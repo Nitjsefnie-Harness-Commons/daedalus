@@ -177,6 +177,59 @@ def throttled_query(reset_epoch=None, reset_at=None, exit=1, stderr=None,
             'body': {'data': None, 'errors': [error]}}
 
 
+def rest_403(message=THROTTLED, stderr=None, headers=None):
+    """A 403 whose rate-limit evidence is its body, and nothing else.
+
+    Beside `refusal_response`, and the shape GitHub really sends: a
+    JSON object whose `message` names the limit, no `errors[]` at all so
+    the structured reader cannot see it, and no rate-limit headers,
+    because a secondary limit answers 403 with none. The base read this
+    off the body; a reader narrowed to a body that failed to parse lost
+    it, and nothing on stderr has to rescue it.
+
+    `stderr` is `gh`'s own complaint and the default writes none, which
+    is the case that lost the base's behaviour.
+    """
+    answer = {'status': 403, 'headers': headers or {},
+              'body': {'message': message}}
+    if stderr is not None:
+        answer['stderr'] = stderr
+    return answer
+
+
+def permission_403():
+    """A 403 that is not a rate limit: a real failed poll, every time.
+
+    The negative of `rest_403`, and what a watcher's consecutive-failure
+    counter counts. Nothing here names a limit - not the status, not the
+    headers, not the JSON `message`, not the complaint `gh` writes - so
+    every carrier declines it and the query fails, which is the only way
+    to spend a failure from the counter.
+    """
+    said = 'Resource not accessible by integration.'
+    return {'status': 403, 'headers': {}, 'body': {'message': said},
+            'stderr': f'gh: {said} (HTTP 403)\n'}
+
+
+def delivered_answer(headers=None, stderr=None, data=None):
+    """A 200 that did what it was asked: exit 0, and a non-null `data`.
+
+    What the co-condition reads, and what the carriers are gated on: a
+    successful answer, whatever else it carries. The two shapes worth
+    naming are a `gh` warning on stderr that merely mentions a limit, and
+    the last successful request before the window closes, which arrives
+    with `X-Ratelimit-Remaining: 0` beside a reset.
+    """
+    page = {'data': {'repository': {'items': {
+        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+        'nodes': list(data or [{'id': 1}])}}}}
+    answer = {'status': 200, 'headers': headers or {}, 'body': page,
+              'exit': 0}
+    if stderr is not None:
+        answer['stderr'] = stderr
+    return answer
+
+
 def base_answers():
     """Answers for the REST surfaces the base watchers read; the specific
     paths come first, `pulls/195` alone matching all three comment surfaces.

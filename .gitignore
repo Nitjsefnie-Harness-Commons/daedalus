@@ -628,6 +628,7 @@
 !/tests/test_gh_body_shapes.py
 !/tests/test_gh_client.py
 !/tests/test_gh_head_prs.py
+!/tests/test_gh_matcher.py
 !/tests/test_gh_refusal.py
 !/tests/test_ghexpr.py
 !/tests/test_gitignore_control.py
@@ -804,6 +805,7 @@
 !/tests/test_vm_file_load_guard.py
 !/tests/test_watch_all.py
 !/tests/test_watcher_budget.py
+!/tests/test_watcher_escalation.py
 !/tests/test_watcher_loop_budget.py
 !/tests/test_watcher_poll_index.py
 !/tests/test_watcher_waits.py
