@@ -310,11 +310,17 @@ def test_a_runner_timed_out_suites_own_child_does_not_survive_it(tmp):
                                         result.stderr)
         pid = int(recorded.read_text(encoding='ascii'))
         block = _suite_block(result.stdout, 'test_stubborn.py')
-        said = [found.group() for found in records(block)]
+        found = records(block)
+        assert len(found) == 1, (len(found), block)
+        record = found[0].groupdict()
         assert settle_gone(pid, _WEDGE_SETTLE_S), (
             f'pid {pid} outlived the bound the runner enforced. It ignores '
             f'SIGTERM, so only the escalation reaches it, and it did not; '
-            f'the record says: {said}')
+            f'the record says: {found[0].group()}')
+        # The other direction of the same claim: this suite DID ignore the
+        # request, so a record claiming it took one is false -- and the
+        # pair of controls is what pins the clause in both directions.
+        assert 'ignored the request' in record['cleanup'], record
     finally:
         kill_recorded(recorded)
 
