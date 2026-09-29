@@ -208,11 +208,13 @@ def _receiver_escapes(node):
 def _spread_args(call):
     """Whether a call's arguments are a form its receiver cannot be read from.
 
-    Any `Starred` or `**` argument, or fewer positional arguments than the
-    form needs. A setattr-family call in that shape cannot prove which
-    receiver it is writing, so it poisons EVERY receiver in scope rather
-    than guessing one -- and a guess that picked the wrong receiver would
-    be a false green, which is the direction this rule exists to close.
+    Any `Starred` or `**` argument. A setattr-family call in that shape
+    cannot prove which receiver it is writing, so it poisons EVERY
+    receiver in scope rather than guessing one -- and a guess that picked
+    the wrong receiver would be a false green, which is the direction
+    this rule exists to close. The arity half is the CALLER's: both sites
+    read `len(node.args) != 3 or _spread_args(node)`, and that `3` is the
+    form's own arity, which this helper cannot know.
     """
     return (any(isinstance(arg, ast.Starred) for arg in call.args)
             or any(key.arg is None for key in call.keywords))

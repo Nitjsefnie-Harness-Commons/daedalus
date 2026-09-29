@@ -142,14 +142,16 @@ REAL_ROW_TOTALS = {'test_bridge_startup.py': 7, 'test_parent_watch.py': 7,
 def test_the_real_files_emit_exactly_the_rows_this_suite_names(tmp):
     """The set of rows is CLOSED, not merely the nine that carry none.
 
-    Delete the narrowing and all ten of the `DISCHARGED` sites come back.
-    But that table says nine lines carry no row and `CHILD_BOUNDS` says
-    fourteen carry one, and a row on a FIFTEENTH line of these files is
-    invisible to both -- which is what `test_real_browser_harness.py:131`
-    was, until `NAMED_OVER_REFUSALS` named it. So the set is closed in
-    both directions: no row sits at a line no table resolves, and each
-    file carries the measured count, so an EXTRA row at a known line is
-    red here as well as a row on an unknown one.
+    Delete the narrowing and all nine of the `DISCHARGED` sites carry a
+    row again -- 16 rows across the nine, measured with both arms stubbed
+    off. But that table says nine lines carry no row and `CHILD_BOUNDS`
+    says fourteen carry one, and a row on a FIFTEENTH line of these
+    files is invisible to both -- which is what
+    `test_real_browser_harness.py:131` was, until `NAMED_OVER_REFUSALS`
+    named it. So the set is closed in both directions: no row sits at a
+    line no table resolves, and each file carries the measured count, so
+    an EXTRA row at a known line is red here as well as a row on an
+    unknown one.
     """
     del tmp
     for relative, snippet, occurrence in DISCHARGED:
