@@ -85,16 +85,10 @@ def _process_is_live(pid):
 def _windows_is_live(pid):
     """Whether Windows still holds `pid`, asked of the API rather than a probe.
 
-    `os.kill(pid, 0)` is not that question on this platform: it opens the
-    process it is asked about and can end it, so a receipt written over it
-    is a probe that changes what it measures. The API is the query, and it
-    answers in BOTH directions — a handle, or an error code, because a null
-    handle is two conditions rather than one.
-
-    The alternative was `tasklist /FI "PID eq N"`, which is a query too but
-    costs a process launch, and therefore a bound; and the bound would have
-    to be a figure this module composes, which it cannot measure on the
-    three legs where `tasklist` does not exist.
+    `os.kill(pid, 0)` is not that question here: it opens the process it is
+    asked about and can end it, so a receipt written over it is a probe that
+    changes what it measures. The API answers in BOTH directions — a handle,
+    or an error code, because a null handle is two conditions, not one.
     """
     return _open_handle_says_live(_windows_kernel32(), pid)
 
@@ -102,17 +96,13 @@ def _windows_is_live(pid):
 def _windows_kernel32():
     """`kernel32`, loaded so that a failure can be read.
 
-    `ctypes.windll` is `WinDLL('kernel32')` with `use_last_error=False`, and
-    without that the error code behind a null handle is not retrievable —
-    which is the whole question, as `_open_handle_says_live` states.
-    `tests/test_parent_watch.py` opens this same library this same way.
+    `ctypes.windll` is this library with `use_last_error=False`, and without
+    that the error code behind a null handle is not retrievable.
+    `tests/test_parent_watch.py` opens it the same way.
     """
     win_dll = getattr(ctypes, 'WinDLL')
     kernel32 = win_dll('kernel32', use_last_error=True)
-    # A HANDLE is pointer-sized and `ctypes` defaults a return to `c_int`,
-    # so a 64-bit handle is TRUNCATED — and a truncated handle reads as
-    # null, which is the branch below. Without this the receipt would read
-    # a live process as gone on every 64-bit leg.
+    # Pointer-sized, or a 64-bit handle truncates to null — see below.
     kernel32.OpenProcess.restype = ctypes.c_void_p
     kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int,
                                      ctypes.c_ulong)
@@ -125,15 +115,12 @@ def _open_handle_says_live(kernel32, pid):
 
     A handle is a yes. A null handle is NOT a no: `ERROR_INVALID_PARAMETER`
     is a pid that was never there, and `ERROR_ACCESS_DENIED` is a pid that
-    is running and that this process is not permitted to open — a
-    privileged child, which is exactly the process a tree kill leaves
-    behind. Reading the second as the first reports a kill that did not
-    happen, which is the one direction this receipt must not lie in.
+    is running and that this process may not open — a privileged child, which
+    is what a tree kill leaves behind. Reading the second as the first
+    reports a kill that did not happen.
 
-    The kernel32 is a parameter so that classification can be driven from
-    any platform: the four `windows-latest` cells are the only place the
-    real loader runs, and a branch no other leg can reach is a branch with
-    no control at all.
+    `kernel32` is a parameter so this is drivable off Windows, which is the
+    only place the real loader runs.
     """
     handle = kernel32.OpenProcess(
         _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)

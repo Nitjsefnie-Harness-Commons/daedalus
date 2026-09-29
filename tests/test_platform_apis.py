@@ -94,12 +94,24 @@ def _asks_the_platform(function, reached):
     for node in ast.walk(function):
         if not isinstance(node, ast.If):
             continue
-        spelled = ast.unparse(node.test)
-        if any(mark in spelled for mark in PLATFORM_IDENTITY):
-            return True
-        if _names_the_reached(node.test, reached):
+        if _asks_which_platform(node.test) or _names_the_reached(
+                node.test, reached):
             return True
     return False
+
+
+def _asks_which_platform(test):
+    """Whether this `if` reads the platform's identity off a real attribute.
+
+    Matched on the node, not the printed form: `sys.platform` inside a
+    string is a value, and `if 'sys.platform' in os.environ.get(...)` says
+    nothing about which platform this is. All three marks are
+    `attribute.on_name`, so that shape is what separates the question from
+    its spelling.
+    """
+    return any(isinstance(node, ast.Attribute)
+               and ast.unparse(node) in PLATFORM_IDENTITY
+               for node in ast.walk(test))
 
 
 def _names_the_reached(test, reached):
@@ -127,6 +139,38 @@ def _names_the_reached(test, reached):
                     for argument in node.args[:1]):
             return True
     return False
+
+
+# The keywords that hand a function to the platform rather than call it.
+# `preexec_fn` is the one this tree uses: the child runs the body before
+# `exec`, so the holder chain of a handed-off name is still a chain.
+HANDOFF_KEYWORDS = ('preexec_fn', 'user', 'group', 'extra_groups', 'umask')
+
+
+def _reach_sites(tree, name):
+    """The references to `name` that actually EXECUTE it.
+
+    A call target, or a hand-off keyword the platform invokes — the second
+    is why this is not simply "is it called", because
+    `tests/test_plant_restore.py`'s privilege drop is run as
+    `preexec_fn=`. A parameter, a local, a rebinding and a bare `return
+    name` spell the name without running it, and treating any of those as
+    a holder lets an unreachable function borrow a guard from a sibling
+    that never reaches it — the same hole as matching a question by its
+    spelling, one level up.
+    """
+    reached = {id(node.func) for node in ast.walk(tree)
+               if isinstance(node, ast.Call)
+               and isinstance(node.func, ast.Name)
+               and node.func.id == name}
+    reached |= {id(word.value) for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                for word in node.keywords
+                if word.arg in HANDOFF_KEYWORDS
+                and isinstance(word.value, ast.Name)
+                and word.value.id == name}
+    return [node for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and id(node) in reached]
 
 
 def _platform_decided(tree, function, reached):
@@ -160,10 +204,8 @@ def _platform_decided(tree, function, reached):
             continue
         holders = {
             id(holder): holder
-            for holder in (
-                _innermost_def(tree, node)
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Name) and node.id == current.name)
+            for holder in (_innermost_def(tree, node)
+                           for node in _reach_sites(tree, current.name))
             if holder is not None}
         if not holders:
             return False
@@ -266,6 +308,31 @@ def test_the_platform_rule_names_an_unguarded_read_and_spares_a_guarded_one(
         '        arm()\n')
     assert list(_posix_only_uses(related_probe)) == [], (
         list(_posix_only_uses(related_probe)))
+    # The platform's identity spelled inside a STRING is a value, not a
+    # question. This is the shape the substring match over an unparsed `if`
+    # could not tell apart from the real thing.
+    identity_in_a_string = ast.parse(
+        'import os, signal\n'
+        'def arm():\n'
+        '    signal.signal(signal.SIGALRM, print)\n'
+        'def call():\n'
+        '    if "sys.platform" in os.environ.get("NOTES", ""):\n'
+        '        arm()\n')
+    assert list(_posix_only_uses(identity_in_a_string)) == [
+        (3, 'signal.SIGALRM')], (
+        list(_posix_only_uses(identity_in_a_string)))
+    # And a name that is only ever SPELLED beside the platform question is
+    # not a caller: a parameter and a bare `return name` reach nothing.
+    spelled_not_called = ast.parse(
+        'import os, signal\n'
+        'def arm():\n'
+        '    signal.signal(signal.SIGALRM, print)\n'
+        'def unrelated(arm, notes):\n'
+        '    if sys.platform == "win32":\n'
+        '        return notes\n'
+        '    return arm\n')
+    assert list(_posix_only_uses(spelled_not_called)) == [
+        (3, 'signal.SIGALRM')], list(_posix_only_uses(spelled_not_called))
     # And the same body called from a site that asks nothing is still named,
     # or the exemption would be a hole rather than a reading.
     unguarded_caller = ast.parse(

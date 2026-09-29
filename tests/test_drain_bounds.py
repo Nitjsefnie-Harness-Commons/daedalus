@@ -294,6 +294,26 @@ def test_the_real_cross_scope_shape_is_the_shared_kill_and_reap(tmp):
                and isinstance(node.func, ast.Attribute)
                and node.func.attr == 'killpg'
                for node in ast.walk(shared)), lines
+    # The OWN-GROUP GUARD, which the two assertions above do not cover: they
+    # ask that a `killpg` and an `os.kill(pid, ...)` both EXIST, and a
+    # function can satisfy that while having lost the branch that decides
+    # between them. The branch is what stops `killpg` from being issued on
+    # the group this very process is in, which on POSIX would SIGKILL the
+    # test runner and take every suite with it.
+    guards = [node for node in ast.walk(shared)
+              if isinstance(node, ast.If)
+              and 'os.getpgrp()' in ast.unparse(node.test)]
+    assert len(guards) == 1, (
+        f'the own-group guard is gone or doubled: {guards}')
+    guard = guards[0]
+    assert ast.unparse(guard.test) == 'process_group == os.getpgrp()', (
+        ast.unparse(guard.test))
+    # and the guarded arm kills the PID alone — a `killpg` inside it would
+    # defeat the guard it is the guard for.
+    guarded_calls = [ast.unparse(node) for node in ast.walk(guard)
+                     if isinstance(node, ast.Call)]
+    assert not any('killpg' in call for call in guarded_calls), guarded_calls
+    assert any('os.kill(pid' in call for call in guarded_calls), guarded_calls
     assert any(isinstance(node, ast.Call)
                and isinstance(node.func, ast.Attribute)
                and node.func.attr == 'kill'
