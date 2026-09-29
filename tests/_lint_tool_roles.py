@@ -22,7 +22,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _receiver_resolution import _mentions  # noqa: E402
 from _util import ROOT  # noqa: E402
+
+# `_mentions` is defined once for this tree, in
+# `tests/_receiver_resolution.py`, and imported rather than restated: its
+# second argument is a set of names, and a guard names one, so every call
+# here wraps the name in a set of one.
 
 _SUBPROCESS = ('run', 'Popen', 'check_call', 'check_output')
 _SKIP_NAMES = ('skip', 'skipTest', 'SkipTest')
@@ -158,25 +164,6 @@ def _tolerates_absence(body):
                                for part in ast.walk(statement))
 
 
-def _mentions(node, name):
-    """Whether the expression names `name`, whatever shape wraps it.
-
-    The question an absence guard asks is whether the thing that was looked
-    up is missing, not which spelling of that question its author chose.
-    `x is None`, `x == None`, `not x`, `x != None` and `x in (None,)` are
-    five answers to one question; a derivation that reads three of them
-    finds every suite written by the author of the other two invisible, and
-    an invisible suite is a tool nothing has to install.
-
-    A bare truthiness test whose body skips counts as an absence guard too,
-    which is wrong for a body that skips only when the tool is PRESENT. No
-    suite is written that way, and the error runs toward a red build
-    rather than toward a green one.
-    """
-    return any(isinstance(part, ast.Name) and part.id == name
-               for part in ast.walk(node))
-
-
 def _command_sites(tree, parent, bound_for, modules):
     """Every `(command word, enclosing try)` a subprocess call names.
 
@@ -297,22 +284,41 @@ def _lookup_target_names(statement, lookup):
     tuple value, position by position: `a, b = which(t), which(u)` must
     not file `u`'s guard under `a`, and `_first, found = None, which(t)`
     must not file `t`'s guard under `_first`. A target tuple against a
-    non-tuple value binds nothing, because nothing unpacks.
+    non-tuple value binds nothing, because nothing unpacks — which is
+    also why `(a, b) = c = which(t)` binds nothing, and it binds nothing
+    on purpose: that spelling is a `ValueError` at runtime, since a path
+    string is not a two-element sequence. The shape beside it that CAN
+    run, `a = b, c = which(t), None`, has a tuple target in a
+    comma-separated list, and is the case the third paragraph is about.
     """
     if isinstance(statement, ast.AnnAssign):
         target, value = statement.target, statement.value
     elif isinstance(statement, ast.Assign) and len(statement.targets) == 1:
         target, value = statement.targets[0], statement.value
     elif isinstance(statement, ast.Assign):
-        # A chained assignment: one value, and every target holds it.
-        return tuple(item.id for item in statement.targets
-                     if isinstance(item, ast.Name))
+        # A comma-separated target list, where every target takes part of
+        # one value: `a = b, c = which(t), None` gives `a` the whole tuple
+        # and unpacks it into `b` and `c`. So each target is resolved
+        # against the value on its own terms, and the tool reaches `b`.
+        # Reading only the Name targets would file it under `a`, which
+        # holds the tuple and not the tool.
+        return tuple(
+            name for item in statement.targets
+            for name in _one_target(item, statement.value, lookup))
     else:
         return ()
+    return _one_target(target, value, lookup)
+
+
+def _one_target(target, value, lookup):
+    """The names one assignment target takes the lookup's value into."""
     if isinstance(target, ast.Name):
         return (target.id,)
     if (isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple)
             and len(target.elts) == len(value.elts)):
+        # Node identity, not a name test: the question is whether THIS
+        # lookup is inside that value, and `lookup` is the call node rather
+        # than a name any expression could carry.
         return tuple(name.id for name, item in zip(target.elts, value.elts)
                      if isinstance(name, ast.Name)
                      and lookup in ast.walk(item))
@@ -359,6 +365,16 @@ def _scope(parent, node):
 def _role_of_binding(scope, name, tool, skipped, present):
     """Record how the suite guards the tool bound to `name` in that scope.
 
+    The question being asked is whether the thing that was looked up is
+    missing, not which spelling of that question its author chose: `x is
+    None`, `x == None`, `not x`, `x != None` and `x in (None,)` are five
+    answers to one question, and a derivation that reads three of them
+    finds every suite written by the author of the other two invisible.
+    An invisible suite is a tool nothing has to install. A bare truthiness
+    test whose body skips therefore counts too, which is wrong for a body
+    that skips only when the tool is PRESENT — no suite is written that
+    way, and the error runs toward a red build rather than a green one.
+
     The mention test comes first in both halves on purpose: the body of
     every `if` in a scope is walked to decide what it does, and a module
     holds hundreds of `if`s for the handful that guard a lookup. Testing
@@ -366,10 +382,11 @@ def _role_of_binding(scope, name, tool, skipped, present):
     """
     if scope is None:
         return
-    if any(_mentions(part.test, name) and _tolerates_absence(part.body)
+    if any(_mentions(part.test, frozenset((name,)))
+           and _tolerates_absence(part.body)
            for part in ast.walk(scope) if isinstance(part, ast.If)):
         skipped.add(tool)
-    if any(_mentions(part.test, name) for part in ast.walk(scope)
+    if any(_mentions(part.test, frozenset((name,))) for part in ast.walk(scope)
            if isinstance(part, ast.Assert)):
         present.add(tool)
 
