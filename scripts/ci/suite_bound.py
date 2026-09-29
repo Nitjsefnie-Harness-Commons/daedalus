@@ -177,7 +177,22 @@ def _kill_direct(process, reason):
 
 
 def _taskkill(process):
-    """Kill the tree the way Windows can: by pid, with the tree flag."""
+    """Kill the tree the way Windows can: by pid, with the tree flag.
+
+    One phase, and every string below says so. `/F` is a forced
+    termination, so a suite killed here is given no request and no grace
+    and cannot flush what it had measured -- which is the pre-branch
+    Windows behaviour, unchanged by this branch, and the reason the
+    record has to name it rather than let a reader infer that a graceful
+    path ran.
+
+    `CTRL_BREAK_EVENT` to the child group would be the two-phase
+    analogue, and the launch already sets
+    `creationflags=CREATE_NEW_PROCESS_GROUP` to make it reachable. It is
+    not used here: it is new Windows behaviour that no host this branch
+    was written on can exercise, and issue #1204 asked for a bound rather
+    than for a graceful stop.
+    """
     try:
         result = subprocess.run(
             ['taskkill', '/F', '/T', '/PID', str(process.pid)],
@@ -185,12 +200,16 @@ def _taskkill(process):
             stderr=subprocess.DEVNULL, check=False,
             timeout=CLEANUP_TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        return f'taskkill timed out after {CLEANUP_TIMEOUT_S}s'
+        return (f'taskkill /F gave up after {CLEANUP_TIMEOUT_S}s, so the '
+                'tree may still be running; no request was sent and no '
+                'grace was given')
     except OSError as error:
-        return f'taskkill failed to run: {error}'
+        return f'taskkill /F could not run: {error}'
     if result.returncode == 0:
-        return 'taskkill completed successfully'
-    return f'taskkill failed with exit code {result.returncode}'
+        return ('taskkill /F force-killed the tree; no request was sent '
+                'and no grace was given, so the suite flushed nothing')
+    return (f'taskkill /F exited {result.returncode}, so the tree may still '
+            'be running; no request was sent and no grace was given')
 
 
 def launch_suite(argv, *, cwd, output_path, env=None, timeout):
