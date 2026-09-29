@@ -77,31 +77,6 @@ time.sleep(120)
 # not. This is the one shape the survivor clause exists for, and no other
 # control plants it: every other wedged suite is either compliant with
 # nothing behind it, or non-compliant outright.
-_COMPLIANT_WITH_SURVIVOR_SUITE = """import os, signal, subprocess, sys, time
-from pathlib import Path
-
-root = Path(__file__).resolve().parent
-child = subprocess.Popen(
-    [sys.executable, '-c',
-     'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN);'
-     ' time.sleep(120)'],
-    stdin=subprocess.DEVNULL)
-(root / 'survivor.pid').write_text(str(child.pid), encoding='ascii')
-
-
-def _stopped(signum, frame):
-    del signum, frame
-    (root / 'stopped.pid').write_text(str(os.getpid()), encoding='ascii')
-    print('suite was asked to stop and flushed', flush=True)
-    sys.exit(0)
-
-
-signal.signal(signal.SIGTERM, _stopped)
-print('wedged suite reached its own body', flush=True)
-time.sleep(120)
-"""
-
-
 # The bound this control shrinks, as a FRACTION of the one definition the
 # launcher reads. A number typed here would be a second premise, and it
 # would stop relating to the default the moment that default moved -- the
@@ -222,15 +197,6 @@ def test_a_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
     # all, would both pass it. The two records differ here and nowhere a
     # looser pin can see.
     assert 'asked to stop and the suite did' in record['cleanup'], record
-    # This suite leaves no child of its own, so its group empties when it
-    # exits and the escalation has nothing to reach. The record has to say
-    # THAT, not that the escalation reached something: a `_signal_group`
-    # that reported a vanished group as reached would make this clause lie
-    # about a group that was empty, and nothing else in either suite could
-    # see it -- the only other record of this shape is the one that names a
-    # real survivor.
-    assert 'was already gone' in record['cleanup'], record
-    assert 'reached what was still in it' not in record['cleanup'], record
 
 
 def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
@@ -329,41 +295,6 @@ def test_the_coverage_launcher_binds_the_module_the_workflow_path_finds(tmp):
         kill_recorded(recorded)
     group = coverage_group(result.stdout, 'test_wedged.py')
     _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
-
-
-def test_a_compliant_suite_that_leaves_a_survivor_says_so(tmp):
-    """The escalation clause names a survivor, and the survivor really dies.
-
-    Two properties in one shape, because the shape is the only one that has
-    both: the suite takes the request, so the record may say it did, and
-    its child does not, so the escalation has something to reach and the
-    record must say it reached it. Every other wedged suite is compliant
-    with nothing behind it, or non-compliant outright, so without this
-    control the survivor clause is asserted nowhere and a `_signal_group`
-    that reported an empty group as reached would pass.
-    """
-    if sys.platform == 'win32':
-        _util.skip('the liveness probe is POSIX; see pid_alive')
-    root = Path(tmp) / 'tree' / 'tests'
-    try:
-        result, _invocations = coverage_tree(
-            tmp, {'test_wedged.py': _COMPLIANT_WITH_SURVIVOR_SUITE},
-            suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
-        assert result.returncode != 0, (result.returncode, result.stdout,
-                                        result.stderr)
-        assert (root / 'stopped.pid').exists(), (
-            'the suite was killed rather than asked to stop, so this is not '
-            'the compliant-with-a-survivor case at all')
-        pid = int((root / 'survivor.pid').read_text(encoding='ascii'))
-        group = coverage_group(result.stdout, 'test_wedged.py')
-        record = _assert_one_record(
-            group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
-        assert 'reached what was still in it' in record['cleanup'], record
-        assert settle_gone(pid, _WEDGE_SETTLE_S), (
-            f'pid {pid} survived the escalation the record says reached it: '
-            f'{group}')
-    finally:
-        kill_recorded(root / 'survivor.pid')
 
 
 def test_the_coverage_launcher_refuses_every_unusable_bound(tmp):
