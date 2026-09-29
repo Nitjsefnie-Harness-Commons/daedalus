@@ -306,19 +306,19 @@ def launch_refusals(source, here, bound_sink=None):
             ambiguous.add(name)
         binding_map[name] = value
     reader = ArgvReader(binding_map, ambiguous)
-    # `binding_map` is the WHOLE of what the chain limb below knows about
-    # rebinding, and it is filled from six spellings: a Name-target
-    # Assign, an AnnAssign, a NamedExpr, an argument default, a For
-    # target and a With target. A root bound any other way is absent
-    # from it and the limb would prove a name the module has rebound.
-    # So the limb reads a set collected by the AST's own vocabulary for
-    # a binding rather than by a list of the spellings: every `Store`
-    # target, every `ast.arg`, and every string the grammar keeps in a
-    # NAME FIELD of some node — which is how a handler's name, a `def`,
-    # a `class` and an import alias reach the tree. A binding form the
-    # interpreter adds is refused without anyone editing this, and the
-    # cost is stated in `proved_fixed`: a module that harmlessly
-    # rebinds a stdlib root this way loses the proof and is reported.
+    # The chain limb below must not prove a name the module has rebound,
+    # so `rebound` is collected by the AST's own vocabulary for a
+    # binding rather than by a list of spellings: every `Store` target,
+    # every `ast.arg`, and every string the grammar keeps in a NAME
+    # FIELD of some node — a handler's name, a `def`, an import alias. A
+    # binding form the interpreter adds is then refused without anyone
+    # editing this; the cost is stated in `proved_fixed`. The
+    # `binding_map` seed is redundant today — every key in it is already
+    # a `Store` or an `ast.arg`, and dropping it moves no row — and
+    # protective tomorrow: it makes "rebound contains binding_map"
+    # structural rather than a coincidence of the present bindings table,
+    # the likeliest thing here to grow. Falsified by a `binding_map` key
+    # that is neither.
     rebound = set(binding_map) | {
         node.id for node in ast.walk(tree)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
