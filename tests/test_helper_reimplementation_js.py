@@ -19,10 +19,10 @@ complete JavaScript program: the head carries the opening brace and the
 body and the closing brace are separate pieces. A constant that held a
 whole `function eventTarget(...) { ... }` would be, to the live scan
 that reads this file as part of the tests tree, a re-implementation of
-`_worker_sources`' own helper living in a file this branch edits — and a
-row may not name such a file. Splitting the fixture is the same rule the
-recogniser is built on: a program is an expression, not a bag of
-strings, so a fixture has to be one too.
+`_worker_sources`' own helper — and a SECOND declaration of a name the
+base already carries, which a row may not name. Splitting the fixture is
+the same rule the recogniser is built on: a program is an expression,
+not a bag of strings, so a fixture has to be one too.
 """
 import subprocess
 import sys

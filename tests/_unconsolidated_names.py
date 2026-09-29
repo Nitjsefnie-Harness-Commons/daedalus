@@ -2,9 +2,11 @@
 
 Keyed by (repo-relative path, name), so a row cannot be widened by a
 prefix or a substring match. Every entry is a pre-existing collision: a
-row may name a site the branch did not create, and a row naming a file
-the branch adds or edits is itself a finding, so the table can absorb
-what `main` lands underneath it while excusing nothing the branch wrote.
+row may name a declaration the base already carried, and may not name
+one the branch added. The comparison is a count, so a second
+declaration of a name the base carries is an addition, while an edit to
+a body the base carries is not authoring it. That is what lets the
+table absorb what `main` lands underneath it.
 """
 UNCONSOLIDATED_NAMES = {
     ('tests/_binding_assertions.py', '_scope_violations'):
