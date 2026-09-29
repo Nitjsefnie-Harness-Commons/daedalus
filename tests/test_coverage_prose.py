@@ -82,22 +82,26 @@ and that is why three successive widenings of this one each pulled a new
 false alarm in from the other side. Within the window a sentence is
 judged on TWO conditions, and failing either leaves it ADMITTED: it
 carries a reach PREDICATE, and it NAMES A SHIPPED MODULE. At least one
-judged sentence must then name the named module, in one of the three
-spellings the population yields: its full repo-relative path, its bare
-filename, or the shipped directory it sits in. Identity reads those same
-three, through the same helper admission reads them through, so a claim
-admitted for naming a shipped module is not refused a line later for
-spelling the module the way the rule itself accepts. All three come from
-the one population the coverage report means by "shipped JavaScript", so a
-module added later is judged without a change here. Both conditions carry
-weight in the paragraph as shipped: the long sentence above names twenty
-shipped modules and is admitted because it carries no predicate, and
-`no suite reaches the tree on its own` carries one and is admitted because
-it names no module. What makes skipping such a sentence safe is the
-ORACLE: a window holding no sentence that names the named module is a
-refusal, not a pass, and a window holding only a predicate about a
-different module is that same refusal, so nothing can be dropped from
-judgement and leave the paragraph unchecked.
+judged sentence must then name the named module, and ADMISSION and
+IDENTITY are different questions that the three spellings answer
+differently: a shipped module is ADMITTED by any of them -- the full
+repo-relative path, the bare filename, or the shipped directory it sits
+in, all read off the one population the coverage report means by "shipped
+JavaScript", so a module added later is judged without a change here --
+while IDENTITY is read from the named module's own two forms, its full
+path and its bare filename, because a directory names no one module and
+so cannot say which module a claim is about. A claim about a shipped
+directory is therefore judged, and refused, rather than read as prose;
+a claim about the named module is not refused for spelling it the way
+admission accepts. Both conditions carry weight in the paragraph as
+shipped: the long sentence above names twenty shipped modules and is
+admitted because it carries no predicate, and `no suite reaches the tree
+on its own` carries one and is admitted because it names no module. What
+makes skipping such a sentence safe is the ORACLE: a window holding no
+sentence that names the named module is a refusal, not a pass, and a
+window holding only a predicate about a different module is that same
+refusal, so nothing can be dropped from judgement and leave the
+paragraph unchecked.
 
 The price of that rule falls on BOTH sides, and the far side has paid it
 since before the window was symmetric: on the wave-2 base every reach
@@ -116,11 +120,14 @@ top of this docstring. The honest name for the residual is a claim this
 control does not govern. The shapes to recognise it in are the shortest
 spelling -- `No suite runs `sse.js`.` -- a shipped directory -- `No suite
 reaches `extension/`.` -- and a full path -- `No suite runs
-`extension/worker/tabs.js`.`
+`extension/worker/tabs.js`.` The shipped-directory form is the one the
+two questions part company on: inside the window it is ADMISSION that
+reads it, so the claim is judged and refused on IDENTITY, which is a
+different failure from the distance-based admission named above.
 
 Two more shapes are left, and both are PARKED rather than closed. A claim
 naming the module by the tree's PROSE name -- "the extension options
-page", "the extension" -- rather than by any of the three spellings is
+page", "the extension" -- rather than by either form identity reads is
 refused by the identity check, loudly, with the message that the claim is
 about another module. A prose alias is not derivable from here: reading
 one out of the paragraph this control judges is circular, and hard-coding
@@ -311,6 +318,20 @@ def _reported(sentence):
                     if RUN_ATTRIBUTION.search(clause))
 
 
+def _module_forms(rel):
+    """The three spellings ONE shipped module is written in.
+
+    Its full repo-relative path, its bare filename, and the shipped
+    directory the path sits in. Split out from `_module_names` so a caller
+    that needs the same spellings for one module reads them from here
+    rather than rebuilding them: the two questions those spellings answer
+    want different subsets, and a second copy of this rule is how the two
+    would drift apart.
+    """
+    root, _, leaf = rel.rpartition('/')
+    return {rel, leaf} | ({f'{root}/'} if root else set())
+
+
 def _module_names(sources):
     """Every spelling of a shipped module the tree itself writes.
 
@@ -320,26 +341,29 @@ def _module_names(sources):
     the same thing, so a rule reading only the full path judged fewer
     claims than the position rule it replaced.
     """
-    names = set(sources)
-    for rel in sources:
-        root, _, leaf = rel.rpartition('/')
-        if root:
-            names.add(f'{root}/')
-        names.add(leaf)
-    return names
+    return set().union(*(_module_forms(rel) for rel in sources))
 
 
 def _named_forms():
-    """The same three forms, for THIS paragraph's module alone.
+    """The forms that can prove a claim is about THIS paragraph's module.
 
-    Admission asks whether a sentence names any shipped module; identity
-    asks whether it names the named one. Reading the two through different
-    forms made the rule admit a claim and then, a line later, refuse it for
-    spelling the module the way admission accepts -- so these are taken from
-    `_module_names` and not written out here, and no second copy of the
-    population rule can grow beside it.
+    Two of the three, and the difference is the whole of it: ADMISSION and
+    IDENTITY are different questions. Admission asks whether a sentence
+    names any shipped module at all, and a shipped directory answers that,
+    which is what keeps `No suite reaches `extension/`.` judged rather than
+    read as prose. Identity asks whether the claim is about this one
+    module, and a directory cannot name one, so the directory form is
+    admitted as evidence of a claim while never counting as proof of which
+    module that claim is about -- a claim about the whole root is not a
+    claim about the module inside it.
+
+    A directory is the one form that names no file, so it is the one that
+    ends in the separator and the one dropped here. The two that remain
+    are read from `_module_forms`, so no second copy of the population rule
+    can grow beside it.
     """
-    return _module_names((UNREACHED,))
+    return {form for form in _module_forms(UNREACHED)
+            if not form.endswith('/')}
 
 
 def _names_any(claim, names):
