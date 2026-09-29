@@ -27,8 +27,13 @@ from pathlib import Path
 from _control_calls import (ModuleNames, _SHARED_HELPER, call_judgement,
                             has_spread)
 def _bound_names(target):
-    """The names a subscript or attribute target is reached through."""
-    return [target.id] if isinstance(target, ast.Name) else []
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, ast.Starred):
+        yield from _bound_names(target.value)
+    elif isinstance(target, (ast.List, ast.Tuple)):
+        for part in target.elts:
+            yield from _bound_names(part)
 
 
 from _control_paths import (SCOPES as _SCOPES, _UNKNOWN_PATH,
