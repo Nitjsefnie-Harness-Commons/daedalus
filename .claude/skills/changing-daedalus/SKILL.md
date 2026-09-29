@@ -401,17 +401,35 @@ failures to it - because a watcher that has gone blind must not look like a
 quiet pull request. CI announces success and failure alike, and re-resolves
 the branch head every poll since a push moves it.
 
-**A rate-limit refusal is a wait, not a failure.** Whether an answer IS a
-refusal is a question about the EVIDENCE it carries - a `Retry-After`; an
-`X-RateLimit-Reset` beside a spent `X-Ratelimit-Remaining`; a GraphQL
-`errors[]` entry naming a rate limit in its `type` or its `code`; or what
-`gh` wrote to stderr - and not about the status or the exit code. A
-throttled query answers **200** and exits **1**, so a reader that waits on
-either of those never reaches the evidence. Each watcher then says once
-where it is waiting - the instant the API reported, or a minute when it
-reported none - and resumes there rather than retrying every interval,
-which is what used to keep the limit at zero after it was reached. A 403
-with no rate-limit evidence is an ordinary failure and is never a pause.
+**A rate-limit refusal is a wait, not a failure.** An answer IS a refusal
+when it DID NOT DELIVER - `gh` exited 0, and the body is a JSON object
+with a non-null `data` - and carries evidence; or when it delivered and
+its own `errors[]` entry is the report. Evidence is a `Retry-After`; an
+`X-RateLimit-Reset` beside a spent `X-Ratelimit-Remaining`; a reset on a
+403 or 429; a GraphQL `errors[]` entry naming a rate limit in its `type`
+or its `code`; the answer's own text; or what `gh` wrote to stderr. It is
+NEVER the status and NEVER the exit code alone: a throttled query answers
+**200** and exits **1**, so a reader that waits on either of those never
+reaches the evidence.
+
+Which carrier is read is decided by who owns the words. An `errors[]`
+entry's `type` and `code` are the server's own labels, which no caller
+can write into, so that carrier is read on a delivered answer too - and
+that is what catches a rate limit nested under a partial `data`, which
+`data is not null` would otherwise read as a success. The header, the
+body's text and the complaint are read only on an answer that did NOT
+deliver, because a caller's own field, or a coincidence, spells the same
+two words: before that gate existed a 200 that SUCCEEDED, with a `gh`
+warning merely mentioning a limit, was answered with a flat minute's
+pause. The body's text is further scoped to a status the API throttles
+with at all, so a 404 whose message happens to mention a limit is a
+failure and not a wait.
+
+Each watcher then says once where it is waiting - the instant the API
+reported, or a minute when it reported none - and resumes there rather
+than retrying every interval, which is what used to keep the limit at
+zero after it was reached. A 403 with no rate-limit evidence is an
+ordinary failure and is never a pause.
 
 **The children cannot outlive the aggregator.** `watch_all.py` gives each
 child the read end of a pipe and keeps the only write end itself: this
@@ -456,9 +474,10 @@ request, without one, and on a branch of its own. A rate-limit refusal is
 the one exception to exit 3: it is a known wait, so it pauses until the
 reset and polls again, bounded by the same `--timeout` - and a bound
 reached inside such a pause is still exit 2, never 3. The refusal is
-recognised from the evidence the answer carries, not from the status or
-the exit code, because GitHub really does answer a throttled query with a
-200 and an exit 1 (issue 1338).
+recognised from the EVIDENCE the answer carries and from whether it
+delivered, never from the status or the exit code on their own, because
+GitHub really does answer a throttled query with a 200 and an exit 1
+(issue 1338).
 
 **Exit 4 exists because "every run that happened to exist passed" is not
 "every run that should exist did"** (issue #1217, PR #1122 head
