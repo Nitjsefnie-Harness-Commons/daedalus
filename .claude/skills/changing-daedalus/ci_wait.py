@@ -131,11 +131,7 @@ DEFAULT_REPO = ci_gate.DEFAULT_REPO
 DEFAULT_INTERVAL = 60
 DEFAULT_TIMEOUT = 5400
 DEFAULT_GRACE = 300
-# The definitions are ci_gate's, which watch_all.py reads too; these are
-# aliases, not copies, so the two waiters cannot answer a different
-# question. An acceptable conclusion is ONE set for both the run filter
-# and the check filter, or a red run and a red check would be judged by two
-# rules that can drift apart.
+# ci_gate's definitions, which `watch_all.py` reads too.
 ACCEPTABLE = ci_gate.ACCEPTABLE
 # The workflows whose absence is a refusal rather than a wait, and the
 # default a caller who names nothing is held to. The expectation itself is
@@ -251,11 +247,9 @@ def print_matrix(runs, sha, out):
 
 
 def _print_states(label, entries, out):
-    """Each entry's name, status and conclusion, in one shape for both.
-
-    A run and a check run normalise to the same keys precisely so one
-    loop prints either: a reader told a verdict failed should not have to
-    learn a second format to find out which one.
+    """A run and a check run normalise to the same keys precisely so
+    one loop prints either: a reader told a verdict failed should not
+    have to learn a second format to find out which one.
     """
     for entry in entries:
         conclusion = entry.get('conclusion')
@@ -381,8 +375,6 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
                       file=out, flush=True)
             return 0
         if state == 'unacceptable':
-            # Runs or published checks, never both: `verdict` returns at
-            # the first one it finds, and both print through this loop.
             print(f'CI on {sha[:12]} UNACCEPTABLE:', file=out, flush=True)
             for offender in offenders:
                 print(f'  {offender.get("name")}: '
