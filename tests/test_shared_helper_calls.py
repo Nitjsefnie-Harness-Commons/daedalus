@@ -223,6 +223,37 @@ def test_every_region_is_judged_on_the_path_that_cannot_order(tmp):
         'control-owned' for line in _EVERY_REGION_LINES]
 
 
+def test_the_unjudged_scan_reports_a_known_omission(tmp):
+    """(l) the scan that is supposed to catch a hole is itself a control.
+
+    Its two sides are computed by different vocabularies — one walks the
+    AST, one wraps the guard's own entry — so a region neither can see
+    is impossible by construction. This says the pair can still tell
+    "judged" from "not judged": an assembly that drops a scope's header
+    is one this scan reports and the whole tree says nothing about.
+    """
+    from _unjudged_scan import scan
+    from _control_writes import _ModuleJudgement
+
+    root = Path(tmp)
+    helper = ('class _C(dict(shot=(ROOT / \'.pwned\').write_text(\'x\'))):\n'
+              '    pass\n\n\n'
+              'def _helper(tmp):\n    return _C\n')
+    _plant(root, helper, _HELPER_CALL + _CALLS_HELPER)
+    control = 'test_control.py'
+    assert scan(root, [control]) == [], 'the scan found a hole in a whole ' \
+        'assembly'
+    original = _ModuleJudgement.judge_scope
+    _ModuleJudgement.judge_scope = (
+        lambda self, scope, seeding: self.judge(scope, seeding))
+    try:
+        blind = scan(root, [control])
+    finally:
+        _ModuleJudgement.judge_scope = original
+    assert [site[:2] for site in blind] == [
+        ('tests/_shared.py', 1), ('tests/_shared.py', 1)], blind
+
+
 def test_a_nested_def_inside_a_helper_is_judged(tmp):
     """(l) the local contract judges a nested def; so must the imported one."""
     root = Path(tmp)
