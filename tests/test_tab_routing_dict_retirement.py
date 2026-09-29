@@ -14,6 +14,14 @@ is deliberate and it is this suite's whole shape: the round-4 survivor
 sweep reverted every pinned site in turn and found five with no red
 anywhere, because no verdict distinguished them. A control that passes
 both with and without the code it pins is not a control.
+
+**On the read-back arms.** `values()` and `items()` project a retired
+container's recorded values. That was carried for several rounds as a
+limitation this branch left open, and it is not one: across 128 cells at
+this head no read-back shape reads clean, against 25 at the base. The
+projection does not carry a retirement onto the values it projects, and
+it does not need to, because every read that reaches those values
+already joins -- which is why the numbers moved without it.
 """
 import ast
 import sys
@@ -32,7 +40,7 @@ from _pyroute_reads import (_apply_pop, _dict_call_value,  # noqa: E402
                             _merge_or_value, _readback_copy)
 from _pyroute_state import FlowState  # noqa: E402
 from _pyroute_storage import (container_copy,  # noqa: E402
-                              join_clean_occupancy)
+                              join_clean_occupancy, retired_into)
 from _pyroute_stores import (_seed_receiver,  # noqa: E402
                              _subscript_store)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
@@ -333,6 +341,25 @@ def test_a_pattern_rest_carries_the_retirement_it_projected(tmp):
     rest = cast(DeferredContainer, state.callables['_rest'])
     assert rest.stale == frozenset({'k'}), rest.stale
     assert 'k' in rest.items, rest.items
+
+
+def test_the_projection_drops_what_it_left_out(tmp):
+    """The intersection, and the defect it exists to prevent.
+
+    A fold carries a source's retirement only for the keys that survive
+    into the destination: a key the projection dropped out is not a key
+    the destination holds, so retiring it there would be a fact about
+    nothing. Carrying the whole set instead is sound and imprecise, and
+    the sweep's `retired_into` revert is that form rather than a stronger
+    one -- `return frozenset()` kills four controls and this one too, but
+    only this one distinguishes them.
+    """
+    marker = frozenset({'k', 'j'})
+    assert retired_into(marker, {'k': None}) == frozenset({'k'})
+    assert retired_into(marker, {}) == frozenset()
+    assert retired_into(frozenset(), {'k': None}) == frozenset()
+    # The unknown-key slot names no key, so a retirement at it is nothing.
+    assert retired_into(frozenset({DYNAMIC_KEY}), {'k': None}) == frozenset()
 
 
 def test_a_join_of_two_paths_keeps_the_retirement(tmp):
