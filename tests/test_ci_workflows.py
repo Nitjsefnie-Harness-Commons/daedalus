@@ -13,9 +13,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _actionlint import (_PLANTED_JOB, _assert_actionlint_clean,  # noqa: E402
-                         _assert_run_refuses, _assert_run_skips,
-                         _lint_workflows, _workflow_paths)
+from _actionlint import (_ACTIONLINT, _PLANTED_FINDING,  # noqa: E402
+                         _expanded_names, _job_step, _lint_refuses,
+                         _lint_skips, _lint_workflows,
+                         _pinned_actionlint_version, _planted_workflow_tree)
+from _wffixtures import _refuses  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _job_section, _tests_yml)
@@ -309,54 +311,52 @@ def test_the_tracked_workflows_pass_actionlint(tmp):
 
 
 def test_the_workflow_expansion_covers_both_extensions(tmp):
-    directory = Path(tmp) / '.github' / 'workflows'
-    directory.mkdir(parents=True)
-    for name in ('named.yml', 'named.yaml', 'named.txt'):
-        (directory / name).write_text('', encoding='utf-8')
-    found = {path.name for path in _workflow_paths(Path(tmp))}
-    # An extension nothing matches contributes nothing: the step's nullglob.
-    assert found == {'named.yml', 'named.yaml'}, found
+    assert _expanded_names(tmp) == {'named.yml', 'named.yaml'}
 
 
 def test_a_workflow_carrying_a_real_lint_finding_is_refused(tmp):
-    """A copy of a tracked workflow, carrying a real shellcheck finding."""
-    root = Path(tmp) / 'tree'
-    directory = root / '.github' / 'workflows'
-    directory.mkdir(parents=True)
-    tracked = ROOT / '.github' / 'workflows' / 'claim.yml'
-    (directory / tracked.name).write_text(
-        tracked.read_text(encoding='utf-8') + _PLANTED_JOB, encoding='utf-8')
-    _assert_run_refuses(lambda: _lint_workflows(root), 'SC2183')
+    root = _planted_workflow_tree(tmp)
+    _refuses(lambda: _lint_workflows(root), contains='SC2183')
 
 
 def test_a_finding_the_linter_reported_is_refused(tmp):
     del tmp
-    output = ('claim.yml:58:9: shellcheck reported issue in this script: '
-              'SC2183:warning:1:8: This format string has 3 variables, but '
-              'is passed 2 arguments [shellcheck]')
-    ran = ('actionlint', '1.7.12', '1.7.12', [Path('claim.yml')], 1, output)
-    _assert_run_refuses(lambda: _assert_actionlint_clean(*ran), 'SC2183')
-
-
-def test_a_lint_run_at_another_version_is_skipped(tmp):
-    del tmp
-    ran = ('actionlint', '1.6.0', '1.7.12', [Path('claim.yml')], 0, '')
-    _assert_run_skips(lambda: _assert_actionlint_clean(*ran), '1.6.0',
-                      '1.7.12')
+    reason = _lint_refuses({'returncode': 1, 'output': _PLANTED_FINDING})
+    assert 'SC2183' in reason, reason
 
 
 def test_a_lint_run_without_the_binary_is_skipped(tmp):
     del tmp
-    ran = (None, None, '1.7.12', [Path('claim.yml')], 0, '')
-    _assert_run_skips(lambda: _assert_actionlint_clean(*ran), 'actionlint',
-                      '1.7.12')
+    reason = _lint_skips({'binary': None, 'installed': None})
+    assert 'actionlint-absent' in reason and '1.7.12' in reason, reason
+
+
+def test_a_lint_run_without_shellcheck_is_skipped(tmp):
+    del tmp
+    reason = _lint_skips({'shellcheck': None})
+    assert 'shellcheck-absent' in reason and 'shellcheck' in reason, reason
+
+
+def test_a_lint_run_at_another_version_is_skipped(tmp):
+    del tmp
+    reason = _lint_skips({'installed': '1.6.0'})
+    assert 'actionlint-version' in reason and '1.6.0' in reason, reason
 
 
 def test_an_empty_workflow_directory_is_refused_not_clean(tmp):
     del tmp
-    ran = ('actionlint', '1.7.12', '1.7.12', [], 0, '')
-    _assert_run_refuses(lambda: _assert_actionlint_clean(*ran),
-                        'no workflow files matched')
+    assert 'no-workflows' in _lint_refuses({'files': []})
+
+
+def test_the_pin_is_read_from_the_job_not_written_down(tmp):
+    del tmp
+    job = {'env': {'ACTIONLINT_VERSION': '9.9.9'}}
+    assert _pinned_actionlint_version(job) == '9.9.9'
+
+
+def test_the_suite_lints_with_the_binary_the_job_installs(tmp):
+    del tmp
+    assert f'./{_ACTIONLINT} --version' in _job_step('Install actionlint')
 
 
 def test_the_audit_covers_every_python_dependency_surface(tmp):
