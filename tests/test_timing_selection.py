@@ -5,14 +5,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ci_time_instrument import _time_tests  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-
-
-def _time_tests():
-    return _util.load(ROOT / 'scripts' / 'ci' / 'time_tests.py')
 
 
 def _selection_tree(tmp):
