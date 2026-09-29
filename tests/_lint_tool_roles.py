@@ -266,6 +266,48 @@ def _names_subprocess(func, modules):
     return isinstance(func, ast.Name) and func.id in modules
 
 
+def _bound_name(statement, lookup):
+    """The name a lookup's result lands in, whatever statement binds it.
+
+    Three ordinary shapes bind it, and a walk that reads one is blind to
+    the other two:
+
+        found = shutil.which(t)
+        found: str = shutil.which(t)
+        found, _rest = shutil.which(t), None
+
+    The middle one is an `ast.AnnAssign`, which is not a subclass of
+    `ast.Assign` and carries `.target` rather than `.targets` — so the arm
+    that read `targets[0]` never fired on it, and a tool bound that way
+    landed in NEITHER set. That is the worst of the three failures: not a
+    tool in the wrong set, but a tool the derivation concluded the tree
+    states no requirement about at all. An annotation is a plausible habit
+    in a repository that runs two pyright configurations, and
+    `_constants` already read them, so the evidence a reader would use to
+    rule this hole out was on screen and pointed the wrong way.
+
+    A tuple target binds its ELEMENTS from the matching elements of a
+    tuple value, position by position: `a, b = which(t), which(u)` must
+    not file `u`'s guard under `a`, and `_first, found = None, which(t)`
+    must not file `t`'s guard under `_first`. A target tuple against a
+    non-tuple value binds nothing, because nothing unpacks.
+    """
+    if isinstance(statement, ast.AnnAssign):
+        target, value = statement.target, statement.value
+    elif isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+        target, value = statement.targets[0], statement.value
+    else:
+        return None
+    if isinstance(target, ast.Name):
+        return target.id
+    if (isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple)
+            and len(target.elts) == len(value.elts)):
+        for name, item in zip(target.elts, value.elts):
+            if isinstance(name, ast.Name) and lookup in ast.walk(item):
+                return name.id
+    return None
+
+
 def _role_of_lookup(parent, node, tool, skipped, present):
     """Record how the suite that wrote this `which` call treats absence."""
     current = node
@@ -279,10 +321,10 @@ def _role_of_lookup(parent, node, tool, skipped, present):
             present.add(tool)
             return
         if isinstance(current, ast.stmt):
-            if (isinstance(current, ast.Assign)
-                    and isinstance(current.targets[0], ast.Name)):
-                _role_of_binding(_scope(parent, current),
-                                 current.targets[0].id, tool, skipped, present)
+            bound = _bound_name(current, node)
+            if bound is not None:
+                _role_of_binding(_scope(parent, current), bound, tool,
+                                 skipped, present)
             return
 
 
