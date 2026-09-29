@@ -551,16 +551,13 @@ class _ModuleJudgement:
     def _scopes(tree, helper_nodes, reach):
         """The scopes of this module that are judged.
 
-        One rule, over the roots rather than over a kind of root: every
-        scope inside a root is judged, whatever the root is. A root is
-        the module itself for a local judgement, and each reached
-        top-level scope for an imported one — so a reached class is
-        judged with its methods and its nested classes the same way a
-        reached function is judged with its nested `def`, and a kind of
-        reached scope added later cannot arrive without its regions.
-
-        The only exclusion is `helper_nodes`: a reached function's own
-        body is judged by the seeding loop, not twice.
+        One rule, over roots rather than over a kind of root: every scope
+        inside a root is judged, whatever the root is. A root is the
+        module for a local judgement and each reached top-level scope for
+        an imported one, so a reached class arrives with its methods the
+        way a reached function arrives with its nested `def`. The only
+        exclusion is `helper_nodes`: a reached function's body is the
+        seeding loop's, not this list's.
         """
         roots = ([tree] if reach is None else
                  [node for node in tree.body
@@ -572,11 +569,10 @@ class _ModuleJudgement:
     def judge_helper(self, name, seeding):
         """Everything one reached helper owes: its body and its signature.
 
-        The single per-helper entry, and both the ordered path and the
-        cyclic fallback come through it. A signature is a region of the
-        definition rather than of the body, and it is listed here rather
-        than judged from the loop that orders the bodies — which is what
-        a helper the loop cannot order was silently skipping.
+        The single per-helper entry; the ordered path and the cyclic
+        fallback both come through it. A signature belongs to the
+        definition rather than the body, and is listed here rather than
+        judged from the loop that orders the bodies.
         """
         function = self.helpers[name]
         self.judge(function, seeding)
