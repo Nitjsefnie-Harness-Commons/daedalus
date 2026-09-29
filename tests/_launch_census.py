@@ -566,6 +566,7 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
     (callees, bound, receivers, direct, aliases, literals,
      shadows, params) = context
     shadowed = params.get(function, frozenset())
+    hidden = shadows.get(function, frozenset()) | shadowed
     faults = []
     if (function is scope and 'timeout' in _parameter_names(function)
             and 'timeout' not in handed
@@ -589,9 +590,7 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
                            " 'timeout' key"))
     for node in ast.walk(function):
         if not _is_call(node) or receiver.is_network_read(
-                node.func, bound,
-                shadows.get(function, frozenset())
-                | params.get(function, frozenset())):
+                node.func, bound, hidden):
             continue
         for keyword in node.keywords:
             if keyword.arg != 'timeout':
