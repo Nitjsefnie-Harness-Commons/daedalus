@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
 """A payload key spelled as a NAME names the key its binding names.
 
+The guard read a dict-literal key only when it was a string
+`ast.Constant`, so a key bound to a name contributed no tracked key at
+all and a real send read as carrying no `tab`: fail-open, silent on the
+traffic the guard exists to police.
+
+`payload_literal_key` folds the position instead of refusing it, and the
+fold decides the verdict, because the three answers are three different
+runtimes. A string names a tracked key; a non-string literal is provably
+not `'tab'` and names none; an expression that will not fold names none
+without going opaque, which is what keeps the discriminating rows clean
+instead of over-reported. That is a claim about what THIS reader
+resolves - the shapes a compile-time fold resolves are #1352.
+
 Each row states the RUNTIME truth beside the guard verdict, observed by
 executing the row rather than claimed, and a clean row reads clean
 because the RUNTIME agrees - not because the fold gave up on the
-position. That is what makes each a control, not a snapshot. The fold's
-boundary is `_pyroute_keys`'s (#1352).
+position. That is what makes each a control, not a snapshot.
 """
 import ast
 import sys
@@ -42,12 +54,21 @@ _ROWS = [
         'k = "tab"', 'cmd = {}', 'cmd |= {k: 5}')),
     ('beside-spread', 1, {'id': 'x', 'tab': 5}, _CALL, _inside(
         'k = "tab"', 'other = {"id": "x"}', 'cmd = {**other, k: 5}')),
+    # Written at the call itself, so no binding table is consulted and
+    # only the fold can see the name.
     ('inline-at-call', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
      + '    k = "tab"\n'
        "    return ext_cmd('PUT', '/command', **{k: 5})\n"),
+    # A walrus in KEY position is inside this reader's domain, unlike the
+    # walrus BINDING rows in `_CROSS_SCOPE`, and carries a real `tab` at
+    # runtime - as the name it binds.
     ('walrus-key', 1, {'tab': 5}, _CALL, _inside('cmd = {(k := "tab"): 5}')),
     ('literal', 1, {'tab': 5}, _CALL, _inside("cmd = {'tab': 5}")),
-    # A removed key is not a tracked key; a `clear` names none.
+    # Removal, in seven spellings of one behaviour: `del`, `pop` and
+    # `pop` with a default, each by literal and by name, then `clear` in
+    # both. They fold the same key position, so the block buys spelling
+    # coverage and not seven distinct positions. A `clear` names no key
+    # and so takes every one of them.
     ('del-literal', 0, {'id': 'x'}, _CALL, _inside(
         'cmd = {"id": "x", "tab": 5}', 'del cmd["tab"]')),
     ('del-name', 0, {'id': 'x'}, _CALL, _inside(
@@ -62,8 +83,12 @@ _ROWS = [
         'cmd = {"id": "x", "tab": 5}', 'cmd.clear()')),
     ('clear-name', 0, {}, _CALL, _inside(
         'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.clear()')),
-    # A removal takes the ONE key it names, which no row above can see:
-    # they all remove `tab` itself, so dropping one and every key agree.
+    # A removal takes the ONE key it names, and no row above can see it:
+    # every one of those removes `tab` itself, so dropping one key and
+    # dropping every key score the same there. These remove the OTHER
+    # key instead, so `tab` survives to the sender while the guard still
+    # reports - a fold that swept the whole payload's keys would read
+    # them clean.
     ('pop-non-tab-literal', 1, {'tab': 5}, _CALL, _inside(
         'cmd = {"id": "x", "tab": 5}', 'cmd.pop("id")')),
     ('pop-non-tab-name', 1, {'tab': 5}, _CALL, _inside(
@@ -72,7 +97,8 @@ _ROWS = [
         'cmd = {"id": "x", "tab": 5}', 'del cmd["id"]')),
     ('del-non-tab-name', 1, {'tab': 5}, _CALL, _inside(
         'k = "id"', 'cmd = {"id": "x", "tab": 5}', 'del cmd[k]')),
-    # The splat raises first, so nothing reaches the sender at all.
+    # A non-string key is provably not `'tab'`, and the splat raises
+    # before the call returns, so nothing reaches the sender at all.
     ('nonstring', 0, _RAISES, _CALL, _inside(
         "cmd = {5: 'x', 'tab': 'extension'}")),
     ('other-string', 0, {'type': 'focus-tab'}, _CALL, _inside(
@@ -88,9 +114,15 @@ _ROWS = [
        '    return ext_cmd("PUT", "/command", **cmd)\n'),
 ]
 
-# Two boundaries this change does not cross. Each row below carries a real
-# `tab` to the sender while reading clean: the literals table is empty in
-# a nested body (#1341) and carries no walrus BINDING (#1343).
+# Two boundaries this change does not cross. Every row below carries a real
+# `tab` to the sender while reading clean, which is what makes each a
+# separate defect rather than a member this change claims to close. The
+# literals table is empty in a nested body, so a binding made OUTSIDE one
+# is unresolved, and the container model's `_literal_key` reads that same
+# table under the same boundary (#1341). The walrus rows are the other
+# case: `walrus-key` above DOES read a walrus in key position, but the
+# table carries no walrus BINDING, so a name it binds resolves nowhere
+# after it (#1343).
 _CROSS_SCOPE = [
     ('module-scope', 0, {'tab': 5}, _CALL,
      'TAB = "tab"\n' + _inside('cmd = {TAB: 5}')),
@@ -154,7 +186,13 @@ def test_every_row_the_runtime_clears_still_reads_clean(tmp):
 
 
 def test_a_delete_drops_the_literal_the_other_writer_drops(tmp):
-    """The two literal-table writers are one per reader and must agree."""
+    """The two writers of the name-to-literal table, one per reader.
+
+    `ast.Delete` is where they used to differ - this one returning early
+    where `_pyroute_mapping` forgot the name - so a key spelled with a
+    name the program has deleted is a key the program cannot spell at
+    all, and must resolve to nothing.
+    """
     path = Path(tmp) / 'deleted-name.py'
     path.write_text('k = "tab"\n'
                     'cmd = {k: 5}\n'
