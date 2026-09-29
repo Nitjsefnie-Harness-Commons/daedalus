@@ -186,6 +186,13 @@ def test_a_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
         f'nothing; the record says returncode {record["returncode"]}')
     assert 'suite was asked to stop and flushed' in group, group
     assert int(record['returncode']) == 0, record
+    # The cleanup has to say the suite TOOK THE REQUEST. Asserting the
+    # route alone -- `process group` -- is satisfied by the record a suite
+    # that ignored the request and was killed also produces, so a grace
+    # that asked the wrong subject, or a group that was never signalled at
+    # all, would both pass it. The two records differ here and nowhere a
+    # looser pin can see.
+    assert 'asked to stop and the suite did' in record['cleanup'], record
 
 
 def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
@@ -325,21 +332,71 @@ def test_every_wait_this_module_makes_is_bounded(_tmp):
     properties a source read is sound for. The bound is unobservable at
     runtime: a process the kill has already reached always reaps, so the
     wait returns whether or not it carried a bound, and no run can tell
-    the two apart. Dropping the bound on any `wait` or `communicate` in
-    this module turns this red.
+    the two apart.
+
+    Two shapes of unbounded wait are read, because the module uses two.
+    A `.wait(`/`.communicate()` with no `timeout=` keyword, and a
+    `time.sleep()` inside a `while` loop that never compares the clock
+    again -- which is what a grace window spelled as a poll looks like
+    with its deadline check deleted, and no member-call spelling would see
+    it. Deleting either bound turns this red.
     """
     unbounded = []
-    for node in ast.walk(ast.parse(
+    for function in ast.walk(ast.parse(
             _BOUND_SOURCE.read_text(encoding='utf-8'))):
-        if not isinstance(node, ast.Call):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        function = node.func
-        if not (isinstance(function, ast.Attribute)
-                and function.attr in ('wait', 'communicate')):
-            continue
-        if not any(keyword.arg == 'timeout' for keyword in node.keywords):
-            unbounded.append(f'{_BOUND_SOURCE.name}:{node.lineno}')
+        where = function.name
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            callee = node.func
+            if not (isinstance(callee, ast.Attribute)
+                    and callee.attr in ('wait', 'communicate')):
+                continue
+            if not any(kw.arg == 'timeout' for kw in node.keywords):
+                unbounded.append(f'{where}:{node.lineno} waits unbounded')
+        for loop in _loops(function):
+            if not _sleeps(loop) or _reads_the_clock(loop):
+                continue
+            unbounded.append(
+                f'{where}:{loop.lineno} sleeps in a loop that never '
+                f'compares the clock again')
     assert not unbounded, f'these waits carry no bound: {unbounded}'
+
+
+def _loops(function):
+    """Every loop directly in `function`, not the ones in a nested def."""
+    for node in ast.walk(function):
+        if not isinstance(node, (ast.For, ast.While, ast.AsyncWith)):
+            continue
+        if any(isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.Lambda))
+               and inner is not node
+               for inner in ast.walk(node)):
+            continue
+        yield node
+
+
+def _sleeps(node):
+    """Whether `node` contains a sleep, at any depth."""
+    return any(isinstance(inner, ast.Call)
+               and isinstance(inner.func, ast.Attribute)
+               and inner.func.attr == 'sleep'
+               for inner in ast.walk(node))
+
+
+def _reads_the_clock(node):
+    """Whether `node` compares what the clock returns, in any expression."""
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Compare):
+            continue
+        operands = [inner.left, *inner.comparators]
+        if any(isinstance(part, ast.Call)
+               and isinstance(part.func, ast.Attribute)
+               and part.func.attr == 'monotonic' for part in operands):
+            return True
+    return False
 
 
 def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
