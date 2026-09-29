@@ -23,7 +23,8 @@ from typing import cast
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute_mapping import (_apply_mapping_store,  # noqa: E402
-                             _apply_setdefault)
+                             _apply_setdefault,
+                             _mark_unprovable)
 from _pyroute_match import _bind_mapping  # noqa: E402
 from _pyroute_positions import at_position  # noqa: E402
 from _pyroute_reads import (_apply_pop, _dict_call_value,  # noqa: E402
@@ -248,6 +249,31 @@ def test_the_subscript_read_honours_a_retired_key(tmp):
     assert merge_yielded(at_position(retired, 'k')) \
         == DeferredAlternatives((recorded, UNPROVABLE_SENDER))
     assert merge_yielded(at_position(current, 'k')) is recorded
+
+
+def test_a_store_that_cannot_read_its_source_retires_what_it_held(tmp):
+    """The producer side, entered at `_mark_unprovable` itself.
+
+    A store that folded a source the model could not read may have named
+    any key the container already held, so every recorded value is
+    retired along with the count. This is the row the #1154 mechanism
+    turned on, and it has to be pinned here rather than through a
+    verdict: the end-to-end rows that used to cover it are repaired and
+    read clean, so reverting this site's `stale=` left the suites green
+    until the census assertion caught that the SITE had gone. A control
+    that says the site exists is not one that says it behaves.
+    """
+    # A container that has NOT retired anything yet: carrying its marker
+    # forward unchanged would satisfy this control without the site doing
+    # any work, which is the bug it was written to catch.
+    state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
+    owner = DeferredContainer({'k': None}, 1, 'dict')
+    state.callables['d'] = owner
+    _mark_unprovable(state, owner, 'd')
+    marked = cast(DeferredContainer, state.callables['d'])
+    assert marked.stale == frozenset({'k'}), marked.stale
+    assert marked.length is None, marked.length
+    assert state.aliases['d'] == UNPROVABLE_SENDER, state.aliases
 
 
 def test_the_state_signature_separates_a_retired_key_from_a_current_one(tmp):
