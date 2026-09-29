@@ -357,8 +357,7 @@ def test_a_doubles_modelled_signature_is_not_a_launchers_deadline(tmp):
             # in the fixture that motivated the fix: a control built from
             # one cannot falsify the other, and this is the class that let
             # a regression through two waves.
-            (SELF_BOUND_DOUBLE, ('g',), None),
-            (SELF_BOUND_MAPPING, ('g',), None)):
+            (SELF_BOUND_DOUBLE, ('g',), None)):
         rows = _rows(source, in_path)
         assert 'timeout parameter' not in [route for _, route in rows], rows
         if call_line is not None:
@@ -577,11 +576,10 @@ SELF_BOUND_DOUBLE = '''def g(argv, timeout=None):
     raise RuntimeError('no')
 '''
 
-SELF_BOUND_MAPPING = '''def g(argv, timeout=None):
-    spent = {}
-    spent['seen'] = timeout
-    raise RuntimeError('no')
-'''
+# The dict spelling of the same double, `spent['seen'] = timeout`, is
+# NOT here: it is I-3's shape, and I-3 pins it as a REFUSAL, because a
+# subscript store hands the number to a container the census resolves no
+# body for. It was here as a discharge and the two contradicted.
 
 
 # --- the real files, which are not on the path ----------------------------
