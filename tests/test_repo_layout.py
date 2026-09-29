@@ -383,7 +383,7 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     Scope is the tracked tree, not a hand-written module list, so a module
     added later is inside its reach with no hand edit. Every tracked
     Python file is read: the analyser refuses a bounded call whatever it
-    calls, and the old `'subprocess' in source` filter hid 440 of the 630
+    calls, and the old `'subprocess' in source` filter hid 440 of the 631
     tracked files, which is a filter that fails silently.
 
     A launch that only reads the local repository, or sits inside an
