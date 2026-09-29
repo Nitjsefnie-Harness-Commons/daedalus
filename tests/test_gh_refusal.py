@@ -7,9 +7,8 @@ executable double in `_fake_gh.py`. The axis matters more than the case:
 a fix that closes the headers and leaves the body, or a control that
 reads two carriers of the same value and is blinded by their agreeing,
 is the failure this file is arranged to make impossible. Every widening
-the matcher got carries its negative in the same place - an entry naming
-no limit, a complaint naming no limit, a nonzero exit over nothing, a
-counter spent with no reset behind it.
+the matcher got carries its negative in the same place: an entry naming
+no limit, a complaint naming no limit, a nonzero exit over nothing.
 """
 import contextlib
 import io
@@ -618,13 +617,32 @@ def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
     assert resume - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, resume - now)
 
 
+def test_a_json_body_naming_a_rate_limit_outside_errors_is_not_a_refusal(tmp):
+    """A parsed body is read through `errors[]`, not through its text.
+
+    A 200 that merely MENTIONS a limit in a payload field of its own is
+    an answer, not a refusal, and reading the raw text of a body that
+    parsed is a second opinion about an answer the structure already
+    gave - a second one that fires on this body because `rateLimit` is
+    the name of a real extension.
+    """
+    mod = _client()
+    body = {'data': {'repository': {'items': {'nodes': [{'id': 1}]}}},
+            'note': 'the account rate limit was consulted'}
+    answer = {'status': 200, 'body': body}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        data = mod.graphql(ITEM_QUERY, {'after': None})
+    assert mod.nodes(data, ('repository', 'items')) == [{'id': 1}]
+
+
 def _wait_for(mod, answer, now, tmp):
     """The wait a refusal the reader found would buy, in whole seconds.
 
     Driven through `graphql` and a real `gh` process, so the instant is
-    one the reader actually derived from the answer rather than one this
-    control handed it: a reader returning a value the clamps below do not
-    reach is exactly what these three rows exist to catch.
+    one the reader derived from the answer rather than one this control
+    handed it: a reader returning a value these clamps do not reach is
+    what the three rows below exist to catch.
     """
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
     watcher = mod.Watcher('w', out=io.StringIO())
@@ -637,10 +655,9 @@ def _wait_for(mod, answer, now, tmp):
 
 
 def test_a_refusal_carrying_no_instant_waits_the_plain_minute(tmp):
-    """The first of the three states the evidence can be in: no reset
-    reported at all. A pause still has to happen - the limit is real - but
-    there is nothing to wake at, so the wait is the module's plain minute
-    and not a moment the reader invented.
+    """No reset reported at all. A pause still has to happen - the limit
+    is real - but there is nothing to wake at, so the wait is the plain
+    minute and not a moment the reader invented.
     """
     mod = _client()
     now = 1790266796.5

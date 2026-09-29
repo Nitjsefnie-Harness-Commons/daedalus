@@ -149,9 +149,18 @@ def exhausted(status, headers, body, complained='', payload=None):
     permission refusal rather than a wait.
     """
     now = time.time()
+    # A body that parsed is read through `errors[]` and nowhere else, and
+    # its raw text is deliberately not a second opinion about it: the
+    # loose reading fires on a payload that merely mentions a limit in a
+    # field of its own, and `rateLimit` being the name of a real
+    # extension is what makes that reading fire on the very body that
+    # most certainly IS a refusal. The unparsed body is the case the
+    # words are the only reading of - a REST answer whose text is all
+    # there is.
+    loose = body if not isinstance(payload, dict) else ''
     found = [_header_evidence(status, headers, now),
              _graphql_refusal(payload),
-             (_names_a_rate_limit(body), None),
+             (_names_a_rate_limit(loose), None),
              (_names_a_rate_limit(complained), None)]
     if not any(refused for refused, _ in found):
         return False, None
