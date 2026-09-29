@@ -6,18 +6,18 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-try:
-    from scripts.ci.suite_bound import (
-        launch_suite, suite_timeout, timeout_record)
-except ImportError:  # pragma: no cover - the script-directory import path
-    # The order is load-bearing. Both spellings name one file, and Python
-    # gives each a module object of its own, so whichever is tried first is
-    # the copy every caller that can reach it shares. The package spelling
-    # comes first because a caller with the repository root importable --
-    # a test, a tool -- already holds that object, and a second object
-    # would be a second copy of the bound, which is the drift this module
-    # exists to remove. A workflow step runs the file by path with only
-    # its own directory on the path, and reaches the fallback.
+if __package__:
+    # pylint: disable-next=relative-beyond-top-level
+    from .suite_bound import launch_suite, suite_timeout, timeout_record
+else:
+    # A workflow step runs this file by path, so `sys.path[0]` is
+    # `scripts/ci` and the repository root is on no path at all. Which
+    # spelling resolves is therefore decided by HOW this module was
+    # loaded, not by catching an `ImportError`: catching one cannot tell
+    # "this spelling is unavailable here" from an `ImportError` raised
+    # inside the shared module, and it would load one file under two
+    # names — two module objects, two copies of the bound, which is the
+    # drift this import exists to prevent.
     from suite_bound import launch_suite, suite_timeout, timeout_record
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,12 +103,17 @@ def main(argv=None):
                     timed_out.append(relative)
 
     if timed_out:
-        # A killed suite is not a failing suite. Its coverage is truncated
-        # at whatever it had measured, so unlike a suite that failed on its
-        # own this refuses the run even without --require-all, and says
-        # which suites to look at first.
-        print(f"TIMED OUT: {', '.join(timed_out)} — each was killed at its "
-              f"{bound} s bound and its coverage is truncated",
+        # A suite that overran is not a suite that failed. What it leaves
+        # behind depends on how it took the request to stop: one that
+        # flushed on it keeps what it had measured, and one that did not
+        # contributes nothing -- `sigterm = true` makes the difference,
+        # and neither outcome is the same as a suite that ran to the end
+        # and failed. So this refuses the run even without --require-all,
+        # and says which suites to look at first.
+        print(f"TIMED OUT: {', '.join(timed_out)} — each was ended at its "
+              f"{bound} s bound; a suite that flushed on the request keeps "
+              f"what it had measured and one that did not contributes "
+              f"nothing",
               file=sys.stderr)
         return 1
     if require_all and failed:

@@ -269,8 +269,9 @@ def _await_alive(proc, drained, probe, what):
 
     What is being waited for here is an ordering, so a deadline would turn a
     loaded machine into a failure while proving nothing extra on a fast one.
-    A regression surfaces as a hung job instead, which is the trade this
-    repository takes deliberately.
+    This wait is still unbounded, and what ends a regression in it is the
+    launcher's bound on the suite, which kills the whole process tree and
+    names the suite rather than this wait.
     """
     while True:
         value = probe()
