@@ -194,21 +194,38 @@ def _receiver_escapes(node):
                       (*args.posonlyargs, *args.args, *args.kwonlyargs)}:
         return False
     proven = set()
-    # A `with` target is named in the poison list whatever else the Load is,
-    # so `with CM(self) as s` is a withitem use and not a bare call argument.
-    withitem = {id(inner)
-                for item in ast.walk(node) if isinstance(item, ast.withitem)
-                for inner in ast.walk(item.context_expr)}
+    # The call-argument position is proven ONLY when the Call's RESULT is
+    # DISCARDED -- the Call is the whole value of an `Expr` statement. A
+    # call whose result is BOUND or FLOWS anywhere can hand the receiver
+    # back as an alias: `with CM(self) as s`, `s = same(self)`,
+    # `return f(self)`, `[f(self)]`, `x = f(self).y`. The withitem case is
+    # derived by this clause and needs no case of its own; an override
+    # beside a clause that should have produced it is a claim the code does
+    # not derive.
+    discarded = {id(stmt.value) for stmt in ast.walk(node)
+                 if isinstance(stmt, ast.Expr) and path._is_call(stmt.value)}
     for child in ast.walk(node):
         if (isinstance(child, ast.Attribute)
                 and isinstance(child.value, ast.Name)
                 and child.value.id == 'self'):
             proven.add(id(child.value))
-        elif path._is_call(child):
+        elif path._is_call(child) and id(child) in discarded:
             for arg in (*child.args, *(k.value for k in child.keywords)):
-                if (isinstance(arg, ast.Name) and arg.id == 'self'
-                        and id(arg) not in withitem):
+                if isinstance(arg, ast.Name) and arg.id == 'self':
                     proven.add(id(arg))
     return any(isinstance(child, ast.Name) and child.id == 'self'
                and isinstance(child.ctx, ast.Load) and id(child) not in proven
                for child in ast.walk(node))
+
+
+def _spread_args(call):
+    """Whether a call's arguments are a form its receiver cannot be read from.
+
+    Any `Starred` or `**` argument, or fewer positional arguments than the
+    form needs. A setattr-family call in that shape cannot prove which
+    receiver it is writing, so it poisons EVERY receiver in scope rather
+    than guessing one -- and a guess that picked the wrong receiver would
+    be a false green, which is the direction this rule exists to close.
+    """
+    return (any(isinstance(arg, ast.Starred) for arg in call.args)
+            or any(key.arg is None for key in call.keywords))

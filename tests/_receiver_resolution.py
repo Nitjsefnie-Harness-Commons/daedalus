@@ -28,7 +28,7 @@ import inspect
 import sys
 
 from _binding_names import (_every_use_proven, _names_a_target_binds,
-                            _receiver_escapes, _rebindings)
+                            _receiver_escapes, _rebindings, _spread_args)
 import _launch_path as path
 
 # The modules a NETWORK READ is a member of. This names MODULES and never
@@ -456,25 +456,28 @@ def _reflective(tree):
             poison.append(path._dotted_key(node.args[0]))
         elif ((isinstance(func, ast.Name) and func.id == 'setattr')
               or (isinstance(func, ast.Attribute)
-                  and func.attr == 'setattr')) and len(node.args) == 3:
-            base = path._dotted_key(node.args[0])
-            name = node.args[1]
-            if isinstance(name, ast.Constant) and isinstance(name.value, str):
+                  and func.attr == 'setattr')):
+            base = path._dotted_key(node.args[0]) if node.args else ''
+            name = node.args[1] if len(node.args) > 1 else None
+            # A spread or short arity cannot prove WHICH receiver, so all
+            # of them are poisoned; the old arity guard skipped this branch
+            # entirely, neither resolving a key nor poisoning.
+            if len(node.args) != 3 or _spread_args(node):
+                poison.extend([base, 'self'])
+            elif (isinstance(name, ast.Constant)
+                  and isinstance(name.value, str)):
                 key = f'{base}.{name.value}' if base else name.value
                 resolved[key] = isinstance(node.args[2], _LITERALS)
             else:
                 poison.append(base)
         elif (isinstance(func, ast.Attribute)
               and func.attr == '__setattr__' and node.args):
-            # The receiver is `args[0]` in the unbound spelling
-            # `object.__setattr__(obj, ...)` and `func.value` in the bound
-            # `obj.__setattr__(...)`, where `args[0]` is the NAME being
-            # set. Reading the argument in both spellings took the name
-            # constant, dotted to '', and dropped the poison: a bound
-            # `self.__setattr__('handles', Popen())` DISCHARGED. Three
-            # arguments is what tells the two spellings apart.
-            target = node.args[0] if len(node.args) == 3 else func.value
-            poison.append(path._dotted_key(target))
+            # In the BOUND `obj.__setattr__(...)` `args[0]` is the NAME,
+            # not the receiver, so a short arity poisons `self` too.
+            if len(node.args) != 3 or _spread_args(node):
+                poison.extend([path._dotted_key(node.args[0]), 'self'])
+            else:
+                poison.append(path._dotted_key(node.args[0]))
     for node in ast.walk(tree):
         if path._is_def(node) and _receiver_escapes(node):
             poison.append('self')

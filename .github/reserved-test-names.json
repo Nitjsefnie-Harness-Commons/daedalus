@@ -878,6 +878,7 @@
     "_source_items": {"python": ["tests/_pyroute_reads.py"]},
     "_spelled": {"python": ["tests/_sweep_launch_scan.py"]},
     "_split_action": {"python": ["tests/_workflow_cache_boundary.py"]},
+    "_spread_args": {"python": ["tests/_binding_names.py"]},
     "_starred_selection": {"python": ["tests/_pyroute_live.py"]},
     "_start_in_thread": {"python": ["tests/_mcp_load.py"]},
     "_start_mcp_in_process": {"python": ["tests/_mcp_load.py"]},
