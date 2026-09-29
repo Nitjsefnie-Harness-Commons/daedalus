@@ -265,6 +265,7 @@
 
 # ─── tests ───
 !/tests/
+!/tests/_actionlint.py
 !/tests/_argv_read.py
 !/tests/_arm_sweep.py
 !/tests/_bash_resolver_scan.py
