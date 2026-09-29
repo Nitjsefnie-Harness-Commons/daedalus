@@ -39,6 +39,20 @@ def _fixture_failure(tmp):
         return failure
 
 
+def test_a_controlled_call_that_does_not_raise_is_a_failure(tmp):
+    """The helper's refusal arm, over a call that simply returned."""
+    del tmp
+    seen = []
+    refusal = None
+    try:
+        _call_failure(lambda: seen.append('called'))
+    except AssertionError as raised:
+        refusal = raised
+    assert refusal is not None, 'a call that did not raise was accepted'
+    assert str(refusal) == 'controlled call did not raise', refusal
+    assert seen == ['called'], seen
+
+
 def test_indeterminate_e2big_diagnostics_are_harness_failures(tmp):
     del tmp
     too_large = OSError(errno.E2BIG, 'controlled command-size refusal')
