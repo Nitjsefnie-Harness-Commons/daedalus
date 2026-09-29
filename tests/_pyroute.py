@@ -447,7 +447,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(statement, ast.ClassDef):
             for value in [*statement.decorator_list, *statement.bases,
                           *(item.value for item in statement.keywords)]:
-                pairs = check_expression(value, pairs)
+                pairs = check_store(value, pairs)
             local_names, _, _ = lexical_scope_names(
                 statement, annotations_eager)
             completed = []
