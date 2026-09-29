@@ -78,14 +78,9 @@ def _value_error(call):
 
 
 def test_promoted_modules_import_by_package(tmp):
-    """Each promoted module imports as a package, by that name.
-
-    `scripts.ci.coverage_suites` is here because it selects its import on
-    `__package__`, and the branch that selects is unreachable from a run by
-    path -- which is the only way CI and every control run it. Without this
-    row the `if` half is dead code, and a name misspelled inside it turns
-    nothing red.
-    """
+    # `coverage_suites` is promoted because it selects its import on
+    # `__package__`, and no run by path -- which is the only shape CI uses --
+    # reaches the half that selects.
     command = '; '.join((
         'import scripts.ci.ratchet', 'import scripts.ci.size_baseline',
         'import scripts.ci.line_lengths', 'import scripts.ci.thresholds',
