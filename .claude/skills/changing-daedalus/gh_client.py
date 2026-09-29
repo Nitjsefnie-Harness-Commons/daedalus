@@ -8,14 +8,11 @@ payload on stdin, which is what keeps a GraphQL `null` variable a `null`
 instead of the empty string `-f` would send, and `-i` asks for the response
 headers, which is where the rate-limit reset lives.
 
-Whether an answer is a rate-limit refusal is `gh_rate_limit`'s question,
-not this module's: an answer reports exhaustion when it did NOT DELIVER what
-was asked for and carries rate-limit EVIDENCE, whatever the status and
-whatever `gh`'s exit code says, because a throttled query answers 200 and
-exits 1. That module is the one reader, and it reads every carrier the
-evidence travels on. An answer with no evidence is an ordinary failure and
-is never a pause - a permission refusal must not be answered by sleeping.
-`Watcher` is the long-running half: on a refusal it says once where it is
+Whether an answer is a rate-limit refusal is `gh_rate_limit`'s question
+and its rule, stated once there; this module asks it and obeys it. An
+answer with no evidence is an ordinary failure and is never a pause - a
+permission refusal must not be answered by sleeping. `Watcher` is the
+long-running half: on a refusal it says once where it is
 waiting, sleeps until the reset the API reported - bounded so a hostile
 or absent header cannot hang or hot-loop a watcher - and resumes. The
 parent-death guarantee is the pipe's, below, and a thread rather than the
@@ -177,9 +174,8 @@ def graphql(query, variables=None):
             raise found
         raise QueryError(complained.strip()[:400] or f'gh exited {code}')
     status, headers, body = _parse(answered)
-    # Read before the exit code is judged, not after: the body is one of
-    # the carriers, and on a throttled query the code says 1 while the
-    # body says everything (issue 1338).
+    # Read before the exit code is judged: the body is a carrier, and on a
+    # throttled query the code says 1 while the body says everything.
     try:
         payload = json.loads(body)
     except ValueError as exc:
