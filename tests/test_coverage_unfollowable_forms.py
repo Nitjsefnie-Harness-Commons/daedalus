@@ -23,6 +23,7 @@ from _carrier_cases import (  # noqa: E402
     _target_carrier_cases, _target_free_cases,
     _transforming_cases, _value_preserving_cases)
 import _coverage_guard  # noqa: E402
+# Aliased deliberately: a def of this name would trip a boundary row (#1340).
 from _coverage_source_fixtures import (  # noqa: E402
     _expected_binding_diagnostic as _at)
 from _coverage_guard import (  # noqa: E402
