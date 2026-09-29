@@ -23,6 +23,13 @@ and the diff read 0 on a tree with 53 holes in it.
 
 If you can name a function both sides call, the diff can only confirm
 that function. They share none.
+
+The diff is ONE-DIRECTIONAL, and the direction matters: it reports a site
+the reach owes and the guard does not judge. It cannot see a site the
+guard judges that this check never owed, which is the permissive direction
+and the one a blind check fails in. Both halves are derived from the same
+reach, so a root kind the reach does not admit is outside this check's
+domain on BOTH sides rather than invisible in one of them.
 """
 import ast
 import sys
@@ -30,19 +37,18 @@ from pathlib import Path
 
 from _imported_calls import module_scopes, reached_functions
 
-SCOPE_KINDS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-
-
 def _reached_roots(entry, tree):
     """The top-level scopes an entry reaches, and nothing else.
 
     The reach is the premise of the claim, not the thing under test, so
-    it comes from the resolver. The REGION each root owes is the whole
-    subtree, and that is where no kind is consulted.
+    it comes from the resolver, and the answer is one question — is this
+    node's name reached — which is the question the assembly asks too. The
+    REGION each root owes is the whole subtree, and that is where no kind
+    is consulted.
     """
     names = reached_functions(entry, module_scopes(tree))
     return [node for node in tree.body
-            if node.__class__ in SCOPE_KINDS and node.name in names]
+            if getattr(node, 'name', None) in names]
 
 
 def _call_sites(label, tree, entry):
