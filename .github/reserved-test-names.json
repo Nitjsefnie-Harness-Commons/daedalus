@@ -1643,6 +1643,7 @@
     "uploadBodies": {"javascript": ["tests/_boundary_env.py"]},
     "valueOfCharge": {"javascript": ["tests/_gm_two_origin.py"]},
     "value_signature": {"python": ["tests/_pyroute_values.py"]},
+    "verify_clause_against_tree": {"python": ["tests/_timed_basis.py"]},
     "verify_recorded_count": {"python": ["tests/_timed_basis.py"]},
     "verify_unmeasured_list": {"python": ["tests/_timed_basis.py"]},
     "waitFor": {"javascript": ["tests/_boundary_env.py", "tests/_hotfixharness.py", "tests/_overlap.py", "tests/_relayharness.py"]},

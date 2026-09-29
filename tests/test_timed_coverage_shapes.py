@@ -28,6 +28,7 @@ import contextlib
 import datetime
 import io
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -164,6 +165,15 @@ def test_the_growth_rate_is_measured_against_the_tree_not_asserted(tmp):
     on `HEAD` rather than on a named ref: a `refs/pull/N/merge`
     checkout has no `origin/main`, and this control runs in the `suites`
     job.
+
+    The note names the WINDOWS and no figure. It used to name the
+    suite count at the head of each window and the rate each one
+    implies, and every one of those was stale within a day of being
+    measured while nothing read them, so nothing went red. Reading the
+    windows out of it is what keeps the number in the note load-bearing
+    at all: the control walks every window the note names, and a note
+    naming one it ignores would be a measurement nothing checked -- it
+    named three and the control walked two.
     """
     coverage = _coverage()
     fewest, most = coverage.SUITES_PER_DAY
@@ -176,7 +186,7 @@ def test_the_growth_rate_is_measured_against_the_tree_not_asserted(tmp):
             'growth rate; the constant is stated with its window and the '
             'summary quotes its endpoints, which the two note controls '
             'above read back')
-    measured = _rates(history, now_suites)
+    measured = _rates(history, now_suites, _stated_windows())
     assert measured, 'the stated window is not in this history'
     for days, rate in measured:
         assert fewest <= rate <= most, (
@@ -208,12 +218,12 @@ def _suites_by_day(repo):
     return history[max(history)], history
 
 
-def _rates(history, now_suites):
+def _rates(history, now_suites, windows):
     """`(days back, suites a day)` at each window the module's basis names."""
     newest = max(history)
     today = datetime.date.fromisoformat(newest)
     rates = []
-    for days in (4, 16):
+    for days in windows:
         want = (today - datetime.timedelta(days=days)).isoformat()
         older = [date for date in history if date <= want]
         if not older:
@@ -223,6 +233,23 @@ def _rates(history, now_suites):
             continue
         rates.append((span, (now_suites - history[max(older)]) / span))
     return rates
+
+
+# The windows the module's own note names, in the two spellings a prose
+# list of them can take. A suite count and a rate are true of one
+# afternoon and false of the next, so the note quotes neither; the
+# window is the part that does not move, and it is the part the control
+# walks, so a note naming a window the control ignores names a
+# measurement nothing checked.
+_WINDOWS = r'over windows of ([\d, and]+?) days back'
+
+
+def _stated_windows():
+    """The window lengths `SUITES_PER_DAY_BASIS` names, in days."""
+    basis = _coverage().SUITES_PER_DAY_BASIS
+    match = re.search(_WINDOWS, basis)
+    assert match, f'the rate names no window to measure: {basis}'
+    return [int(days) for days in re.findall(r'\d+', match.group(1))]
 
 
 def test_a_truncated_recorded_set_is_refused_under_the_share_bound(tmp):
@@ -297,10 +324,16 @@ def test_the_two_shapes_are_told_apart_by_the_recorded_set_alone(tmp):
     recorded = {name: data['suite_weights'][name] for name in names
                 if name in data['suite_weights']}
     # The same number of estimated suites in both shapes, so the share
-    # is identical and nothing but the recorded set can decide.
+    # is identical and nothing but the recorded set can decide. The
+    # file's own tree already prices some of its suites at the median,
+    # so the arrivals are what has to be ADDED to that base rather than
+    # the whole count: the file once described exactly the 328 it
+    # recorded, and naming the 12 it does not is what moved this.
     keep = _truncation_boundary(planner, coverage, data, names)
+    base = sum(1 for name in names if name not in data['suite_weights'])
     dropped = len(names) - keep
-    arrivals = [f'test_arrived{index:04d}.py' for index in range(dropped)]
+    arrivals = [f'test_arrived{index:04d}.py'
+                for index in range(dropped - base)]
     drifted = fixture_tree(Path(tmp) / 'drifted',
                            sorted(set(names) | set(arrivals)))
     for kept, tree_under, refused in (

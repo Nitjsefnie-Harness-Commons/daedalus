@@ -190,6 +190,12 @@ def _coverage_clause(recorded, names, unmeasured):
     estimates made the clause read beside a weight clause that adds
     their recorded values -- "estimated at the median" beside a number
     that is not the median.
+
+    The names are listed in the tree's own order, which is sorted, and
+    not in the order of a set: this clause is compared byte for byte
+    against a committed file by two suites, so a set's iteration order
+    would make the sentence -- and the file written from it -- a
+    different string in every process.
     """
     carried = [name for name in unmeasured if name in recorded]
     unknown = [name for name in unmeasured if name not in recorded]
@@ -202,7 +208,7 @@ def _coverage_clause(recorded, names, unmeasured):
                      'recorded weights')
     return (f'{len(unmeasured)} of the tree\'s {len(names)} suites are not '
             f'measured by these runs, ' + ' and '.join(spans) + ': '
-            + ', '.join(unmeasured))
+            + ', '.join(name for name in names if name in unmeasured))
 
 
 def basis_sentence(tree, data, cells, estimated):
@@ -224,12 +230,24 @@ def basis_sentence(tree, data, cells, estimated):
     only when the two agree: a run that produced two cells of a
     fourteen-cell matrix measured two cells, and the repository runs
     fourteen.
+
+    The unmeasured set is a UNION, and the second term is the floor the
+    file carries on its own: the write is a union, so a suite the tree
+    holds and the file records nothing about was not measured by the
+    runs that produced this file, whatever the caller reports. Taking
+    the caller's report alone let a caller holding a tree it could see
+    and naming no unmeasured suite have the sentence certify the whole
+    of it -- which is how a regeneration that read the list back out of
+    the prose it was regenerating wrote "every suite in the tree is
+    measured" over a file that records twelve of its 340. On a caller
+    holding the run's real set the floor is a subset of it and the
+    union moves nothing.
     """
     decision = plan_matrix(tree, data)
     loads = [cell.weight for cell in decision.cells]
     names = suite_names(tree)
     planned_weights = resolve(data['suite_weights'], names, 1.0)[0]
-    unmeasured = set(estimated)
+    unmeasured = set(estimated) | set(estimated_count(tree, data))
     measured_weights = {name: weight for name, weight
                         in planned_weights.items()
                         if name not in unmeasured}
@@ -267,11 +285,12 @@ def basis_sentence(tree, data, cells, estimated):
             f'reference-normalized medians over {data["runs"]} run(s) '
             f'({data["measured_from"]}), each suite a multiple of the '
             'reference workload its own cell measured')
-    if estimated:
+    if unmeasured:
         weight_clause = (
             f'the {len(measured_weights)} recorded weights total '
-            f'{total:.4g} {unit} and the {len(estimated)} suites these runs '
-            f'did not measure add {planned - total:.4g}, {planned:.4g} in all')
+            f'{total:.4g} {unit} and the {_plural(len(unmeasured), "suite")} '
+            f'these runs did not measure add {planned - total:.4g}, '
+            f'{planned:.4g} in all')
     else:
         weight_clause = (f'the {len(measured_weights)} recorded weights '
                          f'total {total:.4g} {unit}')
@@ -298,8 +317,9 @@ def basis_sentence(tree, data, cells, estimated):
          f'count reaches the bound the planner clamps and names the target '
          f'the margin would need.'),
     ]
-    if estimated:
-        parts.append(_coverage_clause(data['suite_weights'], names, estimated))
+    if unmeasured:
+        parts.append(_coverage_clause(
+            data['suite_weights'], names, unmeasured))
     else:
         parts.append('every suite in the tree is measured by these runs')
     parts.append(

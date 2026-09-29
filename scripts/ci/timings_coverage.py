@@ -237,21 +237,25 @@ NOTE_ESTIMATED_SUITE_SHARE = 0.10
 MIN_RECORDED_SKEW = 2.0
 # Tracked suites this tree gains a day, which is how the note converts an
 # estimated count into refreshes that did not land. A RANGE and not a
-# point, because the rate is not a constant: on this branch's history at
-# 2026-09-28 the tree held 321 tracked suites, against 166 sixteen days
-# earlier, 190 seven days earlier and 215 four days earlier -- 9.7, 18.7
-# and 26.5 a day over those three windows. A single figure quoted to one
-# decimal place is a precision the measurement does not have, and it is
-# read by an operator deciding how urgently to re-run a refresh.
-# `SUITES_PER_DAY_BASIS` names the windows so the next reader
-# re-measures rather than re-argues, and
+# point, because the rate is not a constant: a fortnight of this tree's
+# own history does not show one, and a figure quoted to one decimal place
+# is a precision the measurement does not have. An operator reads it
+# deciding how urgently to re-run a refresh.
+#
+# The range is MEASURED and no figure is written here, because a count
+# of suites and a rate are both true of one afternoon and false of the
+# next: the totals and rates this sentence used to quote were stale
+# within a day, and nothing read them, so nothing went red.
+# `SUITES_PER_DAY_BASIS` names the WINDOWS, which do not move, and
 # `test_the_growth_rate_is_measured_against_the_tree_not_asserted`
-# re-derives both ends from the tree's own history.
+# re-derives the rate at each and requires this range to contain them.
 SUITES_PER_DAY = (8, 30)
 SUITES_PER_DAY_BASIS = (
-    'this branch at 2026-09-28: 321 tracked tests/ suites, against 166 at '
-    '2026-09-12 (16 days, 9.7 a day), 190 at 2026-09-21 (7 days, 18.7) and '
-    '215 at 2026-09-24 (4 days, 26.5)')
+    'measured from this tree\'s own history at 2026-09-28 over windows of '
+    '16, 7 and 4 days back from its newest commit; '
+    '`test_the_growth_rate_is_measured_against_the_tree_not_asserted` '
+    're-derives the rate at each of those windows and this range has to '
+    'contain them')
 _REMEDY = ('re-derive it from a run that measured the tree with '
            '`python3 scripts/ci/refresh_timings.py --runs-root '
            '<downloaded runs> --out .github/suite-timings.json`')
