@@ -48,6 +48,15 @@ CHAIN_LIMB_ROWS = (
      "import daedalus_bridge.config\n"
      "daedalus_bridge.config.startup_paths(timeout=30)\n",
      [(2, 'unreadable', 'unplaced')]),
+    # The descent is what the predicate's own `while` says, and nothing
+    # in the tree needs it: no receiver is more than one step from its
+    # root, so `while` and `if` read the live tree alike. The row is here
+    # so that is a measurement rather than an accident -- narrowing the
+    # descent to one step turns exactly this row red and nothing else.
+    ('a-two-step-dotted-stdlib-chain-is-proved',
+     "import xml.etree.ElementTree\n"
+     "xml.etree.ElementTree.parse(timeout=30)\n",
+     []),
     ('a-parameter-shadowing-a-stdlib-root-is-refused',
      "import http.client\n"
      "def probe(http):\n"
