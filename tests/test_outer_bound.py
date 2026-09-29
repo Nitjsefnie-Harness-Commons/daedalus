@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The bound a control holds on a call that can wedge, and its platform floor.
+"""The bound a control holds on a call that can wedge, and the tree it kills.
 
 A control written for a hang detector cannot use the detector: the code under
 test is exactly the machinery that would have ended the wait, so against a
@@ -8,13 +8,11 @@ The bound lives in `tests/_outer_bound.py` because the mechanism that ends
 such a wait must itself sit OUTSIDE the call, run on every matrix leg, and be
 obliged to kill the child rather than merely stop waiting for it.
 
-The second half of this suite is the class that cost four legs: a POSIX-only
-API reached unguarded from a test module. `signal.SIGALRM` and
-`signal.setitimer` do not exist on Windows, so a control that arms one raises
-`AttributeError` the moment it arms. The tripwire is a rule about SHAPE — a
-POSIX-only call in a function that never asks the platform — rather than a
-list of files, so a helper beside the two sites is covered the same way they
-were.
+The platform rule that used to be the second half of this suite — a
+POSIX-only API reached unguarded from a test module, the class that cost
+four matrix legs — is in `tests/test_platform_apis.py`. The two are
+unrelated subjects, and one suite holding both is what put this file over
+the size ceiling.
 """
 import ast
 import os
@@ -225,6 +223,45 @@ def test_the_receipt_tells_a_live_process_from_a_dead_one(tmp):
         process.wait(timeout=REAP_BOUND_S)
 
 
+def test_the_receipt_reads_both_null_handles_and_only_one_is_a_dead_pid(tmp):
+    """A null handle is two conditions, and only one of them is a corpse.
+
+    `OpenProcess` returns null both for a pid that was never there and for
+    a pid that is running and that this process may not open — a
+    privileged child, which is exactly what a tree kill leaves behind.
+    Reading the second as the first makes the receipt report a kill that
+    never happened, and that is the one direction it must not lie in.
+
+    The real function only runs on `windows-latest`, so the classification
+    is driven here with a stand-in `kernel32` rather than left to the four
+    legs that would be the only place to notice.
+    """
+    del tmp
+    from unittest import mock  # noqa: PLC0415
+
+    import _processtree as tree  # noqa: PLC0415
+
+    def kernel32_returning(handle):
+        kernel32 = mock.Mock()
+        kernel32.OpenProcess.return_value = handle
+        return kernel32
+
+    codes = [tree._ERROR_ACCESS_DENIED, tree._ERROR_INVALID_PARAMETER]
+    reading = mock.patch.object(
+        tree.ctypes, 'get_last_error', side_effect=codes, create=True)
+    with reading:
+        live_but_forbidden = tree._open_handle_says_live(
+            kernel32_returning(None), 4242)
+        absent = tree._open_handle_says_live(
+            kernel32_returning(None), 4243)
+    assert live_but_forbidden, (
+        'a running process this one may not open read as gone, so a kill '
+        'that never happened is reported as one')
+    assert not absent, 'a pid that was never there read as live'
+    assert tree._open_handle_says_live(kernel32_returning(7), 4244), (
+        'an opened handle did not read as live')
+
+
 def test_a_child_that_announces_after_the_bound_is_still_found(tmp):
     """The pid is looked for again, not read once.
 
@@ -271,286 +308,6 @@ def test_a_passed_bound_with_no_announced_pid_still_names_the_wedge(tmp):
     assert 'no pid' in report, report
 
 
-# --- the platform floor ------------------------------------------------------
-
-# A POSIX-only API reached from a function that never asks the platform is
-# the defect this suite's second half exists for, and it is the ATTRIBUTE that
-# is the tell: `signal.signal` is portable and `signal.SIGALRM` is not, so a
-# control that armed the portable call still raised `AttributeError` one
-# expression later, on the argument. `os.getpid` and `os.pipe` are
-# deliberately absent — both are portable, and a list carrying them would
-# fire on correct code.
-#
-# Keyed by the module the name hangs off rather than spelled whole, because
-# `test_noderun_deadline.py` holds a control that reads the tree for the
-# markers of the one module allowed to end a child, and a tripwire that
-# spelled a call whole would be the second module carrying that text.
-POSIX_ONLY_MEMBERS = {
-    'signal': frozenset({
-        'alarm', 'setitimer', 'getitimer', 'siginterrupt', 'sigwait',
-        'sigwaitinfo', 'pthread_kill', 'SIGALRM', 'ITIMER_REAL',
-        'ITIMER_VIRTUAL', 'ITIMER_PROF', 'SIGVTALRM', 'SIGINFO', 'SIGCLD',
-        'SIGWINCH', 'SIGPOLL', 'SIGIO', 'SIGPWR', 'SIGSYS', 'SIGUNUSED'}),
-    'os': frozenset({
-        'fork', 'forkpty', 'killpg', 'setsid', 'setpgid', 'getpgrp',
-        'tcgetpgrp', 'tcsetpgrp', 'uname', 'getuid', 'geteuid', 'setuid',
-        'setgid', 'chroot', 'mkfifo', 'getloadavg', 'sched_getaffinity',
-        'sched_setaffinity', 'startfile', 'pread', 'pwrite'})}
-# A function that reaches one of these may still own it, provided it says
-# which platform it is on. `tests/_processtree.py`'s tree kill and
-# `_dashnode`'s file lock branch on the platform and neither is refused.
-#
-# A capability probe counts as asking: `hasattr(signal, 'alarm')` is the same
-# question asked portably, and `tests/test_cmdqueue_bounds.py`'s cyclic-binding
-# control asks it before reaching for the alarm. That control is the
-# distinguished form the corpus records rather than the condemned one — it
-# does not run where the capability is absent, and a regression in the
-# arithmetic it watches goes red wherever it does run, because the guarantee
-# is a fixed-point over a finite name space and never varied by platform. What
-# is refused is the reach with nothing said, which is the shape that put four
-# matrix legs red.
-# A platform IDENTITY question — which platform is this — is about every
-# POSIX-only member at once, so it answers any of them. These three are
-# spelled the same way on every platform and are the only such question.
-#
-# A CAPABILITY question is different, and used to be matched by the same
-# substring test as the identity ones: any `hasattr(` or `getattr(` anywhere
-# in an `if` spared any reach below it. `hasattr(os, 'geteuid')` says whether
-# the process may drop privileges; it says nothing whatever about a signal,
-# and a rule that cannot tell the two apart spares an unguarded
-# `signal.SIGALRM` under a probe about `os`. A capability question therefore
-# counts only when it is about the module the reach used — which is the
-# granularity `tests/test_plant_restore.py` needs and which the measured
-# blind case does not.
-PLATFORM_IDENTITY = ('sys.platform', 'os.name', 'platform.system')
-
-
-def _innermost_def(tree, node):
-    """The innermost `def` of `tree` that `node` sits in, or None."""
-    holders = [other for other in ast.walk(tree)
-               if isinstance(other, (ast.FunctionDef, ast.AsyncFunctionDef))
-               and other.lineno <= node.lineno
-               <= (other.end_lineno or other.lineno)]
-    return max(holders, key=lambda other: other.lineno) if holders else None
-
-
-def _asks_the_platform(function, reached):
-    """Whether `function` asks the question this reach makes relevant.
-
-    `reached` is the `(module, member)` the read went through, and the
-    test is walked rather than unparsed and searched, so a mention inside a
-    message string is not a question. What counts as the right question is
-    `PLATFORM_IDENTITY`'s comment, which carries the measurement.
-    """
-    for node in ast.walk(function):
-        if not isinstance(node, ast.If):
-            continue
-        spelled = ast.unparse(node.test)
-        if any(mark in spelled for mark in PLATFORM_IDENTITY):
-            return True
-        if _names_the_reached(node.test, reached):
-            return True
-    return False
-
-
-def _names_the_reached(test, reached):
-    """Whether `test` asks about the module the read went through.
-
-    Module-level on purpose, and the limit is stated rather than papered
-    over: a probe of one `os` member spares a reach on another, because
-    `tests/test_plant_restore.py` guards `os.setuid` with
-    `hasattr(os, 'geteuid')` and that is the shape a caller reaching a
-    sibling member really writes. What the module match buys is that a
-    probe about `os` cannot spare a reach on `signal`, which is the hole
-    this replaces.
-    """
-    module, _ = reached
-    for node in ast.walk(test):
-        if isinstance(node, ast.Name) and node.id == module:
-            return True
-        if isinstance(node, ast.Attribute) and isinstance(
-                node.value, ast.Name) and node.value.id == module:
-            return True
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                and node.func.id in ('hasattr', 'getattr') and any(
-                    isinstance(argument, ast.Constant)
-                    and argument.value == module
-                    for argument in node.args[:1]):
-            return True
-    return False
-
-
-def _platform_decided(tree, function, reached):
-    """Whether something above `function` already asked which platform this is.
-
-    The reach is a defect when NOTHING has said. A function may say it
-    itself, which is the shape the tripwire was written for; but the
-    question can also be asked one or two levels up, at the only place that
-    can answer it — the caller that guards the call, or the function that
-    hands the body to the platform rather than calling it. That is the shape
-    `tests/test_plant_restore.py` arrived with when this branch rebased onto
-    a base carrying it: the privilege drop is reached only where
-    `hasattr(os, 'geteuid')` has already said the platform can do it, and
-    a rule that cannot follow the chain manufactures a red on correct code,
-    which is the same defect as one that passes on broken code.
-
-    The walk stops the moment a function asks, and gives up rather than
-    guesses at anything else: a reference nobody holds, a reach nobody
-    guards, or a cycle with no question in it. So the defect the tripwire
-    exists for is still named — the two suites that armed `SIGALRM` did it
-    from a chain on which nothing asks.
-    """
-    seen = set()
-    pending = [function]
-    while pending:
-        current = pending.pop()
-        if id(current) in seen:
-            return False
-        seen.add(id(current))
-        if _asks_the_platform(current, reached):
-            continue
-        holders = {
-            id(holder): holder
-            for holder in (
-                _innermost_def(tree, node)
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Name) and node.id == current.name)
-            if holder is not None}
-        if not holders:
-            return False
-        pending.extend(holders.values())
-    return True
-
-
-def _posix_only_uses(tree):
-    """Every POSIX-only attribute read the platform rule would refuse.
-
-    A read and a call are the same thing to this: a name reached but never
-    invoked still raised `AttributeError` on the leg that lacks it. Returns
-    `(lineno, spelling)` per offending read, so a caller can report where.
-    """
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Attribute):
-            continue
-        if not isinstance(node.value, ast.Name):
-            continue
-        members = POSIX_ONLY_MEMBERS.get(node.value.id)
-        if members is None or node.attr not in members:
-            continue
-        function = _innermost_def(tree, node)
-        if function is not None and _platform_decided(
-                tree, function, (node.value.id, node.attr)):
-            continue
-        yield node.lineno, f'{node.value.id}.{node.attr}'
-
-
-def test_the_platform_rule_names_an_unguarded_read_and_spares_a_guarded_one(
-        tmp):
-    """The tripwire fires, and the shape it refuses is the one that bit.
-
-    A rule that is only ever run over the tree cannot say whether it reads:
-    it passed clean on the very defect it was written for, because it asked
-    each node for its enclosing function and a node cannot see the tree. So
-    both directions are driven here from planted source — the unguarded read
-    named, the guarded one spared, and a portable one spared whatever
-    surrounds it.
-    """
-    del tmp
-    unguarded = ast.parse(
-        'import signal\n'
-        'def arm():\n'
-        '    signal.signal(signal.SIGALRM, print)\n')
-    assert list(_posix_only_uses(unguarded)) == [(3, 'signal.SIGALRM')], (
-        list(_posix_only_uses(unguarded)))
-    guarded = ast.parse(
-        'import os, sys\n'
-        'def own_group():\n'
-        "    if sys.platform == 'win32':\n"
-        '        return None\n'
-        '    return os.getpgrp()\n')
-    assert list(_posix_only_uses(guarded)) == [], (
-        list(_posix_only_uses(guarded)))
-    portable = ast.parse(
-        'import os\n'
-        'def where():\n'
-        '    return os.getpid()\n')
-    assert list(_posix_only_uses(portable)) == [], (
-        list(_posix_only_uses(portable)))
-    # The question asked at the CALL SITE rather than inside the function
-    # that reaches the API, which is the shape `tests/test_plant_restore.py`
-    # arrived with after this branch rebased onto a base carrying it: the
-    # privilege drop is only reached where `hasattr(os, 'geteuid')` has
-    # already said the platform can do it.
-    called_from_a_guard = ast.parse(
-        'import os, sys, subprocess\n'
-        'def drop():\n'
-        '    os.setgid(65534)\n'
-        'def run():\n'
-        '    if hasattr(os, "geteuid"):\n'
-        '        return subprocess.run(["x"], preexec_fn=drop)\n'
-        '    return None\n')
-    assert list(_posix_only_uses(called_from_a_guard)) == [], (
-        list(_posix_only_uses(called_from_a_guard)))
-    # An UNRELATED capability probe above the reach, which is the shape the
-    # substring matcher over an unparsed `if` could not tell from a
-    # relevant one: `hasattr(os, 'geteuid')` says whether the process may
-    # drop privileges, and says nothing whatever about a signal. The reach
-    # is still named.
-    unrelated_probe = ast.parse(
-        'import os, signal\n'
-        'def arm():\n'
-        '    signal.signal(signal.SIGALRM, print)\n'
-        'def call():\n'
-        '    if hasattr(os, "geteuid"):\n'
-        '        arm()\n')
-    assert list(_posix_only_uses(unrelated_probe)) == [(3, 'signal.SIGALRM')], (
-        list(_posix_only_uses(unrelated_probe)))
-    # And the same question, asked about the module the reach used, spares
-    # it: that is `tests/test_plant_restore.py`'s own shape, and the file is
-    # real and green in the suite.
-    related_probe = ast.parse(
-        'import os, signal\n'
-        'def arm():\n'
-        '    signal.signal(signal.SIGALRM, print)\n'
-        'def call():\n'
-        '    if hasattr(signal, "SIGALRM"):\n'
-        '        arm()\n')
-    assert list(_posix_only_uses(related_probe)) == [], (
-        list(_posix_only_uses(related_probe)))
-    # And the same body called from a site that asks nothing is still named,
-    # or the exemption would be a hole rather than a reading.
-    unguarded_caller = ast.parse(
-        'import os, subprocess\n'
-        'def drop():\n'
-        '    os.setgid(65534)\n'
-        'def run():\n'
-        '    return subprocess.run(["x"], preexec_fn=drop)\n')
-    assert list(_posix_only_uses(unguarded_caller)) == [(3, 'os.setgid')], (
-        list(_posix_only_uses(unguarded_caller)))
-
-
-def test_no_posix_only_api_sits_in_a_function_that_never_asks_the_platform(
-        tmp):
-    """The tripwire this suite's own subject tripped, four legs ago.
-
-    `tests/test_noderun_deadline.py` and `tests/test_gate_extensions.py` each
-    armed `signal.signal(signal.SIGALRM, ...)` and `signal.setitimer(...)`
-    from a function that never asked the platform, and neither the signal nor
-    the timer exists on `windows-latest`: the control raised `AttributeError`
-    the moment it armed, so the four `windows-latest` cells of the twelve in
-    `scripts/ci/classify_changes.py`'s `FULL_MATRIX` were red before the
-    matrix ran a line of the change that matrix exists to check.
-    """
-    del tmp
-    offences = []
-    for source in sorted(TESTS.glob('*.py')):
-        tree = ast.parse(source.read_text(encoding='utf-8'),
-                         filename=str(source))
-        offences.extend(f'{source.name}:{line} {spelled}'
-                        for line, spelled in _posix_only_uses(tree))
-    assert offences == [], offences
-
-
 # --- the stalling controls, and the bound each one owes --------------------
 #
 # A control that drives a real child which never settles has exactly one
@@ -581,7 +338,7 @@ STALLING_CONTROL_MODULES = (
 #
 # Both are CALLS, and the parenthesis is the whole narrowing. A harness that
 # installs its own fake timer writes `global.setTimeout = …`, and that is the
-# keepalive hazard the scope note below is about: the assignment is not a
+# keepalive hazard the scope note above is about: the assignment is not a
 # child holding an event loop open, it is the code that makes sure no real
 # timer ever arms. An empty `while (true) {}` is left out for the other
 # half of the same reason — in this tree it is how a stand-in's child is

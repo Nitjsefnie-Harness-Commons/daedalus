@@ -16,6 +16,7 @@ is the only reading of a kill that is not the string the kill wrote about
 it, and a module that owns the kill is the one that can be asked whether it
 happened.
 """
+import ctypes
 import os
 import signal
 import subprocess
@@ -29,6 +30,17 @@ import time
 # of a survivor calls it gone.
 SETTLE_S = 5
 SETTLE_POLL_S = 0.05
+# `PROCESS_QUERY_LIMITED_INFORMATION` is the least right Windows grants
+# that still answers the question; a broader mask asks for more access
+# than a receipt has any business holding.
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+# `ERROR_ACCESS_DENIED` — the null handle that means a process is
+# RUNNING and this one may not open it. `ERROR_INVALID_PARAMETER`
+# is the other null handle and means the pid is not there.
+_ERROR_ACCESS_DENIED = 5
+# `ERROR_INVALID_PARAMETER` — the null handle that means there was no
+# such pid. The pair is the whole classification.
+_ERROR_INVALID_PARAMETER = 87
 
 
 def process_is_gone(pid, settle_s=SETTLE_S):
@@ -43,9 +55,9 @@ def process_is_gone(pid, settle_s=SETTLE_S):
     `os.kill(pid, 0)` sends no signal — it raises for a pid the kernel has
     reaped and returns for a live one. Windows has no such call, and
     `os.kill(pid, 0)` there opens the process it is asked about and can end
-    it, so the answer is read from `tasklist`, which only reports. That is
-    the same split `tests/test_speedharness.py` records, and it is why this
-    is not a one-liner over `os.kill`.
+    it, so the answer is asked of the API instead. That is the split
+    `tests/test_speedharness.py` records, and it is why this is not a
+    one-liner over `os.kill`.
     """
     deadline = time.monotonic() + settle_s
     while True:
@@ -59,7 +71,7 @@ def process_is_gone(pid, settle_s=SETTLE_S):
 def _process_is_live(pid):
     """One read of liveness, per platform, and never a signal."""
     if sys.platform == 'win32':
-        return _tasklist_has(pid)
+        return _windows_is_live(pid)
     try:
         os.kill(pid, 0)
     except PermissionError:
@@ -70,18 +82,65 @@ def _process_is_live(pid):
     return True
 
 
-def _tasklist_has(pid):
-    """Whether `tasklist` reports `pid`, which is a query and not a kill."""
-    try:
-        result = subprocess.run(
-            ['tasklist', '/FI', f'PID eq {pid}', '/NH'],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True,
-            check=False, timeout=SETTLE_S)
-    except (OSError, subprocess.SubprocessError):
-        # A platform where the query could not be made answers "alive", so
-        # the receipt refuses rather than reporting a kill it did not see.
+def _windows_is_live(pid):
+    """Whether Windows still holds `pid`, asked of the API rather than a probe.
+
+    `os.kill(pid, 0)` is not that question on this platform: it opens the
+    process it is asked about and can end it, so a receipt written over it
+    is a probe that changes what it measures. The API is the query, and it
+    answers in BOTH directions — a handle, or an error code, because a null
+    handle is two conditions rather than one.
+
+    The alternative was `tasklist /FI "PID eq N"`, which is a query too but
+    costs a process launch, and therefore a bound; and the bound would have
+    to be a figure this module composes, which it cannot measure on the
+    three legs where `tasklist` does not exist.
+    """
+    return _open_handle_says_live(_windows_kernel32(), pid)
+
+
+def _windows_kernel32():
+    """`kernel32`, loaded so that a failure can be read.
+
+    `ctypes.windll` is `WinDLL('kernel32')` with `use_last_error=False`, and
+    without that the error code behind a null handle is not retrievable —
+    which is the whole question, as `_open_handle_says_live` states.
+    `tests/test_parent_watch.py` opens this same library this same way.
+    """
+    win_dll = getattr(ctypes, 'WinDLL')
+    kernel32 = win_dll('kernel32', use_last_error=True)
+    # A HANDLE is pointer-sized and `ctypes` defaults a return to `c_int`,
+    # so a 64-bit handle is TRUNCATED — and a truncated handle reads as
+    # null, which is the branch below. Without this the receipt would read
+    # a live process as gone on every 64-bit leg.
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int,
+                                     ctypes.c_ulong)
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    return kernel32
+
+
+def _open_handle_says_live(kernel32, pid):
+    """Whether this `OpenProcess` names a process that still exists.
+
+    A handle is a yes. A null handle is NOT a no: `ERROR_INVALID_PARAMETER`
+    is a pid that was never there, and `ERROR_ACCESS_DENIED` is a pid that
+    is running and that this process is not permitted to open — a
+    privileged child, which is exactly the process a tree kill leaves
+    behind. Reading the second as the first reports a kill that did not
+    happen, which is the one direction this receipt must not lie in.
+
+    The kernel32 is a parameter so that classification can be driven from
+    any platform: the four `windows-latest` cells are the only place the
+    real loader runs, and a branch no other leg can reach is a branch with
+    no control at all.
+    """
+    handle = kernel32.OpenProcess(
+        _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if handle:
+        kernel32.CloseHandle(handle)
         return True
-    return str(pid) in result.stdout
+    return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
 
 
 def process_group(process):
@@ -189,6 +248,9 @@ def kill_process_tree(pid, cleanup_timeout):
     except OSError as error:
         return f'process-group lookup failed: {error}'
     try:
+        if process_group == os.getpgrp():
+            os.kill(pid, signal.SIGKILL)
+            return 'direct process kill requested for the current group'
         os.killpg(process_group, signal.SIGKILL)
         return f'process group {process_group} killed'
     except ProcessLookupError:
