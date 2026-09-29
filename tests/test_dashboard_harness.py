@@ -20,6 +20,7 @@ import _dashfield  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 import test_dashboard_behaviour as behaviour  # noqa: E402
+# Aliased deliberately: a def of this name would trip a boundary row (#1340).
 from _node_harness_fixtures import (  # noqa: E402
     _node_harness as _harness)
 

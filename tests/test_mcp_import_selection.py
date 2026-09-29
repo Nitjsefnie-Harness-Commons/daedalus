@@ -76,8 +76,8 @@ def _spelling(callee):
 def _refuses_the_callee(_tmp, callee):
     """The scan refuses a call whose callee `callee` it cannot resolve.
 
-    `_assert_scan_refusal` checks the site and the reason; a refusal that
-    fails to name the offending SPELLING leaves a maintainer
+    `_assert_scan_refusal` in the closure suite checks the site and the reason;
+    a refusal that fails to name the offending SPELLING leaves a maintainer
     reading the source to find which of several calls the closure is
     complaining about, and one that drops the remedy leaves them with a
     complaint instead, so both are checked here.
