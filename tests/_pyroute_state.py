@@ -225,14 +225,15 @@ def apply_dict_statement(node, dicts, literals=None):
                 dicts.pop(target.id, None)
             else:
                 dicts[target.id] = keys
-        elif isinstance(target, ast.Subscript) and isinstance(
-                target.value, ast.Name) and (
-                    name := payload_literal_key(target.slice, literals)) is not None:
-            if name == 'tab':
-                dicts.setdefault(target.value.id, {}).pop(
-                    OPAQUE_TAB_SPREAD, None)
-            dicts.setdefault(target.value.id, {})[name] = (
-                node.value.lineno, node.value)
+        elif (isinstance(target, ast.Subscript)
+              and isinstance(target.value, ast.Name)):
+            name = payload_literal_key(target.slice, literals)
+            if name is not None:
+                if name == 'tab':
+                    dicts.setdefault(target.value.id, {}).pop(
+                        OPAQUE_TAB_SPREAD, None)
+                dicts.setdefault(target.value.id, {})[name] = (
+                    node.value.lineno, node.value)
 
 
 def apply_state_dict_statement(node, state):
