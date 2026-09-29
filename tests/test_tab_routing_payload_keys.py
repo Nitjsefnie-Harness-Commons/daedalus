@@ -21,12 +21,13 @@ against. A row that stated only a verdict could drift from the runtime
 and still pass, and a stated truth that stopped being true would fail
 here before it was compared to anything.
 """
+import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _pyroute import py_tab_routing_violations  # noqa: E402
+from _pyroute import dict_assignments, py_tab_routing_violations  # noqa: E402
 
 # The filed shape's module: one function, a real send, and the sender
 # spelled as a local function so the last line is a genuine Python call.
@@ -182,6 +183,24 @@ def test_every_row_the_runtime_clears_still_reads_clean(tmp):
             loud.append(label)
     assert loud == [], loud
 
+
+def test_a_delete_drops_the_literal_the_other_writer_drops(tmp):
+    """`dict_assignments` forgets a deleted name, as the flow's writer does.
+
+    The two writers of the name-to-literal table are one per reader and
+    have to agree; `ast.Delete` is where they used to differ, this one
+    returning early where `_pyroute_mapping` forgets the name. A key
+    spelled with a name the program has deleted is a key the program
+    cannot spell at all, so it must resolve to nothing.
+    """
+    path = Path(tmp) / 'deleted-name.py'
+    path.write_text('k = "tab"\n'
+                    'cmd = {k: 5}\n'
+                    'del k\n'
+                    'other = {k: 5}\n', encoding='utf-8')
+    found = dict_assignments(ast.parse(path.read_text(encoding='utf-8')))
+    assert 'tab' in found['cmd']
+    assert found['other'] == {}
 
 
 def main():
