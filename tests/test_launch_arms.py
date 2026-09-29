@@ -254,7 +254,8 @@ def test_every_arm_is_uniquely_addressed(tmp):
             f'not distinct: {cuts}')
     shared = sorted(where for where, cuts in on_one_line.items()
                     if len(cuts) > 1)
-    assert shared == [('_launch_audit.py', 534), ('_launch_audit.py', 556)], (
+    assert shared == [('_launch_audit.py', 519),
+                   ('_launch_audit.py', 541)], (
         'the same-line pairs the table carries, each two operands of one '
         f'disjunction; a new one is a decision, not an accident: {shared}')
 
@@ -263,8 +264,8 @@ def test_every_arm_the_text_cannot_pin_is_settled_by_deleting_it(tmp):
     """Where the spelling cannot say which arm is meant, the cut does.
 
     An address is a claim about a clause, and a claim the source cannot
-    repeat back is not one the text can check: `_launch_audit.py:169` and
-    `:170` carry byte-identical text and differ only in indentation, so
+    repeat back is not one the text can check: `_launch_audit.py:154` and
+    `:155` carry byte-identical text and differ only in indentation, so
     exchanging the two entries' `line` and `cut` leaves the line check,
     the uniqueness check and the span check all green while the table
     says an undriven arm is CONTROLLED.
@@ -454,7 +455,7 @@ def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
     """
     del tmp
     named = {(row[0], row[1]) for row in MARKER_NON_MEMBERS}
-    for name in ('_launch_audit.py', '_argv_read.py'):
+    for name in ('_launch_audit.py', '_argv_read.py', '_stdlib_read.py'):
         clauses, spans = _marker(name)
         listed = {arm[LINE] for arm in LAUNCH_ARMS if arm[FILE] == name}
         for line, _kind in clauses:
@@ -525,7 +526,7 @@ def test_every_controlled_non_member_is_controlled_by_its_evidence(tmp):
     shape an arm carries them, for 22 clauses in no arm at all -- so
     they sit outside the 150-arm sweep, the crash/value partition and
     the `uncontrolled` count, and nothing re-derived either.
-    `_launch_audit.py:303` is the sharpest case: its evidence row is
+    `_launch_audit.py:288` is the sharpest case: its evidence row is
     named by no arm, so that clause's only recorded state lived in the
     one structure nothing measures.
 

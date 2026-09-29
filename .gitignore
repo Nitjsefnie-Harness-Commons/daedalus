@@ -446,6 +446,7 @@
 !/tests/_service_loader.py
 !/tests/_speedharness.py
 !/tests/_step_ceiling.py
+!/tests/_stdlib_read.py
 !/tests/_stream_fake.py
 !/tests/_sweep_launch_scan.py
 !/tests/_tabroute_focus.py
