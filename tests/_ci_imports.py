@@ -54,7 +54,8 @@ def _imports_both_arms(own, selector):
                 if node.module:
                     names.add(f'{base}.{node.module}')
                 else:
-                    names.update(f'{base}.{alias.name}' for alias in node.names)
+                    names.update(f'{base}.{alias.name}'
+                                 for alias in node.names)
     return names
 
 
