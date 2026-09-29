@@ -451,7 +451,9 @@ treats an absent gating workflow as its own answer - keep holding, and if
 `--max-hold` releases the batch anyway, name the workflow that is missing
 rather than "unknown", which is the shape #839 was filed about. A *red*
 `tests` run is present, and settles the matrix as a completed failure
-always did.
+always did. The hold asks about the WORKFLOW only, and the published
+check-run beside it is `ci_wait.py`'s own question - the reasoning is
+recorded under that tool's exit codes below, so it is stated once.
 
 Waiting on one commit's CI is `ci_wait.py`, beside this file:
 
@@ -462,13 +464,16 @@ python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha> \
 
 Its exit code is the verdict, so a caller never has to read the loop: 0 every
 run on the SHA concluded `success`, `neutral` or `skipped` **and the
-`tests` matrix has a run on that SHA**; 1 every run concluded and one
-concluded otherwise, offenders named with URLs; 2 the `--timeout` bound
-expired first - with named runs still open, with no run ever appearing, or
-with every run concluded and the `tests` matrix still absent; 3 the
+`tests` matrix has a run on that SHA** **and the `gate freshness` check
+run has concluded acceptably**; 1 every run concluded and one concluded
+otherwise, or a required published check run did, offenders - runs and
+checks alike - named with URLs; 2 the `--timeout` bound expired first - with
+named runs still open, with no run ever appearing, or with every run
+concluded and a required workflow or check still absent; 3 the
 invocation was rejected or a query failed - loud and at
 once, never retried behind a message that reads like waiting; 4 every run
-concluded acceptably and none of them is a `tests` run, so this head is not
+concluded acceptably and either none of them is a `tests` run or no
+`gate freshness` check run is on the SHA, so this head is not
 certified - no merge is claimed, because this is reached with a pull
 request, without one, and on a branch of its own. A rate-limit refusal is
 the one exception to exit 3: it is a known wait, so it pauses until the
@@ -495,11 +500,46 @@ to protect is one who never says otherwise), and it is
 answered rather than waited on forever: a conflicting pull request for the
 head refuses at once, and anything else is given `--grace` seconds
 (default 300) from the first observation before it refuses, naming the
-missing workflow, the grace and the runs that do exist. The pull-request
+missing workflow AND the missing check, the grace and the runs that do
+exist. The pull-request
 lookup is a disambiguation, not this tool's subject, so its failure is said
 once on stderr and the wait continues to the grace - a slower correct
 answer, never a green. A present-but-red `tests` run is exit 1, not exit 4:
-the conclusion is judged before the set is.
+the conclusion is judged before the set is, and so is a present-but-red
+`gate freshness` check - which is why a red check outranks exit 4 even on a
+head whose `tests` run is also absent.
+
+**A PUBLISHED CHECK-RUN is a gate that is not a workflow run, and this
+repository has one** (issue #1360). The `gate freshness` workflow's own run
+concludes `success` on every head, red verdict or not, because publishing
+that verdict is the run's job: `scripts/ci/gate_freshness.py` writes a check
+run of its own through the Checks API onto each open pull-request head, and
+the rulesets read THAT. So a waiter reading only runs reads the publisher
+and misses the gate - head `8ddfec21f32d484657e7ebc56c46a1b395670ca9`
+carried seven green runs and a `gate freshness` check that concluded
+FAILURE, and the tool exited 0. The run is the publisher, the check is the
+gate, and only the second is read by the rulesets.
+
+**The predicate for both kinds of gate is `ci_gate.py`'s, and so is the
+direction rule that says which of them an invocation is held to** - the
+required-workflow set, the published-check set, and the note a refusal
+carries all live beside each other so they cannot drift apart, and
+`ci_wait.py` reaches each through that module rather than keeping a copy.
+`watch_all.py`'s hold deliberately does NOT take this read, and the
+judgement is worth stating rather than leaving silent: its CI child
+(`ci_watch.py`) reads the head's `statusCheckRollup` contexts, which ARE
+check runs, so it already announces a red published verdict as a
+non-success conclusion under the batch's own name; and the publisher writes
+onto open pull-request heads only, which are the only heads that watcher
+runs against, so once the publisher's own run has concluded the verdict is
+either there or never coming. The predicate is shared anyway so a second
+reader has one place to reach for.
+
+`--required NAME` states a workflow gate, and it does not reach the
+published one: `gate freshness` is a name THIS repository's publisher
+chose, so it is required here where no argument can switch it off, and
+required nowhere else, where that name on a stranger's repository is a
+guess - the same asymmetry the workflows follow, and for the same reason.
 
 **`--required NAME` states a gate, and what that may DO depends on which
 repository this is** (issue #1318). It is repeatable and all-of:

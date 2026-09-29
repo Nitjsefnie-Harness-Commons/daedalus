@@ -37,11 +37,50 @@ Those rules are the two callers' alone, and they do not agree. Both ask the
 gate question of the set below; the wait judges the conclusion question over
 that set, while the hold judges it over the raw runs - which is what
 `watch_all.py`'s own docstring says is deliberately not shared.
+
+A PUBLISHED CHECK-RUN is a gate that is not a workflow run, and this
+repository has one. The `gate freshness` workflow's own run concludes
+`success` on every head whatever it published, because publishing the
+verdict IS that run's job: `scripts/ci/gate_freshness.py` writes a check run
+of its own through the Checks API onto each pull-request head. The rulesets
+read that check, so the run is the publisher and the check is the gate, and
+a waiter that reads only runs certifies a head whose gate is red (issue
+#1360). The check arrives in a check suite belonging to no workflow run at
+all, which is why it is invisible to a run-shaped read and reachable only
+through the suites' own `checkRuns`.
+
+So the expectation and the two predicates live here for the same reason the
+workflow ones do - a second reader must have one place to reach for - and
+they are read by NAME, exactly, like a workflow: `Gate freshness` is a
+different check and cannot satisfy this one.
+
+The DIRECTION RULE is here too, because it is the same question with a
+caller's own facts added: which gates is this invocation held to, and what
+does a refusal say about the ones it was not told about. A waiter KNOWS
+this repository's gates and is only GUESSING about another's, so a named
+gate may only make it STRICTER here and only REPLACE the set there, and a
+name it invented is required nowhere at all. The note a refusal carries
+lives beside the set it describes, so the two cannot drift apart.
+
+`watch_all.py`'s hold deliberately does NOT take this read, and the
+judgement belongs here rather than in the silence: the watcher's CI child
+reads the head's `statusCheckRollup` contexts, which ARE check runs, so it
+already announces a red published verdict as a non-success conclusion under
+the batch's own name; and the publisher writes onto open pull-request heads
+only, which are the only heads that watcher runs against, so once the
+publisher's own run has concluded the verdict is there or never coming. The
+predicate is shared anyway so a second reader finds one definition.
 """
 
 from datetime import datetime, timezone
 
+DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
 REQUIRED_WORKFLOWS = frozenset({'tests'})
+PUBLISHED_CHECKS = frozenset({'gate freshness'})
+# The one definition of an acceptable conclusion. `ci_wait.ACCEPTABLE` is an
+# alias of this rather than a second literal, so the run filter and the
+# check filter cannot come to disagree about what a pass is.
+ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
@@ -105,6 +144,94 @@ def missing_required(runs, *, required=REQUIRED_WORKFLOWS):
     the argument a no-op rather than a rule that refuses everything.
     """
     return sorted(required - {run.get('name') for run in judged(runs)})
+
+
+def red_published(checks, *, required=PUBLISHED_CHECKS):
+    """The required check runs whose conclusion is not acceptable.
+
+    Unlike `missing_required` this reads a conclusion, because a red
+    published verdict is a FAILURE and not an absence - the same reason
+    the workflow predicate does not, and the same reason the caller still
+    judges its own runs' conclusions: a workflow the caller required and
+    this one required together must not answer the same question twice.
+
+    The whole check is returned rather than its name, because the caller
+    prints its offenders through one loop and a name alone would have to
+    be looked up again to find the conclusion and the URL.
+    """
+    return [check for check in checks
+            if check.get('name') in required
+            and check.get('conclusion') not in ACCEPTABLE]
+
+
+def missing_published(checks, *, required=PUBLISHED_CHECKS):
+    """The required check names no check run carries, sorted.
+
+    The mirror of `missing_required` over the other shape of gate, and
+    asked of the raw list: there is no filter to apply, because a check
+    run is its own verdict and the newest one IS it. A publisher PATCHes
+    the run it POSTed rather than adding a second one.
+    """
+    return sorted(required - {check.get('name') for check in checks})
+
+
+def is_default_repo(repo):
+    """Whether `repo` names the repository whose gates these are.
+
+    Case-insensitive over the whole `owner/name`, and asked of the RESOLVED
+    value rather than of whether a flag was passed: spelling this
+    repository out in full names the same repository. Only the comparison
+    is normalised, so a query still goes out as the caller spelled it.
+    """
+    return repo.lower() == DEFAULT_REPO.lower()
+
+
+def required_workflows(repo, named):
+    """The workflow names an invocation is held to.
+
+    A direction, and deliberately not a symmetric one: a flag may only
+    make a waiter STRICTER where it already knows the gate, and may only
+    REPLACE a requirement where it was guessing. Here the caller's names
+    are UNIONED with `REQUIRED_WORKFLOWS` - which puts the `tests`
+    protection out of reach of any argument, and with it the false green of
+    issue #1217 - while on another repository they replace a guess. Each
+    name is stripped, so `' ci '` is the requirement `ci` rather than a
+    name no run carries and no report can spell legibly (issue #1320).
+    """
+    if not named:
+        return REQUIRED_WORKFLOWS
+    names = frozenset(name.strip() for name in named)
+    if is_default_repo(repo):
+        return REQUIRED_WORKFLOWS | names
+    return names
+
+
+def required_published(repo):
+    """The published check runs an invocation is held to.
+
+    The same asymmetry, and with no flag to carry it: `gate freshness` is a
+    NAME this repository's publisher chose, so it is a fact here and a
+    guess everywhere else.
+    """
+    return PUBLISHED_CHECKS if is_default_repo(repo) else frozenset()
+
+
+def gate_note(repo, named):
+    """The note a missing-gate report carries, or nothing at all.
+
+    Both facts it turns on are the caller's, and only `main` holds them.
+    It is empty whenever a gate was named, because a caller who has stated
+    one is not asking what is checked by default; and empty on this
+    repository under every spelling, because there the answer is not a
+    guess. `is_default_repo` answers the repository half for this and for
+    `required_workflows`, and the names are rendered from the constant, so
+    the note and the set cannot drift apart.
+    """
+    if named or is_default_repo(repo):
+        return ''
+    names = ', '.join(sorted(REQUIRED_WORKFLOWS))
+    return (f'  only {names} is checked by default; --required NAME states '
+            'the workflow that gates another repository')
 
 
 class GateAbsent:

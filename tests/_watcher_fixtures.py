@@ -86,7 +86,7 @@ def runs_page(suites=()):
 
 
 def suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
-          started='2026-09-20T10:00:00Z', name=None):
+          started='2026-09-20T10:00:00Z', name=None, check_runs=None):
     """One check suite of a workflow run, as the live schema reports it.
 
     `name` overrides the workflow's own name, which is how a fixture
@@ -94,14 +94,29 @@ def suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
     it is an INCOMPLETE set, not a settled one, so a fixture standing in
     for a head whose matrix ran has to name that workflow or it is
     exercising a different state than it did before.
+
+    `check_runs` are the suite's own check runs - the job checks of a
+    `pull_request` run, and the verdict a publisher POSTed of its own. The
+    connection is absent unless a fixture asks for it, which is what a
+    suite carrying no check run at all sees.
+
+    `workflow=None` leaves the suite with no `workflowRun` at all, which is
+    the shape a suite created through the Checks API has: it belongs to no
+    workflow run, so the run list never sees it and only its check runs
+    are readable.
     """
-    return {'status': status, 'conclusion': conclusion, 'createdAt': started,
-            'workflowRun': {
-                'databaseId': rid, 'createdAt': started,
-                'url': f'https://github.com/o/r/actions/runs/{rid}',
-                'file': {'path': '.github/workflows/ci.yml'},
-                'workflow': {'databaseId': workflow,
-                             'name': name or f'workflow {workflow}'}}}
+    node = {'status': status, 'conclusion': conclusion,
+            'createdAt': started}
+    if workflow is not None:
+        node['workflowRun'] = {
+            'databaseId': rid, 'createdAt': started,
+            'url': f'https://github.com/o/r/actions/runs/{rid}',
+            'file': {'path': '.github/workflows/ci.yml'},
+            'workflow': {'databaseId': workflow,
+                         'name': name or f'workflow {workflow}'}}
+    if check_runs is not None:
+        node['checkRuns'] = {'nodes': list(check_runs)}
+    return node
 
 
 def refusal_response(status=403, headers=None,

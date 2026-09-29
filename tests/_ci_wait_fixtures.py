@@ -100,5 +100,24 @@ def _ci_wait_contract():
         'ci_wait_verdict_contract')
 
 
-def _ci_wait_verdict(runs):
-    return _ci_wait_contract().verdict(runs)
+def _ci_wait_verdict(runs, checks=(), required_checks=None):
+    """`verdict` on a loaded copy, with the published check nameable.
+
+    `required_checks=None` means the tool's own default rather than no
+    required check at all: a suite that wants the check switched off
+    says `frozenset()`, which is a different thing to say.
+    """
+    mod = _ci_wait_contract()
+    if required_checks is None:
+        required_checks = mod.PUBLISHED_CHECKS
+    return mod.verdict(runs, checks, required_checks=required_checks)
+
+
+def _ci_wait_state(runs, checks=()):
+    """(runs, checks) as a poll of the real `ci_wait.py` answers.
+
+    `ci_state` is the one read and it answers both questions at once, so a
+    suite that stubs the poll has to say what each poll carried: the run
+    list alone is a head whose publisher has written nothing.
+    """
+    return (list(runs), list(checks))

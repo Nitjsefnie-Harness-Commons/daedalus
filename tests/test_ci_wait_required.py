@@ -24,6 +24,7 @@ import _util  # noqa: E402
 from _ci_wait_fixtures import (  # noqa: E402
     _ci_wait_run as _run,
     _ci_wait_clock as _Clock,
+    _ci_wait_state as _state,
     _frozen_ci_wait_clock as _frozen_wait_clock)
 
 ROOT = _util.ROOT
@@ -40,6 +41,22 @@ def _green(*names):
     return [_run(rid, 'success', f'2026-09-20T10:0{rid}:00Z', name=name,
                  workflow=rid * 11)
             for rid, name in enumerate(names, start=1)]
+
+
+def _published():
+    """The published `gate freshness` check run, concluded green.
+
+    Every case here is about the WORKFLOW direction rule, and since
+    issue 1360 a head whose publisher has written nothing is a state
+    of its own that `main` cannot be told about from a flag - it is
+    decided by the repository - so the precondition is stated here
+    once. `tests/test_ci_wait_published.py` is where the check is the
+    subject.
+    """
+    return [{'id': 7, 'name': 'gate freshness', 'status': 'completed',
+             'conclusion': 'success', 'completed_at':
+             '2026-09-20T10:10:00Z',
+             'html_url': 'https://github.com/o/r/runs/7'}]
 
 
 def _conflicting(number):
@@ -69,7 +86,7 @@ def _run_main(mod, clock, argv, runs, pulls=(), err=None):
     the same regression is an ordinary FAIL inside a run that completes
     and reports every test in it.
     """
-    setattr(mod, 'runs_on', lambda repo, sha: list(runs))
+    setattr(mod, 'ci_on', lambda repo, sha: _state(runs, _published()))
     setattr(mod, 'prs_on', lambda repo, sha: list(pulls))
     out = io.StringIO()
     err = err if err is not None else io.StringIO()
@@ -325,7 +342,10 @@ def test_a_named_gate_that_did_not_run_still_refuses_naming_both(tmp):
                             '--grace', '1', '--interval', '1'],
                            _green('gate freshness', 'CodeQL'))
     assert code == 4, text
-    assert 'no ci or tests run on' in text, text
+    # Each absent gate is named as its own phrase, since issue 1360 added
+    # the second kind: a reader told "no ci or tests run" cannot tell
+    # which gate to go and look for.
+    assert 'no ci run and no tests run on' in text, text
     assert '--required' not in text, text
 
 
@@ -354,7 +374,7 @@ def test_every_spelling_of_this_repository_is_still_the_default(tmp):
     one carrying the claim. With `--required` in hand the note's `named`
     disjunct short-circuits, so `--required' not in text` is proved by the
     flag and never reaches the repository comparison - which is how
-    `_gate_note` came to hold a literal `repo == DEFAULT_REPO` beside a
+    `ci_gate.gate_note` came to hold a literal `repo == DEFAULT_REPO` beside a
     helper it was supposed to be asking, with every suite green. A row
     with no `--required` proves the note's absence by the REPOSITORY
     alone, and the case variant is the only spelling that discriminates:
@@ -423,7 +443,7 @@ _DEFAULT_REFUSAL = (
 def test_naming_this_repositories_own_gate_prints_identically(tmp):
     """The claim SKILL.md makes - naming the gate this tool already knows
     leaves the output byte for byte what it was - held here. It used to be
-    cited to `ci_wait`'s `_gate_note`, which no longer states it: that
+    cited to `ci_gate`'s `gate_note`, which no longer states it: that
     docstring now claims only that the NOTE is empty on those paths, which
     is the narrower thing that survives the union.
 

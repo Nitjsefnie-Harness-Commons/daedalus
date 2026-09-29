@@ -28,6 +28,7 @@ import _util  # noqa: E402
 from _ci_wait_fixtures import (  # noqa: E402
     _ci_wait_run as _run,
     _ci_wait_clock as _Clock,
+    _ci_wait_state as _state,
     _frozen_ci_wait_clock as _frozen_wait_clock,
     _ci_wait_verdict)
 
@@ -40,6 +41,31 @@ def _ci_wait():
     return _util.load(SOURCE, 'ci_wait_gate_contract')
 
 
+def _workflow_verdict(runs):
+    """`verdict` with the published check switched off.
+
+    Every case here is about the required WORKFLOW, so each says so
+    once here rather than each call carrying the keyword. Since issue
+    1360 the default also requires a `gate freshness` CHECK RUN, and a
+    head whose publisher wrote nothing is a different state;
+    `tests/test_ci_wait_published.py` is where that state is under
+    test, and the one place here where BOTH are absent is the
+    refusal naming both, beside it.
+    """
+    return _ci_wait_verdict(runs, required_checks=frozenset())
+
+
+def _workflow_wait(mod, repo, sha, interval, bound, out, grace=300):
+    """`wait` with the published check switched off, as above.
+
+    The parameters are named, never `*args`/`**kwargs`: a call that
+    unpacks a mapping is refused by `tests/test_repo_layout.py`, which
+    cannot tell a hidden `timeout=` from any other keyword.
+    """
+    return mod.wait(repo, sha, interval, bound, out, grace=grace,
+                    required_checks=frozenset())
+
+
 # ---- the required-workflow expectation (issue 1217) ----
 
 def test_a_green_run_of_the_required_workflow_is_acceptable(tmp):
@@ -48,7 +74,7 @@ def test_a_green_run_of_the_required_workflow_is_acceptable(tmp):
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness'),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _workflow_verdict(runs) == ('acceptable', [])
 
 
 def test_a_green_set_without_the_required_run_is_incomplete(tmp):
@@ -61,21 +87,21 @@ def test_a_green_set_without_the_required_run_is_incomplete(tmp):
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness'),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL'),
     ]
-    assert _ci_wait_verdict(runs) == ('incomplete', [])
+    assert _workflow_verdict(runs) == ('incomplete', [])
 
 
 def test_no_runs_at_all_is_waiting_not_incomplete(tmp):
     """Absence of the required workflow must not mask the "nothing ran" case,
     which is waiting and says so in the exit-2 report."""
     del tmp
-    assert _ci_wait_verdict([]) == ('waiting', [])
+    assert _workflow_verdict([]) == ('waiting', [])
 
 
 def test_a_red_required_run_fails_rather_than_reading_as_incomplete(tmp):
     """Step 4 precedes step 5: a present-but-red gate is a failure, and the
     refusal that a missing gate earns must never swallow it."""
     del tmp
-    state, offenders = _ci_wait_verdict(
+    state, offenders = _workflow_verdict(
         [_run(1, 'failure', '2026-09-20T10:00:00Z', name='tests')])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
@@ -94,7 +120,7 @@ def test_the_newest_run_of_the_required_workflow_satisfies_the_gate(tmp):
         _run(1, 'cancelled', '2026-09-20T10:00:00Z', name='tests'),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _workflow_verdict(runs) == ('acceptable', [])
 
 
 def test_an_empty_required_set_reproduces_the_previous_verdicts(tmp):
@@ -103,10 +129,13 @@ def test_an_empty_required_set_reproduces_the_previous_verdicts(tmp):
     del tmp
     mod = _ci_wait()
     green = [_run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]
-    assert mod.verdict(green, required=frozenset()) == ('acceptable', [])
-    assert mod.verdict([], required=frozenset()) == ('waiting', [])
+    assert mod.verdict(green, required=frozenset(),
+                required_checks=frozenset()) == ('acceptable', [])
+    assert mod.verdict([], required=frozenset(),
+                required_checks=frozenset()) == ('waiting', [])
     red = [_run(1, 'failure', '2026-09-20T10:00:00Z', name='gate freshness')]
-    state, offenders = mod.verdict(red, required=frozenset())
+    state, offenders = mod.verdict(red, required=frozenset(),
+                required_checks=frozenset())
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 
@@ -118,7 +147,7 @@ def test_a_resembling_name_does_not_satisfy_the_requirement(tmp):
     del tmp
     for name in ('Tests', 'test', 'tests ', 'unit tests', 'tests.yml'):
         runs = [_run(1, 'success', '2026-09-20T10:00:00Z', name=name)]
-        assert _ci_wait_verdict(runs) == ('incomplete', []), name
+        assert _workflow_verdict(runs) == ('incomplete', []), name
 
 
 # ---- the refusal on an incomplete set (issue 1217) ----
@@ -133,15 +162,15 @@ def test_a_conflicting_head_refuses_before_the_grace_elapses(tmp):
     mod = _ci_wait()
     clock = _Clock()
     sha = 'cb67badf' + '0' * 32
-    setattr(mod, 'runs_on', lambda repo, s: [
+    setattr(mod, 'ci_on', lambda repo, s: _state([
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness'),
-        _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL')])
+        _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL')]))
     setattr(mod, 'prs_on', lambda repo, s: [
         {'number': 1122, 'state': 'OPEN', 'mergeable': 'CONFLICTING',
          'mergeStateStatus': 'DIRTY', 'headRefOid': s}])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', sha, 60, 600, out, grace=300)
+        code = _workflow_wait(mod, 'o/r', sha, 60, 600, out, grace=300)
     text = out.getvalue()
     assert code == 4, text
     assert clock.now == 1000.0, clock.now
@@ -175,14 +204,15 @@ def test_each_limb_of_the_conflict_test_alone_still_refuses(tmp):
             ('7' * 40, 'MERGEABLE', 'DIRTY', 'DIRTY'),
             ('8' * 40, 'CONFLICTING', 'CLEAN', 'CONFLICTING')):
         clock = _Clock()
-        setattr(mod, 'runs_on', lambda repo, s: [
-            _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+        setattr(mod, 'ci_on', lambda repo, s: _state([
+            _run(1, 'success', '2026-09-20T10:00:00Z',
+                 name='gate freshness')]))
         setattr(mod, 'prs_on', lambda repo, s, m=mergeable, t=merge_state: [
             {'number': 1122, 'state': 'OPEN', 'mergeable': m,
              'mergeStateStatus': t, 'headRefOid': s}])
         out, err = io.StringIO(), io.StringIO()
         with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-            code = mod.wait('o/r', sha, 60, 600, out, grace=300)
+            code = _workflow_wait(mod, 'o/r', sha, 60, 600, out, grace=300)
         text = out.getvalue()
         assert code == 4, (mergeable, merge_state, text)
         assert clock.now == 1000.0, (mergeable, merge_state, clock.now)
@@ -240,13 +270,13 @@ def test_the_refusal_names_the_blocking_request_not_the_first_one(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, s: [
-        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'ci_on', lambda repo, s: _state([
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     setattr(mod, 'prs_on', lambda repo, s: [
         _pull(101), _pull(202, 'CONFLICTING')])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', '4' * 40, 60, 600, out, grace=300)
+        code = _workflow_wait(mod, 'o/r', '4' * 40, 60, 600, out, grace=300)
     text = out.getvalue()
     assert code == 4, text
     assert '#202' in text, text
@@ -263,14 +293,14 @@ def test_a_still_computing_pull_request_is_not_a_refusal(tmp):
     mod = _ci_wait()
     clock = _Clock()
     sha = 'a' * 40
-    setattr(mod, 'runs_on', lambda repo, s: [
-        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'ci_on', lambda repo, s: _state([
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     setattr(mod, 'prs_on', lambda repo, s: [
         {'number': 1122, 'state': 'OPEN', 'mergeable': 'UNKNOWN',
          'mergeStateStatus': 'UNKNOWN', 'headRefOid': s}])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', sha, 7, 600, out, grace=30)
+        code = _workflow_wait(mod, 'o/r', sha, 7, 600, out, grace=30)
     text = out.getvalue()
     assert code == 4, text
     assert 'grace' in text, text
@@ -301,12 +331,12 @@ def test_a_pull_request_that_turns_conflicting_later_is_re_read(tmp):
         return [{'number': 1122, 'state': 'OPEN', 'mergeable': mergeable,
                  'mergeStateStatus': 'UNKNOWN', 'headRefOid': sha}]
 
-    setattr(mod, 'runs_on', lambda repo, s: [
-        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'ci_on', lambda repo, s: _state([
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     setattr(mod, 'prs_on', _asks)
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', '5' * 40, 10, 600, out, grace=300)
+        code = _workflow_wait(mod, 'o/r', '5' * 40, 10, 600, out, grace=300)
     text = out.getvalue()
     assert code == 4, text
     assert 'pull request #1122' in text, text
@@ -335,15 +365,15 @@ def test_an_incomplete_set_inside_the_grace_keeps_polling(tmp):
         elif len(polls) >= 4:
             runs.append(_run(2, 'success', '2026-09-20T10:05:00Z',
                              name='tests'))
-        return runs
+        return _state(runs)
 
-    setattr(mod, 'runs_on', _polls)
+    setattr(mod, 'ci_on', _polls)
     setattr(mod, 'prs_on', lambda repo, s: [
         {'number': 1122, 'state': 'OPEN', 'mergeable': 'MERGEABLE',
          'mergeStateStatus': 'BLOCKED', 'headRefOid': s}])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'b' * 40, 10, 600, out, grace=300)
+        code = _workflow_wait(mod, 'o/r', 'b' * 40, 10, 600, out, grace=300)
     text = out.getvalue()
     assert code == 0, text
     assert polls == [1000.0, 1010.0, 1020.0, 1030.0], polls
@@ -366,13 +396,13 @@ def test_an_incomplete_set_past_the_grace_refuses_without_a_pull_request(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, s: [
+    setattr(mod, 'ci_on', lambda repo, s: _state([
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness'),
-        _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL')])
+        _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL')]))
     setattr(mod, 'prs_on', lambda repo, s: [])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'c' * 40, 7, 600, out, grace=30)
+        code = _workflow_wait(mod, 'o/r', 'c' * 40, 7, 600, out, grace=30)
     text = out.getvalue()
     assert code == 4, text
     assert 'tests' in text, text
@@ -390,14 +420,14 @@ def test_an_incomplete_set_past_the_grace_refuses_on_a_mergeable_head(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, s: [
-        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'ci_on', lambda repo, s: _state([
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     setattr(mod, 'prs_on', lambda repo, s: [
         {'number': 1122, 'state': 'OPEN', 'mergeable': 'MERGEABLE',
          'mergeStateStatus': 'CLEAN', 'headRefOid': s}])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'd' * 40, 7, 600, out, grace=30)
+        code = _workflow_wait(mod, 'o/r', 'd' * 40, 7, 600, out, grace=30)
     text = out.getvalue()
     assert code == 4, text
     assert 'tests' in text, text
@@ -417,8 +447,8 @@ def test_a_failed_pull_request_lookup_still_refuses_on_the_grace(tmp):
         polls.append(clock.now)
         raise mod.gh_client.QueryError('gh exited 1')
 
-    setattr(mod, 'runs_on', lambda repo, s: [
-        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'ci_on', lambda repo, s: _state([
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     # The transport, not the accessor: this control is about the REAL
     # head_pull_requests propagating a failed read into the wait's handler.
     # ONE run, and its own output is what is asserted: the earlier version
@@ -432,7 +462,7 @@ def test_a_failed_pull_request_lookup_still_refuses_on_the_grace(tmp):
     try:
         out, err = io.StringIO(), io.StringIO()
         with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-            code = mod.wait('o/r', 'e' * 40, 7, 600, out, grace=30)
+            code = _workflow_wait(mod, 'o/r', 'e' * 40, 7, 600, out, grace=30)
     finally:
         setattr(mod.gh_client, 'graphql', real)
     text = out.getvalue()
@@ -450,8 +480,8 @@ def test_once_reports_incomplete_and_still_exits_zero(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, s: [
-        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'ci_on', lambda repo, s: _state([
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
         code = mod.main(['f' * 40, '--once'])
@@ -467,12 +497,12 @@ def test_a_bound_shorter_than_the_grace_names_the_missing_gate(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, s: [
-        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'ci_on', lambda repo, s: _state([
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     setattr(mod, 'prs_on', lambda repo, s: [])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', '9' * 40, 10, 30, out, grace=300)
+        code = _workflow_wait(mod, 'o/r', '9' * 40, 10, 30, out, grace=300)
     text = out.getvalue()
     assert code == 2, text
     assert 'still open' not in text, text
@@ -501,15 +531,15 @@ def test_the_refusal_names_the_gate_the_judged_set_is_missing(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, s: [
+    setattr(mod, 'ci_on', lambda repo, s: _state([
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness',
              workflow=11),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL',
-             workflow=22)])
+             workflow=22)]))
     setattr(mod, 'prs_on', lambda repo, s: [])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', '6' * 40, 7, 600, out, grace=30)
+        code = _workflow_wait(mod, 'o/r', '6' * 40, 7, 600, out, grace=30)
     text = out.getvalue()
     assert code == 4, text
     assert 'no tests run on' in text, text

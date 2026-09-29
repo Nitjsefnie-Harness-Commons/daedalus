@@ -236,6 +236,7 @@
     "_ci_wait_clock": {"python": ["tests/_ci_wait_fixtures.py"]},
     "_ci_wait_contract": {"python": ["tests/_ci_wait_fixtures.py"]},
     "_ci_wait_run": {"python": ["tests/_ci_wait_fixtures.py"]},
+    "_ci_wait_state": {"python": ["tests/_ci_wait_fixtures.py"]},
     "_ci_wait_verdict": {"python": ["tests/_ci_wait_fixtures.py"]},
     "_class_containers": {"python": ["tests/_jsroute_sweep_grammar.py"]},
     "_class_declarations": {"python": ["tests/_jsroute_keys.py"]},

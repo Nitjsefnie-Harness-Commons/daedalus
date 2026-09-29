@@ -22,6 +22,11 @@ poll loop's business.
 connection reports another page and feeds each `endCursor` back as its own
 `after`, one `gh` invocation per page, so nothing is missed.
 
+One walk of the commit's check suites answers two questions. Each suite
+carries the workflow run its jobs belong to AND its own `checkRuns` - the
+job checks of a `pull_request` run, and the verdict a publisher POSTed of
+its own. `ci_state` returns both; `workflow_runs` is the first of them.
+
 `DAEDALUS_GH` overrides the executable, which is how the suites put a fake
 `gh` in front of a watcher where a bare `gh` name does not resolve.
 """
@@ -75,6 +80,10 @@ RUNS_QUERY = f'''query WatchRuns(
               databaseId createdAt url
               file {{ path }}
               workflow {{ databaseId name }}
+            }}
+            checkRuns(first: {PAGE_SIZE}) {{
+              nodes {{ databaseId name status conclusion completedAt
+                      detailsUrl }}
             }}
           }}
         }}
@@ -284,27 +293,65 @@ def _run_from_suites(suites):
     }
 
 
-def workflow_runs(owner, name, sha):
-    """Every workflow run GitHub reports against one SHA.
+def _check_run(node):
+    """One check run, in the key names a workflow run already uses.
+
+    Lowercased because the API spells the enum in caps and both callers
+    compare against `ACCEPTABLE`; the two shapes agree on every field the
+    offender print loop reads, which is what lets one loop print a red run
+    and a red published verdict in the same list.
+    """
+    conclusion = node.get('conclusion')
+    return {
+        'id': node.get('databaseId'),
+        'name': node.get('name'),
+        'status': (node.get('status') or '').lower(),
+        'conclusion': conclusion.lower() if conclusion else None,
+        'html_url': node.get('detailsUrl'),
+        'completed_at': node.get('completedAt'),
+    }
+
+
+def ci_state(owner, name, sha):
+    """(workflow runs, check runs) GitHub reports against one SHA.
 
     Through the commit's check suites rather than the check-runs list, for
     the reason `ci_wait.py` documents. A run whose jobs have not started has
     no suite yet and reads as no runs at all, which is a wait, never a pass.
     The suites of one run collapse to that run, so a run is one entry here
     exactly as the REST list returned it.
+
+    Both answers off ONE walk, because the caller that needs the checks is
+    the one that polls for minutes and a second query per poll is a cost
+    the checks do not earn. The check runs are read off every suite,
+    including one belonging to no workflow run: a verdict published through
+    the Checks API arrives in a suite of its own, and dropping it for
+    having no run is exactly what hid a red gate (issue #1360).
     """
     pages = paginate(
         RUNS_QUERY,
         {'owner': owner, 'name': name, 'sha': sha, 'after': None},
         [(('repository', 'object', 'checkSuites'), 'after')])
     by_suite = {}
+    checks = []
     for page in pages:
         for suite in nodes(page, ('repository', 'object', 'checkSuites')):
             run = _suite_run(suite)
             if run:
                 by_suite.setdefault(run.get('databaseId'), []).append(suite)
+            checks.extend(_check_run(node)
+                          for node in nodes(suite, ('checkRuns',)))
     runs = [_run_from_suites(suites) for suites in by_suite.values()]
-    return [run for run in runs if run]
+    return [run for run in runs if run], checks
+
+
+def workflow_runs(owner, name, sha):
+    """Every workflow run GitHub reports against one SHA.
+
+    `ci_state`'s first answer, so a caller that reads only the runs - the
+    hold does - pays for one query and not two.
+    """
+    return ci_state(owner, name, sha)[0]
 
 
 def _exit_at_eof(descriptor):

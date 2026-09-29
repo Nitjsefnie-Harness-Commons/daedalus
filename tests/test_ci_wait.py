@@ -12,6 +12,7 @@ import _util  # noqa: E402
 from _ci_wait_fixtures import (  # noqa: E402
     _ci_wait_run as _run,
     _ci_wait_clock as _Clock,
+    _ci_wait_state as _state,
     _frozen_ci_wait_clock as _frozen_wait_clock,
     _ci_wait_verdict)
 
@@ -21,6 +22,30 @@ SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'ci_wait.py'
 
 def _ci_wait():
     return _util.load(SOURCE, 'ci_wait_contract')
+
+
+def _filter_verdict(runs):
+    """`verdict` with the published check switched off.
+
+    Every case in this suite is about the RUN filter, so each says so
+    here rather than each call carrying the keyword. A head whose
+    publisher has written no verdict is a different state and
+    `ci_wait` now reads it (issue 1360);
+    `tests/test_ci_wait_published.py` is where it is under test.
+    """
+    return _ci_wait_verdict(runs, required_checks=frozenset())
+
+
+def _filter_wait(mod, repo, sha, interval, bound, out,
+                  grace=300):
+    """`wait` with the published check switched off, as above.
+
+    The parameters are named, never `*args`/`**kwargs`: a call that
+    unpacks a mapping is refused by `tests/test_repo_layout.py`, which
+    cannot tell a hidden `timeout=` from any other keyword.
+    """
+    return mod.wait(repo, sha, interval, bound, out, grace=grace,
+                    required_checks=frozenset())
 
 
 def test_superseded_cancelled_run_is_ignored(tmp):
@@ -33,13 +58,13 @@ def test_superseded_cancelled_run_is_ignored(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
-    assert _ci_wait_verdict(list(reversed(runs))) == ('acceptable', [])
+    assert _filter_verdict(runs) == ('acceptable', [])
+    assert _filter_verdict(list(reversed(runs))) == ('acceptable', [])
 
 
 def test_a_deliberate_cancel_is_still_unacceptable(tmp):
     del tmp
-    state, offenders = _ci_wait_verdict(
+    state, offenders = _filter_verdict(
         [_run(1, 'cancelled', '2026-09-07T10:00:00Z')])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
@@ -51,7 +76,7 @@ def test_a_newer_run_of_another_workflow_does_not_supersede(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', workflow=11),
         _run(2, 'success', '2026-09-07T10:05:00Z', workflow=22),
     ]
-    state, offenders = _ci_wait_verdict(runs)
+    state, offenders = _filter_verdict(runs)
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 
@@ -62,7 +87,7 @@ def test_the_ignored_run_cannot_complete_the_wait_either(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, None, '2026-09-07T10:05:00Z', status='in_progress'),
     ]
-    assert _ci_wait_verdict(runs) == ('waiting', [])
+    assert _filter_verdict(runs) == ('waiting', [])
 
 
 def test_a_superseded_open_run_does_not_hold_the_verdict(tmp):
@@ -77,7 +102,7 @@ def test_a_superseded_open_run_does_not_hold_the_verdict(tmp):
              name='tests'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _filter_verdict(runs) == ('acceptable', [])
 
 
 def test_the_newest_run_decides_even_when_it_is_still_queued(tmp):
@@ -91,7 +116,7 @@ def test_the_newest_run_decides_even_when_it_is_still_queued(tmp):
         _run(2, None, '2026-09-07T10:05:00Z', status='in_progress',
              name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('waiting', [])
+    assert _filter_verdict(runs) == ('waiting', [])
 
 
 def test_a_superseded_failure_beside_a_newer_green_run_is_acceptable(tmp):
@@ -106,8 +131,8 @@ def test_a_superseded_failure_beside_a_newer_green_run_is_acceptable(tmp):
         _run(1, 'failure', '2026-09-07T10:00:00Z', name='tests'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
-    assert _ci_wait_verdict(list(reversed(runs))) == ('acceptable', [])
+    assert _filter_verdict(runs) == ('acceptable', [])
+    assert _filter_verdict(list(reversed(runs))) == ('acceptable', [])
 
 
 def test_a_failure_nobody_re_ran_is_still_unacceptable(tmp):
@@ -118,7 +143,7 @@ def test_a_failure_nobody_re_ran_is_still_unacceptable(tmp):
     run, which `runs[:1]` keeps - so what is pinned here is the single-run
     verdict, and the filters it rules out are the ones that return nothing."""
     del tmp
-    state, offenders = _ci_wait_verdict(
+    state, offenders = _filter_verdict(
         [_run(1, 'failure', '2026-09-07T10:00:00Z', name='tests')])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
@@ -127,12 +152,12 @@ def test_a_failure_nobody_re_ran_is_still_unacceptable(tmp):
 def test_equal_timestamps_tie_break_by_numeric_id(tmp):
     del tmp
     stamp = '2026-09-07T10:00:00Z'
-    state, offenders = _ci_wait_verdict([
+    state, offenders = _filter_verdict([
         _run(9, 'cancelled', stamp),
         _run(10, 'success', stamp, name='tests'),
     ])
     assert state == 'acceptable'
-    state, offenders = _ci_wait_verdict([
+    state, offenders = _filter_verdict([
         _run(10, 'cancelled', stamp),
         _run(9, 'success', stamp, name='tests'),
     ])
@@ -142,13 +167,13 @@ def test_equal_timestamps_tie_break_by_numeric_id(tmp):
 
 def test_created_at_stands_in_for_a_missing_run_started_at(tmp):
     del tmp
-    state, offenders = _ci_wait_verdict([
+    state, offenders = _filter_verdict([
         _run(1, 'cancelled', None, created_at='2026-09-07T10:00:00Z'),
         _run(2, 'success', None, name='tests',
              created_at='2026-09-07T10:05:00Z'),
     ])
     assert state == 'acceptable'
-    state, offenders = _ci_wait_verdict([
+    state, offenders = _filter_verdict([
         _run(1, 'cancelled', None, created_at='2026-09-07T10:05:00Z'),
         _run(2, 'success', None, name='tests',
              created_at='2026-09-07T10:00:00Z'),
@@ -178,7 +203,7 @@ def test_a_start_time_beats_a_creation_time_that_disagrees(tmp):
         _run(2, 'success', '2026-09-07T09:00:00Z',
              created_at='2026-09-07T10:00:00Z'),
     ]
-    state, offenders = _ci_wait_verdict(runs)
+    state, offenders = _filter_verdict(runs)
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 
@@ -189,7 +214,7 @@ def test_fractional_second_stamps_are_ordered_by_instant_not_text(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, 'success', '2026-09-07T10:00:00.500Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _filter_verdict(runs) == ('acceptable', [])
 
 
 def test_an_unidentifiable_run_is_never_superseded(tmp):
@@ -208,18 +233,18 @@ def test_an_unidentifiable_run_is_never_superseded(tmp):
              workflow=None),
         _run(3, 'success', '2026-09-07T10:10:00Z', name='tests'),
     ]
-    state, offenders = _ci_wait_verdict(runs)
+    state, offenders = _filter_verdict(runs)
     assert state == 'unacceptable', state
     assert [run['id'] for run in offenders] == [1], offenders
     # The guard is the GROUP, not the verdict: a run that does name its
     # workflow still supersedes within it, by id and by path alike.
-    assert _ci_wait_verdict([
+    assert _filter_verdict([
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='tests',
              workflow=11),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
              workflow=11),
     ]) == ('acceptable', [])
-    assert _ci_wait_verdict([
+    assert _filter_verdict([
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='tests',
              path='.github/workflows/ci.yml'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
@@ -235,14 +260,14 @@ def test_the_workflow_path_groups_when_the_id_is_absent(tmp):
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
              path='.github/workflows/ci.yml'),
     ]
-    assert _ci_wait_verdict(same) == ('acceptable', [])
+    assert _filter_verdict(same) == ('acceptable', [])
     other = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z',
              path='.github/workflows/ci.yml'),
         _run(2, 'success', '2026-09-07T10:05:00Z',
              path='.github/workflows/tests.yml'),
     ]
-    state, offenders = _ci_wait_verdict(other)
+    state, offenders = _filter_verdict(other)
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 
@@ -254,15 +279,15 @@ def test_only_the_newest_cancelled_run_of_a_workflow_survives(tmp):
         _run(2, 'cancelled', '2026-09-07T10:05:00Z'),
         _run(3, 'success', '2026-09-07T10:10:00Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
-    state, offenders = _ci_wait_verdict(runs[:2])
+    assert _filter_verdict(runs) == ('acceptable', [])
+    state, offenders = _filter_verdict(runs[:2])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [2]
 
 
 def test_the_zero_and_green_contracts_are_unchanged(tmp):
     del tmp
-    assert _ci_wait_verdict([]) == ('waiting', [])
+    assert _filter_verdict([]) == ('waiting', [])
     # One workflow per run, as the producer emits it: three runs sharing a
     # workflow id are three runs of ONE workflow, and the filter keeps only
     # the newest of them - so the three acceptable conclusions cannot be
@@ -274,7 +299,7 @@ def test_the_zero_and_green_contracts_are_unchanged(tmp):
              workflow=22),
         _run(3, 'skipped', '2026-09-07T10:10:00Z', name='CodeQL', workflow=33),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _filter_verdict(runs) == ('acceptable', [])
 
 
 def test_the_acceptable_line_names_the_failure_it_discarded(tmp):
@@ -287,9 +312,9 @@ def test_the_acceptable_line_names_the_failure_it_discarded(tmp):
         _run(1, 'failure', '2026-09-07T10:00:00Z', name='tests'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    setattr(mod, 'runs_on', lambda repo, sha: runs)
+    setattr(mod, 'ci_on', lambda repo, sha: _state(runs))
     out = io.StringIO()
-    code = mod.wait('o/r', 'a' * 40, 60, 60, out)
+    code = _filter_wait(mod, 'o/r', 'a' * 40, 60, 60, out)
     text = out.getvalue()
     assert code == 0, text
     assert 'all 1 run(s) on aaaaaaaaaaaa acceptable' in text, text
@@ -319,9 +344,9 @@ def test_the_discarded_count_agrees_with_the_runs_it_names(tmp):
     named = ''.join(
         f'  {run["name"]} (run {run["id"]}): {run["conclusion"]} '
         f'{run["html_url"]}\n' for run in discarded)
-    setattr(mod, 'runs_on', lambda repo, sha: runs)
+    setattr(mod, 'ci_on', lambda repo, sha: _state(runs))
     out = io.StringIO()
-    code = mod.wait('o/r', 'a' * 40, 60, 60, out)
+    code = _filter_wait(mod, 'o/r', 'a' * 40, 60, 60, out)
     text = out.getvalue()
     assert code == 0, text
     counted = (f'all {len(runs) - len(discarded)} run(s) on aaaaaaaaaaaa '
@@ -342,7 +367,7 @@ def test_the_grouping_is_by_workflow_and_not_by_run_name(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='gate freshness'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _filter_verdict(runs) == ('acceptable', [])
 
 
 def test_the_success_line_counts_judged_runs_only(tmp):
@@ -358,9 +383,9 @@ def test_the_success_line_counts_judged_runs_only(tmp):
     # Direct on purpose, unlike the setattr elsewhere: these two stubs
     # (here and in the next test) are the file's recorded type errors,
     # and setattr would zero that count and graduate the baseline entry.
-    mod.runs_on = lambda repo, sha: runs
+    mod.ci_on = lambda repo, sha: _state(runs)
     out = io.StringIO()
-    code = mod.wait('o/r', 'a' * 40, 60, 60, out)
+    code = _filter_wait(mod, 'o/r', 'a' * 40, 60, 60, out)
     assert code == 0
     assert out.getvalue() == (
         'aaaaaaaaaaaa 2 run(s)\n'
@@ -376,10 +401,10 @@ def test_the_success_line_counts_judged_runs_only(tmp):
 def test_the_success_line_is_unchanged_without_ignored_runs(tmp):
     del tmp
     mod = _ci_wait()
-    mod.runs_on = lambda repo, sha: [
-        _run(1, 'success', '2026-09-07T10:00:00Z', name='tests')]
+    mod.ci_on = lambda repo, sha: _state(
+        [_run(1, 'success', '2026-09-07T10:00:00Z', name='tests')])
     out = io.StringIO()
-    code = mod.wait('o/r', 'b' * 40, 60, 60, out)
+    code = _filter_wait(mod, 'o/r', 'b' * 40, 60, 60, out)
     assert code == 0
     assert out.getvalue() == (
         'bbbbbbbbbbbb 1 run(s)\n'
@@ -394,13 +419,13 @@ def test_a_timeout_names_the_runs_still_open(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, sha: [
+    setattr(mod, 'ci_on', lambda repo, sha: _state([
         _run(1, 'success', '2026-09-07T10:00:00Z'),
-        _run(2, None, '2026-09-07T10:05:00Z', status='in_progress')])
+        _run(2, None, '2026-09-07T10:05:00Z', status='in_progress')]))
     out = io.StringIO()
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'c' * 40, 30, 30, out)
+        code = _filter_wait(mod, 'o/r', 'c' * 40, 30, 30, out)
     text = out.getvalue()
     assert code == 2, text
     assert clock.now == 1030.0, clock.now
@@ -413,11 +438,11 @@ def test_a_timeout_before_any_run_says_so(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    setattr(mod, 'runs_on', lambda repo, sha: [])
+    setattr(mod, 'ci_on', lambda repo, sha: _state([]))
     out = io.StringIO()
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'd' * 40, 30, 30, out)
+        code = _filter_wait(mod, 'o/r', 'd' * 40, 30, 30, out)
     text = out.getvalue()
     assert code == 2, text
     assert 'rate limited' not in text, text
@@ -438,12 +463,12 @@ def test_a_pause_that_ends_the_wait_still_reports_the_limit(tmp):
         if len(polls) == 1:
             raise mod.gh_client.RateLimited(
                 'slow down', resume_at=clock.now + 3600)
-        return []
+        return _state([])
 
-    setattr(mod, 'runs_on', _refuse_first)
+    setattr(mod, 'ci_on', _refuse_first)
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'e' * 40, 30, 30, out)
+        code = _filter_wait(mod, 'o/r', 'e' * 40, 30, 30, out)
     assert code == 2, out.getvalue()
     assert polls == [1000.0], polls
     assert clock.now == 1030.0, clock.now
@@ -465,12 +490,13 @@ def test_a_refusal_that_ended_early_still_answers_the_wait(tmp):
         if len(polls) == 1:
             raise mod.gh_client.RateLimited(
                 'slow down', resume_at=clock.now + 5)
-        return [_run(1, 'success', '2026-09-07T10:00:00Z', name='tests')]
+        return _state(
+            [_run(1, 'success', '2026-09-07T10:00:00Z', name='tests')])
 
-    setattr(mod, 'runs_on', _refuse_first)
+    setattr(mod, 'ci_on', _refuse_first)
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'f' * 40, 30, 60, out)
+        code = _filter_wait(mod, 'o/r', 'f' * 40, 30, 60, out)
     assert code == 0, out.getvalue()
     assert polls == [1000.0, 1005.0], polls
     assert 'acceptable' in out.getvalue(), out.getvalue()
@@ -493,13 +519,14 @@ def test_a_pause_that_ended_early_does_not_label_the_next_timeout(tmp):
         if len(polls) == 1:
             raise mod.gh_client.RateLimited(
                 'slow down', resume_at=clock.now + 5)
-        return [_run(1, None, '2026-09-07T10:00:00Z', status='in_progress')]
+        return _state(
+            [_run(1, None, '2026-09-07T10:00:00Z', status='in_progress')])
 
-    setattr(mod, 'runs_on', _refuse_first)
+    setattr(mod, 'ci_on', _refuse_first)
     out = io.StringIO()
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'a' * 40, 10, 30, out)
+        code = _filter_wait(mod, 'o/r', 'a' * 40, 10, 30, out)
     text = out.getvalue()
     assert code == 2, text
     assert polls == [1000.0, 1005.0, 1015.0, 1025.0], polls
@@ -547,14 +574,15 @@ def test_a_poll_that_overruns_the_bound_reports_the_runs(tmp):
 
     def _overrunning(repo, sha):
         clock.now += 100
-        return [_run(1, None, '2026-09-07T10:00:00Z', status='in_progress')]
+        return _state(
+            [_run(1, None, '2026-09-07T10:00:00Z', status='in_progress')])
 
-    setattr(mod, 'runs_on', _overrunning)
+    setattr(mod, 'ci_on', _overrunning)
     out = io.StringIO()
     err = io.StringIO()
     try:
         with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-            code = mod.wait('o/r', 'a' * 40, 10, 30, out)
+            code = _filter_wait(mod, 'o/r', 'a' * 40, 10, 30, out)
     finally:
         setattr(mod.gh_client, 'Watcher', real_watcher)
     text = out.getvalue()
@@ -579,7 +607,7 @@ def test_a_bound_before_the_first_poll_reports_from_empty_runs(tmp):
     out = io.StringIO()
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'b' * 40, 5, 0, out)
+        code = _filter_wait(mod, 'o/r', 'b' * 40, 5, 0, out)
     text = out.getvalue()
     assert code == 2, text
     assert clock.now == 1000.0, clock.now
