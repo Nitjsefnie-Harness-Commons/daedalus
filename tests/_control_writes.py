@@ -26,6 +26,15 @@ from pathlib import Path
 
 from _control_calls import (ModuleNames, _SHARED_HELPER, call_judgement,
                             has_spread)
+from _control_paths import (SCOPES as _SCOPES, _CONTROL_OWNED_PATH,
+                            _UNKNOWN_PATH, _nested_scope_expressions,
+                            _owned_path_names, _path_kind,
+                            _scope_local_names, _scope_nodes,
+                            _seeded_parameters)
+from _imported_calls import (Context, SharedResolver, module_functions,
+                             module_scopes, reached_functions)
+
+
 def _bound_names(target):
     if isinstance(target, ast.Name):
         yield target.id
@@ -34,33 +43,6 @@ def _bound_names(target):
     elif isinstance(target, (ast.List, ast.Tuple)):
         for part in target.elts:
             yield from _bound_names(part)
-
-
-from _control_paths import (SCOPES as _SCOPES, _UNKNOWN_PATH,
-                            _nested_scope_expressions, _owned_path_names,
-                            _path_kind, _scope_local_names, _scope_nodes,
-                            _seeded_parameters)
-from _imported_calls import (Context, SharedResolver, module_functions,
-                             module_scopes, reached_functions)
-from _control_paths import _CONTROL_OWNED_PATH
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def _call_violation(node, judgement, problem, kind, target, owned, trusted,
