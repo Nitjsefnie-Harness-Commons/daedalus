@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Measure suites concurrently so coverage is not the workflow bottleneck."""
 import os
-import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed

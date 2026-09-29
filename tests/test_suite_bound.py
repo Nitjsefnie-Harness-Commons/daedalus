@@ -123,7 +123,7 @@ def _pid_alive(pid):
 
 
 def _settle_gone(pid, seconds):
-    """Wait out a kill's own settling, against a deadline rather than a margin."""
+    """Wait out a kill's own settling, on a deadline, not a margin."""
     deadline = time.monotonic() + seconds
     while _pid_alive(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
@@ -191,7 +191,7 @@ def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
 
 
 def test_a_timed_out_suites_own_child_does_not_survive_it(tmp):
-    """The direct child is not the tree; only the tree is what a wedge leaves."""
+    """The direct child is not the tree; the tree is what a wedge leaves."""
     if sys.platform == 'win32':
         _util.skip('the liveness probe is POSIX; see _pid_alive')
     recorded = Path(tmp) / 'tree' / 'tests' / 'grandchild.pid'
@@ -252,12 +252,15 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
     controls above ask that by running the launchers.
     """
     definitions, readers = [], []
-    for path in sorted((ROOT / 'scripts').rglob('*.py')) + [ROOT / 'run_tests.py']:
+    tracked = sorted((ROOT / 'scripts').rglob('*.py'))
+    for path in tracked + [ROOT / 'run_tests.py']:
         source = path.read_text(encoding='utf-8')
         relative = path.relative_to(ROOT).as_posix()
         for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
             targets = ([node.target] if isinstance(node, ast.AnnAssign)
-                       else getattr(node, 'targets', []))
+                       else node.targets)
             if not any(getattr(target, 'id', '') == 'DEFAULT_SUITE_TIMEOUT_S'
                        for target in targets):
                 continue
