@@ -298,9 +298,10 @@ def test_nonterminating_node_probe_is_harness_failure(tmp):
                     # block ends.
                     assert failure.deadline_s == probe_deadline, (
                         failure.deadline_s)
-                    assert 'the probe spoke before it wedged' in failure.stdout, (
-                        failure.stdout)
-                    assert isinstance(failure.stdout, str), type(failure.stdout)
+                    spoke = 'the probe spoke before it wedged'
+                    assert spoke in failure.stdout, failure.stdout
+                    assert isinstance(failure.stdout, str), (
+                        type(failure.stdout))
                     return
         except OuterBoundExpired as wedged:
             raise AssertionError(

@@ -294,8 +294,8 @@ def test_the_platform_rule_names_an_unguarded_read_and_spares_a_guarded_one(
         'def call():\n'
         '    if hasattr(os, "geteuid"):\n'
         '        arm()\n')
-    assert list(_posix_only_uses(unrelated_probe)) == [(3, 'signal.SIGALRM')], (
-        list(_posix_only_uses(unrelated_probe)))
+    unrelated = list(_posix_only_uses(unrelated_probe))
+    assert unrelated == [(3, 'signal.SIGALRM')], unrelated
     # And the same question, asked about the module the reach used, spares
     # it: that is `tests/test_plant_restore.py`'s own shape, and the file is
     # real and green in the suite.

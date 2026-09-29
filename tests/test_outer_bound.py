@@ -239,6 +239,11 @@ def test_the_receipt_reads_both_null_handles_and_only_one_is_a_dead_pid(tmp):
     del tmp
     from unittest import mock  # noqa: PLC0415
 
+    # `ERROR_INVALID_HANDLE` (6), Windows': the code a null handle
+    # carries when it is not one of the two above. Carried here
+    # because it is the probe's subject and nothing else reads it.
+    _ERROR_INVALID_HANDLE = 6
+
     import _processtree as tree  # noqa: PLC0415
 
     def kernel32_returning(handle):
@@ -246,7 +251,8 @@ def test_the_receipt_reads_both_null_handles_and_only_one_is_a_dead_pid(tmp):
         kernel32.OpenProcess.return_value = handle
         return kernel32
 
-    codes = [tree._ERROR_ACCESS_DENIED, tree._ERROR_INVALID_PARAMETER]
+    codes = [tree._ERROR_ACCESS_DENIED, tree._ERROR_INVALID_PARAMETER,
+             _ERROR_INVALID_HANDLE]
     reading = mock.patch.object(
         tree.ctypes, 'get_last_error', side_effect=codes, create=True)
     with reading:
@@ -254,11 +260,16 @@ def test_the_receipt_reads_both_null_handles_and_only_one_is_a_dead_pid(tmp):
             kernel32_returning(None), 4242)
         absent = tree._open_handle_says_live(
             kernel32_returning(None), 4243)
+        unclassified = tree._open_handle_says_live(
+            kernel32_returning(None), 4244)
     assert live_but_forbidden, (
         'a running process this one may not open read as gone, so a kill '
         'that never happened is reported as one')
     assert not absent, 'a pid that was never there read as live'
-    assert tree._open_handle_says_live(kernel32_returning(7), 4244), (
+    assert unclassified, (
+        'ERROR_INVALID_HANDLE null handle read as gone, so a code this '
+        'reading has never seen invents a kill')
+    assert tree._open_handle_says_live(kernel32_returning(7), 4245), (
         'an opened handle did not read as live')
 
 
@@ -341,18 +352,26 @@ STALLING_CONTROL_MODULES = (
 # neither waits.
 #
 # **This tuple is not the tree's full vocabulary, and the gap is named rather
-# than left for a reader to find.** This tree also spells a never-settling
-# child `new Promise(() => {})` (eighty sites, the commonest spelling of
-# all) and `setImmediate(function starve() {…})` (twenty). Neither is in the
-# tuple, so a control written that way is OUTSIDE the population and this
-# census would not ask it for a bound. Widening the tuple to cover them was
-# measured and refused: it names `test_gate_extensions.py`'s two hang
-# controls, which answer a never-settling promise INSIDE the harness and
-# launch no child at all, so the marker alone cannot tell a wedge from a
-# fixture. Distinguishing them needs a launch predicate, and the tree's own
-# (`tests/_node_launch_sweep.py`) reports no launch for two of the five
-# watched suites, because their children are launched by imported helpers.
-# So the limit stands until there is a predicate that works on all five.
+# than left for a reader to find.** Over the tracked `.py` tree this branch
+# also spells a never-settling child `new Promise(() => {})` at 28 sites and
+# `setImmediate(` at 21. Neither is in the tuple, so a control written that
+# way is OUTSIDE the population and this census would not ask it for a
+# bound.
+#
+# Widening the tuple to cover them was measured and refused, and the reason
+# is not the one first written here. It names
+# `tests/test_gate_extensions.py`'s two hang controls — which DO launch, both
+# through `_hang_probe` to `run_gate` — so "no child" was never the
+# distinction. What the marker cannot do is tell a WEDGE from a FIXTURE,
+# because the never-settling promise in those controls is answered INSIDE the
+# harness, and the two `new Promise` sites in that very file (`:76`, `:96`)
+# both RESOLVE: they are `Promise.race` sentinels, not stalls. Separating
+# them needs a launch predicate that says which child is being waited on, and
+# the tree's own (`tests/_node_launch_sweep.py`) reports no launch for two of
+# the five watched suites — `test_gate_extensions.py` and
+# `test_noderun_deadline.py` — because their children are launched by
+# imported helpers. So the limit stands until there is a predicate that
+# works on all five.
 STALL_SOURCES = ('setInterval(', 'setTimeout(')
 # How far the reach follows a stall source that is not in the control's own
 # text. Bounded because an unbounded walk over a cyclic tree is a hang, and
