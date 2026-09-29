@@ -100,8 +100,17 @@ def _hold():
     path = os.environ.get(GATE)
     if path is None:
         return
-    _recorded('entered', path)
+    # The entry goes INSIDE the wait, once, because that is what makes it
+    # mean anything: a reader counting entries is asserting that these
+    # calls are being held, and a record written one line above the loop
+    # says only that they arrived - so a hold skipped for exactly the
+    # watcher's own calls would satisfy it. Unconditional inside the loop
+    # would record once per poll and the count would not be a count.
+    entered = False
     while not os.path.exists(path):
+        if not entered:
+            _recorded('entered', path)
+            entered = True
         time.sleep(0.02)
     _recorded('release', path)
 
