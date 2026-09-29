@@ -89,8 +89,9 @@ def run_extension_hotfix_quota(plan):
         # never exits, and this is the branch that names it: the launcher's
         # detector killed the child, the cleanup reaped it, and the evidence
         # is the worker's own output plus what the cleanup did. Without this
-        # the suite ceiling would end the run instead — and it SIGTERMs the
-        # suite, leaving the child alive and reparented, naming no test.
+        # the launcher's ceiling would end the run instead — and it ends the
+        # suite's whole process tree, naming the suite and nothing about
+        # the worker in it.
         raise AssertionError(
             'the hotfix-quota scenario never finished: the worker stopped '
             'answering a command it had been given') from failure
