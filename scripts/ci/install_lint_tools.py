@@ -97,7 +97,8 @@ def _verify(payload, key):
 
 def _extract(payload, destination):
     """Unpack the one executable out of the verified archive."""
-    binary = 'actionlint.exe' if platform.system() == 'Windows' else 'actionlint'
+    windows = platform.system() == 'Windows'
+    binary = 'actionlint.exe' if windows else 'actionlint'
     target = destination / binary
     if binary.endswith('.zip'):
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
