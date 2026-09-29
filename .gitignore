@@ -29,6 +29,8 @@
 
 # ─── root ───
 !/.gitignore
+!/.gitignore
+!/.gitignore
 !/.gitleaks.toml
 !/.pylintrc
 !/AGENTS.md
@@ -288,6 +290,8 @@
 !/tests/_case_fold.py
 !/tests/_cdpharness.py
 !/tests/_child_boot_env.py
+!/tests/_ci_imports.py
+!/tests/_ci_publisher.py
 !/tests/_ci_time_instrument.py
 !/tests/_ci_wait_fixtures.py
 !/tests/_classifier_calls.py
