@@ -7,8 +7,16 @@ coverage==7.16.1
 PyYAML==6.0.3
 # The shellcheck binary, as a package, so a requirements file can supply it:
 # actionlint shells out to shellcheck for every `run:` block and reports
-# nothing at all when it is missing, and neither upstream release stream nor
-# any Windows package manager ships a shellcheck for this matrix. Pinned for
-# the reason the two above are — a shellcheck release must not turn CI red on
-# an unchanged commit. scripts/ci/install_lint_tools.py names it in TOOLS.
+# nothing at all when it is missing. Pinned for the reason the two above
+# are — a shellcheck release must not turn CI red on an unchanged commit.
+#
+# This line is the ONLY place the shellcheck version is written down.
+# scripts/ci/install_lint_tools.py READS the pin and installs that version
+# into the tool directory it puts on PATH, so every job that reaches the
+# suites lints with the version named here — including `timed`, which runs
+# its interpreters by absolute path and therefore cannot see a console
+# script installed in a virtualenv, and which used to resolve a shellcheck
+# from its runner image at a version no pin named. A job that installs this
+# file also has the binary; on those the installer's copy is first on PATH
+# and is the same version, so the two routes cannot disagree.
 shellcheck-py==0.11.0.1
