@@ -702,6 +702,7 @@
     "_plain_getattr": {"python": ["tests/_pyroute_live.py"]},
     "_plain_read": {"python": ["tests/_cmdqueue_faults.py"]},
     "_planted": {"python": ["tests/_drain_scan.py"]},
+    "_planted_finding": {"python": ["tests/_actionlint.py"]},
     "_planted_workflow_tree": {"python": ["tests/_actionlint.py"]},
     "_poll": {"python": ["tests/_mcp_tool_commands.py"]},
     "_poll_budget": {"python": ["tests/_cmdqueue_faults.py"]},
