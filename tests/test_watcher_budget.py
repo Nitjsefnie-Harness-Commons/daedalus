@@ -37,6 +37,8 @@ from _watcher_fixtures import refusal_response  # noqa: E402
 from _watcher_fixtures import review  # noqa: E402
 from _watcher_fixtures import runs_page  # noqa: E402
 from _watcher_fixtures import suite  # noqa: E402
+from _watcher_fixtures import throttled_query  # noqa: E402
+from _watcher_fixtures import THROTTLED  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -427,6 +429,49 @@ def test_a_refused_wait_pauses_and_still_answers(tmp):
     assert 'acceptable' in done.stdout, done.stdout
     assert len(fake.calls()) == 2, [call['request'][:60]
                                     for call in fake.calls()]
+
+
+def test_a_wait_pauses_on_the_live_throttled_query_and_still_answers(tmp):
+    """The wait's own contract on the refusal GitHub really sends.
+
+    Every carrier is present here - the spent headers, the `RATE_LIMIT`
+    entry with its `graphql_rate_limit` code, and the complaint `gh`
+    wrote - because this control is about the wait rather than about any
+    one carrier, and tests/test_gh_client.py drives each of them alone.
+    Before the fix this exited 3 within a second of starting, which is
+    what two pull-request waits on 2026-09-29 saw.
+    """
+    reset_at = datetime.fromtimestamp(time.time() + 3, timezone.utc)
+    refusal = throttled_query(
+        reset_at=reset_at.strftime(STAMP), exit=1,
+        stderr=f'gh: {THROTTLED}\n')
+    answers = dict(idle_answers())
+    answers['checkSuites'] = [refusal, runs_page([suite(1, name='tests')])]
+    fake = _fake_gh.FakeGh(tmp, answers)
+    done = _ci_wait(fake)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert len([line for line in done.stderr.splitlines()
+                if 'rate limit' in line]) == 1, done.stderr
+    assert 'acceptable' in done.stdout, done.stdout
+    assert len(fake.calls()) == 2, [call['request'][:60]
+                                    for call in fake.calls()]
+
+
+def test_a_persistent_live_refusal_exits_two_and_never_three(tmp):
+    """The other half of the exit contract, on the same shape: a limit
+    that outlives the bound ends the wait at 2, and the line says the
+    bound fell inside a pause. Exit 3 here would say the query FAILED,
+    which is the outcome the whole of this branch exists to remove.
+    """
+    far = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime(STAMP)
+    answers = dict(idle_answers())
+    answers['checkSuites'] = throttled_query(reset_at=far, exit=1,
+                                             stderr=f'gh: {THROTTLED}\n')
+    fake = _fake_gh.FakeGh(tmp, answers)
+    done = _ci_wait(fake, bound=5, limit=40)
+    assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
+    assert 'still rate limited' in done.stdout, done.stdout
+    assert len(fake.calls()) <= 2, len(fake.calls())
 
 
 def test_a_persistent_refusal_exits_two_at_its_timeout(tmp):

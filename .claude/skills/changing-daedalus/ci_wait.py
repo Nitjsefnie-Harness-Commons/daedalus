@@ -69,10 +69,14 @@ about a commit nobody asked about.
 
 A rate-limit refusal is the one exception to the exit-3 rule, and
 deliberate: a refusal is a known wait, not a failed query, so the wait says
-once where it is waiting, sleeps until the reset the API reported (bounded
-by its own --timeout, which then ends the wait rather than buying another
-request) and polls again. Every other failure exits 3 at once, which keeps a
-403 that is really a permission refusal loud.
+once where it is waiting, sleeps until the reset the API reported - or a
+minute when it reported none - bounded by its own --timeout, which then
+ends the wait rather than buying another request, and polls again. Whether
+an answer IS a refusal is `gh_rate_limit`'s question and not this tool's:
+it is answered by the evidence the answer carries, whatever the status and
+whatever `gh`'s exit code says, because a throttled query answers 200 and
+exits 1. Every other failure exits 3 at once, which keeps a 403 that is
+really a permission refusal loud.
 
 A workflow's verdict is decided by its NEWEST run on the SHA - the run
 GitHub's required-check status reports for it. Every older run of that
