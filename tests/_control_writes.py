@@ -26,6 +26,11 @@ from pathlib import Path
 
 from _control_calls import (ModuleNames, _SHARED_HELPER, call_judgement,
                             has_spread)
+def _bound_names(target):
+    """The names a subscript or attribute target is reached through."""
+    return [target.id] if isinstance(target, ast.Name) else []
+
+
 from _control_paths import (SCOPES as _SCOPES, _UNKNOWN_PATH,
                             _nested_scope_expressions, _owned_path_names,
                             _path_kind, _scope_local_names, _scope_nodes,
@@ -159,8 +164,7 @@ class _ModuleJudgement:
         """
         reached = ([tree] if reach is None else
                    [node for node in tree.body
-                    if isinstance(node, _SCOPES)
-                    and getattr(node, 'name', None) in reach])
+                    if getattr(node, 'name', None) in reach])
         roots = [node for node in reached if id(node) not in helper_nodes]
         top_level = helper_nodes | {id(node) for node in roots}
         scopes = [node for root in reached

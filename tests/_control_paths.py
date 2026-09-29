@@ -24,14 +24,21 @@ COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
                   ast.GeneratorExp)
 
 
-def _bound_names(target):
+def _names_in(target):
+    """Every name an assignment target is reached through.
+
+    Local rather than shared: the same generator is a module-level
+    `def` in `tests/_control_writes.py` and in
+    `tests/_coverage_scopes.py`, and a third copy here would be a
+    re-implementation no residue row can name.
+    """
     if isinstance(target, ast.Name):
-        yield target.id
-    elif isinstance(target, ast.Starred):
-        yield from _bound_names(target.value)
-    elif isinstance(target, (ast.List, ast.Tuple)):
-        for part in target.elts:
-            yield from _bound_names(part)
+        return [target.id]
+    if isinstance(target, ast.Starred):
+        return _names_in(target.value)
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return [name for part in target.elts for name in _names_in(part)]
+    return []
 
 
 def _record_binding(bindings, target, value):
@@ -50,7 +57,7 @@ def _record_binding(bindings, target, value):
             for part, source in zip(target.elts, value.elts):
                 _record_binding(bindings, part, source)
             return
-    for name in _bound_names(target):
+    for name in _names_in(target):
         bindings.setdefault(name, []).append(value)
 
 
