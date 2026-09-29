@@ -9,17 +9,16 @@ instead of the empty string `-f` would send, and `-i` asks for the response
 headers, which is where the rate-limit reset lives.
 
 Whether an answer is a rate-limit refusal is `gh_rate_limit`'s question,
-not this module's: an answer reports exhaustion when it carries rate-limit
-EVIDENCE, whatever the status and whatever `gh`'s exit code says, because a
-throttled query answers 200 and exits 1. That module is the one reader, and
-it reads every carrier the evidence travels on. An answer with no evidence
-is an ordinary failure and is never a pause - a permission refusal must not
-be answered by sleeping. `Watcher` is the long-running half: on a refusal it
+not this module's: an answer reports exhaustion when it did NOT DELIVER what
+was asked for and carries rate-limit EVIDENCE, whatever the status and
+whatever `gh`'s exit code says, because a throttled query answers 200 and
+exits 1. That module is the one reader, and it reads every carrier the
+evidence travels on. An answer with no evidence is an ordinary failure and
+is never a pause - a permission refusal must not be answered by sleeping. `Watcher` is the long-running half: on a refusal it
 says once where it is waiting, sleeps until the reset the API reported -
 bounded so a hostile or absent header cannot hang or hot-loop a watcher - and
-resumes. The
-parent-death guarantee is the pipe's, below, and a thread rather than the
-poll loop's business.
+resumes. The parent-death guarantee is the pipe's, below, and a thread
+rather than the poll loop's business.
 
 `paginate` is the GraphQL spelling of `--paginate`: it loops while any named
 connection reports another page and feeds each `endCursor` back as its own
@@ -44,6 +43,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gh_rate_limit import RateLimited  # noqa: E402
 from gh_rate_limit import bare_complaint  # noqa: E402
+from gh_rate_limit import delivered  # noqa: E402
 from gh_rate_limit import exhausted  # noqa: E402
 from gh_rate_limit import refusal_text  # noqa: E402
 
@@ -185,7 +185,9 @@ def graphql(query, variables=None):
         payload, unparseable = None, exc
     else:
         unparseable = None
-    refused, resume = exhausted(status, headers, body, complained, payload)
+    ok = delivered(code, answered, payload)
+    refused, resume = exhausted(status, headers, body, complained, payload,
+                                ok)
     if refused:
         raise RateLimited(refusal_text(status, body, complained), resume)
     if code != 0 or status >= 400:
