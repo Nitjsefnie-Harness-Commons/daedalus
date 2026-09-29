@@ -75,15 +75,37 @@ The population is `js_coverage.tracked_sources` rather than a second copy of
 its rule, so this suite cannot drift from the definition it checks against:
 if the report's meaning of "shipped JavaScript" moves, both move together.
 
-What the attribution check reads is the CLAUSE, and what it demands of it
-is a referent, not a phrase: the clause must name a figure, and the figure it
-names must not be the code-line count. Naming the report is not enough, since
-a clause may name it while attributing nothing, and a clause that credits the
-count attributes the one figure here the tree proves. That is a referent
-test with a stated vocabulary, so it is written down here: a figure is named
-by a digit run or by the word `figure`, and the count is named by a digit run
-equal to it or by `count` / `code line`. A correct rewording that reaches the
-run-only figure by some other noun is outside that vocabulary and reds.
+What the attribution check reads is the claim SENTENCE with the count phrase
+cut out of it, and what it demands of what is left is a referent, not a
+phrase: it must name the report, it must name a figure, and it must not name
+the code-line count. Naming the report is not enough, since a sentence may name
+it while attributing nothing, and a sentence that credits the count attributes
+the one figure here the tree proves.
+
+The cut is by SPAN, not at clause boundaries, and that is the load-bearing
+choice. The count and the credit are two things one sentence says, and no
+clause boundary sits between them: `at 0 of 51 code lines -- the coverage
+step summary, which the run prints, records the leading figure` is ONE
+attribution whose subject is an appositive spanning three comma-delimited
+clauses. Reading clause by clause took the first clause naming the report and
+refused that rewording for a figure stated one clause away, which is the shape
+the shipped paragraph itself uses.
+
+The count is still looked for in the clauses that NAME the report, and that
+asymmetry is the point. A misattribution is stated in those words; a credit
+need not be. So `at 0 of 51 code lines, and the count is the tree's, which the
+coverage step summary does not report` is admitted, as it was, because the
+count it names is the sentence's own subject matter and not something handed
+to the run.
+
+That is a referent test with a stated vocabulary, so it is written down here: a
+figure is named by a digit run or by the word `figure`, and the count is named
+by `count` / `code line`. A digit run equal to the count is NOT part of that
+vocabulary: the credit check reads the noun, so a rewording that credits the
+run with the count by its VALUE is caught by the figure scan instead, which is
+the control that judges figures by their position. A correct rewording that
+reaches the run-only figure by some other noun is outside the vocabulary and
+reds.
 """
 import re
 import sys
@@ -100,8 +122,12 @@ from js_lines import code_lines  # noqa: E402
 CONTRIBUTING = ROOT / 'CONTRIBUTING.md'
 UNREACHED = 'extension/options.js'
 # Every token boundary takes whitespace, not one space: the paragraph is
-# hand-wrapped, and a rewrap of a correct figure is not a change to it.
-COUNT_PHRASE = r'at\s+0\s+of\s+(\d+)\s+code\s+lines'
+# hand-wrapped, and a rewrap of a correct figure is not a change to it. Case is
+# not part of the phrase either, for the reason the reach family below states:
+# an editor who moves the phrase to the front of a sentence capitalises it, and
+# that rewrap is not a change to the claim. Compiled rather than spelled twice
+# over, so every reader of the paragraph takes that case rule with it.
+COUNT_PHRASE = re.compile(r'at\s+0\s+of\s+(\d+)\s+code\s+lines', re.IGNORECASE)
 
 
 def _prose():
@@ -129,7 +155,7 @@ def test_the_unreached_module_line_count_is_the_trees(tmp):
     line: a hand-copied count in the guard's own documentation drifts
     exactly as the one in the prose did."""
     del tmp
-    said = re.search(COUNT_PHRASE, _paragraph())
+    said = COUNT_PHRASE.search(_paragraph())
     assert said, 'the paragraph no longer states the unreached module count'
     source = (ROOT / UNREACHED).read_text(encoding='utf-8')
     real = len(code_lines(source, UNREACHED))
@@ -182,12 +208,14 @@ RUN_ATTRIBUTION = re.compile(r'coverage\s+step\s+summary')
 SENTENCE_END = re.compile(r'(?<=[.!?])\s+')
 # A clause ends where the paragraph already ends one. Newline is NOT a
 # boundary: the text is hand-wrapped, and a clause split across a line break
-# is one clause.
+# is one clause. One of the two attribution checks reads on this and the
+# other does not, because a misattribution is STATED in the words that name
+# the report, while a credit may sit in a clause that does not.
 CLAUSE_END = re.compile(r'[;:,—–]')
-# The attribution is a relation, so the clause is read for what it credits.
-# Naming the report is not crediting anything to it, and crediting the count
-# is misattributing the one figure here the tree proves. The vocabulary both
-# tests use is in the module docstring.
+# The attribution is a relation, so what the claim says is read for what it
+# credits. Naming the report is not crediting anything to it, and crediting
+# the count is misattributing the one figure here the tree proves. The
+# vocabulary both tests use is in the module docstring.
 FIGURE = re.compile(r'\bfigure\b|\d+')
 COUNT_NAME = re.compile(r'\bcode[ -]lines?\b|\bcount\b', re.IGNORECASE)
 
@@ -196,17 +224,57 @@ def _sentences(text):
     return SENTENCE_END.split(text)
 
 
-def _attribution_clause(sentence):
-    """The one clause of a sentence that names the run's report, or None.
+def _credit(sentence):
+    """What a claim says about the report, with the count taken out of it.
 
-    A clause and not the sentence, because a sentence may state the count and
-    then credit a figure, and reading the sentence would put the count inside
-    the credit.
+    A SPAN and not a clause. The count and the credit are two things one
+    sentence says, and no clause boundary sits between them: `at 0 of 51
+    code lines -- the coverage step summary, which the run prints, records
+    the leading figure` is ONE attribution whose subject is an appositive
+    spanning three comma-delimited clauses. So the count phrase is cut out
+    where it stands and the rest is read whole, which keeps the count out of
+    the credit without cutting the credit short. Splitting on clause
+    boundaries instead took the first clause naming the report and refused
+    that rewording for a figure stated one clause away.
     """
-    for clause in CLAUSE_END.split(sentence):
-        if RUN_ATTRIBUTION.search(clause):
-            return clause
-    return None
+    said = COUNT_PHRASE.search(sentence)
+    if said is None:
+        return sentence
+    return sentence[:said.start()] + sentence[said.end():]
+
+
+def _reported(sentence):
+    """The clauses of a sentence that name the run's report.
+
+    Where a MISATTRIBUTION is looked for, and deliberately narrower than
+    `_credit`: a sentence may say the count is the tree's and credit the run
+    with a different figure, and that is correct prose, so only the words
+    that name the report are read for the count. A count named anywhere else
+    in the claim is that sentence's own subject matter.
+    """
+    return ' '.join(clause for clause in CLAUSE_END.split(sentence)
+                    if RUN_ATTRIBUTION.search(clause))
+
+
+def _reach_claims(sentences):
+    """Every reach claim this paragraph makes about its own module, paired
+    with where it sits so the attribution can look at the sentence after it.
+
+    The count phrase's sentence and the one after it -- the same pair the
+    attribution already spans, because the count and the claim are one
+    assertion and a rendering that splits it puts the second half next. A
+    reach predicate anywhere else in a paragraph that is mostly coverage
+    prose is a statement about modules in general, and holding it to this
+    paragraph's module refused correct sentences that were never about it.
+    """
+    pairs = []
+    for index, sentence in enumerate(sentences):
+        if not COUNT_PHRASE.search(sentence):
+            continue
+        for offset, claim in enumerate(sentences[index:index + 2]):
+            if REACH_CLAIM.search(claim):
+                pairs.append((index + offset, claim))
+    return pairs
 
 
 def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
@@ -221,29 +289,34 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
 
     Every assertion is over a SENTENCE, which is where a claim lives, so the
     oracle half comes first: with no claim to judge, the checks below pass
-    over an empty paragraph, and that is the pass that reads as a green.
+    over an empty paragraph, and that is the pass that reads as a green. The
+    sentences that carry one are the count phrase's and the one after it,
+    which is the pair the attribution already spans; a predicate match
+    anywhere else in the paragraph is prose about coverage in general and is
+    not this paragraph's claim to judge.
 
     Each claim then owes three things. It names the module, because a
     paragraph can name it somewhere else and claim a different one here. It
     carries the attribution, in its own sentence or the one immediately after
     it, so an ordinary two-sentence rendering is not punished for splitting
-    a claim. And the clause carrying it credits a figure rather than the
-    report, and that figure is not the count.
+    a claim. And what it says with the count phrase cut out names the report
+    and names a figure, while the clauses naming the report do not name the
+    count.
 
     What this does NOT read: a claim spelled as none of the predicates above,
+    a reach claim in neither the count phrase's sentence nor the one after it,
     a run named as anything other than the coverage step summary, and a
     referent outside the vocabulary the module docstring states.
     """
     del tmp
     text = _paragraph()
     assert UNREACHED in text, 'the paragraph no longer names the module'
-    assert re.search(COUNT_PHRASE, text), (
+    assert COUNT_PHRASE.search(text), (
         'the paragraph no longer states the module count, so the run has no '
         'figure to report and the attributions checked below have none to '
         'carry')
     sentences = _sentences(text)
-    claims = [(i, s) for i, s in enumerate(sentences)
-              if REACH_CLAIM.search(s)]
+    claims = _reach_claims(sentences)
     assert claims, (
         'the paragraph no longer claims the module is unreached, so every '
         'assertion below is judging nothing and the count phrase beside it '
@@ -257,22 +330,24 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
             f'the sentence claiming a reach is about another module: {where}. '
             f'{UNREACHED} is named elsewhere in the paragraph, so the claim '
             f'and the module it is about are not the same sentence')
-        clause = _attribution_clause(claim)
-        if clause is None and index + 1 < len(sentences):
-            clause = _attribution_clause(sentences[index + 1])
-        assert clause, (
+        credit = _credit(claim)
+        reported = _reported(claim)
+        if not RUN_ATTRIBUTION.search(credit) and index + 1 < len(sentences):
+            credit = _credit(sentences[index + 1])
+            reported = _reported(sentences[index + 1])
+        assert RUN_ATTRIBUTION.search(credit), (
             f'a reach claim carries no attribution in its own sentence or the '
             f'one after it: {where}. Whether a suite executes {UNREACHED} is '
             f'decidable only from the coverage run, so the claim must name '
             f'the report that measures it')
-        assert not COUNT_NAME.search(clause), (
+        assert not COUNT_NAME.search(reported), (
             f'the attribution credits the code-line count to the coverage '
-            f'run: ...{" ".join(clause.split())}... . That count is the '
+            f'run: ...{" ".join(reported.split())}... . That count is the '
             f'tree\'s, read off the file by this suite, and it is the one '
             f'figure here no run reports')
-        assert FIGURE.search(clause), (
+        assert FIGURE.search(credit), (
             f'the attribution names the report but credits it with no figure: '
-            f'...{" ".join(clause.split())}... . A report named beside the '
+            f'...{" ".join(credit.split())}... . A report named beside the '
             f'claim is not an attribution of the figure the claim rests on')
 
 
@@ -397,13 +472,13 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     """
     del tmp
     text = _paragraph()
-    said_count = re.search(COUNT_PHRASE, text)
+    said_count = COUNT_PHRASE.search(text)
     assert said_count, 'the paragraph no longer states the module count'
     count = int(said_count.group(1))
     figures = _claim_figures(said_count.group(0), said_count.start())
     spans = {(start, end) for start, end, _ in figures}
     claim = ' '.join(said_count.group(0).split())
-    claims = len(re.findall(COUNT_PHRASE, text))
+    claims = len(COUNT_PHRASE.findall(text))
 
     # Percentages are blanked first, so their digits are not also judged as
     # bare figures; they keep their offset either way.
