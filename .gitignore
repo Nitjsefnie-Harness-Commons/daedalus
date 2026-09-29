@@ -464,6 +464,7 @@
 !/tests/_suite_jobs.py
 !/tests/_sweep_launch_scan.py
 !/tests/_tabroute_focus.py
+!/tests/_tabroute_keyset.py
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
 !/tests/_teardown.py
@@ -775,6 +776,7 @@
 !/tests/test_tab_routing_dict_construction.py
 !/tests/test_tab_routing_dict_keyset.py
 !/tests/test_tab_routing_dict_lengths.py
+!/tests/test_tab_routing_dict_retirement.py
 !/tests/test_tab_routing_dict_stores.py
 !/tests/test_tab_routing_js.py
 !/tests/test_tab_routing_js_await.py
