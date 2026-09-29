@@ -85,4 +85,21 @@ CHAIN_LIMB_ROWS = (
      "subprocess.run(['git', 'status'], check=True)\n"
      "http.client.HTTPSConnection('h', timeout=30)\n",
      []),
+    # The set is consulted on the ROOT, so a member of an excluded root
+    # named directly walks past it: the root is never a dotted import, so
+    # the chain limb never sees it and the bare-Name limb proves the
+    # member. The negative keeps the guard to the roots that are in the
+    # set rather than to every from-import.
+    ('a-from-import-of-an-excluded-root-member-is-refused',
+     "import subprocess\n"
+     "from multiprocessing.connection import wait\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "wait(children, timeout=30)\n",
+     [(4, 'unreadable', 'unplaced')]),
+    ('a-from-import-of-an-unexcluded-root-is-still-proved',
+     "import subprocess\n"
+     "from http.client import HTTPConnection\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "HTTPConnection('h', timeout=30)\n",
+     []),
 )
