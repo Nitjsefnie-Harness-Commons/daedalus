@@ -12,7 +12,7 @@ tree — is claimed explicitly by the control that owns it. A predicate over
 two basenames is a fingerprint of that property rather than the property:
 a third runner, a `.yaml` workflow, a `uses:` step, a shell loop over
 `tests/*.py` and `unittest discover -s tests` are all routes the
-basenames cannot see, so `_door_jobs` reads the step's resolved inputs and
+basenames cannot see, so `_suite_step` reads the step's resolved inputs and
 follows the tracked file a step runs, which is where the mechanism is
 written down whatever the runner is called.
 """
@@ -188,8 +188,8 @@ def _mentions_suite_tree(node):
     return False
 
 
-def _door_jobs():
-    """`(source, job, runs, mechanism)` for every job reaching the suites.
+def _suite_step(workflow, job):
+    """`(index, mechanism)` for the first step reaching the suites, or None.
 
     A step's resolved inputs are its `run:`, its `uses:` and its `with:`
     values, and the step reaches the suite tree when they name a path under
@@ -198,6 +198,13 @@ def _door_jobs():
     step is `python scripts/ci/third_runner.py` says nothing about suites —
     so the file a step runs is read for what it does.
 
+    The INDEX is half the answer, because where a step sits in a job decides
+    what its siblings could count on: a `setup-node` step after
+    `python run_tests.py` declares nothing, and only the position tells that
+    apart from a step that declares it first. Every question about a suite
+    job's ordering asks this function rather than re-walking the steps, so
+    two controls cannot disagree about which step is the one that reaches.
+
     What this cannot see: a step whose reach is decided outside the
     repository. A `uses:` composite action is a remote string with no
     source here to read, and neither is a container image's entry point. A
@@ -205,20 +212,43 @@ def _door_jobs():
     falsify, and the control that owns the residue says so where a reader
     will meet it.
     """
+    for index, step in enumerate(_job_steps(workflow, job)):
+        inputs = _step_inputs(step)
+        if _names_suite_tree(inputs):
+            return index, NAMES
+        if any(_runs_suites(path) for path in _named_files(inputs)):
+            return index, RUNNER
+    return None
+
+
+def _action_name(step):
+    """The `owner/repo` a step's `uses:` names, with the ref dropped.
+
+    A pin is a property of the workflow, not of the action: the same
+    `actions/setup-node` is a declaration whatever commit it is pinned at,
+    and comparing the full `uses:` would make every bump a second control to
+    update.
+    """
+    uses = str(step.get('uses') or '').strip()
+    return uses.split('@', 1)[0] if uses else ''
+
+
+def _actions_before(workflow, job, index):
+    """Every action name the steps before `index` use."""
+    return {_action_name(step)
+            for step in _job_steps(workflow, job)[:index]}
+
+
+def _door_jobs():
+    """`(source, job, runs, mechanism)` for every job reaching the suites."""
     sources = sorted(WORKFLOW_DIR.glob('*.yml')) + sorted(
         WORKFLOW_DIR.glob('*.yaml'))
     found = []
     for source in sources:
         workflow = source.read_text(encoding='utf-8')
         for job in _job_names(workflow):
-            runs = _ordered_job_runs(workflow, job)
-            for step in _job_steps(workflow, job):
-                inputs = _step_inputs(step)
-                if _names_suite_tree(inputs):
-                    found.append((source.name, job, runs, NAMES))
-                    break
-                if any(_runs_suites(path)
-                       for path in _named_files(inputs)):
-                    found.append((source.name, job, runs, RUNNER))
-                    break
+            reach = _suite_step(workflow, job)
+            if reach is not None:
+                runs = _ordered_job_runs(workflow, job)
+                found.append((source.name, job, runs, reach[1]))
     return found
