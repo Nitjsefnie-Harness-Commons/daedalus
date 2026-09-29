@@ -49,7 +49,8 @@ INSTALLER_SOURCE = ROOT / 'scripts' / 'ci' / 'install_lint_tools.py'
 # file. SUITE_RUNNERS recognises the first; the second is the door a third
 # spelling walks through, and it is the one this file has to account for.
 SUITE_DOOR = re.compile(
-    r'tests/test_|run_tests[.]py|coverage_suites[.]py|time_tests[.]py')
+    r'tests/test_|run_tests[.]py|coverage_suites[.]py|time_tests[.]py'
+    r'|pytest')
 # The doors that are not a sanctioned runner, and what each one is. A route
 # added without being named here is red until a human judges it, which is the
 # property no membership test over runner basenames can have on its own.
@@ -207,7 +208,8 @@ def _skips(body):
     names = ('skip', 'skipTest', 'SkipTest')
     for statement in body:
         for part in ast.walk(statement):
-            if isinstance(part, ast.Call) and _dotted_or_bare_name(part) in names:
+            call = isinstance(part, ast.Call)
+            if call and _dotted_or_bare_name(part) in names:
                 return True
             if isinstance(part, ast.Raise):
                 name = _dotted_or_bare_name(part.exc)
@@ -271,7 +273,8 @@ def _command_words(tree):
         argv = node.args[0]
         if isinstance(argv, (ast.List, ast.Tuple)) and argv.elts:
             first = argv.elts[0]
-            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            named = isinstance(first, ast.Constant)
+            if named and isinstance(first.value, str):
                 words.add(first.value)
     return words
 
@@ -411,14 +414,15 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
         f'only {len(found)} job(s) run a suite runner, so this control is '
         'reading a set too small to be the whole set of them: '
         f'{[(source, job) for source, job, _ in found]}')
-    declared = _declared_tools()
-    unjournalled = sorted(_unjournalled() - declared)
+    declared = ', '.join(sorted(_declared_tools()))
+    unjournalled = sorted(_unjournalled() - _declared_tools())
     assert not unjournalled, (
         'the suites skip on '
-        f'{", ".join(_unjournalled())} and nothing asserts them, so a '
-        'suite-running job that has not installed them skips in silence on '
-        f'every leg; scripts/ci/install_lint_tools.py declares {declared} '
-        'and the next binary a suite skips on has to be added there')
+        f'{", ".join(unjournalled)} and nothing treats them as present, so '
+        'a suite-running job that has not installed them skips in silence '
+        f'on every leg; scripts/ci/install_lint_tools.py declares '
+        f'{declared}, and the next binary a suite skips on has to be added '
+        'there')
     for source, job, runs in found:
         assert any(LINT_INSTALLER in run for run in runs), (
             f'the {job} job in {source} runs a suite runner, which discovers '
@@ -457,11 +461,14 @@ def test_no_job_reaches_the_suites_by_a_door_this_control_does_not_name(tmp):
     del tmp
     sanctioned = {(source, job) for source, job, _ in _suite_jobs()}
     residue = _door_jobs() - sanctioned
-    assert residue == set(SUITE_DOORS), (
-        'the jobs reaching the suites are the sanctioned ones plus '
-        f'{sorted(set(SUITE_DOORS))}, and now also {sorted(residue)}; name '
-        'the new door in SUITE_DOORS with what it is, and judge whether it '
-        'has to install what the suites skip on')
+    named = set(SUITE_DOORS)
+    assert residue == named, (
+        f'doors into the suite tree that SUITE_DOORS does not name: '
+        f'{sorted(residue - named)}; named doors that are gone: '
+        f'{sorted(named - residue)}. The jobs reaching the suites are the '
+        'ones naming a sanctioned runner plus the ones SUITE_DOORS lists; '
+        'name the new door there with what it is, and judge whether it has '
+        'to install what the suites skip on')
 
 
 def test_every_tool_the_installer_recorded_resolves_on_path(tmp):
