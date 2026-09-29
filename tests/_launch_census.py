@@ -141,7 +141,7 @@ assignment rather than a gap: one control, one owner, and a control in
     refused — including a receiver the walk could not resolve and a
     reaper whose name the census does not hold, because neither of those
     is a proof. The reasoning is at the decision point in
-    `tests/_receiver_resolution.py::deadline_reaches_a_child` and is not
+    `tests/_deadline_reach.py::deadline_reaches_a_child` and is not
     restated here. A number a CALLER fills is still read at the caller's
     line by `_parameter_bound_faults`. Five controls in
     `tests/test_launch_census_receivers.py` hold it, in both directions:
@@ -151,6 +151,23 @@ assignment rather than a gap: one control, one owner, and a control in
     Two more read it over the three SHIPPED files rather than over
     planted ones, in `tests/test_launch_real_files.py`, and the third
     there closes the set of rows those files carry;
+  - a receiver that is a PARAMETER, which the table above discharges from
+    the tree's own BINDINGS and the arm beside it discharges from its CALL
+    SITES: every call of the owning function in the same module, each
+    required unspread, each required to fill the parameter with a
+    container the caller writes as a literal, and no argument permitted to
+    be a launched child. The class is a value handed in from OUTSIDE the
+    tree, because a call from a module the census does not read is not
+    among the sites consulted; the instance is a test double handed a
+    recorder list by a module no census pass parses. The arm is not
+    complete and is not claimed to be: a site discharged from the call
+    sites in one module while its real caller lives in another is a
+    discharge a reader cannot audit, and the name is here so the gap is
+    a statement rather than a surprise. The control beside this is
+    `test_a_receiver_the_call_sites_cannot_resolve_is_still_refused` in
+    `tests/test_launch_deadline_reach.py`, and the positive direction it
+    has to hold is the `tests/test_real_browser_harness.py` site read by
+    `tests/test_launch_real_files.py`;
   - FOUR classes of site the analyser REFUSES and the repo-layout gate does
     not act on, so they are reported and not policed. The gate's keep rule
     (`tests/test_repo_layout.py::_bound_sites`) admits a site only when the
@@ -170,6 +187,7 @@ assignment rather than a gap: one control, one owner, and a control in
 """
 import ast
 
+import _deadline_reach as reach
 import _launch_path as path
 import _receiver_resolution as receiver
 
@@ -564,15 +582,15 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
     reap.
     """
     (callees, bound, receivers, direct, aliases, literals,
-     shadows, params) = context
+     shadows, params, tree) = context
     shadowed = params.get(function, frozenset())
     hidden = shadows.get(function, frozenset()) | shadowed
     faults = []
     if (function is scope and 'timeout' in _parameter_names(function)
             and 'timeout' not in handed
-            and receiver.deadline_reaches_a_child(
+            and reach.deadline_reaches_a_child(
                 function, 'timeout', callees, receivers, direct,
-                aliases, literals, bound, shadowed)):
+                aliases, literals, bound, shadowed, tree)):
         faults.append((relative, function.lineno, 'timeout parameter',
                        'a path function takes a deadline parameter, so a '
                        'bound reaches the child through the signature'))
@@ -620,7 +638,7 @@ def _faults(relative, tree, in_path=frozenset(), callable_names=frozenset(),
     context = (callees, bindings, receivers, direct,
                aliases, receiver.literal_bindings(tree),
                receiver._shadowed_parameters(tree, bindings),
-               receiver._function_parameters(tree))
+               receiver._function_parameters(tree), tree)
     faults = []
     handed = frozenset(_CHILD_PARAMETERS.get(relative, {}))
     for scope in _bodies_in_scope(tree, in_path):

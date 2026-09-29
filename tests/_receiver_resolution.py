@@ -20,15 +20,19 @@ That is the whole of the rule, and each of the two is a proof rather
 than a guess about what the census does not know.
 `deadline_reaches_a_child` is where that reasoning lives, and
 `literal_bindings` is what the second proof is read off; this is the map,
-not the argument.
+not the argument. The decision point itself MOVED to
+`tests/_deadline_reach.py` when the call-site arm was added, because this
+file was already at its ceiling; `literal_bindings` stayed here with the
+binding readers it shares, and the module that reasons over it imports
+this one rather than the other way round.
 """
 import ast
 import importlib
 import inspect
 import sys
 
-from _binding_names import (_every_use_proven, _names_a_target_binds,
-                            _receiver_escapes, _rebindings, _spread_args)
+from _binding_names import (_names_a_target_binds, _receiver_escapes,
+                            _rebindings, _spread_args)
 import _launch_path as path
 
 # The modules a NETWORK READ is a member of. This names MODULES and never
@@ -555,146 +559,3 @@ def is_network_read(func, bound, shadowed=frozenset()):
         return False
     value = _live_object(dotted)
     return value is not None and id(value) in reads
-
-
-def _mentions(node, names):
-    return any(isinstance(inner, ast.Name) and inner.id in names
-               for inner in ast.walk(node))
-
-
-def _deadline_sinks(function, derived):
-    """Every call the deadline, or a name computed from it, reaches.
-
-    The whole call, so a `*spread` in front of the argument is read like
-    any other element: an index into `node.args` lands on the spread
-    instead of the number behind it, and the deadline the spread stands
-    for is then never examined.
-    """
-    return [call for call in ast.walk(function)
-            if path._is_call(call) and _mentions(call, derived)]
-
-
-def _raised_exceptions(function, bound):
-    """`dotted callee` for every call that builds what a `raise` raises.
-
-    Constructing the exception is not ending a child, and the deadline
-    reaching nothing else is the same proof as the arithmetic case. The
-    callee is resolved to a live object and asked what it IS, so a
-    call that merely looks like an exception is not cleared — the mistake
-    the two-name operation test made from the other direction.
-
-    IMPORTED, specifically, and the limit is a false red rather than a
-    false green: a local `class Refused(Exception)` does not fire this
-    arm, because the resolver reads imports and a class the module
-    defines is not one it can reach. A fixture that raises its own error
-    with the deadline in hand is therefore refused. That HAPPENS today,
-    and `test_a_raise_carrying_the_deadline_is_discharged_when_imported`
-    is the control that holds it there.
-    """
-    raised = set()
-    for node in ast.walk(function):
-        if not isinstance(node, ast.Raise) or node.exc is None:
-            continue
-        target = node.exc
-        if not isinstance(target, ast.Call):
-            continue
-        dotted = _resolve_dotted(target.func, bound)
-        value = _live_object(dotted) if dotted is not None else None
-        if isinstance(value, type) and issubclass(value, BaseException):
-            raised.add(path._dotted_key(target.func))
-    return frozenset(raised)
-
-
-def deadline_reaches_a_child(function, name, callees, receivers, direct,
-                             aliases, literals, bound, shadowed):
-    """Whether the deadline this signature takes can reach a child.
-
-    Two ways, and both are the census's own question asked of a parameter
-    instead of a call. The function PLACES a launch, so a caller has an
-    undeclared way to bound the child it owns and the signature is the
-    only place that shows. Or it HANDS the parameter, or a name computed
-    from it, to a call the census cannot show is harmless.
-
-    The second half is a POSITIVE proof in the discharge direction, and
-    that is the whole of the difference. `literal_bindings` carries it: a
-    call whose receiver is in that set is harmless, because a container
-    cannot end a child. Either proof may fire only once `_every_use_proven`
-    has cleared the gate in front of it — a deadline reaching no call at
-    all is NOT a proof, and the generator is what falsified it: a deadline
-    that travelled through a `for` target, a walrus, an augmented or
-    annotated assignment, a tuple unpack or a `match` capture was still in
-    flight, and an incomplete `derived` simply never saw the call it
-    reached.
-
-    Everything else is refused, and the reason is that each earlier
-    version substituted a guess for the proof. Discharging when the
-    RECEIVER did not resolve silenced three shapes that reap a real child
-    through an unresolved receiver. Reading the OPERATION instead, and
-    discharging when its name was neither `wait` nor `communicate`,
-    silenced the same class from the other side: those are two names off
-    one stdlib class, and a rule built on them does not read the class, so
-    `wait_procs`, a pool's `reap_all` and a spread in front of the
-    argument all went unrefused. Measured against `origin/main`, both are
-    the same mistake. An unresolved receiver and an unrecognised operation
-    are each the census saying it does not know, and "does not know" is
-    not a proof in either direction.
-
-    The bound this leaves is the false red. A function that hands its
-    deadline to a receiver the tree BUILDS rather than writes, a list from
-    a call or an attribute filled from a parameter, is refused; so is a
-    bare-name call to a function the walk did not resolve. That is the
-    price of a discharge that is a proof rather than a guess, and it is
-    in the direction that cannot end a child silently.
-
-    A parameter the CALLER fills is a third thing and not this one: that
-    number is the caller's, and `_parameter_bound_faults` reads it at the
-    caller's line.
-    """
-    if any(path._is_launch(call, receivers, direct, aliases)
-           for call in ast.walk(function) if path._is_call(call)):
-        return True
-    derived = {name}
-    limit = len(list(ast.walk(function))) + 1
-    for _ in range(limit):
-        before = len(derived)
-        for node in ast.walk(function):
-            if (isinstance(node, ast.Assign) and node.value is not None
-                    and _mentions(node.value, derived)):
-                derived.update(target.id for target in node.targets
-                               if isinstance(target, ast.Name))
-        if len(derived) == before:
-            break
-    if not _every_use_proven(function, derived):
-        return True
-    if any(isinstance(node, ast.Assign) and node.value is not None
-           and any(isinstance(t, ast.Subscript) for t in node.targets)
-           and _mentions(node.value, derived)
-           for node in ast.walk(function)):
-        # A subscript store hands the number to a container the census
-        # resolves no body for, so it can reach anything.
-        return True
-    sinks = _deadline_sinks(function, derived)
-    if not sinks:
-        return False
-    raised = _raised_exceptions(function, bound)
-    for call in sinks:
-        func = call.func
-        if path._dotted_key(func) in raised:
-            continue
-        if isinstance(func, ast.Name):
-            return True
-        if isinstance(func, ast.Attribute):
-            receiver = path._dotted_key(func.value)
-            if receiver not in literals:
-                return True
-            # A receiver the function itself SHADOWS is not the table's
-            # verdict: the module saw one binding and the call may see
-            # the caller's. Only a bare name can be shadowed that way —
-            # `self.x` is an attribute of a parameter, and the join over
-            # the class's own writings is what speaks for it.
-            if isinstance(func.value, ast.Name) and func.value.id in shadowed:
-                return True
-            continue
-        # No receiver to ask about, so no proof to offer: a refusal.
-        return True
-    return False

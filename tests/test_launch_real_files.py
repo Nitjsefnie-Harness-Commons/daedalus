@@ -7,7 +7,10 @@ files those shapes live in, because a planted fixture cannot see a shape
 the file happens to spell differently -- and one of them did:
 `test_real_browser_harness.py:131` is a `subprocess.run` double that
 neither `DISCHARGED` nor `CHILD_BOUNDS` named, so the set of rows was
-open at both ends until the completeness control below closed it.
+open at both ends until the completeness control below closed it. That
+site is the one the call-site arm in `tests/_deadline_reach.py` now
+discharges, and it is named in `DISCHARGED_BY_CALL_SITES` rather than
+dropped, so a line a table resolves stays a line a table resolves.
 
 Nothing here runs the shipped tree for its verdict. Those three files are
 not on the launch path on main, so the census reports nothing at all for
@@ -124,24 +127,24 @@ CHILD_BOUNDS = (
     ('test_real_browser_harness.py', 'thread.join(timeout=2 *', 1, WRITTEN),
 )
 
-# The one row these three files carry that no table above accounts for, and
-# the only site the narrowing does not recover. `_successful_run_recorder`'s
-# inner `run` hands the deadline to `recorded`, a PARAMETER, and the arm
-# discharges only on a proof. That proof has to lie INSIDE `run`: the arm
-# judges the parameter's own function and never consults its callers, so the
-# `recorded = []` this module writes at 174 -- a real writing, and the only
-# caller there is -- discharges nothing. The site therefore stays refused.
-# `origin/main` refuses it too, so the census returns it to main's verdict
-# rather than improving on it, which is what makes it an over-refusal and not
-# a regression. #1337 carries the diagnosis.
-NAMED_OVER_REFUSALS = (
+# The one row these three files used to carry that no table above accounted
+# for, and the site the call-site arm inside `deadline_reaches_a_child`
+# recovered. `_successful_run_recorder`'s inner `run` hands the deadline to
+# `recorded`, a PARAMETER, and no local writing can prove a parameter's
+# value -- `ast.arg` vetoes its own name in every scope, which is correct
+# and stays. The arm resolves the parameter at the CALL SITES instead, and
+# this module makes exactly one: `recorded` is the `recorded = []` written
+# two lines above it, a container literal, and not a child. The site
+# discharges, which is what the arm is for; it is listed here rather than
+# deleted so the line resolves to a table and a widened arm is red.
+DISCHARGED_BY_CALL_SITES = (
     ('test_real_browser_harness.py', 'def run(args, *, cwd, ', 1),)
 
 # How many rows each real file carries, measured with `_real_rows`. The two
 # tables above say what every row MEANS and neither can say there is no row
 # beyond them, which is the whole of the control below.
 REAL_ROW_TOTALS = {'test_bridge_startup.py': 7, 'test_parent_watch.py': 7,
-                   'test_real_browser_harness.py': 8}
+                   'test_real_browser_harness.py': 7}
 
 
 def test_the_real_files_emit_exactly_the_rows_this_suite_names(tmp):
@@ -152,27 +155,28 @@ def test_the_real_files_emit_exactly_the_rows_this_suite_names(tmp):
     off. But that table says nine lines carry no row and `CHILD_BOUNDS`
     says fourteen carry one, and a row on a FIFTEENTH line of these
     files is invisible to both -- which is what
-    `test_real_browser_harness.py:131` was, until `NAMED_OVER_REFUSALS`
-    named it. So the set is closed in both directions: no row sits at a
-    line no table resolves, and each file carries the measured count, so
-    an EXTRA row at a known line is red here as well as a row on an
-    unknown one.
+    `test_real_browser_harness.py:131` was, until a table named it. So
+    the set is closed in both directions: no row sits at a line no table
+    resolves, and each file carries the measured count, so an EXTRA row
+    at a known line is red here as well as a row on an unknown one.
     """
     del tmp
     named = {row[0] for table in (DISCHARGED, CHILD_BOUNDS,
-                                  NAMED_OVER_REFUSALS) for row in table}
+                                  DISCHARGED_BY_CALL_SITES)
+             for row in table}
     uncovered = sorted(named - set(REAL_ROW_TOTALS))
     assert not uncovered, (
         f'the tables name {uncovered} and REAL_ROW_TOTALS does not, so the '
         f'loop below never reads it and its rows are unverified')
-    for relative, snippet, occurrence in DISCHARGED:
-        line = _line_holding(relative, snippet, occurrence)
-        rows = [row for row in _real_rows(relative) if row[1] == line]
-        assert not rows, (relative, line, snippet, rows)
+    for table in (DISCHARGED, DISCHARGED_BY_CALL_SITES):
+        for relative, snippet, occurrence in table:
+            line = _line_holding(relative, snippet, occurrence)
+            rows = [row for row in _real_rows(relative) if row[1] == line]
+            assert not rows, (relative, line, snippet, rows)
     for relative, total in REAL_ROW_TOTALS.items():
         rows = _real_rows(relative)
         known = {_line_holding(relative, *row[1:3])
-                 for table in (CHILD_BOUNDS, NAMED_OVER_REFUSALS)
+                 for table in (CHILD_BOUNDS, DISCHARGED_BY_CALL_SITES)
                  for row in table if row[0] == relative}
         stray = [(row[1], row[2]) for row in rows if row[1] not in known]
         assert not stray, (relative, 'a row no table accounts for', stray)
@@ -180,26 +184,28 @@ def test_the_real_files_emit_exactly_the_rows_this_suite_names(tmp):
                                     [(row[1], row[2]) for row in rows])
 
 
-def test_a_named_over_refusal_refuses(tmp):
-    """The one site the narrowing does not recover: #1337.
+def test_the_site_the_call_sites_prove_discharges(tmp):
+    """The positive direction of the arm, read over a SHIPPED file.
 
-    `origin/main` refuses this site too, so the census returns it to
-    main's verdict rather than improving on it -- which is what makes it
-    an over-refusal and not a regression. Note `ast.arg` uses
-    `setdefault`, so a parameter does not veto a key a literal already
-    proved; here nothing proved `recorded`, so there was nothing for the
-    exemption to preserve.
+    `origin/main` refused this site and the census was right to: `recorded`
+    is a parameter, and `ast.arg` vetoes its own name in every scope
+    because a parameter's value comes from the caller. The arm resolves it
+    at the call sites instead, so the site is now a DISCHARGE and this is
+    the control that would go red if the arm were narrowed back -- the
+    direction that only ever costs a refusal is the one this repo cannot
+    see go missing, so the positive is pinned here beside the negative.
 
-    Pinned as a REFUSAL so an edit that starts discharging it is
-    visible. #1337 carries the diagnosis; this is the site row.
+    A control that passes both before and after the arm has no opinion, so
+    this is the one to break first: `if False:` over the arm in
+    `tests/_deadline_reach.py` turns this red and leaves every refusal
+    below green.
     """
     del tmp
-    for relative, snippet, occurrence in NAMED_OVER_REFUSALS:
+    for relative, snippet, occurrence in DISCHARGED_BY_CALL_SITES:
         line = _line_holding(relative, snippet, occurrence)
-        routes = [row[2] for row in _real_rows(relative) if row[1] == line]
-        assert routes == ['timeout parameter'], (
-            relative, line, 'the named over-refusal started discharging',
-            routes)
+        rows = [row for row in _real_rows(relative) if row[1] == line]
+        assert not rows, (relative, line, 'the call-site proof stopped '
+                          'discharging and the site is refused again', rows)
 
 
 def test_the_real_files_keep_every_genuine_child_bound(tmp):

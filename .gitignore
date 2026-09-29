@@ -74,6 +74,8 @@
 !/.github/ci-thresholds.json
 !/.github/dependabot.yml
 !/.github/reserved-test-names.json
+!/.github/reserved-test-names.json
+!/.github/reserved-test-names.json
 !/.github/suite-timings.json
 
 # ─── .github/ISSUE_TEMPLATE ───
@@ -330,6 +332,7 @@
 !/tests/_dashsection_transport.py
 !/tests/_dashsection_wave1.py
 !/tests/_dashshell.py
+!/tests/_deadline_reach.py
 !/tests/_debugger_attachment_harness.py
 !/tests/_deliveries.py
 !/tests/_diff_coverage_fixtures.py
@@ -678,6 +681,7 @@
 !/tests/test_launch_census_scopes.py
 !/tests/test_launch_control_boundary.py
 !/tests/test_launch_deadline_positions.py
+!/tests/test_launch_deadline_reach.py
 !/tests/test_launch_path.py
 !/tests/test_launch_real_files.py
 !/tests/test_launch_receiver_positions.py
