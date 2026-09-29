@@ -93,10 +93,10 @@ def _pin():
     is what it disagrees with. Raising the pin in the workflow is then one
     edit, here and in the reasons alike.
     """
-    found = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(\S+)\s*$',
+    found = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
                        _tests_yml(), re.MULTILINE)
     assert len(found) == 1, found
-    return found[0]
+    return found[0].strip('\'"')
 
 
 def _job_step(name):
