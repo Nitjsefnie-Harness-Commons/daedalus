@@ -600,6 +600,20 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # The suites this job runs skip on node, so it declares node rather
+      # than inheriting whatever the hosted image happens to carry; a
+      # job that reaches the suites and does not say so is the shape
+      # test_ci_lint_tools.py's declaration control refuses, and it reads
+      # ORDER, so this step has to stay above the first suite-running one.
+      # No package-manager cache: this job has no lockfile, and a cache
+      # written here is cross-run state no gate on this event reaches.
+      # actions/setup-node v7.0.0
+      - uses: >-
+          actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
       # The pip cache is restored on every event and saved only from a push of
       # main. Restore and save are separate steps so the event gate can sit
       # between them: `cache: pip` saves in a post-job step that runs after the
@@ -791,6 +805,19 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+
+      # Same reason and the same order as the suites job: the suites reached
+      # here skip on node, so this job declares it instead of inheriting the
+      # image, and a declaration below the first suite-running step is not
+      # one. `package-manager-cache: false` keeps this job out of the set of
+      # cache-writing jobs test_workflow_cache_boundary.py records, which is
+      # what the suites job's step does too.
+      # actions/setup-node v7.0.0
+      - uses: >-
+          actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          package-manager-cache: false
 
       # Same cache, same gate as the suites job: restore on every event, save
       # only from a push of main, and never through `cache: pip`, whose
@@ -1671,6 +1698,24 @@ jobs:
           persist-credentials: false
           # Same reason as the head checkout above.
           fetch-depth: 0
+
+      # Above the probe below, not beside the setup-python step. The
+      # declaration control reads ORDER, and the first step that NAMES a
+      # suite runner is the probe — the walk follows the file a step runs,
+      # and it cannot tell `time_tests.py --help` from a run of it, so a
+      # declaration below that point is a declaration the control reads as
+      # too late. `package-manager-cache: false` is load-bearing here and
+      # not merely consistent: without it this step classifies the job as a
+      # cache WRITER, and test_only_the_recorded_jobs_write_the_actions_cache
+      # fails with `unrecorded cache-writing jobs: ['timed']` — a job that
+      # runs no npm install, on a job with no lockfile, writing cross-run
+      # state the measurement below then depends on.
+      # actions/setup-node v7.0.0
+      - uses: >-
+          actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          package-manager-cache: false
 
       - name: Probe the head scripts for options
         id: probe
