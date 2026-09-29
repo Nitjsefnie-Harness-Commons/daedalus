@@ -15,11 +15,13 @@ under it, and a name-keyed or file-keyed rule merges them:
     or not the base already carried a body like it, because the row
     covers the base's COUNT of that name and not the head's.
 
-It reaches that by reading the merge base's OWN definitions, which is a
-content comparison; a path list cannot tell a site the branch wrote from
-one it did not, and this branch edits fifteen of the twenty-seven files
-the JavaScript residue lives in, so a path-scoped boundary would forbid
-recording rows for sites that predate it.
+It reaches that by counting: how many declarations the head binds that
+name to at that path, against how many the merge base bound it to. A
+digest of each body would read an EDIT to a declaration the base already
+carries as an authorship of it, and a path list cannot tell a site the
+branch wrote from one it did not, and this branch edits fifteen of the
+twenty-seven files the JavaScript residue lives in, so a path-scoped
+boundary would forbid recording rows for sites that predate it.
 
 A checkout that cannot answer says WHICH WAY in `reason`, and the
 two are not interchangeable. `UNREADABLE` is a REFUSAL the caller must
@@ -86,7 +88,7 @@ def _text_at(root, ref, path):
 
 
 def introduced_rows(table, read, root, bases=BRANCH_BASES):
-    """The rows naming a declaration the base tree does not carry.
+    """The rows whose name the head binds to MORE declarations than the base.
 
     The three shapes of drift this separates, and why a name-keyed or
     file-keyed rule merges them, are in this module's docstring; that
@@ -122,12 +124,12 @@ def introduced_rows(table, read, root, bases=BRANCH_BASES):
                  if (text := _text_at(root, merge_base, path)) is not None})
     return Boundary(sorted(
         key for key in table
-        if _digests_for(head, key) - _digests_for(base, key)), None)
+        if _count_for(head, key) > _count_for(base, key)), None)
 
 
-def _digests_for(digests, key):
-    """How many times each body was bound to that name in that file."""
-    return digests.get(key[0], {}).get(key[1], Counter())
+def _count_for(digests, key):
+    """How many declarations the tree binds that name to in that file."""
+    return sum(digests.get(key[0], {}).get(key[1], Counter()).values())
 
 
 def python_digests(sources):

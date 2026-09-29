@@ -45,13 +45,17 @@ The residue ships as that table, and the boundary on it is the BRANCH'S
 OWN DIFF, not "the table may only shrink". A shrink-only rule is
 unlandable on a base that moves: every new tests module `main` lands can
 surface a collision nobody introduced, and the control would go red for
-code the branch never touched. The enforceable boundary is instead that
-a row may name any pre-existing site, and may NOT name a file this
-branch adds or edits — so the table can absorb what `main` lands
+code the branch never touched. The enforceable boundary is instead per
+DECLARATION rather than per file: a row may name any site the base
+already binds its name at, however far the branch edits the body, and may
+NOT name one the head binds that name to strictly more times than the
+base did. So a second copy of a name the base carries is refused while
+an edit to its single declaration is excused — the two a file-keyed rule
+merges into one verdict for both. The table can absorb what `main` lands
 underneath it while still being unable to excuse one line of what the
-branch itself wrote. That is a rule over a derived set of paths rather
-than a promise about the author's intent, which is why it can be a
-control at all.
+branch itself wrote. That is a rule over a derived count rather than a
+promise about the author's intent, which is why it can be a control at
+all.
 
 THE SAME RULE IN JAVASCRIPT. A `function` inside a Python string
 literal is not a Python binding, and this repository's duplicate-code
@@ -199,6 +203,10 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
     the file as clean. The base carries one `twin`; the head carries
     two, byte-identical — the issue this branch exists for, reproduced
     inside the control that is supposed to catch it.
+
+    The fourth runs the other way, and a digest-keyed rule misses it too:
+    `edited` is one declaration the base already carries and the branch
+    rewrites the body of, which is an edit rather than an authorship.
     """
     repo = Path(tmp) / 'branch'
     repo.mkdir()
@@ -213,8 +221,11 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
     base = _mod_text(
         'def twin(value):', '    return 1', '',
         'def pair(value):', '    return 1', '',
+        'def edited(value):', '    return 1', '',
         'HARNESS = r"""', 'function carried(l) {',
-        '  const seen = [];', '  return seen;', '}', '"""')
+        '  const seen = [];', '  return seen;', '}',
+        'function retouched(l) {', '  const a = [];', '  return a;', '}',
+        '"""')
     (repo / 'tests' / 'test_base.py').write_text(base, encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
@@ -223,27 +234,36 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
     subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     # A new name, a second BYTE-IDENTICAL copy of a name the base
-    # already carries, and a name nothing touched.
+    # already carries, a name nothing touched, and a declaration the
+    # branch EDITED rather than added.
     (repo / 'tests' / 'test_base.py').write_text(_mod_text(
         'def twin(value):', '    return 1', '',
         'def twin(value):', '    return 1', '',
         'def pair(value):', '    return 1', '',
         'def added(value):', '    return 2', '',
+        'def edited(value):', '    return 3', '',
         'HARNESS = r"""', 'function carried(l) {',
         '  const seen = [];', '  return seen;', '}',
         'function carried(l) {', '  const seen = [];', '  return seen;',
-        '}', '"""'), encoding='utf-8')
+        '}',
+        'function retouched(l) {', '  const b = [];', '  return b;', '}',
+        '"""'), encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'commit', '-qm', 'branch'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
 
     table = {('tests/test_base.py', name): 'a row' for name in
-             ('carried', 'twin', 'pair', 'added')}
+             ('carried', 'twin', 'pair', 'added', 'edited', 'retouched')}
     py = introduced_rows(table, python_digests, repo, bases=('main',))
+    assert ('tests/test_base.py', 'edited') not in py.introduced, (
+        'an EDIT to a body the base already carries is not authorship: '
+        f'{py.introduced}')
     want = [('tests/test_base.py', 'added'), ('tests/test_base.py', 'twin')]
     assert py.introduced == want, 'the copy is not free'
     js = introduced_rows(table, js_digests, repo, bases=('main',))
+    assert ('tests/test_base.py', 'retouched') not in js.introduced, (
+        'nor is one on the JavaScript side: ' f'{js.introduced}')
     assert js.introduced == [
         ('tests/test_base.py', 'carried')], 'and neither is a second copy'
     # A checkout carrying neither base cannot answer, and REFUSES.
