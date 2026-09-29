@@ -76,14 +76,26 @@ _ROWS = [
     # The controls. Each reads clean because the RUNTIME agrees, not
     # because the fold gave up on the position.
     ('literal', 1, {'tab': 5}, _CALL, _inside("cmd = {'tab': 5}")),
-    # A key the program deletes before the send is not a tracked key at
+    # A key the program removes before the send is not a tracked key at
     # the send, and the runtime agrees: the payload that arrives carries
-    # `id` and nothing else. Both spellings fold the same key position,
-    # so a name-bound deletion removes what a literal one removes.
+    # `id` and nothing else, or nothing at all. Every spelling folds the
+    # same key position, so a name-bound `pop` removes what a literal one
+    # removes and a `clear` removes them all.
     ('del-literal', 0, {'id': 'x'}, _CALL, _inside(
         'cmd = {"id": "x", "tab": 5}', 'del cmd["tab"]')),
     ('del-name', 0, {'id': 'x'}, _CALL, _inside(
         'k = "tab"', 'cmd = {"id": "x", k: 5}', 'del cmd[k]')),
+    ('pop-literal', 0, {'id': 'x'}, _CALL, _inside(
+        'cmd = {"id": "x", "tab": 5}', 'cmd.pop("tab")')),
+    ('pop-name', 0, {'id': 'x'}, _CALL, _inside(
+        'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.pop(k)')),
+    # A default is the missing key's value, not a second key to remove.
+    ('pop-default', 0, {'id': 'x'}, _CALL, _inside(
+        'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.pop(k, None)')),
+    ('clear-literal', 0, {}, _CALL, _inside(
+        'cmd = {"id": "x", "tab": 5}', 'cmd.clear()')),
+    ('clear-name', 0, {}, _CALL, _inside(
+        'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.clear()')),
     # A non-string key is provably not 'tab', and it is not a key the
     # runtime can pass either: the splat raises before the call returns,
     # so nothing reaches the sender at all.
