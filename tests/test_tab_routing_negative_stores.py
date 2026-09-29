@@ -71,6 +71,18 @@ _NO_ITEM_ASSIGNMENT = {
 _NO_ITEM_ASSIGNMENT_DELETE = (
     't = (relay(), quiet())\n', 't', 0, '', 't[1]()', 'del t[0]')
 
+# The slice sign, which is the one store a plain index never reaches:
+# `x[0:1] = v` rewrites a run of positions and `x[0] = v` writes one, so
+# they take different paths through the model and each needs its own gate.
+# The list row is the control: it takes a slice store, the run it writes
+# has a length the model cannot resolve, and the read must stay reported.
+_NO_ITEM_ASSIGNMENT_SLICE = {
+    'tuple': ('t = (relay(), quiet())\n', 't', '0:1', '', 't[1]()',
+              't[0:1] = [quiet()]'),
+    'list': ('t = [relay(), quiet(), quiet()]\n', 't', '0:1', '', 't[1]()',
+             't[0:1] = [quiet()]'),
+}
+
 
 def _spelling(k, spelling):
     return {'literal': f'x[{k}]', 'name': 'x[i]',
@@ -113,6 +125,64 @@ def _no_assignment_shape(seed, name, k, prelude, read, statement=None):
     store = statement or f'{name}[{k}] = relay()'
     return _QUIET + seed + f'try:\n    {store}\n' \
         + 'except TypeError:\n    pass\n' + prelude + _SL + read
+
+
+# The delete sign, one row per kind that refuses `del x[k]`. The refusal is
+# the kind's, not the key's: a tuple takes no item deletion at any key, and
+# a slice refuses with the same TypeError an index does, so both spellings
+# run against every row. `prelude` is what a kind whose element is not
+# callable needs to reach a position that holds one.
+_NO_ITEM_DELETION = {
+    'tuple': ('t = (relay(), quiet())\n', 't', '', 't[1]()'),
+}
+# A kind the model records no positional container for, so the delete gate
+# has no kind to decline and the row is clean whichever way the gate reads.
+# A set, a frozenset, a str, a bytes and a range are all here: their
+# elements are not addressable by position, so a delete can never move a
+# recorded fact. These rows do not discriminate today, and they say so
+# rather than pretending otherwise -- they pin that a narrowing does not
+# begin tracking such a kind in order to invalidate it.
+_NO_ITEM_DELETION_UNTRACKED = {
+    'set': ('s = {relay(), quiet()}\n', 's', 'x = [quiet() for _ in s]\n',
+            'x[0]()'),
+    'frozenset': ('v = frozenset([relay(), quiet()])\n', 'v',
+                  'x = [quiet() for _ in v]\n', 'x[0]()'),
+    'str': ('s = "ab"\n', 's', 'x = [quiet() for _ in s]\n', 'x[0]()'),
+    'bytes': ('s = b"ab"\n', 's', 'x = [quiet() for _ in s]\n', 'x[0]()'),
+    'range': ('s = range(3)\n', 's', 'x = [quiet() for _ in s]\n', 'x[0]()'),
+}
+# The kinds the gate must keep claiming. A list takes item deletion at both
+# keys, and a mapping's delete is followed precisely. Each row keeps its own
+# exact answer: an index delete shifts one position and the model follows
+# the shift, a slice delete leaves a length it cannot resolve and the read
+# fails closed, and the mapping's two rows are the routed twin and its clean
+# twin. A narrowing of the delete's KIND would move the slice row; a
+# narrowing that dropped the arm altogether would move the routed one.
+_ITEM_DELETION = {
+    'list_index': ('x = [relay(), quiet()]\n', 'x', '0', 'x[0]()', (0, 0)),
+    'list_slice': ('x = [relay(), quiet()]\n', 'x', '0:1', 'x[0]()', (0, 1)),
+    'list_routed': ('x = [ordinary, relay()]\n', 'x', '0', 'x[0]()', (1, 1)),
+    'dict_routed': ('d = {"a": 1, "b": relay()}\n', 'd', '"a"', 'd["b"]()',
+                    (1, 1)),
+    'dict_twin': ('d = {"a": 1, "b": quiet()}\n', 'd', '"a"', 'd["b"]()',
+                  (0, 0)),
+}
+
+
+def _no_deletion_shape(seed, name, prelude, read, key, alias=False):
+    """A subscript delete into a kind that takes no item deletion. The
+    `try` is the program's own, for the reason the store shape's is: the
+    delete raises, so the read has nowhere to run from without it. The
+    aliased spelling binds the receiver to a second name and deletes
+    through that, so the gate is reached the way an alias reaches it."""
+    body = _QUIET + seed + (f'y = {name}\n' if alias else '')
+    body += f'try:\n    del {"y" if alias else name}[{key}]\n'
+    return body + 'except TypeError:\n    pass\n' + prelude + _SL + read
+
+
+def _item_deletion_shape(seed, name, key, read, prelude=''):
+    """The same shape on a kind that does take item deletion."""
+    return _QUIET + seed + f'del {name}[{key}]\n' + prelude + _SL + read
 
 
 def _negative_store_verdicts(tmp, row):
@@ -196,19 +266,85 @@ def test_a_kind_with_no_item_assignment_refuses_every_store(tmp):
         -1, 'literal', _clean(2), 'relay()', 'x[1]()'))
     if recorded != (1, 1):
         wrong.append(('list_negative', recorded))
-    # The gate's second sign. (0, 1) is a FALSE POSITIVE against a runtime
-    # of (0, 0) - a tuple delete always raises, so the container is
-    # provably unchanged - and it is one of the three named in the pull
-    # request, tracked as #1220. It is the conservative answer for a
-    # subscript delete inside a branch, which fires on the statement
-    # rather than on the modelled effect. The family pre-dates this branch
-    # and is visible on a list at `main`, AND this branch adds the tuple
-    # position to it: the same shape on a tuple reads (0, 0) on `main` and
-    # (0, 1) here, so the tuple row is not one that was always reporting.
-    # Pinned because it is the verdict, not because it is right.
+    # The gate's second sign. A tuple takes no item deletion, so the delete
+    # raises, the container is provably unchanged, and a read of a position
+    # it still holds is provable: the verdict is clean. The gate keys on
+    # the receiver's kind, so it declines the delete here for the same
+    # reason it declines the store above rather than for the key's sign.
     deleted = _verdict(tmp, _no_assignment_shape(*_NO_ITEM_ASSIGNMENT_DELETE))
-    if deleted != (0, 1):
+    if deleted != (0, 0):
         wrong.append(('tuple_delete', deleted))
+    assert not wrong, wrong
+
+
+def test_a_kind_with_no_item_deletion_refuses_every_delete(tmp):
+    # A kind that takes no item deletion drops nothing, so every position
+    # the model recorded still holds what it held and a read of one is
+    # provable. Each kind runs both key spellings and both receiver
+    # spellings: the refusal is the kind's, and the gate has to reach the
+    # delete the same way through an alias as through the name itself.
+    wrong = []
+    for name, row in list(_NO_ITEM_DELETION.items()) + list(
+            _NO_ITEM_DELETION_UNTRACKED.items()):
+        seed, receiver, prelude, read = row
+        for key in ('0', '0:1'):
+            for alias in (False, True):
+                verdict = _verdict(tmp, _no_deletion_shape(
+                    seed, receiver, prelude, read, key, alias))
+                if verdict != (0, 0):
+                    wrong.append((name, key, alias, verdict))
+    assert not wrong, wrong
+
+
+def test_a_kind_that_takes_item_deletion_keeps_reporting(tmp):
+    # The control the narrowing above would break if it were a narrowing of
+    # the store path rather than of the delete's kind, and the one that
+    # fails if the arm is dropped altogether. A list and a mapping both
+    # take `del x[k]`, so neither may be answered from the no-deletion gate.
+    wrong = []
+    for name, row in _ITEM_DELETION.items():
+        seed, receiver, key, read, expected = row
+        verdict = _verdict(tmp, _item_deletion_shape(
+            seed, receiver, key, read))
+        if verdict != expected:
+            wrong.append((name, verdict, expected))
+    assert not wrong, wrong
+
+
+def test_a_kind_with_no_item_assignment_refuses_every_slice_store(tmp):
+    # The other store sign, and the one a plain index never reaches. A
+    # tuple rewrites no run of positions, so the model's recorded ones all
+    # stand and the read is provable. The list row is the control: a list
+    # does take a slice store, the run it writes has a length the model
+    # cannot resolve, and the read stays reported. A gate that declined
+    # every store into a kind without one passes the tuple row and fails it.
+    wrong = []
+    for name, row in _NO_ITEM_ASSIGNMENT_SLICE.items():
+        verdict = _verdict(tmp, _no_assignment_shape(*row))
+        if verdict != (0, 0 if name == 'tuple' else 1):
+            wrong.append((name, verdict))
+    assert not wrong, wrong
+
+
+def test_a_delete_the_model_cannot_resolve_stays_fail_closed(tmp):
+    # The third arm: a receiver whose kind the model never decided. The
+    # delete gate declines it because there is no kind to decline, which
+    # is not a reason to read a later call clean - the receiver may be a
+    # list, and a list's delete moves what the model recorded. The row
+    # reaches the receiver through a call the model does not fold, so no
+    # spelling of the narrowing can answer for it, and a gate that
+    # answered anyway would be trading a disclosure for a silence.
+    shape = ('def pick(a, b): return a\n'
+             'x = pick([relay(), quiet()], [quiet()])\n')
+    wrong = []
+    for alias in (False, True):
+        body = _QUIET + shape
+        body += 'y = x\n' if alias else ''
+        body += f'try:\n    del {"y" if alias else "x"}[0]\n'
+        body += 'except TypeError:\n    pass\n'
+        verdict = _verdict(tmp, body + _SL + 'x[0]()')
+        if verdict != (0, 1):
+            wrong.append((alias, verdict))
     assert not wrong, wrong
 
 
