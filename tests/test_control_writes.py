@@ -163,6 +163,62 @@ def test_recognises_ast_parse_as_a_pure_call(tmp):
     assert _violations(source) == []
 
 
+def test_refuses_what_the_pure_name_table_does_not_name(tmp):
+    """The negative space of the `isinstance` row, on both sides of it.
+
+    `isinstance` and `ast.walk` and `str.split` were added to the tables
+    in this branch, and a row added to a table widens the class it names.
+    So each class carries a refusal beside the row: the sibling built-in
+    that is still not named, and the built-in that can write. Admitting
+    the second is the mutant that kills this, and it kills nothing else.
+    """
+    for name, expected in (('issubclass(int, str)',
+                            '3: issubclass callable is unresolved'),
+                           ("__import__('os')",
+                            '3: __import__ callable is unresolved')):
+        source = Path(tmp) / 'pure-name.py'
+        source.write_text(
+            "def test_control(tmp):\n"
+            "    del tmp\n"
+            f"    {name}\n",
+            encoding='utf-8')
+        assert _violations(source) == [f'pure-name.py:{expected}'], name
+
+
+def test_refuses_what_the_pure_method_table_does_not_name(tmp):
+    """The negative space of the `str.split` row, on both sides of it."""
+    for line, expected in (("    text.rsplit(' ')",
+                            "4: text.rsplit is not a modelled call"),
+                           ("    text.split(' ').rmtree()",
+                            "4: text.split(' ').rmtree is not a "
+                            "modelled call")):
+        source = Path(tmp) / 'pure-method.py'
+        source.write_text(
+            "def test_control(tmp):\n"
+            "    del tmp\n"
+            "    text = 'a b'\n"
+            f"{line}\n",
+            encoding='utf-8')
+        assert _violations(source) == [f'pure-method.py:{expected}'], line
+
+
+def test_refuses_what_the_module_call_table_does_not_name(tmp):
+    """The negative space of the `ast.walk` row, on both sides of it."""
+    for spelling, expected in (('ast.iter_child_nodes',
+                                '5: ast.iter_child_nodes is not a '
+                                'modelled call'),
+                               ('os.remove',
+                                '5: os.remove is not a modelled call')):
+        source = Path(tmp) / 'module-call.py'
+        source.write_text(
+            "import ast\nimport os\n"
+            "def test_control(tmp):\n"
+            "    del tmp\n"
+            f"    {spelling}(ast.parse('1'))\n",
+            encoding='utf-8')
+        assert _violations(source) == [f'module-call.py:{expected}'], spelling
+
+
 def test_refuses_a_comprehension_rebound_owned_name(tmp):
     """A comprehension target shadowing tmp does not inherit ownership."""
     source = Path(tmp) / 'comprehension-target.py'
