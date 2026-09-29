@@ -1046,6 +1046,7 @@
     "_subscript_bases": {"python": ["tests/_control_paths.py"]},
     "_subscript_read": {"python": ["tests/_cli_arg_audit_resolver.py"]},
     "_subscript_store": {"python": ["tests/_pyroute_stores.py"]},
+    "_suite_bound_site": {"python": ["tests/_coverage_suite_fixture.py"]},
     "_suite_step": {"python": ["tests/_suite_jobs.py"]},
     "_supplied": {"python": ["tests/_mcp_selection_fold.py"]},
     "_surviving": {"python": ["tests/_version_contract_scanners.py"]},

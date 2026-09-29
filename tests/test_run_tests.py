@@ -9,8 +9,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _coverage_suite_fixture import coverage_tree  # noqa: E402
 
 ROOT = _util.ROOT
+SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                         'runner_suite_bound')
 _OVERRUN_BOUND_S = 2
 
 _PASSING_SUITE = (
@@ -41,10 +44,24 @@ _SLOW_PASSING_SUITE = (
 )
 
 
-def _sandbox(tmp, suites):
+def _sandbox(tmp, suites, suite_bound=None):
+    """A copy of the runner over fabricated suites, with what it imports.
+
+    `suite_bound` rewrites the one definition the copied runner resolves
+    when it launches, so a control can shrink the real default instead of
+    carrying a second number that stops relating to it.
+    """
     root = Path(tmp) / 'tree'
     (root / 'tests').mkdir(parents=True)
+    (root / 'scripts' / 'ci').mkdir(parents=True)
     shutil.copy(ROOT / 'run_tests.py', root / 'run_tests.py')
+    shutil.copy(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                root / 'scripts' / 'ci' / 'suite_bound.py')
+    if suite_bound is not None:
+        (root / 'sitecustomize.py').write_text(
+            'import scripts.ci.suite_bound as _bound\n'
+            f'_bound.DEFAULT_SUITE_TIMEOUT_S = {suite_bound!r}\n',
+            encoding='utf-8')
     for name, source in suites.items():
         (root / 'tests' / name).write_text(source, encoding='utf-8')
     return root
@@ -52,6 +69,14 @@ def _sandbox(tmp, suites):
 
 def _run_sandbox(root, timeout_env):
     env = dict(os.environ, **timeout_env)
+    if (root / 'sitecustomize.py').exists():
+        # `site` looks for a sitecustomize on the path the interpreter has
+        # built BEFORE it imports one, and a script's own directory is put
+        # on the path after that. Without the tree on PYTHONPATH the patch
+        # is written, never read, and the control would measure the default.
+        inherited = env.get('PYTHONPATH')
+        env['PYTHONPATH'] = os.pathsep.join(
+            [str(root)] + ([inherited] if inherited else []))
     return subprocess.run(
         [sys.executable, str(root / 'run_tests.py')],
         cwd=str(root), env=_util.child_coverage('keep', env, cwd=root),
@@ -211,6 +236,81 @@ def test_an_invalid_timeout_stops_startup_naming_the_setting(tmp):
                                         result.stdout)
         assert 'DAEDALUS_SUITE_TIMEOUT' in result.stdout + result.stderr, (
             value)
+
+
+# The reader's whole accept/reject surface, as this repository's corpus
+# entry `guards/2026-09-02-probe-a-numeric-readers-surface-with-inf-and-nan`
+# was filed against: `float(raw)` plus a `<= 0` test admits `inf`, and a
+# bound of infinity never expires, so the setting meant to bound each suite
+# reinstates the unbounded wait. `test_an_invalid_timeout_stops_startup_
+# naming_the_setting` above already walks `soon, inf, INF, 1e400, nan, 0,
+# -1` and asserts each is refused. What it does not say is WHICH message
+# each refusal gives, and it carries neither `-inf` nor the empty string --
+# a reader that MOVED is a reader that can arrive half converted, and a
+# refusal that names a different cause is a second answer to one question.
+_UNUSABLE_BOUNDS = (
+    ('inf', 'finite positive'),
+    ('-inf', 'finite positive'),
+    ('INF', 'finite positive'),
+    ('1e400', 'finite positive'),
+    ('nan', 'finite positive'),
+    ('0', 'finite positive'),
+    ('-1', 'finite positive'),
+    ('soon', 'not a number'),
+    ('', 'not a number'),
+)
+
+
+def test_a_bound_that_would_not_bound_is_refused_by_name(tmp):
+    root = _sandbox(tmp, {'test_passer.py': _PASSING_SUITE})
+    for value, expected in _UNUSABLE_BOUNDS:
+        result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': value})
+        reported = result.stdout + result.stderr
+        assert result.returncode != 0, (value, result.returncode, reported)
+        assert 'DAEDALUS_SUITE_TIMEOUT' in reported, (value, reported)
+        assert expected in reported, (value, reported)
+
+
+def test_a_finite_positive_bound_is_accepted(tmp):
+    root = _sandbox(tmp, {'test_passer.py': _PASSING_SUITE})
+    result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': '2.5'})
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr)
+
+
+_SHARED_BOUND_S = 3
+
+_SHARED_WEDGED_SUITE = """import time
+print('wedged suite reached its own body', flush=True)
+time.sleep(120)
+"""
+
+
+def _coverage_group(stdout, name):
+    """The block the coverage launcher printed for `name`."""
+    start = stdout.index(f'::group::tests/{name}\n')
+    end = stdout.index('::endgroup::\n', start)
+    return stdout[start:end]
+
+
+def test_both_launchers_read_the_one_definition_of_the_bound(tmp):
+    """One bound, two launchers, each naming the value the other must see.
+
+    The value is set on the shared module in each synthetic tree, so a
+    launcher that resolved its bound at `def` time, or carried a second
+    copy of the number, would report the default instead of this one.
+    """
+    runner_root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE},
+                           suite_bound=_SHARED_BOUND_S)
+    runner = _run_sandbox(runner_root, {})
+    record = f'SUITE TIMED OUT after {float(_SHARED_BOUND_S)} s (returncode '
+    assert record in _suite_block(runner.stdout, 'test_staller.py'), (
+        runner.stdout, runner.stderr)
+    coverage, _invocations = coverage_tree(
+        tmp, {'test_wedged.py': _SHARED_WEDGED_SUITE},
+        suite_bound=_SHARED_BOUND_S, outer_timeout=_SHARED_BOUND_S * 20)
+    assert record in _coverage_group(coverage.stdout, 'test_wedged.py'), (
+        coverage.stdout, coverage.stderr)
 
 
 if __name__ == '__main__':
