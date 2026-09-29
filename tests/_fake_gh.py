@@ -15,6 +15,15 @@ still runs, and an install proves the launcher executes before a suite trusts
 it. The fake mirrors real `gh api -i`: status line, header block and body on
 stdout, `gh: ... (HTTP NNN)` on stderr, exit 1 for any error status,
 rate-limit refusals included.
+
+That is the SHAPE of an answer, not everything `gh` does, and the part it
+left out is the part a throttled query really arrives in: a 200 carrying
+the spent rate-limit headers, `gh` exiting 1 over it, and `gh: API rate
+limit already exceeded ...` on stderr. So an answer may also state the
+exit code, the stderr and the stdout `gh` leaves behind, and a shape the
+fake cannot render is REFUSED BY NAME rather than answered plausibly: a
+double that fills in what it was not told is a control with no opinion on
+the case it is standing in for.
 """
 
 import contextlib
@@ -29,6 +38,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 WINDOWS = sys.platform.startswith('win')
+
+# What a fixture answer may name. Naming any one of them makes the object
+# a spec; an object naming none is a 200 whose body is that object.
+RESPONSE = frozenset({'status', 'headers', 'body'})
+OUTCOME = frozenset({'exit', 'stderr', 'stdout'})
 
 REASONS = {200: 'OK', 400: 'Bad Request', 403: 'Forbidden',
            404: 'Not Found', 429: 'Too Many Requests',
@@ -107,26 +121,45 @@ def _fixture(answers, request):
     return None, None
 
 
-def _response(answer):
-    """(status, headers, body) from one fixture answer.
+class Unmodelled(Exception):
+    """A fixture asked for a shape this fake will not invent."""
 
-    A bare string, or a JSON object naming none of the response fields, is a
-    200 whose body is that value - the shape most fixtures use. The file is
-    data, so each field is checked for the type the renderer needs.
+
+def _response(answer):
+    """One fixture answer, as the fields of a `gh` run.
+
+    `status`, `headers` and `body` are the response; `exit` and `stderr`
+    are what `gh` leaves behind it, and `stdout` replaces the rendered
+    response outright - the empty string included, which is how a suite
+    models a refusal the transport never produced a body for.
+
+    A bare string, or a JSON object naming none of these fields, is a 200
+    whose body is that value: the shape most fixtures use. The file is
+    data, so each field is checked for the type its renderer needs and a
+    value of the wrong type is refused by name rather than defaulted.
     """
     spec = (answer if isinstance(answer, dict)
-            and set(answer) & {'status', 'headers', 'body'}
+            and set(answer) & (RESPONSE | OUTCOME)
             else {'body': answer})
-    status = spec.get('status', 200)
-    headers = spec.get('headers') or {}
-    body = spec.get('body', '')
-    return (status if isinstance(status, int) else 200,
-            headers if isinstance(headers, dict) else {}, body)
+    out = {'status': 200, 'headers': {}, 'body': '',
+           'exit': None, 'stderr': None, 'stdout': None}
+    for name, kind in (('status', int), ('headers', dict),
+                       ('exit', int), ('stderr', str), ('stdout', str)):
+        if name in spec and not isinstance(spec[name], kind):
+            raise Unmodelled(f'the {name} field is {spec[name]!r}, '
+                             f'which is not {kind.__name__}')
+        if name in spec:
+            out[name] = spec[name]
+    out['body'] = spec.get('body', '')
+    return out
 
 
 def _render(status, headers, text):
     """The `-i` shape: status line, headers, blank line, body."""
-    lines = [f'HTTP/2.0 {status} {REASONS.get(status, "Status")}']
+    if status not in REASONS:
+        raise Unmodelled(f'there is no reason phrase for HTTP {status}, so a '
+                         'status line written for one would be a guess')
+    lines = [f'HTTP/2.0 {status} {REASONS[status]}']
     for name, value in headers.items():
         lines.append(f'{name}: {value}')
     return '\r\n'.join(lines) + '\r\n\r\n' + text
@@ -147,22 +180,47 @@ def main(argv):
     if response is None:
         sys.stderr.write(f'fake gh: no fixture carries {request[:200]!r}\n')
         return 1
-    status, headers, body = _response(response)
-    text = body if isinstance(body, str) else json.dumps(body)
+    try:
+        return _respond(response, argv)
+    except Unmodelled as exc:
+        sys.stderr.write(f'fake gh: this fake does not model {exc}\n')
+        return 2
+
+
+def _respond(response, argv):
+    """Write one answered run: its stdout, its stderr and the code it exits.
+
+    `gh` exits 1 on any error status and writes `gh: ... (HTTP NNN)` to
+    stderr, and a suite overrides that pair with `exit` and `stderr`
+    because a throttled GraphQL query is a 200 that exits 1 over a
+    message naming the limit (issue 1338) - a shape the status alone
+    cannot produce.
+    """
+    spec = _response(response)
+    status = spec['status']
+    text = (spec['body'] if isinstance(spec['body'], str)
+            else json.dumps(spec['body']))
     # Headers only when asked; the base scripts never ask, and a header
     # block on their stdout is the unparseable answer a base watcher would
     # have met in the wild.
     if '-i' in argv or '--include' in argv:
-        text = _render(status, headers, text)
+        text = (spec['stdout'] if spec['stdout'] is not None
+                else _render(status, spec['headers'], text))
+    elif spec['stdout'] is not None:
+        raise Unmodelled('a stdout it was handed, on a call that asked for no '
+                         'header block: answering the rendered response '
+                         'instead would ignore it')
     if os.environ.get('DAEDALUS_FAKE_GH_CRLF'):
         # What a Windows text stream does to a response that already spells
         # its line endings: a Linux run can hand the client those bytes.
         text = text.replace('\n', '\r\n')
-    sys.stdout.write(text + '\n')
-    if status >= 400:
+    if text:
+        sys.stdout.write(text + '\n')
+    if spec['stderr'] is not None:
+        sys.stderr.write(spec['stderr'])
+    elif status >= 400:
         sys.stderr.write(f'gh: {text.strip()[:200]} (HTTP {status})\n')
-        return 1
-    return 0
+    return spec['exit'] if spec['exit'] is not None else int(status >= 400)
 
 
 class FakeGh:

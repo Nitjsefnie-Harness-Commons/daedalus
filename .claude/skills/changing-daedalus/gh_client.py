@@ -8,13 +8,16 @@ payload on stdin, which is what keeps a GraphQL `null` variable a `null`
 instead of the empty string `-f` would send, and `-i` asks for the response
 headers, which is where the rate-limit reset lives.
 
-Two shapes of exhaustion are recognised because GitHub reports both: a 403
-or 429 carrying rate-limit evidence, and a 200 whose `errors[]` carries a
-`RATE_LIMITED` entry. A 403 with no rate-limit evidence is an ordinary
-failure and is never a pause - a permission refusal must not be answered by
-sleeping. `Watcher` is the long-running half: on a refusal it says once
-where it is waiting, sleeps until the reset the API reported - bounded so a
-hostile or absent header cannot hang or hot-loop a watcher - and resumes. The
+Whether an answer is a rate-limit refusal is `gh_rate_limit`'s question,
+not this module's: an answer reports exhaustion when it carries rate-limit
+EVIDENCE, whatever the status and whatever `gh`'s exit code says, because a
+throttled query answers 200 and exits 1. That module is the one reader, and
+it reads every carrier the evidence travels on. An answer with no evidence
+is an ordinary failure and is never a pause - a permission refusal must not
+be answered by sleeping. `Watcher` is the long-running half: on a refusal it
+says once where it is waiting, sleeps until the reset the API reported -
+bounded so a hostile or absent header cannot hang or hot-loop a watcher - and
+resumes. The
 parent-death guarantee is the pipe's, below, and a thread rather than the
 poll loop's business.
 
@@ -36,6 +39,13 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gh_rate_limit import RateLimited  # noqa: E402
+from gh_rate_limit import bare_complaint  # noqa: E402
+from gh_rate_limit import exhausted  # noqa: E402
+from gh_rate_limit import refusal_text  # noqa: E402
 
 GH_TIMEOUT = 120
 PAGE_SIZE = 100
@@ -96,19 +106,6 @@ class WaitExpired(RuntimeError):
         self.rate_limited = rate_limited
 
 
-class RateLimited(RuntimeError):
-    """A refusal carrying the instant to resume at, when it carries one.
-
-    A sibling of `QueryError`, never a subclass: a pause must be handled
-    before the failure path, and an `except QueryError` that caught this
-    too would turn a known wait back into the loud failure it is not.
-    """
-
-    def __init__(self, message, resume_at=None):
-        super().__init__(message)
-        self.resume_at = resume_at
-
-
 def _executable():
     """The `gh` to run: the fake in the suites, the real one elsewhere."""
     return os.environ.get('DAEDALUS_GH') or 'gh'
@@ -139,56 +136,12 @@ def _parse(text):
     raise QueryError('no header block in the gh response')
 
 
-def _resume_at(headers, now):
-    """The instant a refusal reported, preferring `Retry-After`."""
-    retry = headers.get('retry-after')
-    if retry and retry.lstrip('-').isdigit():
-        return now + int(retry)
-    reset = headers.get('x-ratelimit-reset')
-    if reset and reset.lstrip('-').isdigit():
-        return float(reset)
-    return None
-
-
-def _refused(status, headers, body):
-    """Whether an HTTP answer is a rate-limit refusal, and when to resume."""
-    if status not in (403, 429):
-        return False, None
-    resume = _resume_at(headers, time.time())
-    if resume is not None or 'rate limit' in body.lower():
-        return True, resume
-    return False, None
-
-
-def _graphql_refusal(payload):
-    """Whether a 200 body reports exhaustion in `errors[]`, and when to resume.
-
-    How GraphQL reports a throttled query: the transport succeeded, so the
-    evidence is the error's `type` and its `rateLimit` extension.
-    """
-    for error in payload.get('errors') or []:
-        if str(error.get('type') or '').upper() != 'RATE_LIMITED':
-            continue
-        extensions = error.get('extensions') or {}
-        rate = extensions.get('rateLimit') or {}
-        now = time.time()
-        reset = rate.get('resetAt') or extensions.get('resetAt')
-        if reset:
-            try:
-                iso = str(reset).replace('Z', '+00:00')
-                stamp = datetime.fromisoformat(iso)
-                return True, stamp.timestamp()
-            except ValueError:
-                pass
-        retry = rate.get('retryAfter') or extensions.get('retryAfter')
-        if isinstance(retry, (int, float)):
-            return True, now + retry
-        return True, None
-    return False, None
-
-
 def _call(query, variables):
     """One `gh api graphql`, payload on stdin, headers asked for.
+
+    What the run leaves behind is returned whole, a run that left nothing
+    on stdout included: whether a refusal is what it says is a question
+    about the evidence, and the evidence can be on either stream.
 
     The answer is read as bytes and decoded here: a text-mode read
     translates line endings a second time on a Windows relay, and each
@@ -204,33 +157,44 @@ def _call(query, variables):
             input=payload, capture_output=True, timeout=GH_TIMEOUT)
     except (subprocess.SubprocessError, OSError) as exc:
         raise QueryError(f'gh failed: {exc}') from exc
-    answered = proc.stdout.decode('utf-8', 'replace')
-    complained = proc.stderr.decode('utf-8', 'replace')
-    if not answered.strip():
-        detail = complained.strip()[:400] or f'gh exited {proc.returncode}'
-        raise QueryError(detail)
-    return proc.returncode, answered, complained
+    return (proc.returncode,
+            proc.stdout.decode('utf-8', 'replace'),
+            proc.stderr.decode('utf-8', 'replace'))
 
 
 def graphql(query, variables=None):
     """One page of a GraphQL query, fresh, no-cache, headers included."""
     code, answered, complained = _call(query, variables)
+    if not answered.strip():
+        # `gh` refused before the transport produced a response, so there
+        # is no status and no header block to read and the complaint is
+        # the only carrier there is. `bare_complaint` is what that carrier
+        # can be, and a complaint naming no limit is the plain failure an
+        # empty stdout has always been.
+        found = bare_complaint(complained)
+        if found is not None:
+            raise found
+        raise QueryError(complained.strip()[:400] or f'gh exited {code}')
     status, headers, body = _parse(answered)
-    refused, resume = _refused(status, headers, body)
-    if refused:
-        raise RateLimited(f'HTTP {status}: {body.strip()[:200]}', resume)
-    if code != 0 or status >= 400:
-        detail = (complained or body).strip()[:400] or f'HTTP {status}'
-        raise QueryError(detail)
+    # Read before the exit code is judged, not after: the body is one of
+    # the carriers, and on a throttled query the code says 1 while the
+    # body says everything (issue 1338).
     try:
         payload = json.loads(body)
     except ValueError as exc:
-        raise QueryError(f'unparseable gh output: {exc}') from exc
+        payload, unparseable = None, exc
+    else:
+        unparseable = None
+    refused, resume = exhausted(status, headers, body, complained, payload)
+    if refused:
+        raise RateLimited(refusal_text(status, body, complained), resume)
+    if code != 0 or status >= 400:
+        detail = (complained or body).strip()[:400] or f'HTTP {status}'
+        raise QueryError(detail)
+    if unparseable is not None:
+        raise QueryError(f'unparseable gh output: {unparseable}')
     if not isinstance(payload, dict):
         raise QueryError('the gh response is not a JSON object')
-    refused, resume = _graphql_refusal(payload)
-    if refused:
-        raise RateLimited('GraphQL rate limit exceeded', resume)
     data = payload.get('data')
     if not isinstance(data, dict):
         raise QueryError(f'no data in the gh response: '

@@ -401,9 +401,15 @@ failures to it - because a watcher that has gone blind must not look like a
 quiet pull request. CI announces success and failure alike, and re-resolves
 the branch head every poll since a push moves it.
 
-**A rate-limit refusal is a wait, not a failure.** Each watcher says once
-where it is waiting - the instant the API reported as `X-RateLimit-Reset` or
-`Retry-After` - and resumes at that reset rather than retrying every interval,
+**A rate-limit refusal is a wait, not a failure.** Whether an answer IS a
+refusal is a question about the EVIDENCE it carries - a `Retry-After`; an
+`X-RateLimit-Reset` beside a spent `X-Ratelimit-Remaining`; a GraphQL
+`errors[]` entry naming a rate limit in its `type` or its `code`; or what
+`gh` wrote to stderr - and not about the status or the exit code. A
+throttled query answers **200** and exits **1**, so a reader that waits on
+either of those never reaches the evidence. Each watcher then says once
+where it is waiting - the instant the API reported, or a minute when it
+reported none - and resumes there rather than retrying every interval,
 which is what used to keep the limit at zero after it was reached. A 403
 with no rate-limit evidence is an ordinary failure and is never a pause.
 
@@ -448,7 +454,11 @@ concluded acceptably and none of them is a `tests` run, so this head is not
 certified - no merge is claimed, because this is reached with a pull
 request, without one, and on a branch of its own. A rate-limit refusal is
 the one exception to exit 3: it is a known wait, so it pauses until the
-reset and polls again, bounded by the same `--timeout`.
+reset and polls again, bounded by the same `--timeout` - and a bound
+reached inside such a pause is still exit 2, never 3. The refusal is
+recognised from the evidence the answer carries, not from the status or
+the exit code, because GitHub really does answer a throttled query with a
+200 and an exit 1 (issue 1338).
 
 **Exit 4 exists because "every run that happened to exist passed" is not
 "every run that should exist did"** (issue #1217, PR #1122 head

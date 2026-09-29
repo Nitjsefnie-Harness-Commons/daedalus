@@ -22,6 +22,10 @@ TICK = 2
 # control is checked against the bound the idle controls enforce.
 IDLE_POLL_BOUND = 1
 STAMP = '%Y-%m-%dT%H:%M:%SZ'
+# What `gh` writes to stderr when it refuses a throttled query, and what
+# the GraphQL entry beside it says. One wording, two carriers, so a
+# control can separate them.
+THROTTLED = 'API rate limit already exceeded for user ID 1.'
 
 
 def page_info(has_next=False, cursor=None):
@@ -114,6 +118,63 @@ def rate_limited_error(reset_at=None, retry_after=None):
     return {'status': 200, 'body': {'data': None, 'errors': [
         {'type': 'RATE_LIMITED', 'message': 'API rate limit exceeded.',
          'extensions': {'rateLimit': rate}}]}}
+
+
+def spent_headers(reset_epoch, resource='graphql'):
+    """The rate-limit headers a throttled answer carries, and nothing else."""
+    return {'X-RateLimit-Limit': '5000', 'X-Ratelimit-Remaining': '0',
+            'X-Ratelimit-Reset': str(reset_epoch),
+            'X-Ratelimit-Resource': resource}
+
+
+def spent_limit_response(reset_epoch, body=None, exit=1, stderr=None):
+    """A refusal whose ONLY evidence is the spent rate-limit headers.
+
+    Beside `refusal_response`, and the shape GitHub really sends for a
+    throttled query (issue 1338): a status the transport is satisfied
+    with, `X-Ratelimit-Remaining: 0` beside the reset it counts down to,
+    and a body naming no limit at all. A reader that believes only the
+    body, or that raises over the exit code before reading anything, does
+    not see this one.
+
+    `body` is whatever the transport managed to write, `None` for a JSON
+    answer with no data in it; `stderr` is `gh`'s own complaint, and
+    leaving it out models a run that exits nonzero in silence.
+    """
+    return {'status': 200, 'headers': spent_headers(reset_epoch),
+            'body': {'data': None} if body is None else body,
+            'exit': exit, 'stderr': stderr}
+
+
+def throttled_query(reset_epoch=None, reset_at=None, exit=1, stderr=None,
+                    kind: str | None = 'RATE_LIMIT',
+                    code: str | None = 'graphql_rate_limit',
+                    message=THROTTLED):
+    """The 200 GitHub answers a throttled GraphQL query with.
+
+    Beside `rate_limited_error`, and the refusal captured on 2026-09-29
+    with `gh api -i graphql` (issue 1338): the transport succeeds, the
+    entry names the limit in a `type` of `RATE_LIMIT` and a `code` of
+    `graphql_rate_limit`, and `gh` exits 1 with the message on stderr.
+
+    Every axis is separable, which is what lets a control for one of them
+    be a control rather than a second copy of the same evidence: no
+    `reset_epoch` leaves the header axis out, `kind`/`code` of `None`
+    leave the body axis out, `stderr=''` leaves the complaint out and
+    `exit=0` the exit code. What is left is the shape a reader believing
+    only the named carriers can see, and nothing else.
+    """
+    rate = {}
+    if reset_at:
+        rate['resetAt'] = reset_at
+    error = {'message': message, 'extensions': {'rateLimit': rate}}
+    if kind is not None:
+        error['type'] = kind
+    if code is not None:
+        error['code'] = code
+    return {'status': 200, 'exit': exit, 'stderr': stderr,
+            'headers': spent_headers(reset_epoch) if reset_epoch else {},
+            'body': {'data': None, 'errors': [error]}}
 
 
 def base_answers():

@@ -102,9 +102,10 @@ def planted(directory, name, *splices):
     `(anchor, plant)` pair, and each anchor must occur exactly once so the
     plant lands where the control means it to. Taking the planted text back
     out must give the tracked file byte for byte, which is what says no
-    other line moved along with the plant. The copy carries `gh_client`
+    other line moved along with the plant. The copies carry the client
     beside it, because a script puts its own directory on `sys.path` and
-    imports from there.
+    imports from there - and the client imports the reader beside it, so
+    a tree holding one of the two is a tree whose watcher cannot start.
     """
     tracked = (SKILL / name).read_text(encoding='utf-8')
     text = tracked
@@ -120,6 +121,7 @@ def planted(directory, name, *splices):
         written = written.replace(plant, '', 1)
     assert written == tracked, name
     shutil.copy(SKILL / 'gh_client.py', here / 'gh_client.py')
+    shutil.copy(SKILL / 'gh_rate_limit.py', here / 'gh_rate_limit.py')
     return script
 
 
