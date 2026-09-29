@@ -7,12 +7,14 @@ bound to a name first contributed no tracked key at all and the payload
 read as one carrying no `tab`. That is fail-open: the send is real and the
 guard says nothing about it.
 
-`payload_key` folds the position instead of refusing it, and the fold
-decides the verdict, because the three answers are three different
-runtimes. A string names a tracked key. A non-string literal is provably
-not `'tab'` and names none. An expression that will not fold names none
-without becoming opaque, which is what keeps the discriminating rows
-clean instead of over-reported.
+`payload_literal_key` folds the position instead of refusing it, and
+the fold decides the verdict, because the three answers are three
+different runtimes. A string names a tracked key. A non-string literal
+is provably not `'tab'` and names none. An expression that will not
+fold names none without becoming opaque, which is what keeps the
+discriminating rows clean instead of over-reported. That is a claim
+about what this reader resolves and not about the runtime - the shapes
+a compile-time fold resolves there are #1352.
 
 Every row states the RUNTIME truth beside the guard verdict, and the
 truth is not a claim about the row: each module is executed and the
@@ -117,7 +119,7 @@ _ROWS = [
 # The boundary this change does not cross. `state.literals` is empty in a
 # nested body, so a binding made OUTSIDE the body that reads the key is
 # not resolved, and the container model's `_literal_key` reads the same
-# table under the same boundary. Each of these three DOES reach the
+# table under the same boundary. Each row below DOES reach the
 # sender carrying a real `tab` - the truth is stated here because the
 # guard cannot see it, which is what makes them a separate defect and
 # not a member this change claims to close.
