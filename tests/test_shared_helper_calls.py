@@ -232,7 +232,7 @@ def test_the_unjudged_scan_reports_a_known_omission(tmp):
     "judged" from "not judged": an assembly that drops a scope's header
     is one this scan reports and the whole tree says nothing about.
     """
-    from _unjudged_scan import scan
+    from _unjudged_scan import unjudged_sites
     from _control_writes import _ModuleJudgement
 
     root = Path(tmp)
@@ -241,13 +241,13 @@ def test_the_unjudged_scan_reports_a_known_omission(tmp):
               'def _helper(tmp):\n    return _C\n')
     _plant(root, helper, _HELPER_CALL + _CALLS_HELPER)
     control = 'test_control.py'
-    assert scan(root, [control]) == [], 'the scan found a hole in a whole ' \
-        'assembly'
+    assert unjudged_sites(root, [control]) == [], \
+        'the scan found a hole in a whole assembly'
     original = _ModuleJudgement.judge_scope
     _ModuleJudgement.judge_scope = (
         lambda self, scope, seeding: self.judge(scope, seeding))
     try:
-        blind = scan(root, [control])
+        blind = unjudged_sites(root, [control])
     finally:
         _ModuleJudgement.judge_scope = original
     assert [site[:2] for site in blind] == [
