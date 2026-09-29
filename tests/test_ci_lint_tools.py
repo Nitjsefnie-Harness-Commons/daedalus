@@ -69,7 +69,6 @@ ROOT = _util.ROOT
 #   The control that would need it is a workflow control resolving each
 #   `run:` path against a checkout layout, which does not exist here.
 INSTALLER_PATH = 'scripts/ci/install_lint_tools.py'
-INSTALLER_PATH = 'scripts/ci/install_lint_tools.py'
 LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 INSTALLER_SOURCE = ROOT / INSTALLER_PATH
 # The doors that reach the suites without FINDING them: a fixed list of
