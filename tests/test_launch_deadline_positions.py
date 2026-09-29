@@ -205,6 +205,7 @@ def test_a_bare_assert_message_is_proven_and_a_nested_one_is_not(tmp):
     A bare Name gets that exemption; nothing nested under the message does.
     """
     del tmp
+
     def rows_for(message):
         source = ('def run_gate(box, url, timeout):\n'
                   '    box.append(1)\n'
