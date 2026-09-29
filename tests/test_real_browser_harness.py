@@ -140,42 +140,6 @@ def _successful_run_recorder(recorded):
     return run
 
 
-def test_the_cdp_harness_site_reports_its_own_stalled_child(tmp):
-    """A wedged CDP child is the site's own named failure, not a hang.
-
-    The child is real, it writes a line and then holds its event loop open,
-    and the deadline is the site's own composed figure rather than a
-    shortened one — a control that proved a different number would be
-    proving nothing about this site.
-
-    The bound is held from outside for the reason beside its chain, and the
-    child announces a pid because a bound with nothing to kill only reports.
-    Node itself is not re-checked here: the control above names its own
-    absence by name.
-    """
-    pid_file = Path(tmp) / 'cdp.pid'
-    stalling = (announcing_pid(pid_file) + '\n'
-                "process.stdout.write('cdp spoke\\n');"
-                'setInterval(()=>{},1000);')
-    caught = None
-    try:
-        with mock.patch.object(_evalpages, 'CDP_CALL_HARNESS', stalling), \
-                outer_bound(OUTER_BOUND_S, pid_file, 'the CDP call site'):
-            try:
-                test_cdp_harness_uses_passed_deadline(tmp)
-            except NodeBoundExceeded as failure:
-                caught = failure
-    except OuterBoundExpired as wedged:
-        raise AssertionError(
-            'the outer bound fired: the CDP child wedged and nothing in the '
-            'suite ended it, which is what this control exists to prevent'
-        ) from wedged
-    assert caught is not None, 'the wedged CDP harness finished'
-    assert caught.deadline_s == CDP_HARNESS_DEADLINE_S, caught.deadline_s
-    assert 'cdp spoke' in caught.stdout, caught.stdout
-    assert isinstance(caught.stdout, str), type(caught.stdout)
-
-
 def test_browser_launch_passes_basic_password_store_flag(tmp):
     def stop_after_launch(profile, process, declared_worker):
         assert Path(profile) == Path(tmp) / 'chromium-profile', profile
@@ -255,6 +219,42 @@ global.clearTimeout = () => {};
         result.returncode, result.stdout, result.stderr)
     assert result.stdout == '4321', result.stdout
     assert result.stderr == '', result.stderr
+
+
+def test_the_cdp_harness_site_reports_its_own_stalled_child(tmp):
+    """A wedged CDP child is the site's own named failure, not a hang.
+
+    The child is real, it writes a line and then holds its event loop open,
+    and the deadline is the site's own composed figure rather than a
+    shortened one — a control that proved a different number would be
+    proving nothing about this site.
+
+    The bound is held from outside for the reason beside its chain, and the
+    child announces a pid because a bound with nothing to kill only reports.
+    Node itself is not re-checked here: the control above names its own
+    absence by name.
+    """
+    pid_file = Path(tmp) / 'cdp.pid'
+    stalling = (announcing_pid(pid_file) + '\n'
+                "process.stdout.write('cdp spoke\\n');"
+                'setInterval(()=>{},1000);')
+    caught = None
+    try:
+        with mock.patch.object(_evalpages, 'CDP_CALL_HARNESS', stalling), \
+                outer_bound(OUTER_BOUND_S, pid_file, 'the CDP call site'):
+            try:
+                test_cdp_harness_uses_passed_deadline(tmp)
+            except NodeBoundExceeded as failure:
+                caught = failure
+    except OuterBoundExpired as wedged:
+        raise AssertionError(
+            'the outer bound fired: the CDP child wedged and nothing in the '
+            'suite ended it, which is what this control exists to prevent'
+        ) from wedged
+    assert caught is not None, 'the wedged CDP harness finished'
+    assert caught.deadline_s == CDP_HARNESS_DEADLINE_S, caught.deadline_s
+    assert 'cdp spoke' in caught.stdout, caught.stdout
+    assert isinstance(caught.stdout, str), type(caught.stdout)
 
 
 def test_fixture_converts_only_post_configuration_environment_skips(tmp):

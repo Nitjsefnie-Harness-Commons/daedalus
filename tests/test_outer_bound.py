@@ -257,6 +257,48 @@ def _asks_the_platform(function):
         for node in ast.walk(function))
 
 
+def _platform_decided(tree, function):
+    """Whether something above `function` already asked which platform this is.
+
+    The reach is a defect when NOTHING has said. A function may say it
+    itself, which is the shape the tripwire was written for; but the
+    question can also be asked one or two levels up, at the only place that
+    can answer it — the caller that guards the call, or the function that
+    hands the body to the platform rather than calling it. That is the shape
+    `tests/test_plant_restore.py` arrived with when this branch rebased onto
+    a base carrying it: the privilege drop is reached only where
+    `hasattr(os, 'geteuid')` has already said the platform can do it, and
+    a rule that cannot follow the chain manufactures a red on correct code,
+    which is the same defect as one that passes on broken code.
+
+    The walk stops the moment a function asks, and gives up rather than
+    guesses at anything else: a reference nobody holds, a reach nobody
+    guards, or a cycle with no question in it. So the defect the tripwire
+    exists for is still named — the two suites that armed `SIGALRM` did it
+    from a chain on which nothing asks.
+    """
+    seen = set()
+    pending = [function]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            return False
+        seen.add(id(current))
+        if _asks_the_platform(current):
+            continue
+        holders = {
+            id(holder): holder
+            for holder in (
+                _innermost_def(tree, node)
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Name) and node.id == current.name)
+            if holder is not None}
+        if not holders:
+            return False
+        pending.extend(holders.values())
+    return True
+
+
 def _posix_only_uses(tree):
     """Every POSIX-only attribute read the platform rule would refuse.
 
@@ -273,7 +315,7 @@ def _posix_only_uses(tree):
         if members is None or node.attr not in members:
             continue
         function = _innermost_def(tree, node)
-        if function is not None and _asks_the_platform(function):
+        if function is not None and _platform_decided(tree, function):
             continue
         yield node.lineno, f'{node.value.id}.{node.attr}'
 
@@ -310,6 +352,31 @@ def test_the_platform_rule_names_an_unguarded_read_and_spares_a_guarded_one(
         '    return os.getpid()\n')
     assert list(_posix_only_uses(portable)) == [], (
         list(_posix_only_uses(portable)))
+    # The question asked at the CALL SITE rather than inside the function
+    # that reaches the API, which is the shape `tests/test_plant_restore.py`
+    # arrived with after this branch rebased onto a base carrying it: the
+    # privilege drop is only reached where `hasattr(os, 'geteuid')` has
+    # already said the platform can do it.
+    called_from_a_guard = ast.parse(
+        'import os, sys, subprocess\n'
+        'def drop():\n'
+        '    os.setgid(65534)\n'
+        'def run():\n'
+        '    if hasattr(os, "geteuid"):\n'
+        '        return subprocess.run(["x"], preexec_fn=drop)\n'
+        '    return None\n')
+    assert list(_posix_only_uses(called_from_a_guard)) == [], (
+        list(_posix_only_uses(called_from_a_guard)))
+    # And the same body called from a site that asks nothing is still named,
+    # or the exemption would be a hole rather than a reading.
+    unguarded_caller = ast.parse(
+        'import os, subprocess\n'
+        'def drop():\n'
+        '    os.setgid(65534)\n'
+        'def run():\n'
+        '    return subprocess.run(["x"], preexec_fn=drop)\n')
+    assert list(_posix_only_uses(unguarded_caller)) == [(3, 'os.setgid')], (
+        list(_posix_only_uses(unguarded_caller)))
 
 
 def test_no_posix_only_api_sits_in_a_function_that_never_asks_the_platform(
