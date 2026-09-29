@@ -368,16 +368,27 @@ def test_no_job_reaches_the_suites_by_a_door_this_control_does_not_name(tmp):
 def test_every_tool_the_installer_recorded_resolves_on_path(tmp):
     """What the installer says it installed has to be there afterwards.
 
-    Gated on the variable the installer writes, so this reaches the three
-    suite jobs and nowhere else; off a CI leg the installer has not run and
-    there is no subject to check. A leg where it DID run and the binary is
-    still missing fails below rather than skipping — the whole defect is a
-    check that reported success having verified nothing.
+    Gated on the variable the installer writes, so this reaches the `suites`,
+    `coverage-matrix` and `publish` jobs in `tests.yml` and `release.yml`,
+    and the `timed` job in `tests.yml`, and nowhere else: those four are
+    the jobs whose steps run `python scripts/ci/install_lint_tools.py`.
+    Off a CI leg the installer has not run and there is no subject to
+    check. A leg where it DID run and the binary is still missing fails
+    below rather than skipping — the whole defect is a check that reported
+    success having verified nothing.
+
+    The early return is a SKIP carrying its reason, not a bare pass. A run
+    log has to distinguish "ran, and every tool resolved" from "did not
+    run", and a control whose subject is this branch's whole motivation
+    cannot be the one that reports nothing about itself.
     """
     del tmp
     recorded = os.environ.get(LINT_TOOLS_ENV)
     if recorded is None:
-        return
+        _util.skip(
+            f'${LINT_TOOLS_ENV} is unset, so the installer has not run on '
+            'this leg and there is nothing recorded to resolve; the static '
+            'halves of this file still gate')
     _require_resolvable(tuple(tool for tool in recorded.split(',') if tool))
 
 
