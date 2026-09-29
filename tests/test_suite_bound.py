@@ -15,7 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    coverage_group, coverage_tree, kill_recorded, records, settle_gone)
+    FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING, REQUESTED_THEN_GRACED,
+    TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
+    records, settle_gone)
 from _repo import ROOT, iter_tree_files  # noqa: E402
 
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
@@ -169,12 +171,24 @@ def test_a_fast_suite_is_measured_and_not_reported_as_timed_out(tmp):
     assert result.stderr == '', result.stderr
 
 
-def test_a_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
-    """The kill asks first, so a suite that flushes on SIGTERM still does.
+def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
+    """Which contract the launcher gives on THIS platform, asserted as such.
 
-    `pyproject.toml` sets `sigterm = true` for exactly this: a terminated
-    suite still writes what it measured. A launcher that SIGKILLs first
-    takes that away, and nothing else in the tree would notice.
+    POSIX: the suite is asked to stop, gets a bounded grace, and is killed
+    only if it does not comply -- so a suite that flushes on the request
+    keeps what it measured, and the record has to say the request was made
+    and taken. `pyproject.toml` sets `sigterm = true` for that.
+
+    Windows: the route is one `taskkill /F /T`, a forced termination. No
+    request, no grace, nothing flushes, and the record says that rather
+    than leaving a reader to infer a graceful path ran. That is the
+    pre-branch Windows behaviour, which this branch did not change.
+
+    Both halves are asserted and each REFUSES the other platform's clause.
+    A control that skipped on Windows would leave that platform with
+    nothing asserting what it actually does, and one that asserted the
+    POSIX contract there would be a red leg that teaches nothing -- which
+    is what CI reported on 2026-09-29.
     """
     marker = Path(tmp) / 'tree' / 'tests' / 'stopped.pid'
     try:
@@ -185,18 +199,28 @@ def test_a_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
         kill_recorded(marker)
     group = coverage_group(result.stdout, 'test_wedged.py')
     record = _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
+    assert TREE_WAS_KILLED in record['cleanup'], record
+    if FORCES_WITHOUT_ASKING:
+        assert not marker.exists(), (
+            'a forced taskkill sent no request, so this suite cannot have '
+            f'flushed; the record says: {record}')
+        assert FORCED_WITHOUT_GRACE in record['cleanup'], record
+        assert REQUESTED_THEN_GRACED not in record['cleanup'], record
+        assert int(record['returncode']) != 0, record
+        return
     assert marker.exists(), (
         f'the suite was killed rather than asked to stop, so it flushed '
         f'nothing; the record says returncode {record["returncode"]}')
     assert 'suite was asked to stop and flushed' in group, group
     assert int(record['returncode']) == 0, record
     # The cleanup has to say the suite TOOK THE REQUEST. Asserting the
-    # route alone -- `process group` -- is satisfied by the record a suite
-    # that ignored the request and was killed also produces, so a grace
-    # that asked the wrong subject, or a group that was never signalled at
-    # all, would both pass it. The two records differ here and nowhere a
-    # looser pin can see.
-    assert 'asked to stop and the suite did' in record['cleanup'], record
+    # route alone is satisfied by the record a suite that ignored the
+    # request and was killed also produces, so a grace that asked the
+    # wrong subject, or a group that was never signalled at all, would
+    # both pass it. The two records differ here and nowhere a looser pin
+    # can see.
+    assert REQUESTED_THEN_GRACED in record['cleanup'], record
+    assert FORCED_WITHOUT_GRACE not in record['cleanup'], record
 
 
 def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
@@ -209,9 +233,14 @@ def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
     finally:
         kill_recorded(recorded)
     group = coverage_group(result.stdout, 'test_wedged.py')
-    route = 'taskkill' if sys.platform == 'win32' else 'process group'
-    assert route in group, (
-        f'the record does not name the {route} route the kill took: {group}')
+    assert TREE_WAS_KILLED in group, (
+        f'the record does not name the {TREE_WAS_KILLED} route the kill '
+        f'took: {group}')
+    clause = (FORCED_WITHOUT_GRACE if FORCES_WITHOUT_ASKING
+              else REQUESTED_THEN_GRACED)
+    assert clause in group, (
+        f'the record does not name what that route does about asking: '
+        f'{group}')
 
 
 def test_a_timed_out_suites_own_child_does_not_survive_it(tmp):
