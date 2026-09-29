@@ -95,22 +95,22 @@ re-run then cleared. Issue #1249 is a head on which the older failure
 outvoted the newer green; with no newer sibling a run is judged as it
 stands, so a deliberate cancel and an unretried failure both still fail.
 
-Discarding a failure is what that rule costs, so the discard is never
-silent: the acceptable line names every run the filter dropped, with its
-workflow, its run id, its conclusion and its URL, and its count is the
-number of lines printed. The filter is `ci_gate`'s, and so is the
-required-workflow check that applies it, so a superseded run's name cannot
-satisfy the gate and this tool and `watch_all.py` cannot answer the same
-question differently (issue #1262). It is NOT applied to a published check
-run: a publisher PATCHes the check it POSTed rather than adding a second
-one. The runs and the check runs come off one walk of the commit's check
-suites, which is `gh_client`'s subject.
+Discarding a failure is what that rule costs, so the acceptable line
+names every run the filter dropped, with its workflow, its run id, its
+conclusion and its URL, and its count is the number of lines printed.
+The filter is `ci_gate`'s, and so is the check that applies it, so a
+superseded run's name cannot satisfy the gate and this tool and
+`watch_all.py` cannot answer differently (issue #1262). It is NOT
+applied to a check run: a publisher PATCHes the one it POSTed.
+
+This file is AT the 500 ceiling, the room made by cutting prose, which
+cannot be repeated. There is NO SEAM in it - one tool, one contract - so
+the next change is a trim, or a relocation to a module this did not.
 
 Run --once before a long wait; it prints the matrix AND the check runs to
 stderr and exits 0 when the query succeeded, `state: incomplete` included,
-because a trial call is not a verdict. A rejected argument or a failed query
-exits 3, and the argument refusals are read before this branch, so they
-answer --once too.
+because a trial call is not a verdict. A rejected argument or a failed
+query exits 3, and the refusals are read before this branch.
 """
 
 import argparse
