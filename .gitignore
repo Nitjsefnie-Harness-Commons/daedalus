@@ -459,6 +459,7 @@
 !/tests/_stdlib_read.py
 !/tests/_step_ceiling.py
 !/tests/_stream_fake.py
+!/tests/_suite_jobs.py
 !/tests/_sweep_launch_scan.py
 !/tests/_tabroute_focus.py
 !/tests/_tabroute_selections.py
