@@ -186,7 +186,7 @@ def graphql(query, variables=None):
         payload, unparseable = None, exc
     else:
         unparseable = None
-    ok = delivered(code, answered, payload)
+    ok = delivered(code, payload)
     refused, resume = exhausted(status, headers, body, complained, payload,
                                 ok)
     if refused:
