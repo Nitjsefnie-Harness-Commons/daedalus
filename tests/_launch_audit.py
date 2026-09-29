@@ -15,15 +15,16 @@ binds and the analyser read, or an attribute chain from a dotted stdlib
 import the module has not rebound. A receiver the analyser cannot
 prove is never passed over, so a bounded git launch reaches the tree
 only as a refusal, an allowance row, or the interpreter's own code.
-Only the argv and head reading lives in `_argv_read.py`, which binds no
-configuration of its own.
+Only the argv and head reading lives in `_argv_read.py` and what the
+standard library itself says in `_stdlib_read.py`, neither of which
+binds configuration of its own.
 """
 import ast
-import inspect
-import subprocess
 import sys
 
 from _argv_read import ArgvReader
+from _stdlib_read import (
+    _LAUNCH_KEYWORDS, _STDLIB_LAUNCH_ROOTS, _dotted_stdlib_root)
 
 CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
@@ -51,21 +52,6 @@ def _parameters(node):
             names.add(extra.arg)
     return names
 
-
-def _launch_keywords():
-    """What a launch may legitimately be handed, read from the stdlib.
-
-    From `inspect.signature` rather than a list, so a keyword a future
-    interpreter adds is admitted and a misspelling is a refusal rather
-    than a silent pass. A hand list made `pipesize` a false red once.
-    """
-    popen = inspect.signature(
-        subprocess.__dict__['Popen'].__init__).parameters
-    run = inspect.signature(subprocess.__dict__['run']).parameters
-    return frozenset(popen) | frozenset(run)
-
-
-_LAUNCH_KEYWORDS = _launch_keywords()
 
 
 def launch_refusals(source, here, bound_sink=None):
@@ -677,24 +663,3 @@ def bound_sites(source, here):
     launch_refusals(source, here, bound_sink=sink)
     return sink
 
-
-# The stdlib roots an attribute chain is refused on: each is a PACKAGE
-# whose submodule reaches a launch or a child wait (asyncio.subprocess,
-# concurrent.futures, multiprocessing.connection, os.popen), and each
-# has a row that can execute. `shutil` and `pty` are not packages, so the
-# limb is unreachable through either. `subprocess` needs no entry: the
-# limb DOES return it for `import subprocess.spawn`, but every
-# `subprocess.x(...)` call is placed before the unplaced arm reads it.
-_STDLIB_LAUNCH_ROOTS = frozenset(
-    {'asyncio', 'concurrent', 'multiprocessing', 'os'})
-
-
-def _dotted_stdlib_root(receiver, dotted_roots):
-    """The stdlib root this attribute chain is spelled from, or None."""
-    while isinstance(receiver, ast.Attribute):
-        receiver = receiver.value
-    if isinstance(receiver, ast.Name) and receiver.id in dotted_roots \
-            and receiver.id in sys.stdlib_module_names \
-            and receiver.id not in _STDLIB_LAUNCH_ROOTS:
-        return receiver.id
-    return None
