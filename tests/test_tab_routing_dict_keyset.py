@@ -7,10 +7,18 @@ key it knows is absent really is absent. When it cannot -- an unknown length
 with no unknown-key slot standing for what it never learned -- a read may
 select anything the unenumerated part carried, so it joins instead of
 answering "nothing". Two kinds of key are in that state: one the model never
-recorded, and one it recorded BEFORE the store that lost the count, whose
-recorded value that store may since have replaced. A key written after that
-store is untouched by it and keeps its recorded value. Answering a value a
-store has replaced is the silent outcome this suite exists to police.
+recorded, and one it recorded BEFORE a store that could not read its source,
+whose recorded value that store may since have replaced. A key written after
+that store is untouched by it and keeps its recorded value. Answering a value
+a store has replaced is the silent outcome this suite exists to police.
+
+**What counts as a store that cannot read its source.** Only a source the
+model has no account of: a user call, `vars(args)`, a source reached through a
+name, a starred positional. A source whose PAIRS ITS OWN SYNTAX SPELLS is
+read -- a `zip` of two equal-length literal columns pairs them by position,
+and a single-argument sequence wrapper spells them one layer down -- so a
+store that folds one writes keys the model can name and retires nothing. That
+is what puts every `_AXES` row at a clean `(0, 0)`.
 
 **The census is not a closed set.** `_AXES` is the census: one member per
 way a tracked dict acquires a key the model did not learn, driven from the
@@ -320,15 +328,14 @@ _CONTAINER_READS = ('get', 'setdefault')
 _SUBSCRIPT = ('subscript',)
 _ALL_READS = tuple(sorted(_READS))
 
-# The rest of the domain, at the polarity that still reads silent. A source
-# the model folds and then loses: the read answers the recorded value or its
-# own default, so a `relay()` the runtime really does call is reported
-# nothing. Each names the issue it is parked against, or `None` where the
-# filing is still with the maintainer. The table is what the branch
-# measured, not a closed set, so a member of the domain it does not carry is
-# a silent read nothing here watches; the docstring says what that costs. The
-# fourth field is the clean cost of the read forms the member does NOT name,
-# which its own shape already reports through.
+# The rest of the domain, at the polarity that still reads silent: the read
+# answers the recorded value or its own default, so a `relay()` the runtime
+# really does call is reported nothing. Each names the issue it is parked
+# against. The table is what the branch measured, not a closed set, so a
+# member of the domain it does not carry is a silent read nothing here
+# watches; the docstring says what that costs. The fourth field is the clean
+# cost of the read forms the member does NOT name, which its own shape
+# already reports through.
 _SILENT = {
     # A positional source reached through a star, so the container answers
     # the subscript from the fold and joins the two container reads instead.
