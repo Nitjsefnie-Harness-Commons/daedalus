@@ -86,7 +86,7 @@ SECONDARY_CONTROLLED = {
 # The closure claim is a GRANULARITY claim, so it is stated with one. The
 # spelling-independent marker is every `if`/`elif`/`while`/`return` header
 # plus each disjunct of a multi-line condition (the granularity the table
-# already uses for :534 and :558), and a clause inside a listed arm's
+# already uses for :532 and :556), and a clause inside a listed arm's
 # SPAN is that arm. `return` is in it because the table treats one as a
 # member (`pf.fallthrough` is `drop_stmt` on one).
 #
@@ -98,9 +98,9 @@ SECONDARY_CONTROLLED = {
 # (seven): a last statement, or one only caller reads for membership
 # or truthiness.
 #
-# The two finer clauses sit INSIDE a listed arm: :572 is the `**`-unpack
-# operand of `ub.not-bounded` (:571) and _argv_read.py:212 the `seen`
-# operand of `rs.guard` (:202). The table splits :534 and :558 per
+# The two finer clauses sit INSIDE a listed arm: :570 is the `**`-unpack
+# operand of `ub.not-bounded` (:569) and _argv_read.py:212 the `seen`
+# operand of `rs.guard` (:202). The table splits :532 and :556 per
 # operand and leaves these whole, a spelling difference, not a gap.
 # `tests/test_launch_arms.py` re-derives it and refuses a non-member
 # this tuple does not name.
@@ -135,20 +135,20 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 398, 'MERGED',
      'the head of a one-member chain; :400 ch.machinery-member is its '
      'only member and is listed'),
-    ('_launch_audit.py', 577, 'INERT',
+    ('_launch_audit.py', 575, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 596, 'CONTROLLED',
+    ('_launch_audit.py', 594, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 663, 'CONTROLLED',
+    ('_launch_audit.py', 661, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 680, 'CONTROLLED',
+    ('_launch_audit.py', 678, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     # The chain limb and the root predicate it reads, recorded here
     # rather than in the enumeration for the reason above.
-    ('_launch_audit.py', 515, 'CONTROLLED',
+    ('_launch_audit.py', 513, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 517, 'CONTROLLED',
+    ('_launch_audit.py', 515, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 694, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
