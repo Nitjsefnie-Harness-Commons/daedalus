@@ -9,16 +9,13 @@ arrive as a failed query and escalate, and now it waits instead, so the
 counter's behaviour across a pause is a behaviour change with no witness
 until there is one.
 
-The control is the escalation line itself, and the LINE is not enough to
-tell a counted pause from an uncounted one: a pause that reached the
-counter is still answer #1, and the escalation still fires at the same
-threshold. So each row says WHICH failure came first. One row - the CI
-one - has the negative
-beside it: the same run with the pause removed escalates at the same
-number, so the pause is the only difference between them. The comment
-watcher does not, because its own negative is the same shape with a
-different query, and repeating it would measure the fixture rather than
-the watcher.
+The escalation LINE cannot tell a counted pause from an uncounted one -
+a pause that reached the counter is still answer #1, and the escalation
+still fires at the same threshold - so each row says WHICH failure came
+first. The CI row has its negative beside it, the same run without the
+pause, so the pause is the only difference between them; the comment
+watcher does not, because its own negative is that shape with a
+different query and repeating it would measure the fixture.
 """
 import subprocess
 import sys
@@ -57,10 +54,7 @@ def _reports_the_escalation(line):
     return 'consecutive failures' in line
 
 
-# The bound a stderr wait gives up after. The same figure
-# `await_gone` uses, and for the same reason: a child that is alive and
-# printing reaches its state in well under it, and a child that never
-# does must not hold the suite open.
+# The bound a stderr wait gives up after: the figure `await_gone` uses.
 BACKSTOP = 90
 
 
@@ -74,14 +68,12 @@ class _SlowStream(waits.Stream):
     moment the escalation reaches stdout, and lets every later line
     through at the drain's own speed.
 
-    The lag has to be measured against the CHILD, not chosen: the
-    escalation is printed after `FAIL_ESCALATE` polls at the interval the
-    row asks for, so a drain that keeps pace is not a drain that is
-    behind. Two lags were tried and both passed an unsynchronised read -
-    a quarter of a second per line, then eight seconds - because the
-    child was slower than both. This one outlives the run, which is the
-    only lag that is a lag rather than a delay. That makes the row cost
-    about fifteen seconds, and it is the price of a control that can tell
+    The lag must outlive the CHILD's run, not merely be long: the
+    escalation is printed after `FAIL_ESCALATE` polls, so a lag shorter
+    than that is a drain that keeps pace and never a drain that is
+    behind. A quarter of a second per line, and then eight seconds, both
+    passed an unsynchronised read here for exactly that reason. The cost
+    is about fifteen seconds a run, and it buys a control that can tell
     the two reads apart.
     """
 
@@ -108,9 +100,7 @@ def _lagging_child(script, args, fake):
     Its own launch, and that duplication is the point: the harness's
     `ChildProcess` starts a stderr pump in its constructor, so swapping
     the Stream afterwards puts a SECOND reader on one pipe and the two
-    split the lines between them - a slower drain that is not slower at
-    all. A row that needs the drain to be the lag needs the launch to
-    say which one it is.
+    split the lines between them - a slower drain that is not slower.
     """
     argv = [sys.executable, '-u', str(SKILL / script)] + list(args)
     proc = subprocess.Popen(
@@ -173,14 +163,10 @@ def test_a_ci_pause_does_not_advance_the_failure_counter(tmp):
                           'the escalation line')
         line = _escalation_line(child)
         assert f'after {ESCALATE} consecutive failures' in line, line
-        # WHICH failure came first is what discriminates. The COUNT of
-        # them does not: a pause that reached the counter is still
-        # answer one, and the escalation still fires at the same number.
-        # The lines are waited for on stderr, because the escalation the
-        # wait above returns on is a STDOUT line and the two drains are
-        # independent - reading stderr straight after it is reading a
-        # view that may not have caught up, which is what a Windows cell
-        # of this branch caught.
+        # WHICH failure came first is what discriminates, and the COUNT
+        # of them is not - see this file's docstring. The read is on
+        # stderr because the escalation waited for above is a STDOUT
+        # line, and the two drains are independent.
         failed = _await_failed_polls(child.err, 1, 'the first failed poll')
         first = failed[0]
         assert 'not accessible' in first, first
@@ -192,15 +178,10 @@ def test_a_ci_pause_does_not_advance_the_failure_counter(tmp):
 
 
 def test_the_pause_row_holds_when_the_stderr_drain_falls_behind(tmp):
-    """The race, made repeatable, and the reason the wait is on stderr.
-
-    stdout and stderr are pumped on two INDEPENDENT threads, so how far
-    the stderr drain has caught up when a line arrives on stdout is a
-    property of the machine. This replaces that drain with one that lags
-    by a quarter of a second per line - what a loaded Windows cell does -
-    and drives the same row through it. A row that waits on the stderr
-    condition holds; a row that reads `child.err.lines` after the stdout
-    wait is looking at a view that is not there yet, and fails.
+    """The race, made repeatable, by driving the CI row through a drain
+    that has not caught up. It asserts both that an unsynchronised read
+    of that drain finds nothing and that the row still holds, so the
+    wait is what holds.
 
     It is a control for the CONTROL, which is the only kind that can
     witness a timing change: without it, "wait on the right stream" is
@@ -247,12 +228,11 @@ def test_the_same_ci_run_without_a_pause_escalates_at_the_same_number(tmp):
 
 
 def test_a_comment_pause_does_not_advance_the_failure_counter(tmp):
-    """`pr_comment_watch` escalates the same way, so it gets its own
-    witness rather than an inference from the sibling's control - and it
-    carries the assertion the sibling needed and did not have: that the
-    FIRST failed poll is the permission refusal rather than the pause.
-    Without it this row passed against a plant that let the pause reach
-    the counter.
+    """`pr_comment_watch` escalates the same way and gets its own
+    witness. It carries the assertion this file is about - the FIRST
+    failed poll is the permission refusal, not the pause - which it did
+    not have, and without it this row passed against a plant that let
+    the pause reach the counter.
     """
     answers = dict(idle_answers())
     pause = refusal_response(429, {'Retry-After': '1'})
