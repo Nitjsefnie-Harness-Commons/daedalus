@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
 """The binaries a suite skips on must be installed in every job that runs it.
 
-A suite that shells out to a real binary SKIPS when the binary is absent, and
-a skip is a pass to every runner and every aggregate. So a job without the
-binary is green having verified nothing, silently, on every leg — which is
-the shape issue 1353 was for actionlint and shellcheck.
+A suite that shells out to a real binary SKIPS when the binary is absent,
+and a skip is a pass to every runner and every aggregate. So a job without
+the binary is green having verified nothing, silently, on every leg — the
+shape issue 1353 was for actionlint and shellcheck.
 
-Both halves of that sentence are controls here. Which jobs run a suite is
-derived from what the jobs run, not from a list of their names; which tools
-the suites can skip on is derived from the suites' own source, not from a
-list. Nothing in either direction is maintained by hand except the residue
-the last control names, and that is a claim about the complement rather than
-another list to keep in step.
+Which jobs run a suite is derived from what the jobs run; which tools the
+suites can skip on is derived from the suites' own source. Nothing in
+either direction is maintained by hand except the residue one control
+names, and that is a claim about the complement rather than another list
+to keep in step. The job derivation is shared with the control already on
+that set, through `tests/_suite_jobs.py`.
 
-The derivation is not extended here: `_workflow_jobs` and `SUITE_RUNNERS`
-come from `test_type_errors.py`, whose control on the same job set already
-uses them, so the two controls cannot disagree about which jobs run suites.
-
-Every control is a guard, so a green run proves the tree still matches it and
-nothing more. The proof that it bites is a planted defect in a real target:
-the installer step removed from a real suite job, a skip arm added to a real
-suite for a binary nothing installs, and a suite-running job planted in a
-workflow this file never reads.
+Every control here is a guard: a green run proves the tree still matches
+it and nothing more. The proof that it bites is a planted defect in a
+real target — the installer step removed from a real suite job, a skip
+arm added to a real suite for a binary nothing installs, and a suite
+job planted in a workflow this file never reads.
 """
 import ast
 import os
