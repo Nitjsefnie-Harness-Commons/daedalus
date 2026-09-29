@@ -16,9 +16,16 @@ import _util  # noqa: E402
 from _actionlint import (_ACTIONLINT,  # noqa: E402
                          _assert_run_guard_both_ways,
                          _assert_unlaunchable_binary_is_a_refusal,
-                         _expanded_names, _job_step, _lint_refuses,
-                         _lint_skips, _lint_workflows, _pin, _planted_finding,
-                         _pinned_actionlint_version, _planted_workflow_tree)
+                         _job_step, _lint_refuses, _lint_skips,
+                         _lint_workflows, _pin, _planted_finding,
+                         _planted_workflow_tree,
+                         assert_empty_workflow_set_is_refused,
+                         assert_expansion_covers_both_extensions,
+                         assert_integration_platform_scoped,
+                         assert_lint_covered,
+                         assert_lint_step_covers_both_extensions,
+                         assert_other_version_is_refused,
+                         assert_pin_read_from_the_job)
 from _wffixtures import _refuses  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
@@ -272,18 +279,7 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
     workflow's own header says the other gates cannot catch.
     """
     del tmp
-    workflow = _tests_yml()
-    _, marker, after = workflow.partition('- name: actionlint\n')
-    assert marker, (
-        'the actionlint step is not named the way this test finds it')
-    step, _, _ = after.partition('- name: zizmor')
-    for pattern in ('.github/workflows/*.yml', '.github/workflows/*.yaml'):
-        assert pattern in step, (pattern, step)
-    # An extension nothing matches must not reach actionlint as a literal
-    # pattern, and a directory holding no workflows at all must not read as a
-    # clean lint — both would be the same silent pass in a different place.
-    assert 'nullglob' in step, step
-    assert 'exit 1' in step, step
+    assert_lint_step_covers_both_extensions()
 
 
 def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
@@ -308,11 +304,16 @@ def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
 
 def test_the_tracked_workflows_pass_actionlint(tmp):
     del tmp
-    _lint_workflows(ROOT)
+    assert_lint_covered(_lint_workflows(ROOT))
+
+
+def test_the_shellcheck_integration_is_scoped_to_posix(tmp):
+    del tmp
+    assert_integration_platform_scoped()
 
 
 def test_the_workflow_expansion_covers_both_extensions(tmp):
-    assert _expanded_names(tmp) == {'named.yml', 'named.yaml'}
+    assert_expansion_covers_both_extensions(tmp)
 
 
 def test_a_workflow_carrying_a_real_lint_finding_is_refused(tmp):
@@ -340,20 +341,17 @@ def test_a_lint_run_without_shellcheck_is_skipped(tmp):
 
 def test_a_lint_run_at_another_version_is_skipped(tmp):
     del tmp
-    reason = _lint_skips({'installed': '1.6.0'})
-    assert 'actionlint-version' in reason and '1.6.0' in reason, reason
+    assert_other_version_is_refused()
 
 
 def test_an_empty_workflow_directory_is_refused_not_clean(tmp):
     del tmp
-    assert 'no-workflows' in _lint_refuses({'files': []})
+    assert_empty_workflow_set_is_refused()
 
 
 def test_the_pin_is_read_from_the_job_not_written_down(tmp):
     del tmp
-    job = {'env': {'ACTIONLINT_VERSION': '9.9.9'}}
-    assert _pinned_actionlint_version(job) == '9.9.9'
-    assert _pinned_actionlint_version() == _pin()
+    assert_pin_read_from_the_job()
 
 
 def test_the_suite_lints_with_the_binary_the_job_installs(tmp):
