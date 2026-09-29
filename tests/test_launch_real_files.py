@@ -125,7 +125,8 @@ CHILD_BOUNDS = (
     ('test_real_browser_harness.py', 'input=source, timeout=deadline_s)', 1,
      'the constant deadline_s is not computed from a named chain, so '
      'the figure behind it is written rather than composed'),
-    ('test_real_browser_cdp_timeouts.py', 'thread.join(timeout=2 *', 1, WRITTEN),
+    ('test_real_browser_cdp_timeouts.py', 'thread.join(timeout=2 *', 1,
+     WRITTEN),
 )
 
 # The one row these three files used to carry that no table above accounted

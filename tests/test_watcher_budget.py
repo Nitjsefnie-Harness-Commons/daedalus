@@ -621,9 +621,19 @@ def test_the_windows_arm_answers_the_question_its_caller_asks(tmp):
 
     del tmp
 
-    def answers_alive(handle, last_error):
+    def answers_alive(handle, last_error, exit_code=tree._STILL_ACTIVE):
+        # The receipt asks the handle a second question now — not only
+        # whether it opens, but whether the process has ended — so a
+        # stand-in that answers only the first one leaves the control
+        # reading a bare handle as a corpse. It owes an answer to both.
         kernel32 = mock.Mock()
         kernel32.OpenProcess.return_value = handle
+
+        def get_exit_code(_handle, out):
+            out._obj.value = exit_code
+            return 1
+
+        kernel32.GetExitCodeProcess.side_effect = get_exit_code
         with mock.patch.object(tree.sys, 'platform', 'win32'), \
                 mock.patch.object(tree, '_windows_kernel32',
                                   return_value=kernel32), \
@@ -632,7 +642,10 @@ def test_the_windows_arm_answers_the_question_its_caller_asks(tmp):
             return _windows_pid_alive(4242)
 
     assert answers_alive(7, tree._ERROR_INVALID_PARAMETER), (
-        'an opened handle read as not alive')
+        'an opened handle for a running process read as not alive')
+    assert not answers_alive(7, tree._ERROR_INVALID_PARAMETER,
+                             exit_code=0), (
+        'an opened handle for an ended process read as alive')
     assert not answers_alive(None, tree._ERROR_INVALID_PARAMETER), (
         'a pid Windows says was never there read as alive')
     assert answers_alive(None, tree._ERROR_ACCESS_DENIED), (
