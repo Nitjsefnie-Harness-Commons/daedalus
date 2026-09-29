@@ -57,7 +57,6 @@
     "tests/test_bridge_startup.py": 1,
     "tests/test_change_classifier.py": 6,
     "tests/test_ci_pip_cache.py": 4,
-    "tests/test_ci_ratchets.py": 2,
     "tests/test_ci_thresholds.py": 1,
     "tests/test_ci_wait.py": 2,
     "tests/test_ci_workflows.py": 6,
