@@ -24,8 +24,7 @@ import ast
 from collections import defaultdict
 from pathlib import Path
 
-from _control_calls import (ModuleNames, _SHARED_HELPER, call_judgement,
-                            has_spread)
+from _control_calls import (ModuleNames, _SHARED_HELPER, call_judgement)
 from _control_paths import (SCOPES as _SCOPES, _CONTROL_OWNED_PATH,
                             _UNKNOWN_PATH, _nested_scope_expressions,
                             _owned_path_names, _path_kind,

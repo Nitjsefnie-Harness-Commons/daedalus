@@ -9,10 +9,9 @@ guard applies is here, so a change to what counts as owned is a change to
 one file rather than to the assembly that consults it.
 """
 import ast
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import PurePosixPath, PureWindowsPath
 
-from _control_calls import ModuleNames, argument, has_spread, pattern_names
-from _imported_calls import Context
+from _control_calls import argument, has_spread, pattern_names
 
 _UNKNOWN_PATH = 0
 _RELATIVE_PATH = 1
