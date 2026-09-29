@@ -125,8 +125,11 @@ def payload_literal_key(node, literals):
 
     The payload model's twin of `_literal_key`, over the same
     name-to-literal table: a string constant names itself, a name
-    carries the literal it was bound to, and any other expression is
-    read through the same pure-AST fold.
+    carries the literal it was bound to, a walrus names what it binds,
+    and any other expression is read through the same pure-AST fold.
+    The walrus is read here rather than in `_literal_value` so that
+    folding one stays a fact about the payload model rather than a
+    change to every reader of the shared evaluator.
 
     None is an answer, not a refusal, and the three ways to reach it are
     three different runtimes. A non-string literal is provably not
@@ -139,6 +142,8 @@ def payload_literal_key(node, literals):
         value = (literals or {}).get(node.id, _UNSAFE_LITERAL)
     elif isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
+    elif isinstance(node, ast.NamedExpr):
+        return payload_literal_key(node.value, literals)
     else:
         value = _literal_value(node)
     return value if isinstance(value, str) else None

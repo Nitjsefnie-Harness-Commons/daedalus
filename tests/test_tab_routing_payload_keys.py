@@ -68,6 +68,10 @@ _ROWS = [
     ('inline-at-call', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
      + '    k = "tab"\n'
        "    return ext_cmd('PUT', '/command', **{k: 5})\n"),
+    # The member of this check's own domain that its first cut did not
+    # consider: a walrus in KEY position is a key position, and it
+    # carries a real tab at runtime exactly as the name it binds does.
+    ('walrus-key', 1, {'tab': 5}, _CALL, _inside('cmd = {(k := "tab"): 5}')),
     # The controls. Each reads clean because the RUNTIME agrees, not
     # because the fold gave up on the position.
     ('literal', 1, {'tab': 5}, _CALL, _inside("cmd = {'tab': 5}")),
@@ -96,6 +100,13 @@ _ROWS = [
 # sender carrying a real `tab` - the truth is stated here because the
 # guard cannot see it, which is what makes them a separate defect and
 # not a member this change claims to close.
+#
+# The two walrus rows are the other boundary. `walrus-key` reads the
+# walrus in key position, which is a key position this change's reader
+# does consider. What the table does not carry is the walrus's BINDING,
+# so a name the walrus binds resolves nowhere after it - the two rows
+# below carry a real `tab` at runtime and read clean, and their fix site
+# is the table's own writer rather than this reader.
 _CROSS_SCOPE = [
     ('module-scope', 0, {'tab': 5}, _CALL,
      'TAB = "tab"\n' + _inside('cmd = {TAB: 5}')),
@@ -103,6 +114,10 @@ _CROSS_SCOPE = [
      'def f(args, key="tab"):\n' + _SENDER + '    cmd = {key: 5}\n' + _SPREAD),
     ('parameter', 0, {'tab': 5}, "f(ARGS, 'tab')",
      'def f(args, key):\n' + _SENDER + '    cmd = {key: 5}\n' + _SPREAD),
+    ('walrus-binding-then-name-key', 0, {'tab': 5}, _CALL, _inside(
+        '(w := "tab")', 'k = w', 'cmd = {k: 5}')),
+    ('walrus-binding-then-subscript', 0, {'tab': 5}, _CALL, _inside(
+        'cmd = {}', '(k := "tab")', 'cmd[k] = 5')),
 ]
 
 
