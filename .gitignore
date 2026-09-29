@@ -58,6 +58,7 @@
 !/.claude/skills/changing-daedalus/ci_watch.py
 !/.claude/skills/changing-daedalus/gh_client.py
 !/.claude/skills/changing-daedalus/gh_head_prs.py
+!/.claude/skills/changing-daedalus/gh_rate_limit.py
 !/.claude/skills/changing-daedalus/plant.py
 !/.claude/skills/changing-daedalus/pr_comment_watch.py
 !/.claude/skills/changing-daedalus/watch_all.py
@@ -625,6 +626,7 @@
 !/tests/test_generator_second_consumption.py
 !/tests/test_gh_client.py
 !/tests/test_gh_head_prs.py
+!/tests/test_gh_refusal.py
 !/tests/test_ghexpr.py
 !/tests/test_gitignore_control.py
 !/tests/test_gitignore_generator.py

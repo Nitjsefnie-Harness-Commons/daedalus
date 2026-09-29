@@ -64,58 +64,6 @@ def test_the_request_is_one_no_cache_json_payload_with_headers_included(tmp):
     assert payload['variables']['after'] is None
 
 
-def test_a_403_with_a_reset_header_is_a_rate_limit_refusal(tmp):
-    mod = _client()
-    reset = int(time.time()) + 120
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 403, 'headers': {'X-RateLimit-Reset': str(reset)},
-        'body': 'API rate limit exceeded for the account.'}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited as refusal:
-            assert refusal.resume_at == reset
-        else:
-            raise AssertionError('a 403 with a reset header must refuse')
-
-
-def test_a_403_whose_only_evidence_is_the_body_is_still_a_refusal(tmp):
-    """Some refusals carry the rate limit in the body and nowhere else;
-    without that clause ci_wait would exit 3 instead of waiting out the
-    reset.
-    """
-    mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 403, 'headers': {},
-        'body': 'API rate limit exceeded for the account.'}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited:
-            pass
-        else:
-            raise AssertionError('a body-only rate-limit 403 must refuse')
-
-
-def test_a_retranslated_header_block_still_yields_its_values(tmp):
-    """A re-translated header block still yields its values. Without that,
-    the block ends early, the header lines fall into the body, and a
-    reported reset arrives as no reset - a 60-second default instead.
-    """
-    del tmp
-    mod = _client()
-    answered = _windows_text(
-        'HTTP/2.0 403 Forbidden\r\nX-RateLimit-Reset: 42\r\n'
-        'Retry-After: 7\r\n\r\n{"data": null}\n')
-    status, headers, body = mod._parse(answered)
-    assert status == 403
-    assert headers.get('x-ratelimit-reset') == '42', headers
-    assert headers.get('retry-after') == '7', headers
-    assert json.loads(body) == {'data': None}, body
-    refused, resume = mod._refused(status, headers, body)
-    assert refused and resume is not None, resume
-
-
 def test_a_header_reset_survives_a_windows_text_stream_end_to_end(tmp):
     """The whole chain over the bytes a Windows stdout really delivers: a
     real `gh` process, the real request, the real parse.
@@ -138,16 +86,19 @@ def test_a_header_reset_survives_a_windows_text_stream_end_to_end(tmp):
 
 
 @contextlib.contextmanager
-def _frozen_client_clock(mod, now):
-    """The clock the client reads, pinned to the fixture's own instant.
+def _frozen(mod, now):
+    """The clock the module reads, pinned to the fixture's own instant.
 
-    Everything but `time()` is the real module's, so a client that reads
-    the monotonic clock or sleeps while it answers still can. What the
-    refusal then carries is derived from the fixture and from this instant,
+    Everything but `time()` is the real module's, so a watcher that reads
+    the monotonic clock or sleeps while it pauses still can. What the
+    pause then claims is derived from the fixture and from this instant,
     which is the whole point: no interval the runner spends decides it.
+    The refusal reader is a module of its own with its own clock, and the
+    controls that drive one freeze both - those are in
+    `tests/test_gh_refusal.py`.
     """
 
-    class _Frozen:
+    class _Pinned:
         @staticmethod
         def time():
             return now
@@ -156,108 +107,11 @@ def _frozen_client_clock(mod, now):
             return getattr(time, name)
 
     real = getattr(mod, 'time')
-    setattr(mod, 'time', _Frozen())
+    setattr(mod, 'time', _Pinned())
     try:
         yield
     finally:
         setattr(mod, 'time', real)
-
-
-def test_a_429_prefers_retry_after_over_the_reset_header(tmp):
-    """The refusal carries the instant `Retry-After` asked for, counted
-    from the clock the client itself read.
-
-    The two headers name instants an hour apart, so the value the refusal
-    carries says which one was read; a window around the runner's own clock
-    would say only how fast this machine got here, which is a claim a
-    loaded windows leg decides. The delay is 37 because that is not a value
-    any default in this client carries: 60 is the absent-reset backoff and 90
-    is the other control's fixture, so a client that read the header's
-    presence and answered with either of them would be told apart from one
-    that read its value.
-    """
-    mod = _client()
-    now = 1790266796.5
-    retry_after = 37
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 429, 'headers': {
-            'Retry-After': str(retry_after),
-            'X-RateLimit-Reset': str(int(now) + 3600)},
-        'body': 'You have exceeded a secondary rate limit.'}})
-    with fake.activate(), _frozen_client_clock(mod, now):
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited as refusal:
-            assert refusal.resume_at == now + retry_after, refusal.resume_at
-        else:
-            raise AssertionError('a 429 with Retry-After must refuse')
-
-
-def test_a_graphql_rate_limited_error_is_a_refusal_naming_its_reset(tmp):
-    mod = _client()
-    reset_at = '2030-01-01T00:00:00Z'
-    wanted = datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200,
-        'body': {'data': None, 'errors': [{
-            'type': 'RATE_LIMITED',
-            'message': 'API rate limit exceeded.',
-            'extensions': {'rateLimit': {'resetAt': reset_at,
-                                         'retryAfter': 5}}}]}}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited as refusal:
-            assert refusal.resume_at == wanted
-        else:
-            raise AssertionError('a GraphQL RATE_LIMITED error must refuse')
-
-
-def test_a_graphql_retry_after_is_honoured_when_no_reset_is_reported(tmp):
-    """No reset reported, so the refusal's instant is the `retryAfter`
-    counted from the clock the client read - the value, not a window.
-    """
-    mod = _client()
-    now = 1790266796.5
-    retry_after = 90
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200,
-        'body': {'data': None, 'errors': [{
-            'type': 'RATE_LIMITED',
-            'extensions': {'retryAfter': retry_after}}]}}})
-    with fake.activate(), _frozen_client_clock(mod, now):
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited as refusal:
-            assert refusal.resume_at == now + retry_after, refusal.resume_at
-        else:
-            raise AssertionError('retryAfter must be honoured')
-
-
-def test_a_403_without_rate_limit_evidence_is_an_ordinary_failure(tmp):
-    mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 403, 'body': 'Resource not accessible by integration.'}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.QueryError:
-            pass
-        else:
-            raise AssertionError('a plain 403 must fail the query')
-
-
-def test_an_unparseable_body_is_an_ordinary_failure(tmp):
-    mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200, 'body': 'not json at all'}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.QueryError:
-            pass
-        else:
-            raise AssertionError('an unparseable body must fail the query')
 
 
 def test_pagination_is_one_call_per_page_and_every_cursor_is_followed(tmp):
@@ -306,7 +160,7 @@ def _paused(mod, instant, resume_at, deadline=None, monotonic=None):
     slept = []
     watcher = mod.Watcher('w', out=out, deadline=deadline)
     watcher.sleep = slept.append
-    with _frozen_client_clock(mod, instant):
+    with _frozen(mod, instant):
         if monotonic is not None:
             mod.time.monotonic = lambda: monotonic
         watcher._pause(mod.RateLimited('rate limited', resume_at))
@@ -358,31 +212,6 @@ def test_a_reset_nearer_than_the_floor_is_floored_and_names_the_floor(tmp):
     assert slept == [2.0], slept
     wanted = _stamp(now + mod.MIN_BACKOFF)
     assert (duration, stamp) == ('2', wanted), (duration, stamp)
-
-
-def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
-    """The exposure the floor above defends against is reachable today.
-
-    `_graphql_refusal` takes any `retryAfter` that is a number, and a
-    GraphQL body is JSON, so a fractional one arrives - a reset a
-    thousandth of a second out. Without this, tightening that
-    validation would leave every other control green while the one
-    above justified itself falsely.
-
-    The fixture omits `resetAt` because the refusal reads it first and
-    would never reach `retryAfter`; add one and this passes for the
-    wrong reason.
-    """
-    del tmp
-    mod = _client()
-    now = 1789012345.0
-    payload = {'errors': [{'type': 'RATE_LIMITED', 'extensions': {
-        'rateLimit': {'retryAfter': 0.001}}}]}
-    with _frozen_client_clock(mod, now):
-        refused, resume = mod._graphql_refusal(payload)
-    assert refused is True, refused
-    assert resume == now + 0.001, resume
-    assert resume - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, resume - now)
 
 
 def test_a_reset_already_past_is_floored_and_names_the_floor(tmp):
@@ -562,7 +391,7 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
         real_sleep(seconds)
 
     watcher.sleep = recording_sleep
-    with _frozen_client_clock(mod, now):
+    with _frozen(mod, now):
         assert watcher.poll(clock) == 'answered'
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 1, lines
