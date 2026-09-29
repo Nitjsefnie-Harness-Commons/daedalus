@@ -17,27 +17,22 @@ inside it is reported against that file and line. A table row still
 decides first, so an import is never the reason a call was allowed.
 
 What the guard does not see, by design: a statement at a shared helper
-module's top level is not judged, exactly as the bodies of the ten helper
-modules a control already imports are not. Only what the imported call
-reaches is.
+module's top level, exactly as in the ten helper modules a control
+already imports. Only what the imported call reaches is judged.
 """
 import ast
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from _control_calls import (ModuleNames, _SHARED_HELPER, argument,
-                            call_judgement, has_spread, pattern_names,
-                            shared_helper_path)
+                            call_judgement, has_spread, pattern_names)
+from _imported_calls import (Context, SharedResolver, module_functions,
+                             reached_functions)
 
 _UNKNOWN_PATH = 0
 _RELATIVE_PATH = 1
 _CONTROL_OWNED_PATH = 2
 _MAX_PROOF_DEPTH = 2
-# A cross-module HOP is one shared-helper file a resolution reads, so the
-# bound is on files crossed and not on the path-proof nesting above, which
-# bounds calls inside one file; the two are counted separately because a
-# helper two files deep can still prove a path one call deep.
-_MAX_SHARED_HOPS = 2
 _SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
            ast.ClassDef, ast.Lambda)
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
@@ -243,126 +238,6 @@ def _scope_local_names(scope):
         else:
             names.update(pattern_names(node))
     return names
-
-
-def _module_functions(tree, names):
-    """The module-level functions a call in this file can resolve to."""
-    return {node.name: node for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and names.is_unique_def(node.name)}
-
-
-class _Context:
-    """The functions a call in one file can resolve to, and their file.
-
-    A name the file does not define is looked for in the `tests/_*.py`
-    module its import names, and the proof then moves to THAT module's
-    own table, so a helper's body is read against the file that writes
-    it and never against the caller that happened to reach it.
-    """
-
-    def __init__(self, functions, names, resolver):
-        self.functions = functions
-        self.names = names
-        self.resolver = resolver
-
-    def resolve(self, name):
-        """The function `name` names, and the context to prove it in."""
-        if name in self.functions:
-            return self.functions[name], self
-        imported = self.resolver.imported(self.names, name)
-        if imported is None:
-            return None, None
-        return imported.function, imported.module.context
-
-
-class _SharedModule:
-    """One `tests/_*.py` file a control imported a callee out of."""
-
-    def __init__(self, tree, label, context):
-        self.tree = tree
-        self.label = label
-        self.context = context
-
-    @staticmethod
-    def read(path, root, resolver):
-        """The module at `path`, or None when it cannot be read whole.
-
-        A file that does not parse, or that cannot be read, is a refusal
-        rather than an empty module: "nothing found" and "nothing to
-        look at" are the same answer to a subset check and must not be.
-        """
-        try:
-            tree = ast.parse(path.read_text(encoding='utf-8'))
-        except (OSError, UnicodeDecodeError, SyntaxError):
-            return None
-        try:
-            label = path.relative_to(root).as_posix()
-        except (TypeError, ValueError):
-            label = path.name
-        names = ModuleNames(tree)
-        return _SharedModule(
-            tree, label,
-            _Context(_module_functions(tree, names), names, resolver))
-
-
-class _Import:
-    """A callee resolved out of a shared helper module."""
-
-    def __init__(self, module, function):
-        self.module = module
-        self.function = function
-
-
-class _SharedResolver:
-    """The shared-helper imports of one file, and the files they name."""
-
-    def __init__(self, root, hops=_MAX_SHARED_HOPS):
-        self.root = root
-        self.hops = hops
-        self.modules = {}
-
-    def child(self):
-        """The resolver one hop further from the control that started it."""
-        return _SharedResolver(self.root, self.hops - 1)
-
-    def _module(self, path):
-        if path not in self.modules:
-            self.modules[path] = _SharedModule.read(
-                path, self.root, self.child())
-        return self.modules[path]
-
-    def imported(self, names, name):
-        """The imported callee `name` binds, or None to keep refusing."""
-        if self.hops < 1:
-            return None
-        path = shared_helper_path(names, name, self.root)
-        if path is None:
-            return None
-        module = self._module(path)
-        if module is None:
-            return None
-        function = module.context.functions.get(name)
-        return None if function is None else _Import(module, function)
-
-
-def _reached_functions(entry, functions):
-    """The named functions `entry` reaches in the file it is written in.
-
-    The rest of a shared module belongs to that module, not to the
-    control that imported one of its names, and judging all of it would
-    refuse code no control wrote.
-    """
-    reached = {entry.name}
-    pending = [entry]
-    while pending:
-        scope = pending.pop()
-        for call in _helper_calls(scope, functions):
-            name = call.func.id
-            if name in functions and name not in reached:
-                reached.add(name)
-                pending.append(functions[name])
-    return reached
 
 
 def _returned_values(scope):
@@ -646,9 +521,9 @@ class _ModuleJudgement:
     def __init__(self, tree, label, resolver, reach=None, seeded=None):
         self.label = label
         self.names = ModuleNames(tree)
-        self.functions = _module_functions(tree, self.names)
+        self.functions = module_functions(tree, self.names)
         self.resolver = resolver
-        self.context = _Context(self.functions, self.names, resolver)
+        self.context = Context(self.functions, self.names, resolver)
         named = {node.id for node in ast.walk(tree)
                  if isinstance(node, ast.Name)
                  and isinstance(node.ctx, ast.Load)}
@@ -679,7 +554,8 @@ class _ModuleJudgement:
                 continue
             problem, kind, target = call_judgement(
                 node, self.label, self.names, self.resolver.root)
-            if kind is _SHARED_HELPER:
+            if (kind is _SHARED_HELPER
+                    and isinstance(node.func, ast.Name)):
                 # The import is not the proof. The name is seeded from
                 # the kinds this call site hands it, and its body is
                 # judged in the file that writes it, once every caller
@@ -713,7 +589,7 @@ class _ModuleJudgement:
         module = imported.module
         self.violations.extend(_ModuleJudgement(
             module.tree, module.label, module.context.resolver,
-            reach=_reached_functions(
+            reach=reached_functions(
                 imported.function, module.context.functions),
             seeded={name: seeding}).run())
 
@@ -753,5 +629,5 @@ def control_write_violations(source, repository_root):
     except ValueError:
         label = source.name
     judgement = _ModuleJudgement(tree, label,
-                                 _SharedResolver(repository_root))
+                                 SharedResolver(repository_root))
     return [message for _, _, message in judgement.run()]
