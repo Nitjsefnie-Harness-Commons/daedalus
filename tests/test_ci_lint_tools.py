@@ -16,8 +16,11 @@ control already on that set, through `tests/_suite_jobs.py`.
 Every control here is a guard: a green run proves the tree still matches
 it and nothing more. The proof that it bites is a planted defect in a
 real target — the installer step removed from a real suite job, a skip
-arm added to a real suite for a binary nothing installs, and a suite
-job planted in a workflow this file never reads.
+arm added to a real suite for a binary nothing installs, and a third
+suite runner planted in a workflow the door walk then has to classify.
+Every workflow is read now: `_door_jobs` globs `*.yml` and `*.yaml`, so
+no workflow is one this file does not look at, and the bound on what the
+walk can see is stated in `tests/_suite_jobs.py` where it lives.
 """
 import os
 import shutil
@@ -113,6 +116,21 @@ def _declared_tools():
 # message names the parser rather than the binary, so none of them is
 # visible to the channel that matches a tool named in a message: a
 # derivation that reads these is reading the guard, not the wording.
+#
+# THIS IS A LIST OF WITNESSES, NOT AN ENUMERATION, and the control that
+# reads it says so where a reader meets it. The name of the test that
+# drives it says "every spelling", and that is a claim this table cannot
+# make: adding a fifteenth shape turns it red, which is the point — a
+# recogniser that cannot see a shape nobody thought of fails nothing —
+# but it also means the table's real job is to hold one witness per way
+# the recogniser's STRUCTURE can fail, so that a structural change which
+# drops an arm is red rather than silent. The shapes still open, recorded
+# so the next round does not re-derive them: a `which` over a loop
+# variable, where the tool is never a candidate at all and no guard-shape
+# fix can reach it; `os.popen`; a string argv under `shell=True`; and a
+# locally named skip helper whose name is neither `skip*` nor `*Skipped`,
+# which is a class bound (the recogniser matches names, not call intent)
+# rather than one defect.
 GUARDED_ON = {
     'inline identity':
         'if shutil.which(TOOL) is None:\n    _util.skip("no parser")',
@@ -147,6 +165,15 @@ GUARDED_ON = {
     'constant bound in a function':
         'def probe():\n    local = TOOL\n    found = shutil.which(local)\n'
         '    if not found:\n        _util.skip("no parser")\n',
+    'annotated binding of the result':
+        'found: str = shutil.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'tuple-unpacked binding of the result':
+        'found, _rest = shutil.which(TOOL), None\nif not found:\n'
+        '    _util.skip("no parser")',
+    'second slot of a tuple-unpacked binding':
+        'def probe():\n    _first, found = None, shutil.which(TOOL)\n'
+        '    if not found:\n        _util.skip("no parser")\n',
     'command that cannot be started':
         'try:\n    subprocess.run([TOOL, "--version"], check=True)\n'
         'except FileNotFoundError:\n    _util.skip("no parser")',
@@ -162,10 +189,19 @@ def test_every_spelling_of_an_absence_guard_is_read_as_one_operation(tmp):
     """No suite is invisible because its author spelled the guard differently.
 
     Driven through the derivation rather than planted in `tests/`, because
-    the question is what the recognisers read and every spelling would
+    the question is what the recognisers read and every shape would
     otherwise be a tracked change. One of these is the two-step
     truthiness guard that reads as a PRESENCE test — a suite skipping on a
     binary no job installs — and the control missed it for a whole wave.
+
+    The NAME says "every spelling" and `GUARDED_ON` does not deliver
+    that: it is a list of witnesses, one per way the recogniser's
+    structure can fail, and the list is evidence rather than the gate.
+    Adding a shape turns this red, which is exactly what a witness is
+    for — a recogniser that cannot see a shape nobody thought of fails
+    nothing — but a reader must not take the name as a completeness claim
+    the table does not carry. The shapes still open, and the reason each
+    is not a row here, are named beside the table.
     """
     del tmp
     for label, body in GUARDED_ON.items():
