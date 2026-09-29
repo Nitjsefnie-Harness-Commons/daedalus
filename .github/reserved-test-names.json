@@ -887,6 +887,7 @@
     "_this_member": {"python": ["tests/_jsroute_returns.py"]},
     "_through_ext_cmd": {"python": ["tests/_pyroute_violations.py"]},
     "_through_unprovable": {"python": ["tests/_pyroute_violations.py"]},
+    "_time_tests": {"python": ["tests/_ci_time_instrument.py"]},
     "_timeout": {"python": ["tests/_dashnode_retry_control.py"]},
     "_timeout_faults": {"python": ["tests/_launch_census.py"]},
     "_timeout_slots": {"python": ["tests/_launch_census.py"]},
