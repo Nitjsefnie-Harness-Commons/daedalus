@@ -101,19 +101,26 @@ _QUIET = [
 
 # A mutation the runtime does not perform, one row per binder site, carrying
 # the guard's answer so the cost of storing at a binder is pinned where the
-# branch changed it rather than disclosed in prose. The two kinds are not the
-# same claim and the rows are kept apart, because a control that cannot tell
-# them apart pins nothing.
+# branch changed it rather than disclosed in prose. The two tables measure two
+# different things and are kept apart, because a control that cannot tell them
+# apart pins nothing.
 #
-# A statically dead arm -- a literal test, a short-circuiting `or` -- is dead
-# to the guard as well as to the runtime, so (0, 0) is the correct answer and
-# the (0, 1) below is the defect filed as #1374. A condition the model cannot
-# resolve is NOT statically dead: the runtime may take that arm, so (0, 1) is
-# the fail-closed answer and the row is a control against a future change that
-# would drop a report the model owes. The first `class C(1 if ...)` shape the
-# review suggested is not here: `class C(1)` is not constructible, so it never
-# reaches the guard at all.
-_UNTAKEN = [
+# `_STATICALLY_DEAD` is what the model can decide on its own: a literal `if`
+# test, or a short-circuiting `or` whose first operand is a literal. The arm is
+# dead to the guard as well as to the runtime, so (0, 0) is the correct answer
+# and the (0, 1) below is the defect filed as #1374. There is no short-circuit
+# row at a class base, and there cannot be: a class base must be a class, and
+# no class is an `ast.Constant`, so the deciding operand is a `Name` the model
+# cannot resolve. The `class C(1 if ...)` shape a review suggested is
+# absent for the same reason: `class C(1)` raises at runtime, before the guard
+# is consulted.
+#
+# `_UNRESOLVED` is what the model cannot decide: the runtime may take that arm,
+# so (0, 1) is the fail-closed answer the model owes. These are controls
+# against a future change that would drop an owed report, which is why a
+# filter that silences them is wrong even when it silences
+# `_STATICALLY_DEAD` correctly.
+_STATICALLY_DEAD = [
     ('def-default-dead-arm', _LIST,
      f'def g(a=(1 if True else {_POP})):\n    pass', (0, 1)),
     ('def-default-dead-shortcircuit', _LIST,
@@ -123,13 +130,20 @@ _UNTAKEN = [
     ('lambda-default-dead-shortcircuit', _LIST,
      f'g = lambda a=(1 or {_POP}): 0', (0, 1)),
     ('class-base-dead-arm', _CLASS_OBJECT,
-     f'class C(type if True else ({_POP} or type)):\n    pass', (0, 1)),
-    ('class-base-dead-shortcircuit', _CLASS_OBJECT,
-     f'class C(type or ({_POP} or type)):\n    pass', (0, 1)),
+     f'class C(type if True else ({_POP} or type)):\n    pass', (0, 1))]
+
+_UNRESOLVED = [
     ('def-default-unresolved-condition', _LIST,
      f'def g(a=(1 if args.flag else {_POP})):\n    pass', (0, 1)),
     ('class-base-unresolved-condition', _CLASS_OBJECT,
-     f'class C(type if args.flag else ({_POP} or type)):\n    pass', (0, 1))]
+     f'class C(type if args.flag else ({_POP} or type)):\n    pass', (0, 1)),
+    # `type` decides this `or` and the model cannot resolve a `Name`, so the
+    # second operand is not statically dead and belongs with the rows above
+    # rather than with the short-circuit rows in `_STATICALLY_DEAD`.
+    ('class-base-unresolved-builtin', _CLASS_OBJECT,
+     f'class C(type or ({_POP} or type)):\n    pass', (0, 1))]
+
+_UNTAKEN = _STATICALLY_DEAD + _UNRESOLVED
 
 # A `body` is walked by its own flow against its own state, where the
 # statement store hook already runs; a `name`, an `arg` and a `type_comment`
