@@ -27,7 +27,6 @@ from _watcher_fixtures import PR  # noqa: E402
 from _watcher_fixtures import SHA  # noqa: E402
 from _watcher_fixtures import STAMP  # noqa: E402
 from _watcher_fixtures import TICK  # noqa: E402
-from _watcher_fixtures import base_answers  # noqa: E402
 from _watcher_fixtures import check  # noqa: E402
 from _watcher_fixtures import ci_page  # noqa: E402
 from _watcher_fixtures import comment  # noqa: E402
@@ -109,18 +108,27 @@ def _hourly(per_poll, tick):
     return per_poll * (3600 / tick)
 
 
+def _windows_pid_alive(pid):
+    """`is alive` on the Windows leg, read from the shared receipt.
+
+    The receipt answers IS GONE and this is asked IS ALIVE, at five call
+    sites, so the answer is its NEGATION — a name ending `_is_gone` called
+    from one ending `_is_alive` is the cheapest tell there is. The branch is
+    behind a `sys.platform` check no run here crosses, so the control below
+    forces it rather than trusting a whole-suite green.
+    """
+    return not process_is_gone(pid, 0)
+
+
 def _pid_alive(pid):
     """Whether a pid still names a process, on any platform CI runs.
 
     The Windows half reads through `tests/_processtree.py`'s receipt rather
-    than repeating it, and the POSIX half below already had the answer this
-    function's Windows copy was missing: a pid this process may not open is
-    a pid that is RUNNING, not one that is gone. A second copy of the
-    question is how the two drifted apart in the first place, so the copy
-    is gone and only the one that reads the error code is left.
+    than repeating it — a second copy of the question is how the two drifted
+    apart in the first place.
     """
     if sys.platform.startswith('win'):
-        return process_is_gone(pid, 0)
+        return _windows_pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -216,110 +224,6 @@ def test_a_trial_that_dies_part_way_through_is_not_counted(tmp):
     assert refused[0] == 1, refused
     assert len(fake.calls()) == 1, [call['request'][:60]
                                     for call in fake.calls()]
-
-
-_BASE_POLL_READS = '    for kind, path in surfaces(repo, pr):\n'
-_BASE_POLL_TWICE = '    for kind, path in surfaces(repo, pr) * 2:\n'
-# The base watcher's three comment surfaces; its own state read is outside
-# that loop, which is why a doubled pass is three calls and not four.
-BASE_SURFACES = 3
-
-
-def _base_script(directory, name, doubled=False):
-    """The base commit's copy of one watcher, or None when unreachable.
-
-    `doubled` reads every comment surface twice per poll: a defect only a
-    copy can carry, and the one the base's own cost measure would refuse.
-    """
-    found = subprocess.run(
-        ['git', '-C', str(ROOT), 'show', f'{BASE}:.claude/skills/'
-         f'changing-daedalus/{name}'], capture_output=True)
-    if found.returncode != 0:
-        return None
-    raw = found.stdout
-    if doubled:
-        text = raw.decode('utf-8')
-        assert text.count(_BASE_POLL_READS) == 1, name
-        raw = text.replace(_BASE_POLL_READS, _BASE_POLL_TWICE).encode('utf-8')
-    Path(directory).mkdir(parents=True, exist_ok=True)
-    path = Path(directory) / name
-    path.write_bytes(raw)
-    return path
-
-
-def test_the_hourly_cost_of_an_idle_watch_is_two_queries(tmp):
-    """The branch's watchers, measured through the whole poll surface."""
-    after = {}
-    for name, args in (('pr_comment_watch.py', [PR]),
-                       ('ci_watch.py', [BRANCH])):
-        here = Path(tmp) / 'after' / name
-        here.parent.mkdir(parents=True, exist_ok=True)
-        fake = _fake_gh.FakeGh(here.parent, idle_answers())
-        per_poll, seen = once_run.measure(SKILL / name, args, fake, TICK)
-        after[name] = per_poll
-        assert per_poll <= IDLE_POLL_BOUND, (
-            name, per_poll, [call['request'][:80] for call in seen])
-    total = sum(after.values())
-    print(f'\n  AFTER an idle watched pull request costs {total:.0f} gh '
-          f'call(s) per poll ({after}), '
-          f'{total * 60:.0f}/hour at the 60s default tick')
-
-
-def test_the_base_commit_cost_through_the_same_harness(tmp):
-    """The same measurement over the base commit's scripts, for the delta.
-
-    The base scripts invoke `gh` by bare name, which only a POSIX PATH can
-    resolve to the fake; the figure is therefore reported from the platform
-    that can produce it rather than from an invented one.
-    """
-    if _fake_gh.WINDOWS:
-        _util.skip('the base scripts call gh by bare name, which no PATH '
-                   'seam can answer on Windows; the AFTER figure and the '
-                   'measurement method are platform-independent')
-    before = {}
-    for name, args in (('pr_comment_watch.py', [PR]),
-                       ('ci_watch.py', [BRANCH])):
-        here = Path(tmp) / 'before' / name
-        script = _base_script(here, name)
-        if script is None:
-            _util.skip(f'base commit {BASE} is not reachable in this '
-                       f'checkout; the BEFORE figure is never invented')
-        fake = _fake_gh.FakeGh(here, base_answers())
-        before[name] = len(once_run.once(
-            script, args + ['--interval', str(TICK)], fake))
-    total = sum(before.values())
-    assert total >= 6, before
-    print(f'\n  BEFORE an idle watched pull request cost {total:.0f} gh '
-          f'call(s) per poll ({before}), '
-          f'{total * 60:.0f}/hour at the 60s default tick')
-
-
-def test_the_base_figure_is_read_off_the_base_script(tmp):
-    """`total >= 6` discriminates only if the 6 was measured, not remembered.
-
-    A floor a constant satisfies proves nothing, so the base comment watcher
-    is measured again with every comment surface read twice per poll. The
-    figure has to move with the script, which is what says the BEFORE number
-    is a measurement and the AFTER number beside it is one too.
-    """
-    if _fake_gh.WINDOWS:
-        _util.skip('the base scripts call gh by bare name, which no PATH '
-                   'seam can answer on Windows; the BEFORE figure and the '
-                   'measurement method are platform-independent')
-    figures = {}
-    for doubled in (False, True):
-        here = Path(tmp) / ('twice' if doubled else 'once')
-        script = _base_script(here, 'pr_comment_watch.py', doubled=doubled)
-        if script is None:
-            _util.skip(f'base commit {BASE} is not reachable in this '
-                       f'checkout; the BEFORE figure is never invented')
-        fake = _fake_gh.FakeGh(here, base_answers())
-        figures[doubled] = len(once_run.once(
-            script, [PR, '--interval', str(TICK)], fake))
-    print(f'\n  the base comment watcher: {figures[False]} call(s) per poll, '
-          f'{figures[True]} with every surface read twice')
-    assert figures[False], figures
-    assert figures[True] == figures[False] + BASE_SURFACES, figures
 
 
 def test_the_children_die_with_their_parent(tmp):
@@ -694,6 +598,42 @@ def test_an_incomplete_wait_costs_one_query_beyond_the_runs_each_tick(tmp):
     # different entries, so comparing the lists compares timestamps.
     assert len(head_calls) == len(run_calls), (
         len(head_calls), len(run_calls))
+
+
+def test_the_windows_arm_answers_the_question_its_caller_asks(tmp):
+    """The Windows arm is forced, because no local run can reach it.
+
+    A whole-suite green proves nothing about it: `sys.platform` is never
+    `win32` on the host that runs the suite, and
+    `test_watcher_budget.py` runs on every OS in the matrix — which is
+    exactly where a polarity error is free.
+
+    So the arm is driven here through the seam the receipt is separable by: a
+    stand-in `kernel32`, a chosen `GetLastError`, the platform forced on. A
+    real child is not needed; the question is which way the two senses sit,
+    not whether the API behaves as documented.
+    """
+    import _processtree as tree
+    from unittest import mock
+
+    del tmp
+
+    def answers_alive(handle, last_error):
+        kernel32 = mock.Mock()
+        kernel32.OpenProcess.return_value = handle
+        with mock.patch.object(tree.sys, 'platform', 'win32'), \
+                mock.patch.object(tree, '_windows_kernel32',
+                                  return_value=kernel32), \
+                mock.patch.object(tree.ctypes, 'get_last_error',
+                                  return_value=last_error, create=True):
+            return _windows_pid_alive(4242)
+
+    assert answers_alive(7, tree._ERROR_INVALID_PARAMETER), (
+        'an opened handle read as not alive')
+    assert not answers_alive(None, tree._ERROR_INVALID_PARAMETER), (
+        'a pid Windows says was never there read as alive')
+    assert answers_alive(None, tree._ERROR_ACCESS_DENIED), (
+        'a running pid this process may not open read as not alive')
 
 
 def main():

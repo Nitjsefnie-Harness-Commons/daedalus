@@ -34,12 +34,11 @@ SETTLE_POLL_S = 0.05
 # that still answers the question; a broader mask asks for more access
 # than a receipt has any business holding.
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-# `ERROR_ACCESS_DENIED` — the null handle that means a process is
-# RUNNING and this one may not open it. `ERROR_INVALID_PARAMETER`
-# is the other null handle and means the pid is not there.
+# `ERROR_ACCESS_DENIED` — the null handle that means a process is RUNNING
+# and this one may not open it. Nothing else reports gone because of it.
 _ERROR_ACCESS_DENIED = 5
-# `ERROR_INVALID_PARAMETER` — the null handle that means there was no
-# such pid. The pair is the whole classification.
+# `ERROR_INVALID_PARAMETER` — the ONLY null-handle code that means there was
+# no such pid, and so the only one that reports gone.
 _ERROR_INVALID_PARAMETER = 87
 
 
@@ -113,11 +112,21 @@ def _windows_kernel32():
 def _open_handle_says_live(kernel32, pid):
     """Whether this `OpenProcess` names a process that still exists.
 
-    A handle is a yes. A null handle is NOT a no: `ERROR_INVALID_PARAMETER`
-    is a pid that was never there, and `ERROR_ACCESS_DENIED` is a pid that
-    is running and that this process may not open — a privileged child, which
-    is what a tree kill leaves behind. Reading the second as the first
-    reports a kill that did not happen.
+    A handle is a yes. A null handle is NOT a no, and which way it fails
+    depends on the code behind it:
+
+    * `ERROR_INVALID_PARAMETER` (87) — the only code that positively means
+      THIS PID WAS NEVER THERE. The one value that reports gone.
+    * `ERROR_ACCESS_DENIED` (5) — the pid is running and this process may
+      not open it. A privileged child, which is what a tree kill leaves.
+    * anything else — `ERROR_INVALID_HANDLE` (6) and every code the API may
+      grow — is not evidence of anything, so it reports LIVE.
+
+    The default is therefore live, not gone: an allow-list of "gone" would
+    read every unclassified code as a corpse, and a receipt that invents a
+    kill is the one failure this whole mechanism exists to prevent. A code
+    this reading has never seen costs a timeout, which is the cheap
+    direction.
 
     `kernel32` is a parameter so this is drivable off Windows, which is the
     only place the real loader runs.
@@ -127,7 +136,7 @@ def _open_handle_says_live(kernel32, pid):
     if handle:
         kernel32.CloseHandle(handle)
         return True
-    return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
+    return ctypes.get_last_error() != _ERROR_INVALID_PARAMETER
 
 
 def process_group(process):

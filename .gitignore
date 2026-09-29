@@ -850,6 +850,7 @@
 !/tests/test_vm_file_load_guard.py
 !/tests/test_watch_all.py
 !/tests/test_watcher_budget.py
+!/tests/test_watcher_budget_base.py
 !/tests/test_watcher_escalation.py
 !/tests/test_watcher_lifecycle.py
 !/tests/test_watcher_loop_budget.py
