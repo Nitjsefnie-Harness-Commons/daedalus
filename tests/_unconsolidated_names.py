@@ -154,12 +154,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_aggregate_gate.py', '_run'):
         'this builds one workflow run as the actions API reports it, where '
         'the shared _run boots a node scenario',
-    ('tests/test_aggregate_needs.py', '_fixture'):
-        'byte-identical to the row for tests/test_workflow_job_timeouts.py, '
-        'and neither is a copy of the owner: this writes one fixture '
-        'workflow into a fresh tmp directory where the owner reads a '
-        'fake-GitHub answer fragment. The pair is a real duplicate and '
-        'consolidating it is deferred, not dismissed',
     ('tests/test_bash_resolver_scan.py', '_synthetic'):
         'a one-line delegate to the bash resolver own synthetic entry, and '
         'the name it collides with is the drain analyser',
@@ -322,12 +316,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_workflow_eslint.py', '_run'):
         'this returns one named step run block through the bounded reader, '
         'where the shared _run boots a node scenario',
-    ('tests/test_workflow_job_timeouts.py', '_fixture'):
-        'byte-identical to the row for tests/test_aggregate_needs.py, and '
-        'neither is a copy of the owner: this writes one fixture workflow '
-        'into a fresh tmp directory where the owner reads a fake-GitHub '
-        'answer fragment. The pair is a real duplicate and consolidating it '
-        'is deferred, not dismissed',
     ('tests/test_workflow_job_timeouts.py', '_planted'):
         'this copies the real workflow minus the aggregate job bound, where '
         'the owner reverts one converted site in a scratch tree',

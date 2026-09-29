@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wffixtures import _probe_workflow  # noqa: E402
 from _wfjobs import bound_source, load, workflow_files  # noqa: E402
 from _yamlscalar import YAMLReadError  # noqa: E402
 
@@ -88,14 +89,6 @@ BOUNDED_JOB = (
     '      - run: echo hi\n')
 
 
-def _fixture(tmp, name, source):
-    """Write one fixture workflow into a fresh workflows directory."""
-    root = Path(tmp) / name
-    root.mkdir(parents=True, exist_ok=True)
-    (root / 'probe.yml').write_text(source, encoding='utf-8')
-    return root
-
-
 def test_each_valid_spelling_that_bounds_a_job_passes(tmp):
     """The bound is found however valid YAML spells the job."""
     cases = {
@@ -144,7 +137,7 @@ def test_each_valid_spelling_that_bounds_a_job_passes(tmp):
             'timeout-minutes: 5', 'timeout-minutes: 1e3'),
     }
     for name, source in sorted(cases.items()):
-        violations = _timeout_violations(_fixture(tmp, name, source))
+        violations = _timeout_violations(_probe_workflow(tmp, name, source))
         assert not violations, f'{name}: {violations}'
 
 
@@ -198,7 +191,7 @@ def test_each_unbounded_shape_is_named(tmp):
                           '    timeout-minutes: -5\n',
     }
     for name, source in sorted(cases.items()):
-        violations = _timeout_violations(_fixture(tmp, name, source))
+        violations = _timeout_violations(_probe_workflow(tmp, name, source))
         assert len(violations) == 1, f'{name}: {violations}'
         assert 'probe' in violations[0], f'{name}: {violations}'
 
@@ -215,7 +208,7 @@ def test_an_underscore_spelling_float_rejects_is_refused(tmp):
     for value in CRASHING_UNDERSCORES:
         source = 'jobs:\n' + BOUNDED_JOB.replace(
             'timeout-minutes: 5', f'timeout-minutes: {value}')
-        violations = _timeout_violations(_fixture(tmp, f'u-{value}', source))
+        violations = _timeout_violations(_probe_workflow(tmp, f'u-{value}', source))
         assert len(violations) == 1, f'{value}: {violations}'
         assert value in violations[0], f'{value}: {violations}'
 
@@ -224,7 +217,7 @@ def test_an_overflowing_exponent_is_refused(tmp):
     """A bound the numeric read cannot hold finitely bounds nothing."""
     source = 'jobs:\n' + BOUNDED_JOB.replace(
         'timeout-minutes: 5', 'timeout-minutes: 1e400')
-    violations = _timeout_violations(_fixture(tmp, 'overflow', source))
+    violations = _timeout_violations(_probe_workflow(tmp, 'overflow', source))
     assert len(violations) == 1, violations
     assert '1e400' in violations[0], violations
 
@@ -235,7 +228,7 @@ def test_a_quoted_bound_is_refused(tmp):
         source = 'jobs:\n' + BOUNDED_JOB.replace(
             'timeout-minutes: 5', f'timeout-minutes: {value}')
         violations = _timeout_violations(
-            _fixture(tmp, f'quoted-{value.strip(chr(39) + chr(34))}', source))
+            _probe_workflow(tmp, f'quoted-{value.strip(chr(39) + chr(34))}', source))
         assert len(violations) == 1, f'{value}: {violations}'
         assert 'quoted' in violations[0], f'{value}: {violations}'
 
@@ -319,7 +312,7 @@ def test_an_external_caller_target_is_refused(tmp):
 def test_a_caller_naming_no_target_is_refused_not_passed(tmp):
     """A bare `uses:` decodes like an absent one; the key's presence is
     the signal, and the job is named rather than passed as no runner."""
-    root = _fixture(tmp, 'null-caller', 'jobs:\n  call:\n    uses:\n')
+    root = _probe_workflow(tmp, 'null-caller', 'jobs:\n  call:\n    uses:\n')
     violations = _timeout_violations(root)
     assert len(violations) == 1, violations
     assert 'probe.yml:' in violations[0], violations
