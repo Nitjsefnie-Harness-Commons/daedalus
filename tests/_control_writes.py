@@ -561,7 +561,8 @@ class _ModuleJudgement:
         """
         roots = ([tree] if reach is None else
                  [node for node in tree.body
-                  if isinstance(node, _SCOPES) and node.name in reach])
+                  if isinstance(node, _SCOPES)
+                  and getattr(node, 'name', None) in reach])
         return [node for root in roots
                 for node in ast.walk(root)
                 if isinstance(node, _SCOPES) and id(node) not in helper_nodes]
