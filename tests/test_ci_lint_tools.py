@@ -31,13 +31,27 @@ from _lint_tool_roles import (  # noqa: E402
 from _suite_jobs import NAMES, RUNNER, _door_jobs  # noqa: E402
 
 ROOT = _util.ROOT
-# The step every suite-running job carries, and the name the installer writes
-# what it installed under. That name is the whole contract between the script
-# and the test reading it back, so the two spell it once each and nowhere
-# else.
-LINT_INSTALLER = 'python scripts/ci/install_lint_tools.py'
+# The shared installer's path, and the name it writes what it installed
+# under. That name is the whole contract between the script and the test
+# reading it back, so the two spell it once each and nowhere else.
+#
+# The path, NOT the command that runs it. A job's install step is correct
+# because it runs the installer, and `suites`, `coverage-matrix` and
+# `publish` reach the installer through a root checkout while `timed` checks
+# its two trees out into subdirectories and reaches it as
+# `head/scripts/ci/install_lint_tools.py`. A constant holding the whole
+# invocation pinned that second spelling, so the correct path turned the
+# control red with a message arguing for the revert — this branch's own
+# lesson arriving for the third time, after the tool set and the door set.
+# Matching the path with a substring covers both, because the prefixed form
+# ends with the root-relative one.
+#
+# What it does not do is tell a command from a comment that quotes the path
+# inside a `run:` block. The error runs toward a red control naming a
+# comment, which is a cheap edit, rather than toward a green one.
+INSTALLER_PATH = 'scripts/ci/install_lint_tools.py'
 LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
-INSTALLER_SOURCE = ROOT / 'scripts' / 'ci' / 'install_lint_tools.py'
+INSTALLER_SOURCE = ROOT / INSTALLER_PATH
 # The doors that reach the suites without FINDING them: a fixed list of
 # suite paths written in the step, so a suite added tomorrow cannot walk
 # through one of these at all. What each entry owes is that its list stays
@@ -70,6 +84,18 @@ SHIPPED_BY_THE_IMAGE = {
             'so a suite that skips on node skips on every leg; that is a '
             'property of the image, and it is the reason this entry exists',
 }
+
+
+def _runs_installer(run):
+    """Whether a step's command runs the shared installer, from any tree.
+
+    The path is a suffix of every working spelling of it — a job that
+    checks the repository out under `head/` runs
+    `python head/scripts/ci/install_lint_tools.py` — so matching the path
+    asks the property the control means rather than the command one job
+    happened to use.
+    """
+    return INSTALLER_PATH in run
 
 
 def _runner_doors():
@@ -290,11 +316,11 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
         'next binary a suite skips on has to be added there, or listed in '
         'SHIPPED_BY_THE_IMAGE with the reason no job has to install it')
     for source, job, runs, _mechanism in found:
-        assert any(LINT_INSTALLER in run for run in runs), (
+        assert any(_runs_installer(run) for run in runs), (
             f'the {job} job in {source} finds its suites by discovery, so a '
             'suite added tomorrow reaches it whatever it is called; the '
             f'suites it finds skip on {_unjournalled_sentence()}, and the '
-            f'job never runs {LINT_INSTALLER!r}, so on a runner without '
+            f'job never runs {INSTALLER_PATH!r}, so on a runner without '
             'them those suites skip instead of running and the job reports '
             'green')
 
@@ -322,7 +348,7 @@ def test_the_installer_declares_a_tool_and_the_suites_state_one(tmp):
         'derives from tests/ is empty and the control is satisfied by a set '
         'with nothing in it; has the skip idiom moved?')
     assert _declared_tools(), (
-        f'{LINT_INSTALLER!r} declares no tools, so it installs nothing and '
+        f'{INSTALLER_PATH!r} declares no tools, so it installs nothing and '
         'every job that runs it gains a step and no tool')
     assert present, (
         'no suite treats a tool as unconditionally required either, so the '
