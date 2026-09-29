@@ -10,16 +10,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    coverage_tree, kill_recorded, records, settle_gone)
+    coverage_group, coverage_tree, kill_recorded, records, settle_gone)
 
 ROOT = _util.ROOT
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                          'runner_suite_bound')
 _OVERRUN_BOUND_S = 2
-# The runner's own outer bound, outlasting the launcher's SIGTERM grace
-# window so a control that goes red before the escalation reaches a suite
-# reports rather than waits.
-_RUNNER_OUTER_S = SUITE_BOUND.CLEANUP_TIMEOUT_S * 4
+# How long a planted suite stays wedged when nothing ends it. Named
+# because the outer bound below is read against it, and a control whose
+# own limit is the longer of the two cannot see a launcher that simply
+# waits: the suite and its grandchild end on their own and the control
+# reads that as success.
+_PLANTED_WEDGE_S = 60
+# This leg's outer bound, derived as a FRACTION of what it has to outlast
+# rather than typed: it must clear the launcher's SIGTERM grace window --
+# so a suite that ignores the request still gets escalated inside it --
+# and must stay well under the planted wedge, so a grace longer than this
+# is a red here rather than a suite that finished on its own.
+_RUNNER_OUTER_S = _PLANTED_WEDGE_S // 2
+assert _RUNNER_OUTER_S > SUITE_BOUND.CLEANUP_TIMEOUT_S * 2, (
+    f"the outer bound {_RUNNER_OUTER_S} s cannot outlast the launcher's "
+    f"{SUITE_BOUND.CLEANUP_TIMEOUT_S} s grace window twice over, so a suite "
+    f"that ignores the request would be reported before it is escalated")
 # Reaping a killed tree is itself bounded, by a deadline read off the
 # clock rather than asserted as a margin.
 _WEDGE_SETTLE_S = 10
@@ -34,7 +46,7 @@ _PASSING_SUITE = (
 
 _STALLING_SUITE = (
     'import time\nprint("stalling", flush=True)\n'
-    'time.sleep(60)\n'
+    'time.sleep({wedge})\n'
 )
 
 # A suite that answers SIGTERM and flushes, which is what
@@ -51,7 +63,7 @@ _STOPPABLE_SUITE = (
     '    sys.exit(0)\n'
     'signal.signal(signal.SIGTERM, _stopped)\n'
     'print("stalling", flush=True)\n'
-    'time.sleep(60)\n'
+    'time.sleep({wedge})\n'
 )
 
 # A suite that ignores SIGTERM and leaves a child of its own that does the
@@ -63,12 +75,13 @@ _STUBBORN_SUITE = (
     'signal.signal(signal.SIGTERM, signal.SIG_IGN)\n'
     "child = subprocess.Popen(\n"
     "    [sys.executable, '-c', 'import signal, time; "
-    "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'],\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+    "time.sleep({wedge})'],\n"
     '    stdin=subprocess.DEVNULL)\n'
     "(root / 'grandchild.pid').write_text(str(child.pid),"
     " encoding='ascii')\n"
     'print("stalling", flush=True)\n'
-    'time.sleep(60)\n'
+    'time.sleep({wedge})\n'
 )
 
 # Models a bystander a loaded runner could not start in time: the sleep
@@ -105,11 +118,16 @@ def _sandbox(tmp, suites, suite_bound=None):
             f'_bound.DEFAULT_SUITE_TIMEOUT_S = {suite_bound!r}\n',
             encoding='utf-8')
     for name, source in suites.items():
-        (root / 'tests' / name).write_text(source, encoding='utf-8')
+        # The planted wedge is written as a placeholder rather than a
+        # literal so it cannot drift away from the number the outer bound
+        # is derived from above.
+        (root / 'tests' / name).write_text(
+            source.replace('{wedge}', str(_PLANTED_WEDGE_S)),
+            encoding='utf-8')
     return root
 
 
-def _run_sandbox(root, timeout_env):
+def _run_sandbox(root, timeout_env, outer_timeout=120):
     env = dict(os.environ, **timeout_env)
     if (root / 'sitecustomize.py').exists():
         # `site` looks for a sitecustomize on the path the interpreter has
@@ -122,7 +140,7 @@ def _run_sandbox(root, timeout_env):
     return subprocess.run(
         [sys.executable, str(root / 'run_tests.py')],
         cwd=str(root), env=_util.child_coverage('keep', env, cwd=root),
-        capture_output=True, text=True, timeout=120)
+        capture_output=True, text=True, timeout=outer_timeout)
 
 
 def _timeout_record(bound):
@@ -232,16 +250,44 @@ def test_a_runner_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
     """
     root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
     result = _run_sandbox(
-        root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
+        root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)},
+        outer_timeout=_RUNNER_OUTER_S)
     block = _suite_block(result.stdout, 'test_stoppable.py')
     found = records(block)
     assert len(found) == 1, (len(found), block)
     record = found[0].groupdict()
     assert 'suite was asked to stop and flushed' in block, block
     assert int(record['returncode']) == 0, record
-    # It reported its counts on the way out, so the aggregate counts it
-    # as what it says it did -- which is the pre-branch behaviour, and the
-    # reason the grace window is worth its ten seconds.
+    # The cleanup has to say the suite TOOK THE REQUEST. The route alone
+    # is not enough: the record a suite that ignored the request and was
+    # killed produces names the same group and the same escalation.
+    assert 'asked to stop and the suite did' in record['cleanup'], record
+
+
+def test_a_flushed_suite_is_still_counted_as_a_pass_and_this_pins_that(tmp):
+    """A DECISION, pinned deliberately: a flushed wedge counts as a pass.
+
+    `run_tests.py` decides a suite by its returncode and its summary
+    (or: `returncode != 0 or summary is None`), so a suite that exceeded
+    its bound, answered the request and reported its counts is counted as
+    what it says it did. That is pre-branch behaviour -- `git show
+    145ced27:run_tests.py` reaches the same state through
+    `_terminate_and_reap` -- and this control exists to make it a
+    SPECIFIED requirement rather than an accident, so a future change that
+    closes it has to argue with this line.
+
+    The two launchers disagree about it, which is the other half of why
+    this is pinned rather than left implicit. `coverage_suites.py` counts
+    any timed-out suite as failed whatever it reported. See the
+    pull request's Follow-ups.
+    """
+    root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
+    result = _run_sandbox(
+        root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)},
+        outer_timeout=_RUNNER_OUTER_S)
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr)
+    assert 'SUITE TIMED OUT' in result.stdout, result.stdout
     assert 'OVERALL: PASS' in result.stdout, result.stdout
 
 
@@ -258,7 +304,8 @@ def test_a_runner_timed_out_suites_own_child_does_not_survive_it(tmp):
     recorded = root / 'tests' / 'grandchild.pid'
     try:
         result = _run_sandbox(
-            root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
+            root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)},
+            outer_timeout=_RUNNER_OUTER_S)
         assert result.returncode == 1, (result.returncode, result.stdout,
                                         result.stderr)
         pid = int(recorded.read_text(encoding='ascii'))
@@ -386,13 +433,6 @@ time.sleep(120)
 """
 
 
-def _coverage_group(stdout, name):
-    """The block the coverage launcher printed for `name`."""
-    start = stdout.index(f'::group::tests/{name}\n')
-    end = stdout.index('::endgroup::\n', start)
-    return stdout[start:end]
-
-
 def test_both_launchers_read_the_one_definition_of_the_bound(tmp):
     """One bound, two launchers, each naming the value the other must see.
 
@@ -409,7 +449,7 @@ def test_both_launchers_read_the_one_definition_of_the_bound(tmp):
     coverage, _invocations = coverage_tree(
         tmp, {'test_wedged.py': _SHARED_WEDGED_SUITE},
         suite_bound=_SHARED_BOUND_S, outer_timeout=_SHARED_BOUND_S * 20)
-    assert record in _coverage_group(coverage.stdout, 'test_wedged.py'), (
+    assert record in coverage_group(coverage.stdout, 'test_wedged.py'), (
         coverage.stdout, coverage.stderr)
 
 
