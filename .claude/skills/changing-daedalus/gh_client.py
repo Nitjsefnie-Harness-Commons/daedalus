@@ -22,6 +22,13 @@ poll loop's business.
 connection reports another page and feeds each `endCursor` back as its own
 `after`, one `gh` invocation per page, so nothing is missed.
 
+`checkRuns` is nested inside the paginated `checkSuites`, which `paginate`
+pages only at the OUTER level, so a suite carrying more than `PAGE_SIZE`
+check runs would be truncated at the bound, silently. One per job here.
+
+This file is AT the 500-line production ceiling, and the room was made by
+cutting prose: a generic client has no subject seam to relocate to.
+
 `DAEDALUS_GH` overrides the executable, which is how the suites put a fake
 `gh` in front of a watcher where a bare `gh` name does not resolve.
 """
@@ -60,6 +67,9 @@ STAMP = '%Y-%m-%dT%H:%M:%SZ'
 # The pipe's own name, not the bridge's: a process may run a bridge child
 # and a watcher child at once without the two watching each other.
 PARENT_WATCH_ENV = 'DAEDALUS_WATCH_PARENT_FD'
+# The set `ci_gate.ACCEPTABLE` judges published CHECK runs by, spelled
+# here because a suite extracts this module WITHOUT its siblings and
+# cannot import `ci_gate`; a control holds the two EQUAL.
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 
 RUNS_QUERY = f'''query WatchRuns(

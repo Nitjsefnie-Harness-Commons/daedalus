@@ -37,6 +37,7 @@ from _watcher_fixtures import rate_limited_error  # noqa: E402
 from _watcher_fixtures import refusal_response  # noqa: E402
 from _watcher_fixtures import review  # noqa: E402
 from _watcher_fixtures import runs_page  # noqa: E402
+from _watcher_fixtures import RUNS_QUERY  # noqa: E402
 from _watcher_fixtures import suite  # noqa: E402
 from _watcher_fixtures import throttled_query  # noqa: E402
 from _watcher_fixtures import THROTTLED  # noqa: E402
@@ -419,10 +420,9 @@ def _ci_wait(fake, extra=(), bound=30, limit=120):
 def test_a_refused_wait_pauses_and_still_answers(tmp):
     reset_at = datetime.fromtimestamp(time.time() + 3, timezone.utc)
     answers = dict(idle_answers())
-    answers['checkSuites'] = [
+    answers[RUNS_QUERY] = [
         rate_limited_error(reset_at=reset_at.strftime(STAMP)),
-        runs_page([suite(1, name='tests',
-                         check_runs=[published()])])]
+        runs_page([suite(1, name='tests', check_runs=[published()])])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -448,7 +448,7 @@ def test_a_wait_pauses_on_the_live_throttled_query_and_still_answers(tmp):
         reset_at=reset_at.strftime(STAMP), exit=1,
         stderr=f'gh: {THROTTLED}\n')
     answers = dict(idle_answers())
-    answers['checkSuites'] = [refusal, runs_page([
+    answers[RUNS_QUERY] = [refusal, runs_page([
         suite(1, name='tests', check_runs=[published()])])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
@@ -468,8 +468,8 @@ def test_a_persistent_live_refusal_exits_two_and_never_three(tmp):
     """
     far = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime(STAMP)
     answers = dict(idle_answers())
-    answers['checkSuites'] = throttled_query(reset_at=far, exit=1,
-                                             stderr=f'gh: {THROTTLED}\n')
+    answers[RUNS_QUERY] = throttled_query(
+        reset_at=far, exit=1, stderr=f'gh: {THROTTLED}\n')
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake, bound=5, limit=40)
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
@@ -486,7 +486,7 @@ def test_a_persistent_refusal_exits_two_at_its_timeout(tmp):
     far = datetime.now(timezone.utc) + timedelta(hours=2)
     reset_at = far.strftime(STAMP)
     answers = dict(idle_answers())
-    answers['checkSuites'] = rate_limited_error(reset_at=reset_at)
+    answers[RUNS_QUERY] = rate_limited_error(reset_at=reset_at)
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake, bound=5, limit=40)
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
@@ -589,7 +589,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
 
 def test_a_plain_refusal_still_exits_three_at_once(tmp):
     answers = dict(idle_answers())
-    answers['checkSuites'] = [
+    answers[RUNS_QUERY] = [
         refusal_response(403, {}, 'Resource not accessible by integration.')]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
@@ -602,7 +602,7 @@ def test_a_plain_refusal_still_exits_three_at_once(tmp):
 def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
     answers = dict(idle_answers())
     # The published verdict rides along, or the wait never certifies.
-    answers['checkSuites'] = [runs_page([
+    answers[RUNS_QUERY] = [runs_page([
         suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z', name='tests'),
         suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z',
               name='tests', check_runs=[published()])])]
@@ -620,7 +620,7 @@ def test_a_superseded_failure_is_ignored_through_the_new_query(tmp):
     it. The rationale is ci_wait's module docstring; what is pinned here
     is that the discarded failure is still named."""
     answers = dict(idle_answers())
-    answers['checkSuites'] = [runs_page([
+    answers[RUNS_QUERY] = [runs_page([
         suite(1, 'FAILURE', started='2026-09-20T10:00:00Z', name='tests'),
         suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z',
               name='tests', check_runs=[published()])])]
@@ -635,7 +635,7 @@ def test_a_superseded_failure_is_ignored_through_the_new_query(tmp):
 
 def test_a_deliberate_cancel_still_fails_through_the_new_query(tmp):
     answers = dict(idle_answers())
-    answers['checkSuites'] = [runs_page([
+    answers[RUNS_QUERY] = [runs_page([
         suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
@@ -675,7 +675,7 @@ def test_an_incomplete_wait_costs_one_query_beyond_the_runs_each_tick(tmp):
     would keep passing.
     """
     answers = dict(idle_answers())
-    answers['checkSuites'] = runs_page([suite(1, name='gate freshness')])
+    answers[RUNS_QUERY] = runs_page([suite(1, name='gate freshness')])
     empty = {'associatedPullRequests': {'nodes': []}}
     answers['associatedPullRequests'] = {'data': {'repository': {
         'object': empty}}}
@@ -683,7 +683,7 @@ def test_an_incomplete_wait_costs_one_query_beyond_the_runs_each_tick(tmp):
     done = _ci_wait(fake, bound=5, limit=40)
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
     assert 'not certified' in done.stdout, done.stdout
-    run_calls = fake.calls('checkSuites')
+    run_calls = fake.calls(RUNS_QUERY)
     head_calls = fake.calls('associatedPullRequests')
     assert len(run_calls) >= 2, [c['request'][:60] for c in fake.calls()]
     # Lengths, not the call lists: two calls of different kinds are

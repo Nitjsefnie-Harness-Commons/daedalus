@@ -74,8 +74,9 @@ from datetime import datetime, timezone
 DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
 REQUIRED_WORKFLOWS = frozenset({'tests'})
 PUBLISHED_CHECKS = frozenset({'gate freshness'})
-# The one definition of an acceptable conclusion, and `ci_wait`'s is an
-# alias of this rather than a second literal.
+# What an acceptable conclusion is, for the two predicates here.
+# `ci_wait`'s is an alias of this; `gh_client` spells its own, for a
+# reason its comment gives, and a control holds the two equal.
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 

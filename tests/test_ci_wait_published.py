@@ -34,6 +34,7 @@ from _ci_wait_fixtures import (  # noqa: E402
     _frozen_ci_wait_clock as _frozen_wait_clock)
 from _watcher_fixtures import SHA  # noqa: E402
 from _watcher_fixtures import runs_page  # noqa: E402
+from _watcher_fixtures import RUNS_QUERY  # noqa: E402
 from _watcher_fixtures import suite  # noqa: E402
 
 ROOT = _util.ROOT
@@ -75,12 +76,12 @@ def _verdict_suite(conclusion: str | None = 'SUCCESS'):
         _node(7, PUBLISHED, conclusion)])
 
 
-def _answers(suites):
+def _answers(suites, pulls=()):
     """The two queries `ci_wait.py` makes on a head it must answer about."""
     return {
-        'checkSuites': runs_page(suites),
+        RUNS_QUERY: runs_page(suites),
         'associatedPullRequests': {'data': {'repository': {'object': {
-            'associatedPullRequests': {'nodes': []}}}}}}
+            'associatedPullRequests': {'nodes': list(pulls)}}}}}}
 
 
 def _wait(tmp, argv, suites, limit=120):
@@ -208,10 +209,9 @@ def test_the_offenders_are_the_runs_or_the_checks_never_both(tmp):
     before the early return, which reads as harmless since the exit code
     is 1 either way.
 
-    It does not catch a concatenation placed after that return, and cannot:
-    with a run red the return has already answered, so the line is
-    unreachable and no fixture can reach it. Naming that mutation here
-    would be naming one that cannot fire.
+    The placement this cannot catch is after that return, and it needs
+    no control: with a run red the return has already answered, so the
+    line is unreachable and no fixture can reach it.
     """
     del tmp
     mod = _ci_wait()
@@ -249,6 +249,53 @@ def test_an_absent_published_verdict_is_waited_out_and_then_refused(tmp):
     # Polls at 1000, 1007, ... and the refusal at the first observation
     # 30s or more on. A margin would be a claim about this machine.
     assert clock.now == 1035.0, clock.now
+
+
+def test_the_bound_report_names_both_kinds_of_absence(tmp):
+    """The exit-2 line, where BOTH gates are absent.
+
+    The grace refusal beside it is already driven with both missing; this
+    one is not, and it is the line a bound shorter than the grace prints
+    instead - so a report that named only the first absence would read
+    correctly on one exit and lie on the other.
+    """
+    mod = _ci_wait()
+    clock = _Clock()
+    fake = _fake_gh.FakeGh(tmp, _answers(_green('CodeQL')))
+    out, err = io.StringIO(), io.StringIO()
+    with fake.activate(), _frozen_wait_clock(mod, clock), \
+            contextlib.redirect_stderr(err):
+        code = mod.wait(DEFAULT_REPO, SHA, 10, 30, out, grace=300)
+    text = out.getvalue()
+    assert code == 2, text
+    # This line has no `on <sha>` clause - it already named the SHA -
+    # so what is asserted is the two absences joined, which is the
+    # half a `missing[0]`-only report would drop.
+    assert 'no tests run and no gate freshness check and' in text, text
+
+
+def test_the_conflict_refusal_names_the_check_it_publishes(tmp):
+    """The other exit-4 line, and the clause that says a conflicting pull
+    request dispatches neither the workflow nor the check it publishes.
+
+    Driven with both absent, so the line has both to name and a report
+    that dropped the check half is caught rather than merely
+    unexercised.
+    """
+    mod = _ci_wait()
+    clock = _Clock()
+    fake = _fake_gh.FakeGh(tmp, _answers(
+        _green('CodeQL'),
+        [{'number': 7, 'state': 'OPEN', 'mergeable': 'CONFLICTING',
+          'mergeStateStatus': 'DIRTY', 'headRefOid': SHA}]))
+    out, err = io.StringIO(), io.StringIO()
+    with fake.activate(), _frozen_wait_clock(mod, clock), \
+            contextlib.redirect_stderr(err):
+        code = mod.wait(DEFAULT_REPO, SHA, 60, 600, out, grace=300)
+    text = out.getvalue()
+    assert code == 4, text
+    assert 'no tests run and no gate freshness check on' in text, text
+    assert 'nor any check it publishes is dispatched' in text, text
 
 
 def test_a_missing_run_and_a_missing_check_are_named_together(tmp):
@@ -424,6 +471,16 @@ def test_the_predicate_ignores_which_conclusions_are_acceptable(tmp):
     wait = _ci_wait()
     assert wait.ACCEPTABLE is wait.ci_gate.ACCEPTABLE, (
         'ci_wait.ACCEPTABLE is a copy, so the two sets can drift')
+    # The THIRD name, and the one a spelling cannot hold: `gh_client`
+    # spells its own because a suite extracts that module WITHOUT its
+    # siblings and could not import `ci_gate` from the copy, so the two
+    # are held EQUAL here rather than by an import. Proven: dropping
+    # 'skipped' from the client's literal left all three of these suites
+    # green, because `_run_from_suites` and `_check_run` both read
+    # whatever set that module holds.
+    assert wait.gh_client.ACCEPTABLE == wait.ci_gate.ACCEPTABLE, (
+        'gh_client.ACCEPTABLE has drifted, so the run filter and the '
+        'check filter are judged by two different sets')
     assert mod.ACCEPTABLE == wait.ACCEPTABLE, (mod.ACCEPTABLE, wait.ACCEPTABLE)
     assert wait.ACCEPTABLE == frozenset({'success', 'neutral', 'skipped'})
     for conclusion in mod.ACCEPTABLE:
@@ -439,7 +496,7 @@ def test_ci_state_answers_both_questions_from_one_walk(tmp):
     the checks over a second request, so the call count is the control:
     a single page of suites, and a single `gh` call to read it."""
     client = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': runs_page([
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page([
         suite(1, name='tests', check_runs=[
             _node(2, 'tests (3.13, ubuntu-24.04)')]),
         _verdict_suite()])})
@@ -459,12 +516,40 @@ def test_ci_state_answers_both_questions_from_one_walk(tmp):
     assert [c['id'] for c in checks] == [2, 7], checks
 
 
+def test_an_unconcluded_check_is_a_wait_not_a_red_verdict(tmp):
+    """A check with no conclusion has not reached a verdict, and reading
+    it as a red one is a failure reported for a check still running.
+
+    The run limb has always had a status check for exactly this, and the
+    check limb reading a conclusion with no status beside it was the
+    asymmetry: `conclusion: None` fails the acceptable-set test, so the
+    offender line would print `gate freshness: None <url>` and the exit
+    would be 1 - a red verdict for a check the publisher had not
+    finished writing.
+
+    Not reachable on this repository today, since the publisher POSTs
+    the status and the conclusion in one call; it is the SHAPE, not this
+    publisher, that a reader has to survive.
+    """
+    mod = _ci_wait()
+    running = [_check(PUBLISHED, None, status='in_progress')]
+    assert mod.verdict([_head_run('tests')], running) == (
+        'waiting', []), running
+    # The wait is scoped to the checks this caller REQUIRED: a job
+    # check of some other workflow still running is not this head's
+    # business, or every matrix would stall on its own cells.
+    other = [_check(PUBLISHED, 'success'),
+             _check('pylint', None, status='in_progress')]
+    assert mod.verdict([_head_run('tests')], other) == (
+        'acceptable', []), other
+
+
 def test_a_check_run_still_running_normalises_to_no_conclusion(tmp):
     """`conclusion` is null until a check concludes, and a reader that
     left the API's null in place would compare None against the
     acceptable set by accident rather than by decision."""
     client = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': runs_page([
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page([
         suite(1, name='tests', check_runs=[
             _node(3, PUBLISHED, None, status='IN_PROGRESS')])])})
     with fake.activate():
@@ -478,7 +563,7 @@ def test_a_check_run_past_the_first_page_is_still_read(tmp):
     matrix is large it can sit on a later page than the runs. Reading only
     the first page is the read that found every run and no gate."""
     client = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': [
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: [
         _page([suite(1, name='tests')], has_next=True, cursor='CURSOR-1'),
         _page([_verdict_suite()])]})
     with fake.activate():
@@ -494,7 +579,7 @@ def test_a_suite_carrying_no_check_runs_reads_as_none(tmp):
     connection exists, and reading it as an empty list would refuse every
     head the moment one suite answers no nodes."""
     client = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': runs_page(
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page(
         [suite(1, name='tests')])})
     with fake.activate():
         runs, checks = client.ci_state('o', 'r', SHA)
@@ -507,7 +592,7 @@ def test_workflow_runs_is_the_first_answer_and_not_a_second_query(tmp):
     checks it does not ask about: the same answer, off the same one
     request."""
     client = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': runs_page(
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page(
         [suite(1, name='tests'), _verdict_suite()])})
     with fake.activate():
         runs = client.workflow_runs('o', 'r', SHA)
