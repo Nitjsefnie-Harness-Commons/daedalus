@@ -269,6 +269,7 @@
 !/tests/_arm_sweep.py
 !/tests/_bash_resolver_scan.py
 !/tests/_binding_assertions.py
+!/tests/_binding_names.py
 !/tests/_bound_site_rows.py
 !/tests/_bound_site_rows_chain.py
 !/tests/_boundary.py
