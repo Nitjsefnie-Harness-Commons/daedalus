@@ -381,10 +381,10 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     bound, except the ones BOUNDED_GIT_LAUNCHES allows by name.
 
     Scope is the tracked tree, not a hand-written module list, so a module
-    added later is inside its reach with no hand edit. Each file is
-    prefilted on 'subprocess': the analyser only understands launches
-    spelled through `subprocess`, so a source without it cannot hold a
-    launch it would see.
+    added later is inside its reach with no hand edit. Every tracked
+    Python file is read: the analyser refuses a bounded call whatever it
+    calls, and the old `'subprocess' in source` filter hid 440 of the 630
+    tracked files, which is a filter that fails silently.
 
     A launch that only reads the local repository, or sits inside an
     enclosing suite or CI bound, is bounded by that; a hang surfaces as
@@ -463,7 +463,7 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     # The keying carries the anti-prefix promise, so it is checked rather
     # than asserted: a (path,) key alone would let one row stand for every
     # site in a module. The file a row names is read here, not in the walk
-    # above, so a row in a file the prefilter skips is still judged.
+    # above, so a row in a file no live site is found in is still judged.
     for key, sites in live.items():
         if len(sites) > 1:
             findings.append(
