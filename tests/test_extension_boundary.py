@@ -18,6 +18,7 @@ import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _boundary import HARNESS, run_extension_result_boundary  # noqa: E402
 from _boundary_env import ENVIRONMENT  # noqa: E402
+from _node_harness_fixtures import _command_line_length  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
 
@@ -27,11 +28,6 @@ WINDOWS_COMMAND_LINE_LIMIT = 32767
 # The harness length on main when the defect was filed, the size the next
 # scenario entry was one line away from re-spending.
 MAIN_HARNESS_CHARS = 32171
-
-
-def _command_line_length(argv):
-    """The length Windows measures: the arguments joined by one space."""
-    return sum(len(argument) + 1 for argument in argv)
 
 
 _QUERY_TIMING_PROBE = ENVIRONMENT + r"""
