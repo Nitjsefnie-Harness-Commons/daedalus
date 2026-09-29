@@ -219,12 +219,9 @@ def _dotted_bindings(tree):
     `test_a_rebinding_in_any_form_stops_the_read_at_both_scopes`: one row per
     form, and every row is a read the reader now REFUSES.
 
-    The assignment pass runs until the table stops changing, bounded by
-    the table's own size, so no round count is a free parameter to get
-    wrong and a cycle cannot run. A chain written back to front resolves
-    one indirection per round, so one longer than the table stops short
-    with its tail unresolved. That failure direction is a false red and
-    never a false green — an unresolved callee is not a network read.
+    The pass runs until the table stops changing, bounded by the table's
+    own size, so no round count is free and a cycle cannot run. That
+    failure direction is a false red and never a false green.
     """
     scoped = _scoped_assignments(tree)
     bound = {}
@@ -413,8 +410,8 @@ def literal_bindings(tree):
     double's recorder is bound in `__init__` and a fixture's list in the
     test body, while the deadline-carrying call sits in a third scope.
 
-    A name is in the set only when EVERY writing of it is a literal, and
-    that is a CONSERVATIVE JOIN rather than a last-write-wins. The
+    A name is in the set only when EVERY writing of it is a literal: a
+    CONSERVATIVE JOIN, not a last-write-wins. The
     narrowing does not recover
     `tests/test_real_browser_harness.py:131`, whose deadline reaches a
     parameter no writing in the module proves; `origin/main` refuses that
@@ -669,6 +666,13 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
                                if isinstance(target, ast.Name))
         if len(derived) == before:
             break
+    if any(isinstance(node, ast.Assign) and node.value is not None
+           and any(isinstance(t, ast.Subscript) for t in node.targets)
+           and _mentions(node.value, derived)
+           for node in ast.walk(function)):
+        # A subscript store hands the number to a container the census
+        # resolves no body for, so it can reach anything.
+        return True
     sinks = _deadline_sinks(function, derived)
     if not sinks:
         return False
