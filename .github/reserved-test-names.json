@@ -956,6 +956,7 @@
     "_workflow_triggers": {"python": ["tests/_workflows.py"]},
     "_write_atomic": {"python": ["tests/_fake_gh.py"]},
     "_write_command": {"python": ["tests/_command_candidates.py"]},
+    "_write_fault_dir": {"python": ["tests/_write_faults.py"]},
     "_write_mode": {"python": ["tests/_control_calls.py"]},
     "_write_summary": {"python": ["tests/_util.py"]},
     "_write_target": {"python": ["tests/_jsroute_tab.py"]},

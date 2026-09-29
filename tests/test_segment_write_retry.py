@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _write_faults import _write_fault_dir  # noqa: E402
 from _segments import (BRIDGE_ENV, TOK, mint_job, post_segment,  # noqa: E402
                        seg_job)
 
@@ -26,17 +27,9 @@ _HEADER = (
 )
 
 
-def _write_fault_dir(tmp, body):
-    fault_dir = Path(tmp) / 'fault-injection'
-    fault_dir.mkdir()
-    (fault_dir / 'sitecustomize.py').write_text(
-        _HEADER + body, encoding='utf-8')
-    return fault_dir
-
-
 def _bridge_with(tmp, body, extra_env=None):
     """A bridge whose child raises one injected PermissionError."""
-    fault_dir = _write_fault_dir(tmp, body)
+    fault_dir = _write_fault_dir(tmp, body, _HEADER)
     env = {**BRIDGE_ENV, 'PYTHONPATH': str(fault_dir)}
     if extra_env:
         env.update(extra_env)
