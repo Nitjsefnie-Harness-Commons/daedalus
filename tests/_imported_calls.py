@@ -28,6 +28,18 @@ def module_functions(tree, names):
             and names.is_unique_def(node.name)}
 
 
+def module_scopes(tree):
+    """Every module-level scope a call in this file can name.
+
+    The proof context holds the functions only — a class is not a callee
+    and has no signature to seed — while the judgement needs a class body
+    too, because a local `def` reaching one gets it judged.
+    """
+    return {node.name: node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef))}
+
+
 class Context:
     """The functions a call in one file resolves to, and their file.
 
@@ -120,21 +132,28 @@ class SharedResolver:
         return None if function is None else Import(module, function)
 
 
-def reached_functions(entry, functions):
-    """The named functions `entry` reaches in the file it is written in.
+def reached_functions(entry, scopes):
+    """The names of the module-level scopes `entry` reaches.
 
-    The rest of a shared module belongs to that module, not to the control
-    that imported one of its names. The walk enters nested scopes too, so
-    the set is a superset: judging more refuses more, never less.
+    A name reaches, not only a callee: `sorted(items, key=_evil)` passes
+    the function as a value, and a definition the call names is reached
+    whichever way it names it. A class is a scope the reached region can
+    name, and its body is judged.
+
+    What the entry does not name is not returned, and neither is a nested
+    scope: those are regions of a reached function, and
+    `tests/_control_writes.py` judges them from the name set this returns.
     """
     reached = {entry.name}
     pending = [entry]
     while pending:
-        for call in ast.walk(pending.pop()):
-            if not isinstance(call, ast.Call):
+        for node in ast.walk(pending.pop()):
+            if not isinstance(node, ast.Name):
                 continue
-            name = call.func.id if isinstance(call.func, ast.Name) else None
-            if name in functions and name not in reached:
-                reached.add(name)
-                pending.append(functions[name])
+            if not isinstance(node.ctx, ast.Load):
+                continue
+            if node.id in scopes and node.id not in reached:
+                reached.add(node.id)
+                pending.append(scopes[node.id])
     return reached
+

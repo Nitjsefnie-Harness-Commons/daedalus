@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from _control_calls import (ModuleNames, _SHARED_HELPER, argument,
                             call_judgement, has_spread, pattern_names)
 from _imported_calls import (Context, SharedResolver, module_functions,
-                             reached_functions)
+                             module_scopes, reached_functions)
 
 _UNKNOWN_PATH = 0
 _RELATIVE_PATH = 1
@@ -536,15 +536,68 @@ class _ModuleJudgement:
                          if name not in self.helpers}
         self.seedings = dict(seeded or {})
         self.violations = []
-        helper_nodes = set(self.helpers.values())
-        self.scopes = [] if reach is not None else [tree] + [
-            node for node in ast.walk(tree)
-            if isinstance(node, _SCOPES[1:]) and node not in helper_nodes]
+        self.shared = reach is not None
+        self.tree = tree
+        self.scopes = self._scopes(tree, set(self.helpers.values()), reach)
 
     def _imported(self, node):
         if not isinstance(node.func, ast.Name):
             return None
         return self.resolver.imported(self.names, node.func.id)
+
+    @staticmethod
+    def _scopes(tree, helper_nodes, reach):
+        """The scopes of this module that are judged.
+
+        The local contract judges the module itself — so every function's
+        signature is judged with the module's own names — and every nested
+        scope beside it. An imported helper's module belongs to that
+        module, so its top-level statements are not judged; what the
+        imported call reaches is, and that includes the nested scopes
+        inside a reached function, or the two forms would diverge with the
+        imported one weaker.
+        """
+        if reach is None:
+            return [tree] + [node for node in ast.walk(tree)
+                             if isinstance(node, _SCOPES[1:])
+                             and node not in helper_nodes]
+        return ([node for node in tree.body
+                 if isinstance(node, ast.ClassDef) and node.name in reach]
+                + [node for function in tree.body
+                   if isinstance(function, (ast.FunctionDef,
+                                            ast.AsyncFunctionDef))
+                   and function.name in reach
+                   for node in ast.walk(function)
+                   if isinstance(node, _SCOPES[1:]) and node is not function])
+
+    def _judge_signature(self, function):
+        """The expressions a reached function's own signature evaluates.
+
+        A default and a decorator are evaluated where the `def` is, so they
+        are judged with the module's names and not the caller's. The
+        shared module's statements are not judged, so this is the only
+        place a default can be; the local form gets the same calls from
+        its module scope. A nested scope inside the signature is a scope of
+        its own and is left to `scopes`.
+        """
+        owned, mutated = _owned_path_names(self.tree, self.context)
+        trusted = {'Path', 'str', 'os'} - _scope_local_names(self.tree)
+        for node in _nested_scope_expressions(function):
+            pending = [node]
+            while pending:
+                current = pending.pop()
+                if isinstance(current, _SCOPES[1:]):
+                    continue
+                if isinstance(current, ast.Call):
+                    message = _call_violation(
+                        current, self,
+                        *call_judgement(current, self.label, self.names,
+                                        self.resolver.root),
+                        owned, trusted, mutated)
+                    if message is not None:
+                        self.violations.append(
+                            (self.label, current.lineno, message))
+                pending.extend(ast.iter_child_nodes(current))
 
     def judge(self, scope, seeded):
         owned, mutated = _owned_path_names(scope, self.context, seeded)
@@ -589,8 +642,8 @@ class _ModuleJudgement:
         module = imported.module
         self.violations.extend(_ModuleJudgement(
             module.tree, module.label, module.context.resolver,
-            reach=reached_functions(
-                imported.function, module.context.functions),
+            reach=reached_functions(imported.function,
+                                    module_scopes(module.tree)),
             seeded={name: seeding}).run())
 
     def run(self):
@@ -613,6 +666,8 @@ class _ModuleJudgement:
             for name in ready:
                 function = pending.pop(name)
                 self.judge(function, self.seedings.get(name))
+                if self.shared:
+                    self._judge_signature(function)
                 judged.add(function)
         for name in sorted(self.seedings):
             if name not in self.helpers:
