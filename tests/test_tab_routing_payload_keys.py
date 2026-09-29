@@ -75,6 +75,14 @@ _ROWS = [
     # The controls. Each reads clean because the RUNTIME agrees, not
     # because the fold gave up on the position.
     ('literal', 1, {'tab': 5}, _CALL, _inside("cmd = {'tab': 5}")),
+    # A key the program deletes before the send is not a tracked key at
+    # the send, and the runtime agrees: the payload that arrives carries
+    # `id` and nothing else. Both spellings fold the same key position,
+    # so a name-bound deletion removes what a literal one removes.
+    ('del-literal', 0, {'id': 'x'}, _CALL, _inside(
+        'cmd = {"id": "x", "tab": 5}', 'del cmd["tab"]')),
+    ('del-name', 0, {'id': 'x'}, _CALL, _inside(
+        'k = "tab"', 'cmd = {"id": "x", k: 5}', 'del cmd[k]')),
     # A non-string key is provably not 'tab', and it is not a key the
     # runtime can pass either: the splat raises before the call returns,
     # so nothing reaches the sender at all.
@@ -173,6 +181,7 @@ def test_every_row_the_runtime_clears_still_reads_clean(tmp):
         if not expected and _verdict(tmp, label, source):
             loud.append(label)
     assert loud == [], loud
+
 
 
 def main():
