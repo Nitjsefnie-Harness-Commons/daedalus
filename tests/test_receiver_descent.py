@@ -21,14 +21,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _coverage_guard import (  # noqa: E402
-    _BINDING_MESSAGE, _synthetic_violations)
-
-
-def _at(source, marker, message=_BINDING_MESSAGE):
-    """The diagnostic owed a source, at the line carrying `marker`."""
-    line = source[:source.index(marker)].count('\n') + 1
-    return f'tests/synthetic.py:{line}: {message}'
+from _coverage_source_fixtures import (  # noqa: E402
+    _expected_binding_diagnostic)
+from _coverage_guard import _synthetic_violations  # noqa: E402
 
 
 def _one_verdict_each(cases):
@@ -36,7 +31,8 @@ def _one_verdict_each(cases):
     for name, source, marker in cases:
         compile(source, f'<{name}>', 'exec')
         violations = _synthetic_violations(source)
-        assert violations == [_at(source, marker)], (name, violations)
+        assert violations == [
+            _expected_binding_diagnostic(source, marker)], (name, violations)
 
 
 def _no_verdicts(cases):

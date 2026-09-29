@@ -194,12 +194,6 @@ UNCONSOLIDATED_NAMES = {
         'AssertionError text it read, where the owner takes a zero-argument '
         'scan and returns the SystemExit text; a different exception over a '
         'different argument',
-    ('tests/test_coverage_environment.py', '_module_text'):
-        'byte-identical to the test_unresolved_routes site (both '
-        'c79201d1572322de) and the owner bar this suite own one-line '
-        'docstring, which the owner does not carry. The pair is a real '
-        'duplicate and consolidating it means editing one of the two suites, '
-        'which is deferred, not dismissed',
     ('tests/test_coverage_unfollowable_forms.py', '_refused'):
         'this compiles each named synthetic case and asserts exactly one '
         'binding verdict at its marker, where the owner takes a zero-argument '
@@ -289,12 +283,6 @@ UNCONSOLIDATED_NAMES = {
         '(lineno, leaf, spelling) hits, where the drain owner scans a module '
         'text for unbounded drains and the code-eval owner walks an '
         'expression value; three different arguments',
-    ('tests/test_unresolved_routes.py', '_module_text'):
-        'byte-identical to the test_coverage_environment site (both '
-        'c79201d1572322de) and the owner bar this suite own one-line '
-        'docstring, which the owner does not carry. The pair is a real '
-        'duplicate and consolidating it means editing one of the two suites, '
-        'which is deferred, not dismissed',
     ('tests/test_tab_routing_js_heads.py', '_literal'):
         'this builds a method entry plus a plain sibling, where the owner '
         'builds a getter-returning object',
