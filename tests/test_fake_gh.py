@@ -157,11 +157,6 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
         answer.stdin.close()
         entered = _await_entered(fake, 1)
         assert entered, fake.calls()
-        # The process is up and has answered nothing: the entry is logged
-        # and the call is still open, which is the state a liveness reading
-        # is taken against. Reading the stream here would block until the
-        # process ends, which is the thing the hold is postponing.
-        assert answer.poll() is None, answer.returncode
         fake.open_gate()
         out, err = answer.communicate(timeout=60)
         assert answer.returncode == 0, err
@@ -169,6 +164,14 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
     finally:
         answer.kill()
         answer.wait(timeout=60)
+    # The release is the only terminal fact about a wait, so it is what is
+    # asserted: a call still held is indistinguishable from a call nobody
+    # looked at, and reading `answer.poll()` to tell them apart is the very
+    # sample this hold exists to replace - it passed against a double with
+    # no hold in it at all.
+    released = fake.releases()
+    assert len(released) == 1, released
+    assert released[0]['gate'] == str(fake.gate_path), released
 
 
 def _await_entered(fake, count):
