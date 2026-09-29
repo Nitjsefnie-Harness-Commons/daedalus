@@ -95,6 +95,112 @@ def test_an_imported_helper_that_writes_in_the_repository_is_refused(tmp):
         'tests/_shared.py:3: write_text target path is not control-owned']
 
 
+# The regions of a reached scope. Every row is the same text in both
+# forms, so a row that answers CLEAN when imported and refused when local
+# is a hole in the imported form, and a row added for a new kind of region
+# is the only thing that has to change when the reach widens.
+_MORE_REGIONS = (
+    ('a method body of a reached class', 5,
+     'class _C:\n'
+     '    def make(self, tmp):\n'
+     "        (ROOT / '.pwned').write_text('in method')\n\n\n"
+     'def _helper(tmp):\n    return _C\n'),
+    ('a class nested in a reached class', 5,
+     'class _Outer:\n'
+     '    class _Inner:\n'
+     "        (ROOT / '.pwned').write_text('inner class body')\n\n\n"
+     'def _helper(tmp):\n    return _Outer\n'),
+    ('a lambda default on a method of a reached class', 4,
+     'class _C:\n'
+     '    def make(self, f=lambda: (ROOT / \'.pwned\').write_text(\'x\')):\n'
+     '        return f\n\n\n'
+     'def _helper(tmp):\n    return _C\n'),
+    ('a nested def inside a method of a reached class', 6,
+     'class _C:\n'
+     '    def make(self):\n'
+     '        def inner():\n'
+     "            (ROOT / '.pwned').write_text('nested in method')\n"
+     '        inner()\n\n\n'
+     'def _helper(tmp):\n    return _C\n'),
+    ('the signature of a reached function in a call cycle', 7,
+     'def _helper(tmp):\n'
+     '    return _other(tmp)\n\n\n'
+     "def _other(tmp, out=(ROOT / '.pwned').write_text('x')):\n"
+     '    return _helper(tmp)\n'),
+    ('the signature of a cycle ENTRY', 3,
+     "def _helper(tmp, out=(ROOT / '.pwned').write_text('x')):\n"
+     '    return _other(tmp)\n\n\n'
+     'def _other(tmp):\n'
+     '    return _helper(tmp)\n'),
+)
+
+# One helper carrying EVERY region at once, in a call cycle so the
+# readiness loop cannot order the bodies. A category that the assembly
+# judges on one path and not the other shows up here as a missing line.
+_EVERY_REGION = (
+    "def _helper(tmp, entry=(ROOT / '.entry').write_text('x')):\n"
+    '    def nested():\n'
+    "        (ROOT / '.nested').write_text('x')\n"
+    '    nested()\n'
+    '    return _other(tmp)\n\n\n'
+    "def _other(tmp, callee=(ROOT / '.callee').write_text('x')):\n"
+    '    class _C:\n'
+    '        def make(self):\n'
+    "            (ROOT / '.method').write_text('x')\n"
+    '    return _helper(tmp)\n')
+# One line per write in `_EVERY_REGION`, in the order they are written:
+# the entry's default, the nested `def`, the callee's default, the
+# method. A category the assembly judges on the ordered path and not on
+# this one is a missing line here.
+_EVERY_REGION_LINES = (1, 3, 8, 11)
+
+
+def test_every_region_of_a_reached_scope_is_judged(tmp):
+    """(l) a row per region, written twice: imported and as a local def.
+
+    One table, so widening the reach means adding a row and not editing
+    a control. Each row is one text in two forms, and the two verdicts
+    must agree on the verdict even where they differ on the file.
+    """
+    root = Path(tmp)
+    for label, local_line, body in _MORE_REGIONS:
+        helper = root / label
+        helper.mkdir()
+        control = _HELPER_CALL + _CALLS_HELPER
+        local = helper / 'test_local.py'
+        local.write_text(
+            _PRELUDE + body + _CALLS_HELPER, encoding='utf-8')
+        assert control_write_violations(local, helper) == [
+            f'test_local.py:{local_line}: write_text target '
+            'path is not control-owned'], label
+        shared = helper / 'tests' / '_shared.py'
+        shared.parent.mkdir(exist_ok=True)
+        shared.write_text(body, encoding='utf-8')
+        source = helper / 'test_control.py'
+        source.write_text(_PRELUDE + control, encoding='utf-8')
+        messages = control_write_violations(source, helper)
+        assert messages, label
+        assert all(m.startswith('tests/_shared.py:') for m in messages), (
+            label, messages)
+        assert any(m.endswith('write_text target path is not control-owned')
+                   for m in messages), (label, messages)
+
+
+def test_every_region_is_judged_on_the_path_that_cannot_order(tmp):
+    """(l) a cycle, with every region present, loses none of them.
+
+    The loop that seeds a helper from its callers cannot order a cycle, so
+    a cycle takes the fallback. This is the control that says the fallback
+    judges what the ordered path judges: a category the assembly lists on
+    one path and not the other is a missing line here.
+    """
+    root = Path(tmp)
+    source = _plant(root, _EVERY_REGION, _HELPER_CALL + _CALLS_HELPER)
+    assert control_write_violations(source, root) == [
+        f'tests/_shared.py:{line}: write_text target path is not '
+        'control-owned' for line in _EVERY_REGION_LINES]
+
+
 def test_a_nested_def_inside_a_helper_is_judged(tmp):
     """(l) the local contract judges a nested def; so must the imported one."""
     root = Path(tmp)
