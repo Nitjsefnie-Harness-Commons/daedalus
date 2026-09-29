@@ -45,6 +45,10 @@ PINNED = {
 # table does not carry, which is the whole of the first defect.
 WINDOWS_X64 = ('Windows', 'AMD64')
 EXECUTABLE = b'#!/not/really/an/executable\n'
+# The name a real wheel has, so a refusal about the version can
+# tell a wheel of the pinned version from one of another.
+DEFAULT_WHEEL = 'shellcheck_py-0.11.0.1-py3-none-any.whl'
+SCRIPTS = 'shellcheck_py-0.11.0.1.data/scripts'
 
 
 def _installer():
@@ -211,11 +215,9 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
             mock.patch.object(installer, 'TOOL_DIR', tools), \
             mock.patch.object(installer, '_fetch',
                               return_value=payload), \
-            _installed(installer), \
+            _installing(installer, [('shellcheck.exe', EXECUTABLE)]), \
             mock.patch.object(installer, 'shutil', mock.Mock(
-                which=lambda tool: str(installer.script_dir(
-                    tools / installer.SHELLCHECK_PACKAGE)
-                    / f'{tool}.exe'))):
+                which=lambda tool: str(tools / f'{tool}.exe'))):
         # The stub answers from inside the tool directory, because that is
         # the only place `_record` will accept an answer from. A stub that
         # answered from anywhere else used to pass and does not now — which
@@ -229,24 +231,48 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
                 encoding='utf-8')
 
 
-def _installed(installer):
-    """Stand in for the wheel install, writing the console script it leaves.
+def _wheel(directory, members, name=None, scheme=None):
+    """A real wheel carrying `members`, the way the release's wheels do.
 
-    pip is the one part of this step that cannot be exercised without a
-    network and a wheel index, and the part that has to be right is not
-    pip's: it is that the directory pip writes is the directory the step
-    puts on PATH. This writes one console script where pip would and
-    leaves everything else to the real code.
+    Built rather than stubbed, because the code under test OPENS the
+    wheel and reads the member out of it: a fake that only satisfied the
+    call would leave the whole extraction path untested, which is the part
+    the Windows failure was in. Each member is `(name-in-the-scripts-
+    scheme, bytes)`; a directory entry can be asked for with a trailing
+    slash, which the manylinux wheel really does carry.
+    """
+    wheel = Path(directory) / (name or DEFAULT_WHEEL)
+    with zipfile.ZipFile(wheel, 'w') as archive:
+        for member, payload in members:
+            archive.writestr(f'{scheme or SCRIPTS}/{member}', payload)
+    return wheel
+
+
+def _downloaded(members, name=None, scheme=None):
+    """Stub `pip download`, handing back a real wheel in its staging dir.
+
+    pip owns the network and the platform choice, and neither is what
+    this file is testing; what it tests is what the installer does with
+    the wheel pip brought. The command is asserted so a change in the
+    resolution — losing `--only-binary`, or `--no-deps` — is visible.
     """
     def run(command, **kwargs):
         assert kwargs.get('check') is True, 'a pip failure must fail the step'
-        target = Path(command[command.index('--target') + 1])
-        scripts = installer.script_dir(target)
-        scripts.mkdir(parents=True)
-        (scripts / 'shellcheck').write_text('#!/bin/sh\nexit 0\n')
-        (scripts / 'shellcheck').chmod(0o755)
-        return subprocess.CompletedProcess(command, 0)
-    return mock.patch.object(installer.subprocess, 'run', side_effect=run)
+        assert '--only-binary=:all:' in command, (
+            'the sdist fallback would try to build the tool from source on '
+            'a runner')
+        assert '--no-deps' in command, 'nothing else is wanted from the index'
+        return subprocess.CompletedProcess(
+            command, 0, '', _wheel(command[command.index('--dest') + 1],
+                                   members, name, scheme))
+    return run
+
+
+def _installing(installer, members, name=None, scheme=None):
+    """The wheel pip brings, and nothing else stubbed."""
+    return mock.patch.object(
+        installer.subprocess, 'run',
+        side_effect=_downloaded(members, name, scheme))
 
 
 def test_the_shellcheck_version_is_written_down_exactly_once(tmp):
@@ -300,20 +326,82 @@ def test_a_requirements_file_that_names_no_single_version_is_refused(tmp):
                     'and the step would install something no pin names')
 
 
-def test_the_console_script_directory_is_the_one_this_platform_uses(tmp):
-    """`bin` here, `Scripts` on Windows, and the difference is load-bearing.
+def test_the_member_name_comes_from_the_wheel_not_from_a_platform_branch(tmp):
+    """`shellcheck` here, `shellcheck.exe` there, and the wheel decides.
 
-    A tool directory on PATH with no console scripts in it resolves
-    nothing, so a wrong answer here is a step that installs a tool and
-    then fails to find it — which is what the refusal in the installer
-    exists to turn into a message rather than a mystery.
+    The branch this replaces is what broke: pip's `--target` put a
+    scripts-scheme member somewhere no PATH entry reached on
+    windows-latest. Nothing here computes the name from the platform, so
+    there is no second answer to keep correct.
     """
-    del tmp
+    tmp = Path(tmp)
     installer = _installer()
-    with _on('Linux', 'x86_64'):
-        assert installer.script_dir(Path('/t')) == Path('/t/bin')
-    with _on(*WINDOWS_X64):
-        assert installer.script_dir(Path('/t')) == Path('/t/Scripts')
+    for name in ('shellcheck', 'shellcheck.exe'):
+        tools = tmp / name
+        with _installing(installer, [(name, b'#!/not/really\n')]), \
+                mock.patch.object(installer, 'TOOL_DIR', tools):
+            installer.install_shellcheck()
+        assert (tools / name).read_bytes() == b'#!/not/really\n', name
+        assert [p.name for p in tools.iterdir()] == [name], sorted(
+            p.name for p in tools.iterdir())
+
+
+def test_a_wheel_that_carries_the_wrong_binary_is_refused(tmp):
+    """Each of the four supply-chain shapes, refused in the file's register.
+
+    No member, more than one, a name that is not the declared tool, and a
+    version that is not the pin. A wheel that would put something else on
+    PATH is not one to install, and the directory entry the manylinux
+    wheel really carries must not be counted as a second member — that
+    error would make every Linux leg refuse a correct wheel.
+    """
+    tmp = Path(tmp)
+    installer = _installer()
+    cases = {
+        'no scripts member': ([('mod.py', b'x')], 'carries no'),
+        'two scripts members': ([('shellcheck', b'x'), ('other', b'y')],
+                                'carries 2'),
+        'a member that is not the tool': ([('shellcheck-wrapper', b'x')],
+                                          'is not the shellcheck'),
+        'a directory entry beside one binary': (
+            [('scripts/', b''), ('shellcheck', b'x')], None),
+    }
+    for label, (members, expected) in cases.items():
+        tools = tmp / label.replace(' ', '-')
+        # A member that is not under the scripts scheme at all is the
+        # first shape; one that is under it but is not the tool is the
+        # last, and the two are different refusals.
+        scheme = (SCRIPTS.replace('scripts', 'purelib')
+                  if label == 'no scripts member' else None)
+        with _installing(installer, members, scheme=scheme), \
+                mock.patch.object(installer, 'TOOL_DIR', tools):
+            if expected is None:
+                # The one case that must SUCCEED: the directory entry is
+                # not a second binary.
+                installer.install_shellcheck()
+                assert (tools / 'shellcheck').is_file()
+                continue
+            try:
+                installer.install_shellcheck()
+            except SystemExit as refusal:
+                assert expected in str(refusal), f'{label}: {refusal}'
+            else:
+                raise AssertionError(
+                    f'a wheel with {label} was installed rather than '
+                    'refused')
+    # A wheel whose version is not the pin is refused before it is opened,
+    # and this one goes through `install_shellcheck` because that is where
+    # the check lives: the placer is handed a wheel it has already agreed
+    # about and would be testing nothing if asked to re-check.
+    with _installing(installer, [('shellcheck', b'x')],
+                     name='shellcheck_py-0.9.0-py3-none-any.whl'), \
+            mock.patch.object(installer, 'TOOL_DIR', tmp / 'wrong-version'):
+        try:
+            installer.install_shellcheck()
+        except SystemExit as refusal:
+            assert 'not that version' in str(refusal), refusal
+        else:
+            raise AssertionError('a wheel of another version was installed')
 
 
 def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
@@ -342,16 +430,15 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
             mock.patch.object(installer, 'TOOL_DIR', tools), \
             mock.patch.object(installer, '_fetch',
                               return_value=payload), \
-            _installed(installer):
+            _installing(installer, [('shellcheck', EXECUTABLE)]):
         assert installer.main() == 0
-        scripts = installer.script_dir(tools / installer.SHELLCHECK_PACKAGE)
-        assert installer.shutil.which('shellcheck') == str(
-            scripts / 'shellcheck'), (
+        installed = tools / 'shellcheck'
+        assert installer.shutil.which('shellcheck') == str(installed), (
             'shellcheck did not resolve into the directory this step '
             'installed it into')
-        assert str(scripts) in later.read_text(
+        assert str(tools) in later.read_text(
             encoding='utf-8').split('\n'), (
-            'the console-script directory is not on the PATH the later steps '
+            'the tool directory is not on the PATH the later steps '
             'inherit, so a suite would find whatever the runner image '
             'happens to carry instead')
     assert recorded.read_text(encoding='utf-8')

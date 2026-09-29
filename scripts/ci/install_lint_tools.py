@@ -56,6 +56,12 @@ LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 # and there is no second copy to forget.
 REQUIREMENTS = ROOT / 'requirements-test.txt'
 SHELLCHECK_PACKAGE = 'shellcheck-py'
+# The binary the wheel is expected to carry, and the directory inside
+# the wheel that carries it. The member's FILE NAME is what lands on
+# PATH — `shellcheck` on POSIX, `shellcheck.exe` on Windows — and it
+# is read from the wheel rather than computed here.
+SHELLCHECK_BINARY = 'shellcheck'
+SCRIPTS_SCHEME = '.data/scripts/'
 ACTIONLINT_VERSION = '1.7.12'
 # sha256 of each release asset, taken from the release's own checksums.txt.
 # Bump the version and this table together. The key is (platform.system(),
@@ -78,6 +84,9 @@ RELEASE = 'https://github.com/rhysd/actionlint/releases/download'
 ARCHITECTURES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64',
                  'arm64': 'arm64'}
 DOWNLOAD_TIMEOUT = 30
+# A whole-process bound, because pip owns the wheel transfer below, so
+# the per-socket one above does not apply to it.
+WHEEL_TIMEOUT = 300
 MAX_TRANSFER = 64 * 1024 * 1024
 INSTALL_DIR = Path(os.environ.get('RUNNER_TEMP', tempfile.gettempdir()))
 TOOL_DIR = INSTALL_DIR / 'daedalus-lint-tools'
@@ -201,45 +210,129 @@ def shellcheck_pin():
     return found[0].split(';')[0].strip()[len(wanted):]
 
 
-def script_dir(target):
-    """Where pip puts console scripts under `--target` on this platform.
-
-    `bin` on POSIX, `Scripts` on Windows, and the difference is the whole
-    reason a Windows leg needs this computed rather than hardcoded: the
-    tool directory is on PATH either way, and a directory with no console
-    scripts in it resolves nothing.
-    """
-    return target / ('Scripts' if platform.system() == 'Windows' else 'bin')
-
-
 def install_shellcheck():
-    """Install the pinned shellcheck wheel into the tool directory."""
-    target = TOOL_DIR / SHELLCHECK_PACKAGE
+    """Install the pinned shellcheck from its wheel, on every platform.
+
+    Not `pip install --target`. The wheels carry the binary as package data
+    under the scripts scheme and declare no console-script entry point at
+    all, so where `--target` puts such a member is pip's scheme logic, and
+    on windows-latest it put it somewhere no PATH entry reached. Reading
+    the member out of the wheel ourselves makes this the same three lines
+    on all three operating systems, and the one place that can be wrong is
+    a place this file owns rather than one it infers.
+    """
     version = shellcheck_pin()
+    with tempfile.TemporaryDirectory() as staging:
+        wheel = _wheel_for(staging, version)
+        _place_scripts_member(wheel, version)
+    print(f'shellcheck {version} installed from {wheel.name}')
+
+
+def _wheel_for(staging, version):
+    """The one wheel pip resolves the pinned requirement to, right here.
+
+    pip chooses, and that is the whole point. The release publishes five
+    artifacts for this one version — a macOS x86_64 wheel, a macOS arm64
+    wheel, a manylinux wheel, a Windows wheel and an sdist — and
+    macos-latest is arm64, so a wheel named here from a platform table
+    would be another table to keep right by hand, in the one function
+    whose job is to stop assuming what a platform calls something.
+    `--only-binary=:all:` forbids the sdist fallback, which would
+    otherwise try to build the tool from source on a runner.
+
+    The transfer is pip's here, so this bounds what is ACCEPTED rather
+    than what is fetched: an over-limit wheel is refused before a byte of
+    it is opened. The actionlint path bounds the transfer directly because
+    it owns the URL, and the difference is worth naming rather than
+    glossing over.
+    """
+    requirement = f'{SHELLCHECK_PACKAGE}=={version}'
     subprocess.run(
-        [sys.executable, '-m', 'pip', 'install', '--quiet', '--upgrade',
-         '--target', str(target), f'{SHELLCHECK_PACKAGE}=={version}'],
-        check=True)
-    scripts = script_dir(target)
-    if not scripts.is_dir():
+        [sys.executable, '-m', 'pip', 'download', '--only-binary=:all:',
+         '--no-deps', '--dest', staging, requirement],
+        check=True, timeout=WHEEL_TIMEOUT)
+    brought = sorted(Path(staging).iterdir())
+    wheels = [path for path in brought if path.suffix == '.whl']
+    if not wheels:
         raise SystemExit(
-            f'pip installed {SHELLCHECK_PACKAGE} but left no console scripts '
-            f'in {scripts}, so the binary this script declares would not '
-            'resolve; installing it into a directory with nothing in it is '
-            'the same as not installing it')
-    print(f'shellcheck {version} installed at {scripts}')
+            f'pip brought no wheel for {requirement}, only '
+            f'{[path.name for path in brought]}; this script installs the '
+            'binary out of a wheel and will not build one from source')
+    if len(wheels) > 1:
+        raise SystemExit(
+            f'pip brought {len(wheels)} wheels for {requirement}, at '
+            f'{[path.name for path in wheels]}; one pin must name one wheel')
+    wheel = wheels[0]
+    escaped = SHELLCHECK_PACKAGE.replace('-', '_')
+    if not wheel.name.startswith(f'{escaped}-{version}-'):
+        raise SystemExit(
+            f'{requirement} resolved to {wheel.name}, which is not that '
+            'version; installing it would put a binary in place of the one '
+            'the pin names')
+    return wheel
+
+
+def _place_scripts_member(wheel, version):
+    """Write the wheel's one scripts-scheme member into the tool directory.
+
+    Four shapes are refused rather than guessed at, because each is a
+    supply-chain question and not a formatting one: no scripts member, more
+    than one, a name that is not the declared tool, and a wheel whose
+    version is not the pin. A member is also directory-skipped, because
+    the manylinux wheel carries a zero-byte `….data/scripts/` directory
+    entry beside its binary and counting that would make every Linux leg
+    refuse a wheel that is perfectly correct.
+    """
+    size = wheel.stat().st_size
+    if size > MAX_TRANSFER:
+        raise SystemExit(
+            f'{wheel.name} is {size} bytes, over the {MAX_TRANSFER} ceiling '
+            'this script accepts; refusing beats unpacking a transfer that '
+            'should not have been trusted')
+    try:
+        archive = zipfile.ZipFile(wheel)
+    except (OSError, zipfile.BadZipFile) as why:
+        raise SystemExit(
+            f'{wheel.name} is not a readable wheel: {why}') from why
+    with archive:
+        members = [info for info in archive.infolist()
+                   if not info.is_dir()
+                   and SCRIPTS_SCHEME in info.filename
+                   and '/' not in info.filename.split(SCRIPTS_SCHEME)[1]]
+        names = [info.filename.split(SCRIPTS_SCHEME)[1] for info in members]
+        if not members:
+            raise SystemExit(
+                f'{wheel.name} carries no {SCRIPTS_SCHEME} member, so it '
+                'carries no binary; the tool this script declares would not '
+                'resolve, and a wheel without the binary is not a wheel to '
+                'guess at')
+        if len(members) > 1:
+            raise SystemExit(
+                f'{wheel.name} carries {len(members)} {SCRIPTS_SCHEME} '
+                f'members, at {names}; one wheel must carry one binary')
+        member = members[0]
+        name = names[0]
+        if os.path.splitext(name)[0] != SHELLCHECK_BINARY:
+            raise SystemExit(
+                f'{wheel.name} carries {SCRIPTS_SCHEME}{name}, which is not '
+                f'the {SHELLCHECK_BINARY} this script declares; a wheel that '
+                'would put something else on PATH is not one to install')
+        target = TOOL_DIR / name
+        TOOL_DIR.mkdir(parents=True, exist_ok=True)
+        with archive.open(member) as source, open(target, 'wb') as out:
+            out.write(source.read())
+    target.chmod(0o755)
+    print(f'  {target}: {target.stat().st_size} bytes, mode '
+          f'{oct(target.stat().st_mode)[-3:]}, from {version}')
 
 
 def _publish():
-    """Put the tool directories on PATH here and for the steps after."""
-    for directory in (TOOL_DIR, script_dir(TOOL_DIR / SHELLCHECK_PACKAGE)):
-        os.environ['PATH'] = f'{directory}{os.pathsep}{os.environ["PATH"]}'
+    """Put the tool directory on PATH here and for the steps after."""
+    os.environ['PATH'] = f'{TOOL_DIR}{os.pathsep}{os.environ["PATH"]}'
     later = os.environ.get('GITHUB_PATH')
     if later:
         with open(later, 'a', encoding='utf-8') as handle:
             handle.write(f'{TOOL_DIR}\n')
-            handle.write(
-                f'{script_dir(TOOL_DIR / SHELLCHECK_PACKAGE)}\n')
 
 
 def _installed_here(path):
