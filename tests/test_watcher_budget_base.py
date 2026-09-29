@@ -21,11 +21,11 @@ from _watcher_fixtures import IDLE_POLL_BOUND  # noqa: E402
 from _watcher_fixtures import PR  # noqa: E402
 from _watcher_fixtures import TICK  # noqa: E402
 from _watcher_fixtures import base_answers  # noqa: E402
+from _watcher_fixtures import BASE  # noqa: E402
 from _watcher_fixtures import idle_answers  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
-BASE = '3cc3605f38f1b0c0d0e47d5252ad17154bad72ec'
 
 
 _BASE_POLL_READS = '    for kind, path in surfaces(repo, pr):\n'

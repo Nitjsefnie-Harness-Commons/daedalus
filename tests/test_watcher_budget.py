@@ -2,9 +2,13 @@
 """What an idle watched pull request costs, and what a refusal does.
 
 Every watcher here is a real process answering from the fake `gh` in
-`_fake_gh.py`, so the numbers are the requests the scripts actually make. The
-same harness measures the base commit's scripts, extracted with `git show`,
-which is what makes the before/after comparison one method rather than two.
+`_fake_gh.py`, so the numbers are the requests the scripts actually make.
+
+What these watchers cost BEFORE this branch is measured in
+`tests/test_watcher_budget_base.py`. The two halves are one method rather
+than two because they answer from the same fake `gh`, are measured by the
+same `tests/_watcher_once.py`, and are pinned to the same `BASE` in
+`tests/_watcher_fixtures.py`.
 """
 import json
 import os
@@ -44,7 +48,6 @@ from _watcher_fixtures import THROTTLED  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
-BASE = '3cc3605f38f1b0c0d0e47d5252ad17154bad72ec'
 
 
 def _announces_pid(line):
