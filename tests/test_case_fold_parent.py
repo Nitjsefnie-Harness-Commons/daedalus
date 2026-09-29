@@ -246,9 +246,10 @@ def test_the_guard_still_refuses_a_symlink_the_parent_folds(tmp):
     three run on the macOS and Windows CI legs, where the host's own
     volume folds and holds symlinks. The workflow takes **no step** to
     obtain the symlink privilege those legs need: `tests.yml`'s `suites`
-    job is checkout, setup-python, pip cache, pip install, `run_tests.py`,
-    and nothing in `.github/workflows/` mentions symlinks, Developer Mode
-    or `SeCreateSymbolicLink`. It therefore rests on two ambient facts
+    job is checkout, setup-python, pip cache, pip install, the lint-tools
+    install, `run_tests.py`, and nothing in `.github/workflows/` mentions
+    symlinks, Developer Mode or `SeCreateSymbolicLink`. It therefore rests
+    on two ambient facts
     rather than on the tree: the `windows-latest` image runs its account as
     an administrator, which may create a symlink without Developer Mode,
     and CPython's `os.symlink` on Windows asks for

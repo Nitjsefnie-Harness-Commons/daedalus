@@ -522,6 +522,7 @@
 !/tests/test_checkout_pin.py
 !/tests/test_child_coverage.py
 !/tests/test_ci_gate.py
+!/tests/test_ci_lint_tools.py
 !/tests/test_ci_pip_cache.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_thresholds.py
