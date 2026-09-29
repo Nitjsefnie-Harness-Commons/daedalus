@@ -127,6 +127,7 @@
     "_assert_scenario_gate": {"python": ["tests/_boundary.py"]},
     "_assert_slept_its_attempt_budget": {"python": ["tests/_cmdqueue_faults.py"]},
     "_assert_step_trace": {"python": ["tests/_overlap.py"]},
+    "_assert_unlaunchable_binary_is_a_refusal": {"python": ["tests/_actionlint.py"]},
     "_assert_writer_inventory": {"python": ["tests/_workflow_cache_boundary.py"]},
     "_assert_yaml_refusal": {"python": ["tests/_wfassert.py"]},
     "_assertion_site": {"python": ["tests/_util.py"]},
