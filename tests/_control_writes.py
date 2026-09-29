@@ -141,10 +141,11 @@ class _ModuleJudgement:
     def judge_scope(self, scope, seeding):
         """One top-level scope, whole: the body and the header beside it.
 
-        The single per-scope entry, and the roots loop, the nested-scope
-        loop and the readiness loop all reach it. A header is whatever the
-        scope evaluates when it is defined, and the same rule reads a
-        `def`'s and a `class`'s.
+        The single per-scope entry. The roots loop and the readiness loop
+        call it; the nested-scope loop calls `judge` and reaches a nested
+        header through its PARENT's walk, which is where a nested scope's
+        header is judged. A header is whatever the scope evaluates when it
+        is defined, and the same rule reads a `def`'s and a `class`'s.
         """
         self.judge(scope, seeding)
         if self.shared:
@@ -161,7 +162,9 @@ class _ModuleJudgement:
         evaluated where the `def` or `class` is, so they are judged with
         the module's names and not the caller's. The shared module's
         statements are not judged, so this is the only place one of these
-        can be; a nested scope inside one is left to `scopes`.
+        can be, and `if self.shared:` is the whole of the local case
+        because there the module scope judges the same calls. A nested
+        scope inside one is left to `scopes`.
         """
         owned, mutated = _owned_path_names(self.tree, self.context)
         trusted = {'Path', 'str', 'os'} - _scope_local_names(self.tree)
