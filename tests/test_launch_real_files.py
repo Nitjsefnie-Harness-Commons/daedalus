@@ -92,9 +92,9 @@ DISCHARGED = (
      'urllib.request.urlopen(page_url, timeout=2)', 1),
     ('test_real_browser_harness.py',
      'urllib.request.urlopen(page_url, timeout=2)', 2),
-    ('test_real_browser_harness.py', 'def timed_out(', 1),
-    ('test_real_browser_harness.py', 'def outer_timeout(', 1),
-    ('test_real_browser_harness.py', 'def websocket_failed(', 1),
+    ('test_real_browser_cdp_timeouts.py', 'def timed_out(', 1),
+    ('test_real_browser_cdp_timeouts.py', 'def outer_timeout(', 1),
+    ('test_real_browser_cdp_timeouts.py', 'def websocket_failed(', 1),
 )
 
 # The genuine child bounds, with the route and the reason each carries
@@ -122,9 +122,10 @@ CHILD_BOUNDS = (
     ('test_real_browser_harness.py', 'process.wait(timeout=10) == 0', 1,
      WRITTEN),
     ('test_real_browser_harness.py', 'process.wait(timeout=10)', 1, WRITTEN),
-    ('test_real_browser_harness.py', 'text=True, timeout=10)', 1, WRITTEN),
-    ('test_real_browser_harness.py', 'text=True, timeout=10)', 2, WRITTEN),
-    ('test_real_browser_harness.py', 'thread.join(timeout=2 *', 1, WRITTEN),
+    ('test_real_browser_harness.py', 'input=source, timeout=deadline_s)', 1,
+     'the constant deadline_s is not computed from a named chain, so '
+     'the figure behind it is written rather than composed'),
+    ('test_real_browser_cdp_timeouts.py', 'thread.join(timeout=2 *', 1, WRITTEN),
 )
 
 # The one row these three files used to carry that no table above accounted
@@ -144,7 +145,8 @@ DISCHARGED_BY_CALL_SITES = (
 # tables above say what every row MEANS and neither can say there is no row
 # beyond them, which is the whole of the control below.
 REAL_ROW_TOTALS = {'test_bridge_startup.py': 7, 'test_parent_watch.py': 7,
-                   'test_real_browser_harness.py': 7}
+                   'test_real_browser_cdp_timeouts.py': 1,
+                   'test_real_browser_harness.py': 3}
 
 
 def test_the_real_files_emit_exactly_the_rows_this_suite_names(tmp):

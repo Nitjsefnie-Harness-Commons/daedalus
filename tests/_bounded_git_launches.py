@@ -490,6 +490,16 @@ BOUNDED_GIT_LAUNCHES = {
      'parent.proc.wait(timeout)', 1):
          'a parent handle reaping a child it signalled itself, in the'
          ' graceful-exit control',
+    ('tests/test_watcher_budget.py',
+     'test_a_graceful_exit_leaves_no_children_behind',
+     'parent.proc.wait(timeout)', 1):
+         'the same parent-handle reap, in the copy of the graceful-exit'
+         ' control that test_watcher_budget.py carries',
+    ('tests/test_watcher_budget.py',
+     'test_the_children_die_with_their_parent',
+     'parent.proc.wait(timeout)', 1):
+         'the same parent-handle reap, in the copy of the children-die'
+         ' control that test_watcher_budget.py carries',
     ('tests/test_watcher_lifecycle.py',
      'test_the_children_die_with_their_parent',
      'parent.proc.wait(timeout)', 1):
