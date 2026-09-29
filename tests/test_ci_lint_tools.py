@@ -19,7 +19,6 @@ real target — the installer step removed from a real suite job, a skip
 arm added to a real suite for a binary nothing installs, and a suite
 job planted in a workflow this file never reads.
 """
-import ast
 import os
 import re
 import shutil
@@ -30,6 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _suite_jobs import (  # noqa: E402
     SUITE_RUNNERS, WORKFLOW_DIR, _ordered_job_runs, _workflow_jobs)
+from _lint_tool_roles import (  # noqa: E402
+    _derive_tool_roles, _tool_roles)
 from _wfgraph import _job_names  # noqa: E402
 
 ROOT = _util.ROOT
@@ -55,8 +56,6 @@ SUITE_DOORS = {
     ('timed-timings.yml', 'refresh'):
         'five suites are run by path rather than through a runner',
 }
-_SUBPROCESS = ('run', 'Popen', 'check_call', 'check_output')
-_SKIP_NAMES = ('skip', 'skipTest', 'SkipTest')
 
 
 def _suite_jobs():
@@ -87,256 +86,106 @@ def _door_jobs():
     return found
 
 
-def _constants(tree):
-    """The module's own `NAME = 'literal'` bindings, so a `which` resolves.
-
-    A tool named through a module constant is still the tool the suite
-    requires, and reading only literal arguments would make the derivation
-    blind to the spelling half the tree uses.
-    """
-    bound = {}
-    for node in tree.body:
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and isinstance(node.value, ast.Constant)
-                and isinstance(node.value.value, str)):
-            bound[node.targets[0].id] = node.value.value
-    return bound
-
-
-def _tool_name(node, bound):
-    """The tool a `shutil.which` call names, or None for any other call.
-
-    A call that passes a keyword is scoped to a directory the caller chose,
-    so it says what is on THAT path and nothing about the machine the suite
-    runs on. A fixture that writes a bogus binary and then resolves it proves
-    the resolver works; reading that as a requirement on the machine is how
-    a control decides a tool needs no install because a test built its own.
-    """
-    if not (isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == 'which'
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == 'shutil'):
-        return None
-    if node.keywords:
-        return None
-    argument = node.args[0] if node.args else None
-    if isinstance(argument, ast.Name):
-        return bound.get(argument.id)
-    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-        return argument.value
-    return None
-
-
-def _dotted_or_bare_name(node):
-    """The bare name a call or a raise names, or ''."""
-    if isinstance(node, ast.Call):
-        node = node.func
-    if isinstance(node, ast.Name):
-        return node.id
-    return node.attr if isinstance(node, ast.Attribute) else ''
-
-
-def _skips(body):
-    """Whether the statements in an `if` body skip rather than fail.
-
-    The SKIP is the distinguishing property, not the lookup: most of the
-    tree's `shutil.which` uses are `assert node, '...'`, which state a
-    requirement the jobs already meet. Reading a skip as an assertion — or
-    the reverse — is what makes a control like this one either demand a
-    package manager install git, or miss the next binary entirely.
-    """
-    for statement in body:
-        for part in ast.walk(statement):
-            if isinstance(part, ast.Call):
-                if _dotted_or_bare_name(part) in _SKIP_NAMES:
-                    return True
-            elif isinstance(part, ast.Raise):
-                name = _dotted_or_bare_name(part.exc)
-                if name in _SKIP_NAMES or name.endswith('Skipped'):
-                    return True
-    return False
-
-
-def _none_test(test, name, missing):
-    """Whether `test` asks whether `name` is `missing` (None or not)."""
-    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
-        return not missing and _none_test(test.operand, name, True)
-    if isinstance(test, ast.BoolOp):
-        return any(_none_test(value, name, missing) for value in test.values)
-    if isinstance(test, ast.Name):
-        return test.id == name
-    if isinstance(test, ast.Compare) and isinstance(test.left, ast.Name):
-        return (test.left.id == name and len(test.comparators) == 1
-                and isinstance(test.ops[0], (ast.Is, ast.IsNot, ast.Eq))
-                and isinstance(test.comparators[0], ast.Constant)
-                and test.comparators[0].value is None)
-    return False
-
-
-def _command_words(tree):
-    """Tools a suite runs as a command, asking nothing about their absence."""
-    words = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
-            continue
-        if _dotted_or_bare_name(node) not in _SUBPROCESS:
-            continue
-        if not _names_subprocess(node.func):
-            continue
-        argv = node.args[0]
-        if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
-            continue
-        first = argv.elts[0]
-        if isinstance(first, ast.Constant) and isinstance(first.value, str):
-            words.add(first.value)
-    return words
-
-
-def _names_subprocess(func):
-    """Whether a call goes through the subprocess module, aliased or not."""
-    if isinstance(func, ast.Attribute):
-        return (isinstance(func.value, ast.Name)
-                and func.value.id.rsplit('.', 1)[-1] == 'subprocess')
-    return isinstance(func, ast.Name) and func.id.rsplit('.', 1)[-1] in (
-        'subprocess', 'sp')
-
-
-def _role_of_lookup(parent, node, tool, skipped, present):
-    """Record how the suite that wrote this `which` call treats absence."""
-    current = node
-    while current in parent:
-        current = parent[current]
-        if isinstance(current, ast.If) and node in ast.walk(current.test):
-            (skipped if _skips(current.body) else present).add(tool)
-            return
-        if isinstance(current, ast.Assert) and node in ast.walk(current.test):
-            present.add(tool)
-            return
-        if isinstance(current, ast.stmt):
-            if (isinstance(current, ast.Assign)
-                    and isinstance(current.targets[0], ast.Name)):
-                _role_of_binding(_scope(parent, current),
-                                 current.targets[0].id, tool, skipped, present)
-            return
-
-
-def _scope(parent, node):
-    """The function or module the statement sits in, and no wider.
-
-    A helper that reuses one name for several lookups is common, and a
-    guard in another function is that other lookup's guard. Reading the
-    whole module instead attributes one tool's skip to another tool, which
-    is how a control ends up believing a binary nothing has to install.
-    """
-    current = node
-    while current in parent:
-        current = parent[current]
-        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return current
-        if isinstance(current, ast.Module):
-            return current
-    return None
-
-
-def _role_of_binding(scope, name, tool, skipped, present):
-    """Record how the suite guards the tool bound to `name` in that scope."""
-    if scope is None:
-        return
-    parts = list(ast.walk(scope))
-    if any(_skips(part.body) for part in parts
-           if isinstance(part, ast.If) and _none_test(part.test, name, True)):
-        skipped.add(tool)
-    if any(_none_test(part.test, name, False) for part in parts
-           if isinstance(part, ast.Assert)):
-        present.add(tool)
-
-
-def _skip_texts(tree):
-    """Every literal a skip call or a skip raise renders.
-
-    A skip that NAMES the tool it is skipping on is a skip on that tool,
-    whatever plumbing carries the lookup to the skip. Reading only the
-    `which()` binding's own guard misses the common shape where the lookup
-    goes into a dict and the guard reads it out in another function, and a
-    control that misses that reads green having checked nothing — the whole
-    shape issue 1353 is.
-    """
-    texts = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            name = _dotted_or_bare_name(node)
-        elif isinstance(node, ast.Raise):
-            name = _dotted_or_bare_name(node.exc)
-        else:
-            continue
-        if name in _SKIP_NAMES or name.endswith('Skipped'):
-            texts.extend(part.value for part in ast.walk(node)
-                         if isinstance(part, ast.Constant)
-                         and isinstance(part.value, str))
-    return texts
-
-
-_ROLES = []
-
-
-def _tool_roles():
-    """`(skipped, present)` tool names, read off the suites' own source.
-
-    Read once per process: the answer is a property of the tree, and three
-    controls asking the same question should not parse 340 modules six times
-    between them.
-    """
-    if not _ROLES:
-        _ROLES.append(_derive_tool_roles())
-    return _ROLES[0]
-
-
-def _derive_tool_roles():
-    """The two tool sets, one pass to enumerate and one to classify.
-
-    A suite that SKIPS on a missing tool has decided the machine may lack it;
-    one that ASSERTS it, or RUNS it without asking, has decided it may not —
-    and a suite that cannot do its work without the binary fails loudly when
-    it is gone. A tool in both is already covered by a control that reports a
-    failure rather than a skip, so a job that does not install it cannot
-    report green having checked nothing about it. A tool in neither is not a
-    requirement the tree states at all.
-
-    Two passes, and the second re-parses rather than holding every module's
-    tree at once: a skip can only be matched against the tools the tree
-    names, and 340 trees is more to hold than a 4 GB cap should be asked
-    for.
-    """
-    sources = sorted((ROOT / 'tests').rglob('*.py'))
-    candidates = set()
-    for source in sources:
-        tree = ast.parse(source.read_text(encoding='utf-8'))
-        bound = _constants(tree)
-        candidates |= {name for name in
-                       (_tool_name(node, bound) for node in ast.walk(tree))
-                       if name}
-    skipped, present = set(), set()
-    for source in sources:
-        tree = ast.parse(source.read_text(encoding='utf-8'))
-        bound = _constants(tree)
-        present |= _command_words(tree)
-        for text in _skip_texts(tree):
-            skipped |= {tool for tool in candidates
-                        if re.search(rf'\b{re.escape(tool)}\b', text)}
-        parent = {child: node for node in ast.walk(tree)
-                  for child in ast.iter_child_nodes(node)}
-        for node in ast.walk(tree):
-            tool = _tool_name(node, bound)
-            if tool is not None:
-                _role_of_lookup(parent, node, tool, skipped, present)
-    return skipped, present
-
-
 def _declared_tools():
     """The tool set the shared installer says it installs."""
     return frozenset(_util.load(INSTALLER_SOURCE, 'lint_installer').TOOLS)
+
+
+# Ways a suite says a binary may be missing, one per answer to the same
+# question. Every one of them SKIPS or RETURNS on absence, and every skip
+# message names the parser rather than the binary, so none of them is
+# visible to the channel that matches a tool named in a message: a
+# derivation that reads these is reading the guard, not the wording.
+GUARDED_ON = {
+    'inline identity':
+        'if shutil.which(TOOL) is None:\n    _util.skip("no parser")',
+    'inline truthiness':
+        'if not shutil.which(TOOL):\n    _util.skip("no parser")',
+    'inline not-identity':
+        'if shutil.which(TOOL) is not None:\n    return',
+    'bound identity':
+        'found = shutil.which(TOOL)\nif found is None:\n'
+        '    _util.skip("no parser")',
+    'bound truthiness':
+        'found = shutil.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'bound equality':
+        'found = shutil.which(TOOL)\nif found == None:\n'
+        '    _util.skip("no parser")',
+    'bound inequality':
+        'found = shutil.which(TOOL)\nif found != None:\n'
+        '    _util.skip("no parser")',
+    'bound membership':
+        'found = shutil.which(TOOL)\nif found in (None,):\n'
+        '    _util.skip("no parser")',
+    'bound conjunction':
+        'found = shutil.which(TOOL)\nif found is None or not extra:\n'
+        '    _util.skip("no parser")',
+    'aliased import':
+        'found = sh.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'annotated constant':
+        'found = shutil.which(NAMED)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'constant bound in a function':
+        'def probe():\n    local = TOOL\n    found = shutil.which(local)\n'
+        '    if not found:\n        _util.skip("no parser")\n',
+    'command that cannot be started':
+        'try:\n    subprocess.run([TOOL, "--version"], check=True)\n'
+        'except FileNotFoundError:\n    _util.skip("no parser")',
+    'aliased command that cannot be started':
+        'try:\n    sp.run([TOOL, "--version"], check=True)\n'
+        'except OSError:\n    _util.skip("no parser")',
+}
+_PREAMBLE = ('import shutil\nimport subprocess\nimport shutil as sh\n'
+             'import subprocess as sp\nTOOL = "gojq"\nNAMED: str = "gojq"\n')
+
+
+def test_every_spelling_of_an_absence_guard_is_read_as_one_operation(tmp):
+    """No suite is invisible because its author spelled the guard differently.
+
+    Driven through the derivation rather than planted in `tests/`, because
+    the question is what the recognisers read and every spelling would
+    otherwise be a tracked change. One of these is the two-step
+    truthiness guard that reads as a PRESENCE test — a suite skipping on a
+    binary no job installs — and the control missed it for a whole wave.
+    """
+    del tmp
+    for label, body in GUARDED_ON.items():
+        skipped, present = _derive_tool_roles([_PREAMBLE + body + '\n'])
+        assert 'gojq' in skipped, (
+            f'the {label} spelling puts no tool in the skip set, so a suite '
+            'written that way is invisible to this control and its binary '
+            f'needs no install: skipped={sorted(skipped)}, '
+            f'present={sorted(present)}')
+
+
+REQUIRED_ON = {
+    'inline assert':
+        'assert shutil.which(TOOL), "the parser runs the fixture"',
+    'bound assert':
+        'found = shutil.which(TOOL)\n'
+        'assert found, "the parser runs the fixture"',
+    'a command run without asking':
+        'subprocess.run([TOOL, "--version"], check=True)',
+}
+
+
+def test_an_asserted_tool_is_a_requirement_and_not_a_skip(tmp):
+    """The other half of the distinction, so the fix is not one-sided.
+
+    The two-step idiom every helper in the tree uses is
+    `found = which(X); if not found: skip`. Reading anything that mentions
+    the name as a skip would file `assert found, '...'` as a tool the
+    suites tolerate the absence of, and demand an install for a binary
+    every job already has.
+    """
+    del tmp
+    for label, body in REQUIRED_ON.items():
+        skipped, present = _derive_tool_roles([_PREAMBLE + body + '\n'])
+        assert 'gojq' in present, (
+            f'the {label} shape puts no tool in the present set: '
+            f'skipped={sorted(skipped)}, present={sorted(present)}')
 
 
 def _unjournalled():

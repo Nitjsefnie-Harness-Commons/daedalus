@@ -386,6 +386,7 @@
 !/tests/_launch_path.py
 !/tests/_launch_plants.py
 !/tests/_launch_refusal_rows.py
+!/tests/_lint_tool_roles.py
 !/tests/_log_safe_cases.py
 !/tests/_mainworldharness.py
 !/tests/_mcp_builtin_carriers.py
