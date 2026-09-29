@@ -15,8 +15,8 @@ from _jsread import js_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_routes import ROUTES  # noqa: E402
 from _worker_runtime import observe_worker_runtime  # noqa: E402
-from _worker_sources import (directive_entries,  # noqa: E402
-                             worker_source_paths)
+from _worker_sources import (_worker_sources,  # noqa: E402
+                             directive_entries)
 
 _WORKER_PLATFORM_GLOBALS = frozenset({
     'AbortController', 'Date', 'Error', 'Map', 'Math', 'Number', 'Object',
@@ -62,13 +62,6 @@ _WORKER_REDECLARATION_EXCEPTIONS = (
 # stream (answered 503) and syncs the tab list before the observer's
 # synchronous work.
 _BOOT_PLAN = {'planned': ['POST /sync-tabs'], 'planned_stream': [503]}
-
-
-def _worker_sources():
-    return [
-        (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
-        for path in worker_source_paths()
-    ]
 
 
 def _runtime_observations(watched_by_source=None):

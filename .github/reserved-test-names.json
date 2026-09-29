@@ -941,6 +941,7 @@
     "_windows_process_cpu_seconds": {"python": ["tests/_dashnode.py"]},
     "_word_at": {"python": ["tests/_jsroute_keys.py"]},
     "_worker_absence_verdict": {"python": ["tests/_realbrowser_workers.py"]},
+    "_worker_sources": {"python": ["tests/_worker_sources.py"]},
     "_worker_targets": {"python": ["tests/_realbrowser_workers.py"]},
     "_workflow_path_filters": {"python": ["tests/_workflows.py"]},
     "_workflow_triggers": {"python": ["tests/_workflows.py"]},
