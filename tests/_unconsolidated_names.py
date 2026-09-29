@@ -156,9 +156,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_case_fold_parent.py', '_load'):
         'this loads a bridge module by path under a name of its own, where '
         'the shared owner loads the upload routes module',
-    ('tests/test_ci_ratchets.py', '_git'):
-        'this returns the CompletedProcess, because the cases read a diff '
-        'back out of it, where the shared runner discards the result',
     ('tests/test_cli_waits.py', '_run'):
         'this runs one argv under a supplied environment with a 60s bound, '
         'where the shared _run boots a node scenario',
