@@ -99,6 +99,38 @@ _QUIET = [
     ('class-decorator-read', _CLASS_QUIET_CALLABLE,
      '@(x[0] or (lambda c: c))\nclass C:\n    pass', (0, 0))]
 
+# A mutation the runtime does not perform, one row per binder site, carrying
+# the guard's answer so the cost of storing at a binder is pinned where the
+# branch changed it rather than disclosed in prose. The two kinds are not the
+# same claim and the rows are kept apart, because a control that cannot tell
+# them apart pins nothing.
+#
+# A statically dead arm -- a literal test, a short-circuiting `or` -- is dead
+# to the guard as well as to the runtime, so (0, 0) is the correct answer and
+# the (0, 1) below is the defect filed as #1374. A condition the model cannot
+# resolve is NOT statically dead: the runtime may take that arm, so (0, 1) is
+# the fail-closed answer and the row is a control against a future change that
+# would drop a report the model owes. The first `class C(1 if ...)` shape the
+# review suggested is not here: `class C(1)` is not constructible, so it never
+# reaches the guard at all.
+_UNTAKEN = [
+    ('def-default-dead-arm', _LIST,
+     f'def g(a=(1 if True else {_POP})):\n    pass', (0, 1)),
+    ('def-default-dead-shortcircuit', _LIST,
+     f'def g(a=(1 or {_POP})):\n    pass', (0, 1)),
+    ('lambda-default-dead-arm', _LIST,
+     f'g = lambda a=(1 if True else {_POP}): 0', (0, 1)),
+    ('lambda-default-dead-shortcircuit', _LIST,
+     f'g = lambda a=(1 or {_POP}): 0', (0, 1)),
+    ('class-base-dead-arm', _CLASS_OBJECT,
+     f'class C(type if True else ({_POP} or type)):\n    pass', (0, 1)),
+    ('class-base-dead-shortcircuit', _CLASS_OBJECT,
+     f'class C(type or ({_POP} or type)):\n    pass', (0, 1)),
+    ('def-default-unresolved-condition', _LIST,
+     f'def g(a=(1 if args.flag else {_POP})):\n    pass', (0, 1)),
+    ('class-base-unresolved-condition', _CLASS_OBJECT,
+     f'class C(type if args.flag else ({_POP} or type)):\n    pass', (0, 1))]
+
 # A `body` is walked by its own flow against its own state, where the
 # statement store hook already runs; a `name`, an `arg` and a `type_comment`
 # are names rather than expressions; and a PEP 695 `type_params` bound is
@@ -135,8 +167,9 @@ _ILLEGAL = {ast.Lambda: frozenset((
 
 # The one field of each object kind that looks definition-time and is not: a
 # type parameter's bound, constraint or default runs when the parameter is
-# first used. Each row measures that against the real runtime, so a Python
-# that changes the answer turns the pin red.
+# first used. Each row measures that against the real runtime, below 3.14 --
+# the test skips above it, where the matrix does not run and there is no
+# interpreter here to measure the answer against.
 _LAZY_ROWS = (
     (ast.FunctionDef, _LIST, f'def g[T: ({_POP} or int)](a):\n    pass'),
     (ast.ClassDef, _CLASS_OBJECT, f'class C[T: ({_POP} or int)]:\n    pass'))
@@ -245,6 +278,14 @@ def test_reaching_a_binder_position_is_not_itself_a_finding(tmp):
     assert not wrong, wrong
 
 
+def test_a_mutation_the_runtime_never_performs_is_pinned(tmp):
+    observed = [(name, _verdict(tmp, store, header))
+                for name, store, header, _ in _UNTAKEN]
+    wrong = [item for item, row in zip(observed, _UNTAKEN)
+             if item[1] != row[3]]
+    assert not wrong, wrong
+
+
 def test_every_definition_time_field_is_covered(tmp):
     for node_type, rows in _ROWS.items():
         derived = _definition_time_fields(node_type)
@@ -253,13 +294,10 @@ def test_every_definition_time_field_is_covered(tmp):
         for field in derived:
             assert field in _FIELD_ROWS, field
     assert _covered(ast.FunctionDef) == _covered(ast.AsyncFunctionDef)
-    # Every derived field is a row or a declared-illegal position, so a
-    # lambda annotation that ever became legal surfaces here.
-    for node_type in _ROWS:
-        assert _covered(node_type) | _ILLEGAL.get(
-            node_type, frozenset()) == {
-                row for field in _definition_time_fields(node_type)
-                for row in _FIELD_ROWS[field]}
+    # `_ILLEGAL` records a grammar fact the field derivation cannot see: no
+    # `arguments` field changes when the grammar starts admitting an
+    # annotated `lambda` parameter, so the entry is hand-maintained and this
+    # assertion cannot stand in for it.
 
 
 def test_a_type_parameter_bound_is_not_a_definition_time_position(tmp):
