@@ -159,11 +159,22 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
     readings below.
     """
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2)': {'data': None}}, gate=True)
+    # The call is made the way a WATCHER makes it, poll marker and all.
+    # Nothing the double can observe about a held call at the moment of
+    # the reading distinguishes it from one it answered at once - the
+    # record the watcher cases count is written by the same code that
+    # decides to wait, so a hold scoped away from the watcher's calls
+    # satisfies it. What does separate them is a control that makes the
+    # same kind of call and asserts the hold actually waited, and that is
+    # only this control if its call carries the marker the scoping would
+    # key on.
+    env = fake.env()
+    env[_fake_gh.POLL_MARK] = '1'
     answer = subprocess.Popen(
         [str(fake.launcher), 'api', '-i', 'graphql', '--input', '-'],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, encoding='utf-8',
-        errors='replace', env=fake.env())
+        errors='replace', env=env)
     request_in = answer.stdin
     assert request_in is not None, 'the fake is launched with a stdin pipe'
     try:
