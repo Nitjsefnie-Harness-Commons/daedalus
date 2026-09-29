@@ -445,6 +445,14 @@ jobs:
   # trusted from the release page: a linter that runs before every other gate
   # is a supply-chain position worth defending.
   #
+  # The checksum below is recorded HERE rather than read from the release's own
+  # checksums file, which is the property that matters: it is a value this
+  # repository decides and anyone reviewing this line can check, rather than a
+  # value republished by whoever published the binary. The actionlint build
+  # comes from a fork of ours, so the checksum file beside the asset is written
+  # by the same party as the asset. Upstream's release is not immutable either,
+  # so the delta is who holds write access, not whether the tag can move.
+  #
   # A suppression belongs at the offending line as a `# zizmor: ignore[rule]`
   # comment with a justification, never as a raised threshold here — a
   # threshold silences the next finding too, and the next one is the one
@@ -461,9 +469,16 @@ jobs:
       # tag and it rejects `queue` under `concurrency`, a key GitHub documents,
       # so the key cannot be expressed in a workflow here. 1.7.12-queue.1 is
       # the v1.7.12 TAG plus rhysd/actionlint#654 cherry-picked unchanged, so
-      # the delta from the published upstream binary is exactly that patch.
+      # the source delta from upstream v1.7.12 is exactly that patch. The
+      # binaries are not byte-identical to upstream's asset: this one is built
+      # with go1.26.4 and upstream's v1.7.12 with go1.26.1.
+      #
       # When #654 merges and ships upstream, move this back to an upstream
-      # version string and the rhysd release URL below; nothing else changes.
+      # version string, the rhysd release URL below, and the checksum above
+      # with them. The fork lags upstream by the ten commits merged after the
+      # v1.7.12 tag, two of which are behavioural (service-container
+      # `entrypoint`/`command`, and a darwin shellcheck deadlock fix), so
+      # returning to upstream is a pin change and no merge.
       ACTIONLINT_VERSION: 1.7.12-queue.1
       # sha256 of actionlint_1.7.12-queue.1_linux_amd64.tar.gz, from the
       # release's own checksums file. Bump both together.
