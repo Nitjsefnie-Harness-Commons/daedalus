@@ -7,6 +7,20 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+try:
+    from scripts.ci.suite_bound import (
+        launch_suite, suite_timeout, timeout_record)
+except ImportError:  # pragma: no cover - the script-directory import path
+    # The order is load-bearing. Both spellings name one file, and Python
+    # gives each a module object of its own, so whichever is tried first is
+    # the copy every caller that can reach it shares. The package spelling
+    # comes first because a caller with the repository root importable --
+    # a test, a tool -- already holds that object, and a second object
+    # would be a second copy of the bound, which is the drift this module
+    # exists to remove. A workflow step runs the file by path with only
+    # its own directory on the path, and reaches the fallback.
+    from suite_bound import launch_suite, suite_timeout, timeout_record
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,15 +39,19 @@ def _report_safely():
         pass
 
 
-def _run_suite(suite, outputs):
+def _run_suite(suite, outputs, bound):
+    name = suite.relative_to(ROOT).as_posix()
     output_path = Path(outputs) / f"{suite.stem}.output"
-    with output_path.open("wb") as output:
-        result = subprocess.run(
-            [sys.executable, "-m", "coverage", "run", "--parallel-mode",
-             str(suite)],
-            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output,
-            stderr=subprocess.STDOUT, check=False)
-    return result.returncode, output_path
+    returncode, cleanup = launch_suite(
+        name,
+        [sys.executable, "-m", "coverage", "run", "--parallel-mode",
+         str(suite)],
+        cwd=ROOT, output_path=output_path, timeout=bound)
+    if cleanup:
+        with output_path.open("ab") as output:
+            output.write(
+                timeout_record(name, bound, returncode, cleanup).encode())
+    return returncode, output_path, cleanup
 
 
 def main(argv=None):
@@ -45,6 +63,7 @@ def main(argv=None):
     require_all = argv == ["--require-all"]
 
     _report_safely()
+    bound = suite_timeout()
     suites = sorted((ROOT / "tests").glob("test_*.py"))
     if not suites:
         print("no suites found — refusing to report 0% as a pass",
@@ -52,21 +71,22 @@ def main(argv=None):
         return 1
 
     failed = 0
+    timed_out = []
     with tempfile.TemporaryDirectory() as outputs:
         workers = min(len(suites), os.cpu_count() or 1)
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(_run_suite, suite, outputs): suite
+                executor.submit(_run_suite, suite, outputs, bound): suite
                 for suite in suites
             }
             for future in as_completed(futures):
                 suite = futures[future]
                 try:
-                    returncode, output_path = future.result()
+                    returncode, output_path, cleanup = future.result()
                     output = output_path.read_text(
                         encoding="utf-8", errors="replace")
                 except Exception as exc:
-                    returncode = 1
+                    returncode, cleanup = 1, ""
                     output = (
                         f"LAUNCH FAILED: {type(exc).__name__}: {exc}\n")
                 relative = suite.relative_to(ROOT).as_posix()
@@ -80,7 +100,18 @@ def main(argv=None):
                     )
                 block += "::endgroup::\n"
                 print(block, end="", flush=True)
+                if cleanup:
+                    timed_out.append(relative)
 
+    if timed_out:
+        # A killed suite is not a failing suite. Its coverage is truncated
+        # at whatever it had measured, so unlike a suite that failed on its
+        # own this refuses the run even without --require-all, and says
+        # which suites to look at first.
+        print(f"TIMED OUT: {', '.join(timed_out)} — each was killed at its "
+              f"{bound} s bound and its coverage is truncated",
+              file=sys.stderr)
+        return 1
     if require_all and failed:
         print(
             f"{failed} of the {len(suites)} suites failed — refusing "

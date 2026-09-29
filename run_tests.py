@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Run every suite; exit non-zero if any suite fails or ran no coverage."""
 import json
-import math
 import os
 import subprocess
 import sys
@@ -11,7 +10,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_SUITE_TIMEOUT_S = 900
+if str(ROOT) not in sys.path:
+    # Loading this file by path, as `tests/test_suite_runner.py` does,
+    # does not put its directory on the path, and the shared bound is
+    # imported by package name. `scripts/ci/reserved_names.py` reaches a
+    # sibling module the same way.
+    sys.path.insert(0, str(ROOT))
+
+from scripts.ci.suite_bound import (  # noqa: E402
+    DEFAULT_SUITE_TIMEOUT_S, kill_process_tree, suite_timeout,
+    timeout_record)
+
 _SPAWN_LOCK = threading.Lock()
 
 
@@ -62,23 +71,6 @@ def _terminate_and_reap(process):
                   'leaving it unreaped', file=sys.stderr)
 
 
-def _suite_timeout():
-    """The per-suite wall-clock bound, overridable for slow machines."""
-    raw = os.environ.get("DAEDALUS_SUITE_TIMEOUT")
-    if raw is None:
-        return DEFAULT_SUITE_TIMEOUT_S
-    try:
-        timeout = float(raw)
-    except ValueError:
-        raise SystemExit(
-            f"DAEDALUS_SUITE_TIMEOUT: not a number: {raw!r}") from None
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise SystemExit(
-            "DAEDALUS_SUITE_TIMEOUT: must be a finite positive number; "
-            f"got {raw!r}")
-    return timeout
-
-
 def _run_suite(suite, summaries, timeout):
     summary_path = Path(summaries) / f"{suite.stem}.json"
     output_path = Path(summaries) / f"{suite.stem}.output"
@@ -90,19 +82,25 @@ def _run_suite(suite, summaries, timeout):
                 process = subprocess.Popen(
                     [sys.executable, str(suite)], cwd=ROOT,
                     stdin=subprocess.DEVNULL, stdout=output,
-                    stderr=subprocess.STDOUT, env=env)
+                    stderr=subprocess.STDOUT, env=env,
+                    start_new_session=sys.platform != "win32",
+                    creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
+                                   if sys.platform.startswith("win") else 0))
         try:
             returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as expired:
+            # The direct child is not the tree: a suite starts children of
+            # its own, and killing only the child leaves those running.
+            cleanup = kill_process_tree(process)
             _terminate_and_reap(process)
             returncode = process.returncode
             with output_path.open("ab") as output:
-                output.write(
-                    f"SUITE TIMED OUT after {expired.timeout} s "
-                    f"(returncode {process.returncode!r}); "
-                    "its last lines are above\n".encode())
+                output.write(timeout_record(
+                    suite.name, expired.timeout, process.returncode,
+                    cleanup).encode())
     except BaseException:
         if process is not None:
+            kill_process_tree(process)
             _terminate_and_reap(process)
         raise
     return returncode, _read_summary(summary_path), output_path
@@ -110,7 +108,7 @@ def _run_suite(suite, summaries, timeout):
 
 def main() -> int:
     _report_safely()
-    timeout = _suite_timeout()
+    timeout = suite_timeout()
     suites = sorted((ROOT / "tests").glob("test_*.py"))
     if not suites:
         print("no suites found", file=sys.stderr)

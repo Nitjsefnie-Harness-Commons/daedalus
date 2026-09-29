@@ -163,7 +163,10 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
     root = Path(tmp) / under / 'tree'
     (root / 'tests').mkdir(parents=True)
     (root / 'daedalus_bridge').mkdir()
+    (root / 'scripts' / 'ci').mkdir(parents=True)
     shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                 root / 'scripts' / 'ci' / 'suite_bound.py')
     for helper in ('_util.py', '_completion.py', '_teardown.py',
                    '_log_safe_cases.py', '_child_boot_env.py'):
         shutil.copy2(ROOT / 'tests' / helper, root / 'tests' / helper)

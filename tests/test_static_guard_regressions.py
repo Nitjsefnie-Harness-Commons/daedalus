@@ -497,14 +497,17 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     physical cores, so `nproc` burners is not saturation.
 
     What bounds a wedged child now, in symbols that cannot drift:
-    `run_tests.py` sets `DEFAULT_SUITE_TIMEOUT_S = 900` and applies it
-    through `process.wait(timeout=timeout)`, reporting `SUITE TIMED
-    OUT`, so under the `suites` job a wedged sweep child hangs 900s and
-    then says so. `scripts/ci/coverage_suites.py` passes no `timeout=`
-    and `tests/_util.py`'s `runner` has no per-test bound, so under
-    `coverage-matrix` the only escape is that job's `timeout-minutes:
-    30`. The removal trades a 120s red for those; it does not remove the
-    need for a bound, only this one.
+    `scripts/ci/suite_bound.py` holds the one definition of the per-suite
+    bound (`DEFAULT_SUITE_TIMEOUT_S = 900`, overridable through
+    `DAEDALUS_SUITE_TIMEOUT`), and both launchers import it. `run_tests.py`
+    applies it through `process.wait(timeout=timeout)` and
+    `scripts/ci/coverage_suites.py` through the same module's bounded
+    launch; both report `SUITE TIMED OUT` naming the suite, and both kill
+    the child's whole process group, so under the `suites` job and under
+    `coverage-matrix` a wedged sweep child hangs for that bound and then
+    says which suite it was. `tests/_util.py`'s `runner` still has no
+    per-test bound. The removal trades a 120s red for those; it does not
+    remove the need for a bound, only this one.
 
     Enforced structurally over every `tests/test_*.py`, so a site added
     later is covered without a list to maintain: no `timeout` keyword on
