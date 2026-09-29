@@ -310,16 +310,51 @@ def test_a_chain_past_the_hop_bound_is_refused(tmp):
 
 
 def test_a_helper_file_that_cannot_be_read_is_refused(tmp):
-    """(k) nothing read is nothing judged, and that is a refusal."""
+    """(k) nothing read is nothing judged, and that is a refusal.
+
+    Three ways a file can fail to yield a callee, and each is a separate
+    arm of the one branch: it does not parse, it is not text this guard
+    reads, and it is not there. The middle arm is the one a narrowed
+    `except` drops, and dropping it turns a refusal into a crash in
+    every suite that resolves a helper.
+    """
     root = Path(tmp)
     source = _plant(root, 'def _copy_here(tmp):\n    return tmp\n',
                     _IMPORT + _OWNED_CALL)
-    (root / 'tests' / '_shared.py').write_bytes(b'def broken(:\n')
+    helper = root / 'tests' / '_shared.py'
+    for payload in (b'def broken(:\n',
+                    b'def _copy_here(tmp):\n    return tmp\n\xff\xfe\n'):
+        helper.write_bytes(payload)
+        assert control_write_violations(source, root) == [
+            'test_control.py:6: _copy_here callable is unresolved'], payload
+    helper.unlink()
     assert control_write_violations(source, root) == [
         'test_control.py:6: _copy_here callable is unresolved']
-    (root / 'tests' / '_shared.py').unlink()
+
+
+def test_a_hop_two_helper_that_cannot_be_read_still_leaves_the_first_turn(tmp):
+    """(k) an unreadable file further down does not swallow what is nearer.
+
+    The refusal for the unreadable file is the same string the missing
+    definition gives, so the two cannot be told apart by that; what they
+    can be told apart by is the verdict the readable hop still reaches.
+    A hop that writes into the checkout is caught whichever way the file
+    beyond it is classified.
+    """
+    root = Path(tmp)
+    (root / 'tests').mkdir(exist_ok=True)
+    (root / 'tests' / '_shared.py').write_text(
+        'from _right import _right\n'
+        "def _helper(tmp):\n"
+        "    (ROOT / '.pwned').write_text('hop one')\n"
+        '    return _right(tmp)\n', encoding='utf-8')
+    (root / 'tests' / '_right.py').write_bytes(b'def _right(tmp:\n')
+    source = root / 'test_control.py'
+    source.write_text(_PRELUDE + _HELPER_CALL + _CALLS_HELPER,
+                      encoding='utf-8')
     assert control_write_violations(source, root) == [
-        'test_control.py:6: _copy_here callable is unresolved']
+        'tests/_shared.py:3: write_text target path is not control-owned',
+        'tests/_shared.py:4: _right callable is unresolved']
 
 
 def test_a_violation_inside_a_helper_names_the_helper_not_the_control(tmp):
