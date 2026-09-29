@@ -134,8 +134,12 @@ def _rows():
 def _sent(call, source):
     """What the row's own `ext_cmd` receives when the module is run."""
     scope = {}
+    # The runtime truth is an observation, not a claim: each row is run
+    # so the verdict is measured against what the module does.
+    # pylint: disable=exec-used
     exec(compile(source, '<payload-key-row>', 'exec'), scope)
     try:
+        # pylint: disable-next=eval-used
         return eval(call, dict(scope, ARGS=_Args()))
     except TypeError:
         return _RAISES
