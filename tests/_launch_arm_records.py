@@ -135,14 +135,14 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 406, 'MERGED',
      'the head of a one-member chain; :408 ch.machinery-member is its '
      'only member and is listed'),
-    ('_launch_audit.py', 587, 'INERT',
+    ('_launch_audit.py', 594, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 606, 'CONTROLLED',
+    ('_launch_audit.py', 613, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 673, 'CONTROLLED',
+    ('_launch_audit.py', 680, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 690, 'CONTROLLED',
+    ('_launch_audit.py', 697, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     # The chain limb stays in the analyser and is recorded here rather
     # than in the enumeration for the reason above; the root predicate
