@@ -78,10 +78,19 @@ def _value_error(call):
 
 
 def test_promoted_modules_import_by_package(tmp):
+    """Each promoted module imports as a package, by that name.
+
+    `scripts.ci.coverage_suites` is here because it selects its import on
+    `__package__`, and the branch that selects is unreachable from a run by
+    path -- which is the only way CI and every control run it. Without this
+    row the `if` half is dead code, and a name misspelled inside it turns
+    nothing red.
+    """
     command = '; '.join((
         'import scripts.ci.ratchet', 'import scripts.ci.size_baseline',
         'import scripts.ci.line_lengths', 'import scripts.ci.thresholds',
-        'import scripts.ci.workflow_yaml'))
+        'import scripts.ci.workflow_yaml',
+        'import scripts.ci.coverage_suites'))
     imported = subprocess.run(
         [sys.executable, '-c', command], cwd=str(ROOT), capture_output=True,
         text=True, timeout=60)
@@ -89,7 +98,7 @@ def test_promoted_modules_import_by_package(tmp):
     assert all(__import__(name, fromlist=['*']) for name in (
         'scripts.ci.ratchet', 'scripts.ci.size_baseline',
         'scripts.ci.line_lengths', 'scripts.ci.thresholds',
-        'scripts.ci.workflow_yaml'))
+        'scripts.ci.workflow_yaml', 'scripts.ci.coverage_suites'))
 
 
 def test_measurement_rejects_bool_bad_numeric_and_nonfinite(_tmp):
