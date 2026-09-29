@@ -195,14 +195,6 @@ def _receiver_escapes(node):
                       (*args.posonlyargs, *args.args, *args.kwonlyargs)}:
         return False
     proven = set()
-    # The call-argument position is proven ONLY when the Call's RESULT is
-    # DISCARDED -- the Call is the whole value of an `Expr` statement. A
-    # call whose result is BOUND or FLOWS anywhere can hand the receiver
-    # back as an alias: `with CM(self) as s`, `s = same(self)`,
-    # `return f(self)`, `[f(self)]`, `x = f(self).y`. The withitem case is
-    # derived by this clause and needs no case of its own; an override
-    # beside a clause that should have produced it is a claim the code does
-    # not derive.
     for child in ast.walk(node):
         if (isinstance(child, ast.Attribute)
                 and isinstance(child.value, ast.Name)
