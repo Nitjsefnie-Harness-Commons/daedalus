@@ -249,6 +249,10 @@ CLASSIFYING_MODULES = {
 # A row that matches nothing is a failure, so the table cannot outlive the
 # site it excused. That is what keeps it a construction rather than a list.
 UNRESOLVED_LAUNCHES = {
+    ('_actionlint.py', '_installed_actionlint_version', 'subprocess.run'):
+        'an `actionlint` child behind the `binary` parameter, not node',
+    ('_actionlint.py', '_run_actionlint', 'subprocess.run'):
+        'an `actionlint` or `shellcheck` child behind `binary`, not node',
     ('_branch_boundary.py', '_git_text', 'subprocess.run'):
         'a git child behind a local helper',
     ('_coverage_comment_workflow.py', 'run_shell_block', 'subprocess.run'):
@@ -298,6 +302,8 @@ UNRESOLVED_LAUNCHES = {
      'test_the_boundary_says_which_declaration_the_branch_wrote',
      'subprocess.run'):
         'a git child',
+    ('test_fake_gh.py', '_run_fake', 'subprocess.run'):
+        "the `gh` double behind the `fake` parameter's own `launcher`",
     ('test_file_sizes.py', '_size_fixture', 'subprocess.run'):
         'a git child',
     ('test_helper_reimplementation_js.py',
@@ -329,8 +335,7 @@ UNRESOLVED_LAUNCHES = {
 # the two `spelled` sites the tree actually holds are answered by
 # `CLASSIFYING_MODULES` before this table is ever consulted, not by a row.
 # What a row may and may not excuse is the `bound`/`spelled` asymmetry,
-# stated once in `_executable_verdict`, and
-# `tests/test_node_launch_routing_shapes.py` pins both halves of it.
+# stated in `_executable_verdict` and pinned in the shapes suite.
 NOT_FIXED_WORK = {}
 
 VERDICT_NODE = 'node'
@@ -567,11 +572,7 @@ def _resolved_constant(name, own, imported):
 
 
 def _deadline(launch):
-    """The value node of this launch's `timeout=`, or None.
-
-    The VALUE, not its printed form — `_bounds` says what makes one a
-    deadline.
-    """
+    """The value node of this launch's `timeout=`, or None — not its form."""
     for keyword in launch.keywords:
         if keyword.arg == 'timeout':
             return keyword.value
@@ -693,8 +694,7 @@ def _child_name(scope, launch):
 def _exempt(shape, launch):
     """Whether a `node` verdict this table excuses.
 
-    Keyed on the call's shape, exactly as `UNRESOLVED_LAUNCHES` is, and
-    restricted by the `bound`/`spelled` asymmetry stated in
-    `_executable_verdict`, which is where that rule is written down.
+    Keyed on the call's shape, and restricted by the `bound`/`spelled`
+    asymmetry `_executable_verdict` states.
     """
     return shape in NOT_FIXED_WORK and launch['verdict'][1] == 'spelled'

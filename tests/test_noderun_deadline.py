@@ -56,9 +56,9 @@ OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 # Three controls below drive a real child that never settles, and each used
 # to wait out its site's composed figure — 107s at the two launcher sites,
 # 90s at the GM one, about a tenth each of the 900s `run_tests.py` allows a
-# suite — on every leg of a twelve-cell matrix (`scripts/ci/classify_changes.py`'s
-# `FULL_MATRIX`, 3 operating systems by 4 interpreters, four of the cells
-# `windows-latest`) and on the `speed` suite.
+# suite — on every leg of a twelve-cell matrix
+# (`scripts/ci/classify_changes.py`'s `FULL_MATRIX`, 3 operating systems by 4
+# interpreters, four of the cells `windows-latest`) and on the `speed` suite.
 # Each child writes a line and then holds the event loop open forever, so
 # the deadline's one job is to clear node's own startup. The figures are
 # arithmetic and the AST control pins the chain; the FIRING does not depend
