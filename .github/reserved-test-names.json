@@ -684,6 +684,7 @@
     "_planted": {"python": ["tests/_drain_scan.py"]},
     "_poll": {"python": ["tests/_mcp_tool_commands.py"]},
     "_poll_budget": {"python": ["tests/_cmdqueue_faults.py"]},
+    "_poll_outcome": {"python": ["tests/_mcp_poll_outcome.py"]},
     "_poll_queue_reads": {"python": ["tests/_cmdqueue.py"]},
     "_pop_key": {"python": ["tests/_pyroute_reads.py"]},
     "_popen_class": {"python": ["tests/_launch_path.py"]},
