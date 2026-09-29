@@ -121,13 +121,11 @@ def install_actionlint():
     TOOL_DIR.mkdir(parents=True, exist_ok=True)
     target = _extract(payload, TOOL_DIR)
     print(f'actionlint {ACTIONLINT_VERSION} installed at {target}')
-    return target
 
 
-def _publish(path):
+def _publish():
     """Put the tool directory on PATH for this process and the steps after."""
-    entry = f'{TOOL_DIR}{os.pathsep}{os.environ["PATH"]}'
-    os.environ['PATH'] = entry
+    os.environ['PATH'] = f'{TOOL_DIR}{os.pathsep}{os.environ["PATH"]}'
     later = os.environ.get('GITHUB_PATH')
     if later:
         with open(later, 'a', encoding='utf-8') as handle:
@@ -156,7 +154,7 @@ def _record():
 
 def main():
     install_actionlint()
-    _publish(TOOL_DIR)
+    _publish()
     _record()
     return 0
 
