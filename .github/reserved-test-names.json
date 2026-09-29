@@ -498,6 +498,7 @@
     "_job_needs": {"python": ["tests/_wfgraph.py"]},
     "_job_output_mapping": {"python": ["tests/_wfgraph.py"]},
     "_job_output_step_ids": {"python": ["tests/_wfgraph.py"]},
+    "_job_record": {"python": ["tests/_segment_job_record.py"]},
     "_job_section": {"python": ["tests/_wfgraph.py"]},
     "_job_step_ids": {"python": ["tests/_wfgraph.py"]},
     "_jobs_value": {"python": ["tests/_wfjobs.py"]},
