@@ -78,6 +78,15 @@ def test_a_ci_pause_does_not_advance_the_failure_counter(tmp):
         counts = [int(row.split('poll failed (')[1].split(')')[0])
                   for row in child.err.lines if _reports_a_failed_poll(row)]
         assert counts[:ESCALATE] == list(range(1, ESCALATE + 1)), counts
+        # The FIRST failed poll is the permission refusal, not the pause.
+        # The count alone cannot tell a counted pause from an uncounted
+        # one - a pause that reached the counter would still leave five
+        # lines and an escalation at five - so what discriminates is
+        # WHICH failure came first.
+        first = [row for row in child.err.lines
+                 if _reports_a_failed_poll(row)][0]
+        assert 'not accessible' in first, first
+        assert not _reports_pause(first), first
         assert len([row for row in child.out.lines
                     if _reports_pause(row)]) == 1, child.out.lines
     finally:
