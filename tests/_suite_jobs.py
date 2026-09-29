@@ -22,11 +22,14 @@ it runs nothing — `time_tests.py --help` is a step that reaches the suite
 tree and not one that runs a suite — because the alternative is encoding
 which invocations of which runners do what, which is the basename
 fingerprint this module exists to refuse. And a step running a tracked
-file the walk cannot read — a `.sh` wrapper — reaches nothing here, which
+file the walk cannot read — a shell wrapper — reaches nothing here, which
 would drop its job out of the door set in silence. That second one is
 surfaced rather than fixed: `_unclassifiable_steps` names every step in it,
 `tests/test_ci_lint_tools.py` holds that set to files no interpreter can
-execute, and the walk still reads no shell.
+execute, and the walk still reads no shell. What that refusal is about is
+`_PATH_EXTENSIONS` and not every language there is: a tracked file whose
+extension the pattern does not resolve is not a step the walk can see at
+all, so nothing downstream of here answers for it.
 """
 import ast
 import re
@@ -56,8 +59,17 @@ NAMES = 'names'
 # reach the end of the line or a closing quote.
 SUITE_TREE = re.compile(r"""(?<![\w/.-])tests(?:/|[\s'")\\]*(?:#.*)?$)""")
 # A tracked file a step's own text names, by an extension worth reading.
+# The list is the whole universe this walk can resolve, and it is one
+# tuple rather than a set spelled into the pattern: a step naming a
+# tracked file whose extension is not on it names nothing this module
+# can classify, so every control downstream of the walk is silent about
+# it rather than refusing it. The shells are on it because the `suites`
+# matrix runs `windows-latest` beside two POSIX runners, so the
+# interpreter a step's `run:` reaches for is not one language either.
+_PATH_EXTENSIONS = ('py', 'sh', 'bash', 'mk', 'ps1', 'bat', 'cmd',
+                    'json', 'yml', 'yaml', 'toml', 'ini', 'cfg')
 SCRIPT_PATH = re.compile(
-    r'(?<![\w./$-])[\w./-]+\.(?:py|sh|bash|json|yml|yaml|toml|ini|cfg|mk)')
+    rf'(?<![\w./$-])[\w./-]+\.(?:{"|".join(_PATH_EXTENSIONS)})')
 # The build entry points a step may name without an extension at all.
 BUILD_FILES = ('Makefile', 'makefile', 'tox.ini', 'justfile', 'Justfile')
 # How a module looks into a directory: a glob, a walk, a listing.
@@ -295,7 +307,12 @@ def _readable(path):
 # answer. The shape is what makes that a refusal rather than a shrug: a
 # step naming a manifest is inert whatever the manifest says, and a step
 # naming a shell wrapper is not.
-_SCRIPT_SHAPES = ('.sh', '.bash', '.mk')
+_SCRIPT_SHAPES = ('.sh', '.bash', '.mk', '.ps1', '.bat', '.cmd')
+# The rest of `_PATH_EXTENSIONS`: a tracked file a step READS, which is
+# what a manifest is. The two sets and `.py` partition the pattern, and a
+# control holds them to it, so an extension the walk learns to resolve is
+# classified here or that control is red.
+_INERT_SHAPES = ('.json', '.yml', '.yaml', '.toml', '.ini', '.cfg')
 
 
 def _executable_shape(path):
