@@ -601,8 +601,6 @@ DISCHARGED = (
     ('test_real_browser_harness.py', 'def timed_out(', 1),
     ('test_real_browser_harness.py', 'def outer_timeout(', 1),
     ('test_real_browser_harness.py', 'def websocket_failed(', 1),
-    ('test_real_browser_harness.py',
-     'def run(args, *, cwd, capture_output, text, timeout):', 1),
 )
 
 # The genuine child bounds, with the route and the reason each carries

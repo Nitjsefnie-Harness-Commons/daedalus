@@ -414,7 +414,13 @@ def literal_bindings(tree):
     test body, while the deadline-carrying call sits in a third scope.
 
     A name is in the set only when EVERY writing of it is a literal, and
-    that is a CONSERVATIVE JOIN rather than a last-write-wins. The order
+    that is a CONSERVATIVE JOIN rather than a last-write-wins. The
+    narrowing does not recover
+    `tests/test_real_browser_harness.py:131`, whose deadline reaches a
+    parameter no writing in the module proves; `origin/main` refuses that
+    site too, so the census returns it to main's verdict — an intended
+    over-refusal, tracked as #1337, pinned by
+    `test_a_named_over_refusal_refuses`. The order
     is not available to be right: `ast.walk` is breadth-first, so a nested
     write is applied after a shallower one whatever the source says, and
     a table-wide last-write-wins silences a class that holds a real child
@@ -428,19 +434,64 @@ def literal_bindings(tree):
     that is the opposite bias: over-refuse rather than discharge.
     """
     verdicts = {}
+    owners = {id(child): node for node in ast.walk(tree)
+              if isinstance(node, (ast.Assign, ast.AnnAssign))
+              for child in ast.walk(node)}
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and node.value is not None:
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
+        ctx = getattr(node, 'ctx', None)
+        if isinstance(ctx, (ast.Store, ast.Del)) and not isinstance(
+                node, ast.Subscript):
+            # The node CARRYING the context is the node that is bound:
+            # for `self.join_timeouts = []` that is the Attribute, and
+            # the `self` inside it is Load. Keying off the base Name
+            # instead is what left that binding unadjudicated, so the
+            # key is this node's own. A Subscript store (`d[k] = v`)
+            # MUTATES and rebinds no name, which is why it is excluded
+            # here rather than left to yield no key.
+            key = path._dotted_key(node)
+            if not key:
+                continue
+            owner = owners.get(id(node))
+            if owner is None or owner.value is None:
+                verdicts[key] = False
+                continue
+            targets = (owner.targets if isinstance(owner, ast.Assign)
+                       else [owner.target])
+            same = any(path._dotted_key(t) == key for t in targets)
+            verdicts[key] = verdicts.get(key, True) and (
+                same and isinstance(owner.value, _LITERALS))
             continue
-        literal = isinstance(value, _LITERALS)
-        for target in targets:
-            key = path._dotted_key(target)
-            if key:
-                verdicts[key] = verdicts.get(key, True) and literal
+        if isinstance(node, ast.arg):
+            verdicts.setdefault(node.arg, False)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            verdicts[node.name] = False
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            verdicts[node.name] = False
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            verdicts[node.name] = False
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            verdicts[node.rest] = False
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                verdicts[alias.asname or alias.name] = False
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                verdicts[alias.asname or alias.name.split('.')[0]] = False
+        elif getattr(node, 'type_params', None):
+            for param in type_params_of(node):
+                verdicts[param.name] = False
     return frozenset(key for key, ok in verdicts.items() if ok)
+
+
+def type_params_of(node):
+    """A node's PEP 695 type parameters, read defensively; 3.12 and later.
+
+    `getattr` rather than a bare attribute so a 3.11 tree is a skip
+    rather than an AttributeError at import.
+    """
+    found = getattr(node, 'type_params', None) or ()
+    return [param for param in found if getattr(param, 'name', None)]
 
 
 def _takes_a_timeout(value):

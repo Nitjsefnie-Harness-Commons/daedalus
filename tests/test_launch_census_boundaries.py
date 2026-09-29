@@ -272,6 +272,38 @@ REBINDINGS = {
 }
 
 
+NAMED_OVER_REFUSAL = ('test_real_browser_harness.py', 131,
+                      'def run(args, *, cwd, ')
+
+
+def test_a_named_over_refusal_refuses(tmp):
+    """The one site the narrowing does not recover: #1337.
+
+    `_successful_run_recorder`'s inner `run` puts the deadline into
+    `recorded`, a PARAMETER, and no writing in the module proves what a
+    caller passes it, so the signature is refused. `origin/main` refuses
+    this site too, so the census returns it to main's verdict rather
+    than improving on it — which is what makes it an over-refusal and
+    not a regression. Note `ast.arg` uses `setdefault`, so a parameter
+    does not veto a key a literal already proved; here nothing proved
+    `recorded`, so there was nothing for the exemption to preserve.
+
+    Pinned as a REFUSAL so an edit that starts discharging it is
+    visible. #1337 carries the diagnosis; this is the site row.
+    """
+    del tmp
+    relative, line, snippet = NAMED_OVER_REFUSAL
+    source = (TESTS / relative).read_text(encoding='utf-8')
+    assert snippet in source, snippet
+    tree = ast.parse(source)
+    forced = frozenset(
+        n.name for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    rows = [r for r in _faults(relative, tree, forced)
+            if r[1] == line and r[2] == 'timeout parameter']
+    assert rows, 'the named over-refusal started discharging'
+
+
 def test_a_rebinding_in_any_form_stops_the_read_at_both_scopes(tmp):
     """Ten rows: one per form per scope, every one a read now REFUSED.
 
