@@ -21,6 +21,7 @@ import _util  # noqa: E402
 from _ci_wait_fixtures import (  # noqa: E402
     _ci_wait_run as _run,
     _ci_wait_clock as _Clock,
+    _ci_wait_state as _state,
     _frozen_ci_wait_clock as _frozen_wait_clock)
 
 SOURCE = (_util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -34,6 +35,18 @@ def _ci_gate():
 def _gate_run(name, conclusion='success'):
     """One workflow run, as both waiters read it."""
     return {'name': name, 'status': 'completed', 'conclusion': conclusion}
+
+
+def _published_check(conclusion='success'):
+    """One published `gate freshness` check run, as `ci_wait` reads it.
+
+    A head whose publisher has written nothing is a state of its own
+    since issue 1360, so a control about the WORKFLOW gate states this
+    one green rather than leaving the answer ambiguous.
+    """
+    return {'id': 7, 'name': 'gate freshness', 'status': 'completed',
+            'conclusion': conclusion, 'html_url': 'https://github.com/o/r/runs/7',
+            'completed_at': '2026-09-20T10:10:00Z'}
 
 
 def test_a_gating_run_is_present(tmp):
@@ -308,7 +321,7 @@ def test_each_caller_reaches_the_predicate_through_ci_gate(tmp):
     # assertion bite: with the call in place the verdict is the predicate's
     # own, and without it the caller answered for itself.
     asked, answer = _asked_and_answered(
-        wait, lambda m: m.verdict([_gate_run('tests')]))
+        wait, lambda m: m.verdict([_gate_run('tests')], [_published_check()]))
     assert asked, 'ci_wait never asked ci_gate'
     assert answer == ('acceptable', []), answer
     asked, answer = _asked_and_answered(
@@ -325,13 +338,14 @@ def _refusing_wait(caller, runs):
     through `_frozen_wait_clock`, so a timeout here would be a value
     rather than a margin.
     """
-    setattr(caller, 'runs_on', lambda repo, sha: runs)
+    setattr(caller, 'ci_on', lambda repo, sha: _state(runs))
     setattr(caller, 'prs_on', lambda repo, sha: [
         {'number': 1, 'state': 'OPEN', 'mergeable': 'CONFLICTING',
          'mergeStateStatus': 'DIRTY', 'headRefOid': sha}])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(caller, _Clock()), contextlib.redirect_stderr(err):
-        code = caller.wait('o/r', 'a' * 40, 60, 600, out, grace=300)
+        code = caller.wait('o/r', 'a' * 40, 60, 600, out, grace=300,
+                           required_checks=frozenset())
     return code, out.getvalue()
 
 
@@ -374,8 +388,13 @@ def test_every_reader_answers_over_the_judged_set(tmp):
     # answers alike: a caller that pre-filters cannot move the answer, and
     # one that does not cannot either.
     assert mod.missing_required(mod.judged(runs)) == ['tests']
-    assert wait.verdict(runs) == ('incomplete', [])
-    assert wait._missing(runs) == ['tests']
+    assert wait.verdict(runs, [], required_checks=frozenset()) == (
+        'incomplete', [])
+    # The absent gates as the refusal spells them, and this control is
+    # about the workflow one: `tests/test_ci_wait_published.py` is
+    # where a head missing BOTH is the subject.
+    assert wait._missing(runs, [], required_checks=frozenset()) == [
+        'no tests run']
     absent = hold._settled(runs)
     assert isinstance(absent, hold.ci_gate.GateAbsent), absent
     assert absent.missing == ('tests',), absent
