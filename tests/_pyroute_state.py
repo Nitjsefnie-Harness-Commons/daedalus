@@ -7,6 +7,7 @@ from _pyroute_live import bind_alias_statement, rebind_augmented
 from _pyroute_keys import (_UNSAFE_LITERAL, _literal_value, literal_truth,
                            literal_iterable_cardinality, payload_literal_key)
 from _pyroute_mapping import alias_target_pairs, store_deferred_target
+from _pyroute_removal import drop_key
 from _pyroute_storage import join_clean_occupancy
 from _pyroute_values import (CellState, DeferredGenerator,
                              cell_state_signature, is_clean_container,
@@ -204,27 +205,26 @@ def apply_dict_statement(node, dicts, literals=None):
         return
     if isinstance(node, ast.Expr):
         call = node.value
-        if (isinstance(call, ast.Call)
+        if not (isinstance(call, ast.Call)
                 and isinstance(call.func, ast.Attribute)
-                and call.func.attr == 'update'
+                and call.func.attr in ('clear', 'pop', 'update')
                 and isinstance(call.func.value, ast.Name)):
-            merged = _update_keys(call, dicts, literals)
-            if merged is None:
-                dicts.pop(call.func.value.id, None)
-            else:
-                _merge_payload_keys(
-                    dicts.setdefault(call.func.value.id, {}), merged, call)
+            return
+        owner = call.func.value.id
+        if call.func.attr == 'update':
+            keys = _update_keys(call, dicts, literals)
+            if keys is None: dicts.pop(owner, None)
+            else: _merge_payload_keys(dicts.setdefault(owner, {}), keys, call)
+        elif call.func.attr == 'clear': drop_key(dicts, literals, owner)
+        elif call.args: drop_key(dicts, literals, owner, call.args[0])
         return
-    # A deleted key is not a tracked key; its position folds as a store's.
+    # A removed key is not a tracked key, and its position folds as a store's:
+    # `pop` removes what `del` removes, `clear` removes every key.
     if isinstance(node, ast.Delete):
         for target in node.targets:
-            if not (isinstance(target, ast.Subscript)
+            if (isinstance(target, ast.Subscript)
                     and isinstance(target.value, ast.Name)):
-                continue
-            tracked = dicts.get(target.value.id)
-            name = payload_literal_key(target.slice, literals)
-            if name is not None and tracked is not None:
-                tracked.pop(name, None)
+                drop_key(dicts, literals, target.value.id, target.slice)
         return
     if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
         return

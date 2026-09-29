@@ -1173,6 +1173,7 @@
     "dotted_module": {"python": ["tests/_mcp_import_closure.py"]},
     "drain_lines": {"python": ["tests/_util.py"]},
     "drive": {"python": ["tests/_cli_dispatch.py"]},
+    "drop_key": {"python": ["tests/_pyroute_removal.py"]},
     "drop_shifted_positions": {"python": ["tests/_pyroute_positions.py"]},
     "duplicate_witness_gaps": {"python": ["tests/_mcp_guard_floor.py"]},
     "duty": {"python": ["tests/_mcp_selection_sweep.py"]},
