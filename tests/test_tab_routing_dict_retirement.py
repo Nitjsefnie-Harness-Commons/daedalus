@@ -36,7 +36,10 @@ from _pyroute_stores import (_seed_receiver,  # noqa: E402
                              _subscript_store)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
                              DeferredAlternatives, DeferredContainer,
-                             merge_yielded)
+                             merge_yielded, stored_signature)
+from _pyroute_retirement_sites import (  # noqa: E402
+                              undecided_sites as _UNDECIDED,
+                              retirement_sites)
 from _tabroute_keyset import (_CALL, _CLEAN,  # noqa: E402
                               _DESTINATION_FOLDS, _DESTINATION_READS,
                               _OPAQUE_RETIRE, _PRE, _RETIRED_SOURCE,
@@ -90,33 +93,25 @@ def _folded(spelling) -> DeferredContainer:
     return folded
 
 
-# The functions that fold one container's recorded items into another.
-# `_fold_sites_in_the_guard` reads the census out of the guard's own
-# source, so a fifth site fails here rather than being written wrong and
-# unnoticed: the enumeration belongs in the tree, not in a report.
-_FOLD_FUNCTIONS = frozenset({'_apply_mapping_store', '_dict_value',
-                             '_merge_or_value', '_dict_call_value'})
+def test_the_retirement_census_is_the_guard_own_list(tmp):
+    """Every site that propagates or consults a retirement, read out of
+    the guard's own source rather than kept as a list here.
 
+    Keyed on the PROPERTY -- a guard function that mentions `stale` as a
+    name, an attribute or a keyword argument -- so a site spelled with a
+    different helper is found. The earlier version of this check keyed on
+    the callee name `_fold_items`, which finds today's four folds and
+    misses the rest of the rule; that is the same finding one level up,
+    where the sweep that ran over the derived list kept the LIST in a
+    scratch report.
 
-def _fold_sites_in_the_guard():
-    """The guard's own functions that fold one container into another."""
-    sites = set()
-    for name in ('_pyroute_reads', '_pyroute_mapping'):
-        source = Path(__file__).with_name(name + '.py').read_text(
-            encoding='utf-8')
-        for node in ast.walk(ast.parse(source)):
-            if not isinstance(node, ast.FunctionDef):
-                continue
-            for call in ast.walk(node):
-                if isinstance(call, ast.Call) \
-                        and getattr(call.func, 'id', None) == '_fold_items':
-                    sites.add(node.name)
-    return frozenset(sites)
-
-
-def test_the_fold_census_is_the_guard_own_list(tmp):
-    assert _fold_sites_in_the_guard() == _FOLD_FUNCTIONS, (
-        _fold_sites_in_the_guard() ^ _FOLD_FUNCTIONS)
+    `_pyroute_retirement_sites` is the module beside it that reverts each
+    site and reports the controls that die. This is the half that runs on
+    every commit; that one runs on request, and a site with no decision
+    recorded for it stops it running at all.
+    """
+    assert not _UNDECIDED(), sorted(_UNDECIDED())
+    assert len(retirement_sites()) == 19, sorted(retirement_sites())
 
 
 def test_a_fold_carries_the_source_retirement_with_its_items(tmp):
@@ -253,6 +248,29 @@ def test_the_subscript_read_honours_a_retired_key(tmp):
     assert merge_yielded(at_position(retired, 'k')) \
         == DeferredAlternatives((recorded, UNPROVABLE_SENDER))
     assert merge_yielded(at_position(current, 'k')) is recorded
+
+
+def test_the_state_signature_separates_a_retired_key_from_a_current_one(tmp):
+    """The dedupe contract the signer's `stale` term exists to keep.
+
+    Two containers that differ only in which keys a store has retired are
+    not interchangeable: a state carrying the retirement answers a read at
+    that key by joining, and one that does not answers from the recorded
+    value. If they signed alike the flow would keep whichever came first
+    and the other would never be consulted again.
+
+    This is pinned as a property of the signer rather than as a verdict,
+    because no program in the routing domain I could reach separates the
+    two: a branch whose paths differ only in the marker reads the same
+    either way, and the round-5 sweep over the reviewer's 27 cells agreed.
+    The property is what the term is FOR, and dropping the term fails it.
+    """
+    items = {'k': None}
+    current = DeferredContainer(dict(items), None, 'dict')
+    retired = DeferredContainer(dict(items), None, 'dict',
+                                stale=frozenset({'k'}))
+    assert stored_signature(current) != stored_signature(retired), (
+        'two containers differing only in freshness must not sign alike')
 
 
 def test_a_container_copy_never_retires_the_unknown_key_slot(tmp):
