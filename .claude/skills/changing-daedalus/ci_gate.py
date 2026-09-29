@@ -152,12 +152,18 @@ def red_published(checks, *, required=PUBLISHED_CHECKS):
     judges its own runs' conclusions: a workflow the caller required and
     this one required together must not answer the same question twice.
 
+    A check that has NOT concluded cannot be red, so both halves are
+    asked: a caller's waiting guard sits before this predicate, and a
+    running check of the same name beside a red one would otherwise
+    answer `waiting` and the red one would never be read.
+
     The whole check is returned rather than its name, because the caller
     prints its offenders through one loop and a name alone would have to
     be looked up again to find the conclusion and the URL.
     """
     return [check for check in checks
             if check.get('name') in required
+            and check.get('status') == 'completed'
             and check.get('conclusion') not in ACCEPTABLE]
 
 
