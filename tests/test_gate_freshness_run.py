@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _gate_freshness_fixtures import _encode  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 G1 = 'a' * 40
@@ -24,10 +25,6 @@ RUN = 'https://github.com/o/r/actions/runs/1'
 def _mod():
     return _util.load(ROOT / 'scripts' / 'ci' / 'gate_freshness.py',
                       'gate_freshness_run')
-
-
-def _encode(value):
-    return value if isinstance(value, str) else json.dumps(value)
 
 
 def _pr(number, sha=HEAD, base='main', owner='octo', ref='feature'):
