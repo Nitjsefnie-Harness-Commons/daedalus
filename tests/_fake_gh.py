@@ -63,11 +63,15 @@ POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 # A path whose existence releases the calls this fake is holding. Set only
 # where a case asks for a hold; every other answer is written at once.
 GATE = 'DAEDALUS_FAKE_GH_GATE'
-# Where a release is recorded, beside the call log and not inside it. A
-# release is the only terminal fact about a wait - a call that is still
-# waiting looks exactly like a call that has not been looked at - so a
-# control that can only sample the wait is a control that cannot see it.
-# Its own path, because a line in the call log would be counted as a call.
+# Where the hold's entry and its release are recorded, beside the call log
+# and not inside it. A release is the only terminal fact about a wait - a
+# call that is still waiting looks exactly like a call that has not been
+# looked at - so a control that can only sample the wait is a control that
+# cannot see it. Its own path, because a line in the call log would be
+# counted as a call. The ENTRY is recorded beside the release because the
+# two together are what a case that depends on the hold needs: the release
+# says the wait ended, the entry says it began, and a hold scoped away from
+# a call is invisible to either one alone.
 RELEASES = 'DAEDALUS_FAKE_GH_RELEASES'
 
 
@@ -76,32 +80,42 @@ def _hold():
 
     The call is logged before this runs, so a reader counting entries can
     see a call entered and still open - a state, not the instant it happened
-    to look. A subject inside a held call cannot be gone, which is what
-    makes a liveness reading taken here a consequence rather than a sample.
+    to look. What that buys is narrower than "the subject cannot be gone":
+    the subject cannot RETURN from the call, because the answer is not
+    written, and that is all. It can still be removed from under the call -
+    a signal, or a `gh_client` watchdog whose `os._exit` runs on any thread
+    - so a case that reads liveness here must still name the parent it is
+    reading about, or a parent that dies takes the reading with it.
 
-    There is no bound, and that is the point: a bound would turn the hold
-    into a guess, and a guess that expires silently reinstates the sample
-    it exists to replace. The caller opens the gate, so a subject held
-    here is released by the code that chose to hold it, and nothing else.
+    There is no bound in here, and that is the point: a bound would turn
+    the hold into a guess, and a guess that expires silently reinstates the
+    sample it exists to replace. Two bounds sit outside it, and a reader
+    needs both. `gh_client.GH_TIMEOUT` (120 s) bounds the `subprocess.run`
+    the caller is blocked in, so a hold does expire on a subject slow
+    enough to hit it. And the gate is opened by the caller's `finally`, so
+    a caller SIGKILLed outright leaves the fake in this loop for as long as
+    the box lives - measured at 42 s of CPU over 97 minutes, and the
+    leftover tmp tree is never cleaned.
     """
     path = os.environ.get(GATE)
     if path is None:
         return
+    _recorded('entered', path)
     while not os.path.exists(path):
         time.sleep(0.02)
-    _recorded_release(path)
+    _recorded('release', path)
 
 
-def _recorded_release(path):
-    """Leave the one terminal fact about this wait, for a reader to have.
+def _recorded(stage, path):
+    """Leave one line saying a hold began or ended, for a reader to have.
 
-    Absent when no release log was named, so a fake that is not holding
-    writes nothing anywhere and the call log stays the whole record.
+    Absent when no record was named, so a fake that is not holding writes
+    nothing anywhere and the call log stays the whole record.
     """
     log = os.environ.get(RELEASES)
     if log is None:
         return
-    _logged(log, {'t': time.time(), 'gate': path})
+    _logged(log, {'t': time.time(), 'gate': path, 'stage': stage})
 
 
 def _self_test(launcher):
@@ -220,10 +234,12 @@ def main(argv):
     _logged(os.environ['DAEDALUS_FAKE_GH_LOG'],
             {'t': time.time(), 'argv': list(argv), 'request': request,
              'fragment': fragment, 'poll': os.environ.get(POLL_MARK)})
-    _hold()
     if response is None:
+        # Refused before the hold, so a call this fake cannot answer fails
+        # by name rather than waiting for a gate that has nothing to open.
         sys.stderr.write(f'fake gh: no fixture carries {request[:200]!r}\n')
         return 1
+    _hold()
     try:
         return _respond(response, argv)
     except Unmodelled as exc:
@@ -282,8 +298,12 @@ class FakeGh:
         self.gate_path = self.dir / 'gate'
         self.releases_path = self.dir / 'releases.jsonl'
         self.holding = bool(gate)
-        self.gate_path.unlink(missing_ok=True)
-        self.releases_path.write_text('', encoding='utf-8')
+        if self.holding:
+            # Only where a hold is asked for: truncating a record a live
+            # held process appends to is a reset, and the two hundred
+            # instances that never hold must not pay for either file.
+            self.gate_path.unlink(missing_ok=True)
+            self.releases_path.write_text('', encoding='utf-8')
         self.launcher = self.dir / ('gh.bat' if WINDOWS else 'gh')
         # Copied beside the launcher, not referenced from where this module
         # lives: an install that moves keeps working and the launcher holds
@@ -328,6 +348,22 @@ class FakeGh:
         is indistinguishable from a call nobody has looked at, so what a
         control can read is which calls came back and which never did.
         """
+        return [entry for entry in self.stages()
+                if entry['stage'] == 'release']
+
+    def entered(self):
+        """Every hold this fake began, or none if it held nothing.
+
+        The other half of the same record, and the one a case that
+        DEPENDS on the hold needs: a hold scoped away from a call leaves no
+        release to read either, so a case that only counts releases reads
+        the same whether the hold ran for it or not.
+        """
+        return [entry for entry in self.stages()
+                if entry['stage'] == 'entered']
+
+    def stages(self):
+        """Both recorded stages, in the order the fake wrote them."""
         return _entries(self.releases_path)
 
     def open_gate(self):

@@ -485,12 +485,13 @@ BOUNDED_GIT_LAUNCHES = {
          'the final reap, on the same process',
     ('tests/_watcher_waits.py', 'stop', 'self.proc.wait(timeout)', 1):
          'a reap that follows a group kill, on a process already signalled',
-    ('tests/test_watcher_budget.py',
+    ('tests/test_watcher_lifecycle.py',
      'test_a_graceful_exit_leaves_no_children_behind',
      'parent.proc.wait(timeout)', 1):
          'a parent handle reaping a child it signalled itself, in the'
          ' graceful-exit control',
-    ('tests/test_watcher_budget.py', 'test_the_children_die_with_their_parent',
+    ('tests/test_watcher_lifecycle.py',
+     'test_the_children_die_with_their_parent',
      'parent.proc.wait(timeout)', 1):
          'a parent handle stopping a child the test started',
     ('tests/test_watcher_waits.py',
