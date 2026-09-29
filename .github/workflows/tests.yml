@@ -1702,6 +1702,31 @@ jobs:
           echo "base mcp:"; "venv-base/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
           echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
 
+      # time_tests.py globs tests/test_*.py and runs each, so this job
+      # FINDS its suites exactly the way the `suites` job does and a suite
+      # added tomorrow reaches it whatever it is called. Without this step
+      # a suite that drives actionlint or shellcheck skips here on every
+      # cell, silently, and the cell reports a duration for a suite that
+      # did not run — which is worse than a red cell, because the number it
+      # publishes is then the runtime of a skip. `shellcheck` needs no
+      # step: each side's own requirements-test.txt already brings
+      # shellcheck-py into that side's virtualenv, twice over.
+      #
+      # ONE asymmetry, stated rather than left to ordering: the job builds
+      # two environments from two different trees and times suites on both,
+      # and this one installer step installs from the HEAD checkout into a
+      # single shared tool directory that is on PATH for the base side too.
+      # So the base side runs with a binary its own tree never declared.
+      # That is accepted, not overlooked: it is the same pinned 1.7.12 in
+      # both cases, the measurement is of suite runtime rather than of
+      # toolchain parity, and installing twice would double the download
+      # to fix a difference the measurement cannot see. If a future suite
+      # ever reads a tool's VERSION and reports it into a duration, this is
+      # the comment to revisit.
+      - name: Install the lint tools the suites drive
+        if: steps.baseline.outputs.point != ''
+        run: python scripts/ci/install_lint_tools.py
+
       # The unit the suite weights are counted in: one fixed iteration count
       # of one fixed computation, timed on this runner. It runs ONCE per
       # cell, before the rounds, beside the reports the cell uploads, and in
