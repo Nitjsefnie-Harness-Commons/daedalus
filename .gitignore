@@ -389,6 +389,7 @@
 !/tests/_mod_text.py
 !/tests/_mutation_sweep.py
 !/tests/_netcapture_harness.py
+!/tests/_node_harness_fixtures.py
 !/tests/_noderun.py
 !/tests/_noglibc.py
 !/tests/_overlap.py

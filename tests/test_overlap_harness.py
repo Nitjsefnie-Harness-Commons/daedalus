@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
+from _node_harness_fixtures import _background_worker_file  # noqa: E402
 from _overlap import (  # noqa: E402
     _assert_step_trace, _harness_failure)
 from _overlap_clients import _slow_result_server  # noqa: E402
@@ -114,16 +115,10 @@ async function dispatchCommand(command) {
 _SHIPPED_BACKGROUND = _util.ROOT / 'extension' / 'background.js'
 
 
-def _worker(tmp, source):
-    path = Path(tmp) / 'background.js'
-    path.write_text(source, encoding='utf-8')
-    return path
-
-
 def test_run_background_overlap_accepts_a_short_inner_bound(tmp):
     """A caller can shorten diagnostic bounds without changing production."""
     actual = _overlap.run_background_overlap(
-        _worker(tmp, _SETTLING_WORKER),
+        _background_worker_file(tmp, _SETTLING_WORKER),
         [{'id': '_cookies', 'domain': 'owner-a'}],
         ['owner-a'], inner_wait=1, boot=False)
     assert actual == [{
@@ -135,7 +130,8 @@ def test_run_background_overlap_accepts_a_short_inner_bound(tmp):
 
 def test_a_stalled_config_load_names_the_wait(tmp):
     """A never-settling loadConfig promise identifies the config-load step."""
-    failure = _harness_failure(_worker(tmp, _STALLED_CONFIG_WORKER))
+    failure = _harness_failure(
+        _background_worker_file(tmp, _STALLED_CONFIG_WORKER))
     assert ('timed out waiting for the worker to load its config'
             in failure), failure
     assert 'outer backstop' not in failure, failure
@@ -147,8 +143,9 @@ def test_a_stalled_config_load_names_the_wait(tmp):
 
 def test_posted_results_with_stalled_dispatches_name_the_settle_wait(tmp):
     """Posted results do not hide dispatch promises that never settle."""
-    failure = _harness_failure(_worker(tmp, _STALLED_DISPATCH_WORKER),
-                               boot=False)
+    failure = _harness_failure(
+        _background_worker_file(tmp, _STALLED_DISPATCH_WORKER),
+        boot=False)
     assert ('timed out waiting for all dispatchCommand calls to settle'
             in failure), failure
     assert 'outer backstop' not in failure, failure
@@ -164,7 +161,8 @@ def test_posted_results_with_stalled_dispatches_name_the_settle_wait(tmp):
 
 def test_a_synchronous_stall_reports_the_outer_backstop_and_last_step(tmp):
     """A blocked Node event loop is killed with its last entered step named."""
-    failure = _harness_failure(_worker(tmp, _SYNCHRONOUS_STALL_WORKER))
+    failure = _harness_failure(
+        _background_worker_file(tmp, _SYNCHRONOUS_STALL_WORKER))
     assert 'outer backstop' in failure, failure
     assert 'last step: the worker to load its config' in failure, failure
     _assert_step_trace(failure, [
@@ -224,7 +222,7 @@ def test_a_drained_non_ascii_stream_survives_the_backstop_message(tmp):
 def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
     """A blocked dispatch call is not blamed on completed config loading."""
     failure = _harness_failure(
-        _worker(tmp, _SYNCHRONOUS_DISPATCH_STALL_WORKER))
+        _background_worker_file(tmp, _SYNCHRONOUS_DISPATCH_STALL_WORKER))
     assert 'outer backstop' in failure, failure
     assert 'last step: the dispatchCommand calls to start' in failure, failure
     _assert_step_trace(failure, [
@@ -236,8 +234,9 @@ def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
 
 def test_completed_work_that_does_not_exit_reports_the_finished_step(tmp):
     """Finished work is distinct from a harness that never completed."""
-    failure = _harness_failure(_worker(tmp, _FINISHED_BUT_RUNNING_WORKER),
-                               boot=False)
+    failure = _harness_failure(
+        _background_worker_file(tmp, _FINISHED_BUT_RUNNING_WORKER),
+        boot=False)
     assert 'last step: the overlap harness finished' in failure, failure
     assert '"owner":"owner-a"' in failure, failure
     _assert_step_trace(failure, [
@@ -259,7 +258,7 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
     ]
     with _slow_result_server() as base:
         failure = _harness_failure(
-            _worker(tmp, _SETTLING_WORKER), commands=commands,
+            _background_worker_file(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
             wait_between=True, inner_wait=2, boot=False)
     assert ('timed out waiting for the first result to be consumed'
@@ -283,7 +282,7 @@ def test_a_slow_result_post_cannot_preempt_the_consume_wait(tmp):
     ]
     with _slow_result_server(post_delay=2) as base:
         failure = _harness_failure(
-            _worker(tmp, _SETTLING_WORKER), commands=commands,
+            _background_worker_file(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
             wait_between=True, inner_wait=1, boot=False,
             # outer_slack restores the 14s backstop at zero wall-clock cost.
@@ -305,7 +304,7 @@ def test_a_rejected_result_post_is_reported_not_posted(tmp):
     """A non-2xx result POST is a named failure, never a posted result."""
     with _slow_result_server(post_status=400) as base:
         failure = _harness_failure(
-            _worker(tmp, _SETTLING_WORKER),
+            _background_worker_file(tmp, _SETTLING_WORKER),
             commands=[{'id': '_cookies', 'domain': 'owner-a'}],
             order=['owner-a'], result_base=base, inner_wait=2, boot=False)
     assert ('the result POST for owner-a failed: '
@@ -322,7 +321,7 @@ def test_two_posts_for_one_owner_cannot_deadlock_the_wait(tmp):
     count that no longer matches the pushes.
     """
     posted = _overlap.run_background_overlap(
-        _worker(tmp, _DOUBLE_POST_WORKER),
+        _background_worker_file(tmp, _DOUBLE_POST_WORKER),
         [{'id': '_cookies', 'domain': 'owner-a'}],
         ['owner-a'], inner_wait=2, boot=False, results=2)
     assert [item['owner'] for item in posted] == ['owner-a', 'owner-a'], posted
