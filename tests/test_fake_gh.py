@@ -13,6 +13,8 @@ nothing else in the tree asserts.
 """
 import subprocess
 import sys
+import unittest
+from pathlib import Path
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -20,6 +22,13 @@ import _fake_gh  # noqa: E402
 import _util  # noqa: E402
 from _watcher_fixtures import THROTTLED  # noqa: E402
 from _watcher_fixtures import throttled_query  # noqa: E402
+
+
+# A writable answer of every field's own right type, which the loop
+# above spoils one field at a time. Written out rather than built by
+# comprehension so a change to the answer's shape is visible here.
+WRITABLE = {'status': 200, 'headers': {}, 'body': {'data': None},
+            'exit': 0, 'stderr': '', 'stdout': ''}
 
 
 def _run_fake(fake, argv, request=''):
@@ -91,6 +100,33 @@ def test_the_fake_refuses_a_stdout_it_cannot_place(tmp):
     done = _run_fake(fake, ['api', 'pulls/195'])
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
     assert 'header block' in done.stderr, done.stderr
+
+
+def test_the_fake_refuses_a_field_of_the_wrong_type_by_name(tmp):
+    """The five type refusals `_response` makes, one limb each.
+
+    They are the fake's only guard against a fixture that says something
+    the renderer cannot honour, and without a control per limb nothing
+    would fail if one of them were dropped - the field would be read as
+    whatever it happened to be, which is how a double starts answering
+    questions it was not asked. Each is refused BY NAME, because a
+    refusal nobody can name is a refusal nobody can fix.
+    """
+    for field, value in (('status', '200'), ('headers', ['X: 1']),
+                         ('exit', '1'), ('stderr', ['nope']),
+                         ('stdout', ['nope'])):
+        with unittest.TestCase().subTest(field=field):
+            answer = dict(WRITABLE)
+            answer[field] = value
+            where = Path(tmp) / field
+            fake = _fake_gh.FakeGh(where, {'items(first: 2': answer})
+            done = _run_fake(fake, ['api', '-i', 'graphql', '--input', '-'],
+                             '{"query":"items(first: 2)"}')
+            assert done.returncode == 2, (field, done.returncode, done.stderr)
+            assert 'does not model' in done.stderr, (field, done.stderr)
+            assert field in done.stderr, (field, done.stderr)
+            assert repr(value) in done.stderr, (field, done.stderr)
+            assert done.stdout == '', (field, done.stdout)
 
 
 def main():

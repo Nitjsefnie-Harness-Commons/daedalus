@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Which answers report a rate limit, which report only that they failed.
 
-Every control here is one axis of the evidence, driven through the
-client's own `graphql` and answered by a real `gh` process from the fake
-executable double in `_fake_gh.py`. The axis matters more than the case:
+Every control but the two that say so is one axis of the evidence, driven
+through the client's own `graphql` and answered by a real `gh` process from
+the fake executable double in `_fake_gh.py`; the two reach the reader by
+name, and each says which call site it stands in for. The axis matters
+more than the case:
 a fix that closes the headers and leaves the body, or a control that
 reads two carriers of the same value and is blinded by their agreeing,
 is the failure this file is arranged to make impossible. Every widening
@@ -11,7 +13,6 @@ the matcher got carries its negative in the same place: an entry naming
 no limit, a complaint naming no limit, a nonzero exit over nothing.
 """
 import contextlib
-import io
 import json
 import sys
 import time
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
 from _watcher_fixtures import THROTTLED  # noqa: E402
+from _watcher_fixtures import rest_403  # noqa: E402
 from _watcher_fixtures import spent_limit_response  # noqa: E402
 from _watcher_fixtures import throttled_query  # noqa: E402
 
@@ -70,7 +72,12 @@ def _frozen_client_clock(mod, now):
         def __getattr__(self, name):
             return getattr(time, name)
 
-    targets = [mod, _reader()]
+    # The reader is a module of its own with its own clock, so it is
+    # frozen beside the client. `get`, not `[]`: on a tree that predates
+    # the split there is no such module, and a `KeyError` here would make
+    # every control in this file red for a reason that says nothing.
+    reader = sys.modules.get('gh_rate_limit')
+    targets = [mod] if reader is None else [mod, reader]
     real = {target: getattr(target, 'time') for target in targets}
     for target in targets:
         setattr(target, 'time', _Pinned())
@@ -79,16 +86,6 @@ def _frozen_client_clock(mod, now):
     finally:
         for target, clock in real.items():
             setattr(target, 'time', clock)
-
-
-def _reader():
-    """The module the client reads a refusal with, by its imported name.
-
-    Reading a refusal is `gh_rate_limit`'s subject and the client's only
-    import of it, so the name it arrived under is the one place a control
-    can reach the reader itself rather than the answer it produces.
-    """
-    return sys.modules['gh_rate_limit']
 
 
 def test_a_200_whose_only_evidence_is_a_spent_limit_is_a_refusal(tmp):
@@ -377,18 +374,44 @@ def test_a_403_whose_only_evidence_is_the_body_is_still_a_refusal(tmp):
     """Some refusals carry the rate limit in the body and nowhere else;
     without that clause ci_wait would exit 3 instead of waiting out the
     reset.
+
+    The body is the JSON one GitHub really sends, not a line of text: a
+    plain string is not a shape this API produces for a 403, and a
+    control written against one is a control against a fiction. The
+    `message` is neither a GraphQL `type` nor a `code`, so the
+    structured reader cannot see this at all and the text is the only
+    reading of it.
     """
     mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 403, 'headers': {},
-        'body': 'API rate limit exceeded for the account.'}})
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': rest_403(
+        stderr='gh: something else went wrong (HTTP 403)\n')})
     with fake.activate():
         try:
             mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited:
-            pass
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
         else:
             raise AssertionError('a body-only rate-limit 403 must refuse')
+
+
+def test_a_403_naming_no_limit_anywhere_is_an_ordinary_failure(tmp):
+    """The inversion of the row above, on the same shape: a 403 with the
+    same body shape, a complaint that names something else, and no
+    headers. A permission refusal must not be answered by sleeping, and
+    this is the row that says so for the body carrier specifically.
+    """
+    mod = _client()
+    answer = {'status': 403, 'headers': {}, 'stderr':
+              'gh: Resource not accessible by integration (HTTP 403)\n',
+              'body': {'message': 'Resource not accessible by integration.'}}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a 403 naming no limit must fail the query')
 
 
 def test_a_429_prefers_retry_after_over_the_reset_header(tmp):
@@ -480,10 +503,13 @@ def test_a_retranslated_header_block_still_yields_its_values(tmp):
     the block ends early, the header lines fall into the body, and a
     reported reset arrives as no reset - a 60-second default instead.
 
-    The reader is reached by name because the subject is the PARSE, not
-    the refusal: `gh_client.graphql` calls this same reader on this same
-    pair, so a refusal here is a refusal there, and the call site is not
-    left unpinned by this control standing in for it.
+    The refusal those values produce is not asserted here, and the
+    reason is that reaching the reader by name made this control
+    unrunnable on a tree without the split - its redness there was a
+    `KeyError` about a module name, which says nothing. The whole chain
+    over the same bytes is driven through the public entry point in
+    `tests/test_gh_client.py`, by
+    `test_a_header_reset_survives_a_windows_text_stream_end_to_end`.
     """
     del tmp
     mod = _client()
@@ -495,18 +521,10 @@ def test_a_retranslated_header_block_still_yields_its_values(tmp):
     assert headers.get('x-ratelimit-reset') == '42', headers
     assert headers.get('retry-after') == '7', headers
     assert json.loads(body) == {'data': None}, body
-    refused, resume = _reader().exhausted(status, headers, body)
-    assert refused and resume is not None, resume
 
 
 def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
-    """The reader is reached by name here, standing in for the one call
-    `gh_client.graphql` makes on a parsed body: a control through the
-    public entry point cannot hand the reader a `retryAfter` this small
-    without a fixture the client would turn down for some other reason
-    first.
-
-    The exposure the floor above defends against is reachable today.
+    """The exposure the floor above defends against is reachable today.
 
     `_graphql_refusal` takes any `retryAfter` that is a number, and a
     GraphQL body is JSON, so a fractional one arrives - a reset a
@@ -514,20 +532,132 @@ def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
     validation would leave every other control green while the one
     above justified itself falsely.
 
-    The fixture omits `resetAt` because the refusal reads it first and
-    would never reach `retryAfter`; add one and this passes for the
-    wrong reason.
+    Driven through `graphql` and a real `gh` process: `data` is null, so
+    the answer did not deliver and the entry is read, and the instant it
+    reports is the one the pause would wake at. The fixture omits
+    `resetAt` because the refusal reads it first and would never reach
+    `retryAfter`; add one and this passes for the wrong reason.
     """
-    del tmp
     mod = _client()
     now = 1789012345.0
-    payload = {'errors': [{'type': 'RATE_LIMITED', 'extensions': {
-        'rateLimit': {'retryAfter': 0.001}}}]}
-    with _frozen_client_clock(mod, now):
-        refused, resume = _reader()._graphql_refusal(payload)
-    assert refused is True, refused
+    answer = {'status': 200, 'exit': 0, 'stderr': '',
+              'body': {'data': None, 'errors': [
+                  {'type': 'RATE_LIMITED', 'extensions': {
+                      'rateLimit': {'retryAfter': 0.001}}}]}}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate(), _frozen_client_clock(mod, now):
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            resume = refusal.resume_at
+        else:
+            raise AssertionError('a fractional retryAfter must still refuse')
     assert resume == now + 0.001, resume
     assert resume - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, resume - now)
+
+
+def test_a_refusal_is_never_a_query_error(tmp):
+    """The invariant the `RateLimited` docstring claims and nothing held.
+
+    `ci_wait.py:409` and `watch_all.py:209` both wrap a call in `except
+    gh_client.QueryError` and read the failure as a failed query. A
+    refusal that were a subclass would be swallowed by both, and a wait
+    that paused on a rate limit would report it as a broken query - the
+    exact reading this issue exists to remove, arrived at from the other
+    direction.
+    """
+    mod = _client()
+    assert issubclass(mod.RateLimited, RuntimeError), mod.RateLimited
+    assert not issubclass(mod.RateLimited, mod.QueryError), mod.RateLimited
+    assert not issubclass(mod.QueryError, mod.RateLimited), mod.RateLimited
+    try:
+        raise mod.RateLimited('rate limited', None)
+    except mod.QueryError:                            # noqa: B902
+        raise AssertionError('a refusal must not be caught as a query error')
+    except mod.RateLimited:
+        pass
+
+
+def test_a_403_whose_json_body_names_the_limit_refuses_with_nothing_else(tmp):
+    """The refusal the base read and a narrowing lost, with no carrier
+    left to rescue it.
+
+    No rate-limit headers - a secondary limit answers 403 with none - no
+    `errors[]`, and `gh` writing nothing at all. The words are in the
+    body's JSON `message`, so the text carrier is the only reader that
+    can see this, and an answer that refused it answered a query that
+    worked. `rest_403.py` in the review's evidence is this shape.
+    """
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': rest_403()})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
+            assert refusal.args[0].startswith('HTTP 403: '), refusal.args[0]
+        else:
+            raise AssertionError('the body names the limit: must refuse')
+
+
+def test_that_403_with_a_body_naming_nothing_is_an_ordinary_failure(tmp):
+    """The inversion: the same 403 - no headers, `gh` silent - carrying a
+    `message` that names no limit. Nothing anywhere says a limit, so
+    nothing is a pause and the query fails.
+    """
+    mod = _client()
+    answer = rest_403(message='Resource not accessible by integration.')
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a 403 naming no limit must fail the query')
+
+
+def test_a_403_whose_only_evidence_is_the_complaint_is_a_refusal(tmp):
+    """What real `gh` writes over a throttled 403, and the carrier the
+    review showed is pinned by nothing.
+
+    The body here is a permission refusal in every particular - it names
+    no limit, and so do the headers - and the words are only on stderr.
+    Deleting the stderr carrier leaves every other refusal control green
+    while this answer, the one a real `gh` produces, stops refusing.
+    """
+    mod = _client()
+    answer = {'status': 403, 'headers': {},
+              'body': {'message': 'You have been temporarily blocked.'},
+              'stderr': f'gh: {THROTTLED} (HTTP 403)\n'}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
+        else:
+            raise AssertionError('a complaint naming the limit must refuse')
+
+
+def test_that_403_with_a_complaint_naming_something_else_fails(tmp):
+    """The inversion of the row above, character for character: the same
+    403 with the same body, and a complaint that names a block rather
+    than a limit. A reader that treated every complaint as a rate-limit
+    report would sleep on a permission refusal.
+    """
+    mod = _client()
+    answer = {'status': 403, 'headers': {},
+              'body': {'message': 'You have been temporarily blocked.'},
+              'stderr': 'gh: You have been temporarily blocked (HTTP 403)\n'}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a complaint naming no limit must fail')
 
 
 def test_a_json_body_naming_a_rate_limit_outside_errors_is_not_a_refusal(tmp):
@@ -547,62 +677,6 @@ def test_a_json_body_naming_a_rate_limit_outside_errors_is_not_a_refusal(tmp):
     with fake.activate():
         data = mod.graphql(ITEM_QUERY, {'after': None})
     assert mod.nodes(data, ('repository', 'items')) == [{'id': 1}]
-
-
-def _wait_for(mod, answer, now, tmp):
-    """The wait a refusal the reader found would buy, in whole seconds.
-
-    Driven through `graphql` and a real `gh` process, so the instant is
-    one the reader derived from the answer rather than one this control
-    handed it: a reader returning a value these clamps do not reach is
-    what the three rows below exist to catch.
-    """
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
-    watcher = mod.Watcher('w', out=io.StringIO())
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited as refusal:
-            return watcher._wait_seconds(refusal, now)
-        raise AssertionError('the answer was not read as a refusal')
-
-
-def test_a_refusal_carrying_no_instant_waits_the_plain_minute(tmp):
-    """No reset reported at all. A pause still has to happen - the limit
-    is real - but there is nothing to wake at, so the wait is the plain
-    minute and not a moment the reader invented.
-    """
-    mod = _client()
-    now = 1790266796.5
-    answer = {'status': 200, 'stdout': '', 'exit': 1,
-              'stderr': f'gh: {THROTTLED}\n'}
-    assert _wait_for(mod, answer, now, tmp) == float(mod.DEFAULT_BACKOFF)
-    assert mod.DEFAULT_BACKOFF == 60, mod.DEFAULT_BACKOFF
-
-
-def test_a_refusal_carrying_a_reset_already_gone_waits_the_floor(tmp):
-    """The second: a reset that has passed. Waiting exactly to it is no
-    wait at all, and the counter the headers carry is spent, so the
-    floor is the price of not hot-looping the API that just refused us.
-    """
-    mod = _client()
-    now = 1790266796.5
-    spent = spent_limit_response(int(now) - 5000, exit=0, stderr='')
-    assert _wait_for(mod, spent, now, tmp) == float(mod.MIN_BACKOFF)
-    assert mod.MIN_BACKOFF == 2, mod.MIN_BACKOFF
-
-
-def test_a_refusal_carrying_an_absurd_reset_waits_the_ceiling(tmp):
-    """The third: a reset no clock will reach. A fixture that reports one
-    is a fixture that hangs a suite for the length of the wait, so the
-    ceiling is what bounds it - past it the next refusal is a new pause
-    with its own line rather than one sleep that never returns.
-    """
-    mod = _client()
-    now = 1790266796.5
-    absurd = spent_limit_response(int(now) + 10 ** 9, exit=0, stderr='')
-    assert _wait_for(mod, absurd, now, tmp) == float(mod.MAX_BACKOFF)
-    assert mod.MAX_BACKOFF == 6 * 3600, mod.MAX_BACKOFF
 
 
 def main():
