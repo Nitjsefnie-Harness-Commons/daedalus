@@ -13,6 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _actionlint import (_PLANTED_JOB, _assert_actionlint_clean,  # noqa: E402
+                         _assert_run_refuses, _assert_run_skips,
+                         _lint_workflows, _workflow_paths)
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _job_section, _tests_yml)
@@ -297,6 +300,63 @@ def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
     assert step.get('env') == {'GH_TOKEN': '${{ github.token }}'}, step
     zizmor = [i for i, s in enumerate(steps) if s.get('name') == 'zizmor']
     assert zizmor and index > zizmor[0], (index, zizmor)
+
+
+def test_the_tracked_workflows_pass_actionlint(tmp):
+    """The step's shape is pinned above; this is the verdict it produces."""
+    del tmp
+    _lint_workflows(ROOT)
+
+
+def test_the_workflow_expansion_covers_both_extensions(tmp):
+    directory = Path(tmp) / '.github' / 'workflows'
+    directory.mkdir(parents=True)
+    for name in ('named.yml', 'named.yaml', 'named.txt'):
+        (directory / name).write_text('', encoding='utf-8')
+    found = {path.name for path in _workflow_paths(Path(tmp))}
+    # An extension nothing matches contributes nothing: the step's nullglob.
+    assert found == {'named.yml', 'named.yaml'}, found
+
+
+def test_a_workflow_carrying_a_real_lint_finding_is_refused(tmp):
+    """A copy of a tracked workflow, carrying a real shellcheck finding."""
+    root = Path(tmp) / 'tree'
+    directory = root / '.github' / 'workflows'
+    directory.mkdir(parents=True)
+    tracked = ROOT / '.github' / 'workflows' / 'claim.yml'
+    (directory / tracked.name).write_text(
+        tracked.read_text(encoding='utf-8') + _PLANTED_JOB, encoding='utf-8')
+    _assert_run_refuses(lambda: _lint_workflows(root), 'SC2183')
+
+
+def test_a_finding_the_linter_reported_is_refused(tmp):
+    del tmp
+    output = ('claim.yml:58:9: shellcheck reported issue in this script: '
+              'SC2183:warning:1:8: This format string has 3 variables, but '
+              'is passed 2 arguments [shellcheck]')
+    ran = ('actionlint', '1.7.12', '1.7.12', [Path('claim.yml')], 1, output)
+    _assert_run_refuses(lambda: _assert_actionlint_clean(*ran), 'SC2183')
+
+
+def test_a_lint_run_at_another_version_is_skipped(tmp):
+    del tmp
+    ran = ('actionlint', '1.6.0', '1.7.12', [Path('claim.yml')], 0, '')
+    _assert_run_skips(lambda: _assert_actionlint_clean(*ran), '1.6.0',
+                      '1.7.12')
+
+
+def test_a_lint_run_without_the_binary_is_skipped(tmp):
+    del tmp
+    ran = (None, None, '1.7.12', [Path('claim.yml')], 0, '')
+    _assert_run_skips(lambda: _assert_actionlint_clean(*ran), 'actionlint',
+                      '1.7.12')
+
+
+def test_an_empty_workflow_directory_is_refused_not_clean(tmp):
+    del tmp
+    ran = ('actionlint', '1.7.12', '1.7.12', [], 0, '')
+    _assert_run_refuses(lambda: _assert_actionlint_clean(*ran),
+                        'no workflow files matched')
 
 
 def test_the_audit_covers_every_python_dependency_surface(tmp):
