@@ -47,6 +47,7 @@ from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
                              DeferredAlternatives, DeferredContainer,
                              merge_yielded, stored_signature)
 from _retirement_sweep import (  # noqa: E402
+                              NO_MUTATION as _DECIDED,
                               REVERTS as _REVERTS,
                               undecided_sites as _UNDECIDED,
                               retirement_sites)
@@ -127,9 +128,10 @@ def test_the_retirement_census_is_the_guard_own_list(tmp):
     # literal `== 19` still passing, which is the whole failure this
     # derivation exists to prevent. The floor is a tripwire for the
     # derivation going blind; the exactness is the undecided check above.
+    decided = set(_REVERTS) | set(_DECIDED)
     assert len(retirement_sites()) >= 20, sorted(retirement_sites())
-    assert len(retirement_sites()) == len(_REVERTS), sorted(
-        retirement_sites())
+    assert set(retirement_sites()) <= decided, sorted(
+        set(retirement_sites()) - decided)
 
 
 def test_a_fold_carries_the_source_retirement_with_its_items(tmp):

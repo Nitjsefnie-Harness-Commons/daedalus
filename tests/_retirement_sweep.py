@@ -62,6 +62,27 @@ _CONSTRUCTORS = ('DeferredContainer', 'SpreadContainer')
 _COPY_HELPERS = ('container_copy', 'replace_container',
                  'replace_deferred_storage', 'join_clean_occupancy')
 
+# Derived sites with NO mutation, and why there is none to write. These are
+# carries whose retirement is unobservable by construction, so any mutation
+# of them is a no-op and no control could distinguish it. They stay in the
+# census -- a real retirement planted in one of them makes it a site that
+# needs a revert -- but the sweep reports them as decided rather than as
+# survivors, because "a mutation killed nothing" and "this has nothing to
+# mutate" are different facts and only one of them is a finding.
+NO_MUTATION = {
+    '_pyroute_mapping._apply_set_store': (
+        'reached only when set_operands folds a binary SET operation, and '
+        'that refuses a mapping operand, so `previous` is a set or a '
+        'frozenset and carries no retired dict keys: the carry is a no-op '
+        'and so is any mutation of it'),
+    '_pyroute_reads._readback_popitem': (
+        'the projection either joins every value into the unknown-key slot, '
+        'which every read consults anyway, or deletes a key from the items, '
+        'leaving a retirement that names a key the container no longer '
+        'holds -- a conservative over-join, not a hole, and not something '
+        'a control can observe'),
+}
+
 # Every `tests/` module the universe derivation does NOT put in, and why.
 # An exclusion is a decision, so it is recorded here: a module has to be
 # argued out of the sweep in the tree, not silently skipped by it.
@@ -109,15 +130,6 @@ REVERTS = {
         "",
         "            return known.items, known.length is not None, "
         "frozenset()"),
-    '_pyroute_mapping._apply_set_store': (
-        '        folded = container_copy(previous, folded.items)',
-        '        folded = container_copy(previous, folded.items, False, '
-        'frozenset())'),
-    '_pyroute_reads._readback_popitem': (
-        "        replace_deferred_storage(state, owner, container_copy(\n"
-        "            owner, items, True))",
-        "        replace_deferred_storage(state, owner, container_copy(\n"
-        "            owner, items, True, frozenset()))"),
     '_pyroute_reads._apply_pop': (
         "        owner, items, key is _UNRESOLVED_KEY, stale_after_store(\n"
         "            owner, () if key is _UNRESOLVED_KEY else (key,))))",
@@ -369,8 +381,8 @@ def retirement_sites():
 
 
 def undecided_sites():
-    """The derived sites no revert has been written for."""
-    return retirement_sites() - set(REVERTS)
+    """The derived sites with neither a revert nor a recorded decision."""
+    return retirement_sites() - set(REVERTS) - set(NO_MUTATION)
 
 
 def _clear_bytecode():
@@ -418,7 +430,7 @@ def revert_sites():
     missing = undecided_sites()
     if missing:
         raise SystemExit(f'no revert written for: {sorted(missing)}')
-    survivors = []
+    survivors, unmutated = [], []
     print(f'{"site":46s} {"controls that die":44s} survivors')
     for stale in HERE.glob('__pycache__'):
         for cached in stale.glob('*.pyc'):
@@ -427,6 +439,10 @@ def revert_sites():
         module = site.rpartition('.')[0]
         path = HERE / (module + '.py')
         original = path.read_text(encoding='utf-8')
+        if site in NO_MUTATION:
+            unmutated.append(site)
+            print(f'{site:46s} NO MUTATION: {NO_MUTATION[site][:52]}')
+            continue
         old, new = REVERTS[site]
         if old not in original:
             print(f'{site:46s} ANCHOR-MISSING')
