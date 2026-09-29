@@ -495,17 +495,15 @@ def launch_refusals(source, here, bound_sink=None):
         being a bare name — unless the module binds that root again,
         which is the same unreadable name.
 
-        A name the module binds to some OTHER call is proved, because
-        the call itself is then the fixed value.
+        A name the module binds to some OTHER call is proved by it.
 
         The family that is NOT closed is the same shape stated without
         the spellings: a module reached through a name the analyser
         cannot read the origin of — a user's own factory that returns
         one, a module bound by an `except ... as` clause, an attribute
-        held on an object. Each is the machinery route taken one step
-        further from a name the bindings table holds, and the residual
-        list names the family rather than the members it has been seen
-        in.
+        held on an object. Each is the machinery route one step further
+        from a name the bindings table holds, and the residual list
+        names the family rather than the members it has been seen in.
         """
         # An attribute chain: a dotted stdlib root, unless the module has
         # since rebound that name, it is a parameter here, or it can launch.
@@ -680,13 +678,15 @@ def bound_sites(source, here):
     return sink
 
 
-# The stdlib roots an attribute chain is refused on: each reaches a
-# launch or a child wait (asyncio.subprocess, concurrent.futures,
-# multiprocessing.connection, os.popen, pty.spawn, and shutil, whose
-# entry points are all os calls). `subprocess` is not one: a plain
-# import of it is not a dotted import, so the limb never reaches it.
+# The stdlib roots an attribute chain is refused on: each is a PACKAGE
+# whose submodule reaches a launch or a child wait (asyncio.subprocess,
+# concurrent.futures, multiprocessing.connection, os.popen), and each
+# has a row that can execute. `shutil` and `pty` are not packages, so the
+# limb is unreachable through either. `subprocess` needs no entry: the
+# limb DOES return it for `import subprocess.spawn`, but every
+# `subprocess.x(...)` call is placed before the unplaced arm reads it.
 _STDLIB_LAUNCH_ROOTS = frozenset(
-    {'asyncio', 'concurrent', 'multiprocessing', 'os', 'pty', 'shutil'})
+    {'asyncio', 'concurrent', 'multiprocessing', 'os'})
 
 
 def _dotted_stdlib_root(receiver, dotted_roots):

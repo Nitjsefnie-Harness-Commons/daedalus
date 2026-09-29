@@ -18,10 +18,12 @@ CHAIN_LIMB_ROWS = (
     # An attribute chain is the one receiver shape no bare-Name limb can
     # judge, and a member of a standard-library module is the
     # interpreter's own code rather than this repository's launch. The
-    # positive row is the extension; the six after it are the roots that
+    # positive row is the extension; the four after it are the roots that
     # reach a launch anyway, and the last two are the boundaries — a
     # repository module reached the same way, and a bare Name the limb
-    # never sees.
+    # never sees. Every root in the set is a package, so each row here is
+    # a source that could execute; `shutil` and `pty` are not, and the
+    # set says so rather than carrying rows nothing can be.
     ('a-stdlib-dotted-import-member-is-a-proved-fixed-value',
      "import http.client\n"
      "http.client.HTTPConnection(timeout=30)\n",
@@ -41,10 +43,6 @@ CHAIN_LIMB_ROWS = (
     ('excluded-stdlib-root-os-is-refused',
      "import os.path\n"
      "os.path.commonpath(paths, timeout=30)\n",
-     [(2, 'unreadable', 'unplaced')]),
-    ('excluded-stdlib-root-pty-is-refused',
-     "import pty.spawn\n"
-     "pty.spawn.spawn(argv, timeout=30)\n",
      [(2, 'unreadable', 'unplaced')]),
     ('a-repository-dotted-import-is-not-a-stdlib-root',
      "import daedalus_bridge.config\n"
