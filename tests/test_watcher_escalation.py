@@ -9,12 +9,16 @@ arrive as a failed query and escalate, and now it waits instead, so the
 counter's behaviour across a pause is a behaviour change with no witness
 until there is one.
 
-The control is the escalation line itself. `FAIL_ESCALATE` genuine
-failures AFTER a pause still produce it, and at exactly that number - a
-pause that advanced the counter would escalate EARLIER, which is the only
-way the claim can fail while the escalation still works at all. The row
-beside each of these is the negative: the same run with the pause removed
-escalates at the same number, so the pause is the only difference.
+The control is the escalation line itself, and the LINE is not enough to
+tell a counted pause from an uncounted one: a pause that reached the
+counter is still answer #1, and the escalation still fires at the same
+threshold. So each row also says WHICH failure came first, and reads the
+whole `poll failed (N)` sequence. One row - the CI one - has the negative
+beside it: the same run with the pause removed escalates at the same
+number, so the pause is the only difference between them. The comment
+watcher does not, because its own negative is the same shape with a
+different query, and repeating it would measure the fixture rather than
+the watcher.
 """
 import sys
 from pathlib import Path
@@ -111,7 +115,11 @@ def test_the_same_ci_run_without_a_pause_escalates_at_the_same_number(tmp):
 
 def test_a_comment_pause_does_not_advance_the_failure_counter(tmp):
     """`pr_comment_watch` escalates the same way, so it gets its own
-    witness rather than an inference from the sibling's control.
+    witness rather than an inference from the sibling's control - and it
+    carries the two assertions the sibling needed and did not have: the
+    count sequence, and that the FIRST failed poll is the permission
+    refusal rather than the pause. Without them this row passed against
+    a plant that let the pause reach the counter.
     """
     answers = dict(idle_answers())
     pause = refusal_response(429, {'Retry-After': '1'})
@@ -125,6 +133,13 @@ def test_a_comment_pause_does_not_advance_the_failure_counter(tmp):
                           'the escalation line')
         line = _escalation_line(child)
         assert f'after {ESCALATE} consecutive failures' in line, line
+        counts = [int(row.split('poll failed (')[1].split(')')[0])
+                  for row in child.err.lines if _reports_a_failed_poll(row)]
+        assert counts[:ESCALATE] == list(range(1, ESCALATE + 1)), counts
+        first = [row for row in child.err.lines
+                 if _reports_a_failed_poll(row)][0]
+        assert 'not accessible' in first, first
+        assert not _reports_pause(first), first
     finally:
         child.stop()
 
