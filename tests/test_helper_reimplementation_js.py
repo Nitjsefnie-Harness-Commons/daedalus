@@ -551,6 +551,15 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
     for it, in the same shape the Python table's boundary is pinned in —
     so a mutant that stops the function deciding anything turns this
     suite red rather than passing.
+
+    Four names, and two of them are there to catch a reader that is
+    cheaper than the one it should be. `retouched` is a body the branch
+    EDITED, which is not authorship; `twin` is a second BYTE-IDENTICAL
+    copy of a declaration the base already carries, which a set of
+    digests makes free and a Counter does not. Neither was here before,
+    so the reader's own argument — that it is a counter and not a set
+    precisely because of byte-identical copies — had no entry on this
+    side that only this side's reader could fail.
     """
     repo = Path(tmp) / 'branch'
     repo.mkdir()
@@ -563,7 +572,9 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
     kept = _mod_text('HARNESS = r"""', 'function kept(listener) {',
                      '  const seen = [];', '  return seen;', '}',
                      'function retouched(listener) {', '  const a = [];',
-                     '  return a;', '}', '"""')
+                     '  return a;', '}',
+                     'function twin(listener) {', '  const dup = [];',
+                     '  return dup;', '}', '"""')
     (repo / 'tests' / 'test_base.py').write_text(kept, encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
@@ -572,14 +583,19 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
     subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     # The branch MOVES nothing it inherited, ADDS one declaration of
-    # a name an older row already covers, and EDITS a declaration the
-    # base already carries: the row for the older declaration stays, the
-    # new one has no row, and the edit is not authorship.
+    # a name an older row already covers, EDITS a declaration the base
+    # already carries, and writes a SECOND BYTE-IDENTICAL copy of one:
+    # the row for the older declaration stays, the new one has no row,
+    # the edit is not authorship, and the copy is.
     (repo / 'tests' / 'test_base.py').write_text(_mod_text(
         'HARNESS = r"""', 'function kept(listener) {',
         '  const seen = [];', '  return seen;', '}',
         'function retouched(listener) {', '  const b = [];',
-        '  return b;', '}', '"""',
+        '  return b;', '}',
+        'function twin(listener) {', '  const dup = [];',
+        '  return dup;', '}',
+        'function twin(listener) {', '  const dup = [];',
+        '  return dup;', '}', '"""',
         '', 'HARNESS2 = r"""', 'function added(listener) {',
         '  const other = [];', '  return other;', '}', '"""'),
         encoding='utf-8')
@@ -591,13 +607,20 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
     table = {('tests/test_base.py', 'kept'): 'this one predates the branch',
              ('tests/test_base.py', 'added'): 'this one is the branch own',
              ('tests/test_base.py', 'retouched'):
-                 'this one is edited, not written'}
+                 'this one is edited, not written',
+             ('tests/test_base.py', 'twin'):
+                 'a second byte-identical copy of one the base carries'}
     boundary = introduced_rows(
         table, js_digests, repo, bases=('main',))
     assert ('tests/test_base.py', 'retouched') not in boundary.introduced, (
         'an EDIT to a body the base already carries is not authorship: '
         f'{boundary.introduced}')
-    assert boundary.introduced == [('tests/test_base.py', 'added')], boundary
+    assert ('tests/test_base.py', 'twin') in boundary.introduced, (
+        'a second BYTE-IDENTICAL copy adds nothing to a set of digests, '
+        f'so a set-based reader calls it free: {boundary.introduced}')
+    assert boundary.introduced == [
+        ('tests/test_base.py', 'added'),
+        ('tests/test_base.py', 'twin')], boundary
     # Neither base and base-is-head are DIFFERENT questions, and a tag
     # build is the second one: a release tag is a commit ON main, so the
     # base IS the head and there is nothing to compare.
