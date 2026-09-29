@@ -31,6 +31,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
+from _node_harness_fixtures import _command_line_length  # noqa: E402
 
 DashboardNodeHarness = _dashnode.DashboardNodeHarness
 run_dashboard_node = _dashnode.run_dashboard_node
@@ -47,11 +48,6 @@ HEAD_WIDEST_COMMAND_LINE = 33056
 # The launcher is byte-identical at both refs; the payload grew, which is what
 # made the ceiling reachable at all.
 BASE_WIDEST_COMMAND_LINE = 30728
-
-
-def _command_line_length(argv):
-    """The length Windows measures: the arguments joined by one space."""
-    return sum(len(argument) + 1 for argument in argv)
 
 
 def _settled_child():

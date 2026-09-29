@@ -239,6 +239,7 @@
     "_closing": {"python": ["tests/_js_functions.py"]},
     "_closure_names": {"python": ["tests/_control_writes.py"]},
     "_collapsed_rows": {"python": ["tests/_launch_arm_pinning.py"]},
+    "_command_line_length": {"python": ["tests/_node_harness_fixtures.py"]},
     "_command_names_shell": {"python": ["tests/_bash_resolver_scan.py"]},
     "_comment": {"python": ["tests/_yamllines.py"]},
     "_compare": {"python": ["tests/_ghexpr.py"]},
