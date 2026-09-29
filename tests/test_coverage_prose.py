@@ -13,12 +13,12 @@ being a number in a set.
 
 So there is no reach CHECK here, and the reason is structural rather than a
 budget. Setting `NODE_V8_COVERAGE` means every suite that launches Node, and
-they reach the interpreter through seven launch primitives spread across the
+they reach the interpreter through launch primitives spread across the
 shared harness helpers, so no single chokepoint can carry the flag for them.
 A static scan cannot stand in either, because the reach set is not decidable
 from the tests tree's source: `tests/_worker_sources.py` parses the shipped
 `extension/background.js` for its own `importScripts(...)` call and loads
-the seventeen worker modules that call names, and `tests/_dashshell.py`
+every worker module that call names, and `tests/_dashshell.py`
 imports a dashboard module through an ES `import()` of a path that arrives
 only as an argv string. Both execute shipped JavaScript whose path is in no
 suite, so a scan asking which modules the suites name reports those as
@@ -74,6 +74,16 @@ than when it pretends to have none.
 The population is `js_coverage.tracked_sources` rather than a second copy of
 its rule, so this suite cannot drift from the definition it checks against:
 if the report's meaning of "shipped JavaScript" moves, both move together.
+
+What the attribution check reads is the CLAUSE, and what it demands of it
+is a referent, not a phrase: the clause must name a figure, and the figure it
+names must not be the code-line count. Naming the report is not enough, since
+a clause may name it while attributing nothing, and a clause that credits the
+count attributes the one figure here the tree proves. That is a referent
+test with a stated vocabulary, so it is written down here: a figure is named
+by a digit run or by the word `figure`, and the count is named by a digit run
+equal to it or by `count` / `code line`. A correct rewording that reaches the
+run-only figure by some other noun is outside that vocabulary and reds.
 """
 import re
 import sys
@@ -143,29 +153,60 @@ def test_the_named_module_is_still_shipped_javascript(tmp):
     sources = tracked_sources(ROOT)
     assert UNREACHED in sources, (
         f'{UNREACHED} is not in the population of tracked shipped JavaScript, '
-        f'so CONTRIBUTING.md cannot call it the one shipped module no suite '
-        f'reaches')
+        f'so CONTRIBUTING.md cannot make it the module its unreached-module '
+        f'claim is about')
 
 
-# The reach predicates a claim can be spelled with, so the absence check
-# below judges a family of wordings rather than the one this branch
-# replaced. What it does not read is in the module docstring, as always.
+# The reach predicates a claim can be spelled with, so the check below judges
+# a family of wordings rather than the one this branch replaced. Case is not
+# part of a wording: restating the claim as its own sentence capitalises its
+# first word, which is the most ordinary way to write the claim at all, and a
+# case-sensitive family would miss exactly that. What it does not read is in
+# the module docstring, as always.
 REACH_CLAIM = re.compile(
-    r'\bno\s+(?:suite|suites|test|tests)\s+(?:reach|execute|run)'
+    r'\bno\s+(?:suite|suites|test|tests)\s+'
+    r'(?:reach(?:es)?|execute[sd]?|runs?)\b'
     r'|\bdoes\s+not\s+(?:reach|execute|run)\b'
     r'|\bnot\s+(?:reached|executed|covered)\b'
-    r'|\bunreached\b')
+    r'|\bunreached\b', re.IGNORECASE)
 # The report a run-only figure belongs to, spelled as the figure-admission
 # control below already spells it, so one phrase carries both.
 RUN_ATTRIBUTION = re.compile(r'coverage\s+step\s+summary')
 # A sentence ends at a full stop, a bang or a question mark followed by
-# whitespace and a capital. A dot inside a filename is followed by a letter
-# and never splits, which is what keeps `.py` and `.js` whole here.
-SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z`])')
+# whitespace, with nothing required of what comes next. A dot inside a
+# filename is followed by a letter, so `.py` and `.js` stay whole; a capital
+# was once required, which made the splitter fail permissively — a sentence
+# beginning with anything else merged into its predecessor, and a merged
+# claim swallowed the attribution that followed it. Failing permissively is
+# the wrong direction for a check whose absence half must not go vacuous.
+SENTENCE_END = re.compile(r'(?<=[.!?])\s+')
+# A clause ends where the paragraph already ends one. Newline is NOT a
+# boundary: the text is hand-wrapped, and a clause split across a line break
+# is one clause.
+CLAUSE_END = re.compile(r'[;:,—–]')
+# The attribution is a relation, so the clause is read for what it credits.
+# Naming the report is not crediting anything to it, and crediting the count
+# is misattributing the one figure here the tree proves. The vocabulary both
+# tests use is in the module docstring.
+FIGURE = re.compile(r'\bfigure\b|\d+')
+COUNT_NAME = re.compile(r'\bcode[ -]lines?\b|\bcount\b', re.IGNORECASE)
 
 
 def _sentences(text):
     return SENTENCE_END.split(text)
+
+
+def _attribution_clause(sentence):
+    """The one clause of a sentence that names the run's report, or None.
+
+    A clause and not the sentence, because a sentence may state the count and
+    then credit a figure, and reading the sentence would put the count inside
+    the credit.
+    """
+    for clause in CLAUSE_END.split(sentence):
+        if RUN_ATTRIBUTION.search(clause):
+            return clause
+    return None
 
 
 def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
@@ -178,37 +219,61 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
     this suite green: a presence check over a reach claim, which is the one
     claim in the tree nothing here can settle.
 
-    Two halves, and the order matters. The ABSENCE half fails on a sentence
-    that claims a reach without naming the run that measures it: the old
-    wording restored, or the new wording with its attribution clause cut out.
-    The ORACLE half fails when the observations that scan judges are gone —
-    no reach claim at all, the module unnamed, the count phrase dropped, the
-    step summary unmentioned — because then the absence half passes over an
-    empty paragraph, which is the pass that reads as a green.
+    Every assertion is over a SENTENCE, which is where a claim lives, so the
+    oracle half comes first: with no claim to judge, the checks below pass
+    over an empty paragraph, and that is the pass that reads as a green.
+
+    Each claim then owes three things. It names the module, because a
+    paragraph can name it somewhere else and claim a different one here. It
+    carries the attribution, in its own sentence or the one immediately after
+    it, so an ordinary two-sentence rendering is not punished for splitting
+    a claim. And the clause carrying it credits a figure rather than the
+    report, and that figure is not the count.
 
     What this does NOT read: a claim spelled as none of the predicates above,
-    and a run named as anything other than the coverage step summary.
+    a run named as anything other than the coverage step summary, and a
+    referent outside the vocabulary the module docstring states.
     """
     del tmp
     text = _paragraph()
-    claims = [s for s in _sentences(text) if REACH_CLAIM.search(s)]
-    unattributed = [s for s in claims if not RUN_ATTRIBUTION.search(s)]
-    assert not unattributed, (
-        f'the paragraph claims a reach on its own word: '
-        f'...{" ".join(unattributed[0].split())}... . Whether a suite '
-        f'executes {UNREACHED} is decidable only from the coverage run, so '
-        f'the sentence making the claim names the report that measures it')
-    assert claims, (
-        'the paragraph no longer claims the module is unreached, so the '
-        'absence assertion above is judging nothing and the count phrase '
-        'beside it has nothing to count')
     assert UNREACHED in text, 'the paragraph no longer names the module'
     assert re.search(COUNT_PHRASE, text), (
         'the paragraph no longer states the module count, so the run has no '
-        'figure to report and the attribution checked above is bare')
+        'figure to report and the attributions checked below have none to '
+        'carry')
+    sentences = _sentences(text)
+    claims = [(i, s) for i, s in enumerate(sentences)
+              if REACH_CLAIM.search(s)]
+    assert claims, (
+        'the paragraph no longer claims the module is unreached, so every '
+        'assertion below is judging nothing and the count phrase beside it '
+        'has nothing to count')
     assert RUN_ATTRIBUTION.search(text), (
         'the paragraph no longer names the coverage step summary, so the '
         'figure it attributes there is attributed nowhere')
+    for index, claim in claims:
+        where = f'...{" ".join(claim.split())}...'
+        assert UNREACHED in claim, (
+            f'the sentence claiming a reach is about another module: {where}. '
+            f'{UNREACHED} is named elsewhere in the paragraph, so the claim '
+            f'and the module it is about are not the same sentence')
+        clause = _attribution_clause(claim)
+        if clause is None and index + 1 < len(sentences):
+            clause = _attribution_clause(sentences[index + 1])
+        assert clause, (
+            f'a reach claim carries no attribution in its own sentence or the '
+            f'one after it: {where}. Whether a suite executes {UNREACHED} is '
+            f'decidable only from the coverage run, so the claim must name '
+            f'the report that measures it')
+        assert not COUNT_NAME.search(clause), (
+            f'the attribution credits the code-line count to the coverage '
+            f'run: ...{" ".join(clause.split())}... . That count is the '
+            f'tree\'s, read off the file by this suite, and it is the one '
+            f'figure here no run reports')
+        assert FIGURE.search(clause), (
+            f'the attribution names the report but credits it with no figure: '
+            f'...{" ".join(clause.split())}... . A report named beside the '
+            f'claim is not an attribution of the figure the claim rests on')
 
 
 def _digit_runs(text):
@@ -369,7 +434,7 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
         f'shipped JavaScript file in the tree, which moves for reasons that '
         f'have nothing to do with {UNREACHED}; the run prints the share in '
         f'the coverage step summary')
-    assert re.search(r'coverage\s+step\s+summary', text), (
+    assert RUN_ATTRIBUTION.search(text), (
         'the run-only figures must point at the coverage step summary')
 
 
