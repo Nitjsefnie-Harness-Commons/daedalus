@@ -12,25 +12,41 @@ what a call-site bound is composed from instead.
 
 The cost of keeping those sites out of the shared launcher is a figure, so
 it is measured rather than asserted, and the measurement SAYS WHICH DIRECTION
-it moves. This branch did not hold the audited path down; it grew it. Ten
-modules reached `run_node_argv` in Task 2 and the path went 49 -> 59, the ten
-being exactly those modules. Routing the eight `CLASSIFYING_MODULES`
-through the shared launcher as well would take it to 67, eight more, which
-is the price the call-site shape is paying:
+it moves. This branch did not hold the audited path down; it grew it. The
+path went 49 -> 62, and routing the eight `CLASSIFYING_MODULES` through the
+shared launcher as well would take it to 70, eight more, which is the price
+the call-site shape is paying:
 
     cd tests && python3 -c "from pathlib import Path; import _launch_path \
 as p, _node_launch_routing as r; a = set(p.path_functions( \
 Path('.').resolve(), p.LAZY_MODULES)); print(len(a), \
 len(a | {m for m in r.CLASSIFYING_MODULES}))"
 
-The first number is 59 at this head and 49 at the branch point `7d3e714`,
-which is the base the "went 49 -> 59" is measured against; `origin/main`
-moves under the branch, so a figure stated against it goes stale with
-nothing here changing. The second is the counterfactual: it adds the eight
-classifying modules, and every one of them is outside the path today, which
-is the check that keeps the addition honest. It is a simulation, and a
-simulation is not a number the repository states, so it is stated here with
-its method beside it rather than as a fact.
+The base is this branch's MERGE BASE, `1181af8b`, where the same line's
+first figure is 49. It is named by the commit rather than by `origin/main`
+because `origin/main` moves under the branch, and a figure stated against a
+moving ref goes stale with nothing here changing — which is exactly what
+happened to the sentence above: it was written against a base, the branch
+was rebased onto a newer one, and the endpoint was carried across unmeasured.
+
+So the count is stated as a COUNT AND A LIST, because a bare count is what
+the next commit falsifies silently. The thirteen modules this branch added
+to the path are `_jsroute_controls.py`, `_jsroute_harness.py`,
+`_mainworldharness.py`, `test_examples_parse.py`, `test_gm_transfers.py`,
+`test_jsread_mask.py`, `test_overlap_bound.py`, `test_tab_routing_js.py`,
+`test_tab_routing_js_await.py`, `test_tab_routing_js_closure.py`,
+`test_tab_routing_js_keys.py`, `test_tab_routing_js_reach.py` and
+`test_tab_routing_js_sweep.py`; a fourteenth would be this sentence's next
+falsification and nothing else would catch it. The earlier claim that the
+growth was "ten, being exactly those modules" was wrong twice over: the
+count was ten for the modules Task 2 routed, and the path grew by thirteen,
+because routing a caller brings the callers of its helpers with it.
+
+The second number is the counterfactual: it adds the eight classifying
+modules, and every one of them is outside the path today, which is the check
+that keeps the addition honest. It is a simulation, and a simulation is not
+a number the repository states, so it is stated here with its method beside
+it rather than as a fact.
 
 The success near the deadline is the site itself: every child here runs in
 a suite run, so seven of the eight figures are exercised in the PASSING

@@ -7,12 +7,11 @@ child, and the three that must NOT have one — the expiry message, the
 unlink door, and the report's completeness — are here, so the file that
 drives the launcher is not also the file that fakes it.
 
-`_child_is_gone` is the odd one out and is here for the same reason: it is
-the probe that tells a real kill from a reported one, and it belongs beside
-the doubles rather than inside a control that could make it look like part
-of the assertion it supports.
+The receipt that tells a real kill from a reported one is NOT here. It is
+`tests/_processtree.py`'s `process_is_gone`, beside the kill it reads, and it
+answers for a whole tree rather than for one pid out of a child's stdout —
+which is what a tree-scoped cleanup needs and what a stand-in cannot be.
 """
-import os
 import subprocess
 
 
@@ -64,22 +63,3 @@ def stuck_popen_again(argv, **kwargs):
     kwargs['stdout'].write(b'out')
     kwargs['stderr'].write(b'err')
     return StuckAgain()
-
-
-def child_is_gone(stdout):
-    """Whether the pid the child reported is no longer a live process.
-
-    The cleanup's own string is a REPORT; this is the thing the report is
-    about, and a launcher that reported a kill it never performed passes a
-    string assertion. The probe is `os.kill(pid, 0)`, which on POSIX raises
-    for a pid the kernel has reaped and returns for a live one, and on
-    Windows raises for a process it cannot open and TERMINATES one it can —
-    so a survivor fails the assertion on both, and the orphan left by a
-    broken cleanup does not outlive the suite.
-    """
-    pid = int(stdout.splitlines()[0])
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return True
-    return False
