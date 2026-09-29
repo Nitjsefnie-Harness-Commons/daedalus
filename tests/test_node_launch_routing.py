@@ -288,8 +288,8 @@ def test_a_call_site_bound_is_derived_and_not_written(tmp):
     repository stayed green against that mutation, which is the observation
     this answers. The figure behind "deliberately outside" is in
     `tests/_node_launch_routing.py`'s docstring, measured at this head and
-    stated with the direction it moves: the audited path is 58 modules, it
-    was 48 on `origin/main`, and this branch is what raised it.
+    stated with the direction it moves: the audited path is 59 modules, it
+    was 49 at this branch's merge base, and this branch is what raised it.
 
     The negative half is planted because a rule that cannot tell a composed
     figure from a typed one is the false green this branch exists to remove,

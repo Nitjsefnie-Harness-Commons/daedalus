@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """Browser-free controls for the real-browser fixture machinery."""
-import base64
 import contextlib
-import hashlib
 import json
 import shutil
-import socket
 import subprocess
 import sys
-import threading
-import time
 import types
 import urllib.request
 from pathlib import Path
@@ -22,6 +17,8 @@ import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _realbrowser_workers as _WORKERS  # noqa: E402
 import _util  # noqa: E402
+from _outer_bound import (  # noqa: E402
+    OuterBoundExpired, announcing_pid, outer_bound)
 from _realbrowser_fixture_controls import (  # noqa: E402
     _browser_requirements, _browser_version, _enter_fixture,
     _fixture_runtime, _popen_double, _ProcessDouble)
@@ -143,6 +140,42 @@ def _successful_run_recorder(recorded):
     return run
 
 
+def test_the_cdp_harness_site_reports_its_own_stalled_child(tmp):
+    """A wedged CDP child is the site's own named failure, not a hang.
+
+    The child is real, it writes a line and then holds its event loop open,
+    and the deadline is the site's own composed figure rather than a
+    shortened one — a control that proved a different number would be
+    proving nothing about this site.
+
+    The bound is held from outside for the reason beside its chain, and the
+    child announces a pid because a bound with nothing to kill only reports.
+    Node itself is not re-checked here: the control above names its own
+    absence by name.
+    """
+    pid_file = Path(tmp) / 'cdp.pid'
+    stalling = (announcing_pid(pid_file) + '\n'
+                "process.stdout.write('cdp spoke\\n');"
+                'setInterval(()=>{},1000);')
+    caught = None
+    try:
+        with mock.patch.object(_evalpages, 'CDP_CALL_HARNESS', stalling), \
+                outer_bound(OUTER_BOUND_S, pid_file, 'the CDP call site'):
+            try:
+                test_cdp_harness_uses_passed_deadline(tmp)
+            except NodeBoundExceeded as failure:
+                caught = failure
+    except OuterBoundExpired as wedged:
+        raise AssertionError(
+            'the outer bound fired: the CDP child wedged and nothing in the '
+            'suite ended it, which is what this control exists to prevent'
+        ) from wedged
+    assert caught is not None, 'the wedged CDP harness finished'
+    assert caught.deadline_s == CDP_HARNESS_DEADLINE_S, caught.deadline_s
+    assert 'cdp spoke' in caught.stdout, caught.stdout
+    assert isinstance(caught.stdout, str), type(caught.stdout)
+
+
 def test_browser_launch_passes_basic_password_store_flag(tmp):
     def stop_after_launch(profile, process, declared_worker):
         assert Path(profile) == Path(tmp) / 'chromium-profile', profile
@@ -222,163 +255,6 @@ global.clearTimeout = () => {};
         result.returncode, result.stdout, result.stderr)
     assert result.stdout == '4321', result.stdout
     assert result.stderr == '', result.stderr
-
-
-def test_cdp_response_timeout_has_distinct_assertion_subtype(tmp):
-    del tmp
-    timeout_exit_code = getattr(
-        _realbrowser, 'CDP_TIMEOUT_EXIT_CODE', None)
-    assert timeout_exit_code is not None, 'timeout exit code is unnamed'
-
-    def timed_out(args, *, cwd, capture_output, text, timeout):
-        assert len(args) == 7, args
-        assert args[-1] == '10000', args
-        assert cwd == _realbrowser.ROOT, cwd
-        assert capture_output is True, capture_output
-        assert text is True, text
-        assert timeout == 15, timeout
-        return types.SimpleNamespace(
-            returncode=timeout_exit_code, stdout='',
-            stderr='CDP response timed out\n')
-
-    failure = None
-    with mock.patch.object(_WORKERS.subprocess, 'run', timed_out):
-        try:
-            _realbrowser.cdp_call(
-                'node-for-control', 'ws://target', 'Runtime.evaluate', {})
-        except AssertionError as why:
-            failure = why
-    timeout_type = getattr(_realbrowser, 'CDPTimeout', None)
-    assert timeout_type is not None, 'cdp_call has no distinct timeout type'
-    assert issubclass(timeout_type, AssertionError), timeout_type
-    assert failure.__class__ is timeout_type, failure.__class__
-    assert 'CDP response timed out' in str(failure), failure
-
-
-# Above the harness child's outer bound (deadline/1000 + 5) and level with
-# the production probe budget; the join waits two quanta plus slack.
-PEER_PATIENCE = 10
-
-
-@contextlib.contextmanager
-def _silent_websocket_peer():
-    listener = socket.socket()
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(('127.0.0.1', 0))
-    listener.listen(1)
-    listener.settimeout(PEER_PATIENCE)
-    port = listener.getsockname()[1]
-    record = {'served': False, 'errors': []}
-
-    def serve():
-        try:
-            connection, _address = listener.accept()
-            with connection:
-                connection.settimeout(PEER_PATIENCE)
-                request = b''
-                while b'\r\n\r\n' not in request:
-                    chunk = connection.recv(4096)
-                    if not chunk:
-                        raise AssertionError('WebSocket handshake ended early')
-                    request += chunk
-                key = next(
-                    line.split(':', 1)[1].strip()
-                    for line in request.decode('ascii').split('\r\n')
-                    if line.lower().startswith('sec-websocket-key:'))
-                accept = base64.b64encode(hashlib.sha1(
-                    (key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-                    .encode('ascii')).digest()).decode('ascii')
-                connection.sendall((
-                    'HTTP/1.1 101 Switching Protocols\r\n'
-                    'Upgrade: websocket\r\n'
-                    'Connection: Upgrade\r\n'
-                    f'Sec-WebSocket-Accept: {accept}\r\n\r\n'
-                ).encode('ascii'))
-                record['served'] = True
-                time.sleep(0.2)
-        except Exception as why:  # noqa: BLE001
-            record['errors'].append(why)
-
-    thread = threading.Thread(target=serve)
-    thread.start()
-    try:
-        yield f'ws://127.0.0.1:{port}', record
-    finally:
-        listener.close()
-        thread.join(timeout=2 * PEER_PATIENCE + 1)
-    assert not thread.is_alive(), 'silent WebSocket peer did not stop'
-
-
-def test_real_cdp_harness_timeout_is_classified_by_exit_code(tmp):
-    del tmp
-    node = shutil.which('node')
-    assert node, 'Node is required to execute the CDP harness control'
-    timeout_type = getattr(_realbrowser, 'CDPTimeout', None)
-    assert timeout_type is not None, 'cdp_call has no timeout type'
-
-    records = []
-    for _attempt in range(2):
-        failure = None
-        deadline = mock.patch.object(
-            _WORKERS, 'CDP_RESPONSE_DEADLINE_MS', 50)
-        with deadline, _silent_websocket_peer() as (target, record):
-            records.append(record)
-            try:
-                _realbrowser.cdp_call(node, target, 'Runtime.evaluate', {})
-            except AssertionError as why:
-                failure = why
-        if record['served']:
-            assert not record['errors'], record
-            break
-    else:
-        raise AssertionError(
-            f'the silent peer never served the harness child: {records}')
-    assert failure.__class__ is timeout_type, failure
-
-
-def test_outer_subprocess_deadline_is_cdp_timeout(tmp):
-    del tmp
-
-    def outer_timeout(args, *, cwd, capture_output, text, timeout):
-        assert cwd == _realbrowser.ROOT, cwd
-        assert capture_output is True, capture_output
-        assert text is True, text
-        raise subprocess.TimeoutExpired(
-            args, timeout, output='', stderr='outer deadline')
-
-    failure = None
-    with mock.patch.object(_WORKERS.subprocess, 'run', outer_timeout):
-        try:
-            _realbrowser.cdp_call(
-                'node-for-control', 'ws://target', 'Runtime.evaluate', {})
-        except Exception as why:  # noqa: BLE001
-            failure = why
-    timeout_type = getattr(_realbrowser, 'CDPTimeout', None)
-    assert failure.__class__ is timeout_type, failure
-
-
-def test_cdp_non_timeout_failure_stays_plain_assertion(tmp):
-    del tmp
-
-    def websocket_failed(args, *, cwd, capture_output, text, timeout):
-        assert len(args) == 7, args
-        assert args[-1] == '10000', args
-        assert cwd == _realbrowser.ROOT, cwd
-        assert capture_output is True, capture_output
-        assert text is True, text
-        assert timeout == 15, timeout
-        return types.SimpleNamespace(
-            returncode=1, stdout='', stderr='CDP websocket failed\n')
-
-    failure = None
-    with mock.patch.object(_WORKERS.subprocess, 'run', websocket_failed):
-        try:
-            _realbrowser.cdp_call(
-                'node-for-control', 'ws://target', 'Runtime.evaluate', {})
-        except AssertionError as why:
-            failure = why
-    assert failure.__class__ is AssertionError, failure.__class__
-    assert 'CDP websocket failed' in str(failure), failure
 
 
 def test_fixture_converts_only_post_configuration_environment_skips(tmp):
@@ -667,28 +543,39 @@ CDP_HARNESS_SAMPLES_S = (0.245, 0.122, 0.225, 0.162,
 CDP_HARNESS_SLOWEST_S = max(CDP_HARNESS_SAMPLES_S)
 CDP_HARNESS_DEADLINE_S = round(CDP_HARNESS_SLOWEST_S * SITE_HANG_MULTIPLE)
 
+# The outer bound the stalled control below holds while it waits, for the
+# reason `tests/_outer_bound.py` gives: the bound it would be waiting out is
+# the one a reversion removes, and the suite ceiling's SIGTERM reports a job
+# timeout rather than a control. A bound carried in from a sibling is a seam
+# this repository refuses, so the chain is repeated here rather than
+# imported.
+#
+#   OUTER_BOUND_SAMPLES     the same measurement as the other three files
+#                           that hold one — these samples are of the bound's
+#                           own expiry, measured in test_noderun_deadline.py
+#   OUTER_BOUND_SLOWEST_S   max of those samples
+#   OUTER_BOUND_S           the bound, with no multiple
+#
+# The margin is over this file's own healthy path and nothing else: the
+# `CDP_HARNESS_DEADLINE_S` above, 10s, and node's startup. The samples are
+# borrowed rather than re-derived, so the two facts are stated apart on
+# purpose.
+OUTER_BOUND_SAMPLES = (52.0, 55.0, 57.0)
+OUTER_BOUND_SLOWEST_S = max(OUTER_BOUND_SAMPLES)
+OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
+
 
 def _bounded(node, argv, deadline_s, source=None):
-    """A `node` child under a bound this module composed, classified."""
+    """A `node` child under a bound this module composed, classified.
+
+    The stalled half of this site's control lives in
+    `tests/test_real_browser_cdp_stalls.py`, which reaches in here for it.
+    """
     try:
         return subprocess.run([node, *argv], capture_output=True,
                               text=True, input=source, timeout=deadline_s)
     except subprocess.TimeoutExpired as why:
         raise node_bound_expiry(why, deadline_s) from why
-
-
-def test_the_cdp_harness_site_reports_its_own_stalled_child(tmp):
-    stalling = "process.stdout.write('cdp spoke\\n');setInterval(()=>{},1000);"
-    caught = None
-    try:
-        with mock.patch.object(_evalpages, 'CDP_CALL_HARNESS', stalling):
-            test_cdp_harness_uses_passed_deadline(tmp)
-    except NodeBoundExceeded as failure:
-        caught = failure
-    assert caught is not None, 'the wedged CDP harness finished'
-    assert caught.deadline_s == CDP_HARNESS_DEADLINE_S, caught.deadline_s
-    assert 'cdp spoke' in caught.stdout, caught.stdout
-    assert isinstance(caught.stdout, str), type(caught.stdout)
 
 
 def main():
