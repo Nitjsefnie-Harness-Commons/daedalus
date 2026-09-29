@@ -324,10 +324,17 @@ def test_the_receivers_the_census_does_not_read_are_disclosed(tmp):
     this is the control that would go red if the docstring lost either
     item, or if the module holding the plants were removed and the two
     arms became claims with nothing behind them.
+
+    The two CONSEENCES of the binding machinery are named beside the arms
+    they follow, for the same reason: a disclosure that bounds a hole
+    with a sentence naming the one shape the author happened to defeat
+    understates the class, and an auditor reads the list rather than the
+    test table the consequences were previously disclosed only in.
     """
     del tmp
     disclosed = census.__doc__ or ''
     for item in ('network read', 'can be PROVEN to put the',
+                 'the lambda shadow-set MERGE', 'the refused add POPS',
                  'test_launch_census_receivers.py'):
         assert item in disclosed, item
     assert (TESTS / 'test_launch_census_receivers.py').is_file()
