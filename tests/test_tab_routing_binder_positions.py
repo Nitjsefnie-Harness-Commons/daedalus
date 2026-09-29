@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """A mutating call in a definition-time binder position fails closed.
 
-Python evaluates a function object's decorators, its defaults, its
-keyword-only defaults and its annotations, and a class object's decorators,
-its bases and its class keywords, when the `def`, the `class` or the `lambda`
-executes -- never when the resulting object is later used. A tracked
-container mutated in one of them is mutated before any body runs, so a later
-read answers from a position the model recorded before the shift. The store
-hook that drops those positions has to run there, the way it runs in a header
-or a case guard.
+Python evaluates a function object's decorators, defaults and annotations,
+and a class object's decorators, bases and class keywords, when the `def`,
+the `class` or the `lambda` executes -- never when the resulting object is
+later used. A tracked container mutated in one of them is mutated before any
+body runs, so a later read answers from a position the model recorded before
+the shift, and the store hook that drops those positions has to run there.
 
 The family is derived from the `ast` fields of the four object-defining nodes
 rather than from a list of spellings, so a field a future Python adds fails
@@ -46,9 +44,8 @@ _CLASS_OBJECT = 'x = [object, relay(), *args.values]'
 _CLASS_CALLABLE = 'x = [None, relay(), *args.values]'
 # The same two carriers with no relay anywhere, so a clean verdict on a
 # control row is the rule staying quiet rather than a read that could not
-# have reported. The decorator's carrier starts with the quiet callable
-# rather than a base, because a decorator is called with the class and the
-# base is spelled as a call instead.
+# have reported. The decorator's carrier starts with the quiet callable: a
+# decorator is called with the class, and the base is spelled as a call.
 _CLASS_QUIET_OBJECT = 'x = [object, quiet(), *args.values]'
 _CLASS_QUIET_CALLABLE = 'x = [ordinary, quiet(), *args.values]'
 
@@ -91,10 +88,9 @@ _ROWS = {
          f'@({_POP} or (lambda c: c))\nclass C:\n    pass')],
 }
 
-# A position the object definition does evaluate, carrying no mutation. The
-# rule is a rule about a mutation, and reaching the position is not itself a
-# finding: over-reporting is a failure mode here, so the row is measured
-# rather than assumed.
+# A position the object definition does evaluate, carrying no mutation.
+# Reaching the position is not itself a finding, and over-reporting is a
+# failure mode here, so the row is measured rather than assumed.
 _QUIET = [
     ('class-base-read', _CLASS_QUIET_OBJECT, 'class C(x[0]):\n    pass',
      (0, 0)),
@@ -139,8 +135,8 @@ _ILLEGAL = {ast.Lambda: frozenset((
 
 # The one field of each object kind that looks definition-time and is not: a
 # type parameter's bound, constraint or default runs when the parameter is
-# first used. Each row measures that against the real runtime rather than
-# asserting it, so a Python that changes the answer turns the pin red.
+# first used. Each row measures that against the real runtime, so a Python
+# that changes the answer turns the pin red.
 _LAZY_ROWS = (
     (ast.FunctionDef, _LIST, f'def g[T: ({_POP} or int)](a):\n    pass'),
     (ast.ClassDef, _CLASS_OBJECT, f'class C[T: ({_POP} or int)]:\n    pass'))
@@ -257,8 +253,8 @@ def test_every_definition_time_field_is_covered(tmp):
         for field in derived:
             assert field in _FIELD_ROWS, field
     assert _covered(ast.FunctionDef) == _covered(ast.AsyncFunctionDef)
-    # Every derived field is either a row or a declared-illegal position, so
-    # a lambda annotation that ever became legal would surface here.
+    # Every derived field is a row or a declared-illegal position, so a
+    # lambda annotation that ever became legal surfaces here.
     for node_type in _ROWS:
         assert _covered(node_type) | _ILLEGAL.get(
             node_type, frozenset()) == {
