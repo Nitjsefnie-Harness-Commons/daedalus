@@ -159,39 +159,38 @@ NOTE_ESTIMATED_SUITE_SHARE = 0.10
 # is not quoted here, because every multiplier in it is a figure of the
 # tree rather than of the file, and a merge moves it.
 #
-# 2.0 DOES ITS JOB: the file that motivated this condition -- the 222
-# lightest, published behind a summary reading
-# `heaviest/median 1.000` -- sits at 1.87 and is refused, and so is
-# everything more truncated. The residual band above the floor is a
+# 2.0 DOES ITS JOB: the file that motivated this condition -- a heavily
+# truncated one, published behind a summary reading
+# `heaviest/median 1.000` -- sits below the floor and is refused, and so
+# is everything more truncated. The residual band above the floor is a
 # PRICED ACCEPTANCE rather than an oversight: a plan in that band is
 # lopsided, and every suite in it still runs, so a lopsided matrix and
 # no matrix are not comparable outcomes. Ruled by the maintainer.
 #
-# 2.2 WOULD BUY the 240-lightest file back, and IS NOT TAKEN, for a
+# 2.2 WOULD BUY the file just above the floor back, and IS NOT TAKEN, for a
 # reason that is NOT the drift path. It is tempting to read 2.2 as
 # costing the fuse -- as though arrivals priced at the recorded median
 # dilute the recorded set and walk its skew down to the floor. They do
 # not: `recorded_skew` is over the resolved weights MINUS the invented
-# ones, so a drifted file's recorded set is unchanged and its skew is
-# 5.13 at one day, at nineteen, and at every arrival count between.
-# Measured, and `test_the_two_shapes_are_told_apart_by_the_recorded_set_
-# alone` asserts the same float at five arrival counts. Under the other
-# definition -- the ratio over ALL resolved weights, arrivals included --
-# the skew does fall, from 4.90 at a day to 2.97 at nineteen, and it
-# still has not reached 2.2 at a third of the tree. So no reading makes
-# 2.2 cost five days of a missed nightly, and the real reason is the
-# one below.
+# ones, so a drifted file's recorded set is unchanged and its skew is the
+# recorded set's own at every arrival count. Measured, and
+# `test_the_two_shapes_are_told_apart_by_the_recorded_set_alone` asserts
+# the same float at five arrival counts. Under the other definition --
+# the ratio over ALL resolved weights, arrivals included -- the skew does
+# fall, but it has not reached 2.2 even with a third of the tree
+# arrived. So no reading makes 2.2 cost days of a missed nightly, and
+# the real reason is the one below.
 #
 # THE REAL REASON IS THAT 2.2 IS NOT A NUMBER ABOUT THIS TREE. 2.0 sits
-# 0.13 clear of the shape it catches (1.87) and 0.18 below the one it
-# does not (2.18), and both of those are properties of a distribution
-# that a nightly refresh re-measures. 2.2 would sit 0.02 above a shape
-# that moves, so a file whose only change was last night's data could
-# flip between publishing and being refused, and the flip would be a
-# true statement about the data wearing the costume of a guard
-# tightening. 2.0 is a round number about equally clear of both, and
-# raising it is a decision to be made against a fresh measurement, not
-# a number to nudge.
+# clear of the shape it catches and about as far below the one it does
+# not, and both of those shapes are properties of a distribution that a
+# nightly refresh re-measures. 2.2 would sit just above a shape that
+# moves, so a file whose only change was last night's data could flip
+# between publishing and being refused, and the flip would be a true
+# statement about the data wearing the costume of a guard tightening.
+# 2.0 is a round number about equally clear of both, and raising it is a
+# decision to be made against a fresh measurement, not a number to
+# nudge.
 MIN_RECORDED_SKEW = 2.0
 # Tracked suites this tree gains a day, which is how the note converts an
 # estimated count into refreshes that did not land. A RANGE and not a

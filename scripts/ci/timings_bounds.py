@@ -54,10 +54,10 @@ TARGET_STEP = 5
 # steps a total spans is a function of the total's MAGNITUDE and not of
 # the tree: one suite recorded at 1e300 puts 2e299 candidates between
 # the planner and a return, each a full `plan()` with its own
-# `git ls-files`. 256 steps is 1280 multiples, against 356.4 for the
-# shipped file -- a real tree of this size is under half the bound --
-# and past it the weights are not runtimes, which is a refusal with a
-# reason rather than a number to spend a cron job's 30 minutes on.
+# `git ls-files`. 256 steps is 1280 multiples, and a real tree of any
+# shipped size stays a fraction of that, so past the bound the weights
+# are not runtimes, which is a refusal with a reason rather than a
+# number to spend a cron job's 30 minutes on.
 MAX_TARGET_PROBES = 256
 
 
