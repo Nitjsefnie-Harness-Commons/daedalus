@@ -565,6 +565,7 @@
 !/tests/test_coverage_prose.py
 !/tests/test_coverage_root_provenance.py
 !/tests/test_coverage_scope_bindings.py
+!/tests/test_coverage_source_readers.py
 !/tests/test_coverage_suites.py
 !/tests/test_coverage_unfollowable_forms.py
 !/tests/test_dashboard_accessibility.py

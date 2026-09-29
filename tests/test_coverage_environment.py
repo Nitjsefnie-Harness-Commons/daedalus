@@ -573,18 +573,6 @@ def test_real_module_controls_agree_under_crlf_endings(tmp):
             == normalised[:normalised.index(multi)].count('\n'))
 
 
-def test_a_real_crlf_test_module_reads_back_normalised(tmp):
-    """The shared reader's CRLF arm, on a file that really has one."""
-    relative = Path('tests/test_diff_coverage.py')
-    _, target = _real_module_copy(tmp, relative)
-    lf = _normalized_source(target)
-    target.write_bytes(lf.replace('\n', '\r\n').encode('utf-8'))
-    assert b'\r\n' in target.read_bytes()
-    read_back = _normalized_source(target)
-    assert '\r' not in read_back
-    assert read_back == lf
-
-
 def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
     """Deleting env= from a real repo-script launch in tmp is caught."""
     relative = Path('tests/test_diff_coverage.py')
