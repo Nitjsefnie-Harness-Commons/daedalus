@@ -101,8 +101,9 @@ def runs_page(suites=()):
         'pageInfo': page_info(), 'nodes': list(suites)}}}}}
 
 
-def suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
-          started='2026-09-20T10:00:00Z', name=None, check_runs=None):
+def suite(rid, conclusion: str | None = 'SUCCESS', status='COMPLETED',
+          workflow: int | None = 11, started='2026-09-20T10:00:00Z',
+          name=None, check_runs=None):
     """One check suite of a workflow run, as the live schema reports it.
 
     `name` overrides the workflow's own name, which is how a fixture
@@ -121,8 +122,12 @@ def suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
     workflow run, so the run list never sees it and only its check runs
     are readable.
     """
-    node = {'status': status, 'conclusion': conclusion,
-            'createdAt': started}
+    # Annotated, because the suite gains a `workflowRun` and a
+    # `checkRuns` it does not start with: inferred from the three
+    # string keys it would be a `dict[str, str]` and both of those
+    # assignments would be a type error rather than a value.
+    node: dict[str, object] = {
+        'status': status, 'conclusion': conclusion, 'createdAt': started}
     if workflow is not None:
         node['workflowRun'] = {
             'databaseId': rid, 'createdAt': started,
