@@ -27,7 +27,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
+from _watcher_fixtures import THROTTLED  # noqa: E402
 from _watcher_fixtures import delivered_answer  # noqa: E402
+from _watcher_fixtures import rest_403  # noqa: E402
 from _watcher_fixtures import spent_headers  # noqa: E402
 from _watcher_fixtures import spent_limit_response  # noqa: E402
 
@@ -232,6 +234,176 @@ def test_the_same_body_without_the_data_is_read_as_the_report_it_is(tmp):
             assert refusal.resume_at is None, refusal.resume_at
         else:
             raise AssertionError('an answer with no data is read as text')
+
+
+def test_a_403_whose_only_evidence_is_the_body_is_still_a_refusal(tmp):
+    """Some refusals carry the rate limit in the body and nowhere else;
+    without that clause ci_wait would exit 3 instead of waiting out the
+    reset.
+
+    The body is the JSON one GitHub really sends, not a line of text: a
+    plain string is not a shape this API produces for a 403, and a
+    control written against one is a control against a fiction. The
+    `message` is neither a GraphQL `type` nor a `code`, so the
+    structured reader cannot see this at all and the text is the only
+    reading of it.
+    """
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': rest_403(
+        stderr='gh: something else went wrong (HTTP 403)\n')})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
+        else:
+            raise AssertionError('a body-only rate-limit 403 must refuse')
+
+
+def test_a_403_naming_no_limit_anywhere_is_an_ordinary_failure(tmp):
+    """The inversion of the row above, on the same shape: a 403 with the
+    same body shape, a complaint that names something else, and no
+    headers. A permission refusal must not be answered by sleeping, and
+    this is the row that says so for the body carrier specifically.
+    """
+    mod = _client()
+    answer = {'status': 403, 'headers': {}, 'stderr':
+              'gh: Resource not accessible by integration (HTTP 403)\n',
+              'body': {'message': 'Resource not accessible by integration.'}}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a 403 naming no limit must fail the query')
+
+
+def test_a_403_whose_json_body_names_the_limit_refuses_with_nothing_else(tmp):
+    """The refusal the base read and a narrowing lost, with no carrier
+    left to rescue it.
+
+    No rate-limit headers - a secondary limit answers 403 with none - no
+    `errors[]`, and `gh` writing nothing at all. The words are in the
+    body's JSON `message`, so the text carrier is the only reader that
+    can see this, and an answer that refused it answered a query that
+    worked. `rest_403.py` in the review's evidence is this shape.
+    """
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': rest_403()})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
+            assert refusal.args[0].startswith('HTTP 403: '), refusal.args[0]
+        else:
+            raise AssertionError('the body names the limit: must refuse')
+
+
+def test_that_403_with_a_body_naming_nothing_is_an_ordinary_failure(tmp):
+    """The inversion: the same 403 - no headers, `gh` silent - carrying a
+    `message` that names no limit. Nothing anywhere says a limit, so
+    nothing is a pause and the query fails.
+    """
+    mod = _client()
+    answer = rest_403(message='Resource not accessible by integration.')
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a 403 naming no limit must fail the query')
+
+
+def test_a_403_whose_only_evidence_is_the_complaint_is_a_refusal(tmp):
+    """What real `gh` writes over a throttled 403, and the carrier the
+    review showed is pinned by nothing.
+
+    The body here is a permission refusal in every particular - it names
+    no limit, and so do the headers - and the words are only on stderr.
+    Deleting the stderr carrier leaves every other refusal control green
+    while this answer, the one a real `gh` produces, stops refusing.
+    """
+    mod = _client()
+    answer = {'status': 403, 'headers': {},
+              'body': {'message': 'You have been temporarily blocked.'},
+              'stderr': f'gh: {THROTTLED} (HTTP 403)\n'}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
+        else:
+            raise AssertionError('a complaint naming the limit must refuse')
+
+
+def test_that_403_with_a_complaint_naming_something_else_fails(tmp):
+    """The inversion of the row above, character for character: the same
+    403 with the same body, and a complaint that names a block rather
+    than a limit. A reader that treated every complaint as a rate-limit
+    report would sleep on a permission refusal.
+    """
+    mod = _client()
+    answer = {'status': 403, 'headers': {},
+              'body': {'message': 'You have been temporarily blocked.'},
+              'stderr': 'gh: You have been temporarily blocked (HTTP 403)\n'}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a complaint naming no limit must fail')
+
+
+def test_a_200_that_delivered_nothing_and_was_complained_about_refuses(tmp):
+    """The complaint alone, on an answer that did not deliver, from a `gh`
+    that exited 0.
+
+    This is the shape a reader must not gate on the EXIT CODE: `gh` exits
+    0 whenever the transport succeeded, and writes its warning to stderr
+    whatever it did, so a 200 that carries no `data` beside a complaint
+    naming the limit is a refusal with no header, no `errors[]` and no
+    nonzero code to read. The co-condition the rule actually names is
+    delivery, and this is the row that says so - gate the complaint on
+    the code instead and only this one dies.
+    """
+    mod = _client()
+    answer = {'status': 200, 'exit': 0,
+              'body': {'data': None, 'repository': None},
+              'stderr': f'gh: {THROTTLED}\n'}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
+        else:
+            raise AssertionError('a complaint naming the limit must refuse')
+
+
+def test_that_200_with_a_complaint_naming_something_else_fails(tmp):
+    """The inversion, on the same shape: the same 200, the same exit 0,
+    and a complaint that names a warning. Nothing says a limit.
+    """
+    mod = _client()
+    answer = {'status': 200, 'exit': 0,
+              'body': {'data': None, 'repository': None},
+              'stderr': 'gh: the query was empty (HTTP 200)\n'}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a complaint naming no limit must fail')
 
 
 def main():
