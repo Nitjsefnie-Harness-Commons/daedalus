@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
     FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING, REQUESTED_THEN_GRACED,
-    coverage_group, coverage_tree, kill_recorded, records, settle_gone)
+    TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
+    records, settle_gone)
 
 ROOT = _util.ROOT
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
@@ -266,6 +267,10 @@ def test_a_runner_wedged_suite_states_the_kill_its_platform_took(tmp):
     found = records(block)
     assert len(found) == 1, (len(found), block)
     record = found[0].groupdict()
+    # The route, as the coverage twin asserts it: the cleanup clause says
+    # what the route DID, and this says which route it was. Either alone
+    # is satisfiable by a record that got the other half wrong.
+    assert TREE_WAS_KILLED in record['cleanup'], record
     if FORCES_WITHOUT_ASKING:
         assert 'suite was asked to stop and flushed' not in block, block
         assert FORCED_WITHOUT_GRACE in record['cleanup'], record

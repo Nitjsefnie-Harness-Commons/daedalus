@@ -43,12 +43,15 @@ _FAKE_COVERAGE_INIT = """def process_startup(**_kwargs):
 
 SYNTHETIC_PROCESS_START = 'fabricated coverage startup'
 
-# Which kill the launcher will reach on THIS host, read here rather than
-# from the module under test: a control that took the predicate from
-# `suite_bound.py` would agree with it by construction and could not catch
-# a route and a control that disagreed. The predicate is spelled the way
-# the launcher spells it, and the controls branch on the CONTRACT each
-# platform gives rather than on a skip.
+# Which kill the launcher will reach on THIS host. Read here rather than
+# from the module under test, but the HONEST account of what that buys is
+# narrower than it looks: `sys.platform` is a host fact and not a decision
+# either side makes, so this predicate agrees with the launcher's by
+# spelling, and it cannot drift without the host changing. What a control
+# is really independent ON is the strings below -- they are spelled here and
+# asserted against the launcher's OWN output, so a control cannot pass by
+# agreeing with a copy of the thing it is checking. The predicate only
+# decides which of them the control expects to find.
 FORCES_WITHOUT_ASKING = sys.platform.startswith('win')
 # The half of a record that is true on every platform: the tree was ended
 # and a signal of some kind reached it.
@@ -58,6 +61,15 @@ TREE_WAS_KILLED = 'taskkill' if FORCES_WITHOUT_ASKING else 'process group'
 # and REFUSES the other, so a route that silently changed platform is red.
 REQUESTED_THEN_GRACED = 'asked to stop'
 FORCED_WITHOUT_GRACE = 'no request was sent and no grace was given'
+# The two sentences an operator reads, spelled here and nowhere else, for
+# the same reason as the clauses above: a control asserts the one its
+# platform selects and REFUSES the other, so a conditional that sends the
+# wrong platform's sentence to stderr is red. Inverting the conditional
+# used to move no assertion at all, which is the whole of finding E2.
+OPERATOR_ASKS_FIRST = ('a suite that took the request to stop keeps what it '
+                       'had measured, and one that did not contributes '
+                       'nothing')
+OPERATOR_FORCES = 'a forced kill leaves a suite nothing to flush'
 
 # The whole timeout record, not a prefix of it. A pin that stops before
 # the suite name is satisfied by a sibling occurrence the launcher printed
