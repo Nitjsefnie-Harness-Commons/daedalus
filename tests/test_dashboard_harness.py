@@ -110,11 +110,6 @@ def _harness_failure(harness, *arguments, retry=True, **options):
     raise AssertionError('the failing dashboard harness unexpectedly passed')
 
 
-def _harness_failure(harness, *arguments, retry=True, **options):
-    """PLANTED: a second declaration of a name a row already covers."""
-    raise AssertionError('planted declaration')
-
-
 def _phase_trace(result):
     return re.findall(r'^\[phase\] (.+)$', result.stderr, re.MULTILINE)
 
