@@ -561,7 +561,9 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
                        env=_util.child_coverage('scrub'))
     (repo / 'tests').mkdir()
     kept = _mod_text('HARNESS = r"""', 'function kept(listener) {',
-                     '  const seen = [];', '  return seen;', '}', '"""')
+                     '  const seen = [];', '  return seen;', '}',
+                     'function retouched(listener) {', '  const a = [];',
+                     '  return a;', '}', '"""')
     (repo / 'tests' / 'test_base.py').write_text(kept, encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
@@ -569,11 +571,16 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
-    # The branch MOVES nothing it inherited and ADDS one declaration of
-    # a name an older row already covers: the row for the older
-    # declaration stays, the new one has no row.
+    # The branch MOVES nothing it inherited, ADDS one declaration of
+    # a name an older row already covers, and EDITS a declaration the
+    # base already carries: the row for the older declaration stays, the
+    # new one has no row, and the edit is not authorship.
     (repo / 'tests' / 'test_base.py').write_text(_mod_text(
-        kept, '', 'HARNESS2 = r"""', 'function added(listener) {',
+        'HARNESS = r"""', 'function kept(listener) {',
+        '  const seen = [];', '  return seen;', '}',
+        'function retouched(listener) {', '  const b = [];',
+        '  return b;', '}', '"""',
+        '', 'HARNESS2 = r"""', 'function added(listener) {',
         '  const other = [];', '  return other;', '}', '"""'),
         encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
@@ -582,9 +589,14 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
                    env=_util.child_coverage('scrub'))
 
     table = {('tests/test_base.py', 'kept'): 'this one predates the branch',
-             ('tests/test_base.py', 'added'): 'this one is the branch own'}
+             ('tests/test_base.py', 'added'): 'this one is the branch own',
+             ('tests/test_base.py', 'retouched'):
+                 'this one is edited, not written'}
     boundary = introduced_rows(
         table, js_digests, repo, bases=('main',))
+    assert ('tests/test_base.py', 'retouched') not in boundary.introduced, (
+        'an EDIT to a body the base already carries is not authorship: '
+        f'{boundary.introduced}')
     assert boundary.introduced == [('tests/test_base.py', 'added')], boundary
     # Neither base and base-is-head are DIFFERENT questions, and a tag
     # build is the second one: a release tag is a commit ON main, so the
