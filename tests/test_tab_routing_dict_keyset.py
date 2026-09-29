@@ -75,9 +75,12 @@ from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _pyroute_mapping import _apply_mapping_store  # noqa: E402
+from _pyroute_mapping import (_apply_mapping_store,  # noqa: E402
+                             _apply_setdefault)
 from _pyroute_reads import (_dict_call_value, _dict_value,  # noqa: E402
-                            _mapping_lookup, _merge_or_value)
+                            _mapping_lookup, _merge_or_value,
+                            _readback_copy)
+from _pyroute_storage import join_clean_occupancy  # noqa: E402
 from _pyroute_state import FlowState  # noqa: E402
 from _pyroute_stores import _subscript_store  # noqa: E402
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
@@ -469,12 +472,13 @@ def _retired_source_state():
     return state
 
 
-def _fold_into_destination(state) -> DeferredContainer:
+def _fold_into_destination(state, keywords=None) -> DeferredContainer:
     """Run the store fold of a retired source into a bound destination."""
     owner = DeferredContainer({}, 0, 'dict')
     state.callables['o'] = owner
     _apply_mapping_store(state, owner, 'o',
-                         [ast.Name(id='d', ctx=ast.Load())], {}, None)
+                         [ast.Name(id='d', ctx=ast.Load())],
+                         keywords or {}, None)
     return cast(DeferredContainer, state.callables['o'])
 
 
@@ -500,6 +504,35 @@ def _folded(spelling) -> DeferredContainer:
     # fold, so none of them is the empty result they answer with.
     assert folded is not None, spelling
     return folded
+
+
+# The functions that fold one container's recorded items into another.
+# `_fold_sites_in_the_guard` reads the census out of the guard's own
+# source, so a fifth site fails here rather than being written wrong and
+# unnoticed: the enumeration belongs in the tree, not in a report.
+_FOLD_FUNCTIONS = frozenset({'_apply_mapping_store', '_dict_value',
+                             '_merge_or_value', '_dict_call_value'})
+
+
+def _fold_sites_in_the_guard():
+    """The guard's own functions that fold one container into another."""
+    sites = set()
+    for name in ('_pyroute_reads', '_pyroute_mapping'):
+        source = Path(__file__).with_name(name + '.py').read_text(
+            encoding='utf-8')
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call) \
+                        and getattr(call.func, 'id', None) == '_fold_items':
+                    sites.add(node.name)
+    return frozenset(sites)
+
+
+def test_the_fold_census_is_the_guard_own_list(tmp):
+    assert _fold_sites_in_the_guard() == _FOLD_FUNCTIONS, (
+        _fold_sites_in_the_guard() ^ _FOLD_FUNCTIONS)
 
 
 def test_a_fold_carries_the_source_retirement_with_its_items(tmp):
@@ -528,6 +561,101 @@ def test_a_fold_carries_the_source_retirement_with_its_items(tmp):
         None, state.callables['o'], 'o', False, False)
     refreshed = cast(DeferredContainer, state.callables['o'])
     assert refreshed.stale == frozenset(), refreshed
+
+
+# A key the SAME expression writes settles it. The value the model wrote
+# is the value the runtime holds there, so whatever a fold beside it
+# retired must not survive. The one member that does survive is the
+# literal written BEFORE the fold, because at runtime the fold overwrites
+# it and the value the container ends up holding is the source's.
+_SETTLED = {
+    'update-keyword': ('o.update(d, k=relay())', frozenset()),
+    'dict-keyword': ('dict(d, k=relay())', frozenset()),
+    'display-after': ('{**d, "k": relay()}', frozenset()),
+    'display-before': ('{"k": relay(), **d}', frozenset({'k'})),
+}
+
+
+def test_a_key_the_same_expression_writes_settles_it(tmp):
+    """The un-retiring half, at each of the four sites that owes it.
+
+    A `key=value` pair, a `dict()` keyword and a display literal are all
+    values the model read, written at a key the source may have retired.
+    Each settles that key; none of them settles any other, which is what
+    the fourth member pins. Entered at the site itself, because a verdict
+    cannot tell a settled key from one the fold simply never carried."""
+    for spelling, (source, expected) in sorted(_SETTLED.items()):
+        state = _retired_source_state()
+        if spelling == 'update-keyword':
+            settled = _fold_into_destination(
+                state, {'k': ast.Constant('v')})
+        else:
+            node = ast.parse(source, mode='eval').body
+            settled = (_dict_value(node, state) if isinstance(node, ast.Dict)
+                       else _dict_call_value(node, state))
+        # A source that recorded a key gives both of these something to
+        # fold, so neither is the empty result they answer with.
+        assert settled is not None, spelling
+        assert settled.stale == expected, (spelling, settled.stale)
+
+
+def test_a_copy_carries_the_retirement_it_copied(tmp):
+    """`d.copy()` holds what the receiver holds, doubt included."""
+    state = _retired_source_state()
+    owner = state.callables['d']
+    copied = _readback_copy(ast.parse('d.copy()', mode='eval').body,
+                            state, owner)
+    assert copied.stale == owner.stale, copied.stale
+    assert _mapping_lookup(cast(DeferredContainer, copied), 'k',
+                           object()) is not None
+
+
+def test_a_setdefault_settles_a_key_the_join_left_retired(tmp):
+    """The one un-retiring site whose key is NOT held when it runs.
+
+    A join can drop a retired key's value while the retirement survives,
+    so `setdefault` on that key does write after all, and the write
+    settles it. This is also what pins `join_clean_occupancy`'s carry:
+    without it the container reaching `setdefault` is not the one under
+    test, and the site would look inert rather than unproven."""
+    kept = FlowState({}, {}, {}, {}, set(), set(), {}, set())
+    kept.callables['d'] = DeferredContainer(
+        {'k': None}, None, 'dict', stale=frozenset({'k'}))
+    other = kept.copy()
+    other.callables['d'] = DeferredContainer({'j': None}, None, 'dict')
+    joined = join_clean_occupancy(kept, other)
+    owner = cast(DeferredContainer, joined.callables['d'])
+    assert 'k' not in owner.items and owner.stale, owner
+    call = ast.parse('d.setdefault("k", ordinary)').body[0]
+    assert isinstance(call, ast.Expr)
+    _apply_setdefault(joined, call.value, owner, 'd')
+    written = cast(DeferredContainer, joined.callables['d'])
+    assert written.stale == frozenset(), written.stale
+    assert 'k' in written.items, written.items
+
+
+def test_a_pattern_rest_carries_the_retirement_it_projected(tmp):
+    """A `case {**_rest}` binds the same values under a new name."""
+    routed, clean = [], []
+    for prefix, tag in ((_PRE, routed), (_CLEAN, clean)):
+        body = (prefix + _OPAQUE_RETIRE + 'match d:\n'
+                '    case {**_rest}:\n        x = _rest["k"]\n'
+                'send = ext_cmd\nreturn x' + _CALL)
+        tag.append(_tracked_focus_verdict(tmp, body, counts=True))
+    assert (routed[0], clean[0]) == ((1, 1), (0, 0)), (routed, clean)
+
+
+def test_a_join_of_two_paths_keeps_the_retirement(tmp):
+    """Two states that differ only in a clean key join; the retirement
+    rides across that join like any other recorded fact."""
+    kept = _retired_source_state()
+    other = kept.copy()
+    other.callables['d'] = DeferredContainer(
+        {'k': None, 'j': None}, None, 'dict', stale=frozenset({'k'}))
+    joined = join_clean_occupancy(kept, other)
+    assert joined is not kept or cast(
+        DeferredContainer, joined.callables['d']).stale == frozenset({'k'}), \
+        joined.callables['d']
 
 
 def test_a_fold_of_a_retired_source_reports_every_read_form(tmp):
