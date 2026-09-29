@@ -15,7 +15,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING, REQUESTED_THEN_GRACED,
+    FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING,
+    OPERATOR_ASKS_FIRST, OPERATOR_FORCES, REQUESTED_THEN_GRACED,
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
     records, settle_gone)
 from _repo import ROOT, iter_tree_files  # noqa: E402
@@ -148,6 +149,17 @@ def test_a_wedged_suite_is_named_and_fails_the_run(tmp):
                                     result.stderr)
     group = coverage_group(result.stdout, 'test_wedged.py')
     _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
+    # The operator's sentence is selected by the same platform this control
+    # is asserting for, and the other platform's is refused. The record pin
+    # above reads the cleanup clause, not this line, so a conditional that
+    # sent the wrong sentence to stderr used to move no assertion at all.
+    said, refused = ((OPERATOR_FORCES, OPERATOR_ASKS_FIRST)
+                     if FORCES_WITHOUT_ASKING
+                     else (OPERATOR_ASKS_FIRST, OPERATOR_FORCES))
+    assert (f'TIMED OUT: tests/test_wedged.py — each was ended at its '
+            f'{float(_WEDGE_BOUND_S)} s bound; {said}'
+            ) in result.stderr, result.stderr
+    assert refused not in result.stderr, result.stderr
     assert 'test_wedged.py' in result.stderr, result.stderr
     assert 'TIMED OUT' in result.stderr, result.stderr
     # The sibling that finished kept its own block and is named in no
