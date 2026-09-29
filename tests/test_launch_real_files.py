@@ -48,10 +48,13 @@ def _real_rows(relative):
     missing. So a DISCHARGED row here is proof the rule is right about
     those lines, and a KEPT row is weaker evidence than it looks, being a
     bound under a reading strictly wider than the shipped one. Measured
-    on all three files at `6b055a10`, the forced row set equals the union
-    of the per-function solo derivations, so nothing is overstated today;
-    when issue 1121's branch lands the forcing becomes redundant and this
-    should read the real `census()` instead.
+    on all three files, the forced row set equals the union of the
+    per-function solo derivations — 7, 7 and 6 distinct
+    `(line, route, reason)` triples — so nothing is overstated today. It
+    is re-measurable at any commit: union `_faults(f, tree, {name})` over
+    every function `f` defines, and compare that set with
+    `_faults(f, tree, every_name)`. When issue 1121's branch lands the
+    forcing becomes redundant and this should read the real `census()`.
     """
     tree = ast.parse((TESTS / relative).read_text(encoding='utf-8'))
     return census._faults(relative, tree, _every_function(tree))
@@ -123,12 +126,14 @@ CHILD_BOUNDS = (
 
 # The one row these three files carry that no table above accounts for, and
 # the only site the narrowing does not recover. `_successful_run_recorder`'s
-# inner `run` hands the deadline to `recorded`, a PARAMETER, and no writing
-# in the module proves what a caller passes it -- the arm discharges only on
-# a proof, so the signature is refused. `origin/main` refuses this site too,
-# so the census returns it to main's verdict rather than improving on it,
-# which is what makes it an over-refusal and not a regression. #1337 carries
-# the diagnosis.
+# inner `run` hands the deadline to `recorded`, a PARAMETER, and the arm
+# discharges only on a proof. That proof has to lie INSIDE `run`: the arm
+# judges the parameter's own function and never consults its callers, so the
+# `recorded = []` this module writes at 174 -- a real writing, and the only
+# caller there is -- discharges nothing. The site therefore stays refused.
+# `origin/main` refuses it too, so the census returns it to main's verdict
+# rather than improving on it, which is what makes it an over-refusal and not
+# a regression. #1337 carries the diagnosis.
 NAMED_OVER_REFUSALS = (
     ('test_real_browser_harness.py', 'def run(args, *, cwd, ', 1),)
 
@@ -154,6 +159,12 @@ def test_the_real_files_emit_exactly_the_rows_this_suite_names(tmp):
     unknown one.
     """
     del tmp
+    named = {row[0] for table in (DISCHARGED, CHILD_BOUNDS,
+                                  NAMED_OVER_REFUSALS) for row in table}
+    uncovered = sorted(named - set(REAL_ROW_TOTALS))
+    assert not uncovered, (
+        f'the tables name {uncovered} and REAL_ROW_TOTALS does not, so the '
+        f'loop below never reads it and its rows are unverified')
     for relative, snippet, occurrence in DISCHARGED:
         line = _line_holding(relative, snippet, occurrence)
         rows = [row for row in _real_rows(relative) if row[1] == line]
