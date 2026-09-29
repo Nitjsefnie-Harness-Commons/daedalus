@@ -598,12 +598,12 @@ BOUND_SITE_ROWS = (
       '                                      check=True, timeout=30)'),
      [(3, 'git', 'timeout')]),
     # `pf.origin-not-bound` (the `origin not in bound` half of
-    # _launch_audit.py:534). The receiver here is a NAME bound to a
+    # _launch_audit.py:535). The receiver here is a NAME bound to a
     # call, and the call's callee names a module the analyser can
     # account for -- so `origin in safe_names` is satisfied and only
     # `origin not in bound` refuses. That name is `subprocess` itself,
     # which the plain import puts in `safe_names` and the rebind puts in
-    # `bound`; nothing places the bare call at :393, which reads the
+    # `bound`; nothing places the bare call at :394, which reads the
     # RECEIVER of the call, not the callee of what the receiver is
     # bound to. The two rows are the two spellings of that rebind, and
     # both are reported rather than silently passing: any module that
