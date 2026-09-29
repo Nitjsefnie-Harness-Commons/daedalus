@@ -20,6 +20,8 @@ import _dashfield  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 import test_dashboard_behaviour as behaviour  # noqa: E402
+from _node_harness_fixtures import (  # noqa: E402
+    _node_harness as _harness)
 
 
 _HOST_REALM_KEEPALIVE = "setInterval(() => {}, 10);\n"
@@ -73,11 +75,6 @@ console.error = (error) => {{
 throw new Error({message!r});
 """
     return _module(tmp, source, name=name)
-
-
-def _harness(source, bounded_steps=0, module=False):
-    return _dashnode.DashboardNodeHarness(
-        source, bounded_steps=bounded_steps, module=module)
 
 
 def _harness_failure(harness, *arguments, retry=True, **options):

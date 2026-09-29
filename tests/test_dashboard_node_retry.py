@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Retry and bound budgets at the dashboard Node process boundary."""
 import json
-import re
 import subprocess
 import sys
 import time
@@ -11,6 +10,8 @@ from unittest.mock import Mock, call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
+from _node_harness_fixtures import (  # noqa: E402
+    _bound_record, _node_harness)
 from _dashnode_retry_control import (  # noqa: E402
     _controlled_run, _outcome, _timeout)
 
@@ -19,11 +20,6 @@ from _dashnode_retry_control import (  # noqa: E402
 # one spinning the loop spends the whole wait. A quarter of the wall time
 # separates them without failing on a runner that descheduled the child.
 _IDLE_BOUND_CPU_SHARE = 0.25
-
-
-def _harness(source, bounded_steps=0, module=False):
-    return _dashnode.DashboardNodeHarness(
-        source, bounded_steps=bounded_steps, module=module)
 
 
 def _set_filetime(pointer, ticks):
@@ -142,7 +138,7 @@ def test_windows_outer_timeout_records_cpu_before_kill(tmp):
     ):
         record = None
         try:
-            _dashnode._run_dashboard_node_once(_harness(''), attempt=1)
+            _dashnode._run_dashboard_node_once(_node_harness(''), attempt=1)
         except _dashnode._DashboardOuterTimeout as failure:
             record = failure.record
         else:
@@ -186,7 +182,7 @@ def test_windows_retry_escalates_inner_and_outer_timeout_budgets(tmp):
     ):
         try:
             _dashnode.run_dashboard_node(
-                _harness(
+                _node_harness(
                     "await bounded(Promise.resolve(), 'work', "
                     "_dashnodeStepTimeoutMs);",
                     bounded_steps=1, module=True))
@@ -476,14 +472,7 @@ def _bound_outcome(background, label, timeout_ms):
     outcome, () => process.exit(0)));
 }})();
 """
-    return _dashnode.run_dashboard_node(_harness(source, bounded_steps=1))
-
-
-def _bound_record(result):
-    """The crediting record the one bound in a child wrote when it settled."""
-    records = re.findall(r'^\[bound\] (.+)$', result.stderr, re.MULTILINE)
-    assert len(records) == 1, (records, result.stderr)
-    return json.loads(records[0])
+    return _dashnode.run_dashboard_node(_node_harness(source, bounded_steps=1))
 
 
 def test_bounded_outlasts_a_freeze_shorter_than_its_bound(tmp):
@@ -625,7 +614,7 @@ bounded(work, 'work that settles only after a real delay', 4000).then(
   (error) => process.stdout.write('rejected: ' + error.message),
 );
 """
-    result = _dashnode.run_dashboard_node(_harness(source))
+    result = _dashnode.run_dashboard_node(_node_harness(source))
     assert result.stdout.startswith('{'), result
     report = json.loads(result.stdout)
     assert report['value'] == 'settled', result

@@ -6,8 +6,6 @@ one bound in a real node child; starvation is a deterministic busy-wait
 freeze on the single node thread, and the crediting a bound spent is read
 back from the [bound] settlement record the bound writes on stderr.
 """
-import json
-import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +14,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
+from _node_harness_fixtures import (  # noqa: E402
+    _background_worker_file, _bound_record)
 from _overlap import _STEP_LINE  # noqa: E402
 
 
@@ -123,19 +123,6 @@ def _bound_run(source, timeout_s=30):
     return result
 
 
-def _bound_record(result):
-    """The crediting record the one bound in a child wrote when it settled."""
-    records = re.findall(r'^\[bound\] (.+)$', result.stderr, re.MULTILINE)
-    assert len(records) == 1, (records, result.stderr)
-    return json.loads(records[0])
-
-
-def _worker(tmp, source):
-    path = Path(tmp) / 'background.js'
-    path.write_text(source, encoding='utf-8')
-    return path
-
-
 def test_bounded_survives_a_freeze_longer_than_its_bound(tmp):
     """Starved work that settles after the thaw is not rejected.
 
@@ -212,7 +199,7 @@ def test_the_harness_wait_survives_a_starved_child(tmp):
     caller's own, not a helper's.
     """
     actual = _overlap.run_background_overlap(
-        _worker(tmp, _CALLER_FREEZE_WORKER),
+        _background_worker_file(tmp, _CALLER_FREEZE_WORKER),
         [{'id': '_cookies', 'domain': 'owner-a'}],
         ['owner-a'], inner_wait=0.5, boot=False)
     assert actual == [{
@@ -232,7 +219,7 @@ def test_a_frozen_child_reaches_the_outer_backstop(tmp):
     embedded.
     """
     failure = _overlap._harness_failure(
-        _worker(tmp, _FREEZING_CONFIG_WORKER), inner_wait=0.5)
+        _background_worker_file(tmp, _FREEZING_CONFIG_WORKER), inner_wait=0.5)
     assert ('overlap harness outer backstop timed out after'
             in failure), failure
     assert 'last step: the worker to load its config' in failure, failure
