@@ -1,9 +1,10 @@
 """Literal evaluation and the mapping keys one lookup can name.
 
 `_literal_value` folds the literal forms a program writes. `_usable_key`
-keeps only what can also be a dict key, and `_literal_key` names the one a
-lookup resolves. `_unhashable_key_sender` is the discriminator for the one
-unresolved key the runtime cannot hash at all: a literal list, a tuple
+keeps only what can also be a dict key, `_literal_key` names the one a
+lookup resolves, and `payload_literal_key` names the one a tracked payload's
+key position resolves. `_unhashable_key_sender` is the discriminator for the
+one unresolved key the runtime cannot hash at all: a literal list, a tuple
 containing one, a dict or a set, spelled bound to a name or written inline
 at the call. Every other key the evaluator cannot fold is hashable and the
 program routes it fine, so those stay unresolved and silent.
@@ -117,6 +118,30 @@ def _literal_key(node, state):
     if isinstance(node, ast.Name):
         return _usable_key(state.literals.get(node.id, _UNSAFE_LITERAL))
     return _usable_key(_literal_value(node))
+
+
+def payload_literal_key(node, literals):
+    """The string key one payload key position names, or None.
+
+    The payload model's twin of `_literal_key`, over the same
+    name-to-literal table: a string constant names itself, a name
+    carries the literal it was bound to, and any other expression is
+    read through the same pure-AST fold.
+
+    None is an answer, not a refusal, and the three ways to reach it are
+    three different runtimes. A non-string literal is provably not
+    `'tab'`. An expression the fold will not resolve is silent in the
+    runtime too, because a program whose key is a call did not mean
+    `'tab'` either. So None means this position names no tracked key,
+    and a caller must not read it as an opaque one.
+    """
+    if isinstance(node, ast.Name):
+        value = (literals or {}).get(node.id, _UNSAFE_LITERAL)
+    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    else:
+        value = _literal_value(node)
+    return value if isinstance(value, str) else None
 
 
 def _unhashable_key_sender(node, state):

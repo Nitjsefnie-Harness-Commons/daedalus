@@ -2,8 +2,9 @@
 
 Its own module so the flow module, which sat exactly at its size ceiling when
 this was split out of it, keeps the lines the flow needs. Nothing here reads
-or writes flow state; the call, the tracked payload keys and the resolved
-sender are the whole input.
+or writes flow state; the call, the tracked payload keys, the name-to-literal
+table a key position is folded through, and the resolved sender are the whole
+input.
 """
 import ast
 
@@ -11,7 +12,7 @@ from _pyroute_state import (OPAQUE_TAB_SPREAD, UNPROVABLE_SENDER,
                             is_extension_constant, payload_keys)
 
 
-def _through_unprovable(node, dicts, rel, func):
+def _through_unprovable(node, dicts, rel, func, literals=None):
     """What a call whose callee may be ext_cmd must not be allowed to hide."""
     callee = func.id if isinstance(func, ast.Name) else ast.unparse(func)
     found = []
@@ -20,7 +21,7 @@ def _through_unprovable(node, dicts, rel, func):
             found.append(f'{rel}:{kw.value.lineno}: `tab` passed through '
                          f'`{callee}`, which may be ext_cmd')
         elif kw.arg is None:
-            keys = payload_keys(kw.value, dicts)
+            keys = payload_keys(kw.value, dicts, literals)
             if keys is None or OPAQUE_TAB_SPREAD in keys:
                 found.append(f'{rel}:{kw.value.lineno}: opaque spread '
                              f'through `{callee}`, which may be ext_cmd')
@@ -31,14 +32,14 @@ def _through_unprovable(node, dicts, rel, func):
     return found
 
 
-def _through_ext_cmd(node, dicts, rel):
+def _through_ext_cmd(node, dicts, rel, literals=None):
     """What a call that IS ext_cmd must not be allowed to route."""
     found = []
     for kw in node.keywords:
         if kw.arg == 'tab' and not is_extension_constant(kw.value):
             found.append(f'{rel}:{kw.value.lineno}: ext_cmd keyword `tab`')
         elif kw.arg is None:
-            keys = payload_keys(kw.value, dicts)
+            keys = payload_keys(kw.value, dicts, literals)
             if keys is None or OPAQUE_TAB_SPREAD in keys:
                 found.append(f'{rel}:{kw.value.lineno}: opaque **'
                              f'{ast.unparse(kw.value)} passed to ext_cmd; '
@@ -51,12 +52,12 @@ def _through_ext_cmd(node, dicts, rel):
     return found
 
 
-def _typed_payload(node, dicts, rel, allowed_opaque_names):
+def _typed_payload(node, dicts, rel, allowed_opaque_names, literals=None):
     """What a typed `/command` payload must not be able to do to `tab`."""
     cmd_at = next((i for i, a in enumerate(node.args) if isinstance(
         a, ast.Constant) and a.value == '/command'), None)
     if cmd_at is None or cmd_at + 1 >= len(node.args): return []
-    keys = payload_keys(node.args[cmd_at + 1], dicts)
+    keys = payload_keys(node.args[cmd_at + 1], dicts, literals)
     if keys and 'type' in keys and OPAQUE_TAB_SPREAD in keys:
         lineno, spread = keys[OPAQUE_TAB_SPREAD]
         if getattr(spread, 'id', None) not in allowed_opaque_names:
@@ -70,10 +71,10 @@ def _typed_payload(node, dicts, rel, allowed_opaque_names):
 
 
 def call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
-                    sender_name=None):
+                    sender_name=None, literals=None):
     """Every way this one call routes a `tab` the guard cannot verify."""
     if sender_name == UNPROVABLE_SENDER:
-        return _through_unprovable(node, dicts, rel, node.func)
+        return _through_unprovable(node, dicts, rel, node.func, literals)
     if sender_name in ('ext_cmd', '_ext_cmd'):
-        return _through_ext_cmd(node, dicts, rel)
-    return _typed_payload(node, dicts, rel, allowed_opaque_names)
+        return _through_ext_cmd(node, dicts, rel, literals)
+    return _typed_payload(node, dicts, rel, allowed_opaque_names, literals)

@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from _pyroute_live import bind_alias_statement, rebind_augmented
-from _pyroute_keys import (_UNSAFE_LITERAL, _literal_value,
-                           literal_iterable_cardinality, literal_truth)
+from _pyroute_keys import (_UNSAFE_LITERAL, _literal_value, literal_truth,
+                           literal_iterable_cardinality, payload_literal_key)
 from _pyroute_mapping import alias_target_pairs, store_deferred_target
 from _pyroute_storage import join_clean_occupancy
 from _pyroute_values import (CellState, DeferredGenerator,
@@ -143,18 +143,19 @@ def _merge_payload_keys(keys, spread, spread_node):
                 if key is not OPAQUE_TAB_SPREAD)
 
 
-def payload_keys(expr, dicts):
+def payload_keys(expr, dicts, literals=None):
     """Return tracked string keys, or None for a wholly opaque expression."""
     if isinstance(expr, ast.Name): return dicts.get(expr.id)
     if isinstance(expr, ast.Dict):
         keys = {}
         for key, value in zip(expr.keys, expr.values):
             if key is None:
-                _merge_payload_keys(keys, payload_keys(value, dicts), value)
-            elif isinstance(key, ast.Constant) and isinstance(key.value, str):
-                if key.value == 'tab':
+                _merge_payload_keys(
+                    keys, payload_keys(value, dicts, literals), value)
+            elif (name := payload_literal_key(key, literals)) is not None:
+                if name == 'tab':
                     keys.pop(OPAQUE_TAB_SPREAD, None)
-                keys[key.value] = (value.lineno, value)
+                keys[name] = (value.lineno, value)
         return keys
     if (isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name)
             and expr.func.id == 'dict'):
@@ -163,7 +164,7 @@ def payload_keys(expr, dicts):
         keys = {}
         for keyword in expr.keywords:
             if keyword.arg is None:
-                spread = payload_keys(keyword.value, dicts)
+                spread = payload_keys(keyword.value, dicts, literals)
                 _merge_payload_keys(keys, spread, keyword.value)
             else:
                 if keyword.arg == 'tab':
@@ -173,10 +174,10 @@ def payload_keys(expr, dicts):
     return None
 
 
-def _update_keys(call, dicts):
+def _update_keys(call, dicts, literals=None):
     keys = {}
     if call.args:
-        merged = payload_keys(call.args[0], dicts)
+        merged = payload_keys(call.args[0], dicts, literals)
         if merged is None:
             return None
         keys.update(merged)
@@ -189,12 +190,12 @@ def _update_keys(call, dicts):
     return keys
 
 
-def apply_dict_statement(node, dicts):
+def apply_dict_statement(node, dicts, literals=None):
     """Apply one assignment or mapping mutation to tracked payloads."""
     if isinstance(node, ast.AugAssign):
         if (isinstance(node.op, ast.BitOr)
                 and isinstance(node.target, ast.Name)):
-            merged = payload_keys(node.value, dicts)
+            merged = payload_keys(node.value, dicts, literals)
             if merged is None:
                 dicts.pop(node.target.id, None)
             else:
@@ -207,7 +208,7 @@ def apply_dict_statement(node, dicts):
                 and isinstance(call.func, ast.Attribute)
                 and call.func.attr == 'update'
                 and isinstance(call.func.value, ast.Name)):
-            merged = _update_keys(call, dicts)
+            merged = _update_keys(call, dicts, literals)
             if merged is None:
                 dicts.pop(call.func.value.id, None)
             else:
@@ -219,25 +220,24 @@ def apply_dict_statement(node, dicts):
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
     for target in targets:
         if isinstance(target, ast.Name):
-            keys = payload_keys(node.value, dicts)
+            keys = payload_keys(node.value, dicts, literals)
             if keys is None:
                 dicts.pop(target.id, None)
             else:
                 dicts[target.id] = keys
-        elif (isinstance(target, ast.Subscript)
-              and isinstance(target.value, ast.Name)
-              and isinstance(target.slice, ast.Constant)
-              and isinstance(target.slice.value, str)):
-            if target.slice.value == 'tab':
+        elif isinstance(target, ast.Subscript) and isinstance(
+                target.value, ast.Name) and (
+                    name := payload_literal_key(target.slice, literals)) is not None:
+            if name == 'tab':
                 dicts.setdefault(target.value.id, {}).pop(
                     OPAQUE_TAB_SPREAD, None)
-            dicts.setdefault(target.value.id, {})[target.slice.value] = (
+            dicts.setdefault(target.value.id, {})[name] = (
                 node.value.lineno, node.value)
 
 
 def apply_state_dict_statement(node, state):
     before = {name: keys.copy() for name, keys in state.dicts.items()}
-    apply_dict_statement(node, state.dicts)
+    apply_dict_statement(node, state.dicts, state.literals)
     changed = {name for name in before.keys() | state.dicts.keys()
                if before.get(name) != state.dicts.get(name)}
     for name in changed:
@@ -256,17 +256,6 @@ def discard_state_dict(state, name):
     origin = state.dict_origins.pop(name, None)
     if origin is not None:
         state.dict_namespaces.setdefault(origin, {}).pop(name, None)
-
-
-def dict_assignments(scope):
-    """Map local names to string keys, retaining provable mutations."""
-    dicts = {}
-    nodes = [node for node in scope_nodes(scope)
-             if isinstance(node, (ast.Assign, ast.AnnAssign,
-                                  ast.AugAssign, ast.Expr))]
-    for node in sorted(nodes, key=lambda item: (item.lineno, item.col_offset)):
-        apply_dict_statement(node, dicts)
-    return dicts
 
 
 def resolve_sender_name(expr, aliases):

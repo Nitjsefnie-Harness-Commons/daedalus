@@ -30,7 +30,6 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             bind_alias_target, bind_builtin_names, bound_names,
                             callable_state, clear_names, dedupe_states,
                             deferred_generator, definition_values,
-                            dict_assignments as _dict_assignments,
                             evaluated_value, function_allowed_opaque,
                             literal_iterable_nonempty, lexical_scope_names,
                             literal_truth, new_exits, payload_keys,
@@ -38,6 +37,7 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             resolve_sender_name, state_signature,
                             statement_cannot_raise)
 from _pyroute_match import walk_match
+from _pyroute_payload import dict_assignments as _dict_assignments
 from _pyroute_violations import call_violations
 from _pyroute_targets import (bind_with_target, materialized_order,
                               probe_comprehension)
@@ -339,7 +339,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     found = call_violations(
                         node, current_state.dicts, rel,
                         allowed_opaque_names,
-                        sender or sender_value(deferred) or deferred)
+                        sender or sender_value(deferred) or deferred,
+                        current_state.literals)
                     violations.extend(found)
                 current, returned_value = follow_callable_call(
                     candidates, arguments, current, node, analyze_callable,
