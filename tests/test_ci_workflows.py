@@ -15,8 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _actionlint import (_ACTIONLINT, _PLANTED_FINDING,  # noqa: E402
                          _expanded_names, _job_step, _lint_refuses,
-                         _lint_skips, _lint_workflows,
-                         _pinned_actionlint_version, _planted_workflow_tree)
+                         _lint_skips, _lint_workflows, _pin,
+                         _pinned_actionlint_version, _planted_workflow_tree,
+                         _run_actionlint, _workflow_paths)
 from _wffixtures import _refuses  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
@@ -315,8 +316,7 @@ def test_the_workflow_expansion_covers_both_extensions(tmp):
 
 
 def test_a_workflow_carrying_a_real_lint_finding_is_refused(tmp):
-    root = _planted_workflow_tree(tmp)
-    _refuses(lambda: _lint_workflows(root), contains='SC2183')
+    _refuses(_lint_workflows, _planted_workflow_tree(tmp), contains='SC2183')
 
 
 def test_a_finding_the_linter_reported_is_refused(tmp):
@@ -328,13 +328,14 @@ def test_a_finding_the_linter_reported_is_refused(tmp):
 def test_a_lint_run_without_the_binary_is_skipped(tmp):
     del tmp
     reason = _lint_skips({'binary': None, 'installed': None})
-    assert 'actionlint-absent' in reason and '1.7.12' in reason, reason
+    assert 'actionlint-absent' in reason and f'pins {_pin()}' in reason, reason
 
 
 def test_a_lint_run_without_shellcheck_is_skipped(tmp):
     del tmp
     reason = _lint_skips({'shellcheck': None})
     assert 'shellcheck-absent' in reason and 'shellcheck' in reason, reason
+    assert _run_actionlint(_ACTIONLINT, None, _workflow_paths(ROOT)) is None
 
 
 def test_a_lint_run_at_another_version_is_skipped(tmp):
@@ -352,6 +353,7 @@ def test_the_pin_is_read_from_the_job_not_written_down(tmp):
     del tmp
     job = {'env': {'ACTIONLINT_VERSION': '9.9.9'}}
     assert _pinned_actionlint_version(job) == '9.9.9'
+    assert _pinned_actionlint_version() == _pin()
 
 
 def test_the_suite_lints_with_the_binary_the_job_installs(tmp):

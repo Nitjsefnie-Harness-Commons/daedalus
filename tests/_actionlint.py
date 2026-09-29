@@ -32,6 +32,7 @@ rather than a literal pattern. It is Python rather than a shell script, so a
 windows-latest leg expands the same set — there a bare `bash` is the WSL
 launcher, not Git's.
 """
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -73,14 +74,29 @@ def _pinned_actionlint_version(job=None):
     """The version the actionlint job pins, read from the job's own env.
 
     `job` is a parameter so a test can hand this a mapping pinning some
-    other version and see that the value comes out of it. Nothing here
-    knows what the pin is.
+    other version and see that the value comes out of it. Left out, it
+    takes the route every real run takes, and `_pin` is what that route is
+    checked against.
     """
     if job is None:
         job = complete_job_mapping(_tests_yml(), _ACTIONLINT_JOB) or {}
     env = job.get('env') or {}
     assert 'ACTIONLINT_VERSION' in env, env
     return env['ACTIONLINT_VERSION']
+
+
+def _pin():
+    """ACTIONLINT_VERSION, read out of the workflow's own bytes.
+
+    A second reader on purpose, where `_yamlsteps` is the first: a pin
+    written down rather than read has to disagree with something, and this
+    is what it disagrees with. Raising the pin in the workflow is then one
+    edit, here and in the reasons alike.
+    """
+    found = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(\S+)\s*$',
+                       _tests_yml(), re.MULTILINE)
+    assert len(found) == 1, found
+    return found[0]
 
 
 def _job_step(name):
@@ -156,7 +172,10 @@ def _run_actionlint(binary, shellcheck, files):
 
     No arguments is not a run: actionlint handed none lints its working
     directory, which is a verdict about a tree nobody named. Nor is a run
-    without shellcheck a run: that is the whole of what it would check.
+    without shellcheck a run: that is the whole of what it would check —
+    and this check is the second layer, `_assert_actionlint_clean`'s skip
+    arm deciding first, so it fires only where the facts were wired
+    wrongly, and it is what turns that wiring loud instead of clean.
     """
     if not binary or not shellcheck or not files:
         return None
