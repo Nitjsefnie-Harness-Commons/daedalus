@@ -380,6 +380,7 @@
 !/tests/_launch_fixtures.py
 !/tests/_launch_keep.py
 !/tests/_launch_path.py
+!/tests/_launch_plants.py
 !/tests/_launch_refusal_rows.py
 !/tests/_log_safe_cases.py
 !/tests/_mainworldharness.py
@@ -651,7 +652,9 @@
 !/tests/test_launch_arm_cuts.py
 !/tests/test_launch_arms.py
 !/tests/test_launch_control_boundary.py
+!/tests/test_launch_deadline_positions.py
 !/tests/test_launch_path.py
+!/tests/test_launch_receiver_positions.py
 !/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py
 !/tests/test_mcp_builtin_names.py

@@ -180,6 +180,10 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/_dashsection.py', '_run', 'scenario(answers, plan, setup)', 1):
          'the dashboard-section harness running one scenario body with the'
          'test\'s answers and plan; it renders, it does not launch',
+    ('tests/_launch_plants.py', '_plant_verdicts', 'plant()', 1):
+         'the Popen is inside a module TEMPLATE, a string that becomes'
+         ' real code only when a suite execs it, so the enclosing suite'
+         ' is the bound; the analyser reads the text and sees a launch',
     ('tests/_drain.py', 'kill_and_drain', 'process.communicate(timeout)', 1):
          'a drain of an already-killed process: it can only return',
     ('tests/_drain.py', 'kill_and_drain', 'process.wait(timeout)', 1):
