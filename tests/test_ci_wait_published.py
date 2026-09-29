@@ -198,16 +198,20 @@ def test_a_red_verdict_outranks_a_missing_run_at_the_predicate(tmp):
 
 
 def test_the_offenders_are_the_runs_or_the_checks_never_both(tmp):
-    """The run limb returns before the check limb is reached, so an
-    offender list carrying both would be a caller printing a failure it
-    was not asked about - and the claim is only the docstring's until a
-    control holds it.
+    """The list a run failure returns carries no check, and that is only
+    the docstring's word until a control holds it.
 
-    Both surfaces fail here: a red `tests` run beside a red published
-    check. The offenders are the run alone, so a mutant that CONCATENATES
-    the two lists - which reads as harmless, since the exit code is 1
-    either way - is caught by the length and by the absence of the
-    check's name.
+    Both surfaces fail here - a red `tests` run beside a red published
+    check - because that is the only state in which "never both" is a
+    claim about anything. The offenders are the run alone, so this catches
+    a mutant that APPENDS the published offenders to the run offenders
+    before the early return, which reads as harmless since the exit code
+    is 1 either way.
+
+    It does not catch a concatenation placed after that return, and cannot:
+    with a run red the return has already answered, so the line is
+    unreachable and no fixture can reach it. Naming that mutation here
+    would be naming one that cannot fire.
     """
     del tmp
     mod = _ci_wait()

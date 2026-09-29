@@ -49,18 +49,15 @@ a waiter that reads only runs certifies a head whose gate is red (issue
 all, which is why it is invisible to a run-shaped read and reachable only
 through the suites' own `checkRuns`.
 
-So the expectation and the two predicates live here for the same reason the
-workflow ones do - a second reader must have one place to reach for - and
-they are read by NAME, exactly, like a workflow: `Gate freshness` is a
-different check and cannot satisfy this one.
+A published check is read by NAME, exactly, like a workflow: `Gate
+freshness` is a different check and cannot satisfy this one.
 
 The DIRECTION RULE is here too, because it is the same question with a
 caller's own facts added: which gates is this invocation held to, and what
 does a refusal say about the ones it was not told about. A waiter KNOWS
 this repository's gates and is only GUESSING about another's, so a named
 gate may only make it STRICTER here and only REPLACE the set there, and a
-name it invented is required nowhere at all. The note a refusal carries
-lives beside the set it describes, so the two cannot drift apart.
+name it invented is required nowhere at all.
 
 `watch_all.py`'s hold deliberately does NOT take this read, and the
 judgement belongs here rather than in the silence: the watcher's CI child
@@ -77,9 +74,8 @@ from datetime import datetime, timezone
 DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
 REQUIRED_WORKFLOWS = frozenset({'tests'})
 PUBLISHED_CHECKS = frozenset({'gate freshness'})
-# The one definition of an acceptable conclusion. `ci_wait.ACCEPTABLE` is an
-# alias of this rather than a second literal, so the run filter and the
-# check filter cannot come to disagree about what a pass is.
+# The one definition of an acceptable conclusion, and `ci_wait`'s is an
+# alias of this rather than a second literal.
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
