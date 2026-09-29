@@ -49,6 +49,13 @@ def worker_source_paths(background_path=BACKGROUND_PATH):
     return (background_path, *imported_worker_paths(background_path))
 
 
+def _worker_sources():
+    return [
+        (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
+        for path in worker_source_paths()
+    ]
+
+
 def import_scripts_stub(context_name, trace_map_name=None):
     """Build the classic-script loader and its honest-worker path trace.
 
