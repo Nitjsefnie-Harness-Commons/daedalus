@@ -9,18 +9,35 @@ to another name, a call, a container or a nested scope; a
 helper proves its returns from its body and is judged with the kinds
 its callers hand it, and never through a spread argument; and a call
 the tables do not name is refused, not skipped.
+
+A helper a control IMPORTS out of a `tests/_*.py` module is read rather
+than trusted: its file is parsed, the called function is judged with the
+kinds its call sites hand it under the rules above, and a violation
+inside it is reported against that file and line. A table row still
+decides first, so an import is never the reason a call was allowed.
+
+What the guard does not see, by design: a statement at a shared helper
+module's top level is not judged, exactly as the bodies of the ten helper
+modules a control already imports are not. Only what the imported call
+reaches is.
 """
 import ast
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from _control_calls import (ModuleNames, argument, call_judgement,
-                            has_spread, pattern_names)
+from _control_calls import (ModuleNames, _SHARED_HELPER, argument,
+                            call_judgement, has_spread, pattern_names,
+                            shared_helper_path)
 
 _UNKNOWN_PATH = 0
 _RELATIVE_PATH = 1
 _CONTROL_OWNED_PATH = 2
 _MAX_PROOF_DEPTH = 2
+# A cross-module HOP is one shared-helper file a resolution reads, so the
+# bound is on files crossed and not on the path-proof nesting above, which
+# bounds calls inside one file; the two are counted separately because a
+# helper two files deep can still prove a path one call deep.
+_MAX_SHARED_HOPS = 2
 _SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
            ast.ClassDef, ast.Lambda)
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
@@ -235,6 +252,119 @@ def _module_functions(tree, names):
             and names.is_unique_def(node.name)}
 
 
+class _Context:
+    """The functions a call in one file can resolve to, and their file.
+
+    A name the file does not define is looked for in the `tests/_*.py`
+    module its import names, and the proof then moves to THAT module's
+    own table, so a helper's body is read against the file that writes
+    it and never against the caller that happened to reach it.
+    """
+
+    def __init__(self, functions, names, resolver):
+        self.functions = functions
+        self.names = names
+        self.resolver = resolver
+
+    def resolve(self, name):
+        """The function `name` names, and the context to prove it in."""
+        if name in self.functions:
+            return self.functions[name], self
+        imported = self.resolver.imported(self.names, name)
+        if imported is None:
+            return None, None
+        return imported.function, imported.module.context
+
+
+class _SharedModule:
+    """One `tests/_*.py` file a control imported a callee out of."""
+
+    def __init__(self, tree, label, context):
+        self.tree = tree
+        self.label = label
+        self.context = context
+
+    @staticmethod
+    def read(path, root, resolver):
+        """The module at `path`, or None when it cannot be read whole.
+
+        A file that does not parse, or that cannot be read, is a refusal
+        rather than an empty module: "nothing found" and "nothing to
+        look at" are the same answer to a subset check and must not be.
+        """
+        try:
+            tree = ast.parse(path.read_text(encoding='utf-8'))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            return None
+        try:
+            label = path.relative_to(root).as_posix()
+        except (TypeError, ValueError):
+            label = path.name
+        names = ModuleNames(tree)
+        return _SharedModule(
+            tree, label,
+            _Context(_module_functions(tree, names), names, resolver))
+
+
+class _Import:
+    """A callee resolved out of a shared helper module."""
+
+    def __init__(self, module, function):
+        self.module = module
+        self.function = function
+
+
+class _SharedResolver:
+    """The shared-helper imports of one file, and the files they name."""
+
+    def __init__(self, root, hops=_MAX_SHARED_HOPS):
+        self.root = root
+        self.hops = hops
+        self.modules = {}
+
+    def child(self):
+        """The resolver one hop further from the control that started it."""
+        return _SharedResolver(self.root, self.hops - 1)
+
+    def _module(self, path):
+        if path not in self.modules:
+            self.modules[path] = _SharedModule.read(
+                path, self.root, self.child())
+        return self.modules[path]
+
+    def imported(self, names, name):
+        """The imported callee `name` binds, or None to keep refusing."""
+        if self.hops < 1:
+            return None
+        path = shared_helper_path(names, name, self.root)
+        if path is None:
+            return None
+        module = self._module(path)
+        if module is None:
+            return None
+        function = module.context.functions.get(name)
+        return None if function is None else _Import(module, function)
+
+
+def _reached_functions(entry, functions):
+    """The named functions `entry` reaches in the file it is written in.
+
+    The rest of a shared module belongs to that module, not to the
+    control that imported one of its names, and judging all of it would
+    refuse code no control wrote.
+    """
+    reached = {entry.name}
+    pending = [entry]
+    while pending:
+        scope = pending.pop()
+        for call in _helper_calls(scope, functions):
+            name = call.func.id
+            if name in functions and name not in reached:
+                reached.add(name)
+                pending.append(functions[name])
+    return reached
+
+
 def _returned_values(scope):
     """Every expression this scope returns, tuples flattened.
 
@@ -263,8 +393,8 @@ def _proved_call_kind(call, context, owned, trusted_names, mutated, depth):
     """
     if depth >= _MAX_PROOF_DEPTH or not isinstance(call.func, ast.Name):
         return _UNKNOWN_PATH
-    function = context.get(call.func.id)
-    if function is None or call.func.id not in context:
+    function, inner = context.resolve(call.func.id)
+    if function is None:
         return _UNKNOWN_PATH
     seeded = _seeded_parameters(call, function, owned, trusted_names,
                                 mutated, context, depth)
@@ -272,7 +402,7 @@ def _proved_call_kind(call, context, owned, trusted_names, mutated, depth):
     if seeded is None or not values:
         return _UNKNOWN_PATH
     inner_owned, inner_mutated = _owned_path_names(
-        function, context, seeded, depth + 1)
+        function, inner, seeded, depth + 1)
     inner_trusted = {'Path', 'str', 'os'} - _scope_local_names(function)
     if all(_path_kind(value, inner_owned, inner_trusted, inner_mutated,
                       context, depth + 1) == _CONTROL_OWNED_PATH
@@ -400,7 +530,7 @@ def _owned_path_names(scope, functions=None, seeded=None, depth=0):
     for name, kind in (seeded or {}).items():
         bindings.setdefault(name, []).append(kind)
     local_names = _scope_local_names(scope)
-    context = functions or {}
+    context = functions
     trusted_names = {'Path', 'str', 'os'} - local_names
     modelled = set()
     for node in _scope_nodes(scope):
@@ -455,17 +585,17 @@ def _owned_path_names(scope, functions=None, seeded=None, depth=0):
     return kinds, mutated
 
 
-def _call_violation(node, label, names, owned, trusted, mutated, context):
+def _call_violation(node, judgement, problem, kind, target, owned, trusted,
+                    mutated):
     """The one message this call earns, or None when it is proved."""
-    problem, kind, target = call_judgement(node, label, names)
     if problem is not None or kind is None:
         return problem
     if target is None:
-        return f'{label}:{node.lineno}: {kind} target is unresolved'
-    if _path_kind(target, owned, trusted, mutated, context) \
-            != _CONTROL_OWNED_PATH:
-        return (f'{label}:{node.lineno}: {kind} target path is not '
-                'control-owned')
+        return f'{judgement.label}:{node.lineno}: {kind} target is unresolved'
+    if _path_kind(target, owned, trusted, mutated,
+                  judgement.context) != _CONTROL_OWNED_PATH:
+        return (f'{judgement.label}:{node.lineno}: {kind} target path is '
+                'not control-owned')
     return None
 
 
@@ -505,45 +635,87 @@ class _ModuleJudgement:
     every caller hands it, once every caller has been judged; a helper
     nobody calls, or one in a call cycle, is judged unseeded. A test_
     function anything in the module names is a helper too.
+
+    `reach` is the shared-helper form: it names the functions of a
+    `tests/_*.py` file the imported call reaches, `seeded` carries the
+    kinds the control's own call sites handed the entry, and the
+    module's other scopes — every statement at its top level included —
+    are none of this control's business.
     """
 
-    def __init__(self, tree, label):
+    def __init__(self, tree, label, resolver, reach=None, seeded=None):
         self.label = label
         self.names = ModuleNames(tree)
         self.functions = _module_functions(tree, self.names)
+        self.resolver = resolver
+        self.context = _Context(self.functions, self.names, resolver)
         named = {node.id for node in ast.walk(tree)
                  if isinstance(node, ast.Name)
                  and isinstance(node.ctx, ast.Load)}
         self.helpers = {name: function
                         for name, function in self.functions.items()
-                        if not name.startswith('test_') or name in named}
+                        if (reach is None or name in reach)
+                        and (not name.startswith('test_') or name in named)}
         self.controls = {function
                          for name, function in self.functions.items()
                          if name not in self.helpers}
-        self.seedings = {}
+        self.seedings = dict(seeded or {})
         self.violations = []
         helper_nodes = set(self.helpers.values())
-        self.scopes = [tree] + [
+        self.scopes = [] if reach is not None else [tree] + [
             node for node in ast.walk(tree)
             if isinstance(node, _SCOPES[1:]) and node not in helper_nodes]
 
+    def _imported(self, node):
+        if not isinstance(node.func, ast.Name):
+            return None
+        return self.resolver.imported(self.names, node.func.id)
+
     def judge(self, scope, seeded):
-        owned, mutated = _owned_path_names(scope, self.functions, seeded)
+        owned, mutated = _owned_path_names(scope, self.context, seeded)
         trusted = {'Path', 'str', 'os'} - _scope_local_names(scope)
         for node in _scope_nodes(scope):
             if not isinstance(node, ast.Call):
                 continue
-            if (isinstance(node.func, ast.Name)
-                    and node.func.id in self.helpers):
-                function = self.helpers[node.func.id]
-                _meet_seeding(self.seedings, node.func.id, function,
-                              _seeded_parameters(node, function, owned,
-                                                 trusted, mutated,
-                                                 self.functions, 0))
-            message = _call_violation(node, self.label, self.names, owned,
-                                      trusted, mutated, self.functions)
+            problem, kind, target = call_judgement(
+                node, self.label, self.names, self.resolver.root)
+            if kind is _SHARED_HELPER:
+                # The import is not the proof. The name is seeded from
+                # the kinds this call site hands it, and its body is
+                # judged in the file that writes it, once every caller
+                # has been judged; a file this cannot read stays a
+                # refusal here rather than becoming a silent pass.
+                imported = self._imported(node)
+                if imported is not None:
+                    _meet_seeding(
+                        self.seedings, node.func.id, imported.function,
+                        _seeded_parameters(node, imported.function, owned,
+                                           trusted, mutated, self.context, 0))
+                message = None if imported is not None else problem
+            else:
+                if (isinstance(node.func, ast.Name)
+                        and node.func.id in self.helpers):
+                    function = self.helpers[node.func.id]
+                    _meet_seeding(self.seedings, node.func.id, function,
+                                  _seeded_parameters(node, function, owned,
+                                                     trusted, mutated,
+                                                     self.context, 0))
+                message = _call_violation(node, self, problem, kind, target,
+                                          owned, trusted, mutated)
             if message is not None:
-                self.violations.append((node.lineno, message))
+                self.violations.append((self.label, node.lineno, message))
+
+    def _judge_imported(self, name, seeding):
+        """Judge an imported helper's body, in the file that writes it."""
+        imported = self.resolver.imported(self.names, name)
+        if imported is None:
+            return
+        module = imported.module
+        self.violations.extend(_ModuleJudgement(
+            module.tree, module.label, module.context.resolver,
+            reach=_reached_functions(
+                imported.function, module.context.functions),
+            seeded={name: seeding}).run())
 
     def run(self):
         callers = defaultdict(set)
@@ -566,7 +738,10 @@ class _ModuleJudgement:
                 function = pending.pop(name)
                 self.judge(function, self.seedings.get(name))
                 judged.add(function)
-        return [message for _, message in sorted(self.violations)]
+        for name in sorted(self.seedings):
+            if name not in self.helpers:
+                self._judge_imported(name, self.seedings[name])
+        return sorted(self.violations)
 
 
 def control_write_violations(source, repository_root):
@@ -577,4 +752,6 @@ def control_write_violations(source, repository_root):
         label = source.relative_to(repository_root).as_posix()
     except ValueError:
         label = source.name
-    return _ModuleJudgement(tree, label).run()
+    judgement = _ModuleJudgement(tree, label,
+                                 _SharedResolver(repository_root))
+    return [message for _, _, message in judgement.run()]
