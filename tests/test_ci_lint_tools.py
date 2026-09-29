@@ -99,7 +99,24 @@ def _door_jobs():
     return found
 
 
-def _tool_name(node):
+def _constants(tree):
+    """The module's own `NAME = 'literal'` bindings, so a `which` resolves.
+
+    A tool named through a module constant is still the tool the suite
+    requires, and reading only literal arguments would make the derivation
+    blind to the spelling half the tree uses.
+    """
+    bound = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            bound[node.targets[0].id] = node.value.value
+    return bound
+
+
+def _tool_name(node, bound):
     """The tool a `shutil.which` call names, or None for any other call."""
     if not (isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -108,6 +125,8 @@ def _tool_name(node):
             and node.func.value.id == 'shutil'):
         return None
     argument = node.args[0] if node.args else None
+    if isinstance(argument, ast.Name):
+        return bound.get(argument.id)
     if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
         return argument.value
     return None
@@ -217,8 +236,48 @@ def _role_of_binding(tree, name, tool, skipped, present):
         present.add(tool)
 
 
+def _skip_texts(tree):
+    """Every literal a skip call or a skip raise renders.
+
+    A skip that NAMES the tool it is skipping on is a skip on that tool,
+    whatever plumbing carries the lookup to the skip. Reading only the
+    `which()` binding's own guard misses the common shape where the lookup
+    goes into a dict and the guard reads it out in another function, and a
+    control that misses that reads green having checked nothing — the whole
+    shape issue 1353 is.
+    """
+    texts = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = _dotted_or_bare_name(node)
+        elif isinstance(node, ast.Raise):
+            name = _dotted_or_bare_name(node.exc)
+        else:
+            continue
+        if name in _SKIP_NAMES or name.endswith('Skipped'):
+            texts.extend(part.value for part in ast.walk(node)
+                         if isinstance(part, ast.Constant)
+                         and isinstance(part.value, str))
+    return texts
+
+
+_ROLES = []
+
+
 def _tool_roles():
     """`(skipped, present)` tool names, read off the suites' own source.
+
+    Read once per process: the answer is a property of the tree, and three
+    controls asking the same question should not parse 340 modules six times
+    between them.
+    """
+    if not _ROLES:
+        _ROLES.append(_derive_tool_roles())
+    return _ROLES[0]
+
+
+def _derive_tool_roles():
+    """The two tool sets, one pass to enumerate and one to classify.
 
     A suite that SKIPS on a missing tool has decided the machine may lack it;
     one that ASSERTS it, or RUNS it without asking, has decided it may not —
@@ -227,15 +286,32 @@ def _tool_roles():
     failure rather than a skip, so a job that does not install it cannot
     report green having checked nothing about it. A tool in neither is not a
     requirement the tree states at all.
+
+    Two passes, and the second re-parses rather than holding every module's
+    tree at once: a skip can only be matched against the tools the tree
+    names, and 340 trees is more to hold than a 4 GB cap should be asked
+    for.
     """
-    skipped, present = set(), set()
-    for source in sorted((ROOT / 'tests').rglob('*.py')):
+    sources = sorted((ROOT / 'tests').rglob('*.py'))
+    candidates = set()
+    for source in sources:
         tree = ast.parse(source.read_text(encoding='utf-8'))
+        bound = _constants(tree)
+        candidates |= {name for name in
+                       (_tool_name(node, bound) for node in ast.walk(tree))
+                       if name}
+    skipped, present = set(), set()
+    for source in sources:
+        tree = ast.parse(source.read_text(encoding='utf-8'))
+        bound = _constants(tree)
+        present |= _command_words(tree)
+        for text in _skip_texts(tree):
+            skipped |= {tool for tool in candidates
+                        if re.search(rf'\b{re.escape(tool)}\b', text)}
         parent = {child: node for node in ast.walk(tree)
                   for child in ast.iter_child_nodes(node)}
-        present |= _command_words(tree)
         for node in ast.walk(tree):
-            tool = _tool_name(node)
+            tool = _tool_name(node, bound)
             if tool is not None:
                 _role_of_lookup(tree, parent, node, tool, skipped, present)
     return skipped, present
