@@ -103,17 +103,22 @@ def main(argv=None):
                     timed_out.append(relative)
 
     if timed_out:
-        # A suite that overran is not a suite that failed. What it leaves
-        # behind depends on how it took the request to stop: one that
-        # flushed on it keeps what it had measured, and one that did not
-        # contributes nothing -- `sigterm = true` makes the difference,
-        # and neither outcome is the same as a suite that ran to the end
-        # and failed. So this refuses the run even without --require-all,
-        # and says which suites to look at first.
+        # A suite that overran is not a suite that failed, and what it
+        # leaves behind is what it managed to flush before the bound --
+        # which is a different thing on each platform, and the sentence has
+        # to be true of both. On POSIX the kill asks first, so a suite that
+        # answers the request keeps what it measured and one that does not
+        # contributes nothing. On Windows `taskkill /F` is a forced
+        # termination with no request and no grace, so a suite killed there
+        # never had the chance and contributes nothing either way. So this
+        # refuses the run even without --require-all, and says which suites
+        # to look at first.
+        flushed = ('a forced kill leaves a suite nothing to flush'
+                   if sys.platform.startswith('win') else
+                   'a suite that took the request to stop keeps what it '
+                   'had measured, and one that did not contributes nothing')
         print(f"TIMED OUT: {', '.join(timed_out)} — each was ended at its "
-              f"{bound} s bound; a suite that flushed on the request keeps "
-              f"what it had measured and one that did not contributes "
-              f"nothing",
+              f"{bound} s bound; {flushed}",
               file=sys.stderr)
         return 1
     if require_all and failed:

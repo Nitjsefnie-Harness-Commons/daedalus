@@ -121,10 +121,14 @@ def _ask_and_insist(process):
     insisted = _signal_group(group, signal.SIGKILL)
     if stopped:
         # The suite's own exit empties its group, so the escalation is
-        # aimed at a group that may no longer exist. That is the expected
-        # order rather than a failure, and both halves are named.
-        note = '' if insisted is None else f'; {insisted}'
-        return f'process group {group} asked to stop and the suite did{note}'
+        # aimed at a group that may no longer exist -- and a group that
+        # DOES still exist means something of the suite's outlived the
+        # request, which the record has to say rather than leave as an
+        # absence between two clauses that both sound complete. A signal
+        # that goes out proves a member was there; a ProcessLookupError
+        # proves one is not.
+        note = insisted or 'the escalation reached what was still in it'
+        return f'process group {group} asked to stop and the suite did; {note}'
     if insisted is not None:
         return f'{insisted} after {CLEANUP_TIMEOUT_S} s of grace'
     return (f'process group {group} ignored the request and was killed '

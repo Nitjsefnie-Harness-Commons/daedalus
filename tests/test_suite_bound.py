@@ -261,12 +261,16 @@ def test_the_coverage_launcher_binds_the_module_the_workflow_path_finds(tmp):
     other controls here exercise.
 
     A workflow step runs the launcher by path, so `sys.path[0]` is
-    `scripts/ci` and the repository root is on no path at all: the package
-    spelling cannot resolve and the flat one is the only spelling there
-    is. Every other control in this repository puts its synthetic tree on
-    `PYTHONPATH`, which resolves the package spelling instead. So this
-    control leaves `PYTHONPATH` alone, and its passing IS the evidence
-    that the fallback imports and binds what the launcher calls.
+    `scripts/ci` and the repository root is on no path at all: the
+    package spelling cannot resolve and the flat one is the only spelling
+    there is. Every other control here puts its synthetic tree on
+    `PYTHONPATH` too, and that changes NOTHING about the spelling -- the
+    launcher is run by path either way, so it takes the same branch.
+    What `PYTHONPATH` does decide is whether the fixture's
+    `sitecustomize` -- which carries the shrunk constant -- is found at
+    all. This control turns it off, so the launcher's own import is what
+    is under test rather than anything the fixture put there, and its
+    passing IS the evidence that the branch CI runs works.
     """
     recorded = Path(tmp) / 'tree' / 'tests' / 'suite.pid'
     try:
@@ -366,14 +370,13 @@ def test_every_wait_this_module_makes_is_bounded(_tmp):
 
 
 def _loops(function):
-    """Every loop directly in `function`, not the ones in a nested def."""
+    """Every loop in `function`, not the ones belonging to a nested def."""
+    nested = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
     for node in ast.walk(function):
-        if not isinstance(node, (ast.For, ast.While, ast.AsyncWith)):
+        if not isinstance(node, (ast.For, ast.While)):
             continue
-        if any(isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                   ast.Lambda))
-               and inner is not node
-               for inner in ast.walk(node)):
+        inner = [one for one in ast.walk(node) if isinstance(one, nested)]
+        if inner and inner[0] is not node:
             continue
         yield node
 

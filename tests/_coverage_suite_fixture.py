@@ -196,14 +196,22 @@ def coverage_tree(
     an absence of findings -- a control that reports "the bound did not
     hold" instead has to look elsewhere.
 
-    `tree_on_path` is the import path the launcher resolves its shared
-    bound over. Left on, the tree goes on `PYTHONPATH` and the package
-    spelling wins, which is what every other control here measures.
+    `tree_on_path` is whether the tree is on `PYTHONPATH`, and what that
+    governs is the LOOKUP of this tree's `sitecustomize.py` -- nothing
+    else. `site` reads the path the interpreter has already built, and a
+    script's own directory is put on the path after that, so a
+    `sitecustomize` beside the launcher is never found on its own. It
+    does not choose which spelling the launcher imports its shared bound
+    by: the launcher is run by path either way, so `__package__` is `''`
+    and it takes the `else` branch in both cases. `_suite_bound_site`
+    below puts `<tree>/scripts/ci` on the path itself and imports the
+    flat name, so the patch lands on the same module object the
+    launcher binds whichever way it is run.
+
     Turned off, the tree is on no path at all -- the shape a workflow step
-    has, which runs the file by path with only `scripts/ci` importable.
-    A control that wants the workflow's spelling turns it off and drives
-    the bound through `timeout_env` instead of through the constant,
-    because the patch that sets the constant names the package.
+    has, where no `sitecustomize` is found either. A control that wants
+    that turns it off and drives the bound through `timeout_env`, because
+    there is no `sitecustomize` left to carry the constant.
     """
     root = Path(tmp) / 'tree'
     (root / 'scripts' / 'ci').mkdir(parents=True, exist_ok=True)
@@ -244,9 +252,11 @@ def coverage_tree(
         sitecustomize += _cpu_count_site(cpu_count)
     if suite_bound is not None:
         assert tree_on_path, (
-            'the constant is patched under its package name, which needs '
-            'the tree on the path; drive the bound through timeout_env '
-            'instead when the tree is off it')
+            'the constant rides in a sitecustomize, and site looks for '
+            'one on the path the interpreter has already built -- with '
+            'the tree off PYTHONPATH neither this nor the launcher is '
+            'found, so the launcher would enforce the unpatched default. '
+            'Drive the bound through timeout_env instead.')
         sitecustomize += _suite_bound_site(suite_bound)
     if sitecustomize:
         (root / 'sitecustomize.py').write_text(
