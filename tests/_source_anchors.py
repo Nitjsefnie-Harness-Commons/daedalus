@@ -35,7 +35,6 @@ def after_call(text, called, plant):
 
 
 def after_import(text, module, plant):
-    """`text` with `plant` below its one `from <module>` import."""
     found = [node for node in _nodes(ast.parse(text), ast.ImportFrom)
              if node.module == module]
     assert len(found) == 1, f'the {module} import is not unique: {found}'
@@ -62,7 +61,6 @@ def the_call_line(text, name):
 
 
 def before_first_call(text, name, plant):
-    """`text` with `plant` above the first line that calls `name`."""
     first = first_call_line(text, name)
     lines = text.split('\n')
     lines[first - 1:first - 1] = plant.split('\n')

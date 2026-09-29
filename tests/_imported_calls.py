@@ -8,7 +8,8 @@ helper is neither, so this reads the file the import names and hands the
 callee back as a plain `ast.FunctionDef`, which is what lets the path
 proof and the write rules work on it unchanged. A hop past the bound, a
 file that will not parse, and a name the file does not define all answer
-None, so the caller keeps refusing.
+None, so the caller keeps refusing. Every claim here is pinned by a
+control in `tests/test_shared_helper_calls.py`.
 """
 import ast
 
@@ -22,14 +23,13 @@ MAX_SHARED_HOPS = 2
 
 
 def module_functions(tree, names):
-    """The module-level functions a call in this file can resolve to."""
     return {node.name: node for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and names.is_unique_def(node.name)}
 
 
 def module_scopes(tree):
-    """Every module-level scope a call in this file can name.
+    """Every module-level scope a call can name; the functions are a subset.
 
     The proof context holds the functions only — a class is not a callee
     and has no signature to seed — while the judgement needs a class body
@@ -54,7 +54,6 @@ class Context:
         self.resolver = resolver
 
     def resolve(self, name):
-        """The function `name` names, and the context to prove it in."""
         if name in self.functions:
             return self.functions[name], self
         imported = self.resolver.imported(self.names, name)
@@ -64,8 +63,6 @@ class Context:
 
 
 class SharedModule:
-    """One `tests/_*.py` file a control imported a callee out of."""
-
     def __init__(self, tree, label, context):
         self.tree = tree
         self.label = label
@@ -76,7 +73,9 @@ class SharedModule:
         """The module at `path`, or None when it cannot be read whole.
 
         An unreadable file is a refusal and not an empty module: "nothing
-        found" and "nothing to look at" answer a subset check alike.
+        found" and "nothing to look at" answer a subset check alike. The
+        three failures are separate arms, and the one the control plants a
+        file for is the one a narrowed `except` drops.
         """
         try:
             tree = ast.parse(path.read_text(encoding='utf-8'))
@@ -93,23 +92,18 @@ class SharedModule:
 
 
 class Import:
-    """A callee resolved out of a shared helper module."""
-
     def __init__(self, module, function):
         self.module = module
         self.function = function
 
 
 class SharedResolver:
-    """The shared-helper imports of one file, and the files they name."""
-
     def __init__(self, root, hops=MAX_SHARED_HOPS):
         self.root = root
         self.hops = hops
         self.modules = {}
 
     def child(self):
-        """The resolver one hop further from the control that started it."""
         return SharedResolver(self.root, self.hops - 1)
 
     def _module(self, path):
@@ -119,7 +113,6 @@ class SharedResolver:
         return self.modules[path]
 
     def imported(self, names, name):
-        """The imported callee `name` binds, or None to keep refusing."""
         if self.hops < 1:
             return None
         path = shared_helper_path(names, name, self.root)
@@ -136,13 +129,11 @@ def reached_functions(entry, scopes):
     """The names of the module-level scopes `entry` reaches.
 
     A name reaches, not only a callee: `sorted(items, key=_evil)` passes
-    the function as a value, and a definition the call names is reached
-    whichever way it names it. A class is a scope the reached region can
-    name, and its body is judged.
-
+    the function as a value, and a class is a scope the region can name.
     What the entry does not name is not returned, and neither is a nested
     scope: those are regions of a reached function, and
-    `tests/_control_writes.py` judges them from the name set this returns.
+    `tests/_control_writes.py` judges them from the name set returned
+    here. A callback or a class body that is not reached is not judged.
     """
     reached = {entry.name}
     pending = [entry]
@@ -156,4 +147,3 @@ def reached_functions(entry, scopes):
                 reached.add(node.id)
                 pending.append(scopes[node.id])
     return reached
-
