@@ -12,6 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from test_tab_routing_js import _runtime_and_guard  # noqa: E402
+from _jsroute_controls import (  # noqa: E402
+    _family_observations, _focus_program)
 
 
 _SEND = "send('focus-tab', { tab: chromeTab });\n"
@@ -139,19 +141,6 @@ _FAMILIES = [
 ]
 
 
-def _program(body, promotes):
-    seed = 'ordinary' if promotes else 'extCmd'
-    return ("let send = " + seed + ";\n"
-            + body.replace('%S', 'extCmd' if promotes else 'ordinary')
-            + _SEND)
-
-
-def _observed(tmp, name, promotes):
-    path = Path(tmp) / name
-    return [(label, *_runtime_and_guard(_program(body, promotes), path))
-            for label, body in _FAMILIES]
-
-
 def test_promoting_reaches_are_never_silent(tmp):
     """No promoting spelling may route at runtime with a clean guard."""
     expected = [
@@ -211,7 +200,8 @@ def test_promoting_reaches_are_never_silent(tmp):
         ('copy-spread-argument', True, True),
         ('copy-entries-loop', True, True),
     ]
-    observed = _observed(tmp, 'reach-promote.js', True)
+    observed = _family_observations(
+        tmp, 'reach-promote.js', True, _FAMILIES)
     assert not [row for row in observed if row[1] and not row[2]], observed
     assert observed == expected, observed
 
@@ -277,7 +267,8 @@ def test_demoting_reaches_keep_their_verdicts(tmp):
         ('copy-spread-argument', False, True),
         ('copy-entries-loop', False, True),
     ]
-    observed = _observed(tmp, 'reach-demote.js', False)
+    observed = _family_observations(
+        tmp, 'reach-demote.js', False, _FAMILIES)
     assert not [row for row in observed if row[1] and not row[2]], observed
     assert observed == expected, observed
 
@@ -297,7 +288,7 @@ def test_factory_accessor_pair_answers_the_getter(tmp):
     """
     path = Path(tmp) / 'factory-pair.js'
     observed = [(promotes, *_runtime_and_guard(
-        _program(_PAIR, promotes), path)) for promotes in (True, False)]
+        _focus_program(_PAIR, promotes), path)) for promotes in (True, False)]
     assert observed == [(True, True, True), (False, False, True)], observed
 
 
