@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """The poll's ramp pause, pinned to the remaining window on the clock."""
-import asyncio
 import importlib.util
 import sys
 import time
@@ -9,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _mcp_poll_outcome import _poll_outcome  # noqa: E402
 from _mcp_transport_probes import ClientProbe, clock_script  # noqa: E402
 
 DEPS = importlib.util.find_spec('httpx') is not None
@@ -27,13 +27,6 @@ def _session(transport, token='mcptok', url='http://127.0.0.1:18001'):
         'mcp_poll_pause_token_' + str(time.time_ns()),
         default=token)
     return transport.BridgeSession(url, token_var)
-
-
-def _capture(coroutine):
-    try:
-        return asyncio.run(coroutine)
-    except Exception as failure:  # noqa: BLE001
-        return f'raised {type(failure).__name__}: {failure}'
 
 
 def test_poll_caps_the_ramp_pause_at_the_remaining_window(tmp):
@@ -59,7 +52,7 @@ def test_poll_caps_the_ramp_pause_at_the_remaining_window(tmp):
     session.monotonic = clock_script(
         100.0, 100.0499, 100.0499, 100.0499, 100.0499, 100.5)
 
-    result = _capture(session.poll_result(
+    result = _poll_outcome(session.poll_result(
         '', 0.05, expect_id='command', expect_delivery='wanted'))
 
     expected = 'raised TimeoutError: no result within 0.05s'

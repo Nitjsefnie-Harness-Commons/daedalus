@@ -384,6 +384,7 @@
 !/tests/_mcp_import_fixtures.py
 !/tests/_mcp_lambda_sweep.py
 !/tests/_mcp_load.py
+!/tests/_mcp_poll_outcome.py
 !/tests/_mcp_selection_fold.py
 !/tests/_mcp_selection_sweep.py
 !/tests/_mcp_tool_commands.py
