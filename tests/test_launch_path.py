@@ -311,6 +311,29 @@ def test_the_launch_path_still_resolves(tmp):
                                                    'resolving its own names')
 
 
+def test_a_name_two_on_path_modules_declare_still_refuses(tmp):
+    """The AMBIGUITY limb, pinned separately from the declaration limb.
+
+    `body_named` resolves only when exactly ONE on-path module declares the
+    name, and the control above can only see the first half of that: it
+    fails when a name resolves that should not, and an ambiguity guard
+    removed leaves every such name unresolved, so it stays green. `if owners`
+    for `len(owners) == 1` is that mutant — `_run` then resolves to
+    `_boundary.py`'s, which is a different function from the one the
+    `_child_parameters` derivation bound it through.
+    """
+    del tmp
+    paths = census.path_functions(TESTS)
+    declared_by = {name: [relative for relative, in_path in paths.items()
+                          if name in in_path]
+                   for name in ('_run',)}
+    assert len(declared_by['_run']) > 1, (
+        'the shipped tree no longer declares `_run` in two on-path modules, '
+        'so this control no longer pins the ambiguity limb: '
+        f'{sorted(paths)}')
+    assert path.body_named('_run') is None
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='launchpath_')
