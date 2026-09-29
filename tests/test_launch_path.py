@@ -264,6 +264,53 @@ def test_no_census_module_binds_a_launcher_off_the_subprocess_module(tmp):
     assert not offenders, '\n'.join(offenders)
 
 
+def _owner_of(name, body):
+    """The module `body_named` resolved `name` into."""
+    return next((relative for relative, bodies in path.bodies().items()
+                 if bodies.get(name) is body), None)
+
+
+def test_a_name_resolves_only_where_its_module_declares_it(tmp):
+    """A bare name resolves to a DECLARED path function, not to a
+    definition that merely sits in a module on the path.
+
+    `read`, `poll` and `close` are each defined in several modules, several
+    of them on the path, and in none of them is the name a path function.
+    Resolving one of them hands `_positional_deadline_faults` a signature
+    that belongs to an unrelated definition, and the guard then reads a
+    deadline in an argument the tree never wrote as one. Which name
+    collides is a coincidence of today's modules; the property is that a
+    definition the owning module does not DECLARE is not resolvable at all.
+    """
+    del tmp
+    paths = census.path_functions(TESTS)
+    undeclared = []
+    for name in {name for bodies in path.bodies().values()
+                 for name in bodies}:
+        body = path.body_named(name)
+        if body is None:
+            continue
+        owner = _owner_of(name, body)
+        if name not in paths.get(owner, ()):
+            undeclared.append(f'{name} -> {owner}')
+    assert not undeclared, '\n'.join(sorted(undeclared))
+
+
+def test_the_launch_path_still_resolves(tmp):
+    """The other direction: a declared path function is still found.
+
+    A lookup that refuses everything is green against the control above, so
+    the names the census actually resolves are named here. The derivation
+    is driven against the shipped tree first, because the controls above
+    leave the module-level path holding a tree they planted.
+    """
+    del tmp
+    census.path_functions(TESTS)
+    for name in ('run_node_program', 'run_gate', 'cleanup_process_tree'):
+        assert path.body_named(name) is not None, (name, 'the path stopped '
+                                                   'resolving its own names')
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='launchpath_')

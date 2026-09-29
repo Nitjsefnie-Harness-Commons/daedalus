@@ -425,21 +425,24 @@ def bodies():
 
 
 def body_named(name):
-    """A parsed function body by bare name, or None.
+    """A DECLARED path function's body by bare name, or None.
 
-    Names are not unique across the tree, so a name several modules define
-    resolves to the one on the launch path when exactly one module there has
-    it; a name no launcher module has is not a path function and the
-    deadline it might carry is not this audit's subject.
+    The holder set is the modules that DECLARE `name` among their own
+    `in_path` functions, which is the same question `_module_owner` asks
+    for a call site. Membership of `_KNOWN` alone is not the question: a
+    module is on the path for the function the closure reached, and it
+    defines whatever else it defines. A name resolved on that looser
+    question is a call to a function this audit is not about, and the
+    signature read off it can discharge — or invent — a deadline the tree
+    never wrote. The `LAZY_MODULES` / `CHILD_ENDING_MODULES` stem clauses
+    this replaces admitted every name those modules define, which is how
+    `assert_gate_clean` and `require_node` — named in `seed_functions` as
+    NOT on the path — became resolvable. All three modules are on the path
+    for their own declared functions already, so gating on `in_path` loses
+    nothing they legitimately own.
     """
-    holders = [bodies for module, bodies in _BODIES.items()
-               if name in bodies
-               and (module in _KNOWN
-                    or module.rsplit('/', 1)[-1] in LAZY_MODULES
-                    or module.rsplit('/', 1)[-1] in CHILD_ENDING_MODULES)]
-    if len(holders) != 1:
-        return None
-    return holders[0][name]
+    owner = _module_owner(name)
+    return _BODIES[owner][name] if owner is not None else None
 
 
 def parameters_for(relative):
