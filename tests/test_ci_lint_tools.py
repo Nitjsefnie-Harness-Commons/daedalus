@@ -32,10 +32,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _suite_jobs import (  # noqa: E402
+    SUITE_RUNNERS, WORKFLOW_DIR, _ordered_job_runs, _workflow_jobs)
 from _wfgraph import _job_names  # noqa: E402
-from _yamlsteps import complete_job_mapping  # noqa: E402
-from test_type_errors import (  # noqa: E402
-    SUITE_RUNNERS, WORKFLOW_DIR, _workflow_jobs)
 
 ROOT = _util.ROOT
 # The step every suite-running job carries, and the name the installer writes
@@ -70,13 +69,6 @@ def _suite_jobs():
             for entry in _workflow_jobs(runner)]
 
 
-def _job_runs(workflow, job):
-    """The ordered `run:` values of every step in one workflow job."""
-    mapping = complete_job_mapping(workflow, job)
-    assert mapping is not None, f'the workflow has no {job} job'
-    return [step.get('run', '') for step in mapping['steps']]
-
-
 def _door_jobs():
     """`(workflow, job)` for every job whose `run:` reaches the suite tree.
 
@@ -94,7 +86,7 @@ def _door_jobs():
         workflow = source.read_text(encoding='utf-8')
         for job in _job_names(workflow):
             if any(SUITE_DOOR.search(run)
-                   for run in _job_runs(workflow, job)):
+                   for run in _ordered_job_runs(workflow, job)):
                 found.add((source.name, job))
     return found
 

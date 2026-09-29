@@ -18,8 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ratchet_fixture import _git, _normalised  # noqa: E402
-from _wfgraph import _job_names  # noqa: E402
-from _yamlsteps import complete_job_mapping  # noqa: E402
+from _suite_jobs import (  # noqa: E402
+    SUITE_RUNNERS, _workflow_jobs)
 
 ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -29,12 +29,8 @@ THRESHOLDS_SOURCE = ROOT / '.github' / 'ci-thresholds.json'
 # imported: the reserved set's python limb is definitions-only, so this
 # Assign is invisible to the control that would settle the question.
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
-WORKFLOW_DIR = ROOT / '.github' / 'workflows'
 CONFIG_NAME = 'pyrightconfig.tests.json'
 RATCHET_RUN = 'python3 scripts/ci/type_error_baseline.py'
-# Both runners discover suites by glob, so either one puts this suite in the
-# job's scope whether or not the job names it.
-SUITE_RUNNERS = ('run_tests.py', 'coverage_suites.py')
 INSTALL_DEV = 'pip install -r requirements-dev.txt'
 
 
@@ -104,31 +100,6 @@ def _clean():
 
 def _write(repo, rel, content):
     (repo / rel).write_text(content, encoding='utf-8')
-
-
-def _job_runs(workflow, job):
-    """The ordered `run:` values of every step in one workflow job."""
-    mapping = complete_job_mapping(workflow, job)
-    assert mapping is not None, f'the workflow has no {job} job'
-    return [step.get('run', '') for step in mapping['steps']]
-
-
-def _workflow_jobs(marker):
-    """Every job in every workflow with a step whose `run:` names `marker`.
-
-    Read off what the jobs run, not off a list of their names: a job that
-    globs the suites belongs to this control whichever workflow file it was
-    added to, and a control that could only see one file was exactly the
-    defect a third job in a second file walked past.
-    """
-    found = []
-    for source in sorted(WORKFLOW_DIR.glob('*.yml')):
-        workflow = source.read_text(encoding='utf-8')
-        for job in _job_names(workflow):
-            runs = _job_runs(workflow, job)
-            if any(marker in run for run in runs):
-                found.append((source.name, job, runs))
-    return found
 
 
 def test_the_ratchet_runs_in_ci_after_the_checker_is_installed(tmp):
