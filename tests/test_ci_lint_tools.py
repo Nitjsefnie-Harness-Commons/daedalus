@@ -508,7 +508,9 @@ def _mechanism_residue(sources=None):
     none, answered by more than one, or held in a share the tree no longer
     derives. `sources` is the seam the derivation already has, so a suite
     that skips on a tool no mechanism answers is asked about without planting
-    a file in `tests/`.
+    a file in `tests/`; over a synthetic source only the residue arm means
+    anything, because a module that skips on one tool leaves every other
+    mechanism's entry looking stale.
     """
     skipped, _present = (_tool_roles() if sources is None
                          else _derive_tool_roles(sources))
