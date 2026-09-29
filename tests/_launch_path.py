@@ -427,19 +427,23 @@ def bodies():
 def body_named(name):
     """A DECLARED path function's body by bare name, or None.
 
-    The holder set is the modules that DECLARE `name` among their own
-    `in_path` functions, which is the same question `_module_owner` asks
-    for a call site. Membership of `_KNOWN` alone is not the question: a
-    module is on the path for the function the closure reached, and it
-    defines whatever else it defines. A name resolved on that looser
-    question is a call to a function this audit is not about, and the
-    signature read off it can discharge — or invent — a deadline the tree
-    never wrote. The `LAZY_MODULES` / `CHILD_ENDING_MODULES` stem clauses
-    this replaces admitted every name those modules define, which is how
-    `assert_gate_clean` and `require_node` — named in `seed_functions` as
-    NOT on the path — became resolvable. All three modules are on the path
-    for their own declared functions already, so gating on `in_path` loses
-    nothing they legitimately own.
+    The holder set is the modules whose `in_path` contains `name`, not
+    every module on the path that defines it: a module is on the path for
+    the function the closure reached, and it defines whatever else it
+    defines. A name resolved on the looser question hands
+    `_positional_deadline_faults` a signature belonging to an unrelated
+    definition, and the guard then reads a deadline in an argument the tree
+    never wrote as one. The seeded and child-ending modules are on the
+    path for their own declared functions already, so gating on `in_path`
+    loses nothing they legitimately own.
+
+    `in_path` is a declaration for the caller closure only: the callee
+    closure admits a module whole (`known[relative] = set(functions)`), so
+    for `tests/_processtree.py` it names every function the module defines
+    and a name resolved there need not be one the closure reached. That is
+    a pinned scope decision, not a gap — the control
+    `test_the_module_that_ends_the_child_is_on_the_path` puts
+    `_processtree.py` IN and `_util.py` OUT.
     """
     owner = _module_owner(name)
     return _BODIES[owner][name] if owner is not None else None

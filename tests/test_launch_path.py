@@ -274,13 +274,13 @@ def test_a_name_resolves_only_where_its_module_declares_it(tmp):
     """A bare name resolves to a DECLARED path function, not to a
     definition that merely sits in a module on the path.
 
-    `read`, `poll` and `close` are each defined in several modules, several
-    of them on the path, and in none of them is the name a path function.
-    Resolving one of them hands `_positional_deadline_faults` a signature
-    that belongs to an unrelated definition, and the guard then reads a
-    deadline in an argument the tree never wrote as one. Which name
-    collides is a coincidence of today's modules; the property is that a
-    definition the owning module does not DECLARE is not resolvable at all.
+    `read`, `poll` and `close` are each defined in several modules, and in
+    exactly one of those the name is not a path function — which is the one
+    the looser lookup picked. Resolving it hands `_positional_deadline_faults`
+    a signature belonging to an unrelated definition, and the guard reads a
+    deadline in an argument the tree never wrote as one. Which names collide
+    is a coincidence of today's modules; the property is that a definition
+    the owning module does not declare is not resolvable at all.
     """
     del tmp
     paths = census.path_functions(TESTS)
@@ -300,9 +300,9 @@ def test_the_launch_path_still_resolves(tmp):
     """The other direction: a declared path function is still found.
 
     A lookup that refuses everything is green against the control above, so
-    the names the census actually resolves are named here. The derivation
-    is driven against the shipped tree first, because the controls above
-    leave the module-level path holding a tree they planted.
+    the names the census actually resolves are named here. The shipped tree
+    is re-derived first, because the controls above leave the module-level
+    path holding a tree they planted.
     """
     del tmp
     census.path_functions(TESTS)
@@ -312,15 +312,13 @@ def test_the_launch_path_still_resolves(tmp):
 
 
 def test_a_name_two_on_path_modules_declare_still_refuses(tmp):
-    """The AMBIGUITY limb, pinned separately from the declaration limb.
+    """The AMBIGUITY limb, pinned apart from the declaration limb.
 
-    `body_named` resolves only when exactly ONE on-path module declares the
-    name, and the control above can only see the first half of that: it
-    fails when a name resolves that should not, and an ambiguity guard
-    removed leaves every such name unresolved, so it stays green. `if owners`
-    for `len(owners) == 1` is that mutant — `_run` then resolves to
-    `_boundary.py`'s, which is a different function from the one the
-    `_child_parameters` derivation bound it through.
+    The control above fails when a name resolves that should not, and
+    removing the ambiguity guard leaves every ambiguous name unresolved —
+    the same verdict, so it stays green. `if owners` for
+    `len(owners) == 1` is that mutant: `_run` then resolves to
+    `_boundary.py`'s.
     """
     del tmp
     paths = census.path_functions(TESTS)
