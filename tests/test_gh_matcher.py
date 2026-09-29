@@ -8,11 +8,11 @@ true - `NOT_RATE_LIMITED` matches today, because an underscore is a
 boundary to the anchor. It also says the separator between them is
 anything that is neither a letter nor a digit, and no row said so.
 
-Every control here drives the real modules through the real `graphql`
-and a real `gh` process. The strings are carried on the body of an
-answer that did not deliver, because that is the only carrier that reads
-text; a delivered answer is not refused whatever it carries, and the
-rows that say so are in `tests/test_gh_body_shapes.py`.
+Every control here drives the real `graphql` and a real `gh` process.
+The strings ride the body of an answer that did not deliver, because
+that is the only carrier that reads text; a delivered answer is not
+refused whatever it carries, and those rows are in
+`tests/test_gh_body_shapes.py`.
 """
 import sys
 from pathlib import Path
@@ -53,13 +53,11 @@ def _refused_by(mod, text, tmp):
 
 
 def test_a_word_that_merely_ends_in_these_two_is_not_a_refusal(tmp):
-    """The left anchor, which the module's comment claims and nothing held.
-
-    "separate limits" contains "rate limit" from the fourth letter of the
-    first word onward, and a reader that looked for the two words
-    anywhere would sleep on it. The anchor requires a character that is
-    neither a letter nor a digit before them, so the word has to be
-    there, not merely end there.
+    """The left anchor, which the module's comment claims and nothing
+    held. "separate limits" contains "rate limit" from the fourth letter
+    of the first word onward, and a reader looking for the two words
+    anywhere would sleep on it: the anchor requires a character that is
+    neither a letter nor a digit before them.
     """
     mod = _client()
     assert _refused_by(mod, 'The corporate limits are higher on annual '
@@ -69,8 +67,7 @@ def test_a_word_that_merely_ends_in_these_two_is_not_a_refusal(tmp):
 
 
 def test_the_separator_between_them_is_anything_but_a_word_character(tmp):
-    """The separator class, one row per spelling GitHub has used and one
-    per shape a JSON body can carry.
+    """The separator class, one row per spelling GitHub has used.
 
     A match on the two words with a space between them would catch every
     English message and none of the identifiers, which is the half of
