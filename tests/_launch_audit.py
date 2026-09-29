@@ -575,7 +575,14 @@ def launch_refusals(source, here, bound_sink=None):
         bounded call, whatever it calls and whatever the timeout reads.
         That is the whole of the second arm, and a receiver
         `proved_fixed` declines is reported at `unreadable`, so the rule
-        demands a refusal or an allowance row for it.
+        demands a refusal or an allowance row for it. A receiver reached
+        through an import name held in a variable, through a class
+        attribute, or through a run-time namespace is three of those
+        refusals, and the three rows that hold them —
+        `machinery-reached-by-assignment-is-unproved`,
+        `unproved-attribute-receiver-is-reported` and
+        `a-bare-name-receiver-over-a-bound-name` — go red if any of the
+        three shapes stops being reported.
         """
         func = node.func
         if not any(keyword.arg == 'timeout' or keyword.arg is None
