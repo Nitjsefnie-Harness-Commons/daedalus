@@ -372,6 +372,7 @@
     "_evaluation_scopes": {"python": ["tests/_coverage_scopes.py"]},
     "_event": {"python": ["tests/_classifier_calls.py"]},
     "_event_option_keys": {"python": ["tests/_workflows.py"]},
+    "_events": {"python": ["tests/_dashqueue.py"]},
     "_execution_callable": {"python": ["tests/_cli_arg_audit_resolver.py"]},
     "_expand_starred_args": {"python": ["tests/_pyroute_live.py"]},
     "_expanded_elts": {"python": ["tests/_mcp_selection_fold.py"]},

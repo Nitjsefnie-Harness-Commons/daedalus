@@ -11,30 +11,20 @@ The command directory is a parameter rather than a module global, so every
 route that publishes a dashboard event is pinned against the directory it was
 handed: a route that published somewhere else would still answer 200.
 """
-import json
 import os
 import subprocess
 import sys
 import threading
 import types
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
+from _dashqueue import _events  # noqa: E402
 
 
 def _load(name):
     return _util.load(
         _util.ROOT / 'daedalus_bridge' / 'tab_registry.py', name)
-
-
-def _events(cmd_dir, token):
-    """Every dashboard event the routes published under `cmd_dir`."""
-    queue = Path(cmd_dir) / f'{token}_dashboard'
-    if not queue.is_dir():
-        return []
-    return [json.loads(path.read_text(encoding='utf-8'))
-            for path in sorted(queue.iterdir())]
 
 
 def test_normalized_tab_id_accepts_strings_and_integers(_tmp):
