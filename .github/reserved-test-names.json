@@ -1677,6 +1677,7 @@
     "truncating_front_end": {"python": ["tests/_frontend.py"]},
     "turn": {"javascript": ["tests/_debugger_attachment_harness.py"]},
     "type_param_names": {"python": ["tests/_receiver_resolution.py"]},
+    "type_params_of": {"python": ["tests/_receiver_resolution.py"]},
     "types": {"python": ["tests/_dashsection_wave1.py"]},
     "unbound_containers": {"python": ["tests/_jsroute_net.py"]},
     "uncovered_receiver_mentions": {"python": ["tests/_jsroute_net.py"]},
