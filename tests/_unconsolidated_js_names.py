@@ -10,7 +10,7 @@ the same comparison: a row may name any declaration the merge base
 already carried, and may NOT name one this branch added. It is keyed on
 the DECLARATION rather than on the (path, name) pair, so a second, new
 declaration of an already-tabled name in the same file is refused — a
-pair-keyed rule covers it for free, because the first declaration's row
+pair-keyed rule hides it for free, because the first declaration's row
 already matches the pair.
 
 It reads the base tree's own declarations rather than a list of the
