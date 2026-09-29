@@ -109,12 +109,21 @@ def _constants(tree):
 
 
 def _tool_name(node, bound):
-    """The tool a `shutil.which` call names, or None for any other call."""
+    """The tool a `shutil.which` call names, or None for any other call.
+
+    A call that passes a keyword is scoped to a directory the caller chose,
+    so it says what is on THAT path and nothing about the machine the suite
+    runs on. A fixture that writes a bogus binary and then resolves it proves
+    the resolver works; reading that as a requirement on the machine is how
+    a control decides a tool needs no install because a test built its own.
+    """
     if not (isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == 'which'
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == 'shutil'):
+        return None
+    if node.keywords:
         return None
     argument = node.args[0] if node.args else None
     if isinstance(argument, ast.Name):
@@ -198,7 +207,7 @@ def _names_subprocess(func):
         'subprocess', 'sp')
 
 
-def _role_of_lookup(tree, parent, node, tool, skipped, present):
+def _role_of_lookup(parent, node, tool, skipped, present):
     """Record how the suite that wrote this `which` call treats absence."""
     current = node
     while current in parent:
@@ -212,14 +221,34 @@ def _role_of_lookup(tree, parent, node, tool, skipped, present):
         if isinstance(current, ast.stmt):
             if (isinstance(current, ast.Assign)
                     and isinstance(current.targets[0], ast.Name)):
-                _role_of_binding(tree, current.targets[0].id, tool, skipped,
-                                 present)
+                _role_of_binding(_scope(parent, current),
+                                 current.targets[0].id, tool, skipped, present)
             return
 
 
-def _role_of_binding(tree, name, tool, skipped, present):
-    """Record how the suite guards the tool bound to `name`."""
-    parts = list(ast.walk(tree))
+def _scope(parent, node):
+    """The function or module the statement sits in, and no wider.
+
+    A helper that reuses one name for several lookups is common, and a
+    guard in another function is that other lookup's guard. Reading the
+    whole module instead attributes one tool's skip to another tool, which
+    is how a control ends up believing a binary nothing has to install.
+    """
+    current = node
+    while current in parent:
+        current = parent[current]
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return current
+        if isinstance(current, ast.Module):
+            return current
+    return None
+
+
+def _role_of_binding(scope, name, tool, skipped, present):
+    """Record how the suite guards the tool bound to `name` in that scope."""
+    if scope is None:
+        return
+    parts = list(ast.walk(scope))
     if any(_skips(part.body) for part in parts
            if isinstance(part, ast.If) and _none_test(part.test, name, True)):
         skipped.add(tool)
@@ -305,7 +334,7 @@ def _derive_tool_roles():
         for node in ast.walk(tree):
             tool = _tool_name(node, bound)
             if tool is not None:
-                _role_of_lookup(tree, parent, node, tool, skipped, present)
+                _role_of_lookup(parent, node, tool, skipped, present)
     return skipped, present
 
 
