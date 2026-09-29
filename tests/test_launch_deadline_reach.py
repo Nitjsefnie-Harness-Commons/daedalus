@@ -5,8 +5,9 @@
 `timeout` parameter twice: on the tree's own bindings, which is
 `literal_bindings`, and — where the receiver is a parameter, which no local
 writing can prove — at every call site of the function that owns it, in
-this module. The second is what recovers `tests/test_real_browser_harness.py:131`,
-and `tests/test_launch_real_files.py` holds that site over a SHIPPED file.
+this module. The second is what recovers the `test_real_browser_harness.py`
+site at line 131, and `tests/test_launch_real_files.py` holds it over a
+SHIPPED file.
 
 This is the arm's own controls, and the false-green direction is the whole
 of it. A rule that discharges more than its proof is invisible to every
@@ -155,6 +156,24 @@ def run(recorded):
 def go():
     return subprocess.run([])
 ''',
+    'a-call-site-written-at-module-scope': '''def build(recorded):
+    def run(args, *, timeout):
+        recorded.append((list(args), timeout))
+        return None
+
+    return run
+
+
+def go():
+    try:
+        pass
+    except ValueError as recorded:
+        pass
+
+
+recorded = []
+RUN = build(recorded)
+''',
     'a-nested-helper-that-shadows-the-name': '''def build(recorded):
     def run(args, *, timeout):
         recorded.append((list(args), timeout))
@@ -173,9 +192,10 @@ def go():
 }
 
 # The two call-site SPELLINGS the arm reads, each with the refusal beside
-# its discharge so neither line is untested: a keyword fills a keyword-only
-# parameter, and a call written at module scope has no enclosing function
-# to read a `Name` argument's writings from.
+# its discharge so neither line is untested. Both are decided by the ARM
+# rather than by `literal_bindings`: the writing that proves the `Name` is
+# inside a function, and a function's own `ast.arg` is walked before it, so
+# the module-wide table cannot prove the name and the arm has to.
 SPELLINGS = {
     'keyword': ('''def build(*, recorded):
     def run(args, *, timeout):
@@ -200,7 +220,7 @@ def go(items):
     recorded = items
     return build(recorded=recorded)
 '''),
-    'module-scope': ('''def build(recorded):
+    'positional-only': ('''def build(recorded, /):
     def run(args, *, timeout):
         recorded.append((list(args), timeout))
         return None
@@ -208,9 +228,10 @@ def go(items):
     return run
 
 
-recorded = []
-RUN = build(recorded)
-''', '''def build(recorded):
+def go():
+    recorded = []
+    return build(recorded)
+''', '''def build(recorded, /):
     def run(args, *, timeout):
         recorded.append((list(args), timeout))
         return None
@@ -218,9 +239,9 @@ RUN = build(recorded)
     return run
 
 
-child = object()
-recorded = child
-RUN = build(recorded)
+def go(items):
+    recorded = items
+    return build(recorded)
 '''),
 }
 
@@ -387,11 +408,15 @@ def test_a_container_the_caller_built_from_a_launch_is_still_refused(tmp):
 def test_a_spread_call_is_still_refused(tmp):
     """`*recorded` and `**{'recorded': ...}` name no position to read.
 
-    A spread's shape is decided by a runtime length the walk cannot know,
-    so an index into `call.args` lands on the star rather than on the value
-    behind it. `_binding_names._spread_args` answers it for both spellings
-    and both are here, because a rule that read one of them would still be
-    right by accident on the other.
+    Both are here because they are refused by DIFFERENT conditions, which
+    is the point the brief's own condition list did not settle. A
+    `Starred` in front of the argument is an `ast.Starred` where a
+    container would be, so the container condition refuses it; a `**`
+    fills no positional slot at all, so the omitted-argument condition
+    refuses it. A mutation table then measured that an explicit
+    `_spread_args` check on top of the two changed no verdict anywhere --
+    it was an arm nothing could distinguish from its absence, so it is not
+    in the rule, and these two rows are what hold the refusal that is.
     """
     del tmp
     for label in ('a-spread-positional', 'a-spread-keyword'):
@@ -463,6 +488,20 @@ def test_a_call_site_that_is_itself_a_launch_is_still_refused(tmp):
     _assert_refuses('a-call-site-that-is-itself-a-launch')
 
 
+def test_a_call_site_written_at_module_scope_is_still_refused(tmp):
+    """The arm reads an enclosing FUNCTION, and this call is in none.
+
+    Reading the whole tree at a module-scope call site is WIDER than the
+    table the arm sits behind, not narrower: `literal_bindings` also vetoes
+    an `except ... as`, a `match` capture, an import and a `def` name, and
+    this join carries none of those. So a call outside every function is
+    a refusal rather than a second reading of the module, and the row
+    stays whatever the module-wide table says.
+    """
+    del tmp
+    _assert_refuses('a-call-site-written-at-module-scope')
+
+
 def test_a_nested_helper_that_shadows_the_name_is_still_refused(tmp):
     """The `ast.arg` veto, applied inside the caller's OWN scope.
 
@@ -491,13 +530,14 @@ def test_a_receiver_that_is_not_a_parameter_is_still_refused(tmp):
 
 
 def test_both_call_site_spellings_are_read(tmp):
-    """A keyword-only slot, and a call written at module scope.
+    """A keyword-only slot, and a positional-only one.
 
     The keyword row is the only thing that reaches the `'kw'` branch of the
-    slot reader, and the module row is the only thing that reaches the
-    "no enclosing function" reading, which is the wider of the two and so
-    the one that refuses more. Each carries its refusal beside it, because
-    a spelling that only ever discharges is a spelling nobody checked.
+    slot reader and the positional-only row the `posonlyargs` half of the
+    positional one; neither is reached by a `def f(x)` signature, so a slot
+    reader that ignored either would pass every other row here. Each
+    carries its refusal beside it, because a spelling that only ever
+    discharges is a spelling nobody checked.
     """
     del tmp
     for label, (discharged, refused) in SPELLINGS.items():
