@@ -106,10 +106,10 @@ would have been a repo-wide CI outage.
 The band above `MIN_RECORDED_SKEW` is the price of the tier and the
 price is real: the skew floor is the one condition that tells a BIASED
 recorded set from a DRIFTED one, so a biased file still above it is
-PUBLISHED with a plan up to several times the tree's load -- a priced
-acceptance rather than an oversight, because every suite in that plan
-still runs and a lopsided matrix and no matrix are not comparable
-outcomes -- ruled by the maintainer, and `python3
+PUBLISHED with a plan that can understate the tree's load by several
+times -- a priced acceptance rather than an oversight, because every
+suite in that plan still runs and a lopsided matrix and no matrix are
+not comparable outcomes -- ruled by the maintainer, and `python3
 scripts/ci/timings_bounds.py` prints the band the shipped file's own
 recorded set admits, at every truncation, because a multiplier measured
 over a tree moves with the tree and a stale one written here would rot
