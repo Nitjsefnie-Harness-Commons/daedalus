@@ -22,11 +22,18 @@ every module that hands it one can be read.
 The failure direction is unchanged and is the whole of the discipline: this
 arm only ever turns a `return True` into a `return False`, and only on a
 proof a reader can state out loud. A receiver that is not a parameter, a
-parameter with no call site in this module, a spread call, an omitted
-argument, an argument the caller does not write as a container, a `Name`
-with a non-literal writing in the caller, and a container the caller built
-out of a launch are each a refusal, and each has a control of its own in
-`tests/test_launch_deadline_reach.py`.
+parameter with no call site in this module, a call site written outside
+every function, an omitted argument, an argument the caller does not write
+as a container, a `Name` with a non-literal writing in the caller, and a
+container the caller built out of a launch are each a refusal, and each
+has a control of its own in `tests/test_launch_deadline_reach.py`.
+
+A spread is not on that list because it is not a separate decision: a
+`*spread` in front of the argument is an `ast.Starred` where a container
+would be, and a `**` fills no positional slot, so both are refused by the
+two conditions that read the argument. A mutation table measured that --
+deleting an explicit spread check changed no verdict in any suite, which
+is what an unreachable arm looks like from the outside.
 
 What the arm is NOT is complete, and the limit is a boundary rather than a
 gap in the rule: a call from a module the census does not read is not
@@ -37,7 +44,7 @@ reading changed.
 """
 import ast
 
-from _binding_names import _every_use_proven, _spread_args
+from _binding_names import _every_use_proven
 import _launch_path as path
 from _receiver_resolution import (_LITERALS, _live_object, _resolve_dotted)
 
@@ -206,22 +213,23 @@ def _written_as_a_literal(scope, name):
     return verdicts.get(name, False)
 
 
-def _is_a_container(argument, scope, tree, name):
+def _is_a_container(argument, scope, name):
     """Whether the argument written at a call site is a proven container.
 
     Two shapes and no more. The node is a container literal itself, or it
     is a `Name` every one of whose writings in the CALLER's own enclosing
-    scope is one. A module scope is the whole tree, which is the wider of
-    the two readings and therefore the one that refuses more.
+    function is one. There is no third, and a `Name` written at module
+    scope is refused before this is asked: the enclosing function is what
+    the proof is read from, and a call outside every function has none.
     """
     if isinstance(argument, _LITERALS):
         return True
     if not isinstance(argument, ast.Name):
         return False
-    return _written_as_a_literal(tree if scope is None else scope, name)
+    return _written_as_a_literal(scope, name)
 
 
-def _holds_no_child(argument, call, scope, tree, receivers, direct):
+def _holds_no_child(argument, call, scope, receivers, direct):
     """Whether the value a call site passes is not a launched child.
 
     Reused rather than re-derived: the flag `tests/_launch_path.py`
@@ -238,10 +246,9 @@ def _holds_no_child(argument, call, scope, tree, receivers, direct):
         return False
     if not isinstance(argument, ast.Name):
         return True
-    body = scope if scope is not None else tree
-    aliases = path._member_aliases(body, receivers, direct)
+    aliases = path._member_aliases(scope, receivers, direct)
     return argument.id not in path._launch_bound_names(
-        body, receivers, direct, aliases)
+        scope, receivers, direct, aliases)
 
 
 def _parameter_never_holds_a_child(function, receiver, tree, receivers,
@@ -251,7 +258,8 @@ def _parameter_never_holds_a_child(function, receiver, tree, receivers,
     The arm's whole proof, in the order the conditions bite. The receiver
     is a parameter of the judged function or of one enclosing it; the
     owning function is called at least once IN THIS MODULE, because zero
-    call sites prove nothing; every such call is unspread and fills the
+    call sites prove nothing; every such call sits inside a function, so
+    there is an enclosing scope to read a `Name` from; every one fills the
     parameter rather than leaving it to a default; every argument written
     there is a proven container; and no argument is a launched child.
 
@@ -266,14 +274,19 @@ def _parameter_never_holds_a_child(function, receiver, tree, receivers,
     if not sites:
         return False
     for call, scope in sites:
-        if _spread_args(call):
+        if scope is None:
+            # A call written outside every function has no enclosing
+            # function to read a `Name` argument's writings from, and the
+            # module-wide table is not that reading: it carries clauses
+            # this join does not, so reading the whole tree here is WIDER
+            # than the table the arm sits behind rather than narrower.
             return False
         argument = _argument_written_at(call, slot, name)
         if argument is None:
             return False
-        if not _is_a_container(argument, scope, tree, name):
+        if not _is_a_container(argument, scope, name):
             return False
-        if not _holds_no_child(argument, call, scope, tree, receivers, direct):
+        if not _holds_no_child(argument, call, scope, receivers, direct):
             return False
     return True
 
