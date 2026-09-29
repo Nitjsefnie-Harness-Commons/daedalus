@@ -10,8 +10,8 @@ They live here because `_launch_audit.py` is at its size ceiling and
 these are the analyser supporting rather than being it, the same
 relocation issue 1258 made for the arm table. Every guard clause here
 is named in `tests/_launch_arm_records.py` as a non-member, and
-`tests/test_launch_arms.py` sweeps this file beside the two analysers,
-so the claim covers the third file too.
+`tests/test_launch_arms.py` sweeps every file that table names beside
+the two analysers — a set it derives, so the third is counted, not claimed.
 
 The keyword set comes from `inspect.signature` rather than a hand list,
 so a keyword a future interpreter adds is admitted and a misspelling is
