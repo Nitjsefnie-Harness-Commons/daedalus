@@ -60,8 +60,8 @@ def test_the_migrated_control_resolves_and_the_scan_is_not_vacuous(tmp):
 def test_an_imported_helper_that_writes_in_the_repository_is_refused(tmp):
     """(b) the file exists and parses, and its body is still judged."""
     root = Path(tmp)
-    assert control_write_violations(_plant(root, _COPY_HERE, _IMPORT + _OWNED_CALL),
-                                    root) == []
+    owned = _plant(root, _COPY_HERE, _IMPORT + _OWNED_CALL)
+    assert control_write_violations(owned, root) == []
     checkout = _plant(root, _COPY_HERE, _IMPORT + _CHECKOUT_CALL)
     assert control_write_violations(checkout, root) == [
         'tests/_shared.py:3: write_text target path is not control-owned']
