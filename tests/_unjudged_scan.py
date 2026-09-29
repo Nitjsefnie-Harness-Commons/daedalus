@@ -37,6 +37,7 @@ from pathlib import Path
 
 from _imported_calls import module_scopes, reached_functions
 
+
 def _reached_roots(entry, tree):
     """The top-level scopes an entry reaches, and nothing else.
 
