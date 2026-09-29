@@ -177,8 +177,19 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
         errors='replace', env=env)
     request_in = answer.stdin
     assert request_in is not None, 'the fake is launched with a stdin pipe'
+    # The same narrowing for the two reads below: they are pipes this call
+    # asked for, and `Popen` types every stream as optional.
+    answer_out, answer_err = answer.stdout, answer.stderr
+    assert answer_out is not None and answer_err is not None, (
+        'the fake is launched with its output piped')
     try:
         request_in.write('{"query":"items(first: 2)"}')
+        # The close is what tells the fake the request is over - it reads
+        # stdin to end of file - so it cannot be dropped. What cannot be
+        # handed to `communicate` afterwards: it flushes and closes
+        # `self.stdin` itself, and the guard around that catches
+        # BrokenPipeError only, so an already-closed handle raises
+        # ValueError on 3.11 and 3.12 and is tolerated only on 3.13.
         request_in.close()
         entered = _await_entered(fake, answer, 1)
         assert entered, fake.calls()
@@ -192,7 +203,8 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
         assert fake.releases() == [], fake.releases()
         assert len(fake.entered()) == 1, fake.entered()
         fake.open_gate()
-        out, err = answer.communicate(timeout=60)
+        answer.wait(timeout=60)
+        out, err = answer_out.read(), answer_err.read()
         assert answer.returncode == 0, err
         assert 'data' in out, 'the gate withheld the answer'
     finally:
