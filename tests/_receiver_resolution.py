@@ -395,6 +395,12 @@ def literal_bindings(tree):
         elif getattr(node, 'type_params', None):
             for param in type_params_of(node):
                 verdicts[param.name] = False
+    resolved, poison = _reflective(tree)
+    for key, literal in resolved.items():
+        verdicts[key] = verdicts.get(key, True) and literal
+    for base in poison:
+        for key in [k for k in verdicts if k.startswith(f'{base}.')]:
+            verdicts[key] = False
     return frozenset(key for key, ok in verdicts.items() if ok)
 
 
@@ -406,6 +412,51 @@ def type_params_of(node):
     """
     found = getattr(node, 'type_params', None) or ()
     return [param for param in found if getattr(param, 'name', None)]
+
+
+def _reflective(tree):
+    """`key -> is the value a literal`, and the receivers a write POISONS.
+
+    A reflective write either resolves to a key or poisons every
+    attribute key of its receiver, because a disclosed limit may only
+    COST refusals: a form that discharges a live child `main` refuses is
+    a false green, and that is the direction that blocks. A plain
+    `helper(self)` call is not reflective and does not poison — only a
+    writer is, and the clause says so rather than leaving it to be
+    inferred from the absence of a case.
+    """
+    resolved, poison = {}, []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == '__dict__':
+            poison.append(path._dotted_key(node.value))
+    for node in ast.walk(tree):
+        if not path._is_call(node):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == 'vars' and node.args:
+            poison.append(path._dotted_key(node.args[0]))
+        elif ((isinstance(func, ast.Name) and func.id == 'setattr')
+              or (isinstance(func, ast.Attribute)
+                  and func.attr == 'setattr')) and len(node.args) == 3:
+            base = path._dotted_key(node.args[0])
+            name = node.args[1]
+            if isinstance(name, ast.Constant) and isinstance(name.value, str):
+                key = f'{base}.{name.value}' if base else name.value
+                resolved[key] = isinstance(node.args[2], _LITERALS)
+            else:
+                poison.append(base)
+        elif (isinstance(func, ast.Attribute)
+              and func.attr == '__setattr__' and node.args):
+            # The receiver is `args[0]` in the unbound spelling
+            # `object.__setattr__(obj, ...)` and `func.value` in the bound
+            # `obj.__setattr__(...)`, where `args[0]` is the NAME being
+            # set. Reading the argument in both spellings took the name
+            # constant, dotted to '', and dropped the poison: a bound
+            # `self.__setattr__('handles', Popen())` DISCHARGED. Three
+            # arguments is what tells the two spellings apart.
+            target = node.args[0] if len(node.args) == 3 else func.value
+            poison.append(path._dotted_key(target))
+    return resolved, [base for base in poison if base]
 
 
 def _takes_a_timeout(value):
