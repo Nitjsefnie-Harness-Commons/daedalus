@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
+    FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING, REQUESTED_THEN_GRACED,
     coverage_group, coverage_tree, kill_recorded, records, settle_gone)
 
 ROOT = _util.ROOT
@@ -239,14 +240,23 @@ def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
     assert '=== test_passer.py ===' in result.stdout, result.stdout
 
 
-def test_a_runner_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
-    """The runner's kill asks first, so a suite that flushes on SIGTERM does.
+def test_a_runner_wedged_suite_states_the_kill_its_platform_took(tmp):
+    """Which contract the runner gives on THIS platform, asserted as such.
 
-    `pyproject.toml` sets `sigterm = true` so a terminated suite still
-    writes what it measured, and before the tree kill the runner's
-    `terminate()` is what gave it that chance. A runner that SIGKILLs the
-    group first takes it away, and a suite that reports its counts on the
-    way out reports none.
+    POSIX: the request goes to the whole group, a bounded grace follows,
+    and a suite that answers it flushes and reports what it did.
+    `pyproject.toml` sets `sigterm = true` for that, and before the tree
+    kill the runner's `terminate()` is what gave it the chance.
+
+    Windows: one `taskkill /F /T`, a forced termination. Nothing is
+    asked, nothing is given a grace, and the suite cannot flush. That is
+    the pre-branch Windows behaviour -- `_terminate_and_reap` called
+    `process.terminate()`, which is `TerminateProcess` there -- and this
+    branch did not change it.
+
+    Each half refuses the other platform's clause, so a route that
+    silently changed platform is red rather than green for a reason no
+    reader could act on.
     """
     root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
     result = _run_sandbox(
@@ -256,15 +266,22 @@ def test_a_runner_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
     found = records(block)
     assert len(found) == 1, (len(found), block)
     record = found[0].groupdict()
+    if FORCES_WITHOUT_ASKING:
+        assert 'suite was asked to stop and flushed' not in block, block
+        assert FORCED_WITHOUT_GRACE in record['cleanup'], record
+        assert REQUESTED_THEN_GRACED not in record['cleanup'], record
+        assert int(record['returncode']) != 0, record
+        return
     assert 'suite was asked to stop and flushed' in block, block
     assert int(record['returncode']) == 0, record
     # The cleanup has to say the suite TOOK THE REQUEST. The route alone
     # is not enough: the record a suite that ignored the request and was
     # killed produces names the same group and the same escalation.
-    assert 'asked to stop and the suite did' in record['cleanup'], record
+    assert REQUESTED_THEN_GRACED in record['cleanup'], record
+    assert FORCED_WITHOUT_GRACE not in record['cleanup'], record
 
 
-def test_a_flushed_suite_is_still_counted_as_a_pass_and_this_pins_that(tmp):
+def test_a_flushed_suite_is_a_pass_only_where_a_flush_can_happen(tmp):
     """A DECISION, pinned deliberately: a flushed wedge counts as a pass.
 
     `run_tests.py` decides a suite by its returncode and its summary
@@ -276,9 +293,17 @@ def test_a_flushed_suite_is_still_counted_as_a_pass_and_this_pins_that(tmp):
     SPECIFIED requirement rather than an accident, so a future change that
     closes it has to argue with this line.
 
-    The two launchers disagree about it, which is the other half of why
-    this is pinned rather than left implicit. `coverage_suites.py` counts
-    any timed-out suite as failed whatever it reported.
+    The other half is the platform. A flush needs a request to answer, and
+    the Windows route sends none, so there a flushed wedge cannot exist
+    and the suite is reported as what it actually did: failed, with no
+    summary. Asserting the POSIX outcome there would be a red leg that
+    teaches its reader nothing, which is what CI reported on 2026-09-29
+    across all five `windows-latest` cells.
+
+    The two launchers also disagree about a flushed wedge, which is the
+    rest of why this is pinned rather than left implicit.
+    `coverage_suites.py` counts any timed-out suite as failed whatever it
+    reported.
 
     The pull request states the disagreement in its `## Changes` section,
     where the two per-launcher facts live, and the seat's task report
@@ -290,9 +315,16 @@ def test_a_flushed_suite_is_still_counted_as_a_pass_and_this_pins_that(tmp):
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)},
         outer_timeout=_RUNNER_OUTER_S)
+    assert 'SUITE TIMED OUT' in result.stdout, result.stdout
+    if FORCES_WITHOUT_ASKING:
+        assert result.returncode == 1, (result.returncode, result.stdout,
+                                        result.stderr)
+        assert 'test_stoppable.py' in _failed_suites(result.stdout), (
+            result.stdout)
+        assert 'OVERALL: PASS' not in result.stdout, result.stdout
+        return
     assert result.returncode == 0, (result.returncode, result.stdout,
                                     result.stderr)
-    assert 'SUITE TIMED OUT' in result.stdout, result.stdout
     assert 'OVERALL: PASS' in result.stdout, result.stdout
 
 

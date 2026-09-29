@@ -43,6 +43,22 @@ _FAKE_COVERAGE_INIT = """def process_startup(**_kwargs):
 
 SYNTHETIC_PROCESS_START = 'fabricated coverage startup'
 
+# Which kill the launcher will reach on THIS host, read here rather than
+# from the module under test: a control that took the predicate from
+# `suite_bound.py` would agree with it by construction and could not catch
+# a route and a control that disagreed. The predicate is spelled the way
+# the launcher spells it, and the controls branch on the CONTRACT each
+# platform gives rather than on a skip.
+FORCES_WITHOUT_ASKING = sys.platform.startswith('win')
+# The half of a record that is true on every platform: the tree was ended
+# and a signal of some kind reached it.
+TREE_WAS_KILLED = 'taskkill' if FORCES_WITHOUT_ASKING else 'process group'
+# The clause that names the POSIX half's request, and the clause that says
+# the Windows half sent none. A control asserts the one its platform makes
+# and REFUSES the other, so a route that silently changed platform is red.
+REQUESTED_THEN_GRACED = 'asked to stop'
+FORCED_WITHOUT_GRACE = 'no request was sent and no grace was given'
+
 # The whole timeout record, not a prefix of it. A pin that stops before
 # the suite name is satisfied by a sibling occurrence the launcher printed
 # for any suite, so a control that wants the name must match the line: the
