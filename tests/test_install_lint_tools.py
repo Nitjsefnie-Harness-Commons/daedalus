@@ -19,6 +19,7 @@ import hashlib
 import io
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -45,6 +46,9 @@ PINNED = {
 # table does not carry, which is the whole of the first defect.
 WINDOWS_X64 = ('Windows', 'AMD64')
 EXECUTABLE = b'#!/not/really/an/executable\n'
+# The name the control resolves, read through the same constant the
+# installer's own refusal names.
+_ACTIONLINT = 'actionlint'
 # The name a real wheel has, so a refusal about the version can
 # tell a wheel of the pinned version from one of another.
 DEFAULT_WHEEL = 'shellcheck_py-0.11.0.1-py3-none-any.whl'
@@ -58,7 +62,20 @@ SCRIPTS = 'shellcheck_py-0.11.0.1.data/scripts'
 # `actionlint.EXE`, an uppercase extension, never a bare name. The real
 # wheels' names are the property `test_a_wheel_that_carries_the_wrong_binary
 # _is_refused` pins, so this stands in for the wheel and must agree with it.
+# The one place in this file that guesses a host's spelling, and the only
+# one: the name is a fact about the WHEEL, not about this module, so it
+# cannot be derived from the platform and is read from the wheel instead.
 WHEEL_SCRIPTS_NAME = 'shellcheck.exe' if os.name == 'nt' else 'shellcheck'
+
+
+def _is_windows(host):
+    """Whether a `(system, machine)` pair names a Windows host.
+
+    The same predicate the installer branches on, read the same way, so a
+    fixture and the code it drives cannot disagree about which platform
+    this is.
+    """
+    return host[0] == 'Windows'
 
 
 def _installer():
@@ -356,6 +373,39 @@ def test_the_member_name_comes_from_the_wheel_not_from_a_platform_branch(tmp):
             p.name for p in tools.iterdir())
 
 
+def test_the_binary_the_installer_names_on_this_host_is_one_which_can_find(
+        tmp):
+    """The name and the resolver must come from the same platform.
+
+    A run that got past `shellcheck` and then failed on `actionlint` was
+    this, and nothing to do with the install: the fixture stubbed
+    `platform.system()` to say Linux while the process was Windows, so the
+    installer named the binary the POSIX way and the `shutil.which` that
+    then went looking for it followed the Windows rule — a command plus a
+    PATHEXT extension — and found nothing. Stated as a property rather
+    than a platform, so it holds wherever it is run: the binary the
+    installer writes under the HOST's own pair is one this process's
+    `which` can resolve.
+    """
+    tmp = Path(tmp)
+    installer = _installer()
+    host = (installer.platform.system(), installer.platform.machine())
+    destination = tmp / 'tools'
+    destination.mkdir()
+    binary = 'actionlint.exe' if _is_windows(host) else 'actionlint'
+    with _on(*host), mock.patch.dict(
+            os.environ, {'PATH': str(destination) + os.pathsep
+                         + os.environ['PATH']}):
+        written = installer._extract(
+            _release_asset(binary, _is_windows(host)), destination)
+        resolved = shutil.which(_ACTIONLINT, path=os.environ['PATH'])
+    assert resolved == str(written), (
+        f'the installer wrote {written.name!r} on {host[0]} and this host '
+        f'resolves the binary to {resolved!r}; a name and a resolver that '
+        'come from different platforms cannot agree, and the install is '
+        'then correct while the check reads as a failure')
+
+
 def test_the_tool_directory_reaches_this_process_and_not_only_github_path(
         tmp):
     """Why an in-process `shutil.which` can mean anything at all.
@@ -462,17 +512,25 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
     later = tmp / 'path.txt'
     recorded = tmp / 'env.txt'
     payload = _release_asset('actionlint', False)
-    with _on('Linux', 'x86_64'), \
+    # The host's OWN platform pair, not a claim about a different one. A
+    # fixture that stubs `platform.system()` to say Linux while running on a
+    # Windows process makes the installer name the binary the POSIX way, and
+    # then asserts about it with a `which` that follows Windows' rule — a
+    # fixture that does not know the rules of the platform it is on, which
+    # is what the other two failures in this round were too. Stabbing the
+    # real values back keeps the checksum map keyed the way `_asset_name`
+    # builds it, without pretending this is somewhere it is not.
+    host = (installer.platform.system(), installer.platform.machine())
+    payload = _release_asset('actionlint', _is_windows(host))
+    with _on(*host), \
             mock.patch.dict(os.environ, {
                 'GITHUB_PATH': str(later), 'GITHUB_ENV': str(recorded),
                 'PATH': '/usr/bin:/bin'}), \
             mock.patch.dict(
                 installer.ACTIONLINT_SHA256,
-                {('Linux', 'x86_64'):
-                 hashlib.sha256(payload).hexdigest()}), \
+                {host: hashlib.sha256(payload).hexdigest()}), \
             mock.patch.object(installer, 'TOOL_DIR', tools), \
-            mock.patch.object(installer, '_fetch',
-                              return_value=payload), \
+            mock.patch.object(installer, '_fetch', return_value=payload), \
             _installing(installer, [(WHEEL_SCRIPTS_NAME, EXECUTABLE)]):
         assert installer.main() == 0
         landed = tools / WHEEL_SCRIPTS_NAME
@@ -482,6 +540,15 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
             'shellcheck did not resolve into the directory this step '
             f'installed it into: PATH held {resolved!r} and the tool '
             f'directory holds {landed}')
+        # And the OTHER tool, whose name the installer derives from the
+        # platform rather than from anything in a fixture. It is here for
+        # the same reason the failure was: a run that got this far and
+        # failed on actionlint means the fixture, not the install, was
+        # wrong.
+        actionlint = installer.shutil.which('actionlint')
+        assert actionlint and str(tools) in actionlint, (
+            f'actionlint resolved to {actionlint!r}, which is not inside the '
+            'tool directory this install published')
         assert str(tools) in later.read_text(
             encoding='utf-8').split('\n'), (
             'the tool directory is not on the PATH the later steps '
