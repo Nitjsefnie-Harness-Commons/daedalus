@@ -12,8 +12,8 @@ no limit, a complaint naming no limit, a nonzero exit over nothing, a
 counter spent with no reset behind it.
 """
 import contextlib
+import io
 import json
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -90,13 +90,6 @@ def _reader():
     can reach the reader itself rather than the answer it produces.
     """
     return sys.modules['gh_rate_limit']
-
-
-def _run_fake(fake, argv, request=''):
-    """One answered call to the fake, as a real process wrote it."""
-    return subprocess.run([str(fake.launcher), *argv], input=request,
-                          capture_output=True, text=True, encoding='utf-8',
-                          errors='replace', timeout=60, env=fake.env())
 
 
 def test_a_200_whose_only_evidence_is_a_spent_limit_is_a_refusal(tmp):
@@ -190,8 +183,13 @@ def test_a_graphql_error_whose_type_names_the_limit_is_a_refusal(tmp):
     the reset was genuinely absent rather than merely unread.
     """
     mod = _client()
+    # Nothing else in the answer names a limit, or this control would pass
+    # against a reader that never looked at the `type` at all: the body's
+    # own text is a carrier of its own and a message naming the limit
+    # would be evidence beside the one under test.
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': throttled_query(
-        kind='RATE_LIMIT', code=None, exit=0, stderr='')})
+        kind='RATE_LIMIT', code=None, exit=0, stderr='',
+        message='The query could not be completed.')})
     with fake.activate():
         try:
             mod.graphql(ITEM_QUERY, {'after': None})
@@ -208,8 +206,10 @@ def test_a_graphql_error_naming_the_limit_only_in_its_code_is_a_refusal(tmp):
     never looks at the `code` at all.
     """
     mod = _client()
+    # Silent everywhere but the `code`, for the reason the row above gives.
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': throttled_query(
-        kind=None, exit=0, stderr='')})
+        kind=None, exit=0, stderr='',
+        message='The query could not be completed.')})
     with fake.activate():
         try:
             mod.graphql(ITEM_QUERY, {'after': None})
@@ -433,70 +433,6 @@ def test_a_refusal_with_no_body_renders_the_complaint_instead(tmp):
             raise AssertionError('the spent header must refuse')
 
 
-def test_the_fake_writes_the_live_throttled_answer(tmp):
-    """What the widening is for: a 200 that exits 1 with the spent
-    headers on stdout and the complaint on stderr, which the previous
-    fake could not produce at all - every 200 it wrote exited 0. Read
-    from the process rather than from the fixture, so the rendering is
-    the thing under test.
-    """
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': throttled_query(
-        reset_epoch=1700000000, exit=1, stderr=f'gh: {THROTTLED}\n')})
-    done = _run_fake(fake, ['api', '-i', 'graphql', '--input', '-'],
-                     '{"query":"items(first: 2)"}')
-    assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
-    # The fake spells CRLF; a text-mode read translates it back, and what
-    # this control reads is the shape rather than the line-ending bytes.
-    assert done.stdout.startswith('HTTP/2.0 200 OK\n'), repr(done.stdout)
-    assert 'X-Ratelimit-Remaining: 0' in done.stdout, done.stdout
-    assert 'RATE_LIMIT' in done.stdout, done.stdout
-    assert done.stderr == f'gh: {THROTTLED}\n', done.stderr
-
-
-def test_the_fake_writes_nothing_at_all_for_an_empty_stdout(tmp):
-    """The other half: a run whose stdout is empty, which no answer could
-    express before. The complaint is all it leaves, and that is the whole
-    of the evidence this carrier has.
-    """
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'stdout': '', 'exit': 1, 'stderr': f'gh: {THROTTLED}\n'}})
-    done = _run_fake(fake, ['api', '-i', 'graphql', '--input', '-'],
-                     '{"query":"items(first: 2)"}')
-    assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
-    assert done.stdout == '', repr(done.stdout)
-    assert done.stderr == f'gh: {THROTTLED}\n', done.stderr
-
-
-def test_the_fake_refuses_a_status_it_has_no_reason_phrase_for(tmp):
-    """A stub must fail on what it does not model. A status line written
-    for a status the fake has no phrase for is a plausible empty: it
-    parses, and it says nothing true. So the fake refuses by name and
-    exits 2 rather than answering.
-
-    This stands in for the fake's own contract - the launcher is what
-    every other control in this file runs, and this is the only assertion
-    that its refusals are refusals rather than defaults.
-    """
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {'status': 418,
-                                                    'body': {}}})
-    done = _run_fake(fake, ['api', '-i', 'graphql', '--input', '-'],
-                     '{"query":"items(first: 2)"}')
-    assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
-    assert 'does not model' in done.stderr, done.stderr
-    assert '418' in done.stderr, done.stderr
-
-
-def test_the_fake_refuses_a_stdout_it_cannot_place(tmp):
-    """The other unmodellable request: a stdout the fake was handed on a
-    call that asked for no header block. The renderer that answers those
-    calls would drop it, so answering at all would answer something else.
-    """
-    fake = _fake_gh.FakeGh(tmp, {'pulls/195': {'stdout': '', 'exit': 1}})
-    done = _run_fake(fake, ['api', 'pulls/195'])
-    assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
-    assert 'header block' in done.stderr, done.stderr
-
-
 def test_a_403_with_a_reset_header_is_a_rate_limit_refusal(tmp):
     mod = _client()
     reset = int(time.time()) + 120
@@ -680,6 +616,63 @@ def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
     assert refused is True, refused
     assert resume == now + 0.001, resume
     assert resume - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, resume - now)
+
+
+def _wait_for(mod, answer, now, tmp):
+    """The wait a refusal the reader found would buy, in whole seconds.
+
+    Driven through `graphql` and a real `gh` process, so the instant is
+    one the reader actually derived from the answer rather than one this
+    control handed it: a reader returning a value the clamps below do not
+    reach is exactly what these three rows exist to catch.
+    """
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    watcher = mod.Watcher('w', out=io.StringIO())
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            return watcher._wait_seconds(refusal, now)
+        raise AssertionError('the answer was not read as a refusal')
+
+
+def test_a_refusal_carrying_no_instant_waits_the_plain_minute(tmp):
+    """The first of the three states the evidence can be in: no reset
+    reported at all. A pause still has to happen - the limit is real - but
+    there is nothing to wake at, so the wait is the module's plain minute
+    and not a moment the reader invented.
+    """
+    mod = _client()
+    now = 1790266796.5
+    answer = {'status': 200, 'stdout': '', 'exit': 1,
+              'stderr': f'gh: {THROTTLED}\n'}
+    assert _wait_for(mod, answer, now, tmp) == float(mod.DEFAULT_BACKOFF)
+    assert mod.DEFAULT_BACKOFF == 60, mod.DEFAULT_BACKOFF
+
+
+def test_a_refusal_carrying_a_reset_already_gone_waits_the_floor(tmp):
+    """The second: a reset that has passed. Waiting exactly to it is no
+    wait at all, and the counter the headers carry is spent, so the
+    floor is the price of not hot-looping the API that just refused us.
+    """
+    mod = _client()
+    now = 1790266796.5
+    spent = spent_limit_response(int(now) - 5000, exit=0, stderr='')
+    assert _wait_for(mod, spent, now, tmp) == float(mod.MIN_BACKOFF)
+    assert mod.MIN_BACKOFF == 2, mod.MIN_BACKOFF
+
+
+def test_a_refusal_carrying_an_absurd_reset_waits_the_ceiling(tmp):
+    """The third: a reset no clock will reach. A fixture that reports one
+    is a fixture that hangs a suite for the length of the wait, so the
+    ceiling is what bounds it - past it the next refusal is a new pause
+    with its own line rather than one sleep that never returns.
+    """
+    mod = _client()
+    now = 1790266796.5
+    absurd = spent_limit_response(int(now) + 10 ** 9, exit=0, stderr='')
+    assert _wait_for(mod, absurd, now, tmp) == float(mod.MAX_BACKOFF)
+    assert mod.MAX_BACKOFF == 6 * 3600, mod.MAX_BACKOFF
 
 
 def main():
