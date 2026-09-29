@@ -469,10 +469,10 @@ def test_a_retranslated_header_block_still_yields_its_values(tmp):
     `test_a_header_reset_survives_a_windows_text_stream_end_to_end`.
 
     The reader is reached by name, through a lookup that tolerates its
-    absence: `sys.modules.get` is the same one
-    `_frozen_client_clock` uses, so on a tree without the split this
-    control reads `gh_client`'s own reader instead of raising `KeyError`
-    about a module name, and its redness there is about the parse.
+    absence: `sys.modules.get` with a default is the same tolerant
+    lookup `_frozen_client_clock` uses, so on a tree without the split
+    this control fails on the reader that is not there rather than on a
+    `KeyError` about a module name.
     """
     del tmp
     mod = _client()
@@ -484,9 +484,8 @@ def test_a_retranslated_header_block_still_yields_its_values(tmp):
     assert headers.get('x-ratelimit-reset') == '42', headers
     assert headers.get('retry-after') == '7', headers
     assert json.loads(body) == {'data': None}, body
-    reader = getattr(mod, 'exhausted', None) or \
-        sys.modules.get('gh_rate_limit').exhausted
-    refused, resume = reader(status, headers, body)
+    reader = sys.modules.get('gh_rate_limit', mod)
+    refused, resume = reader.exhausted(status, headers, body)
     assert refused and resume is not None, resume
 
 
