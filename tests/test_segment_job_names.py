@@ -14,12 +14,12 @@ endpoint, and assert the status and body. None of them uses a clock. The
 lock-side controls live in `test_segment_lock_stripes.py`, which needs the
 injected seams these do not.
 """
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _segment_job_record import _job_record  # noqa: E402
 from _segments import (BRIDGE_ENV, TOK, mint_job,  # noqa: E402
                        post_segment, seg_job)
 
@@ -27,13 +27,6 @@ from _segments import (BRIDGE_ENV, TOK, mint_job,  # noqa: E402
 def _store_one_segment(base, job, sig):
     """POST one admitted segment, answering (status, body)."""
     return post_segment(base, job, sig, '0', payload=b'abc')
-
-
-def _job_record(docroot, job):
-    """The record the bridge wrote for `job` under a bridge-owned root."""
-    return json.loads(
-        (Path(docroot) / 'segments' / f'{job}.json').read_text(
-            encoding='utf-8'))
 
 
 def _load_store():

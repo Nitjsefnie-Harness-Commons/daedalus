@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _segment_job_record import _job_record  # noqa: E402
 from _seg_lock_seam import SITE_CUSTOMIZE  # noqa: E402
 from _segments import (BRIDGE_ENV, TOK, mint_job,  # noqa: E402
                        post_segment, seg_job)
@@ -324,13 +325,6 @@ def test_a_held_job_stripe_blocks_only_that_job(tmp):
         assert held_ids, (holder, _lock_calls(gate_dir))
         assert all(lock_id == holder[1] for lock_id in held_ids), (
             holder, held_ids, _lock_calls(gate_dir))
-
-
-def _job_record(docroot, job):
-    """The record the bridge wrote for `job` under a bridge-owned root."""
-    return json.loads(
-        (Path(docroot) / 'segments' / f'{job}.json').read_text(
-            encoding='utf-8'))
 
 
 def _holder_thread(gate_dir):
