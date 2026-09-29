@@ -7,30 +7,29 @@ count, beside the `0` the run reports for it. The count is a function of
 that one file and is derived here, in one command, with no suite run and no
 coverage data. The `0` is not, and cannot be: whether a suite executes the
 module is decidable only from V8 output. The phrase's shape is what holds
-the two apart, naming the `0` and the code-line count as separate parts of
-one claim, so each is admitted for being part of that claim and not for
+the two apart, so each is admitted for being part of one claim and not for
 being a number in a set.
 
 So there is no reach CHECK here, and the reason is structural rather than a
-budget. Setting `NODE_V8_COVERAGE` means every suite that launches Node, and
-they reach the interpreter through launch primitives spread across the
-shared harness helpers, so no single chokepoint can carry the flag for them.
-A static scan cannot stand in either, because the reach set is not decidable
-from the tests tree's source: `tests/_worker_sources.py` parses the shipped
+budget. `NODE_V8_COVERAGE` reaches every suite that launches Node, and they
+launch through primitives spread across the shared harness helpers, so no
+single chokepoint carries the flag for them. A static scan cannot stand in
+either, because the reach set is not decidable from the tests tree's
+source: `tests/_worker_sources.py` parses the shipped
 `extension/background.js` for its own `importScripts(...)` call and loads
-every worker module that call names, and `tests/_dashshell.py`
-imports a dashboard module through an ES `import()` of a path that arrives
-only as an argv string. Both execute shipped JavaScript whose path is in no
-suite, so a scan asking which modules the suites name reports those as
-unreached and reds against correct code. `tests/test_vm_file_load_guard.py`
-does not close that gap: it fixes the SPELLING of each `vm.runInContext`
-site, so a `readdirSync` loop that builds its path and then loads it
-canonically passes it, and a load never spelled as a call site is outside
-its discovery entirely. `scripts/ci/js_coverage.py` resolves the reach set
-properly, from the V8 records, in the coverage job -- so the paragraph
-attributes the figure to the coverage step summary that run prints, and the
-control below holds that attribution rather than the truth of a claim no
-gate in this repository can check.
+every worker module that call names, and `tests/_dashshell.py` imports a
+dashboard module through an ES `import()` of a path that arrives only as an
+argv string. Both execute shipped JavaScript whose path is in no suite, so
+a scan asking which modules the suites name reports those as unreached and
+reds against correct code. `tests/test_vm_file_load_guard.py` does not
+close that gap: it fixes the SPELLING of each `vm.runInContext` site, so a
+`readdirSync` loop that builds its path and then loads it canonically
+passes it, and a load never spelled as a call site is outside its discovery
+entirely. `scripts/ci/js_coverage.py` resolves the reach set properly, from
+the V8 records, in the coverage job -- so the paragraph attributes the
+figure to the coverage step summary that run prints, and the control below
+holds that attribution rather than the truth of a claim no gate in this
+repository can check.
 
 The figures the paragraph used to carry and no longer does are refused
 rather than quietly forgotten, because a refused figure is what stops the
@@ -40,17 +39,13 @@ file IS a function of the tree, and that is exactly why it is refused here:
 it moves whenever any other shipped file grows, for reasons that have
 nothing to do with the module this paragraph is about, so two pull requests
 that each ship JavaScript leave it behind between them. The percentage
-derived from such a denominator is refused for the same reason -- a share
-whose base the paragraph does not state has nothing to prove it against.
+derived from such a denominator is refused for the same reason.
 Admissibility is therefore a POSITION and not a value: the figures the
 paragraph may state are the ones the count phrase itself carries, so an
 unrelated figure is refused wherever it appears, at every value, including
 one that happens to equal the count.
 
-What the paragraph calls a shipped module is also checked against the
-population, so a file that is renamed, moved out of `extension/`, or stops
-shipping as JavaScript reds here rather than leaving the prose describing a
-shipped module the coverage report never sees.
+The module the paragraph names is also checked against the population.
 
 The scan reads DIGIT FORM, and its exemptions are by SHAPE rather than by
 example, so the shapes are what is written down here: a figure written in
@@ -60,43 +55,68 @@ before the run, `N-line` after it. Only the first of those four never reaches
 the scan as a run at all; the other three it reads and then lets past, which
 is a weaker promise than invisibility and the honest one to make. So
 `3.5 seconds` is as unchecked as `SHA-256`, and a maintainer must not read
-the familiar-looking one as the boundary.
-
-The hyphen rule is there for the `N-line` figure a future editor would add.
-The cost is that a hyphen-joined figure is admitted whatever it is, and the
-position check never sees it, because the exemption is applied first.
-
-The case docstring repeats this rather than claiming completeness the scan
-does not have. This is deliberate: the alternative is a natural-language
-parser, and a prose gate is worth more when its own limits are written down
-than when it pretends to have none.
+the familiar-looking one as the boundary. The cost of the `N-line` exemption
+is that a hyphen-joined figure is admitted whatever it is, and the position
+check never sees it, because the exemption is applied first.
 
 The population is `js_coverage.tracked_sources` rather than a second copy of
 its rule, so this suite cannot drift from the definition it checks against:
 if the report's meaning of "shipped JavaScript" moves, both move together.
 
-What the attribution check reads is the claim SENTENCE with the count phrase
-cut out of it, and what it demands of what is left is a referent, not a
-phrase: it must name the report, it must name a figure, and it must not name
-the code-line count. Naming the report is not enough, since a sentence may name
-it while attributing nothing, and a sentence that credits the count attributes
-the one figure here the tree proves.
+Where a claim is judged is a WINDOW, and it is stated here with its
+direction because a boundary stated without one reads wider than it is. A
+reach claim is looked for in the count phrase's sentence and in the
+sentence immediately on EITHER side of it, so a rendering that writes the
+figure before the claim is judged exactly as one that writes it after. A
+one-sided window was the defect this replaced, and it made the control
+refuse the paragraph's own claim the moment an editor split its sentence
+into a first half ending `...is the extension options page.` and a second
+beginning `It stands at 0 of 51 code lines`, with the claim stranded one
+sentence ahead of its own figure. Further than a single neighbour is NOT
+judged: a reach predicate that far out in a paragraph of coverage prose is
+a statement about modules in general, and holding it to this paragraph's
+module refused correct sentences that were never about it.
 
-The cut is by SPAN, not at clause boundaries, and that is the load-bearing
-choice. The count and the credit are two things one sentence says, and no
-clause boundary sits between them: `at 0 of 51 code lines -- the coverage
-step summary, which the run prints, records the leading figure` is ONE
-attribution whose subject is an appositive spanning three comma-delimited
-clauses. Reading clause by clause took the first clause naming the report and
-refused that rewording for a figure stated one clause away, which is the shape
-the shipped paragraph itself uses.
+The price of the symmetry falls on the near side, and it is paid in prose
+this control now refuses. A reach predicate in the sentence immediately
+BEFORE the count phrase's is read as this paragraph's claim, so a general
+coverage sentence carrying one there -- `no suite reaches the tree on its
+own` -- is refused for naming no module, when the identical sentence two
+sentences out is admitted. A predicate that close is this paragraph's
+claim by position, and the control will not read it any other way.
+
+That remaining window is where a false claim still passes, and the shape
+that does it is spelled here rather than left to be found. An innocent
+sentence is separated from the claim it would otherwise contradict by an
+ANAPHOR: `No suite runs `dashboard/app.js` either.` sits two sentences
+after the count phrase and is unjudged, where the same sentence without
+"either" names another module and is red. Only that one word carries the
+difference, and no predicate in this file reads anaphora, so closing it
+would mean parsing the paragraph as natural language -- the thing this
+suite declines to be.
+
+The attribution is read off the claim sentence with the count phrase cut out
+of it, and naming the report is not enough: a sentence may name it while
+attributing nothing, and a sentence that credits the count attributes the
+one figure here the tree proves.
+
+The cut is by SPAN and not at clause boundaries, because no clause boundary
+sits between the count and the credit: `at 0 of 51 code lines -- the
+coverage step summary, which the run prints, records the leading figure` is
+ONE attribution whose subject is an appositive spanning three
+comma-delimited clauses. Reading clause by clause refused that rewording
+for a figure stated one clause away -- the shape the shipped paragraph
+itself uses.
 
 The count is still looked for in the clauses that NAME the report, and that
 asymmetry is the point. A misattribution is stated in those words; a credit
-need not be. So `at 0 of 51 code lines, and the count is the tree's, which the
-coverage step summary does not report` is admitted, as it was, because the
-count it names is the sentence's own subject matter and not something handed
-to the run.
+need not be. So `at 0 of 51 code lines, and the count is the tree's, which
+the coverage step summary does not report; that summary reports the leading
+figure` is admitted, because the count it names is the sentence's own
+subject matter and not something handed to the run. Drop the trailing
+credit and that same sentence is refused -- by the figure assertion and not
+by this one, since it disclaims the count and then credits the report with
+nothing, which leaves the `0` standing on no report at all.
 
 That is a referent test with a stated vocabulary, so it is written down here: a
 figure is named by a digit run or by the word `figure`, and the count is named
@@ -124,9 +144,9 @@ UNREACHED = 'extension/options.js'
 # Every token boundary takes whitespace, not one space: the paragraph is
 # hand-wrapped, and a rewrap of a correct figure is not a change to it. Case is
 # not part of the phrase either, for the reason the reach family below states:
-# an editor who moves the phrase to the front of a sentence capitalises it, and
-# that rewrap is not a change to the claim. Compiled rather than spelled twice
-# over, so every reader of the paragraph takes that case rule with it.
+# an editor who moves the phrase to the front of a sentence capitalises it.
+# Compiled rather than spelled twice over, so every reader of the paragraph
+# takes that case rule with it.
 COUNT_PHRASE = re.compile(r'at\s+0\s+of\s+(\d+)\s+code\s+lines', re.IGNORECASE)
 
 
@@ -172,8 +192,7 @@ def test_the_named_module_is_still_shipped_javascript(tmp):
     being tracked shipped JavaScript has not changed a line, so the count
     control still measures it and passes; a file that is gone as well makes
     that control raise rather than judge, which reports a missing file and
-    not a population. This is the only control here that speaks to whether
-    the coverage run still sees the module the prose is about.
+    not a population.
     """
     del tmp
     sources = tracked_sources(ROOT)
@@ -183,11 +202,10 @@ def test_the_named_module_is_still_shipped_javascript(tmp):
         f'claim is about')
 
 
-# The reach predicates a claim can be spelled with, so the check below judges
-# a family of wordings rather than the one this branch replaced. Case is not
-# part of a wording: restating the claim as its own sentence capitalises its
-# first word, which is the most ordinary way to write the claim at all, and a
-# case-sensitive family would miss exactly that. What it does not read is in
+# A family of wordings rather than the one this branch replaced, so the check
+# judges a restatement however it is spelled. Case is not part of a wording:
+# restating the claim as its own sentence capitalises its first word, which is
+# the most ordinary way to write the claim at all. What it does not read is in
 # the module docstring, as always.
 REACH_CLAIM = re.compile(
     r'\bno\s+(?:suite|suites|test|tests)\s+'
@@ -198,24 +216,17 @@ REACH_CLAIM = re.compile(
 # The report a run-only figure belongs to, spelled as the figure-admission
 # control below already spells it, so one phrase carries both.
 RUN_ATTRIBUTION = re.compile(r'coverage\s+step\s+summary')
-# A sentence ends at a full stop, a bang or a question mark followed by
-# whitespace, with nothing required of what comes next. A dot inside a
-# filename is followed by a letter, so `.py` and `.js` stay whole; a capital
-# was once required, which made the splitter fail permissively — a sentence
-# beginning with anything else merged into its predecessor, and a merged
-# claim swallowed the attribution that followed it. Failing permissively is
-# the wrong direction for a check whose absence half must not go vacuous.
+# A dot inside a filename is followed by a letter, so `.py` and `.js` stay
+# whole. A capital after the dot was once required, which made the splitter
+# fail permissively — a sentence beginning with anything else merged into its
+# predecessor, and a merged claim swallowed the attribution that followed it.
+# Failing permissively is the wrong direction for a check whose absence half
+# must not go vacuous.
 SENTENCE_END = re.compile(r'(?<=[.!?])\s+')
-# A clause ends where the paragraph already ends one. Newline is NOT a
-# boundary: the text is hand-wrapped, and a clause split across a line break
-# is one clause. One of the two attribution checks reads on this and the
-# other does not, because a misattribution is STATED in the words that name
-# the report, while a credit may sit in a clause that does not.
+# Newline is NOT a boundary: the text is hand-wrapped, and a clause split
+# across a line break is one clause.
 CLAUSE_END = re.compile(r'[;:,—–]')
-# The attribution is a relation, so what the claim says is read for what it
-# credits. Naming the report is not crediting anything to it, and crediting
-# the count is misattributing the one figure here the tree proves. The
-# vocabulary both tests use is in the module docstring.
+# The vocabulary both tests read is in the module docstring.
 FIGURE = re.compile(r'\bfigure\b|\d+')
 COUNT_NAME = re.compile(r'\bcode[ -]lines?\b|\bcount\b', re.IGNORECASE)
 
@@ -227,15 +238,11 @@ def _sentences(text):
 def _credit(sentence):
     """What a claim says about the report, with the count taken out of it.
 
-    A SPAN and not a clause. The count and the credit are two things one
-    sentence says, and no clause boundary sits between them: `at 0 of 51
-    code lines -- the coverage step summary, which the run prints, records
-    the leading figure` is ONE attribution whose subject is an appositive
-    spanning three comma-delimited clauses. So the count phrase is cut out
-    where it stands and the rest is read whole, which keeps the count out of
-    the credit without cutting the credit short. Splitting on clause
-    boundaries instead took the first clause naming the report and refused
-    that rewording for a figure stated one clause away.
+    A SPAN and not a clause, for the reason in the module docstring: the
+    count and the credit are two things one sentence says, and no clause
+    boundary sits between them. The phrase is cut out where it stands and the
+    rest is read whole, which keeps the count out of the credit without
+    cutting the credit short.
     """
     said = COUNT_PHRASE.search(sentence)
     if said is None:
@@ -247,10 +254,11 @@ def _reported(sentence):
     """The clauses of a sentence that name the run's report.
 
     Where a MISATTRIBUTION is looked for, and deliberately narrower than
-    `_credit`: a sentence may say the count is the tree's and credit the run
-    with a different figure, and that is correct prose, so only the words
-    that name the report are read for the count. A count named anywhere else
-    in the claim is that sentence's own subject matter.
+    `_credit`, which is why this reads on clause boundaries and that one does
+    not. A sentence may say the count is the tree's and credit the run with a
+    different figure, and that is correct prose: a misattribution is STATED in
+    the words that name the report, while a credit may sit in a clause that
+    does not.
     """
     return ' '.join(clause for clause in CLAUSE_END.split(sentence)
                     if RUN_ATTRIBUTION.search(clause))
@@ -260,20 +268,22 @@ def _reach_claims(sentences):
     """Every reach claim this paragraph makes about its own module, paired
     with where it sits so the attribution can look at the sentence after it.
 
-    The count phrase's sentence and the one after it -- the same pair the
-    attribution already spans, because the count and the claim are one
-    assertion and a rendering that splits it puts the second half next. A
-    reach predicate anywhere else in a paragraph that is mostly coverage
-    prose is a statement about modules in general, and holding it to this
-    paragraph's module refused correct sentences that were never about it.
+    The window -- the count phrase's sentence and its immediate neighbour on
+    EITHER side -- is stated with its full rationale, and with what the
+    symmetry costs, in the module docstring. It is symmetric because which
+    half of the claim an editor writes first is not this control's business,
+    and a one-sided window is what let a split of the shipped sentence drop
+    the claim out of the window entirely.
     """
     pairs = []
     for index, sentence in enumerate(sentences):
         if not COUNT_PHRASE.search(sentence):
             continue
-        for offset, claim in enumerate(sentences[index:index + 2]):
+        window = range(max(0, index - 1), min(index + 2, len(sentences)))
+        for position in window:
+            claim = sentences[position]
             if REACH_CLAIM.search(claim):
-                pairs.append((index + offset, claim))
+                pairs.append((position, claim))
     return pairs
 
 
@@ -284,16 +294,21 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
     suite reaches the module, and the only guard beside it read the words as
     present. So a suite that began executing the module, or a second shipped
     module that stopped being reached, made the paragraph false and left
-    this suite green: a presence check over a reach claim, which is the one
-    claim in the tree nothing here can settle.
+    this suite green — a presence check over the one claim in the tree that
+    nothing here can settle.
 
     Every assertion is over a SENTENCE, which is where a claim lives, so the
     oracle half comes first: with no claim to judge, the checks below pass
     over an empty paragraph, and that is the pass that reads as a green. The
-    sentences that carry one are the count phrase's and the one after it,
-    which is the pair the attribution already spans; a predicate match
-    anywhere else in the paragraph is prose about coverage in general and is
-    not this paragraph's claim to judge.
+    sentences that carry one are the count phrase's and its immediate
+    neighbour on either side, so a rendering that writes the figure before
+    the claim is judged as one that writes it after; a predicate match
+    further than a single neighbour is prose about coverage in general and
+    is not this paragraph's claim to judge. The near side is not free: a
+    general coverage sentence carrying a predicate immediately before the
+    count phrase's is judged as this paragraph's claim and refused for
+    naming no module, where the same sentence one sentence further out is
+    admitted.
 
     Each claim then owes three things. It names the module, because a
     paragraph can name it somewhere else and claim a different one here. It
@@ -304,8 +319,8 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
     count.
 
     What this does NOT read: a claim spelled as none of the predicates above,
-    a reach claim in neither the count phrase's sentence nor the one after it,
-    a run named as anything other than the coverage step summary, and a
+    a reach claim more than one sentence from the count phrase's on either
+    side, a run named as anything other than the coverage step summary, and a
     referent outside the vocabulary the module docstring states.
     """
     del tmp
@@ -382,11 +397,9 @@ def _part_of_a_token(text, start, end, run):
         return True
     if '.' in run or before in '.-':
         return True
-    # A hyphen running OUT of the run, but only into a word. `51-line` is one
-    # token the figure belongs to, and it is the likeliest figure this
-    # paragraph could gain; `40-11` and `10-20` put an operator between two
-    # figures, which the scan has to keep reading. The character after the
-    # hyphen is the whole of the difference.
+    # The character after the hyphen is the whole of the difference: `51-line`
+    # is one token the figure belongs to, `40-11` is an operator between two
+    # figures the scan has to keep reading.
     return after == '-' and text[end + 1:end + 2].isalpha()
 
 
@@ -394,11 +407,11 @@ def _claim_figures(phrase, offset):
     """The digit runs one claim asserts, as absolute spans plus their text.
 
     Admissibility is POSITIONAL, so the rule and the refusal message both
-    read this one list: the rule tests a scanned run's span against the
-    spans returned here, and the message prints the runs returned here. A
-    message that spelled the admissible figures out itself would be a second
-    copy of the rule, and the copy is what drifts -- a message naming "0 and
-    the count" once outlived the set it described.
+    read this one list: the rule tests a scanned run's span against the spans
+    returned here, and the message prints the runs returned here. A message
+    that spelled the admissible figures out itself would be a second copy of
+    the rule, and the copy is what drifts -- a message naming "0 and the
+    count" once outlived the set it described.
     """
     return [(offset + start, offset + end, run)
             for run, start, end in _digit_runs(phrase)]
@@ -424,7 +437,7 @@ def test_no_claim_the_pattern_can_spell_carries_a_figure_beyond_the_two(tmp):
     pattern, which is the whole of what is being pinned.
     """
     del tmp
-    said = re.search(COUNT_PHRASE, _paragraph())
+    said = COUNT_PHRASE.search(_paragraph())
     assert said, 'the paragraph no longer states the module count'
     count = said.group(1)
     total = sum(len(code_lines(text, rel))
@@ -439,7 +452,7 @@ def test_no_claim_the_pattern_can_spell_carries_a_figure_beyond_the_two(tmp):
         f'at 0 of {count} of the {total} code lines',
     ]
     for phrase in greedy:
-        matched = re.search(COUNT_PHRASE, phrase)
+        matched = COUNT_PHRASE.search(phrase)
         if matched is None:
             continue
         figures = {run for _, _, run in _claim_figures(matched.group(0),
@@ -456,11 +469,11 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     sits in is one the tree proves, so admissibility is a POSITION.
 
     The claim is the count phrase, and the figures it may state are the ones
-    that phrase itself carries, each admitted for being part of that claim:
-    the bare `0`, PERMITTED rather than derived because it is the claim that
-    the module is unreached, and the code-line count, which the case above
-    derives. That is what refuses an unrelated figure colliding with the
-    count, wherever it appears and at whatever value.
+    that phrase itself carries: the bare `0`, PERMITTED rather than derived
+    because it is the claim that the module is unreached, and the code-line
+    count, which the case above derives. That is what refuses an unrelated
+    figure colliding with the count, wherever it appears and at whatever
+    value.
 
     A percentage is refused outright and the paragraph is required to state
     none, because a share is provable only against a base it states and the
