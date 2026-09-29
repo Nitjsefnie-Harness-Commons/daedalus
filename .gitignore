@@ -306,6 +306,7 @@
 !/tests/_coverage_memo.py
 !/tests/_coverage_mutation_specs.py
 !/tests/_coverage_scopes.py
+!/tests/_coverage_source_fixtures.py
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
 !/tests/_dashdom.py

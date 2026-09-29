@@ -15,14 +15,11 @@ import _coverage_guard  # noqa: E402
 import _util  # noqa: E402
 from _control_writes import control_write_violations  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
+from _coverage_source_fixtures import (  # noqa: E402
+    _normalized_source)
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
 from _repo import ROOT  # noqa: E402
-
-
-def _module_text(target):
-    """A test module's source with checkout line endings normalised."""
-    return target.read_bytes().decode('utf-8').replace('\r\n', '\n')
 
 
 def _real_module_copy(tmp, relative):
@@ -315,7 +312,7 @@ def test_a_declaration_name_cannot_be_aliased(tmp):
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the declaration binding shape changed'
     line = text[:text.index(needle)].count('\n') + 2
     mutated = text.replace(
@@ -384,7 +381,7 @@ def test_a_rebound_declaration_helper_is_caught(tmp):
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the declaration binding shape changed'
     line = text[:text.index(needle)].count('\n') + 1
     mutated = text.replace(
@@ -411,7 +408,7 @@ def test_a_rebound_scrub_delegate_fails_in_a_real_module(tmp):
     relative = Path('tests/test_coverage_combine.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "_ENV = _util.child_coverage('scrub')\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the declaration binding shape changed'
     mutated = text.replace(
         needle,
@@ -533,7 +530,7 @@ def test_shell_wrapped_python_in_a_temp_cwd_is_caught(tmp):
         "str(coverage_xml),\n"
         "             '--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,\n"
         "            capture_output=True, text=True, timeout=60)")
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the shell-wrap launch shape changed'
     line = text[:text.index(needle)].count('\n') + 1
     mutated = text.replace(
@@ -562,7 +559,7 @@ def test_real_module_controls_agree_under_crlf_endings(tmp):
     """A CRLF checkout searches and counts lines exactly like LF."""
     del tmp
     target = ROOT / 'tests' / 'test_diff_coverage.py'
-    lf = _module_text(target)
+    lf = _normalized_source(target)
     crlf = lf.replace('\n', '\r\n')
     single = "'--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,"
     multi = ("    done = subprocess.run(\n"
@@ -581,7 +578,7 @@ def test_row1_a_repository_script_in_a_temp_cwd_must_declare(tmp):
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "'--diff', str(diff)], cwd=tmp, env=_COVERAGE_ENV,"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the row 1 launch shape changed'
     replacement = "'--diff', str(diff)], cwd=tmp,"
     start = text.rindex('subprocess.run(', 0, text.index(needle))
@@ -625,7 +622,7 @@ def test_row3_argv_bound_to_a_local_name_is_caught(tmp):
         "         '--diff', str(diff)],\n"
         "        cwd=tmp, env=_COVERAGE_ENV, capture_output=True, text=True, "
         "timeout=60)")
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the row 3 launch shape changed'
     restored_line = text[:text.index(needle)].count('\n') + 1
     mutated = text.replace(
@@ -678,7 +675,7 @@ def test_keep_outside_a_mapped_tree_fails_at_runtime(tmp):
     relative = Path('tests/test_suite_runner.py')
     _, target = _real_module_copy(tmp, relative)
     needle = "    root = Path(tmp) / under / 'tree'"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the runner tree anchor shape changed'
     mutated = text.replace(
         needle, "    root = Path(tmp) / under / 'unmapped-runner'", 1)

@@ -12,6 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _control_writes import control_write_violations  # noqa: E402
+from _coverage_source_fixtures import (  # noqa: E402
+    _normalized_source)
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
 from _owned_writes import copy_test_tree  # noqa: E402
@@ -27,11 +29,6 @@ _CONTAINER_PRELUDE = (
     "    first, *targets = _real_module_copy(tmp, relative)\n")
 
 
-def _module_text(target):
-    """A test module's source with checkout line endings normalised."""
-    return target.read_bytes().decode('utf-8').replace('\r\n', '\n')
-
-
 def _real_module_copy(tmp, relative):
     """Copy the real test tree under a root this control owns."""
     root = Path(tmp) / 'repository'
@@ -42,7 +39,7 @@ def _real_module_copy(tmp, relative):
 def _planted_copy(tmp, relative, plant):
     """A real module's copy with `plant` appended: (root, target, line)."""
     root, target = _real_module_copy(tmp, relative)
-    text = _module_text(target)
+    text = _normalized_source(target)
     target.write_bytes((text + plant).encode('utf-8'))
     return root, target, text.count('\n') + 1
 
@@ -56,7 +53,7 @@ def _declaration_line(text):
 def _with_planted_launch(target, planted):
     """Plant `planted` after the declaration; return the original bytes."""
     original = target.read_bytes()
-    text = _module_text(target)
+    text = _normalized_source(target)
     target.write_bytes(text.replace(
         _DECLARATION_LINE, _DECLARATION_LINE + planted, 1).encode('utf-8'))
     return original
@@ -73,7 +70,7 @@ def test_an_unmodelled_write_primitive_is_refused_in_a_real_control(tmp):
     """Issue 295's copy: shutil.copyfile over a checkout path is refused."""
     root, target = _real_module_copy(tmp, Path('tests/test_control_writes.py'))
     needle = "    del tmp\n    violations = _violations(Path(__file__))\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the self-scan control shape changed'
     line = text[:text.index(needle)].count('\n') + 2
     mutated = text.replace(
@@ -94,7 +91,7 @@ def test_a_proved_helper_rebound_after_its_definition_is_not_proof(tmp):
     relative = Path('tests/test_coverage_environment.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "    return root, root / relative\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the copy helper shape changed'
     mutated = text.replace(
         needle,
@@ -117,7 +114,7 @@ def test_a_path_replace_is_not_the_pure_string_replace(tmp):
     relative = Path('tests/test_coverage_environment.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "    copy_test_tree(root)\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the copy helper shape changed'
     line = text[:text.index(needle)].count('\n') + 2
     plant = ("    (root / 'tests' / 'test_control_writes.py')"
@@ -176,7 +173,7 @@ def test_an_import_bound_twice_resolves_to_neither_binding(tmp):
     root, target, _ = _planted_copy(
         tmp, Path('tests/test_coverage_environment.py'),
         "def copy_test_tree(root):\n    return root\n")
-    text = _module_text(target)
+    text = _normalized_source(target)
     needle = "    copy_test_tree(root)\n"
     assert needle in text, 'the copy helper shape changed'
     call = text[:text.index(needle)].count('\n') + 1
@@ -190,7 +187,7 @@ def test_a_starred_argument_does_not_make_path_replace_pure(tmp):
     relative = Path('tests/test_coverage_environment.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "    copy_test_tree(root)\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the copy helper shape changed'
     line = text[:text.index(needle)].count('\n') + 2
     plant = ("    (root / 'tests' / 'test_control_writes.py')"
@@ -210,7 +207,7 @@ def test_a_container_reached_through_an_alias_is_not_proof(tmp):
     relative = Path('tests/test_coverage_environment.py')
     root, target = _real_module_copy(tmp, relative)
     needle = "    root, target = _real_module_copy(tmp, relative)\n"
-    text = _module_text(target)
+    text = _normalized_source(target)
     assert needle in text, 'the copy call shape changed'
     first = text[:text.index(needle)].count('\n') + 1
     mutated = text.replace(
@@ -369,7 +366,7 @@ def test_an_annotated_alias_of_the_launch_module_is_a_launch(tmp):
     """Route 1: `launcher: object = subprocess` aliases the module."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
-    first = _declaration_line(_module_text(target))
+    first = _declaration_line(_normalized_source(target))
     original = _with_planted_launch(
         target,
         "launcher: object = subprocess\n"
@@ -390,7 +387,7 @@ def test_an_unresolved_callee_carrying_cwd_needs_a_declaration(tmp):
     """The class behind route 1: any callee with cwd= is judged."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
-    first = _declaration_line(_module_text(target))
+    first = _declaration_line(_normalized_source(target))
     launches = (
         ("sys.modules['subprocess'].run(['python3', 'child.py'], "
          "cwd=tmp)\n", "sys.modules['subprocess'].run"),
@@ -422,7 +419,7 @@ def test_a_readable_spread_carrying_cwd_is_judged_like_the_keyword(tmp):
     """`**{'cwd': tmp}` spells a working directory the guard can read."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
-    first = _declaration_line(_module_text(target))
+    first = _declaration_line(_normalized_source(target))
     for spread in ("{'cwd': tmp}", 'dict(cwd=tmp)'):
         original = _with_planted_launch(
             target,
@@ -442,7 +439,7 @@ def test_a_launcher_bound_through_an_unfollowable_form_is_refused(tmp):
     """A binding the alias walk cannot read is refused at the binding."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
-    first = _declaration_line(_module_text(target))
+    first = _declaration_line(_normalized_source(target))
     original = _with_planted_launch(
         target, 'for launcher in (subprocess,):\n    pass\n')
     try:
@@ -487,7 +484,7 @@ def _assert_root_owner_retired(tmp, plants):
     """Each plant, put before a cwd=_util.ROOT launch, must refuse it."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
-    first = _declaration_line(_module_text(target))
+    first = _declaration_line(_normalized_source(target))
     launch = "subprocess.run(['python3', 'child.py'], cwd=_util.ROOT)\n"
     for planted, offset in plants:
         original = _with_planted_launch(target, planted + launch)
@@ -574,7 +571,7 @@ def test_a_positional_cwd_on_a_recognised_launcher_is_judged(tmp):
     """A launcher's working directory arrives by position too."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
-    first = _declaration_line(_module_text(target))
+    first = _declaration_line(_normalized_source(target))
     plant = ("subprocess.Popen(['python3', 'child.py'], 0, None, None,\n"
              "                  None, None, None, False, False, tmp)\n")
     original = _with_planted_launch(target, plant)
@@ -605,7 +602,7 @@ def test_an_alias_of_the_os_module_still_moves_the_cwd(tmp):
     """Route 3: `import os as filesystem; filesystem.chdir(tmp)` taints."""
     relative = Path('tests/test_diff_coverage.py')
     root, target = _real_module_copy(tmp, relative)
-    first = _declaration_line(_module_text(target))
+    first = _declaration_line(_normalized_source(target))
     original = _with_planted_launch(
         target,
         "import os as filesystem\n"

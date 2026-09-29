@@ -43,6 +43,10 @@ _PURE_IMPORTS = frozenset({
     # in exactly one of them: the key-holder, where the phrase is assigned
     # to a name at the module's top level. It writes nothing.
     ('_coverage_authority_scan', 'phrase_holders'),
+    # The line-ending normaliser the two controls read a real module out of
+    # a copied tree with; it reads bytes and rewrites \r\n, and writes
+    # nothing.
+    ('_coverage_source_fixtures', '_normalized_source'),
 })
 _PURE_METHODS = frozenset({
     'append', 'count', 'decode', 'encode', 'endswith', 'glob', 'index',
