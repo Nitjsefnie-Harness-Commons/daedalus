@@ -98,15 +98,19 @@ _UNREADABLE = 'def mk():\n    return dict(zip(["k"], [relay()]))\n'
 # A source the model cannot read as pairs, reached through a NAME.
 _UNACCOUNTABLE = 'o = {}\no.update(zip(["k"], [relay()]))'
 
-# A key the model recorded BEFORE the store that lost the count, written
-# back after it. What the model wrote there is what the runtime holds, so
-# the read answers from it; the three forms differ only in how the key is
-# made current again, and the third in a removal the model follows, which
-# takes an entry out without writing anything anywhere.
-_FRESH = ('d = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
-          '\nd["k"] = relay()')
-_REFRESHED = ('d = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
-              '\nd.update({"k": relay()})')
+# A key the model recorded BEFORE a store that retires it, written back
+# after it. What the model wrote there is what the runtime holds, so the
+# read answers from it; the three forms differ only in how the key is made
+# current again, and the third in a removal the model follows, which takes
+# an entry out without writing anything anywhere.
+#
+# The retiring store has to STAY OPAQUE, which is the whole point of it: a
+# source whose pairs its own syntax spells is read, folds its keys
+# exactly, and retires nothing. `mk()` is a user call, so its source is
+# never readable and the retirement is what this limb is measured against.
+_OPAQUE_RETIRE = 'd = {"k": ordinary}\n' + _UNREADABLE + 'd.update(mk())\n'
+_FRESH = _OPAQUE_RETIRE + '\nd["k"] = relay()'
+_REFRESHED = _OPAQUE_RETIRE + '\nd.update({"k": relay()})'
 _POPPED = _FRESH + '\nd.pop("j", None)'
 
 # A store whose key the model cannot resolve may have named the key the
@@ -196,6 +200,31 @@ _AXES = {
         _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**{**o})'),
     'ior-stale-unaccountable-name': (
         _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o'),
+    # The name-source family: a source reached through a NAME the model
+    # already holds as unaccountable. Filed as 1162, except the two bare
+    # rows, whose crossing with FRESHNESS is what 1178 was filed for. The
+    # subscript was the silent one until the source's own pairs became
+    # readable; the readable-source rule settled all seven.
+    'update-unaccountable-name': _UNACCOUNTABLE + '\nd = {}\nd.update(o)',
+    'update-unaccountable-name-star': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**o)'),
+    'update-unaccountable-name-doubled': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**{**o})'),
+    'ior-unaccountable-name': _UNACCOUNTABLE + '\nd = {}\nd |= o',
+    'update-unaccountable-name-mixed': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update([("a", 1)], **o)'),
+    'update-unaccountable-name-mixed-keyed': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**{"a": 1}, **o)'),
+    'update-unaccountable-name-mixed-doubled': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**{**{"a": 1}, **o})'),
+    # The same source through a constructor store, which `_dict_call_value`
+    # answers from the same fold. Filed as 1163: this branch repairs the
+    # rows and closes 1154 and 1178, and 1163 stays open on its own rows.
+    'dict-name': _UNACCOUNTABLE + '\nd = dict(o)',
+    'dict-name-star': _UNACCOUNTABLE + '\nd = dict(**o)',
+    'dict-stale-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd = dict(o)'),
+    'ior-after-dict-name': _UNACCOUNTABLE + '\nd = dict(o)\nd |= {"j": 1}',
     'literal': 'd = {"k": relay()}',
 }
 
@@ -212,37 +241,48 @@ _DISPOSITION = {
     'update-pairs-tuple': ('refused', (0, 0)),
     'update-dict': ('refused', (0, 0)),
     'update-keyword': ('refused', (0, 0)),
-    'update-zip': ('declared', (0, 1)),
-    'update-frozenset': ('declared', (0, 1)),
-    'update-unreadable': ('declared', (0, 1)),
+    'update-zip': ('refused', (0, 0)),
+    'update-frozenset': ('refused', (0, 0)),
+    'update-unreadable': ('refused', (0, 0)),
     'update-star': ('refused', (0, 0)),
     'update-star-two': ('refused', (0, 0)),
     'update-star-mixed': ('refused', (0, 0)),
-    'update-star-mixed-unreadable': ('declared', (0, 1)),
-    'update-star-mixed-unreadable-other': ('declared', (0, 1)),
-    'update-star-unreadable': ('declared', (0, 1)),
-    'ior-unreadable': ('declared', (0, 1)),
+    'update-star-mixed-unreadable': ('refused', (0, 0)),
+    'update-star-mixed-unreadable-other': ('refused', (0, 0)),
+    'update-star-unreadable': ('refused', (0, 0)),
+    'ior-unreadable': ('refused', (0, 0)),
     'ior-modelled': ('refused', (0, 0)),
     'setdefault-value': ('refused', (0, 0)),
     'setdefault-vacant': ('refused', (0, 0)),
     'dict-call': ('refused', (0, 0)),
     'dict-call-star': ('refused', (0, 0)),
     'dict-literal-star': ('refused', (0, 0)),
-    'dict-literal-star-unreadable': ('declared', (0, 1)),
-    'assign-unreadable': ('declared', (0, 1)),
-    'copy-unreadable': ('declared', (0, 1)),
-    'recorded-key': ('declared', (0, 1)),
-    'fresh-recorded-key': ('refused', (0, 1)),
-    'fresh-recorded-key-updated': ('refused', (0, 1)),
-    'fresh-recorded-key-popped': ('refused', (0, 1)),
-    'stale-recorded-zip': ('declared', (0, 1)),
-    'stale-recorded-frozenset': ('declared', (0, 1)),
-    'stale-recorded-later-store': ('declared', (0, 1)),
-    'stale-unaccountable-name': ('declared', (0, 1)),
-    'stale-unaccountable-name-star': ('declared', (0, 1)),
-    'stale-unaccountable-name-doubled': ('declared', (0, 1)),
-    'ior-stale-unaccountable-name': ('declared', (0, 1)),
+    'dict-literal-star-unreadable': ('refused', (0, 0)),
+    'assign-unreadable': ('refused', (0, 0)),
+    'copy-unreadable': ('refused', (0, 0)),
+    'recorded-key': ('refused', (0, 0)),
+    'fresh-recorded-key': ('refused', (0, 0)),
+    'fresh-recorded-key-updated': ('refused', (0, 0)),
+    'fresh-recorded-key-popped': ('refused', (0, 0)),
+    'stale-recorded-zip': ('refused', (0, 0)),
+    'stale-recorded-frozenset': ('refused', (0, 0)),
+    'stale-recorded-later-store': ('refused', (0, 0)),
+    'stale-unaccountable-name': ('refused', (0, 0)),
+    'stale-unaccountable-name-star': ('refused', (0, 0)),
+    'stale-unaccountable-name-doubled': ('refused', (0, 0)),
+    'ior-stale-unaccountable-name': ('refused', (0, 0)),
     'literal': ('refused', (0, 0)),
+    'update-unaccountable-name': ('refused', (0, 0)),
+    'update-unaccountable-name-star': ('refused', (0, 0)),
+    'update-unaccountable-name-doubled': ('refused', (0, 0)),
+    'ior-unaccountable-name': ('refused', (0, 0)),
+    'update-unaccountable-name-mixed': ('refused', (0, 0)),
+    'update-unaccountable-name-mixed-keyed': ('refused', (0, 0)),
+    'update-unaccountable-name-mixed-doubled': ('refused', (0, 0)),
+    'dict-name': ('refused', (0, 0)),
+    'dict-name-star': ('refused', (0, 0)),
+    'dict-stale-name': ('refused', (0, 0)),
+    'ior-after-dict-name': ('refused', (0, 0)),
 }
 
 # Shapes the model CAN account for: the key is visible, or its absence is,
@@ -292,64 +332,12 @@ _ALL_READS = tuple(sorted(_READS))
 _SILENT = {
     # A positional source reached through a star, so the container answers
     # the subscript from the fold and joins the two container reads instead.
+    # This is the LAST member: every other row this table once held is
+    # repaired, and the suite's own rule sends a repaired member to `_AXES`
+    # rather than leaving it here to be re-pinned.
     'update-starred-source': (
         'd = {}\nd.update(*[zip(["k"], [relay()])])', 1162, _SUBSCRIPT,
         (0, 1)),
-    # A source reached through a NAME the model already holds as
-    # unaccountable. It takes `_source_items`' `(items, False)` branch, so the
-    # store never reaches `_mark_unprovable` on the OWNER: the container lands
-    # at `items=[]`, `length=None`, no unknown-key slot, and every read of it
-    # answers a clean absence. The container reads join anyway, off the marked
-    # SOURCE name, so the subscript is the only silent one. Joining it is one
-    # factored predicate at `at_position`, and not 1010's invoke arm, where the
-    # `tab` lives in the callee's body rather than at this call site. It is not
-    # free: measured on a throwaway export, it moves all five `_SUBSCRIPT`
-    # rows' clean subscript from `(0, 0)` to `(0, 1)`, and the width-8 state
-    # count from 53 to 674, which fails
-    # `test_conditional_ordinary_stores_scale_linearly` at `(62, 674)`. The two
-    # bare rows name no issue because the filing is with the maintainer.
-    'update-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {}\nd.update(o)', None, _SUBSCRIPT, (0, 1)),
-    'update-unaccountable-name-star': (
-        _UNACCOUNTABLE + '\nd = {}\nd.update(**o)', 1162, _SUBSCRIPT, (0, 1)),
-    'update-unaccountable-name-doubled': (
-        _UNACCOUNTABLE + '\nd = {}\nd.update(**{**o})', 1162, _SUBSCRIPT,
-        (0, 1)),
-    'ior-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {}\nd |= o', None, _SUBSCRIPT, (0, 1)),
-    # The same name-source defect with a constructor store: `_dict_call_value`
-    # folds no item out of an uncounted source and hands back no container, so
-    # every form answers a clean absence. Filed as 1163, and the clean cost is
-    # `(0, 0)` on all three, so the fourth field carries nothing.
-    'dict-name': (
-        _UNACCOUNTABLE + '\nd = dict(o)', 1163, _ALL_READS, (0, 0)),
-    'dict-name-star': (
-        _UNACCOUNTABLE + '\nd = dict(**o)', 1163, _ALL_READS, (0, 0)),
-    # The same crossing through the constructor. `d = dict(o)` rebinds, so
-    # the recorded key is not on the dict the read sees, and it measures
-    # identical to `dict-name` with that recorded binding left out -- which
-    # is what makes this #1163 rather than a second filing.
-    'dict-stale-name': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd = dict(o)', 1163,
-        _ALL_READS, (0, 0)),
-    # And the same constructor under a second, readable store, which is not
-    # load-bearing either: measured identical to `dict-name` again.
-    'ior-after-dict-name': (
-        _UNACCOUNTABLE + '\nd = dict(o)\nd |= {"j": 1}', 1163,
-        _ALL_READS, (0, 0)),
-    # The same family crossed with COMBINATION: a readable pair in the same
-    # `update` call, which is not load-bearing either -- measured identical
-    # to the `**` rows above it, subscript silent and the container reads
-    # reporting. That split is `update-starred-source`'s, so these are #1162.
-    'update-unaccountable-name-mixed': (
-        _UNACCOUNTABLE + '\nd = {}\nd.update([("a", 1)], **o)', 1162,
-        _SUBSCRIPT, (0, 1)),
-    'update-unaccountable-name-mixed-keyed': (
-        _UNACCOUNTABLE + '\nd = {}\nd.update(**{"a": 1}, **o)', 1162,
-        _SUBSCRIPT, (0, 1)),
-    'update-unaccountable-name-mixed-doubled': (
-        _UNACCOUNTABLE + '\nd = {}\nd.update(**{**{"a": 1}, **o})', 1162,
-        _SUBSCRIPT, (0, 1)),
 }
 
 
@@ -397,12 +385,11 @@ def test_an_unlisted_member_of_the_domain_is_rejected(tmp):
     """Hand the census a member of its own stated domain that it does not
     list: a second unreadable update over a dict the first already left
     unaccountable. The read must still not read clean."""
-    member = ('d = {}\nd.update(zip(["j"], [1]))'
-              '\nd.update(zip(["k"], [relay()]))')
+    member = 'd = {}\n' + _UNREADABLE + 'd.update(mk())\nd.update(mk())'
     assert member not in _AXES.values()
     for name, read in sorted(_READS.items()):
         assert _verdict(tmp, member, read) == (1, 1), (name, read)
-        assert _verdict(tmp, member, read, _CLEAN) == (0, 1), (name, read)
+        assert _verdict(tmp, member, read, _CLEAN) == (0, 0), (name, read)
 
 
 def test_an_accountable_key_read_stays_clean(tmp):
@@ -459,7 +446,7 @@ def test_the_mapping_read_joins_a_key_an_unreadable_store_replaced(tmp):
 # read reads clean for a reason that has nothing to do with the marker: a
 # `zip` over a different key leaves the recorded value standing, and the
 # control then measures a false positive where the defect lives.
-_RETIRED_SOURCE = 'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))\n'
+_RETIRED_SOURCE = _OPAQUE_RETIRE
 _DESTINATION_FOLDS = ('o = {}\no.update(d)', 'o = {}\no |= d',
                       'o = dict(d)', 'o = {**d}')
 _DESTINATION_READS = {'subscript': 'o["k"]', 'get': 'o.get("k")',
@@ -545,39 +532,38 @@ def test_a_fold_of_a_retired_source_reports_every_read_form(tmp):
     the defect lives. And the source has to retire the key the RUNTIME
     replaces, so a routed `relay()` really does reach the call through the
     destination and the guard has to report it -- twelve cells, four fold
-    spellings by three read forms, `(1, 1)` routed and `(0, 1)` clean.
+    spellings by three read forms, `(1, 1)` routed and `(0, 0)` clean.
 
-    With the propagation removed from the real code, ten of the twelve
-    read `(1, 0)`, so this is the control that has an opinion. The two
-    that hold are the subscript of `dict(d)` and of `{**d}`: their verdict
-    does not rest on the retirement in the destination's body, and which
-    mechanism carries it is not established here. The store-side test
-    above is the one that says where the fact is dropped.
+    The source is the OPAQUE one: a source whose pairs its own syntax
+    spells is read and retires nothing, so it is no longer a retirement to
+    carry. Which cells go `(1, 0)` with the propagation removed is the
+    round's survivor list, not a claim made here. The store-side test above
+    is what pins that the retirement travels at all.
     """
     for fold in _DESTINATION_FOLDS:
         body = f'{_RETIRED_SOURCE}{fold}'
         for read, source in sorted(_DESTINATION_READS.items()):
             assert _verdict(tmp, body, source) == (1, 1), (fold, read)
-            assert _verdict(tmp, body, source, _CLEAN) == (0, 1), (
+            assert _verdict(tmp, body, source, _CLEAN) == (0, 0), (
                 fold, read)
 
 
 def test_a_key_written_after_an_unreadable_store_keeps_its_value(tmp):
     """The false-positive limb, over all three read forms.
 
-    The key the model wrote after the store that lost the count is one that
+    The key the model wrote after the store that retired it is one that
     store never touched, so the recorded value is the one the runtime holds
-    and the read answers from it. The verdict is the discriminator: a read
-    that resolved to the `relay()` body is reported twice under the routed
-    prefix, once through the unprovable name the store marked and once
-    through the callable itself, where a joined read is reported only
-    through the name. The second form writes the key back with a readable
-    `update` source and the third removes an unrelated key in between, so
-    a store that marked on either of those would show here."""
+    and the read answers from it. The CLEAN figure is the discriminator: a
+    read that resolved reports `(0, 0)` and a joined one `(0, 1)`, because
+    the store that retires marks its own name, and a read bound to an
+    unprovable sender reports through it. The second form writes the key
+    back with a readable `update` source and the third removes an unrelated
+    key in between, so a store that failed to un-retire on either of those
+    would show here."""
     for store in (_FRESH, _REFRESHED, _POPPED):
         for read, source in sorted(_READS.items()):
-            assert _verdict(tmp, store, source) == (1, 2), (store, read)
-            assert _verdict(tmp, store, source, _CLEAN) == (0, 1), (
+            assert _verdict(tmp, store, source) == (1, 1), (store, read)
+            assert _verdict(tmp, store, source, _CLEAN) == (0, 0), (
                 store, read)
 
 
