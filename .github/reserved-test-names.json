@@ -484,6 +484,7 @@
     "_held_mutation": {"python": ["tests/_pyroute_invalidation.py"]},
     "_helper_calls": {"python": ["tests/_control_writes.py"]},
     "_helper_rebind_violations": {"python": ["tests/_coverage_guard.py"]},
+    "_hold": {"python": ["tests/_fake_gh.py"]},
     "_holds_code_eval": {"python": ["tests/_mcp_code_eval.py"]},
     "_hostile": {"python": ["tests/_coverage_comment_publication.py"]},
     "_identifier_part": {"python": ["tests/_ghexpr.py"]},
