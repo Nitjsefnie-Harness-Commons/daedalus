@@ -282,8 +282,13 @@ def test_a_flushed_suite_is_still_counted_as_a_pass_and_this_pins_that(tmp):
 
     The two launchers disagree about it, which is the other half of why
     this is pinned rather than left implicit. `coverage_suites.py` counts
-    any timed-out suite as failed whatever it reported. See the
-    pull request's Follow-ups.
+    any timed-out suite as failed whatever it reported.
+
+    The pull request states the disagreement in its `## Changes` section,
+    where the two per-launcher facts live, and the seat's task report
+    carries the argument for closing it and the reason for not closing it
+    here — a change to the `suites` job's gate, which this issue did not
+    ask for and which this seat cannot run to measure.
     """
     root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
     result = _run_sandbox(
