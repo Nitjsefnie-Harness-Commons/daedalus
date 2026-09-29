@@ -88,16 +88,47 @@ def _still_watching(parent):
     subject is not "the children were alive at the reading"; it is "this
     test's signal is what ended them".
 
-    The gap between this check and the signal is the irreducible one: it is
-    the width of one check, not the width of the test, and no precondition
-    read can close it - a read is a sample, and a sample cannot be
-    simultaneous with the thing it is about. What closing the gap buys is
-    that anything landing in it is a red naming the aggregator rather than
-    a pass that proved nothing.
+    This is a sample, and it has a gap of its own - the few instructions
+    between the read and the signal. A death in that gap is a PASS, not a
+    red, which is the opposite of what an earlier version of this
+    docstring claimed and what the re-review measured: 30 false greens in
+    64 runs. `_ended_by_the_signal`, called after the wait, is what decides
+    it, because a return code is a terminal state rather than a reading
+    and has no gap of its own.
     """
     assert parent.alive(), (
         f'the aggregator to still be watching when the test signals it '
         f'(exit {parent.proc.returncode}):\n{parent.captured()}')
+
+
+def _ended_by_the_signal(parent, expected):
+    """The aggregator's return code, which settles what a sample cannot.
+
+    `_still_watching` is a sample, and a sample has a gap: an aggregator
+    that dies in the instructions between that read and the signal leaves
+    the signal a no-op, takes both watchers out through the watchdog rather
+    than through this test, and the case passes without ever running its
+    subject. The return code is not a sample - it is the terminal state -
+    and it decides the question the sample cannot. A process a signal
+    killed reports that signal; one that exited first reports its own code.
+
+    Measured on Linux/CPython 3.13: `-9` for `kill`, `-2` for SIGINT, and
+    `1` for an aggregator that exited on its own in between, with
+    `_still_watching` silent in that last case. That gap was provoked 30
+    times in 64 runs before this check existed.
+
+    `Popen.kill()` on Windows is `TerminateProcess`, which reports 1 - the
+    same code an aggregator exiting on its own reports - so the question
+    is not decidable there and the check is not made. That is a real gap
+    on the Windows legs, and saying so is cheaper than a check that
+    cannot fail.
+    """
+    if sys.platform.startswith('win'):
+        return
+    assert parent.proc.returncode == expected, (
+        f'the aggregator to have been ended by the test signal {expected} '
+        f'and not by something else (exit {parent.proc.returncode}):\n'
+        f'{parent.captured()}')
 
 
 def _held_at_the_reading(fake, parent):
@@ -135,6 +166,7 @@ def test_the_children_die_with_their_parent(tmp):
         _still_watching(parent)
         parent.proc.kill()
         parent.proc.wait(timeout=60)
+        _ended_by_the_signal(parent, -signal.SIGKILL)
         waits.await_gone(pids, parent, f'children {pids} to die with the '
                          f'parent', _pid_alive)
         assert not any(_pid_alive(pid) for pid in pids), (
@@ -158,6 +190,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         else:
             parent.proc.send_signal(signal.SIGINT)
         parent.proc.wait(timeout=60)
+        _ended_by_the_signal(parent, -signal.SIGINT)
         waits.await_gone(pids, parent, f'children {pids} to leave with a '
                          f'graceful exit', _pid_alive)
         assert not any(_pid_alive(pid) for pid in pids), (
