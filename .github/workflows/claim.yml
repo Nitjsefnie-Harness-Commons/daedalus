@@ -28,10 +28,22 @@ permissions:
   issues: write
 
 concurrency:
-  # Per issue, and NOT cancel-in-progress. Two people claiming at once must
-  # both get an answer: cancelling the first would leave the loser of the race
-  # with silence, and cancelling the second would leave it unanswered.
-  group: claim-${{ github.event.issue.number }}
+  # Per comment, not per issue. A per-issue group let a third `/claim` cancel
+  # the second's pending run: `cancel-in-progress: false` protects only the
+  # run already in progress, so the second commenter got no answer on the
+  # issue, no assignment, and nothing recording that their command was
+  # dropped. Scoping the group to the comment id means no two claim runs ever
+  # share a group, so none can cancel another.
+  #
+  # The cost is that claims on one issue are no longer serialized: two people
+  # claiming the same issue at the same instant can both read it unassigned
+  # and both end up assigned. That is rare, recoverable with `/unclaim` from
+  # either side, and strictly better than silently dropping a command.
+  #
+  # `cancel-in-progress: false` is still load bearing: a re-run of one
+  # comment's run carries the same comment id, so it lands in the same group
+  # and must not cancel the run it replaces.
+  group: claim-${{ github.event.issue.number }}-${{ github.event.comment.id }}
   cancel-in-progress: false
 
 jobs:

@@ -30,6 +30,12 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     assert isinstance(concurrency, dict), 'claim must declare concurrency'
     assert concurrency.get('cancel-in-progress') == 'false', (
         'claim concurrency must not cancel an in-progress run')
+    # Scoped per comment, not per issue: in a per-issue group a third comment
+    # cancels the second's pending run, so that commenter gets no answer.
+    assert concurrency.get('group') == (
+        'claim-${{ github.event.issue.number }}'
+        '-${{ github.event.comment.id }}'), (
+            'claim concurrency group must be scoped per comment')
     condition = job.get('if')
     assert isinstance(condition, str), 'claim must declare an if scalar'
     expected_condition = (
