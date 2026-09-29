@@ -23,14 +23,10 @@ from _carrier_cases import (  # noqa: E402
     _target_carrier_cases, _target_free_cases,
     _transforming_cases, _value_preserving_cases)
 import _coverage_guard  # noqa: E402
+from _coverage_source_fixtures import (  # noqa: E402
+    _expected_binding_diagnostic as _at)
 from _coverage_guard import (  # noqa: E402
     _BINDING_MESSAGE, _synthetic_violations)
-
-
-def _at(source, marker, message=_BINDING_MESSAGE):
-    """The diagnostic owed a source, at the line carrying `marker`."""
-    line = source[:source.index(marker)].count('\n') + 1
-    return f'tests/synthetic.py:{line}: {message}'
 
 
 def _refused(cases):
