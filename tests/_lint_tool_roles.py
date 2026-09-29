@@ -526,3 +526,133 @@ def _parents_of(tree):
     """Every node's parent, so a walk can ask what a node sits inside."""
     return {child: node for node in ast.walk(tree)
             for child in ast.iter_child_nodes(node)}
+
+
+# Ways a suite says a binary may be missing, one per answer to the same
+# question. Every one of them SKIPS or RETURNS on absence, and every skip
+# message names the parser rather than the binary, so none of them is
+# visible to the channel that matches a tool named in a message: a
+# derivation that reads these is reading the guard, not the wording.
+#
+# THIS IS A LIST OF WITNESSES, NOT AN ENUMERATION, and the control that
+# reads it says so where a reader meets it. The name of the test that
+# drives it says "every spelling", and that is a claim this table cannot
+# make: adding a fifteenth shape turns it red, which is the point — a
+# recogniser that cannot see a shape nobody thought of fails nothing —
+# but it also means the table's real job is to hold one witness per way
+# the recogniser's STRUCTURE can fail, so that a structural change which
+# drops an arm is red rather than silent. The shapes still open, recorded
+# so the next round does not re-derive them, and kept in step with what
+# `_lookup_target_names` below says it cannot read:
+#
+# - a `which` over a loop variable, where the tool is never a CANDIDATE at
+#   all, so no guard-shape fix reaches it;
+# - `os.popen`;
+# - a string argv under `shell=True`, where the whole command is one
+#   string rather than an argv element;
+# - a locally named skip helper whose name is neither `skip*` nor
+#   `*Skipped`, which is a class bound — the recogniser matches call
+#   NAMES, not call intent — rather than one defect;
+# - a multi-target assignment, `a = b = which(t)` and the comma-separated
+#   `a = b, c = which(t), None` beside it, which are now READ and are rows
+#   in the table below rather than open shapes. They were open until this
+#   round, and the previous list did not say so, which is the failure this
+#   paragraph exists to stop repeating: a disclosure a reader consults has
+#   to name what the recogniser actually declines.
+#
+# And one shape that is named because it CANNOT RUN, so handling it would
+# be handling a program nobody can execute: `(a, b) = c = which(t)` unpacks
+# a path string into two names, which is a ValueError. It binds nothing,
+# and `_lookup_target_names` says so in the same words rather than leaving
+# a reader to assume the silence was an oversight.
+GUARDED_ON = {
+    'inline identity':
+        'if shutil.which(TOOL) is None:\n    _util.skip("no parser")',
+    'inline truthiness':
+        'if not shutil.which(TOOL):\n    _util.skip("no parser")',
+    'inline not-identity':
+        'if shutil.which(TOOL) is not None:\n    return',
+    'bound identity':
+        'found = shutil.which(TOOL)\nif found is None:\n'
+        '    _util.skip("no parser")',
+    'bound truthiness':
+        'found = shutil.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'bound equality':
+        'found = shutil.which(TOOL)\nif found == None:\n'
+        '    _util.skip("no parser")',
+    'bound inequality':
+        'found = shutil.which(TOOL)\nif found != None:\n'
+        '    _util.skip("no parser")',
+    'bound membership':
+        'found = shutil.which(TOOL)\nif found in (None,):\n'
+        '    _util.skip("no parser")',
+    'bound conjunction':
+        'found = shutil.which(TOOL)\nif found is None or not extra:\n'
+        '    _util.skip("no parser")',
+    'aliased import':
+        'found = sh.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'annotated constant':
+        'found = shutil.which(NAMED)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'constant bound in a function':
+        'def probe():\n    local = TOOL\n    found = shutil.which(local)\n'
+        '    if not found:\n        _util.skip("no parser")\n',
+    'annotated binding of the result':
+        'found: str = shutil.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'tuple-unpacked binding of the result':
+        'found, _rest = shutil.which(TOOL), None\nif not found:\n'
+        '    _util.skip("no parser")',
+    'second slot of a tuple-unpacked binding':
+        'def probe():\n    _first, found = None, shutil.which(TOOL)\n'
+        '    if not found:\n        _util.skip("no parser")\n',
+    'second name of a chained assignment':
+        'first = found = shutil.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'first name of a chained assignment':
+        'first = found = shutil.which(TOOL)\nif not first:\n'
+        '    _util.skip("no parser")',
+    'tuple target in a comma-separated target list':
+        'whole = first, rest = shutil.which(TOOL), None\n'
+        'if not first:\n    _util.skip("no parser")',
+    'name target in a comma-separated target list':
+        'whole = first, rest = shutil.which(TOOL), None\n'
+        'if not whole:\n    _util.skip("no parser")',
+    'command that cannot be started':
+        'try:\n    subprocess.run([TOOL, "--version"], check=True)\n'
+        'except FileNotFoundError:\n    _util.skip("no parser")',
+    'aliased command that cannot be started':
+        'try:\n    sp.run([TOOL, "--version"], check=True)\n'
+        'except OSError:\n    _util.skip("no parser")',
+}
+_PREAMBLE = ('import shutil\nimport subprocess\nimport shutil as sh\n'
+             'import subprocess as sp\nTOOL = "gojq"\nNAMED: str = "gojq"\n')
+
+
+REQUIRED_ON = {
+    'inline assert':
+        'assert shutil.which(TOOL), "the parser runs the fixture"',
+    'bound assert':
+        'found = shutil.which(TOOL)\n'
+        'assert found, "the parser runs the fixture"',
+    'a command run without asking':
+        'subprocess.run([TOOL, "--version"], check=True)',
+}
+# A tool the tree both insists on and tolerates the absence of. Nothing in
+# the tree is written this way today; two independent plants were, and both
+# read green, which is what these cases are here to refuse.
+BOTH_ON = {
+    'asserted elsewhere, skipped here':
+        'def required():\n    assert shutil.which(TOOL), "the parser is '
+        'the fixture"\n\n\n'
+        'def optional():\n    found = shutil.which(TOOL)\n'
+        '    if not found:\n        _util.skip("no parser")\n',
+    'run unguarded, skipped when it cannot start':
+        'def unguarded():\n    subprocess.run([TOOL, "--version"], '
+        'check=True)\n\n\n'
+        'def optional():\n    try:\n'
+        '        subprocess.run([TOOL, "--format", "json"], check=True)\n'
+        '    except FileNotFoundError:\n        _util.skip("no parser")\n',
+}
