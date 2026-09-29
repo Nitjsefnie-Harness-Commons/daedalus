@@ -12,7 +12,8 @@ import _util  # noqa: E402
 from _ci_wait_fixtures import (  # noqa: E402
     _ci_wait_run as _run,
     _ci_wait_clock as _Clock,
-    _frozen_ci_wait_clock as _frozen_wait_clock)
+    _frozen_ci_wait_clock as _frozen_wait_clock,
+    _ci_wait_verdict)
 
 ROOT = _util.ROOT
 SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'ci_wait.py'
@@ -20,10 +21,6 @@ SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'ci_wait.py'
 
 def _ci_wait():
     return _util.load(SOURCE, 'ci_wait_contract')
-
-
-def _verdict(runs):
-    return _ci_wait().verdict(runs)
 
 
 def test_superseded_cancelled_run_is_ignored(tmp):
@@ -36,13 +33,13 @@ def test_superseded_cancelled_run_is_ignored(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
-    assert _verdict(list(reversed(runs))) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(list(reversed(runs))) == ('acceptable', [])
 
 
 def test_a_deliberate_cancel_is_still_unacceptable(tmp):
     del tmp
-    state, offenders = _verdict(
+    state, offenders = _ci_wait_verdict(
         [_run(1, 'cancelled', '2026-09-07T10:00:00Z')])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
@@ -54,7 +51,7 @@ def test_a_newer_run_of_another_workflow_does_not_supersede(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', workflow=11),
         _run(2, 'success', '2026-09-07T10:05:00Z', workflow=22),
     ]
-    state, offenders = _verdict(runs)
+    state, offenders = _ci_wait_verdict(runs)
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 
@@ -65,7 +62,7 @@ def test_the_ignored_run_cannot_complete_the_wait_either(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, None, '2026-09-07T10:05:00Z', status='in_progress'),
     ]
-    assert _verdict(runs) == ('waiting', [])
+    assert _ci_wait_verdict(runs) == ('waiting', [])
 
 
 def test_a_superseded_open_run_does_not_hold_the_verdict(tmp):
@@ -80,7 +77,7 @@ def test_a_superseded_open_run_does_not_hold_the_verdict(tmp):
              name='tests'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
 
 
 def test_the_newest_run_decides_even_when_it_is_still_queued(tmp):
@@ -94,7 +91,7 @@ def test_the_newest_run_decides_even_when_it_is_still_queued(tmp):
         _run(2, None, '2026-09-07T10:05:00Z', status='in_progress',
              name='tests'),
     ]
-    assert _verdict(runs) == ('waiting', [])
+    assert _ci_wait_verdict(runs) == ('waiting', [])
 
 
 def test_a_superseded_failure_beside_a_newer_green_run_is_acceptable(tmp):
@@ -109,8 +106,8 @@ def test_a_superseded_failure_beside_a_newer_green_run_is_acceptable(tmp):
         _run(1, 'failure', '2026-09-07T10:00:00Z', name='tests'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
-    assert _verdict(list(reversed(runs))) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(list(reversed(runs))) == ('acceptable', [])
 
 
 def test_a_failure_nobody_re_ran_is_still_unacceptable(tmp):
@@ -121,7 +118,7 @@ def test_a_failure_nobody_re_ran_is_still_unacceptable(tmp):
     run, which `runs[:1]` keeps - so what is pinned here is the single-run
     verdict, and the filters it rules out are the ones that return nothing."""
     del tmp
-    state, offenders = _verdict(
+    state, offenders = _ci_wait_verdict(
         [_run(1, 'failure', '2026-09-07T10:00:00Z', name='tests')])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
@@ -130,12 +127,12 @@ def test_a_failure_nobody_re_ran_is_still_unacceptable(tmp):
 def test_equal_timestamps_tie_break_by_numeric_id(tmp):
     del tmp
     stamp = '2026-09-07T10:00:00Z'
-    state, offenders = _verdict([
+    state, offenders = _ci_wait_verdict([
         _run(9, 'cancelled', stamp),
         _run(10, 'success', stamp, name='tests'),
     ])
     assert state == 'acceptable'
-    state, offenders = _verdict([
+    state, offenders = _ci_wait_verdict([
         _run(10, 'cancelled', stamp),
         _run(9, 'success', stamp, name='tests'),
     ])
@@ -145,13 +142,13 @@ def test_equal_timestamps_tie_break_by_numeric_id(tmp):
 
 def test_created_at_stands_in_for_a_missing_run_started_at(tmp):
     del tmp
-    state, offenders = _verdict([
+    state, offenders = _ci_wait_verdict([
         _run(1, 'cancelled', None, created_at='2026-09-07T10:00:00Z'),
         _run(2, 'success', None, name='tests',
              created_at='2026-09-07T10:05:00Z'),
     ])
     assert state == 'acceptable'
-    state, offenders = _verdict([
+    state, offenders = _ci_wait_verdict([
         _run(1, 'cancelled', None, created_at='2026-09-07T10:05:00Z'),
         _run(2, 'success', None, name='tests',
              created_at='2026-09-07T10:00:00Z'),
@@ -181,7 +178,7 @@ def test_a_start_time_beats_a_creation_time_that_disagrees(tmp):
         _run(2, 'success', '2026-09-07T09:00:00Z',
              created_at='2026-09-07T10:00:00Z'),
     ]
-    state, offenders = _verdict(runs)
+    state, offenders = _ci_wait_verdict(runs)
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 
@@ -192,7 +189,7 @@ def test_fractional_second_stamps_are_ordered_by_instant_not_text(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, 'success', '2026-09-07T10:00:00.500Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
 
 
 def test_an_unidentifiable_run_is_never_superseded(tmp):
@@ -211,18 +208,18 @@ def test_an_unidentifiable_run_is_never_superseded(tmp):
              workflow=None),
         _run(3, 'success', '2026-09-07T10:10:00Z', name='tests'),
     ]
-    state, offenders = _verdict(runs)
+    state, offenders = _ci_wait_verdict(runs)
     assert state == 'unacceptable', state
     assert [run['id'] for run in offenders] == [1], offenders
     # The guard is the GROUP, not the verdict: a run that does name its
     # workflow still supersedes within it, by id and by path alike.
-    assert _verdict([
+    assert _ci_wait_verdict([
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='tests',
              workflow=11),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
              workflow=11),
     ]) == ('acceptable', [])
-    assert _verdict([
+    assert _ci_wait_verdict([
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='tests',
              path='.github/workflows/ci.yml'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
@@ -238,14 +235,14 @@ def test_the_workflow_path_groups_when_the_id_is_absent(tmp):
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
              path='.github/workflows/ci.yml'),
     ]
-    assert _verdict(same) == ('acceptable', [])
+    assert _ci_wait_verdict(same) == ('acceptable', [])
     other = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z',
              path='.github/workflows/ci.yml'),
         _run(2, 'success', '2026-09-07T10:05:00Z',
              path='.github/workflows/tests.yml'),
     ]
-    state, offenders = _verdict(other)
+    state, offenders = _ci_wait_verdict(other)
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 
@@ -257,15 +254,15 @@ def test_only_the_newest_cancelled_run_of_a_workflow_survives(tmp):
         _run(2, 'cancelled', '2026-09-07T10:05:00Z'),
         _run(3, 'success', '2026-09-07T10:10:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
-    state, offenders = _verdict(runs[:2])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
+    state, offenders = _ci_wait_verdict(runs[:2])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [2]
 
 
 def test_the_zero_and_green_contracts_are_unchanged(tmp):
     del tmp
-    assert _verdict([]) == ('waiting', [])
+    assert _ci_wait_verdict([]) == ('waiting', [])
     # One workflow per run, as the producer emits it: three runs sharing a
     # workflow id are three runs of ONE workflow, and the filter keeps only
     # the newest of them - so the three acceptable conclusions cannot be
@@ -277,7 +274,7 @@ def test_the_zero_and_green_contracts_are_unchanged(tmp):
              workflow=22),
         _run(3, 'skipped', '2026-09-07T10:10:00Z', name='CodeQL', workflow=33),
     ]
-    assert _verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
 
 
 def test_the_acceptable_line_names_the_failure_it_discarded(tmp):
@@ -345,7 +342,7 @@ def test_the_grouping_is_by_workflow_and_not_by_run_name(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='gate freshness'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
 
 
 def test_the_success_line_counts_judged_runs_only(tmp):
