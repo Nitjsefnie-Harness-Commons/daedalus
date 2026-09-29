@@ -230,9 +230,12 @@ def await_lines(stream, match, count, what):
     can never print the line again - and the failure carries everything
     the process did print, which is what says which line arrived instead.
     A process that stays up and stays silent leaves this wait nothing to
-    end it, and the hung job naming this wait is the trade the repository
-    takes deliberately (the `_await_alive` in
-    tests/test_stream_lifecycle.py).
+    end it, and what ends it is the launcher: the runner bounds each suite
+    and names the one it stopped at, so the wedge is reported against the
+    suite that caused it rather than against this wait. The wait itself
+    stays unbounded — a bound here would name the wait rather than the
+    suite, which is the workaround this arrangement exists to avoid (the
+    `_await_alive` in tests/test_stream_lifecycle.py).
     """
     while True:
         with stream.changed:
@@ -253,8 +256,9 @@ def await_calls(fake, count, child, what):
     to wait on and this polls the record. A child that has exited can make
     no further call, which is the state that ends the wait early, with the
     child's own output in the failure. A child that stays up and never
-    calls leaves this wait nothing to end it, and the hung job naming this
-    wait is the same trade `await_lines` takes.
+    calls leaves this wait nothing to end it, and what ends it is the
+    launcher's bound on the suite, which names the suite rather than this
+    wait. Unbounded here on the same terms `await_lines` states.
     """
     while True:
         calls = fake.calls()
