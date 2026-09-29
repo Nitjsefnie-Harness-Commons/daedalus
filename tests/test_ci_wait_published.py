@@ -46,7 +46,8 @@ PUBLISHED = 'gate freshness'
 VERDICT_URL = 'https://github.com/o/r/runs/7'
 
 
-def _node(rid, name, conclusion='SUCCESS', status='COMPLETED'):
+def _node(rid, name, conclusion: str | None = 'SUCCESS',
+          status='COMPLETED'):
     """One check-run node, as the commit's check suites report it."""
     return {'databaseId': rid, 'name': name, 'status': status,
             'conclusion': conclusion,
@@ -54,14 +55,15 @@ def _node(rid, name, conclusion='SUCCESS', status='COMPLETED'):
             'detailsUrl': f'https://github.com/o/r/runs/{rid}'}
 
 
-def _check(name, conclusion='success', status='completed', rid=7):
+def _check(name, conclusion: str | None = 'success', status='completed',
+           rid=7):
     """One check run already normalised, as a caller of `ci_state` gets it."""
     return {'id': rid, 'name': name, 'status': status,
             'conclusion': conclusion, 'html_url': VERDICT_URL,
             'completed_at': '2026-09-20T10:10:00Z'}
 
 
-def _verdict_suite(conclusion='SUCCESS'):
+def _verdict_suite(conclusion: str | None = 'SUCCESS'):
     """The suite the Checks API creates for the verdict a publisher writes.
 
     It is not a workflow run's suite: the publisher POSTs a check run of
@@ -160,6 +162,62 @@ def test_a_job_check_is_not_a_published_verdict(tmp):
         'acceptable', []), checks
 
 
+def test_a_bare_verdict_call_still_demands_the_published_check(tmp):
+    """The shipped DEFAULT, which the rest of this family routes around.
+
+    Every other case here passes `checks` or opts out with
+    `required_checks=frozenset()`, so a default weakened to `frozenset()`
+    left this suite green - while `verdict(runs)` is exactly the call a
+    second reader would write, and it is the call that must NOT certify a
+    head whose publisher has written nothing. The default `checks=()` and
+    the default `required_checks` disagree in the safe direction, and
+    that is a property of the two defaults together, so it is asserted
+    here with neither overridden.
+    """
+    del tmp
+    mod = _ci_wait()
+    assert mod.verdict([_head_run('tests')]) == ('incomplete', [])
+
+
+def test_a_red_verdict_outranks_a_missing_run_at_the_predicate(tmp):
+    """The load-bearing order, without the subprocess in the way.
+
+    The subprocess control proves it end to end; this row asks `verdict`
+    alone, so the order cannot be right by accident in the wait loop's
+    plumbing. The `tests` run is ABSENT - which is the state that earns
+    the exit-4 refusal - and the published check is RED, so the only
+    answer that judges the conclusion before the set is exit 1.
+    """
+    del tmp
+    mod = _ci_wait()
+    state, offenders = mod.verdict(
+        [_head_run('CodeQL')],
+        [_check(PUBLISHED, 'failure'), _check('CodeQL (Code Quality)')])
+    assert state == 'unacceptable', state
+    assert [check['name'] for check in offenders] == [PUBLISHED], offenders
+
+
+def test_the_offenders_are_the_runs_or_the_checks_never_both(tmp):
+    """The run limb returns before the check limb is reached, so an
+    offender list carrying both would be a caller printing a failure it
+    was not asked about - and the claim is only the docstring's until a
+    control holds it.
+
+    Both surfaces fail here: a red `tests` run beside a red published
+    check. The offenders are the run alone, so a mutant that CONCATENATES
+    the two lists - which reads as harmless, since the exit code is 1
+    either way - is caught by the length and by the absence of the
+    check's name.
+    """
+    del tmp
+    mod = _ci_wait()
+    runs = [_head_run('tests', 'failure')]
+    state, offenders = mod.verdict(runs, [_check(PUBLISHED, 'failure')])
+    assert state == 'unacceptable', state
+    assert offenders == runs, offenders
+    assert PUBLISHED not in [o['name'] for o in offenders], offenders
+
+
 # ---- an absent verdict: waited out, then refused ----
 
 def test_an_absent_published_verdict_is_waited_out_and_then_refused(tmp):
@@ -243,6 +301,31 @@ def test_this_repository_cannot_switch_the_published_check_off(tmp):
     assert f'{PUBLISHED}: failure' in text, text
 
 
+def test_either_spelling_of_this_repository_keeps_the_published_check(tmp):
+    """The direction rule's two halves must agree, and only the workflow
+    half was proven case-insensitive.
+
+    `test_every_spelling_of_this_repository_is_still_the_default` claims
+    the property in general, but its discriminating row drives a MISSING
+    WORKFLOW, which `required_workflows` answers: a `required_published`
+    that compared `repo == DEFAULT_REPO` would leave every control green
+    while a caller spelling this repository in either case stops reading
+    the gate it exists to read, and the head refuses at exit 4 forever
+    having never seen a red verdict.
+
+    Both halves are therefore driven apart on purpose - the repository is
+    spelled in lower case and in upper case, and the published check is
+    RED in both, so only the published half can produce the exit 1.
+    """
+    for spelling in (DEFAULT_REPO.lower(), DEFAULT_REPO.upper()):
+        done, _ = _wait(tmp, ['--repo', spelling], _green('tests')
+                        + [_verdict_suite(conclusion='FAILURE')])
+        text = done.stdout
+        assert done.returncode == 1, (
+            spelling, done.returncode, text, done.stderr)
+        assert f'{PUBLISHED}: failure' in text, (spelling, text)
+
+
 # ---- --once ----
 
 def test_once_prints_the_published_check_run(tmp):
@@ -289,6 +372,37 @@ def test_missing_published_names_the_absent_check(tmp):
     assert mod.missing_published([]) == [PUBLISHED]
     assert mod.missing_published([_check(PUBLISHED, 'failure')]) == []
     assert mod.missing_published([_check('pylint')]) == [PUBLISHED]
+
+
+def test_the_required_check_is_the_name_the_publisher_publishes(tmp):
+    """A shared literal needs a control that spans BOTH modules.
+
+    `PUBLISHED_CHECKS` and `scripts/ci/gate_freshness.py`'s `NAME` are two
+    spellings of one string in two files, and every other control here
+    compares against THIS suite's own `PUBLISHED`, so a rename of either
+    - the honest kind, updating every occurrence a real rename touches -
+    left 101/101 green across the ci_wait family and the two suites that
+    pin the publisher's `NAME` green too: nothing spanned the pair.
+
+    The consequence is not a typo. A name the publisher no longer writes
+    is a gate `ci_wait` never finds, so every head of this repository
+    refuses at exit 4 forever having never read a red verdict.
+
+    The comparison is by VALUE against the publisher's own constant, not
+    by spelling either side here - which is how the sibling `ACCEPTABLE`
+    is already held.
+    """
+    del tmp
+    publisher = _util.load(ROOT / 'scripts' / 'ci' / 'gate_freshness.py',
+                           'gate_freshness_publisher')
+    assert _ci_gate().PUBLISHED_CHECKS == frozenset({publisher.NAME}), (
+        'ci_wait would wait for a check the publisher does not write')
+    # And the other two constants of the same publisher, for the same
+    # reason: a stale `EXTERNAL_ID` or `APP_SLUG` makes the writer PATCH
+    # nothing and POST a second check, so the read above is what the
+    # rulesets see.
+    assert publisher.EXTERNAL_ID == 'daedalus-gate-freshness/v1'
+    assert publisher.APP_SLUG == 'github-actions'
 
 
 def test_the_predicate_ignores_which_conclusions_are_acceptable(tmp):
@@ -405,7 +519,7 @@ def _page(suites, has_next=False, cursor=None):
         'nodes': list(suites)}}}}}
 
 
-def _head_run(name, conclusion='success'):
+def _head_run(name, conclusion: str | None = 'success'):
     """One workflow run, as `verdict` reads it."""
     return {'id': 1, 'name': name, 'status': 'completed',
             'conclusion': conclusion,
