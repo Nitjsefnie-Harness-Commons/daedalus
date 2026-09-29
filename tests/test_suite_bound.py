@@ -223,10 +223,18 @@ def test_a_timed_out_suites_own_child_does_not_survive_it(tmp):
                                         result.stderr)
         pid = int(recorded.read_text(encoding='ascii'))
         group = coverage_group(result.stdout, 'test_wedged.py')
+        record = _assert_one_record(
+            group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
         assert settle_gone(pid, _WEDGE_SETTLE_S), (
             f'pid {pid} outlived the bound the launcher enforced. It ignores '
             f'SIGTERM, so only the escalation reaches it, and it did not; '
             f'the record says: {group}')
+        # The other direction of the same claim. This suite DID ignore the
+        # request, so a record that says it took one is false in the same
+        # way the other control's would be -- and the pair together is what
+        # pins the clause, because either assertion alone survives a branch
+        # that simply always takes one side.
+        assert 'ignored the request' in record['cleanup'], record
     finally:
         kill_recorded(recorded)
 
