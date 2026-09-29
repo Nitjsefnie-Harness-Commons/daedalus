@@ -5,3 +5,10 @@ coverage==7.16.1
 # Production readers have no YAML dependency; tests use BaseLoader as an
 # oracle.
 PyYAML==6.0.3
+# The shellcheck binary, as a package, so a requirements file can supply it:
+# actionlint shells out to shellcheck for every `run:` block and reports
+# nothing at all when it is missing, and neither upstream release stream nor
+# any Windows package manager ships a shellcheck for this matrix. Pinned for
+# the reason the two above are — a shellcheck release must not turn CI red on
+# an unchanged commit. scripts/ci/install_lint_tools.py names it in TOOLS.
+shellcheck-py==0.11.0.1

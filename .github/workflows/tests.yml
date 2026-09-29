@@ -608,6 +608,15 @@ jobs:
           python -m pip install -r requirements-test.txt
           python -m pip install -r requirements-dev.txt
 
+      # The suites drive real binaries, and a suite that finds one missing
+      # SKIPS — on every leg, silently, so a job can be green having verified
+      # nothing. This is the step that turns those skips into runs. It runs
+      # after the install above because one of the two tools it names arrives
+      # with that install, and it runs no pip itself, so the cache save below
+      # still holds what this job's install put there.
+      - name: Install the lint tools the suites drive
+        run: python scripts/ci/install_lint_tools.py
+
       - name: Run every suite
         env:
           PYTHONDONTWRITEBYTECODE: "1"
@@ -764,6 +773,14 @@ jobs:
           python -m pip install -r requirements-test.txt
           python -m pip install . ".[mcp]"
           python -m pip install -r requirements-dev.txt
+
+      # The suites drive real binaries, and a suite that finds one missing
+      # SKIPS — on every leg, silently, so this job can publish a coverage
+      # number that never measured the part that needed the binary. One of
+      # the two tools it names arrives with the install above; the step runs
+      # no pip itself, so the cache save below is unaffected by it.
+      - name: Install the lint tools the suites drive
+        run: python scripts/ci/install_lint_tools.py
 
       - name: Measure the bridge's child processes too
         # On Windows terminate() kills fixture children without a coverage

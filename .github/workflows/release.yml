@@ -206,6 +206,13 @@ jobs:
           fi
           echo "tag $GITHUB_REF_NAME matches package version $built"
 
+      # The suites drive real binaries, and a suite that finds one missing
+      # SKIPS — on every leg, silently, so a release can be cut by a job that
+      # verified less than its green said. One of the two tools it names
+      # arrives with the install above; the step runs no pip itself.
+      - name: Install the lint tools the suites drive
+        run: python scripts/ci/install_lint_tools.py
+
       - name: Run every suite before publishing anything
         env:
           PYTHONDONTWRITEBYTECODE: "1"
