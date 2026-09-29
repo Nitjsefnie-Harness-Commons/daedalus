@@ -20,32 +20,34 @@ _TWO = ('def _helper(tmp):\n'
         '    seed(tmp)\n'
         '    seed(tmp)\n'
         '    return tmp\n')
-_CALLS = ('def test_control(tmp):\n'
+_PLANT = "    (tmp / 'x').write_text()"
+_CALLS = ('_helper = None\n'
+          'def test_control(tmp):\n'
           '    del tmp\n'
           '    _helper(tmp)\n'
           '    _helper(tmp)\n')
 
 
-def _refuses(call, *arguments):
-    try:
-        call(*arguments)
-    except AssertionError as error:
-        return str(error)
-    raise AssertionError('the anchor accepted an ambiguous position')
-
-
 def test_after_call_refuses_a_second_occurrence_of_the_anchored_call(tmp):
     """A plant must name one place, or it is a coin toss."""
     del tmp
-    refusal = _refuses(after_call, _TWO, 'seed', "    (tmp / 'x').write_text()")
-    assert 'the seed anchor is not unique' in refusal, refusal
+    try:
+        after_call(_TWO, 'seed', _PLANT)
+    except AssertionError as error:
+        assert 'the seed anchor is not unique' in str(error), error
+    else:
+        raise AssertionError('the anchor accepted an ambiguous position')
 
 
 def test_the_call_line_refuses_a_second_occurrence(tmp):
     """The same, for the line the guard is expected to report."""
     del tmp
-    refusal = _refuses(the_call_line, _TWO, 'seed')
-    assert 'the seed call is not unique' in refusal, refusal
+    try:
+        the_call_line(_TWO, 'seed')
+    except AssertionError as error:
+        assert 'the seed call is not unique' in str(error), error
+    else:
+        raise AssertionError('the anchor accepted an ambiguous position')
 
 
 def test_the_first_call_line_is_the_earlier_of_the_calls(tmp):
@@ -57,12 +59,7 @@ def test_the_first_call_line_is_the_earlier_of_the_calls(tmp):
     go red for a reason no assert-plant check can name.
     """
     del tmp
-    source = ('_helper = None\n'
-              'def test_control(tmp):\n'
-              '    del tmp\n'
-              '    _helper(tmp)\n'
-              '    _helper(tmp)\n')
-    assert first_call_line(source, '_helper') == 4
+    assert first_call_line(_CALLS, '_helper') == 4
 
 
 if __name__ == '__main__':
