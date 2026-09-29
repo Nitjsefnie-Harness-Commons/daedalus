@@ -318,6 +318,7 @@
 !/tests/_dashnode_dom.py
 !/tests/_dashnode_retry_control.py
 !/tests/_dashpager.py
+!/tests/_dashqueue.py
 !/tests/_dashsection.py
 !/tests/_dashsection_controls.py
 !/tests/_dashsection_transport.py
