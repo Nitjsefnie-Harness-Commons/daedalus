@@ -757,6 +757,7 @@
     "_record_binding": {"python": ["tests/_control_writes.py"]},
     "_recording_run": {"python": ["tests/_classifier_calls.py"]},
     "_reference_shape": {"python": ["tests/_command_type_readers.py"]},
+    "_reflective": {"python": ["tests/_receiver_resolution.py"]},
     "_refusal_report": {"python": ["tests/_gc_handshake.py"]},
     "_refusals_logged": {"python": ["tests/_gc_handshake.py"]},
     "_refuse": {"python": ["tests/_command_type_readers.py", "tests/_mcp_import_closure.py"]},
