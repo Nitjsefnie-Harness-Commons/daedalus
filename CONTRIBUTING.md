@@ -171,11 +171,14 @@ and `tests/test_dashboard_harness.py` drive `api.js` and `_util.js`
 beside `extension/content.js`; and the extension's background, worker,
 content and page scripts run under `tests/test_extension_boundary.py`,
 `tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
-`tests/test_gm_*.py` suites. The one shipped module no suite reaches is
-the extension options page, `extension/options.js`, at 0 of 51 code
-lines. That figure is read off the tree by `tests/test_coverage_prose.py`,
-so a change that moves that module's code-line count turns the suite red
-until the figure above is updated with it. The covered count and the total
+`tests/test_gm_*.py` suites. The one shipped module the JavaScript
+coverage run does not reach is the extension options page,
+`extension/options.js`, at 0 of 51 code lines — a reach the run measures
+and the tree cannot, so the leading figure is attributed to the coverage
+step summary that run prints. The code-line count beside it is the tree's,
+read off the file by `tests/test_coverage_prose.py`, so a change that moves
+that module's code-line count turns the suite red until the figure above is
+updated with it. The covered count and the total
 the number is measured over are deliberately not restated here: the
 first is a measurement of one run, the second is a function of every
 shipped JavaScript file in the tree, and that run's own coverage step
