@@ -25,8 +25,9 @@ way a tracked dict acquires a key the model did not learn, driven from the
 mutator rather than from a spelling, over the three axes that domain
 spans -- the mutator, the COMBINATION of a readable and an unreadable
 source in one call, and the FRESHNESS of a value the model recorded before
-an unreadable source could have replaced it. `_DISPOSITION` names every
-member's outcome, and `test_every_axis_member_is_refused_or_declared` fails
+an unreadable source could have replaced it. `_DISPOSITION` carries what
+each member costs once nothing is routed, and
+`test_every_axis_member_reports_on_every_read_form_and_costs_nothing` fails
 on a member present in one and not the other, so the bucket cannot grow by
 omission.
 
@@ -198,61 +199,60 @@ _AXES = {
     'literal': 'd = {"k": relay()}',
 }
 
-# `refused`: the read resolves to a tracked callable, so the guard reads the
-# callable's own body. `declared`: the read joins to an unprovable sender.
-# The second column is what the member's SHAPE costs once nothing is routed.
-# It was the disposition plus the shape -- a member whose own name carried an
-# unprovable alias cost `(0, 1)` whatever its read said -- until the readable
-# sources took that away: no member has a marked name any more, and every row
-# below costs `(0, 0)`. The two columns are pinned per member anyway, so a
-# source that starts marking a name again shows here.
+# What each member's SHAPE costs once nothing is routed. It was an outcome
+# column beside this one -- `refused` when the read resolves to a tracked
+# callable, `declared` when it joins to an unprovable sender -- and that
+# column is gone: once the readable sources were read, no member takes the
+# second outcome and no member's name carries an unprovable alias any more, so
+# every row here reads `(0, 0)` and the outcome said nothing the cost did not.
+# A source that starts marking a name again shows up here.
 _DISPOSITION = {
-    'update-pairs': ('refused', (0, 0)),
-    'update-pairs-tuple': ('refused', (0, 0)),
-    'update-dict': ('refused', (0, 0)),
-    'update-keyword': ('refused', (0, 0)),
-    'update-zip': ('refused', (0, 0)),
-    'update-frozenset': ('refused', (0, 0)),
-    'update-unreadable': ('refused', (0, 0)),
-    'update-star': ('refused', (0, 0)),
-    'update-star-two': ('refused', (0, 0)),
-    'update-star-mixed': ('refused', (0, 0)),
-    'update-star-mixed-unreadable': ('refused', (0, 0)),
-    'update-star-mixed-unreadable-other': ('refused', (0, 0)),
-    'update-star-unreadable': ('refused', (0, 0)),
-    'ior-unreadable': ('refused', (0, 0)),
-    'ior-modelled': ('refused', (0, 0)),
-    'setdefault-value': ('refused', (0, 0)),
-    'setdefault-vacant': ('refused', (0, 0)),
-    'dict-call': ('refused', (0, 0)),
-    'dict-call-star': ('refused', (0, 0)),
-    'dict-literal-star': ('refused', (0, 0)),
-    'dict-literal-star-unreadable': ('refused', (0, 0)),
-    'assign-unreadable': ('refused', (0, 0)),
-    'copy-unreadable': ('refused', (0, 0)),
-    'recorded-key': ('refused', (0, 0)),
-    'fresh-recorded-key': ('refused', (0, 0)),
-    'fresh-recorded-key-updated': ('refused', (0, 0)),
-    'fresh-recorded-key-popped': ('refused', (0, 0)),
-    'stale-recorded-zip': ('refused', (0, 0)),
-    'stale-recorded-frozenset': ('refused', (0, 0)),
-    'stale-recorded-later-store': ('refused', (0, 0)),
-    'stale-unaccountable-name': ('refused', (0, 0)),
-    'stale-unaccountable-name-star': ('refused', (0, 0)),
-    'stale-unaccountable-name-doubled': ('refused', (0, 0)),
-    'ior-stale-unaccountable-name': ('refused', (0, 0)),
-    'literal': ('refused', (0, 0)),
-    'update-unaccountable-name': ('refused', (0, 0)),
-    'update-unaccountable-name-star': ('refused', (0, 0)),
-    'update-unaccountable-name-doubled': ('refused', (0, 0)),
-    'ior-unaccountable-name': ('refused', (0, 0)),
-    'update-unaccountable-name-mixed': ('refused', (0, 0)),
-    'update-unaccountable-name-mixed-keyed': ('refused', (0, 0)),
-    'update-unaccountable-name-mixed-doubled': ('refused', (0, 0)),
-    'dict-name': ('refused', (0, 0)),
-    'dict-name-star': ('refused', (0, 0)),
-    'dict-stale-name': ('refused', (0, 0)),
-    'ior-after-dict-name': ('refused', (0, 0)),
+    'update-pairs': (0, 0),
+    'update-pairs-tuple': (0, 0),
+    'update-dict': (0, 0),
+    'update-keyword': (0, 0),
+    'update-zip': (0, 0),
+    'update-frozenset': (0, 0),
+    'update-unreadable': (0, 0),
+    'update-star': (0, 0),
+    'update-star-two': (0, 0),
+    'update-star-mixed': (0, 0),
+    'update-star-mixed-unreadable': (0, 0),
+    'update-star-mixed-unreadable-other': (0, 0),
+    'update-star-unreadable': (0, 0),
+    'ior-unreadable': (0, 0),
+    'ior-modelled': (0, 0),
+    'setdefault-value': (0, 0),
+    'setdefault-vacant': (0, 0),
+    'dict-call': (0, 0),
+    'dict-call-star': (0, 0),
+    'dict-literal-star': (0, 0),
+    'dict-literal-star-unreadable': (0, 0),
+    'assign-unreadable': (0, 0),
+    'copy-unreadable': (0, 0),
+    'recorded-key': (0, 0),
+    'fresh-recorded-key': (0, 0),
+    'fresh-recorded-key-updated': (0, 0),
+    'fresh-recorded-key-popped': (0, 0),
+    'stale-recorded-zip': (0, 0),
+    'stale-recorded-frozenset': (0, 0),
+    'stale-recorded-later-store': (0, 0),
+    'stale-unaccountable-name': (0, 0),
+    'stale-unaccountable-name-star': (0, 0),
+    'stale-unaccountable-name-doubled': (0, 0),
+    'ior-stale-unaccountable-name': (0, 0),
+    'literal': (0, 0),
+    'update-unaccountable-name': (0, 0),
+    'update-unaccountable-name-star': (0, 0),
+    'update-unaccountable-name-doubled': (0, 0),
+    'ior-unaccountable-name': (0, 0),
+    'update-unaccountable-name-mixed': (0, 0),
+    'update-unaccountable-name-mixed-keyed': (0, 0),
+    'update-unaccountable-name-mixed-doubled': (0, 0),
+    'dict-name': (0, 0),
+    'dict-name-star': (0, 0),
+    'dict-stale-name': (0, 0),
+    'ior-after-dict-name': (0, 0),
 }
 
 # Shapes the model CAN account for: the key is visible, or its absence is,
@@ -310,37 +310,26 @@ _SILENT = {
 }
 
 
-def test_every_axis_member_is_refused_or_declared(tmp):
-    """The two tables agree in both directions: a member in one and not the
-    other fails here rather than passing unnoticed."""
+def test_every_axis_member_reports_on_every_read_form_and_costs_nothing(tmp):
+    """Every member of every axis, over every read form: the read must not
+    read clean, and it must cost nothing once nothing is routed.
+
+    The cost is pinned per member and per form even though it is
+    uniformly `(0, 0)`, because a shape that starts costing a read again
+    has to show here rather than in a suite that only looks for a false
+    green. The report count is not pinned: a member can be reported by the
+    callable's own body, by an unprovable name, or by both, so the
+    invariant is the lower bound.
+    """
     assert sorted(_DISPOSITION) == sorted(_AXES), sorted(
         set(_AXES) ^ set(_DISPOSITION))
-    assert {outcome for outcome, _ in _DISPOSITION.values()} \
-        <= {'refused', 'declared'}
-
-
-def test_no_axis_member_reads_a_key_the_model_never_recorded_clean(tmp):
-    """Every member of every axis, over every read form: one runtime call
-    really does reach `ext_cmd`, and the guard reports it. A member the
-    read leaves silent fails here. The count is not pinned -- a member can
-    be reported by the callable's own body, by an unprovable alias, or by
-    both -- so the invariant is the lower bound, not an exact figure."""
-    for label in sorted(_DISPOSITION):
+    for label, cost in sorted(_DISPOSITION.items()):
         for name, read in sorted(_READS.items()):
             calls, found = _verdict(tmp, _AXES[label], read)
             assert (calls, found >= 1) == (1, True), (
                 label, name, calls, found)
-
-
-def test_a_declared_read_costs_where_a_refused_read_does_not(tmp):
-    """What each member's SHAPE costs once nothing is routed, pinned per
-    member and per read form. Uniform today -- `(0, 0)` throughout -- and
-    pinned anyway, because a shape that starts costing a read again has to
-    show here rather than in a suite that only looks for a false green."""
-    for label, (_, cost) in sorted(_DISPOSITION.items()):
-        for name, read in sorted(_READS.items()):
-            clean = _verdict(tmp, _AXES[label], read, _CLEAN)
-            assert clean == cost, (label, name, clean)
+            assert _verdict(tmp, _AXES[label], read, _CLEAN) == cost, (
+                label, name)
 
 
 def test_an_unlisted_member_of_the_domain_is_rejected(tmp):
@@ -461,8 +450,8 @@ def test_every_silent_member_is_listed_and_not_refused(tmp):
     commit that has to move the member into `_AXES`. The clean counterpart
     is pinned beside it, on EVERY read form rather than only the silent one,
     because a fix that made every read of that key join would be a new false
-    positive rather than a repair -- and which form that would be is the
-    member's own split, so neither can be assumed."""
+    positive rather than a repair, so the clean figure is pinned for every
+    form and not only the silent one."""
     assert not {store for store, _, _, _ in _SILENT.values()} \
         & set(_AXES.values())
     assert all(issue is None or (isinstance(issue, int) and issue > 0)

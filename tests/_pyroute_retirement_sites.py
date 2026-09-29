@@ -67,15 +67,18 @@ REVERTS = {
         "                     | retired_into(known[2], items))\n", ""),
     '_pyroute_reads._mapping_lookup': (
         "    if key in owner.stale:\n"
-        "        return merge_yielded((owner.items.get(key), UNPROVABLE_SENDER,\n"
+        "        return merge_yielded((owner.items.get(key), UNPROVABLE_SENDER"
+        ",\n"
         "                              default))\n", ""),
     '_pyroute_reads._readback_copy': (
-        "        items, dict_length(items, owner.length is not None), 'dict', node,\n"
+        "        items, dict_length(items, owner.length is not None), 'dict', "
+        "node,\n"
         "        stale=owner.stale)",
         "        items, dict_length(\n"
         "            items, owner.length is not None), 'dict', node)"),
     '_pyroute_reads._source_items': (
-        "            return known.items, known.length is not None, known.stale",
+        "            return known.items, known.length is not None, known.stale"
+        "",
         "            return known.items, known.length is not None, "
         "frozenset()"),
     '_pyroute_reads._apply_pop': (
@@ -83,14 +86,16 @@ REVERTS = {
         "            owner, () if key is _UNRESOLVED_KEY else (key,))))",
         "        owner, items, key is _UNRESOLVED_KEY))"),
     '_pyroute_mapping._mark_unprovable': (
-        "                          stale=stale_after_store(owner, unreadable=True))",
+        "                          stale=stale_after_store(owner, unreadable=T"
+        "rue))",
         "                          )"),
     '_pyroute_mapping._apply_mapping_store': (
         "                                 | (carried - set(keywords))))",
         "                                 | carried))"),
     '_pyroute_mapping._apply_setdefault': (
         "            replace_container(state, owner_name, owner, items,\n"
-        "                              stale=stale_after_store(owner, (literal,)))",
+        "                              stale=stale_after_store(owner, (literal"
+        ",)))",
         "            replace_container(state, owner_name, owner, items)"),
     '_pyroute_stores.replace_container': (
         "    copied = container_copy(owner, items, unknown_length, stale)",
@@ -104,24 +109,29 @@ REVERTS = {
         "            owner, () if dynamic else (literal,)))", "        )"),
     '_pyroute_storage.stale_after_store': (
         "    if unreadable:\n"
-        "        return (owner.stale | (set(owner.items) - {DYNAMIC_KEY})) \\\n"
+        "        return (owner.stale | (set(owner.items) - {DYNAMIC_KEY})) \\"
+        "\n"
         "            - set(written)\n"
         "    return owner.stale - set(written)",
         "    return owner.stale"),
     '_pyroute_storage.container_copy': (
         "    current = owner.stale if stale is None else stale\n"
-        "    return DeferredContainer(items, length, owner.kind, owner.identity,\n"
+        "    return DeferredContainer(items, length, owner.kind, owner.identit"
+        "y,\n"
         "                             owner.star_display,\n"
         "                             frozenset(current) - {DYNAMIC_KEY})",
         "    return DeferredContainer(items, length, owner.kind,\n"
         "                             owner.identity, owner.star_display)"),
     '_pyroute_storage.join_clean_occupancy': (
-        "            items, length, owner.kind, owner.identity, star, owner.stale))",
+        "            items, length, owner.kind, owner.identity, star, owner.st"
+        "ale))",
         "            items, length, owner.kind, owner.identity, star))"),
     '_pyroute_positions.at_position': (
         "        if index in container.stale:\n"
-        "            # A store the model could not read may have put something else\n"
-        "            # at this key, so the recorded value is one more candidate.\n"
+        "            # A store the model could not read may have put something"
+        " else\n"
+        "            # at this key, so the recorded value is one more candidat"
+        "e.\n"
         "            return [items.get(index), UNPROVABLE_SENDER,\n"
         "                    items.get(DYNAMIC_KEY)]\n", ""),
     '_pyroute_match._bind_mapping': (
