@@ -233,6 +233,9 @@ def _mapping_item_value(node, owner, state):
                               node.args[0] if node.args else None, state)))
 
 
+# Sequence builtins whose single argument is the pair sequence itself.
+_PAIR_WRAPPERS = ('frozenset', 'list', 'set', 'tuple')
+
 _MAPPING_READBACKS = ('values', 'items', 'popitem', 'copy')
 
 
@@ -501,21 +504,67 @@ def _literal_pair_items(source, state):
     return entries, aligned
 
 
-def _source_items(source, state):
-    """Items one mapping store contributes, whether their keys are all
-    counted, and which of them the source has already retired; None marks
-    unknown contents.
+def _spelled_pair_items(source, state):
+    """The pairs a source spells in its own syntax, and whether it spells
+    every one of them; None marks a source of some other shape.
 
-    The retirement travels with the items because it is a fact about them:
-    a destination built out of these values cannot claim at a retired key
-    that its own value there is current."""
-    known = (_dict_value(source, state) if isinstance(source, ast.Dict)
-             else _known_value(source, state))
-    if not isinstance(known, DeferredContainer):
+    Two shapes name their keys outright. A `zip` of two equal-length
+    literal columns pairs them by position, which is exactly what `zip`
+    does, and taking the key from the FIRST column is what keeps the fold
+    exact: a value-blind scan would put `relay()` at `"k"` and manufacture
+    a false positive on a source that only ever wrote `"j"`. A
+    single-argument sequence wrapper over a literal sequence of two-element
+    pairs spells the same pairs one layer down from the call.
+
+    A key the model cannot resolve leaves the source partly unaccounted,
+    and a source that spells no pair at all accounts for nothing: an empty
+    `zip` is no more an account than an opaque source is, and declining it
+    is what keeps a store that folds one from claiming a key set it never
+    computed.
+    """
+    if not (isinstance(source, ast.Call)
+            and isinstance(source.func, ast.Name) and not source.keywords):
         return None
-    if known.kind == 'dict':
-        return known.items, known.length is not None, known.stale
-    if known.kind not in ('list', 'tuple', 'set'): return None
+    if (source.func.id in state.builtin_globals
+            or source.func.id in state.builtin_locals):
+        return None
+    if source.func.id == 'zip' and len(source.args) == 2:
+        first, second = source.args
+        if not isinstance(first, (ast.List, ast.Tuple, ast.Set)) \
+                or not isinstance(second, (ast.List, ast.Tuple, ast.Set)):
+            return None
+        if not first.elts or len(first.elts) != len(second.elts):
+            return None
+        pairs = list(zip(first.elts, second.elts))
+    elif source.func.id in _PAIR_WRAPPERS and len(source.args) == 1:
+        argument = source.args[0]
+        if not isinstance(argument, (ast.List, ast.Tuple, ast.Set)) \
+                or not argument.elts:
+            return None
+        pairs = []
+        for element in argument.elts:
+            if not isinstance(element, (ast.Tuple, ast.List, ast.Set)) \
+                    or len(element.elts) != 2:
+                return None
+            pairs.append((element.elts[0], element.elts[1]))
+    else:
+        return None
+    items, counted = {}, True
+    for key_node, value_node in pairs:
+        key = _literal_key(key_node, state)
+        if key is _UNRESOLVED_KEY:
+            counted = False
+            continue
+        value = _known_value(value_node, state)
+        if value is None and isinstance(value_node, ast.Call):
+            value = UNPROVABLE_SENDER
+        items[key] = value
+    return items, counted
+
+
+def _pair_sequence_items(known, source, state):
+    """The pairs a tracked sequence source yields, and whether its yield is
+    all of them; None when the sequence is not one this can pair."""
     items = {}
     entries, aligned = _literal_pair_items(source, state)
     for position, value in known.items.items():
@@ -540,9 +589,30 @@ def _source_items(source, state):
     # `True` one key there), and only the dynamic slot precedes it.
     for key, value in entries.values():
         items[key] = value
-    # A pair source is a sequence, so it retires nothing: the keys the
-    # destination ends up holding are named here, not carried over.
-    return items, len(known.items) == known.length, frozenset()
+    return items, len(known.items) == known.length
+
+
+def _source_items(source, state):
+    """Items one mapping store contributes, whether their keys are all
+    counted, and which of them the source has already retired; None marks
+    unknown contents.
+
+    The retirement travels with the items because it is a fact about them:
+    a destination built out of these values cannot claim at a retired key
+    that its own value there is current."""
+    known = (_dict_value(source, state) if isinstance(source, ast.Dict)
+             else _known_value(source, state))
+    if isinstance(known, DeferredContainer):
+        if known.kind == 'dict':
+            return known.items, known.length is not None, known.stale
+        if known.kind in ('list', 'tuple', 'set'):
+            paired = _pair_sequence_items(known, source, state)
+            if paired is not None:
+                # A pair source is a sequence, so it retires nothing: the
+                # keys the destination ends up holding are named here.
+                return *paired, frozenset()
+    spelled = _spelled_pair_items(source, state)
+    return None if spelled is None else (*spelled, frozenset())
 
 
 def _pop_key(call, state):
