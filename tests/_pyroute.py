@@ -238,9 +238,11 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
     def check_store(node, current_pairs):
         """Evaluate an expression the flow reaches without a statement of its
         own, and store against it: a header, a test, a context expression, a
-        case guard, or one of a function's or a class's definition-time binder
-        positions. The per-statement store hook never sees these, so a mutating
-        call in one has to be stored the same way a statement's is."""
+        case guard, or one of a function's, a class's or a `lambda`'s
+        definition-time binder positions (for a `lambda`, its defaults, which
+        are the only ones it has). The per-statement store hook never sees
+        these, so a mutating call in one has to be stored the same way a
+        statement's is."""
         current_pairs = check_expression(node, current_pairs)
         for state in current_pairs:
             store_deferred_value(node, state)
