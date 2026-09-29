@@ -107,8 +107,17 @@ SECONDARY_CONTROLLED = {
 MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 52, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
+    # The keyword set, not a launch. The sweep can only DELETE this
+    # clause, and deleting it crashes every row, so it cannot tell one
+    # evidence from another here; what makes this the right one is that
+    # the row it names is the only verdict the set's VALUE decides --
+    # admit `timout` and `foreign-keyword-on-a-launch` reads `[]`, while
+    # a clean launch reads `[]` either way. A control nothing can fail
+    # for this clause is what the sweep reports on a deletion, and the
+    # set is read from the signature so the misspell is unreachable from
+    # the tree.
     ('_stdlib_read.py', 45, 'CONTROLLED',
-     'a-clean-launch-emits-nothing'),
+     'foreign-keyword-on-a-launch'),
     ('_launch_audit.py', 77, 'INERT',
      "normalize returning its own argument; callers only test it"),
     ('_launch_audit.py', 86, 'INERT',
