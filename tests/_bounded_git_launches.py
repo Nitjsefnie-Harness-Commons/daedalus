@@ -319,35 +319,6 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_atomic_file.py', 'replace', 'self._publish()', 1):
          'the replacement the fake `os.replace` was constructed with; it'
          'writes a temp file into place and spawns nothing',
-    ('tests/test_cli_browser_tabs.py',
-     'test_do_open_tabs_prints_only_a_count_when_nothing_opened',
-     '_ext(timeout)', 1):
-         'the expectation for the count-only output; the call is the same'
-         'and what differs is what the handler prints',
-    ('tests/test_cli_browser_tabs.py',
-     'test_do_open_tabs_renders_a_refusal_carrying_no_url_or_error',
-     '_ext(timeout)', 1):
-         'the expectation for the refusal arm, where the handler must not'
-         'echo the url the fixture still carries',
-    ('tests/test_cli_browser_tabs.py',
-     'test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line',
-     '_ext(timeout)', 1):
-         'the expectation beside the partial-failure case, where the same'
-         'call is made and two lines of output are read',
-    ('tests/test_cli_browser_tabs.py',
-     'test_do_open_tabs_sends_active_false_only_with_background',
-     '_ext(timeout)', 1):
-         'the expectation where the active flag is refused; the fixture is'
-         'what the handler is checked against',
-    ('tests/test_cli_browser_tabs.py',
-     'test_do_open_tabs_sends_every_url_in_order_and_waits_thirty',
-     '_ext(timeout)', 1):
-         'the recorder expectation for the in-order case; the fixture'
-         'names the 30s the test asserts the tool waited for',
-    ('tests/test_cli_browser_tabs.py',
-     'test_do_open_tabs_sends_pinned_only_with_the_flag', '_ext(timeout)', 1):
-         'the expectation where pinning is refused; the same call,'
-         'compared field by field against the sent mapping',
     ('tests/test_client_credentials.py', '_eval', 'getattr(mod, name)()', 1):
          'the loaded MCP tool reached by name, called with the arguments'
          'under test; the getattr is a lookup, not a launch',
