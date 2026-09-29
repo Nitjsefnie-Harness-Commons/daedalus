@@ -1,6 +1,11 @@
 """The retirement's sites, derived from the guard's own source, and the
 sweep that reverts each of them.
 
+Named for what it is rather than for the family it reads: the universe is
+the guard family, identified by the `_pyroute*` naming, and a tool that
+reads that family is not itself a member of it. The earlier name made
+the driver the twenty-first site in its own census.
+
 A retirement is a per-key fact on a tracked container, and the rule it
 exists for is that a constant-key read of a retired key does not answer
 from the recorded value there. The rule lives at a handful of places and
@@ -36,11 +41,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+import _util
 
-GUARD_MODULES = ('_pyroute_match', '_pyroute_mapping', '_pyroute_positions',
-                 '_pyroute_reads', '_pyroute_storage', '_pyroute_stores',
-                 '_pyroute_values')
+HERE = Path(__file__).resolve().parent
+_RETIREMENT_VOCABULARY = ('stale', 'retired')
+GUARD_MODULES = tuple(sorted(
+    path.stem for path in HERE.glob('_pyroute*.py')))
+
+# Every guard module, globbed rather than listed. A hand list is the same
+# defect as a hand site list: a module added to the family would be invisible
+# to the derivation, which is the one claim this branch has no business
+# making by hand. Filled in after HERE, further down.
 
 # The suites a revert has to turn red in, and the test whose name must
 # appear among the failures.
@@ -107,6 +118,8 @@ REVERTS = {
     '_pyroute_stores._subscript_store': (
         "        stale=stale_after_store(\n"
         "            owner, () if dynamic else (literal,)))", "        )"),
+    '_pyroute_storage.retired_into': (
+        '    return retired & set(items)', '    return frozenset()'),
     '_pyroute_storage.stale_after_store': (
         "    if unreadable:\n"
         "        return (owner.stale | (set(owner.items) - {DYNAMIC_KEY})) \\"
@@ -147,13 +160,22 @@ REVERTS = {
 
 
 def _mentions_a_retirement(node):
-    """Whether a function propagates or consults one, by property."""
+    """Whether a function propagates or consults one, by property.
+
+    The vocabulary is the concept's two spellings in this tree: `stale` for
+    the marker itself and `retired` for what a fold inherits. Keying on one
+    of the two is what let `retired_into` -- the function that decides
+    what a fold inherits -- sit outside the sweep entirely.
+    """
     for child in ast.walk(node):
-        if isinstance(child, ast.Name) and child.id.startswith('stale'):
+        if isinstance(child, ast.Name) \
+                and child.id.startswith(_RETIREMENT_VOCABULARY):
             return True
-        if isinstance(child, ast.Attribute) and child.attr == 'stale':
+        if isinstance(child, ast.Attribute) \
+                and child.attr.startswith(_RETIREMENT_VOCABULARY):
             return True
-        if isinstance(child, ast.keyword) and child.arg == 'stale':
+        if isinstance(child, ast.keyword) and child.arg \
+                and child.arg.startswith(_RETIREMENT_VOCABULARY):
             return True
     return False
 
@@ -184,7 +206,8 @@ def _red_controls():
     for suite in CONTROL_SUITES:
         finished = subprocess.run(
             [sys.executable, str(HERE / Path(suite).name)], cwd=HERE.parent,
-            capture_output=True, text=True, timeout=900)
+            env=_util.child_coverage('scrub'), capture_output=True,
+            text=True, timeout=900)
         for line in finished.stdout.splitlines():
             stripped = line.strip()
             if stripped.startswith(('FAIL', 'ERROR')):
@@ -203,6 +226,9 @@ def revert_sites():
         raise SystemExit(f'no revert written for: {sorted(missing)}')
     survivors = []
     print(f'{"site":46s} {"controls that die":44s} survivors')
+    for stale in HERE.glob('__pycache__'):
+        for cached in stale.glob('*.pyc'):
+            cached.unlink()
     for site in sorted(retirement_sites()):
         module = site.rpartition('.')[0]
         path = HERE / (module + '.py')
