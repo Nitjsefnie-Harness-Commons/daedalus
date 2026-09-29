@@ -470,7 +470,6 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
     derivation uses, so the two cannot disagree about it.
     """
     del tmp
-    declared_share = set(DECLARED_BY)
     for source, job, _runs, _mechanism in _runner_doors():
         workflow = _workflow_text(source)
         reach = _suite_step(workflow, job)
@@ -479,7 +478,8 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
             'the suites any more; the two are read from one function and '
             'disagreeing means one of them is stale')
         before = _actions_before(workflow, job, reach[0])
-        missing = sorted(declared_share - before)
+        missing = sorted(tool for tool, action in DECLARED_BY.items()
+                         if action not in before)
         assert not missing, (
             f'the {job} job in {source} finds its suites by discovery, and '
             f'its first suite-running step is step {reach[0] + 1}, before '
