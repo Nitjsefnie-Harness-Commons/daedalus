@@ -33,7 +33,7 @@ from _imported_calls import module_scopes, reached_functions
 SCOPE_KINDS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 
-def _roots(entry, tree):
+def _reached_roots(entry, tree):
     """The top-level scopes an entry reaches, and nothing else.
 
     The reach is the premise of the claim, not the thing under test, so
@@ -45,17 +45,17 @@ def _roots(entry, tree):
             if node.__class__ in SCOPE_KINDS and node.name in names]
 
 
-def _owed(label, tree, entry):
+def _call_sites(label, tree, entry):
     """(file, line, column) of every call inside a reached root."""
     sites = set()
-    for root in _roots(entry, tree):
+    for root in _reached_roots(entry, tree):
         for node in ast.walk(root):
             if isinstance(node, ast.Call):
                 sites.add((label, node.lineno, node.col_offset))
     return sites
 
 
-def scan(root, controls):
+def unjudged_sites(root, controls):
     """The un-judged calls under `root`, one scan of every control.
 
     Returns a sorted list of (file, line, column), each a site the guard
@@ -90,7 +90,7 @@ def scan(root, controls):
 
     owed = set()
     for label, tree, entry in resolved:
-        owed |= _owed(label, tree, entry)
+        owed |= _call_sites(label, tree, entry)
     return sorted(owed - judged)
 
 
@@ -158,7 +158,7 @@ def main(root):
     root = Path(root)
     controls = sorted(str(path.relative_to(root))
                       for path in (root / 'tests').glob('test_*.py'))
-    unjudged = scan(root, controls)
+    unjudged = unjudged_sites(root, controls)
     for label, line, _ in unjudged:
         print(f'  UNJUDGED {label}:{line}')
     print(f'\n{len(unjudged)} un-judged calls under {len(controls)} controls')

@@ -301,6 +301,7 @@
 !/tests/_command_type_readers.py
 !/tests/_completion.py
 !/tests/_control_calls.py
+!/tests/_control_paths.py
 !/tests/_control_writes.py
 !/tests/_controlled_call.py
 !/tests/_coverage_authority_scan.py
@@ -469,6 +470,7 @@
 !/tests/_token_policy_cases.py
 !/tests/_unconsolidated_js_names.py
 !/tests/_unconsolidated_names.py
+!/tests/_unjudged_scan.py
 !/tests/_upload_fixture.py
 !/tests/_util.py
 !/tests/_version_contract.py
