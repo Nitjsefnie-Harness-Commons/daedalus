@@ -333,6 +333,69 @@ def test_no_posix_only_api_sits_in_a_function_that_never_asks_the_platform(
     assert offences == [], offences
 
 
+# --- the stalling controls, and the bound each one owes --------------------
+#
+# A control that drives a real child which never settles has exactly one
+# failure mode against a reversion: the wait runs until the runner's ceiling,
+# and the suite's only report of it is that the job timed out. The bound above
+# is what turns that into a named failure, so every such control is held by
+# one — the announcement beside it, because a bound with no pid to kill only
+# reports.
+#
+# The modules are named rather than globbed over every file under `tests/`
+# because the marker's shape is not a definition. An empty timer holding an
+# event loop open is also how a harness's OWN keepalive child is written, so
+# a marker read across the whole tree would refuse children that are supposed
+# to hold the loop open and settle. The scope is therefore the suites this
+# branch added a stalling control to, and a child in another suite is that
+# suite's own budget to hold.
+STALLING_CONTROL_MODULES = (
+    'test_noderun_deadline.py',
+    'test_real_browser_harness.py',
+    'test_real_browser_environment.py',
+)
+# An empty timer with nothing to do is what "never settles" looks like in
+# JavaScript, and a control's own source reaches that name no other way.
+STALL_MARKER = 'setInterval'
+
+
+def _calls_named(function, name):
+    """Whether `function` makes a call to `name`."""
+    return any(isinstance(node, ast.Call) and ast.unparse(node.func) == name
+               for node in ast.walk(function))
+
+
+def test_every_stalling_control_is_held_by_a_bound_and_announces_a_pid(tmp):
+    """The class, not the one control: a wedge is caught, never waited out.
+
+    Both channels this branch has for a reversion of a launch bound — the one
+    that reads the bound out of the module and the one that waits for it —
+    are in `tests/test_noderun_deadline.py`, and the control that waits for
+    it hung. The bound that control was missing worked in isolation, so
+    nothing was wrong with it; it was simply never reached, because an
+    earlier control in the same suite waited on a child nothing in the suite
+    could end. A census over the three suites the branch put a stalling
+    control in is what keeps the next one from arriving the same way.
+    """
+    del tmp
+    unwrapped = []
+    for name in STALLING_CONTROL_MODULES:
+        tree = ast.parse((TESTS / name).read_text(encoding='utf-8'))
+        for function in tree.body:
+            if not isinstance(function, ast.FunctionDef):
+                continue
+            if STALL_MARKER not in ast.unparse(function):
+                continue
+            missing = [held for held in ('outer_bound', 'announcing_pid')
+                       if not _calls_named(function, held)]
+            if missing:
+                unwrapped.append(
+                    f'{name}:{function.lineno} {function.name} carries no '
+                    f'{" and no ".join(missing)}, so a wedged child there is '
+                    f'a suite timeout rather than a named failure')
+    assert unwrapped == [], unwrapped
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='outerbound_')
 
