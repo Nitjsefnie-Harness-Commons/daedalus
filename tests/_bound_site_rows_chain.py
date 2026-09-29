@@ -92,6 +92,72 @@ CHAIN_LIMB_ROWS = (
      "subprocess.run(['git', 'status'], check=True)\n"
      "http.client.HTTPSConnection('h', timeout=30)\n",
      []),
+    # The guard above reads a SET of the names the module binds, and the
+    # bindings table it replaced reads six of the ways. These five are
+    # the ways that were outside it, one per shape: a target that is not
+    # a Name, a name a `def` binds, a name a `class` binds, a name an
+    # `AugAssign` writes, and a handler's name, which the grammar keeps
+    # as a plain string rather than as a node. Each is a binding at run
+    # time and none of them is in the table, so each proved a root the
+    # module had rebound. The rows are a family, not a list: the set the
+    # limb reads is collected by the AST's vocabulary, so a form added
+    # later is refused without a row here, and the two rows after them
+    # are the negatives that keep the collection from over-refusing.
+    ('a-root-rebound-through-a-tuple-target-is-not-proved',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "def probe(pair):\n"
+     "    other, email = pair\n"
+     "    return email.mime.text.send(['git', 'status'], timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('a-root-rebound-through-a-function-def-is-not-proved',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "def email():\n"
+     "    return 1\n"
+     "email.mime.text.send(['git', 'status'], timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('a-root-rebound-through-a-class-def-is-not-proved',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "class email:\n"
+     "    pass\n"
+     "email.mime.text.send(['git', 'status'], timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('a-root-rebound-through-an-augmented-assignment-is-not-proved',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "email += 1\n"
+     "email.mime.text.send(['git', 'status'], timeout=30)\n",
+     [(4, 'unreadable', 'unplaced')]),
+    ('a-root-rebound-by-an-except-handler-name-is-not-proved',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "try:\n"
+     "    raise ValueError()\n"
+     "except ValueError as email:\n"
+     "    pass\n"
+     "email.mime.text.send(['git', 'status'], timeout=30)\n",
+     [(7, 'unreadable', 'unplaced')]),
+    # The negative for the collection itself rather than for the table:
+    # every one of those five forms present in the module, on names that
+    # are not the root. A guard that refused on any binding at all would
+    # take this row with it.
+    ('unrelated-bindings-in-those-forms-leave-the-root-proved',
+     "import subprocess\n"
+     "import http.client\n"
+     "class Mail:\n"
+     "    pass\n"
+     "def send():\n"
+     "    return 1\n"
+     "count = 0\n"
+     "count += 1\n"
+     "try:\n"
+     "    raise ValueError()\n"
+     "except ValueError as detail:\n"
+     "    print(detail)\n"
+     "http.client.HTTPConnection(timeout=30)\n",
+     []),
     # The set is consulted on the ROOT, so a member of an excluded root
     # named directly walks past it: the root is never a dotted import, so
     # the chain limb never sees it and the bare-Name limb proves the
