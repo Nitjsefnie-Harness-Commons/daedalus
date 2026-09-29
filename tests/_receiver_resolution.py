@@ -11,11 +11,12 @@ network arm resolves a callee to a live OBJECT and asks whether that
 object is a member of a stdlib network module, so `urlopen`, an aliased
 import of it, a module aliased at the import and a local bound from it
 are ONE receiver. The reachability arm asks for a PROOF that the number
-reaches no child and discharges only on one: the number reaching no call
-at all, every call it reaching having a receiver the tree binds to a
-literal, or every one of them only building what a `raise` raises.
+reaches no child and discharges only on one: every call it reaches having
+a receiver the tree binds to a literal, or every one of them only building
+what a `raise` raises -- and only once every use of the deadline sits in a
+position the rule can name.
 
-That is the whole of the rule, and each of the three is a proof rather
+That is the whole of the rule, and each of the two is a proof rather
 than a guess about what the census does not know.
 `deadline_reaches_a_child` is where that reasoning lives, and
 `literal_bindings` is what the second proof is read off; this is the map,
@@ -26,7 +27,8 @@ import importlib
 import inspect
 import sys
 
-from _binding_names import _names_a_target_binds, _rebindings
+from _binding_names import (_every_use_proven, _names_a_target_binds,
+                            _rebindings)
 import _launch_path as path
 
 # The modules a NETWORK READ is a member of. This names MODULES and never
@@ -608,10 +610,15 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
     from it, to a call the census cannot show is harmless.
 
     The second half is a POSITIVE proof in the discharge direction, and
-    that is the whole of the difference. There are two of them, and
-    `literal_bindings` carries the second: the deadline reaching no call
-    at all, and a call whose receiver is in that set. Neither is a guess
-    about what the census does not know.
+    that is the whole of the difference. `literal_bindings` carries it: a
+    call whose receiver is in that set is harmless, because a container
+    cannot end a child. Either proof may fire only once `_every_use_proven`
+    has cleared the gate in front of it — a deadline reaching no call at
+    all is NOT a proof, and the generator is what falsified it: a deadline
+    that travelled through a `for` target, a walrus, an augmented or
+    annotated assignment, a tuple unpack or a `match` capture was still in
+    flight, and an incomplete `derived` simply never saw the call it
+    reached.
 
     Everything else is refused, and the reason is that each earlier
     version substituted a guess for the proof. Discharging when the
@@ -651,6 +658,8 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
                                if isinstance(target, ast.Name))
         if len(derived) == before:
             break
+    if not _every_use_proven(function, derived):
+        return True
     if any(isinstance(node, ast.Assign) and node.value is not None
            and any(isinstance(t, ast.Subscript) for t in node.targets)
            and _mentions(node.value, derived)
