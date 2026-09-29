@@ -17,17 +17,12 @@ from _coverage_guard import (  # noqa: E402
     _BINDING_MESSAGE, _coverage_environment_violations,
     _synthetic_violations)
 from _coverage_mutation_specs import _BASH_MUTATION_SPECS  # noqa: E402
+from _coverage_source_fixtures import _real_module_copy  # noqa: E402
 from _coverage_scopes import (  # noqa: E402
     _evaluation_scopes, _scope_bindings)
 from _mutation_sweep import mutation_sweep  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
 from _sweep_launch_scan import SWEEP_ENTRY, sweep_launches  # noqa: E402
-
-
-def _real_module_copy(tmp, relative):
-    root = Path(tmp) / 'repository'
-    copy_test_tree(root)
-    return root, root / relative
 
 
 def test_mutation_gate_accepts_crlf_copied_helpers(tmp):
