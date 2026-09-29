@@ -40,7 +40,7 @@ def container_copy(owner, items, unknown_length=False, stale=None):
     current = owner.stale if stale is None else stale
     return DeferredContainer(items, length, owner.kind, owner.identity,
                              owner.star_display,
-                             current - {DYNAMIC_KEY})
+                             frozenset(current) - {DYNAMIC_KEY})
 
 
 def fold_dynamic(target, value):

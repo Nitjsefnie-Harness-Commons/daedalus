@@ -103,6 +103,10 @@ def _dict_value(node, state):
             literal = _literal_key(key, state)
             if literal is not _UNRESOLVED_KEY:
                 items[literal] = value
+                # A literal key the display writes settles it, whatever an
+                # earlier fold retired there.
+                stale = frozenset(
+                    key for key in stale if key != literal)
             else:
                 fold_dynamic(items, value)
             continue
@@ -166,6 +170,7 @@ def _dict_call_value(node, state):
     for keyword in node.keywords:
         if keyword.arg is not None:
             items[keyword.arg] = _known_value(keyword.value, state)
+            stale = stale.difference((keyword.arg,))
     if not items:
         return None
     return DeferredContainer(items, dict_length(items, counted), 'dict', node,
