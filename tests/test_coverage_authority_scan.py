@@ -73,6 +73,21 @@ def test_only_the_keys_own_definition_is_exempt(tmp):
     assert phrase_holders(phrase, Path(tmp)) == (
         [holder, 'doc.py', 'probe.py'], 3)
 
+    (Path(tmp) / '_coverage_authority_scan.py').write_text(
+        f"_OBJ.KEY = {phrase!r}\n# {phrase}\n", encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == (
+        [holder, 'doc.py', 'probe.py'], 4)
+
+    (Path(tmp) / '_coverage_authority_scan.py').write_text(
+        f"ONE = TWO = {phrase!r}\n# {phrase}\n", encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == (
+        [holder, 'doc.py', 'probe.py'], 4)
+
+    (Path(tmp) / '_coverage_authority_scan.py').write_text(
+        f"ONE: str = {phrase!r}\n# {phrase}\n", encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == (
+        [holder, 'doc.py', 'probe.py'], 3)
+
 
 def test_only_a_bare_literal_in_the_key_holder_defines_a_key(tmp):
     """Which spellings of a key are a definition, and which are not.
