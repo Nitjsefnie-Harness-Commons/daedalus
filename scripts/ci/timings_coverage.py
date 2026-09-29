@@ -11,11 +11,11 @@ sees is wrong by a multiple rather than by a percent.
 That is what happened here and nothing went red. A refresh measured 28
 of the tree's 326 suites and wrote the file as the measured set alone;
 the survivors totalled 25.8 reference multiples where the tree holds
-346.9. The packer saw 109.5, derived five cells where the weights want
-fourteen, and reported `heaviest/median 1.000` -- a total that is wrong
-by 3.15x is balanced with itself, and the margin is computed over that
-same invented total. The matrix published and the file was internally
-consistent and wrong.
+many times that. The packer saw 109.5, derived five cells where the
+weights want fourteen, and reported `heaviest/median 1.000` -- a total
+that is wrong by 3.15x is balanced with itself, and the margin is
+computed over that same invented total. The matrix published and the
+file was internally consistent and wrong.
 
 THREE CONDITIONS, each answering a question the others cannot.
 
@@ -32,8 +32,8 @@ is short. With `m` recorded weights summing `S` at median `e`, at least
 `floor(m/2)` of them are at or above `e` and the median itself adds one
 more, so `S >= (floor(m/2) + 1) * e`. The share passes its bound only
 when `k * e > S`, hence `k > floor(m/2) + 1`: MORE THAN A THIRD of the
-tree estimated. This file's own recorded set is the other shape -- mean
-1.08 against a median of 0.22, right-skewed as a measured set is -- so
+tree estimated. This file's own recorded set is the other shape -- a
+mean well above its median, right-skewed as a measured set is -- so
 it cannot reach the bound at any coverage. The weight comparison
 therefore decides WHICH refusal a reader gets, never whether to give
 one.
@@ -47,14 +47,14 @@ summary and publishes; `MAX_ESTIMATED_SUITE_SHARE` (a third) refuses.
 THE TIER IS A CONSEQUENCE, NOT A COMPROMISE. An unmeasured suite is
 priced at the recorded MEDIAN, so what a share costs depends on HOW the
 file came to be missing those suites, and there are two ways with very
-different prices. The shipped weights total 356.4 reference multiples, with a
-recorded mean of 1.087 against a median of 0.2118: a ratio of 5.13, and
-that ratio is the third condition's whole subject.
+different prices. The shipped weights carry a recorded mean several
+times its median, and that ratio is the third condition's whole
+subject.
 
 A BIASED recorded set is the shape a refresh leaves when it writes the
 measured set alone, or keeps the lightest of what it measured. It is
 starved of the heavy weights, so the median prices a whole population at
-one sample's rate. CONSTRUCTION A: keep the `k` LIGHTEST of the 328
+one sample's rate. CONSTRUCTION A: keep the `k` LIGHTEST of the
 recorded weights, drop the rest, let the planner estimate every suite the
 file no longer records.
 
@@ -63,22 +63,21 @@ missed daily refresh loses no weight: the file still records everything
 the last run that measured the tree measured, and the unmeasured suites
 are the ones that ARRIVED since, which is a random draw from the tree's
 distribution rather than a censored sample of it. CONSTRUCTION B: keep
-all 328 recorded weights, add `k` suites the tree has gained, and price
+every recorded weight, add `k` suites the tree has gained, and price
 each arrival at what a draw from the recorded distribution is really
-worth -- the recorded MEAN of 1.087, against the 0.2118 the planner
-lends it.
+worth -- the recorded MEAN, against the median the planner lends it.
 
 The two shapes differ in a column neither share reads: a drifted set
-keeps the whole measured population, so its skew is 5.13 at every
+keeps the whole measured population, so its skew is unchanged at every
 arrival count, and a truncated set's skew collapses towards 1 as the
 tail is cut away. That gap is what sets the tiers rather than either
 share alone, and no share can see it, which is why `MIN_RECORDED_SKEW`
 exists at all.
 
 The note is a tenth because that is roughly where the BIASED shape's plan
-is out by 2x, and 2x is the tolerance the plan's purpose sets: the
-cell count is `ceil(total / target)`, so a total out by 2x is a matrix
-carrying half the parallelism the tree needs.
+is out by a factor of two, and a doubling is the tolerance the plan's
+purpose sets: the cell count is `ceil(total / target)`, so a plan out by
+a factor of two is a matrix carrying half the parallelism the tree needs.
 
 The refusal is a third, and it is DERIVED rather than chosen: with `m`
 recorded weights summing `S` at median `e`, at least `floor(m/2)` of them
@@ -95,12 +94,13 @@ file at a third is a slow matrix; a biased one at a third is a fiction.
 WHAT THE FUSE IS NOW, AND WHAT IT COSTS. The refresher is a daily cron at
 06:38 UTC, so a missed run is not a hypothetical, and this tree grows at
 `SUITES_PER_DAY` a day -- a measured RANGE, because the rate is not a
-constant (see the constant). Against a 328-suite recorded set the note
-reaches at 37 arrivals and the refusal at 165. At the bound this module
-carried before, one missed refresh put the file over a tenth and REFUSED
-it, and a refusal here is `Plan the matrix` exiting 1 in
-`.github/workflows/tests.yml`: no pull request could create a matrix at
-all. Two days of a collapsed run, a rate limit or an Actions outage
+constant (see the constant). Against a recorded set the size this one
+is, the note reaches after a few tens of arrivals and the refusal after
+a couple of hundred. At the bound this module carried before, one missed
+refresh put the file over a tenth and REFUSED it, and a refusal here is
+`Plan the matrix` exiting 1 in `.github/workflows/tests.yml`: no pull
+request could create a matrix at all. Two days of a collapsed run, a
+rate limit or an Actions outage
 would have been a repo-wide CI outage.
 
 The band above `MIN_RECORDED_SKEW` is the price of the tier and the
