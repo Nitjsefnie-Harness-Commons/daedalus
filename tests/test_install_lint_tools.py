@@ -28,6 +28,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 ROOT = _util.ROOT
@@ -49,6 +50,10 @@ EXECUTABLE = b'#!/not/really/an/executable\n'
 # The name the control resolves, read through the same constant the
 # installer's own refusal names.
 _ACTIONLINT = 'actionlint'
+# The binary the release ships, and the one every fixture here names: the
+# archive member, the unpacked file, and the name a `which` looks for. The
+# EXTENSION is added by the platform, never written here.
+ACTIONLINT_BINARY = 'actionlint'
 # The name a real wheel has, so a refusal about the version can
 # tell a wheel of the pinned version from one of another.
 DEFAULT_WHEEL = 'shellcheck_py-0.11.0.1-py3-none-any.whl'
@@ -66,6 +71,54 @@ SCRIPTS = 'shellcheck_py-0.11.0.1.data/scripts'
 # one: the name is a fact about the WHEEL, not about this module, so it
 # cannot be derived from the platform and is read from the wheel instead.
 WHEEL_SCRIPTS_NAME = 'shellcheck.exe' if os.name == 'nt' else 'shellcheck'
+
+
+def assert_same_file(resolved, written, what):
+    """A resolved path IS the file that was written, on THIS parent.
+
+    Not a string comparison. `shutil.which` on nt builds its answer from
+    PATHEXT, whose extensions are upper case, so it returns
+    `actionlint.EXE` for a file the installer wrote as `actionlint.exe`.
+    Whether those are one entry or two is a property of the PARENT, so it
+    is asked of the parent — through `tests/_case_fold.py`, the question
+    this tree already asks before every fixture that depends on a name —
+    rather than decided here by comparing strings or by branching on
+    `os.name`. Neither a string comparison nor a platform branch would do:
+    the first reports a working install as a failure, the second is the
+    guess that produced every one of the last three Windows rounds.
+    """
+    assert resolved, f'{what} did not resolve at all'
+    assert Path(resolved).parent == written.parent, (
+        f'{what} resolved to {resolved!r}, which is not even in the tool '
+        f'directory the install published ({written.parent})')
+    folding = _case_fold.folds(written.parent)
+    if folding:
+        assert Path(resolved).name.lower() == written.name.lower(), (
+            f'{what} resolved to {resolved!r} and the install wrote '
+            f'{written.name!r}; this parent folds case, so the two are '
+            'different names')
+        return
+    assert Path(resolved).name == written.name, (
+        f'{what} resolved to {resolved!r} and the install wrote '
+        f'{written.name!r}; this parent does not fold case, so the two are '
+        'different files')
+
+
+def _pinned_to(installer, payload):
+    """Pin the table entry for THIS host's key to this payload's digest.
+
+    The key is ASKED FOR rather than spelled, for the reason the key exists
+    at all: `_asset_name` lowercases `platform.machine()` before building
+    it, so a fixture that spells the raw pair patches an entry the
+    installer never reads. The pin check then compares the synthetic
+    payload against the REAL pinned digest and refuses — which is the check
+    working correctly and the fixture being wrong, and the one way to tell
+    them apart is to have the fixture ask instead of guess.
+    """
+    _asset, key = installer._asset_name()
+    return mock.patch.dict(
+        installer.ACTIONLINT_SHA256,
+        {key: hashlib.sha256(payload).hexdigest()})
 
 
 def _is_windows(host):
@@ -373,6 +426,43 @@ def test_the_member_name_comes_from_the_wheel_not_from_a_platform_branch(tmp):
             p.name for p in tools.iterdir())
 
 
+def test_the_real_pin_table_refuses_the_fixture_payload(tmp):
+    """The seam that lets a test pin a synthetic payload is a SEAM.
+
+    `_pinned_to` puts a digest into `ACTIONLINT_SHA256` so a fixture can
+    install a payload it built, and that is the only way any test here can
+    reach the unpack path at all. It is also, read the wrong way, a way to
+    make the installer accept an asset no pin names — which is the defect
+    this whole change exists to close, and the one that left a job green
+    having linted nothing before it.
+
+    So the refusal is pinned from the OTHER side, against the table as it
+    ships: the real pinned digest, this payload, and a refusal. If a
+    change ever made the production path read anything other than its own
+    table, or made `_verify` lenient, this goes red — and the seam stops
+    being a way to accept anything the moment it could be.
+    """
+    del tmp
+    installer = _installer()
+    payload = _release_asset('actionlint', _is_windows((
+        installer.platform.system(), installer.platform.machine())))
+    digest = hashlib.sha256(payload).hexdigest()
+    for key, pinned in sorted(installer.ACTIONLINT_SHA256.items()):
+        assert digest != pinned, (
+            f'this fixture payload now IS the pinned {key[0]} asset, so the '
+            'seam it uses would be indistinguishable from a real download '
+            'and the refusal below would prove nothing')
+        try:
+            installer._verify(payload, key)
+        except SystemExit as refusal:
+            assert 'not the pinned sha256' in str(refusal), refusal
+        else:
+            raise AssertionError(
+                f'the shipped table accepted a synthetic payload for {key}, '
+                'so anything that reaches _verify with the wrong bytes is '
+                'installed, and that is the defect this branch closes')
+
+
 def test_the_binary_the_installer_names_on_this_host_is_one_which_can_find(
         tmp):
     """The name and the resolver must come from the same platform.
@@ -392,18 +482,17 @@ def test_the_binary_the_installer_names_on_this_host_is_one_which_can_find(
     host = (installer.platform.system(), installer.platform.machine())
     destination = tmp / 'tools'
     destination.mkdir()
-    binary = 'actionlint.exe' if _is_windows(host) else 'actionlint'
+    binary = (f'{ACTIONLINT_BINARY}.exe' if _is_windows(host)
+              else ACTIONLINT_BINARY)
     with _on(*host), mock.patch.dict(
             os.environ, {'PATH': str(destination) + os.pathsep
                          + os.environ['PATH']}):
         written = installer._extract(
             _release_asset(binary, _is_windows(host)), destination)
         resolved = shutil.which(_ACTIONLINT, path=os.environ['PATH'])
-    assert resolved == str(written), (
-        f'the installer wrote {written.name!r} on {host[0]} and this host '
-        f'resolves the binary to {resolved!r}; a name and a resolver that '
-        'come from different platforms cannot agree, and the install is '
-        'then correct while the check reads as a failure')
+    assert_same_file(
+        resolved, written,
+        f'the binary the installer names on {host[0]}')
 
 
 def test_the_tool_directory_reaches_this_process_and_not_only_github_path(
@@ -511,7 +600,6 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
     tools = tmp / 'tools'
     later = tmp / 'path.txt'
     recorded = tmp / 'env.txt'
-    payload = _release_asset('actionlint', False)
     # The host's OWN platform pair, not a claim about a different one. A
     # fixture that stubs `platform.system()` to say Linux while running on a
     # Windows process makes the installer name the binary the POSIX way, and
@@ -526,9 +614,7 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
             mock.patch.dict(os.environ, {
                 'GITHUB_PATH': str(later), 'GITHUB_ENV': str(recorded),
                 'PATH': '/usr/bin:/bin'}), \
-            mock.patch.dict(
-                installer.ACTIONLINT_SHA256,
-                {host: hashlib.sha256(payload).hexdigest()}), \
+            _pinned_to(installer, payload), \
             mock.patch.object(installer, 'TOOL_DIR', tools), \
             mock.patch.object(installer, '_fetch', return_value=payload), \
             _installing(installer, [(WHEEL_SCRIPTS_NAME, EXECUTABLE)]):
@@ -536,19 +622,15 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
         landed = tools / WHEEL_SCRIPTS_NAME
         assert landed.is_file(), sorted(p.name for p in tools.iterdir())
         resolved = installer.shutil.which('shellcheck')
-        assert resolved == str(landed), (
-            'shellcheck did not resolve into the directory this step '
-            f'installed it into: PATH held {resolved!r} and the tool '
-            f'directory holds {landed}')
+        assert_same_file(resolved, landed, 'shellcheck')
         # And the OTHER tool, whose name the installer derives from the
         # platform rather than from anything in a fixture. It is here for
         # the same reason the failure was: a run that got this far and
         # failed on actionlint means the fixture, not the install, was
         # wrong.
         actionlint = installer.shutil.which('actionlint')
-        assert actionlint and str(tools) in actionlint, (
-            f'actionlint resolved to {actionlint!r}, which is not inside the '
-            'tool directory this install published')
+        assert_same_file(actionlint, tools / ACTIONLINT_BINARY,
+                         'actionlint')
         assert str(tools) in later.read_text(
             encoding='utf-8').split('\n'), (
             'the tool directory is not on the PATH the later steps '
