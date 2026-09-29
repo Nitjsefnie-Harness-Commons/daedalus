@@ -1,6 +1,7 @@
 """Run real-browser controls without letting wrong skips escape."""
 import functools
 import sys
+import typing
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -12,7 +13,15 @@ class ControlRequirementSkipped(_util.Skipped):
     """A browser-free control's own requirement is unavailable."""
 
 
-def control_requirement_missing(reason):
+def control_requirement_missing(reason) -> typing.NoReturn:
+    """The requirement is absent, and saying so ends the control.
+
+    Annotated `NoReturn` because it is, and because a caller that
+    guards an executable with it then reads that executable as the
+    `str` the guard proved it is — which is what
+    `tests/_util.py`'s `skip` is annotated for. Without it, every
+    guarded `shutil.which` below this line is a type error.
+    """
     raise ControlRequirementSkipped(reason)
 
 

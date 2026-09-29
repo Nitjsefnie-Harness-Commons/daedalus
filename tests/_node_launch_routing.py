@@ -216,7 +216,7 @@ CLASSIFYING_MODULES = {
                                'other two launches are a real browser rather '
                                'than a Node child, and UNRESOLVED_LAUNCHES '
                                'names them by shape',
-    'test_real_browser_classification.py':
+    'test_real_browser_control_extension.py':
         '`test_the_control_extension_satisfies_its_own_probe` is a '
         'real-browser probe (task 3)',
     'test_real_browser_environment.py':
@@ -296,6 +296,10 @@ UNRESOLVED_LAUNCHES = {
         'a git child',
     ('test_js_coverage_workflow.py', '_capture_updates', 'subprocess.run'):
         "a bash child behind `_util.workflow_bash()`",
+    ('test_plant_restore.py', '_as_nobody', 'subprocess.run'):
+        'a sys.executable child behind the `command` parameter, running the '
+        "plant helper rather than a Node child: the same shape "
+        '`tests/test_worker_runtime.py` carries and for the same reason',
     ('test_reserved_test_names.py', '_fixture_checkout', 'subprocess.run'):
         'a git child',
     ('test_static_guard_regressions.py', 'run', 'real_run'):

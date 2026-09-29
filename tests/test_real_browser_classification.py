@@ -2,7 +2,6 @@
 """Browser-free mutation controls for fixture fault classification."""
 import contextlib
 import errno
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -328,89 +327,6 @@ def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
     for process in processes:
         process.terminate.assert_called_once()
         process.wait.assert_called_once_with(timeout=10)
-
-
-def test_the_control_extension_satisfies_its_own_probe(tmp):
-    """The verdict rests on the control's script reaching its flag."""
-    node = shutil.which('node')
-    if not node:
-        _realbrowser_controls.control_requirement_missing(
-            'Node is absent, so the control worker probe cannot be checked')
-    control = _realbrowser._control_extension(tmp)
-    source = (control / _realbrowser.CONTROL_WORKER_SCRIPT).read_text(
-        encoding='utf-8')
-    try:
-        checked = subprocess.run(
-            [node, '--check'], input=source, capture_output=True, text=True,
-            timeout=CONTROL_CHILD_DEADLINE_S)
-        answer = subprocess.run(
-            [node, '-e',
-             source + '\nprocess.stdout.write(String('
-                      + _realbrowser.CONTROL_WORKER_PROBE + '))'],
-            capture_output=True, text=True, timeout=CONTROL_CHILD_DEADLINE_S)
-    except subprocess.TimeoutExpired as why:
-        raise node_bound_expiry(why, CONTROL_CHILD_DEADLINE_S) from why
-    assert checked.returncode == 0, (checked.returncode, checked.stderr)
-    assert answer.returncode == 0, (answer.returncode, answer.stderr)
-    assert answer.stdout == 'true', (answer.stdout, answer.stderr)
-
-
-# Hang detectors, not health margins; the shape and the shared argument are
-# in `tests/_node_launch_routing.py`, and these samples are measured with the
-# machine BUSY. `--check` parses the worker's source and `-e` runs it, so
-# one deadline covers both, and the foot is where line-keyed rows force it.
-from _node_launch_routing import (  # noqa: E402
-    SITE_HANG_MULTIPLE, NodeBoundExceeded, node_bound_expiry)
-CONTROL_CHILD_CHECK_SAMPLES_S = (0.179, 0.252, 0.150, 0.085,
-                                 0.319, 0.862, 0.786, 1.613)
-CONTROL_CHILD_PROBE_SAMPLES_S = (0.353, 0.293, 0.214, 0.306,
-                                 1.447, 1.103, 2.470, 0.186)
-CONTROL_CHILD_SLOWEST_S = max(
-    *CONTROL_CHILD_CHECK_SAMPLES_S, *CONTROL_CHILD_PROBE_SAMPLES_S)
-CONTROL_CHILD_DEADLINE_S = round(CONTROL_CHILD_SLOWEST_S * SITE_HANG_MULTIPLE)
-
-
-def test_the_control_probe_site_reports_its_own_stalled_child(tmp):
-    stalling = "process.stdout.write('ctrl spoke\\n');setInterval(()=>{},900)"
-    ext = _realbrowser._control_extension(tmp)
-    script = ext / _realbrowser.CONTROL_WORKER_SCRIPT
-    script.write_text(stalling, encoding='utf-8')
-    with mock.patch.object(_realbrowser, '_control_extension',
-                           lambda _root: ext):
-        try:
-            test_the_control_extension_satisfies_its_own_probe(tmp)
-        except NodeBoundExceeded as failure:
-            assert failure.deadline_s == CONTROL_CHILD_DEADLINE_S
-            assert 'ctrl spoke' in failure.stdout, failure.stdout
-            assert isinstance(failure.stdout, str), type(failure.stdout)
-            return
-    raise AssertionError('the control script that wedges finished')
-
-
-def test_the_control_probe_requirement_is_a_skip_not_a_failure(tmp):
-    """A Node-less leg skips the probe control instead of failing it."""
-    with mock.patch.object(shutil, 'which', return_value=None):
-        failure = _call_failure(
-            lambda: test_the_control_extension_satisfies_its_own_probe(tmp))
-    assert failure.__class__ is (
-        _realbrowser_controls.ControlRequirementSkipped), failure
-
-
-def test_the_control_extension_is_loadable_and_cannot_collide_with_ours(tmp):
-    control = _realbrowser._control_extension(tmp)
-    ours = _realbrowser.declared_worker(EXTENSION_ROOT)
-    assert _realbrowser.declared_worker(control) == (
-        _realbrowser.CONTROL_WORKER_SCRIPT)
-    assert _realbrowser.CONTROL_WORKER_SCRIPT != ours, ours
-    listed = [
-        {'type': 'service_worker',
-         'url': f'chrome-extension://ours/{ours}',
-         'webSocketDebuggerUrl': 'ws://ours'},
-        {'type': 'service_worker', 'url': 'chrome-extension://theirs/x',
-         'webSocketDebuggerUrl': 'ws://theirs'},
-    ]
-    assert _realbrowser._worker_targets(
-        listed, _realbrowser.CONTROL_WORKER_SCRIPT) == [], listed
 
 
 def test_no_browser_never_launches_a_diagnosis(tmp):
