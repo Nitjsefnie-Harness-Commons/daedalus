@@ -47,7 +47,15 @@ _NO_WORKFLOWS = 'no-workflows'
 _UNLAUNCHABLE = 'actionlint-unlaunchable'
 
 # Appended to a real workflow; three variables and two arguments is its SC2183.
-_PLANTED_JOB = """
+# Appended to a real workflow. The finding is chosen per platform, because
+# the two doors are expected to catch different kinds and a fixture that
+# planted one kind everywhere would be asserting a contract the Windows door
+# does not have — that decision is what the platform-scoped flag buys, and
+# it is only honest if the negative case says which kind it planted.
+#
+# POSIX: a shellcheck finding, because the integration is on there. This is
+# SC2183, the shape the job's own workflow trips on a printf.
+_PLANTED_SHELLCHECK_JOB = """
   planted-lint-finding:
     runs-on: ubuntu-latest
     steps:
@@ -55,12 +63,96 @@ _PLANTED_JOB = """
           printf "%s %s %s\\n" one two
 """
 
+# Windows: an actionlint-native EXPRESSION finding, which the binary reports
+# with the shellcheck integration off. Verified by running it, not by
+# reasoning: the planted `needs.nothing` reads as
+#   `property "nothing" is not defined in object type {} [expression]`
+# under both `-shellcheck=` and the integrated default.
+_PLANTED_EXPRESSION_JOB = """
+  planted-lint-finding:
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ needs.nothing.outputs.x == 1 }}
+        run: echo hello
+"""
+
+
+def host_tool_name(name):
+    """The file name a tool has on THIS host, for a fixture that writes one.
+
+    One place, because a fixture that guesses is a fixture that is wrong on
+    the platform it did not run on. `shutil.which` resolves a command plus
+    a PATHEXT extension on Windows and only the bare name elsewhere, so a
+    fixture written as `actionlint` proves nothing on nt — and one written
+    as `actionlint.exe` proves nothing on posix. Every review round on this
+    branch has found a fresh copy of that mistake, so the naming lives here
+    and the fixtures ask.
+    """
+    return f'{name}.exe' if os.name == 'nt' else name
+
+
+def planted_job():
+    """The planted job, in the finding this host's lint is expected to catch.
+
+    Windows runs the lint with the shellcheck integration OFF, so a planted
+    shellcheck finding is one it must not be expected to catch — that is
+    precisely what the platform-scoped decision trades away, and the POSIX
+    legs keep every shellcheck finding. The test asserts which kind it
+    planted rather than skipping: a door that could not find a defect would
+    be a silent pass, and a skip is the exact failure this branch exists to
+    close.
+    """
+    return _PLANTED_EXPRESSION_JOB if os.name == 'nt' else \
+        _PLANTED_SHELLCHECK_JOB
+
+
+def planted_finding_marker():
+    """The text a real finding carries on this host, for the refusal to name.
+
+    `[expression]` on Windows and `[shellcheck]` on POSIX, so the refusal a
+    test asserts on is one this platform's lint can actually produce.
+    """
+    return ('property "nothing" is not defined in object type'
+            if os.name == 'nt' else 'SC2183')
+
 
 def _planted_finding():
-    """What actionlint prints for a real finding, in the shape it prints it."""
+    """What actionlint prints for a real finding, in the shape it prints it.
+
+    The shape actionlint's own output takes, so a caller can hand a
+    fabricated verdict to the arm that decides one without a lint running.
+    """
     return ('claim.yml:58:9: shellcheck reported issue in this '
             'script: SC2183:warning:1:8: This format string has 3 '
             'variables, but is passed 2 arguments [shellcheck]')
+
+
+def assert_planted_finding_matches_its_door():
+    """The planted job and the marker a refusal is asserted on agree.
+
+    Driven both ways, because the two are a PAIR and a test that only ever
+    builds the pair its own platform produces cannot notice the other one
+    drifting. On POSIX that pair is a shellcheck job and an `SC2183`
+    marker; on Windows it is an expression job and a `not defined in
+    object type` marker, because that is the door that runs with the
+    shellcheck integration off.
+    """
+    seen = {}
+    original = os.name
+    try:
+        for name in ('nt', 'posix'):
+            os.name = name
+            seen[name] = (planted_job(), planted_finding_marker())
+    finally:
+        os.name = original
+    windows_job, windows_marker = seen['nt']
+    assert 'needs.nothing' in windows_job, windows_job
+    assert 'printf' not in windows_job, windows_job
+    assert 'not defined in object type' in windows_marker, windows_marker
+    posix_job, posix_marker = seen['posix']
+    assert 'printf' in posix_job, posix_job
+    assert 'needs.nothing' not in posix_job, posix_job
+    assert posix_marker == 'SC2183', posix_marker
 
 
 def _pinned_actionlint_version(job=None):
@@ -117,13 +209,18 @@ def _expanded_names(tmp):
 
 
 def _planted_workflow_tree(tmp):
-    """A copy of a tracked workflow, carrying a real shellcheck finding."""
+    """A copy of a tracked workflow, carrying a finding this host can catch.
+
+    Which finding is `planted_job`'s business; what this builds is the tree
+    the real lint is then asked about, so the negative case runs a real
+    binary over real bytes rather than a fabricated verdict.
+    """
     root = Path(tmp) / 'tree'
     directory = root / '.github' / 'workflows'
     directory.mkdir(parents=True)
     tracked = ROOT / '.github' / 'workflows' / 'claim.yml'
     (directory / tracked.name).write_text(
-        tracked.read_text(encoding='utf-8') + _PLANTED_JOB, encoding='utf-8')
+        tracked.read_text(encoding='utf-8') + planted_job(), encoding='utf-8')
     return root
 
 
@@ -346,7 +443,7 @@ def _unlaunchable_binary(tmp):
     """
     directory = Path(tmp) / 'unlaunchable'
     directory.mkdir()
-    bogus = directory / _ACTIONLINT
+    bogus = directory / host_tool_name(_ACTIONLINT)
     bogus.write_text('#!/nonexistent/interpreter\n', encoding='utf-8')
     bogus.chmod(0o755)
     found = shutil.which(_ACTIONLINT, path=str(directory))

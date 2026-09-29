@@ -13,19 +13,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _actionlint import (_ACTIONLINT,  # noqa: E402
-                         _assert_run_guard_both_ways,
-                         _assert_unlaunchable_binary_is_a_refusal,
-                         _job_step, _lint_refuses, _lint_skips,
-                         _lint_workflows, _pin, _planted_finding,
-                         _planted_workflow_tree,
+from _actionlint import (  # noqa: E402
+                         _ACTIONLINT, _assert_run_guard_both_ways,
+                         _assert_unlaunchable_binary_is_a_refusal, _job_step,
+                         _lint_refuses, _lint_skips, _lint_workflows, _pin,
+                         _planted_finding, _planted_workflow_tree,
                          assert_empty_workflow_set_is_refused,
                          assert_expansion_covers_both_extensions,
                          assert_integration_platform_scoped,
                          assert_lint_covered,
                          assert_lint_step_covers_both_extensions,
                          assert_other_version_is_refused,
-                         assert_pin_read_from_the_job)
+                         assert_planted_finding_matches_its_door,
+                         assert_pin_read_from_the_job, planted_finding_marker)
 from _wffixtures import _refuses  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
@@ -310,6 +310,7 @@ def test_the_tracked_workflows_pass_actionlint(tmp):
 def test_the_shellcheck_integration_is_scoped_to_posix(tmp):
     del tmp
     assert_integration_platform_scoped()
+    assert_planted_finding_matches_its_door()  # and the planted finding fits
 
 
 def test_the_workflow_expansion_covers_both_extensions(tmp):
@@ -317,7 +318,8 @@ def test_the_workflow_expansion_covers_both_extensions(tmp):
 
 
 def test_a_workflow_carrying_a_real_lint_finding_is_refused(tmp):
-    _refuses(_lint_workflows, _planted_workflow_tree(tmp), contains='SC2183')
+    tree = _planted_workflow_tree(tmp)
+    _refuses(_lint_workflows, tree, contains=planted_finding_marker())
 
 
 def test_a_finding_the_linter_reported_is_refused(tmp):
