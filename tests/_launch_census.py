@@ -124,11 +124,14 @@ assignment rather than a gap: one control, one owner, and a control in
     is a proof. The reasoning is at the decision point in
     `tests/_receiver_resolution.py::deadline_reaches_a_child` and is not
     restated here. A number a CALLER fills is still read at the caller's
-    line by `_parameter_bound_faults`. Seven controls in
+    line by `_parameter_bound_faults`. Five controls in
     `tests/test_launch_census_receivers.py` hold it, in both directions:
     the doubles and the helper on one side, and on the other a deadline
     the census cannot trace, a reaper it cannot name, a spread in front
-    of the argument, and a double that forwards its deadline to a child;
+    of the argument, and a double that forwards its deadline to a child.
+    Two more read it over the three SHIPPED files rather than over
+    planted ones, in `tests/test_launch_real_files.py`, and the third
+    there closes the set of rows those files carry;
   - FOUR classes of site the analyser REFUSES and the repo-layout gate does
     not act on, so they are reported and not policed. The gate's keep rule
     (`tests/test_repo_layout.py::_bound_sites`) admits a site only when the

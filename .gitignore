@@ -659,6 +659,7 @@
 !/tests/test_launch_control_boundary.py
 !/tests/test_launch_deadline_positions.py
 !/tests/test_launch_path.py
+!/tests/test_launch_real_files.py
 !/tests/test_launch_receiver_positions.py
 !/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py
