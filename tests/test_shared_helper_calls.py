@@ -141,7 +141,7 @@ _MORE_REGIONS = (
      'def _helper(tmp):\n    return _C\n'),
     ('a decorator on a reached class', 4,
      "def _dec(target):\n"
-     f"    (ROOT / '.pwned').write_text('x')\n"
+     "    (ROOT / '.pwned').write_text('x')\n"
      '    return target\n\n\n'
      '@_dec\n'
      'class _C:\n    pass\n\n\n'
@@ -193,7 +193,7 @@ def test_every_region_of_a_reached_scope_is_judged(tmp):
         local.write_text(
             _PRELUDE + body + _CALLS_HELPER, encoding='utf-8')
         assert control_write_violations(local, helper) == [
-            f'test_local.py:{local_line}: write_text target '
+            'test_local.py:' + str(local_line) + ': write_text target '
             'path is not control-owned'], label
         shared = helper / 'tests' / '_shared.py'
         shared.parent.mkdir(exist_ok=True)
