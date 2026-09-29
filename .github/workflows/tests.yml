@@ -1723,9 +1723,17 @@ jobs:
       # to fix a difference the measurement cannot see. If a future suite
       # ever reads a tool's VERSION and reports it into a duration, this is
       # the comment to revisit.
+      #
+      # The `head/` prefix is this job's LAYOUT, not a spelling preference:
+      # it checks the two trees out into subdirectories and sets no
+      # working-directory, so the repository is not at the workspace root
+      # and a root-relative path exits 2 before the script runs at all.
+      # Every other script-running step in this job spells the prefix for
+      # the same reason. HEAD is the tree whose suites this run is
+      # measuring, and it is the one the control checks.
       - name: Install the lint tools the suites drive
         if: steps.baseline.outputs.point != ''
-        run: python scripts/ci/install_lint_tools.py
+        run: python head/scripts/ci/install_lint_tools.py
 
       # The unit the suite weights are counted in: one fixed iteration count
       # of one fixed computation, timed on this runner. It runs ONCE per
