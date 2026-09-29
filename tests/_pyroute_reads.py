@@ -518,14 +518,11 @@ def _spelled_pair_items(source, state):
     does, and taking the key from the FIRST column is what keeps the fold
     exact: a value-blind scan would put `relay()` at `"k"` and manufacture
     a false positive on a source that only ever wrote `"j"`. A
-    single-argument sequence wrapper over a literal sequence of two-element
-    pairs spells the same pairs one layer down from the call.
+    single-argument sequence wrapper spells the same pairs one layer down.
 
-    A key the model cannot resolve leaves the source partly unaccounted,
-    and a source that spells no pair at all accounts for nothing: an empty
-    `zip` is no more an account than an opaque source is, and declining it
-    is what keeps a store that folds one from claiming a key set it never
-    computed.
+    An unresolvable key leaves the source partly unaccounted, and a
+    source that spells no pair at all accounts for nothing -- an empty
+    `zip` is no more an account than an opaque one is.
     """
     if not (isinstance(source, ast.Call)
             and isinstance(source.func, ast.Name) and not source.keywords):
