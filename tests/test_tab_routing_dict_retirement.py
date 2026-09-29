@@ -38,7 +38,8 @@ from _pyroute_stores import (_seed_receiver,  # noqa: E402
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
                              DeferredAlternatives, DeferredContainer,
                              merge_yielded, stored_signature)
-from _pyroute_retirement_sites import (  # noqa: E402
+from _retirement_sweep import (  # noqa: E402
+                              REVERTS as _REVERTS,
                               undecided_sites as _UNDECIDED,
                               retirement_sites)
 from _tabroute_keyset import (_CLEAN, _DESTINATION_FOLDS,  # noqa: E402
@@ -86,8 +87,11 @@ def _folded(spelling) -> DeferredContainer:
               else _merge_or_value(node, state)
               if isinstance(node, ast.BinOp)
               else _dict_call_value(node, state))
-    # A source that recorded a key gives every one of these something to
-    # fold, so none of them is the empty result they answer with.
+    # All three answer `None` for an empty result, and the state below
+    # gives each of them a source that recorded a key, so this cannot fire
+    # on the fixture. It is here because the checker cannot follow the
+    # assignment otherwise, and it states the shape the fixture guarantees
+    # rather than pretending to be a finding.
     assert folded is not None, spelling
     return folded
 
@@ -104,13 +108,20 @@ def test_the_retirement_census_is_the_guard_own_list(tmp):
     where the sweep that ran over the derived list kept the LIST in a
     scratch report.
 
-    `_pyroute_retirement_sites` is the module beside it that reverts each
+    `_retirement_sweep` is the module beside it that reverts each
     site and reports the controls that die. This is the half that runs on
     every commit; that one runs on request, and a site with no decision
     recorded for it stops it running at all.
     """
     assert not _UNDECIDED(), sorted(_UNDECIDED())
-    assert len(retirement_sites()) == 19, sorted(retirement_sites())
+    # The count is DERIVED, not asserted as a literal: a twentieth site
+    # planted in a module the old hand list never named would leave a
+    # literal `== 19` still passing, which is the whole failure this
+    # derivation exists to prevent. The floor is a tripwire for the
+    # derivation going blind; the exactness is the undecided check above.
+    assert len(retirement_sites()) >= 20, sorted(retirement_sites())
+    assert len(retirement_sites()) == len(_REVERTS), sorted(
+        retirement_sites())
 
 
 def test_a_fold_carries_the_source_retirement_with_its_items(tmp):
@@ -326,15 +337,24 @@ def test_a_pattern_rest_carries_the_retirement_it_projected(tmp):
 
 def test_a_join_of_two_paths_keeps_the_retirement(tmp):
     """Two states that differ only in a clean key join; the retirement
-    rides across that join like any other recorded fact."""
+    rides across that join like any other recorded fact.
+
+    The fixture has to make the join REBUILD: `join_clean_occupancy` skips
+    a state whose recorded items already agree, and the previous version of
+    this test differed only in a key the join dropped on both sides, so it
+    took that skip, the assertion short-circuited, and the test could not
+    fail. The `is not kept` assertion below is what says the rebuild ran."""
     kept = _retired_source_state()
+    kept.callables['d'] = DeferredContainer(
+        {'k': None, 'dropped': None}, None, 'dict', stale=frozenset({'k'}))
     other = kept.copy()
     other.callables['d'] = DeferredContainer(
-        {'k': None, 'j': None}, None, 'dict', stale=frozenset({'k'}))
+        {'k': None}, None, 'dict', stale=frozenset({'k'}))
     joined = join_clean_occupancy(kept, other)
-    assert joined is not kept or cast(
-        DeferredContainer, joined.callables['d']).stale == frozenset({'k'}), \
-        joined.callables['d']
+    assert joined is not kept, 'the join skipped: the fixture did not differ'
+    rebuilt = cast(DeferredContainer, joined.callables['d'])
+    assert rebuilt.stale == frozenset({'k'}), rebuilt.stale
+    assert 'k' in rebuilt.items, rebuilt.items
 
 
 def test_a_fold_of_a_retired_source_reports_every_read_form(tmp):

@@ -25,7 +25,7 @@ way a tracked dict acquires a key the model did not learn, driven from the
 mutator rather than from a spelling, over the three axes that domain
 spans -- the mutator, the COMBINATION of a readable and an unreadable
 source in one call, and the FRESHNESS of a value the model recorded before
-an unreadable source could have replaced it. `_DISPOSITION` carries what
+an unreadable source could have replaced it. `_COST` carries what
 each member costs once nothing is routed, and
 `test_every_axis_member_reports_on_every_read_form_and_costs_nothing` fails
 on a member present in one and not the other, so the bucket cannot grow by
@@ -81,7 +81,7 @@ from _pyroute_reads import _mapping_lookup  # noqa: E402
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
                              DeferredAlternatives, DeferredContainer)
 from _tabroute_keyset import (_CLEAN, _COMPUTED, _FRESH,  # noqa: E402
-                              _OPAQUE_RETIRE, _POPPED, _READS,
+                              _POPPED, _READS,
                               _REFRESHED, _UNACCOUNTABLE, _UNREADABLE,
                               _row_body, _row_verdict)
 
@@ -187,8 +187,11 @@ _AXES = {
     'update-unaccountable-name-mixed-doubled': (
         _UNACCOUNTABLE + '\nd = {}\nd.update(**{**{"a": 1}, **o})'),
     # The same source through a constructor store, which `_dict_call_value`
-    # answers from the same fold. Filed as 1163: this branch repairs the
-    # rows and closes 1154 and 1178, and 1163 stays open on its own rows.
+    # answers from the same fold. Filed as 1163, and all four of its rows
+    # are repaired here with no survivor -- its six filing bodies and three
+    # named controls read `(1, 1)` / `(0, 0)` at this head against
+    # `(1, 0)` / `(0, 0)` at base -- so this branch closes 1163 as well as
+    # 1154 and 1178.
     'dict-name': _UNACCOUNTABLE + '\nd = dict(o)',
     'dict-name-star': _UNACCOUNTABLE + '\nd = dict(**o)',
     'dict-stale-name': (
@@ -200,11 +203,11 @@ _AXES = {
 # What each member's SHAPE costs once nothing is routed. It was an outcome
 # column beside this one -- `refused` when the read resolves to a tracked
 # callable, `declared` when it joins to an unprovable sender -- and that
-# column is gone: once the readable sources were read, no member takes the
-# second outcome and no member's name carries an unprovable alias any more, so
-# every row here reads `(0, 0)` and the outcome said nothing the cost did not.
-# A source that starts marking a name again shows up here.
-_DISPOSITION = {
+# column is gone, and so is its name: once the readable sources were read,
+# no member took the second outcome and no member's name carried an
+# unprovable alias, so every row reads `(0, 0)` and the outcome said nothing
+# the cost did not. A source that starts marking a name again shows here.
+_COST = {
     'update-pairs': (0, 0),
     'update-pairs-tuple': (0, 0),
     'update-dict': (0, 0),
@@ -319,9 +322,9 @@ def test_every_axis_member_reports_on_every_read_form_and_costs_nothing(tmp):
     callable's own body, by an unprovable name, or by both, so the
     invariant is the lower bound.
     """
-    assert sorted(_DISPOSITION) == sorted(_AXES), sorted(
-        set(_AXES) ^ set(_DISPOSITION))
-    for label, cost in sorted(_DISPOSITION.items()):
+    assert sorted(_COST) == sorted(_AXES), sorted(
+        set(_AXES) ^ set(_COST))
+    for label, cost in sorted(_COST.items()):
         for name, read in sorted(_READS.items()):
             calls, found = _verdict(tmp, _AXES[label], read)
             assert (calls, found >= 1) == (1, True), (
@@ -384,25 +387,6 @@ def test_the_mapping_read_joins_a_key_an_unreadable_store_replaced(tmp):
     assert _mapping_lookup(countable, 'j', None) is None
 
 
-# A source the model has retired a key in, and every spelling of a fold
-# that builds a destination out of its items. The retirement is a fact
-# about the values the source recorded, so it has to travel with them: the
-# destination cannot claim at a key the source has disowned that its own
-# value there is current.
-#
-# The end-to-end control below needs the source to retire the key the
-# RUNTIME also replaces, or nothing routes through the destination and the
-# read reads clean for a reason that has nothing to do with the marker: a
-# `zip` over a different key leaves the recorded value standing, and the
-# control then measures a false positive where the defect lives.
-_RETIRED_SOURCE = _OPAQUE_RETIRE
-_DESTINATION_FOLDS = ('o = {}\no.update(d)', 'o = {}\no |= d',
-                      'o = dict(d)', 'o = {**d}')
-_DESTINATION_READS = {'subscript': 'o["k"]', 'get': 'o.get("k")',
-                      'setdefault': 'o.setdefault("k")'}
-_FOLDS = ('update', 'update-star', 'ior', 'display', 'or-value', 'dict-call')
-
-
 def test_a_key_written_after_an_unreadable_store_keeps_its_value(tmp):
     """The false-positive limb, over all three read forms.
 
@@ -442,7 +426,7 @@ def test_a_store_through_a_computed_key_joins_on_its_unknown_slot(tmp):
 
 def test_every_silent_member_is_listed_and_not_refused(tmp):
     """The rest of the stated domain, named. A member of it that neither
-    `_AXES` nor `_DISPOSITION` carries is a silent read nobody is looking
+    `_AXES` nor `_COST` carries is a silent read nobody is looking
     for, so each one left is listed against the issue it is parked on and
     PINNED: the pin is the defect, so a repair turns this red on the very
     commit that has to move the member into `_AXES`. The clean counterpart

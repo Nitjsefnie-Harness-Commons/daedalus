@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_tab_routing import _tracked_focus_verdict  # noqa: E402
+from _tabroute_focus import _tracked_focus_verdict  # noqa: E402
 
 _LAMBDA = ("lambda *a, **k: send('_focus', 'focus-tab', "
            "tab=args.chrome_tab)")
