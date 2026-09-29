@@ -31,6 +31,7 @@ from _repo import ROOT
 from _wfgraph import _tests_yml
 from _yamlsteps import complete_job_mapping
 
+# tests/test_ci_workflows.py is at its 700-line ceiling; machinery goes here.
 # Two names for one word today, and two facts: the binary a run resolves
 # on PATH, and the job whose env carries the pin.
 _ACTIONLINT = 'actionlint'
