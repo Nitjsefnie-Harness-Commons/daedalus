@@ -91,14 +91,24 @@ def _global_rebindings(tree):
 
 
 def _global_names(node, tree):
-    """The names a node's enclosing function declares `global`."""
-    declared = set()
+    """The names the function ENCLOSING `node` declares `global`.
+
+    Scoped to the enclosing function, and that is the whole of what
+    `node` is for: the parameter is what makes the answer per-rebinding
+    rather than per-module. The module-wide version read as a decision
+    and decided nothing about `node`, so one `global urlopen` in any
+    function turned every rebinding of `urlopen` in the module into a
+    module-scope rebinding.
+    """
     for outer in ast.walk(tree):
-        if path._is_def(outer):
-            for child in ast.walk(outer):
-                if isinstance(child, ast.Global):
-                    declared.update(child.names)
-    return declared
+        if not path._is_def(outer) or node not in ast.walk(outer):
+            continue
+        declared = set()
+        for child in ast.walk(outer):
+            if isinstance(child, ast.Global):
+                declared.update(child.names)
+        return declared
+    return set()
 
 
 def type_param_names(node):
@@ -209,15 +219,12 @@ def _dotted_bindings(tree):
     `test_a_rebinding_in_any_form_stops_the_read_at_both_scopes`: one row per
     form, and every row is a read the reader now REFUSES.
 
-    The assignment pass runs to a fixpoint of THREE rounds, and that count
-    is the whole of the termination argument: the loop is `for _ in
-    range(3)`, so a cycle cannot run and a chain longer than the rounds
-    stops where the budget runs out. Source order does the work in a
-    single pass for a forward-declared chain; a chain written back to
-    front resolves one indirection per round, so one longer than the
-    budget stops short with its tail unresolved. That failure direction is
-    a false red and never a false green — an unresolved callee is not a
-    network read.
+    The assignment pass runs until the table stops changing, bounded by
+    the table's own size, so no round count is a free parameter to get
+    wrong and a cycle cannot run. A chain written back to front resolves
+    one indirection per round, so one longer than the table stops short
+    with its tail unresolved. That failure direction is a false red and
+    never a false green — an unresolved callee is not a network read.
     """
     scoped = _scoped_assignments(tree)
     bound = {}
@@ -235,7 +242,9 @@ def _dotted_bindings(tree):
     binds = {}
     for _, name in _rebindings(tree):
         binds[name] = binds.get(name, 0) + 1
-    for _ in range(3):
+    limit = len(bound) + len(binds) + 1
+    for _ in range(limit):
+        before = len(bound)
         for node, name in _rebindings(tree):
             if isinstance(node, ast.Assign):
                 resolved = _resolve_dotted(node.value, bound)
@@ -265,6 +274,8 @@ def _dotted_bindings(tree):
                 # can reach the call: `urlopen = object()` inside one
                 # helper shadows the import there, not in the module.
                 bound.pop(name, None)
+        if len(bound) == before:
+            break
     return bound
 
 
@@ -597,12 +608,16 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
            for call in ast.walk(function) if path._is_call(call)):
         return True
     derived = {name}
-    for _ in range(3):
+    limit = len(list(ast.walk(function))) + 1
+    for _ in range(limit):
+        before = len(derived)
         for node in ast.walk(function):
             if (isinstance(node, ast.Assign) and node.value is not None
                     and _mentions(node.value, derived)):
                 derived.update(target.id for target in node.targets
                                if isinstance(target, ast.Name))
+        if len(derived) == before:
+            break
     sinks = _deadline_sinks(function, derived)
     if not sinks:
         return False
