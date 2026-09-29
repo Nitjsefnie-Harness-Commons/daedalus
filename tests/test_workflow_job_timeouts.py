@@ -208,7 +208,8 @@ def test_an_underscore_spelling_float_rejects_is_refused(tmp):
     for value in CRASHING_UNDERSCORES:
         source = 'jobs:\n' + BOUNDED_JOB.replace(
             'timeout-minutes: 5', f'timeout-minutes: {value}')
-        violations = _timeout_violations(_probe_workflow(tmp, f'u-{value}', source))
+        violations = _timeout_violations(
+            _probe_workflow(tmp, f'u-{value}', source))
         assert len(violations) == 1, f'{value}: {violations}'
         assert value in violations[0], f'{value}: {violations}'
 
@@ -228,7 +229,8 @@ def test_a_quoted_bound_is_refused(tmp):
         source = 'jobs:\n' + BOUNDED_JOB.replace(
             'timeout-minutes: 5', f'timeout-minutes: {value}')
         violations = _timeout_violations(
-            _probe_workflow(tmp, f'quoted-{value.strip(chr(39) + chr(34))}', source))
+            _probe_workflow(
+                tmp, f'quoted-{value.strip(chr(39) + chr(34))}', source))
         assert len(violations) == 1, f'{value}: {violations}'
         assert 'quoted' in violations[0], f'{value}: {violations}'
 
