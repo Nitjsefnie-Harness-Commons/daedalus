@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """The lint-tool installer has to work on hosts this one is not.
 
-Every measurement taken while the installer was written was taken on Linux,
-and the two defects this suite exists to catch were both Windows-only: a
-checksum table keyed on the machine string POSIX reports where CPython
-reports `AMD64`, and an archive branch no host could take. Both reached
-five legs of the matrix and neither was caught here, because every gate
-that ran ran on the one platform. So the platform functions are stubbed
-and a real archive of each shape is built here in memory: this suite
-fails anywhere, which is the only way a Windows leg is covered before one
-runs.
-
+Every measurement taken while it was written was taken on Linux, and every
+defect this suite exists to catch was Windows-only: a checksum key CPython
+never returns there, an archive branch no host could take, a wheel member
+placed where no PATH entry reached. So the platform functions are stubbed
+and a real archive of each shape is built in memory — this suite fails
+anywhere, which is the only way a Windows leg is covered before one runs.
 `tests/test_ci_lint_tools.py` is the other half: it holds the jobs to the
 tool set this installer declares.
 """
@@ -34,19 +30,14 @@ import _util  # noqa: E402
 ROOT = _util.ROOT
 INSTALLER_SOURCE = ROOT / 'scripts' / 'ci' / 'install_lint_tools.py'
 # What CPython reports on a windows-latest x64 runner. POSIX spells the
-# same machine `x86_64`, and a key spelled the POSIX way is a key the
-# table does not carry, which is the whole of the first defect.
+# same machine `x86_64`, and the table carries no such key: the first defect.
 WINDOWS_HOST = ('Windows', 'AMD64')
 WINDOWS_X64 = WINDOWS_HOST
-# What the four pinned keys say the release calls each architecture, and
-# whether that release asset is a zip. The installer has to fetch the one
-# its table pins and unpack it as the shape it is.
-# (host pair, the asset the release names for it, whether that asset is a
-# zip). The asset names are SPELLED on purpose: they are the values this
-# suite asserts the installer produces, and an expectation derived from the
-# code under test asserts only that the code agrees with itself. The KEYS
-# are not spelled — `_key_for` asks for those, because the key is built
-# rather than fixed and has moved before.
+# (host pair, the asset the release names for it, whether it is a zip).
+# The asset names are SPELLED on purpose: they are the values this suite
+# asserts the installer produces, and an expectation derived from the code
+# under test asserts only that the code agrees with itself. The KEYS are
+# not spelled — `_key_for` asks, because a key is built and has moved.
 PINNED = (
     (('Linux', 'x86_64'), 'actionlint_1.7.12_linux_amd64.tar.gz', False),
     (('Darwin', 'x86_64'), 'actionlint_1.7.12_darwin_amd64.tar.gz', False),
@@ -54,33 +45,23 @@ PINNED = (
     (WINDOWS_HOST, 'actionlint_1.7.12_windows_amd64.zip', True),
 )
 EXECUTABLE = b'#!/not/really/an/executable\n'
-# The name the control resolves, read through the same constant the
-# installer's own refusal names.
 _ACTIONLINT = 'actionlint'
-# The binary the release ships, and the one every fixture here names: the
-# archive member, the unpacked file, and the name a `which` looks for. The
+# The binary the release ships, and the one every fixture names. The
 # EXTENSION is added by the platform, never written here.
 ACTIONLINT_BINARY = 'actionlint'
-# The name a real wheel has, so a refusal about the version can
-# tell a wheel of the pinned version from one of another.
+# A real wheel's name, so a version refusal can tell it from another.
 DEFAULT_WHEEL = 'shellcheck_py-0.11.0.1-py3-none-any.whl'
 SCRIPTS = 'shellcheck_py-0.11.0.1.data/scripts'
 
 
 def assert_same_file(resolved, written, what):
-    """A resolved path IS the file that was written, on THIS parent.
-
-    Not a string comparison. `shutil.which` on nt builds its answer from
-    PATHEXT, whose extensions are upper case, so it returns
-    `actionlint.EXE` for a file the installer wrote as `actionlint.exe`.
-    Whether those are one entry or two is a property of the PARENT, so it
-    is asked of the parent — through `tests/_case_fold.py`, the question
-    this tree already asks before every fixture that depends on a name —
-    rather than decided here by comparing strings or by branching on
-    `os.name`. Neither a string comparison nor a platform branch would do:
-    the first reports a working install as a failure, the second is the
-    guess that produced every one of the last three Windows rounds.
-    """
+    """Not a string comparison. `which` on nt builds its answer from
+        PATHEXT, whose extensions are upper case, so it returns
+        `actionlint.EXE` for a file written `actionlint.exe`. Whether those
+        are one entry is a property of the PARENT, so it is asked of the
+        parent through `tests/_case_fold.py` rather than decided by string
+        comparison or by branching on `os.name` — the guess that produced
+        three of the last four Windows rounds."""
     assert resolved, f'{what} did not resolve at all'
     assert Path(resolved).parent == written.parent, (
         f'{what} resolved to {resolved!r}, which is not even in the tool '
@@ -101,14 +82,10 @@ def assert_same_file(resolved, written, what):
 def _pinned_to(installer, payload):
     """Pin the table entry for THIS host's key to this payload's digest.
 
-    The key is ASKED FOR rather than spelled, for the reason the key exists
-    at all: `_asset_name` lowercases `platform.machine()` before building
-    it, so a fixture that spells the raw pair patches an entry the
-    installer never reads. The pin check then compares the synthetic
-    payload against the REAL pinned digest and refuses — which is the check
-    working correctly and the fixture being wrong, and the one way to tell
-    them apart is to have the fixture ask instead of guess.
-    """
+        Asked for, not spelled: `_asset_name` lowercases the machine, so a
+        fixture spelling the raw pair patches an entry the installer never
+        reads, and the pin check then refuses the synthetic payload
+        against the REAL digest — the check right and the fixture wrong."""
     _asset, key = installer._asset_name()
     return mock.patch.dict(
         installer.ACTIONLINT_SHA256,
@@ -144,13 +121,7 @@ def _shellcheck_tool(installer):
 def _key_for(installer, host):
     """The checksum key the installer builds for `host`, by asking it.
 
-    The key is a checksum key, so it is a name the installer owns, and it
-    is NOT the raw `(system, machine)` pair: `_asset_name` lowercases the
-    machine before it builds one. Spelling it here is how the residency
-    fixture patched an entry the installer never read — the pin check then
-    compared the payload against the REAL pinned digest and refused, which
-    was the installer being right and this file being wrong.
-    """
+        Never the raw pair: `_asset_name` lowercases the machine."""
     with _on(*host):
         _asset, key = installer._asset_name()
     return key
@@ -159,29 +130,17 @@ def _key_for(installer, host):
 def actionlint_binary(host):
     """The name the installer gives the actionlint executable on `host`.
 
-    ONE place, because this file used to spell it in three and every one of
-    them was written when the installer used a different one: the zip test,
-    the e2e, and the tarball test. `_extract` is the only code that names
-    it and it is not exposed, so the rule lives here — the same predicate
-    and the same extension the installer uses — and
-    `test_every_name_this_file_uses_is_the_one_the_installer_uses` pins the
-    agreement against `_extract` itself, for every key the table carries. A
-    change to the installer's naming is then a red control, not three
-    fixtures quietly disagreeing with it.
-    """
+        One place: this file used to spell it three times, each written
+        when the installer named it differently."""
     return (f'{ACTIONLINT_BINARY}.exe' if _is_windows(host)
             else ACTIONLINT_BINARY)
 
 
 def wheel_member(host, tool):
-    """The member name the wheel for `host` carries its `tool` under.
+    """The member name the wheel for `host` carries `tool` under.
 
-    The same shape: the release names the binary the way the platform
-    spells it, and the installer takes that name from the wheel rather than
-    computing one. So a fixture standing in for a wheel has to carry what
-    the real wheel carries, and that is a fact about the WHEEL — read from
-    the platform, once, here.
-    """
+        A fact about the WHEEL, which the installer reads off it rather
+        than computing; read from the platform once, here."""
     return f'{tool}.exe' if _is_windows(host) else tool
 
 
@@ -297,9 +256,8 @@ def test_an_archive_without_the_binary_is_refused_not_silently_empty(tmp):
     # carries what was asked for and there is nothing to refuse. Spelled
     # deliberately, because this case is about a name that is wrong.
     for host, zipped in ((WINDOWS_X64, True), (('Linux', 'x86_64'), False)):
-        system, machine = host
         member = 'something-else'
-        destination = tmp / f'tools-{system}'
+        destination = tmp / f'tools-{_host_slug(host)}'
         destination.mkdir()
         with _on(*host):
             try:
@@ -309,22 +267,17 @@ def test_an_archive_without_the_binary_is_refused_not_silently_empty(tmp):
                 assert ACTIONLINT_BINARY in str(refusal), refusal
             else:
                 raise AssertionError(
-                    f'the {system} archive carried no {ACTIONLINT_BINARY} '
+                    f'the {host[0]} archive carried no '
+                    f'{ACTIONLINT_BINARY} '
                     'and the installer unpacked it anyway')
 
 
 def test_every_name_this_file_uses_is_the_one_the_installer_uses(tmp):
     """This file's names against the installer's, for every pinned host.
 
-    The condition this exists for: a hand-spelled name outliving the code
-    that stopped spelling it. Three of them did — the zip test, the e2e and
-    the tarball test each carried the actionlint member by hand, each
-    written when the installer named it differently, and the checksum key
-    a fourth that has been moved once already. Now they come from one
-    helper each, and this pins the helper against `_extract` and
-    `_asset_name` themselves, so a change to the installer's naming is a red
-    control here rather than three fixtures quietly disagreeing with it.
-    """
+        A hand-spelled name outliving the code that stopped spelling it is
+        the condition, and four of them did it. One helper each now; this
+        pins the helpers against `_extract` and `_asset_name` themselves."""
     tmp = Path(tmp)
     installer = _installer()
     for host, asset, zipped in PINNED:
@@ -352,25 +305,10 @@ def _host_slug(host):
 
 
 def test_the_installer_on_a_forced_windows_host_produces_windows_names(tmp):
-    """The Windows arm, run HERE, with every platform seam forced at once.
+    """The Windows arm, run HERE, with the platform seams forced at once.
 
-    Five red Windows runs found five real defects while 101 local suites
-    read green, and every one of them was knowable in advance by forcing
-    the host. `shutil.which` reads `sys.platform` at CALL time, so patching
-    it takes its win32 branch — the PATHEXT construction, the upper-cased
-    extension — without a Windows runner. `os.name` and the two `platform`
-    functions are the seams the installer itself reads.
-
-    What this does NOT decide is whether two spellings are one entry,
-    which is a property of the parent and is asked separately, of the
-    parent, by `assert_same_file`. Forcing the host does not fold this
-    host's filesystem, so the `which` answer here carries an upper-cased
-    extension over a lower-cased file on a parent that keeps them apart —
-    a combination no real platform has. That assertion is therefore
-    excluded from this test rather than contorted to pass; the names, the
-    key and the archive kind below are all host-independent and all of them
-    were where the defects were.
-    """
+        Five red Windows runs found five real defects while 101 local
+        suites read green, and every one was knowable by forcing the host."""
     tmp = Path(tmp)
     installer = _installer()
     with _forced_windows():
@@ -389,35 +327,21 @@ def test_the_installer_on_a_forced_windows_host_produces_windows_names(tmp):
             _release_asset(actionlint_binary(host), True), destination)
         assert written.name == actionlint_binary(host) == 'actionlint.exe', (
             written.name)
-        # The RESOLVER is deliberately not here, and that is a limit of
-        # this host rather than a choice: `shutil` binds its `nt` module at
-        # IMPORT time from `os.name`, so no later patch can supply it, and
-        # patching `os.name` at all makes `pathlib` refuse to build a
-        # `WindowsPath` here. The win32 branch of `shutil.which` is
-        # therefore unreachable without a Windows interpreter, and every
-        # property that depends on it is a property of the RUNNER, not of
-        # the installer. Stated so the next reader does not spend a wave
-        # rediscovering it.
+        # The RESOLVER is deliberately absent: it is unreachable here
+        # (see `_forced_windows`), so every property that depends on it is
+        # a property of the RUNNER rather than of the installer.
 
 
 @contextlib.contextmanager
 def _forced_windows():
     """Force the platform seams the INSTALLER reads, to a Windows one.
 
-    `platform.system()` and `platform.machine()` are what the installer
-    asks, and `sys.platform` is patched beside them because it is the other
-    platform question a Python process answers and the one a reader will
-    check first.
-
-    `os.name` is deliberately NOT patched, and that is a measured limit
-    rather than a preference. `shutil` binds its `nt` module at import time
-    from `os.name`, so no later patch can supply it; and patching `os.name`
-    makes `pathlib` refuse to construct a `WindowsPath` on a POSIX host at
-    all. The win32 branch of `shutil.which` is therefore unreachable here
-    without a Windows interpreter, which is why the forced test covers the
-    installer's own naming, key and archive kind and leaves the resolver to
-    the runner. Nothing in production was changed to make this easier.
-    """
+        `os.name` is NOT patched: `shutil` binds its `nt` module at IMPORT
+        time from it, so no later patch supplies one, and patching it makes
+        `pathlib` refuse to build a `WindowsPath` here. The win32 branch of
+        `shutil.which` is therefore unreachable without a Windows
+        interpreter, so the resolver is left to the runner. Nothing in
+        production was changed to make this easier."""
     with mock.patch.object(sys, 'platform', 'win32'), \
             mock.patch('platform.system', return_value='Windows'), \
             mock.patch('platform.machine', return_value='AMD64'):
@@ -442,13 +366,8 @@ def test_a_platform_the_table_does_not_pin_refuses_rather_than_installing(
 
 
 def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
-    """The end to end step, on Windows, with both defects live at once.
-
-    The first defect masked the second: a key that misses refuses before
-    the archive is ever opened, so fixing only the key turns a clean
-    refusal into a traceback. One test drives the whole `main` on the
-    synthesised host so neither order leaves this green.
-    """
+    """The end to end step, on a Windows host, with both archive defects
+        live at once."""
     tmp = Path(tmp)
     installer = _installer()
     tools = tmp / 'tools'
@@ -470,10 +389,9 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
                                      EXECUTABLE)]), \
             mock.patch.object(installer, 'shutil', mock.Mock(
                 which=lambda tool: str(tools / f'{tool}.exe'))):
-        # The stub answers from inside the tool directory, because that is
-        # the only place `_record` will accept an answer from. A stub that
-        # answered from anywhere else used to pass and does not now — which
-        # is the check doing its job, not the test being wrong.
+        # The stub answers from inside the tool directory, the only place
+        # `_record` accepts. A stub from anywhere else used to pass and
+        # does not now: the check working, not the test being wrong.
         assert installer.main() == 0
     installed = tools / actionlint_binary(WINDOWS_X64)
     assert installed.read_bytes() == EXECUTABLE
@@ -486,13 +404,11 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
 def _wheel(directory, members, name=None, scheme=None):
     """A real wheel carrying `members`, the way the release's wheels do.
 
-    Built rather than stubbed, because the code under test OPENS the
-    wheel and reads the member out of it: a fake that only satisfied the
-    call would leave the whole extraction path untested, which is the part
-    the Windows failure was in. Each member is `(name-in-the-scripts-
-    scheme, bytes)`; a directory entry can be asked for with a trailing
-    slash, which the manylinux wheel really does carry.
-    """
+        Built rather than stubbed, because the code under test OPENS the
+        wheel: a fake that only satisfied the call would leave the whole
+        extraction path untested, which is where the Windows failure was.
+        A member is `(name-in-the-scripts-scheme, bytes)`; a trailing
+        slash asks for the directory entry the manylinux wheel carries."""
     wheel = Path(directory) / (name or DEFAULT_WHEEL)
     with zipfile.ZipFile(wheel, 'w') as archive:
         for member, payload in members:
@@ -503,11 +419,10 @@ def _wheel(directory, members, name=None, scheme=None):
 def _downloaded(members, name=None, scheme=None):
     """Stub `pip download`, handing back a real wheel in its staging dir.
 
-    pip owns the network and the platform choice, and neither is what
-    this file is testing; what it tests is what the installer does with
-    the wheel pip brought. The command is asserted so a change in the
-    resolution — losing `--only-binary`, or `--no-deps` — is visible.
-    """
+        pip owns the network and the platform choice and neither is under
+        test; what is under test is what the installer does with the wheel
+        it was given. The command is asserted, so losing `--only-binary`
+        or `--no-deps` is visible."""
     def run(command, **kwargs):
         assert kwargs.get('check') is True, 'a pip failure must fail the step'
         assert '--only-binary=:all:' in command, (
@@ -528,19 +443,11 @@ def _installing(installer, members, name=None, scheme=None):
 
 
 def test_the_shellcheck_version_is_written_down_exactly_once(tmp):
-    """The pin is read out of the requirements file, not repeated here.
+    """The version in the requirements file is not written here too.
 
-    Two copies of a pin is a pin that will drift: the first person to bump
-    one of them gets a job that installs a version no requirements file
-    names, which is the defect this change exists to close, wearing the
-    costume of the fix. So the installer's own source must not spell a
-    REQUIREMENT for shellcheck at the version the file names.
-
-    The requirement form and not the bare version, because a docstring
-    saying which version a job used to resolve from the runner image is
-    evidence a reader wants, and forbidding prose about a version would buy
-    nothing.
-    """
+        Two copies of a pin will drift. The REQUIREMENT form is checked,
+        not the bare version: prose about which version a job used to
+        resolve is evidence a reader wants."""
     del tmp
     installer = _installer()
     version = installer.shellcheck_pin()
@@ -581,11 +488,10 @@ def test_a_requirements_file_that_names_no_single_version_is_refused(tmp):
 def test_the_member_name_comes_from_the_wheel_not_from_a_platform_branch(tmp):
     """`shellcheck` here, `shellcheck.exe` there, and the wheel decides.
 
-    The branch this replaces is what broke: pip's `--target` put a
-    scripts-scheme member somewhere no PATH entry reached on
-    windows-latest. Nothing here computes the name from the platform, so
-    there is no second answer to keep correct.
-    """
+        The branch this replaces is what broke: pip's `--target` put a
+        scripts-scheme member somewhere no PATH entry reached on
+        windows-latest. Nothing here computes the name from the platform, so
+        there is no second answer to keep correct."""
     tmp = Path(tmp)
     installer = _installer()
     tool = _shellcheck_tool(installer)
@@ -601,21 +507,12 @@ def test_the_member_name_comes_from_the_wheel_not_from_a_platform_branch(tmp):
 
 
 def test_the_real_pin_table_refuses_the_fixture_payload(tmp):
-    """The seam that lets a test pin a synthetic payload is a SEAM.
+    """The shipped table refuses this fixture's own payload, every key.
 
-    `_pinned_to` puts a digest into `ACTIONLINT_SHA256` so a fixture can
-    install a payload it built, and that is the only way any test here can
-    reach the unpack path at all. It is also, read the wrong way, a way to
-    make the installer accept an asset no pin names — which is the defect
-    this whole change exists to close, and the one that left a job green
-    having linted nothing before it.
-
-    So the refusal is pinned from the OTHER side, against the table as it
-    ships: the real pinned digest, this payload, and a refusal. If a
-    change ever made the production path read anything other than its own
-    table, or made `_verify` lenient, this goes red — and the seam stops
-    being a way to accept anything the moment it could be.
-    """
+        The seam is a SEAM: read the wrong way it would make the
+        installer accept an asset no pin names, which is the defect this
+        change exists to close. Pinned from the other side, so a lenient
+        `_verify` goes red here."""
     del tmp
     installer = _installer()
     host = _host(installer)
@@ -639,18 +536,12 @@ def test_the_real_pin_table_refuses_the_fixture_payload(tmp):
 
 def test_the_binary_the_installer_names_on_this_host_is_one_which_can_find(
         tmp):
-    """The name and the resolver must come from the same platform.
+    """The binary the installer names on this host is one `which` finds.
 
-    A run that got past `shellcheck` and then failed on `actionlint` was
-    this, and nothing to do with the install: the fixture stubbed
-    `platform.system()` to say Linux while the process was Windows, so the
-    installer named the binary the POSIX way and the `shutil.which` that
-    then went looking for it followed the Windows rule — a command plus a
-    PATHEXT extension — and found nothing. Stated as a property rather
-    than a platform, so it holds wherever it is run: the binary the
-    installer writes under the HOST's own pair is one this process's
-    `which` can resolve.
-    """
+        A run that passed `shellcheck` then failed on `actionlint` was a
+        fixture stubbing the platform to say Linux on a Windows process.
+        Stated as a property, not a platform, so it holds wherever the
+        suite runs."""
     tmp = Path(tmp)
     installer = _installer()
     host = (installer.platform.system(), installer.platform.machine())
@@ -670,17 +561,11 @@ def test_the_binary_the_installer_names_on_this_host_is_one_which_can_find(
 
 def test_the_tool_directory_reaches_this_process_and_not_only_github_path(
         tmp):
-    """Why an in-process `shutil.which` can mean anything at all.
+    """The tool directory reaches this process AND the steps after.
 
-    `$GITHUB_PATH` reaches SUBSEQUENT steps, never the one that writes it,
-    so a check reading PATH inside this process would be reading a PATH
-    this step had not yet changed — and every assertion about residency
-    would be about whatever the runner image happened to carry. The
-    installer's answer is that it does both: it prepends the tool
-    directory to THIS process's own PATH and writes the same line to
-    `$GITHUB_PATH` for the steps after. Both halves are pinned here, so
-    neither can be dropped without this going red.
-    """
+        `$GITHUB_PATH` reaches only LATER steps, so an in-process check
+        depends on the installer also prepending to this process's own
+        PATH. Both halves are pinned, so neither drops silently."""
     tmp = Path(tmp)
     installer = _installer()
     later = tmp / 'path.txt'
@@ -704,12 +589,10 @@ def test_the_tool_directory_reaches_this_process_and_not_only_github_path(
 def test_a_wheel_that_carries_the_wrong_binary_is_refused(tmp):
     """Each of the four supply-chain shapes, refused in the file's register.
 
-    No member, more than one, a name that is not the declared tool, and a
-    version that is not the pin. A wheel that would put something else on
-    PATH is not one to install, and the directory entry the manylinux
-    wheel really carries must not be counted as a second member — that
-    error would make every Linux leg refuse a correct wheel.
-    """
+        No member, more than one, a name that is not the declared tool, a
+        version that is not the pin. The directory entry the manylinux
+        wheel really carries must NOT count as a second member: that error
+        would make every Linux leg refuse a correct wheel."""
     tmp = Path(tmp)
     installer = _installer()
     cases = {
@@ -744,10 +627,8 @@ def test_a_wheel_that_carries_the_wrong_binary_is_refused(tmp):
                 raise AssertionError(
                     f'a wheel with {label} was installed rather than '
                     'refused')
-    # A wheel whose version is not the pin is refused before it is opened,
-    # and this one goes through `install_shellcheck` because that is where
-    # the check lives: the placer is handed a wheel it has already agreed
-    # about and would be testing nothing if asked to re-check.
+    # The version refusal goes through `install_shellcheck`, which is
+    # where the check lives; the placer is handed a wheel already agreed.
     with _installing(installer, [('shellcheck', b'x')],
                      name='shellcheck_py-0.9.0-py3-none-any.whl'), \
             mock.patch.object(installer, 'TOOL_DIR', tmp / 'wrong-version'):
@@ -762,24 +643,19 @@ def test_a_wheel_that_carries_the_wrong_binary_is_refused(tmp):
 def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
     """The whole point, on a PATH that has neither binary on it.
 
-    `timed` used to pass this step because the ubuntu-latest image carries
-    a shellcheck of its own, at a version no pin names, and a check that
-    only asks "does it resolve" cannot tell that from an install. This
-    runs the real entry point with a PATH of nothing, and then looks at
-    WHERE the binary it found lives.
-    """
+        `timed` used to pass because the ubuntu-latest image carries a
+        shellcheck at a version no pin names, and "does it resolve" cannot
+        tell that from an install. This runs the real entry point and then
+        looks at WHERE the binary it found lives."""
     tmp = Path(tmp)
     installer = _installer()
     tools = tmp / 'tools'
     later = tmp / 'path.txt'
     recorded = tmp / 'env.txt'
-    # The host's OWN platform pair, not a claim about a different one. A
-    # fixture that stubs `platform.system()` to say Linux while running on a
-    # Windows process makes the installer name the binary the POSIX way, and
-    # then asserts about it with a `which` that follows Windows' rule — a
-    # fixture that does not know the rules of the platform it is on, which
-    # is what the other two failures in this round were too. Stabbing the
-    # real values back keeps the checksum map keyed the way `_asset_name`
+    # The host's OWN pair, not a claim about another one: stubbing the
+    # platform to say Linux on a Windows process made the installer name
+    # the binary the POSIX way and a `which` following Windows' rule miss
+    # it. Restubbing the real values keeps the map keyed as `_asset_name`
     # builds it, without pretending this is somewhere it is not.
     host = _host(installer)
     tool = _shellcheck_tool(installer)
@@ -799,10 +675,8 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
         resolved = installer.shutil.which(tool)
         assert_same_file(resolved, landed, tool)
         # And the OTHER tool, whose name the installer derives from the
-        # platform rather than from anything in a fixture. It is here for
-        # the same reason the failure was: a run that got this far and
-        # failed on actionlint means the fixture, not the install, was
-        # wrong.
+        # platform: a run that got this far and failed on actionlint means
+        # the fixture was wrong, not the install.
         binary = installer.shutil.which(ACTIONLINT_BINARY)
         assert_same_file(binary, tools / actionlint_binary(host),
                          ACTIONLINT_BINARY)
