@@ -60,9 +60,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/_command_type_readers.py', '_refuse'):
         'each refuses with its own message shape: a where and what pair '
         'against a path, root, node and detail',
-    ('tests/_control_writes.py', '_bound_names'):
-        'one yields the names an assignment target binds and the other '
-        'returns every name a node stores, so they answer differently',
     ('tests/_coverage_guard.py', '_ModuleFacts'):
         'each guard analyses a different launcher surface, and the facts '
         'class each builds carries that surface own names, so neither is a '
@@ -82,9 +79,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/_coverage_guard.py', '_visit'):
         'each walks its own facts object under its own signature and its own '
         'per-call state',
-    ('tests/_coverage_scopes.py', '_bound_names'):
-        'one yields the names an assignment target binds and the other '
-        'returns every name a node stores, so they answer differently',
     ('tests/_coverage_scopes.py', '_parents'):
         'the scope map is built over memoised nodes only, so it is not the '
         'plain walk the command readers want',

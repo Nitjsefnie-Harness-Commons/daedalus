@@ -34,16 +34,6 @@ from _imported_calls import (Context, SharedResolver, module_functions,
                              module_scopes, reached_functions)
 
 
-def _bound_names(target):
-    if isinstance(target, ast.Name):
-        yield target.id
-    elif isinstance(target, ast.Starred):
-        yield from _bound_names(target.value)
-    elif isinstance(target, (ast.List, ast.Tuple)):
-        for part in target.elts:
-            yield from _bound_names(part)
-
-
 def _call_violation(node, judgement, problem, kind, target, owned, trusted,
                     mutated):
     """The one message this call earns, or None when it is proved."""
@@ -92,14 +82,10 @@ class _ModuleJudgement:
 
     A helper's body is judged with its parameters seeded from the kinds
     every caller hands it, once every caller has been judged; a helper
-    nobody calls, or one in a call cycle, is judged unseeded. A test_
-    function anything in the module names is a helper too.
-
-    `reach` is the shared-helper form: it names the functions of a
-    `tests/_*.py` file the imported call reaches, `seeded` carries the
-    kinds the control's own call sites handed the entry, and the
-    module's other scopes — every statement at its top level included —
-    are none of this control's business.
+    nobody calls, or one in a call cycle, is judged unseeded. `reach` is
+    the shared-helper form: it names the `tests/_*.py` functions the
+    imported call reaches, and the module's other scopes — every statement
+    at its top level included — are none of this control's business.
     """
 
     def __init__(self, tree, label, resolver, reach=None, seeded=None):
@@ -134,19 +120,13 @@ class _ModuleJudgement:
     def _scopes(tree, helper_nodes, reach):
         """The top-level scopes judged whole, and the ones inside them.
 
-        One rule, over roots rather than over a kind of root. A root is
-        the module for a local judgement and each reached top-level scope
-        for an imported one, so a reached class arrives with its methods
-        the way a reached function arrives with its nested `def`, and a
-        kind of reached scope added later cannot come without its regions.
-
-        A root is judged whole — body AND header — by `judge_scope`, so
-        `roots` is every top-level scope that is not a helper, helpers
-        included, and both are excluded from the walk below because their
-        own top-level node is not a nested scope. A helper's body is the
-        seeding loop's, and its header is `judge_helper`'s; a class root's
-        are `roots`'. Nothing here asks which kind of scope it is looking
-        at, which is the property the previous two rounds did not have.
+        One rule, over roots rather than over a kind of root, so a kind of
+        reached scope added later cannot come without its regions. A root
+        is the module for a local judgement and each reached top-level
+        scope for an imported one; a root is judged whole by
+        `judge_scope`, and the top-level nodes — helpers included — are
+        excluded from the walk because a top-level node is not a nested
+        scope. Nothing here asks which kind of scope it is looking at.
         """
         reached = ([tree] if reach is None else
                    [node for node in tree.body
@@ -162,10 +142,9 @@ class _ModuleJudgement:
         """One top-level scope, whole: the body and the header beside it.
 
         The single per-scope entry, and the roots loop, the nested-scope
-        loop and the readiness loop all come through it or through the
-        entry it delegates to. A header is whatever the scope evaluates
-        when it is defined, and the same rule reads a `def`'s and a
-        `class`'s.
+        loop and the readiness loop all reach it. A header is whatever the
+        scope evaluates when it is defined, and the same rule reads a
+        `def`'s and a `class`'s.
         """
         self.judge(scope, seeding)
         if self.shared:
@@ -182,9 +161,7 @@ class _ModuleJudgement:
         evaluated where the `def` or `class` is, so they are judged with
         the module's names and not the caller's. The shared module's
         statements are not judged, so this is the only place one of these
-        can be; the local form gets the same calls from its module scope.
-        A nested scope inside one is a scope of its own and is left to
-        `scopes`.
+        can be; a nested scope inside one is left to `scopes`.
         """
         owned, mutated = _owned_path_names(self.tree, self.context)
         trusted = {'Path', 'str', 'os'} - _scope_local_names(self.tree)

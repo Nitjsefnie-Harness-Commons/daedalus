@@ -3,11 +3,22 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 A call outside these tables is refused rather than ignored, so a new
-primitive a control needs is a reviewed line here, not a silent gap. One
-class sits outside the tables: a callee imported out of a `tests/_*.py`
-module under the root the caller passed in. `shared_helper_path` decides
-only which file such an import names; reading that file and judging the
-body is `tests/_imported_calls.py`'s work, under the same write rules.
+primitive a control needs is a reviewed line here, not a silent gap.
+
+WHAT A ROW COSTS. A row is answered before the body is looked at, so a
+`_PURE_IMPORTS` row naming a function in a `tests/_*.py` module exempts
+that function's body from ever being read — and every such row names
+one, which is exactly what the shared-helper path stopped trusting on
+sight. The exemption is sound only while no such body writes.
+`tests/test_shared_helper_calls.py::test_a_pure_import_row_never_names_a_writer`
+drives every row's body through the guard and is what holds that up; the
+fact it establishes was previously only in a reviewer's transcript.
+
+One class sits outside the tables: a callee imported out of a
+`tests/_*.py` module under the root the caller passed in.
+`shared_helper_path` decides only which file such an import names;
+`tests/_imported_calls.py` reads that file and hands the callee back, and
+`tests/_control_writes.py` judges it, under the same write rules.
 """
 import ast
 from collections import Counter

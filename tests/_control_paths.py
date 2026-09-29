@@ -26,10 +26,10 @@ COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
 def _names_in(target):
     """Every name an assignment target is reached through.
 
-    Local rather than shared: the same generator is a module-level
-    `def` in `tests/_control_writes.py` and in
-    `tests/_coverage_scopes.py`, and a third copy here would be a
-    re-implementation no residue row can name.
+    Local rather than shared: the same generator is a module-level `def`
+    in `tests/_coverage_scopes.py`, and a second copy here would be a
+    re-implementation no residue row can name — a row may not name a file
+    this branch adds.
     """
     if isinstance(target, ast.Name):
         return [target.id]

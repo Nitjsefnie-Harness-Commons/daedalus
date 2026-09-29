@@ -2,34 +2,32 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-The invariant is one sentence with no kind in it: **every `ast.Call`
-inside a reached top-level scope of a resolved `tests/_*.py` module is
-judged.** The two sides are computed by two different vocabularies,
-because the first version of this scan was circular — its owed side and
-its judged side both went through `_nested_scope_expressions`, and its
-owed side was gated on `isinstance(node, (ast.FunctionDef,
-ast.AsyncFunctionDef))` — so a class root's header was absent from both
-and the diff read 0 on a tree with 53 holes in it.
+The invariant has no kind in it: every `ast.Call` inside a reached
+top-level scope of a resolved `tests/_*.py` module is judged. The two
+sides are computed by two different vocabularies, because computing them
+by the same one makes them agree whatever the tree contains: a version
+of this file gated the owed side on `isinstance(node, (ast.FunctionDef,
+ast.AsyncFunctionDef))` and recorded the judged side with the guard's own
+`_nested_scope_expressions`, so a class root's header was absent from
+both and the diff read 0 on a tree with 105 holes.
 
-- the OWED side walks the AST: find the reached top-level scopes with
-  the reach, then enumerate `ast.Call` under each with `ast.walk` and
-  nothing else. No `isinstance`, no `_nested_scope_expressions`, no
+- the OWED side walks the AST: the reach finds the top-level scopes, and
+  `ast.walk` enumerates `ast.Call` under each with no `isinstance` and no
   helper of the guard's, so it cannot inherit the assembly's blind spot;
-- the JUDGED side records what the guard inspects, by wrapping
-  `call_judgement` — the one point every call the guard reaches a
-  decision about passes through. Not `_call_violation`, which a call
-  that defers to a shared helper never reaches, so wrapping that would
-  blind this side to exactly the calls the deferral hides.
+- the JUDGED side wraps `call_judgement` — the one point every call the
+  guard reaches a decision about passes through. Not `_call_violation`,
+  which a call that defers to a shared helper never reaches, and wrapping
+  that would blind this side to exactly the calls the deferral hides.
 
 If you can name a function both sides call, the diff can only confirm
 that function. They share none.
 
-The diff is ONE-DIRECTIONAL, and the direction matters: it reports a site
-the reach owes and the guard does not judge. It cannot see a site the
-guard judges that this check never owed, which is the permissive direction
-and the one a blind check fails in. Both halves are derived from the same
-reach, so a root kind the reach does not admit is outside this check's
-domain on BOTH sides rather than invisible in one of them.
+The diff is ONE-DIRECTIONAL: it reports a site the reach owes and the
+guard does not judge, and it cannot see a site the guard judges that this
+check never owed — the permissive direction, and the one a blind check
+fails in. Both halves derive from the same reach, so a root kind the
+reach does not admit is outside this check's domain on BOTH sides rather
+than invisible in one.
 """
 import ast
 import sys
@@ -99,66 +97,6 @@ def unjudged_sites(root, controls):
     for label, tree, entry in resolved:
         owed |= _call_sites(label, tree, entry)
     return sorted(owed - judged)
-
-
-def verify(root, controls, sites):
-    """Plant a checkout write at each site and ask the guard to name it.
-
-    The reduction, and why it is closed: the question is whether the site
-    is JUDGED, and a site is judged the same way whichever control
-    reached the helper that holds it — the call is inside a scope the
-    helper's own seeding fixes, and the planted target is `ROOT`, which
-    no seeding can prove owned, so the answer is a violation or nothing
-    and never depends on the caller. One control per site is therefore
-    the whole question, and it is the control that first resolved the
-    helper the site is in.
-    """
-    import _control_writes
-    from _control_writes import _ModuleJudgement
-
-    resolved = {}
-
-    def watch_import(self, name, seeding):
-        imported = self.resolver.imported(self.names, name)
-        if imported is not None:
-            resolved.setdefault(imported.module.label, self.label)
-        return _IMPORT[0](self, name, seeding)
-
-    _IMPORT = [_ModuleJudgement._judge_imported]
-    _ModuleJudgement._judge_imported = watch_import
-    try:
-        for control in controls:
-            _control_writes.control_write_violations(root / control, root)
-    finally:
-        _ModuleJudgement._judge_imported = _IMPORT[0]
-
-    named, silent = [], []
-    for label, line, _ in sites:
-        helper = root / label
-        text = helper.read_text(encoding='utf-8')
-        original = text
-        control = resolved.get(label)
-        before = set(_control_writes.control_write_violations(
-            root / control, root)) if control else set()
-        indented = (' ' * 4) + "(ROOT / '.unjudged_probe').write_text('p')\n"
-        helper.write_text('\n'.join(text.split('\n')[:line]
-                                    + [indented]
-                                    + text.split('\n')[line:]),
-                          encoding='utf-8')
-        try:
-            found = False
-            if control is not None:
-                # A NEW violation that NAMES THE HELPER'S FILE. A new
-                # violation that does not is the guard noticing the
-                # plant broke the file, which is a refusal and not a
-                # judgement of the site.
-                found = any(message.startswith(label) for message in
-                            set(_control_writes.control_write_violations(
-                                root / control, root)) - before)
-        finally:
-            helper.write_text(original, encoding='utf-8')
-        (named if found else silent).append((label, line))
-    return named, silent
 
 
 def main(root):
