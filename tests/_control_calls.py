@@ -4,9 +4,15 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 A call outside these tables is refused rather than ignored, so a new
 primitive a control needs is a reviewed line here, not a silent gap.
+One class sits outside the tables on purpose: a callee imported out of a
+`tests/_*.py` module under the root the caller passed in. Admissibility
+for that class is `shared_helper_path`, and it decides only which file
+the import names — reading the helper and judging its body is
+`tests/_control_writes.py`'s work, under the same write rules.
 """
 import ast
 from collections import Counter
+from pathlib import Path
 
 _UNRESOLVED_MODE = object()
 _READ_MODES = frozenset({'r', 'rb', 'rt'})
@@ -70,6 +76,30 @@ _WRITER_MODULE_CALLS = {'_util.load': (None, 0),
 _WRITER_IMPORTS = {('_mutation_sweep', 'mutation_sweep'): (None, 0),
                    ('_owned_writes', 'copy_test_tree'): ('root', 0),
                    ('_owned_writes', 'clear_bytecode'): ('root', 0)}
+# A callee the caller may read out of a `tests/_*.py` module instead: the
+# guard reads that file and judges the helper's own body, so the sentinel
+# is a question put to `_control_writes.py`, never an acceptance.
+_SHARED_HELPER = object()
+
+
+def shared_helper_path(names, name, repository_root):
+    """The `tests/_<name>.py` a lone import of `name` names, or None.
+
+    Admissibility only. It answers whether an import points at a shared
+    helper module under the root the caller passed in, and it never reads
+    one: the body is read where it is judged, so a file this cannot
+    parse is still a refusal rather than a silent pass.
+    """
+    if repository_root is None or name in names.relative:
+        return None
+    origin = names.import_origin(name)
+    if origin is None:
+        return None
+    module = origin[0]
+    if not module.startswith('_') or not module.isidentifier():
+        return None
+    path = Path(repository_root) / 'tests' / f'{module}.py'
+    return path if path.is_file() else None
 
 
 def argument(call, name, position):
@@ -131,6 +161,7 @@ class ModuleNames:
         self.modules = set()
         self.defs = set()
         self.namespace_mutated = False
+        self.relative = set()
         subscripted = set()
         for node in ast.walk(tree):
             if (isinstance(node, ast.Subscript)
@@ -179,6 +210,8 @@ class ModuleNames:
                 bound = alias.asname or alias.name
                 self.counts[bound] += 1
                 self.imports[bound] = (node.module, alias.name)
+                if node.level:
+                    self.relative.add(bound)
         elif (_is_namespace_call(node) and id(node) not in subscripted
               and node.func.id != 'locals'):
             self.namespace_mutated = True
@@ -264,7 +297,7 @@ def _attribute_judgement(node, label, names):
     return f'{label}:{line}: {spelling} is not a modelled call', None, None
 
 
-def _name_judgement(node, label, names):
+def _name_judgement(node, label, names, repository_root=None):
     """(problem, kind, target) for a plain-name call."""
     name = node.func.id
     if name == 'open':
@@ -279,15 +312,17 @@ def _name_judgement(node, label, names):
     if origin in _WRITER_IMPORTS:
         return None, name, _writer_target(
             node, _WRITER_IMPORTS[origin], None)
-    return (f'{label}:{node.lineno}: {name} callable is unresolved',
-            None, None)
+    unresolved = f'{label}:{node.lineno}: {name} callable is unresolved'
+    if shared_helper_path(names, name, repository_root) is not None:
+        return unresolved, _SHARED_HELPER, None
+    return unresolved, None, None
 
 
-def call_judgement(node, label, names):
+def call_judgement(node, label, names, repository_root=None):
     """(problem, kind, target): refused outright, or a write to prove."""
     if isinstance(node.func, ast.Attribute):
         return _attribute_judgement(node, label, names)
     if isinstance(node.func, ast.Name):
-        return _name_judgement(node, label, names)
+        return _name_judgement(node, label, names, repository_root)
     return (f'{label}:{node.lineno}: {ast.unparse(node.func)} is not a '
             'modelled call', None, None)
