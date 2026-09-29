@@ -1411,6 +1411,7 @@
     "mint_job": {"python": ["tests/_segments.py"]},
     "missing_citations": {"python": ["tests/_mcp_guard_floor.py"]},
     "module_functions": {"python": ["tests/_imported_calls.py"]},
+    "module_scopes": {"python": ["tests/_imported_calls.py"]},
     "multiline_cases": {"python": ["tests/_token_policy_cases.py"]},
     "mutation_sweep": {"python": ["tests/_mutation_sweep.py"]},
     "named_path": {"python": ["tests/_gitignore_control.py"]},
