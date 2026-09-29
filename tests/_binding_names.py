@@ -174,20 +174,21 @@ def _every_use_proven(function, derived):
 def _receiver_escapes(node):
     """Whether a Load of the RECEIVER sits in a proven position.
 
-    Two, and their complement poisons every key the receiver owns: the
-    `value` of an `Attribute` node (`self.handles`, read or written), and a
-    direct call argument (`helper(self)`). `s = self` and then
-    `s.handles = Popen()` is not a reflective write -- no setattr, no
-    `__dict__`, no `vars` -- so the poison rule has nothing to fire on, and
-    the census goes on reading `self.handles` from its literal binding while
-    the write lands on it at runtime.
+    ONE, and its complement poisons every key the receiver owns: the `value`
+    of an `Attribute` node (`self.handles`, read or written). A CALL
+    ARGUMENT poisons too, discarded or not -- whether a call's result is
+    thrown away looked like a signal and was read as proof, and a signal is
+    not proof. `s = self` and then `s.handles = Popen()` is not a reflective
+    write -- no setattr, no `__dict__`, no `vars` -- so the poison rule has
+    nothing to fire on, and the census goes on reading `self.handles` from
+    its literal binding while the write lands on it at runtime.
 
     This is the same POSITIONS principle as the deadline guard and
     deliberately carries no alias tracking and no binder list: it does not
     ask which binder produced the alias, only whether the receiver's own
-    Load is somewhere a receiver can be used from. `self.x` and
-    `helper(self)` are; an assignment's value, a `for` iterable, a `with`
-    target, a match subject, a default and a return are not.
+    Load is somewhere a receiver can be used from. Only `self.x` is; an
+    assignment's value, a `for` iterable, a `with` target, a match subject,
+    a default, a return and a call argument are not.
     """
     args = node.args
     if 'self' not in {arg.arg for arg in
@@ -202,17 +203,11 @@ def _receiver_escapes(node):
     # derived by this clause and needs no case of its own; an override
     # beside a clause that should have produced it is a claim the code does
     # not derive.
-    discarded = {id(stmt.value) for stmt in ast.walk(node)
-                 if isinstance(stmt, ast.Expr) and path._is_call(stmt.value)}
     for child in ast.walk(node):
         if (isinstance(child, ast.Attribute)
                 and isinstance(child.value, ast.Name)
                 and child.value.id == 'self'):
             proven.add(id(child.value))
-        elif path._is_call(child) and id(child) in discarded:
-            for arg in (*child.args, *(k.value for k in child.keywords)):
-                if isinstance(arg, ast.Name) and arg.id == 'self':
-                    proven.add(id(arg))
     return any(isinstance(child, ast.Name) and child.id == 'self'
                and isinstance(child.ctx, ast.Load) and id(child) not in proven
                for child in ast.walk(node))
