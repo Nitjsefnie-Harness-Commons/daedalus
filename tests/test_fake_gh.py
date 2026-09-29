@@ -144,7 +144,9 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
     reader counting entries can see a call entered and still open, and that
     is a fact about the process rather than about when anybody looked. The
     hold has no bound, because a bound would make it a guess, and a guess
-    that expires is the sample it exists to replace.
+    that expires is the sample it exists to replace - so the bound is the
+    one thing here that has to be asserted, and it is, by the pair of
+    release-record readings below.
     """
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {'data': None}}, gate=True)
     answer = subprocess.Popen(
@@ -157,6 +159,14 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
         answer.stdin.close()
         entered = _await_entered(fake, 1)
         assert entered, fake.calls()
+        # The wait is observable as UNBALANCED: nothing released while the
+        # gate is shut. This half is what catches a hold that was given a
+        # bound - a release record is written either way, so the count
+        # below cannot tell a hold that waited from one that gave up -
+        # and the count below is what catches a hold that does not exist,
+        # which leaves this one true for the wrong reason. Neither half
+        # alone is a gate; the pair is.
+        assert fake.releases() == [], fake.releases()
         fake.open_gate()
         out, err = answer.communicate(timeout=60)
         assert answer.returncode == 0, err
@@ -164,11 +174,6 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
     finally:
         answer.kill()
         answer.wait(timeout=60)
-    # The release is the only terminal fact about a wait, so it is what is
-    # asserted: a call still held is indistinguishable from a call nobody
-    # looked at, and reading `answer.poll()` to tell them apart is the very
-    # sample this hold exists to replace - it passed against a double with
-    # no hold in it at all.
     released = fake.releases()
     assert len(released) == 1, released
     assert released[0]['gate'] == str(fake.gate_path), released
