@@ -457,11 +457,18 @@ jobs:
     timeout-minutes: 10
 
     env:
-      ACTIONLINT_VERSION: 1.7.12
-      # sha256 of actionlint_1.7.12_linux_amd64.tar.gz, from the release's
-      # own checksums file. Bump both together.
+      # A fork build, not an upstream release. v1.7.12 is the latest upstream
+      # tag and it rejects `queue` under `concurrency`, a key GitHub documents,
+      # so the key cannot be expressed in a workflow here. 1.7.12-queue.1 is
+      # the v1.7.12 TAG plus rhysd/actionlint#654 cherry-picked unchanged, so
+      # the delta from the published upstream binary is exactly that patch.
+      # When #654 merges and ships upstream, move this back to an upstream
+      # version string and the rhysd release URL below; nothing else changes.
+      ACTIONLINT_VERSION: 1.7.12-queue.1
+      # sha256 of actionlint_1.7.12-queue.1_linux_amd64.tar.gz, from the
+      # release's own checksums file. Bump both together.
       ACTIONLINT_SHA256: >-
-        8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        dcc2c42a7caaa197dfe63584a3851f62ef260f80b2cf221baaf05479661e1521
 
     steps:
       # actions/checkout v7.0.1
@@ -485,7 +492,7 @@ jobs:
         # hung mirror fails the step instead of holding the runner.
         run: |
           tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          url='https://github.com/rhysd/actionlint/releases/download'
+          url='https://github.com/Nitjsefnie-OSC/actionlint/releases/download'
           url="${url}/v${ACTIONLINT_VERSION}/${tarball}"
           curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
             -o "$tarball" "$url"
