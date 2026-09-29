@@ -577,10 +577,9 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
     policy so this control passes would be the mistake the wave is about. A
     restatement in different words is not detectable here. Every file in the
     package is read, this suite and the module holding the search keys
-    included, and the one exemption is a key's own definition: a plain
-    assignment of the phrase to a name, spared where it is defined rather
-    than by the name of the file that holds it. Only one is ever spared, so a
-    second definition beside the first is still a second statement.
+    included, and exactly one occurrence is spared: a key's own top-level
+    declaration, in the module that declares it. The rows pinning that
+    exemption live in tests/test_coverage_authority_scan.py.
     """
     from _coverage_bindings import _carried_parts
 
