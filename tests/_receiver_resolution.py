@@ -26,6 +26,7 @@ import importlib
 import inspect
 import sys
 
+from _binding_names import _names_a_target_binds, _rebindings
 import _launch_path as path
 
 # The modules a NETWORK READ is a member of. This names MODULES and never
@@ -54,21 +55,6 @@ def _resolve_dotted(node, bound):
     if base is None:
         return None
     return f'{base}.{rest}' if rest else base
-
-
-def _names_a_target_binds(target):
-    """Every NAME a target node binds, through a tuple or a star."""
-    if isinstance(target, ast.Name):
-        return (target.id,)
-    if isinstance(target, (ast.Tuple, ast.List)):
-        return tuple(name for child in target.elts
-                     for name in _names_a_target_binds(child))
-    if isinstance(target, ast.Starred):
-        return _names_a_target_binds(target.value)
-    if isinstance(target, (ast.MatchAs, ast.MatchStar)):
-        # A `match` capture binds its name as TEXT, like `except ... as`.
-        return (target.name,) if target.name else ()
-    return ()
 
 
 def _global_rebindings(tree):
@@ -109,75 +95,6 @@ def _global_names(node, tree):
                 declared.update(child.names)
         return declared
     return set()
-
-
-def type_param_names(node):
-    """The names in a node's PEP 695 type parameters; 3.12 and later.
-
-    Guarded by FEATURE rather than by a version literal, because
-    `scripts/ci/classify_changes.py`'s `FULL_MATRIX` runs 3.11 through
-    3.14 and an unguarded attribute is a red cell on every 3.11 run.
-    """
-    return tuple(p.name for p in (getattr(node, 'type_params', None) or ()))
-
-
-def _rebindings(tree):
-    """`(node, name)` for every name a module binds except an import.
-
-    The set is the Python Language Reference §4.2.1 binding list, cited so
-    a reader can diff this against the reference. Checkable is not closed:
-    the first diff after the citation was installed found two of §4.2.1's
-    own bullets uncollected — `type_params`, unreachable because the
-    `FunctionDef`/`ClassDef` branch precedes the `else` that collected them,
-    and `ast.Lambda` parameters, invisible because `_is_def` excludes
-    `Lambda`.
-
-    Names come from ONE rule: every `ast.Name` whose `ctx` is `Store` or
-    `Del`, whatever statement holds it. The binders that are not `Name`
-    nodes are named below and each is one `getattr`, so a construct the
-    running interpreter does not have is skipped rather than an
-    `AttributeError` at import.
-
-    NOT collected, and named rather than assumed: **formal parameters**,
-    which `_function_parameters` owns — collecting them here too is how
-    the two readers would silently disagree, and a parameter is a
-    binding; and **import statements**, which the reader above keeps as a
-    table rather than as rebindings.
-
-    The node reported is the `Name` itself, except for a target of an
-    `Assign`, where the `Assign` is reported so the caller can resolve the
-    right-hand side.
-    """
-    assignments = {id(child): node for node in ast.walk(tree)
-                   if isinstance(node, ast.Assign)
-                   for child in ast.walk(node)
-                   if isinstance(child, ast.Name)}
-    type_alias = getattr(ast, 'TypeAlias', None)
-    found = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(
-                node.ctx, (ast.Store, ast.Del)):
-            found.append((assignments.get(id(node), node), node.id))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                               ast.ClassDef)):
-            found.append((node, node.name))
-            found.extend((node, name) for name in type_param_names(node))
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            found.append((node, node.name))
-        elif isinstance(node, ast.MatchAs) and node.name:
-            found.append((node, node.name))
-        elif isinstance(node, ast.MatchStar) and node.name:
-            found.append((node, node.name))
-        elif isinstance(node, ast.MatchMapping) and node.rest:
-            found.append((node, node.rest))
-        elif type_alias is not None and isinstance(node, type_alias):
-            alias = getattr(node, 'name', None)  # `type X = ...`, 3.12
-            if alias:
-                found.append((node, alias))
-            found.extend((node, name) for name in type_param_names(node))
-        else:
-            found.extend((node, name) for name in type_param_names(node))
-    return found
 
 
 def _dotted_bindings(tree):

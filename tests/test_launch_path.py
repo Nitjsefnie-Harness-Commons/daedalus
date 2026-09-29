@@ -253,7 +253,7 @@ def test_no_census_module_binds_a_launcher_off_the_subprocess_module(tmp):
     del tmp
     offenders = []
     for module in ('_launch_path.py', '_launch_audit.py', '_launch_census.py',
-                   '_receiver_resolution.py'):
+                   '_receiver_resolution.py', '_binding_names.py'):
         tree = ast.parse((TESTS / module).read_text(encoding='utf-8'))
         receivers = census._subprocess_receivers(tree)
         for node in ast.walk(tree):
