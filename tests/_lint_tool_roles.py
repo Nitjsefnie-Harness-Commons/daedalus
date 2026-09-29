@@ -370,10 +370,23 @@ def _tool_roles():
 def _derive_tool_roles(sources=None):
     """The two tool sets, one pass to enumerate and one to classify.
 
-    A suite that SKIPS on a missing tool has decided the machine may lack it;
-    one that ASSERTS it, or RUNS it without asking, has decided it may not —
-    and a suite that cannot do its work without the binary fails loudly when
-    it is gone. A tool in neither is not a requirement the tree states at all.
+    A suite that SKIPS on a missing tool has decided the machine may lack it,
+    and that tool is the required set: a job that has not installed one
+    reports green having checked nothing. One that ASSERTS a tool, or RUNS
+    it without asking, has decided the machine may not lack it — the suite
+    fails loudly instead, so nothing about the job's install goes
+    unverified. A tool in neither is not a requirement the tree states at
+    all.
+
+    `present` is NOT an exemption from the required set. It was one, on the
+    argument that a tool in both is covered by a control that fails rather
+    than skips — an argument this derivation could not support, because it
+    cannot tell an assert the tree always reaches from one it never does.
+    What genuinely needs no install is named in the control's
+    SHIPPED_BY_THE_IMAGE, one entry and one reason each. `present` is read
+    so the control can say which binaries the tree already insists on, and
+    so neither channel can go empty without the non-vacuity assertion
+    noticing.
 
     `sources` is a seam for the controls that drive this derivation over a
     synthetic module: what the recognisers read is a question about the
