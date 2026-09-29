@@ -1,17 +1,36 @@
 #!/usr/bin/env python3
 """The JavaScript-coverage figures CONTRIBUTING.md states in prose.
 
-The paragraph in `CONTRIBUTING.md` that names the one shipped module no
-suite reaches carries one figure: that module's own code-line count, beside
-the `0` that is the claim of being unreached. The count is a function of
+The paragraph in `CONTRIBUTING.md` that names the one shipped module the
+coverage run does not reach carries one figure: that module's own code-line
+count, beside the `0` the run reports for it. The count is a function of
 that one file and is derived here, in one command, with no suite run and no
-coverage data. The `0` is PERMITTED, not derived: whether a suite executes
-the module is the claim itself, so the count phrase admits it on the
-prose's word and no assertion here would fail if it were untrue. The
-phrase's shape is what holds the two apart, naming the `0` and the code-line
-count as separate parts of one claim, so each is admitted for being part
-of that claim and not for being a number in a set. The coverage report is
-what settles the claim, and #1245 tracks the gap between the two.
+coverage data. The `0` is not, and cannot be: whether a suite executes the
+module is decidable only from V8 output. The phrase's shape is what holds
+the two apart, naming the `0` and the code-line count as separate parts of
+one claim, so each is admitted for being part of that claim and not for
+being a number in a set.
+
+So there is no reach CHECK here, and the reason is structural rather than a
+budget. Setting `NODE_V8_COVERAGE` means every suite that launches Node, and
+they reach the interpreter through seven launch primitives spread across the
+shared harness helpers, so no single chokepoint can carry the flag for them.
+A static scan cannot stand in either, because the reach set is not decidable
+from the tests tree's source: `tests/_worker_sources.py` parses the shipped
+`extension/background.js` for its own `importScripts(...)` call and loads
+the seventeen worker modules that call names, and `tests/_dashshell.py`
+imports a dashboard module through an ES `import()` of a path that arrives
+only as an argv string. Both execute shipped JavaScript whose path is in no
+suite, so a scan asking which modules the suites name reports those as
+unreached and reds against correct code. `tests/test_vm_file_load_guard.py`
+does not close that gap: it fixes the SPELLING of each `vm.runInContext`
+site, so a `readdirSync` loop that builds its path and then loads it
+canonically passes it, and a load never spelled as a call site is outside
+its discovery entirely. `scripts/ci/js_coverage.py` resolves the reach set
+properly, from the V8 records, in the coverage job -- so the paragraph
+attributes the figure to the coverage step summary that run prints, and the
+control below holds that attribution rather than the truth of a claim no
+gate in this repository can check.
 
 The figures the paragraph used to carry and no longer does are refused
 rather than quietly forgotten, because a refused figure is what stops the
@@ -128,48 +147,68 @@ def test_the_named_module_is_still_shipped_javascript(tmp):
         f'reaches')
 
 
-def _claim_subject(text, said, count):
-    """What the claim says about, between the claim phrase and the figure.
-
-    The module is the subject the claim is made about, and the prose puts it
-    between "no suite reaches" and the count. Bounding the sentence instead
-    would red a rewrap that merely split the claim in two, which is the same
-    false positive as a rewrap anywhere else.
-
-    A wording that states the figure FIRST has no such span, and slicing
-    backwards yields an empty string, which the assertion below then reports
-    as a module that is not there. So that order falls back to the whole
-    paragraph, and the binding is positional only when the figure follows the
-    claim phrase.
-    """
-    if said.end() < count.start():
-        return text[said.end():count.start()]
-    return text
+# The reach predicates a claim can be spelled with, so the absence check
+# below judges a family of wordings rather than the one this branch
+# replaced. What it does not read is in the module docstring, as always.
+REACH_CLAIM = re.compile(
+    r'\bno\s+(?:suite|suites|test|tests)\s+(?:reach|execute|run)'
+    r'|\bdoes\s+not\s+(?:reach|execute|run)\b'
+    r'|\bnot\s+(?:reached|executed|covered)\b'
+    r'|\bunreached\b')
+# The report a run-only figure belongs to, spelled as the figure-admission
+# control below already spells it, so one phrase carries both.
+RUN_ATTRIBUTION = re.compile(r'coverage\s+step\s+summary')
+# A sentence ends at a full stop, a bang or a question mark followed by
+# whitespace and a capital. A dot inside a filename is followed by a letter
+# and never splits, which is what keeps `.py` and `.js` whole here.
+SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z`])')
 
 
-def test_the_paragraph_still_claims_the_unreached_module(tmp):
-    """The qualitative claim is what the paragraph is for. The figure beside
-    it is decoration on it, so a gate that only checked the figure would pass
-    on a paragraph that had quietly stopped claiming anything.
+def _sentences(text):
+    return SENTENCE_END.split(text)
 
-    The three things the claim needs are checked together rather than
-    separately: the phrase, the module, and the module AS THE SUBJECT
-    BETWEEN THE PHRASE AND THE FIGURE. Held apart they are three presences
-    a rewrap can separate, and a paragraph that passes all three while
-    claiming a different module is false rather than vague.
+
+def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
+    """The claim is the coverage run's, and the paragraph must say so.
+
+    The wording this replaced asserted on the paragraph's own word that no
+    suite reaches the module, and the only guard beside it read the words as
+    present. So a suite that began executing the module, or a second shipped
+    module that stopped being reached, made the paragraph false and left
+    this suite green: a presence check over a reach claim, which is the one
+    claim in the tree nothing here can settle.
+
+    Two halves, and the order matters. The ABSENCE half fails on a sentence
+    that claims a reach without naming the run that measures it: the old
+    wording restored, or the new wording with its attribution clause cut out.
+    The ORACLE half fails when the observations that scan judges are gone —
+    no reach claim at all, the module unnamed, the count phrase dropped, the
+    step summary unmentioned — because then the absence half passes over an
+    empty paragraph, which is the pass that reads as a green.
+
+    What this does NOT read: a claim spelled as none of the predicates above,
+    and a run named as anything other than the coverage step summary.
     """
     del tmp
     text = _paragraph()
-    said = re.search(r'no\s+suite\s+reaches', text)
-    assert said, 'the paragraph no longer claims the module is unreached'
+    claims = [s for s in _sentences(text) if REACH_CLAIM.search(s)]
+    unattributed = [s for s in claims if not RUN_ATTRIBUTION.search(s)]
+    assert not unattributed, (
+        f'the paragraph claims a reach on its own word: '
+        f'...{" ".join(unattributed[0].split())}... . Whether a suite '
+        f'executes {UNREACHED} is decidable only from the coverage run, so '
+        f'the sentence making the claim names the report that measures it')
+    assert claims, (
+        'the paragraph no longer claims the module is unreached, so the '
+        'absence assertion above is judging nothing and the count phrase '
+        'beside it has nothing to count')
     assert UNREACHED in text, 'the paragraph no longer names the module'
-    count = re.search(COUNT_PHRASE, text)
-    assert count, 'the paragraph no longer states the module count'
-    subject = _claim_subject(text, said, count)
-    assert UNREACHED in subject, (
-        f'the claim names a different module as the one no suite reaches: '
-        f'...{" ".join(subject.split())}... , so {UNREACHED} is named '
-        f'somewhere in the paragraph but is not the module the claim is about')
+    assert re.search(COUNT_PHRASE, text), (
+        'the paragraph no longer states the module count, so the run has no '
+        'figure to report and the attribution checked above is bare')
+    assert RUN_ATTRIBUTION.search(text), (
+        'the paragraph no longer names the coverage step summary, so the '
+        'figure it attributes there is attributed nowhere')
 
 
 def _digit_runs(text):
