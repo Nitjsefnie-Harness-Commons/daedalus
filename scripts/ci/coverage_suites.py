@@ -42,7 +42,6 @@ def _run_suite(suite, outputs, bound):
     name = suite.relative_to(ROOT).as_posix()
     output_path = Path(outputs) / f"{suite.stem}.output"
     returncode, cleanup = launch_suite(
-        name,
         [sys.executable, "-m", "coverage", "run", "--parallel-mode",
          str(suite)],
         cwd=ROOT, output_path=output_path, timeout=bound)
