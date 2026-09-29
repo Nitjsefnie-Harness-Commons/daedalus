@@ -6,6 +6,7 @@ class each one belongs to. The coverage guard is tests/_coverage_guard.py
 and the control-write checker is tests/_control_writes.py; this suite
 is one the latter scans, so its own writes stay below tmp.
 """
+import ast
 import sys
 from pathlib import Path
 
@@ -13,10 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _control_writes import control_write_violations  # noqa: E402
 from _coverage_source_fixtures import (  # noqa: E402
-    _normalized_source)
+    _normalized_source, _real_module_copy)
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
-from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _DECLARATION_LINE = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
@@ -29,19 +29,90 @@ _CONTAINER_PRELUDE = (
     "    first, *targets = _real_module_copy(tmp, relative)\n")
 
 
-def _real_module_copy(tmp, relative):
-    """Copy the real test tree under a root this control owns."""
-    root = Path(tmp) / 'repository'
-    copy_test_tree(root)
-    return root, root / relative
-
-
 def _planted_copy(tmp, relative, plant):
     """A real module's copy with `plant` appended: (root, target, line)."""
     root, target = _real_module_copy(tmp, relative)
     text = _normalized_source(target)
     target.write_bytes((text + plant).encode('utf-8'))
     return root, target, text.count('\n') + 1
+
+
+def _control_and_helper_copy(tmp):
+    """One copied tree's control and the shared helper it imports from."""
+    root, control = _real_module_copy(
+        tmp, Path('tests/test_coverage_environment.py'))
+    return root, control, root / 'tests' / '_coverage_source_fixtures.py'
+
+
+def _nodes(tree, kind):
+    """Every node of one AST kind, so an anchor is a node and not a spelling."""
+    return [node for node in ast.walk(tree) if isinstance(node, kind)]
+
+
+def _calls_of(tree, name):
+    """Every call of the plain name `name` in a parsed module."""
+    return [node for node in _nodes(tree, ast.Call)
+            if isinstance(node.func, ast.Name) and node.func.id == name]
+
+
+def _after_call(text, called, plant):
+    """`text` with `plant` below its one call of `called`; the plant's line.
+
+    The call is located in the AST and the line is read back out of the
+    parse, so the anchor and the line the guard reports move together when
+    the file is reformatted. A count, not a first match: an edit to the
+    wrong occurrence is indistinguishable from no edit at all.
+    """
+    found = _calls_of(ast.parse(text), called)
+    assert len(found) == 1, f'the {called} anchor is not unique: {found}'
+    lines = text.split('\n')
+    lines[found[0].lineno:found[0].lineno] = [plant]
+    return '\n'.join(lines), found[0].lineno + 1
+
+
+def _after_import(text, module, plant):
+    """`text` with `plant` below its one `from <module>` import."""
+    found = [node for node in _nodes(ast.parse(text), ast.ImportFrom)
+             if node.module == module]
+    assert len(found) == 1, f'the {module} import is not unique: {found}'
+    lines = text.split('\n')
+    lines[found[0].end_lineno:found[0].end_lineno] = [plant]
+    return '\n'.join(lines)
+
+
+def _first_call_line(text, name):
+    """The first line at which `text` calls `name`.
+
+    Position, not spelling: the control calls the helper several times and
+    the plant belongs above the first of them.
+    """
+    lines = sorted(node.lineno for node in _calls_of(ast.parse(text), name))
+    assert lines, f'no call of {name} in this copy'
+    return lines[0]
+
+
+def _the_call_line(text, name):
+    """The line of `text`'s one call of `name`; a count, not a first match.
+
+    An edit to the wrong occurrence is indistinguishable from no edit at
+    all, so an anchor that is not unique is a refusal rather than a guess.
+    """
+    found = _calls_of(ast.parse(text), name)
+    assert len(found) == 1, f'the {name} call is not unique: {found}'
+    return found[0].lineno
+
+
+def _before_first_call(text, name, plant):
+    """`text` with `plant` above the first line that calls `name`.
+
+    The control calls the helper several times, so the anchor is the
+    first of them by position rather than a spelling: a reformat moves
+    the plant and the line the guard reports together.
+    """
+    first = _first_call_line(text, name)
+    lines = text.split('\n')
+    lines[first - 1:first - 1] = plant.split('\n')
+    return '\n'.join(lines)
 
 
 def _declaration_line(text):
@@ -87,18 +158,21 @@ def test_an_unmodelled_write_primitive_is_refused_in_a_real_control(tmp):
 
 
 def test_a_proved_helper_rebound_after_its_definition_is_not_proof(tmp):
-    """Route 5: `helper = lambda ...` after `def helper` unresolves it."""
-    relative = Path('tests/test_coverage_environment.py')
-    root, target = _real_module_copy(tmp, relative)
-    needle = "    return root, root / relative\n"
+    """Route 5: `helper = lambda ...` over its binding unresolves it.
+
+    The binding is an import rather than a `def` now, and a name bound
+    twice is unresolved either way, so the route is planted over the one
+    `from _coverage_source_fixtures` import and the control is read back
+    through the guard exactly as before.
+    """
+    root, target = _real_module_copy(
+        tmp, Path('tests/test_coverage_environment.py'))
     text = _normalized_source(target)
-    assert needle in text, 'the copy helper shape changed'
-    mutated = text.replace(
-        needle,
-        needle + "\n\n_real_module_copy = lambda _tmp, _relative: "
-        "(ROOT, ROOT / 'README.md')\n", 1)
-    call = mutated[:mutated.index(
-        '= _real_module_copy(tmp, relative)')].count('\n') + 1
+    mutated = _after_import(
+        text, '_coverage_source_fixtures',
+        "_real_module_copy = lambda _tmp, _relative: "
+        "(ROOT, ROOT / 'README.md')")
+    call = _first_call_line(mutated, '_real_module_copy')
     target.write_bytes(mutated.encode('utf-8'))
     violations = control_write_violations(target, root)
     assert (f'tests/test_coverage_environment.py:{call}: _real_module_copy '
@@ -110,23 +184,25 @@ def test_a_proved_helper_rebound_after_its_definition_is_not_proof(tmp):
 
 
 def test_a_path_replace_is_not_the_pure_string_replace(tmp):
-    """Path.replace moves a file; only the two-argument str form is pure."""
-    relative = Path('tests/test_coverage_environment.py')
-    root, target = _real_module_copy(tmp, relative)
-    needle = "    copy_test_tree(root)\n"
-    text = _normalized_source(target)
-    assert needle in text, 'the copy helper shape changed'
-    line = text[:text.index(needle)].count('\n') + 2
+    """Path.replace moves a file; only the two-argument str form is pure.
+
+    The call it plants beside is the copy the control now IMPORTS, so the
+    plant goes into the shared helper and the violation is owed that
+    helper's own path rather than the control's.
+    """
+    root, control, helper = _control_and_helper_copy(tmp)
+    original = helper.read_bytes()
     plant = ("    (root / 'tests' / 'test_control_writes.py')"
-             ".replace(ROOT / '.probe.py')\n")
-    target.write_bytes(
-        text.replace(needle, needle + plant, 1).encode('utf-8'))
-    violations = control_write_violations(target, root)
-    assert (f'tests/test_coverage_environment.py:{line}: '
+             ".replace(ROOT / '.probe.py')")
+    text, line = _after_call(_normalized_source(helper), 'copy_test_tree',
+                             plant)
+    helper.write_bytes(text.encode('utf-8'))
+    violations = control_write_violations(control, root)
+    assert (f'tests/_coverage_source_fixtures.py:{line}: '
             "(root / 'tests' / 'test_control_writes.py').replace is not a "
             'modelled call') in violations, violations
-    target.write_bytes(text.encode('utf-8'))
-    assert control_write_violations(target, root) == []
+    helper.write_bytes(original)
+    assert control_write_violations(control, root) == []
 
 
 def test_a_lambda_default_is_judged_in_its_enclosing_scope(tmp):
@@ -169,53 +245,50 @@ def test_a_control_called_in_its_module_is_seeded_like_a_helper(tmp):
 
 
 def test_an_import_bound_twice_resolves_to_neither_binding(tmp):
-    """copy_test_tree defined beside its import is no longer the writer."""
-    root, target, _ = _planted_copy(
-        tmp, Path('tests/test_coverage_environment.py'),
-        "def copy_test_tree(root):\n    return root\n")
-    text = _normalized_source(target)
-    needle = "    copy_test_tree(root)\n"
-    assert needle in text, 'the copy helper shape changed'
-    call = text[:text.index(needle)].count('\n') + 1
-    assert control_write_violations(target, root) == [
-        f'tests/test_coverage_environment.py:{call}: copy_test_tree '
+    """copy_test_tree defined beside its import is no longer the writer.
+
+    The import is the shared helper's now, so the shadowing `def` is
+    planted beside it there, and the exact list names that file for the
+    same reason the other planted routes do.
+    """
+    root, control, helper = _control_and_helper_copy(tmp)
+    helper.write_bytes(_normalized_source(helper).encode('utf-8')
+                       + b"def copy_test_tree(root):\n    return root\n")
+    call = _the_call_line(_normalized_source(helper), 'copy_test_tree')
+    assert control_write_violations(control, root) == [
+        f'tests/_coverage_source_fixtures.py:{call}: copy_test_tree '
         'callable is unresolved']
 
 
 def test_a_starred_argument_does_not_make_path_replace_pure(tmp):
     """`*[]` adds nothing at runtime and nothing to the positional count."""
-    relative = Path('tests/test_coverage_environment.py')
-    root, target = _real_module_copy(tmp, relative)
-    needle = "    copy_test_tree(root)\n"
-    text = _normalized_source(target)
-    assert needle in text, 'the copy helper shape changed'
-    line = text[:text.index(needle)].count('\n') + 2
+    root, control, helper = _control_and_helper_copy(tmp)
+    original = helper.read_bytes()
     plant = ("    (root / 'tests' / 'test_control_writes.py')"
-             ".replace(*[], ROOT / '.probe5.py')\n")
-    target.write_bytes(
-        text.replace(needle, needle + plant, 1).encode('utf-8'))
-    violations = control_write_violations(target, root)
-    assert (f'tests/test_coverage_environment.py:{line}: '
+             ".replace(*[], ROOT / '.probe5.py')")
+    text, line = _after_call(_normalized_source(helper), 'copy_test_tree',
+                             plant)
+    helper.write_bytes(text.encode('utf-8'))
+    violations = control_write_violations(control, root)
+    assert (f'tests/_coverage_source_fixtures.py:{line}: '
             "(root / 'tests' / 'test_control_writes.py').replace is not a "
             'modelled call') in violations, violations
-    target.write_bytes(text.encode('utf-8'))
-    assert control_write_violations(target, root) == []
+    helper.write_bytes(original)
+    assert control_write_violations(control, root) == []
 
 
 def test_a_container_reached_through_an_alias_is_not_proof(tmp):
     """Route 4: mutating an alias retires the name that shares the list."""
-    relative = Path('tests/test_coverage_environment.py')
-    root, target = _real_module_copy(tmp, relative)
-    needle = "    root, target = _real_module_copy(tmp, relative)\n"
+    root, target = _real_module_copy(
+        tmp, Path('tests/test_coverage_environment.py'))
     text = _normalized_source(target)
-    assert needle in text, 'the copy call shape changed'
-    first = text[:text.index(needle)].count('\n') + 1
-    mutated = text.replace(
-        needle,
+    first = _first_call_line(text, '_real_module_copy')
+    mutated = _before_first_call(
+        text, '_real_module_copy',
         "    first, *targets = _real_module_copy(tmp, relative)\n"
         "    alias = targets\n"
         "    alias.append(ROOT / 'README.md')\n"
-        "    targets[-1].write_bytes(b'mutated')\n" + needle, 1)
+        "    targets[-1].write_bytes(b'mutated')")
     target.write_bytes(mutated.encode('utf-8'))
     violations = control_write_violations(target, root)
     assert violations == [

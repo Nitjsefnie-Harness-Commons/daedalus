@@ -20,7 +20,8 @@ _WRITE_MODES = frozenset({'w', 'a', 'x', 'wb', 'ab', 'xb'})
 _NAMESPACES = frozenset({'globals', 'vars', 'locals'})
 _PURE_NAMES = frozenset({
     'AssertionError', 'Path', 'SystemExit', 'ValueError', 'all', 'any',
-    'compile', 'dict', 'len', 'list', 'locals', 'repr', 'sorted', 'str'})
+    'compile', 'dict', 'isinstance', 'len', 'list', 'locals', 'repr',
+    'sorted', 'str'})
 _PURE_IMPORTS = frozenset({
     ('_util', 'child_coverage'),
     ('pathlib', 'Path'),
@@ -57,12 +58,15 @@ _PURE_IMPORTS = frozenset({
 _PURE_METHODS = frozenset({
     'append', 'count', 'decode', 'encode', 'endswith', 'glob', 'index',
     'join', 'read_bytes', 'read_text', 'relative_to', 'resolve', 'rindex',
-    'startswith'})
+    'split', 'startswith'})
 _PURE_MODULE_CALLS = frozenset({
     '_util.child_coverage', '_util.collect', '_util.runner',
     # Reaching the assignment that declares a search key is a read of
     # text already read, not a new way to write.
     'ast.parse',
+    # `ast.walk` reads the tree `ast.parse` just built, which is the
+    # same class of thing: an anchor located in source already read.
+    'ast.walk',
     'os.path.join', 'sys.path.insert'})
 # Writers, with where the written path arrives as (keyword, position);
 # (None, None) is the receiver. A child runs where its cwd points and a

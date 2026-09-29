@@ -14,19 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _coverage_guard  # noqa: E402
 import _util  # noqa: E402
 from _control_writes import control_write_violations  # noqa: E402
-from _owned_writes import copy_test_tree  # noqa: E402
 from _coverage_source_fixtures import (  # noqa: E402
-    _normalized_source)
+    _normalized_source, _real_module_copy)
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
 from _repo import ROOT  # noqa: E402
-
-
-def _real_module_copy(tmp, relative):
-    """Copy the real test tree under a root this control owns."""
-    root = Path(tmp) / 'repository'
-    copy_test_tree(root)
-    return root, root / relative
 
 
 def _repository_write_lines():
