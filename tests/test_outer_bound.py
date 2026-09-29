@@ -228,13 +228,13 @@ def test_the_receipt_reads_both_null_handles_and_only_one_is_a_dead_pid(tmp):
 
     `OpenProcess` returns null both for a pid that was never there and for
     a pid that is running and that this process may not open — a
-    privileged child, which is exactly what a tree kill leaves behind.
-    Reading the second as the first makes the receipt report a kill that
-    never happened, and that is the one direction it must not lie in.
+    privileged child, which is what a tree kill leaves behind. Reading the
+    second as the first makes the receipt report a kill that never
+    happened.
 
-    The real function only runs on `windows-latest`, so the classification
-    is driven here with a stand-in `kernel32` rather than left to the four
-    legs that would be the only place to notice.
+    Driven here with a stand-in `kernel32`, because the real function runs
+    only on `windows-latest` and a branch no other leg can reach is a branch
+    with no control at all.
     """
     del tmp
     from unittest import mock  # noqa: PLC0415
@@ -331,18 +331,28 @@ STALLING_CONTROL_MODULES = (
     'test_real_browser_harness.py',
     'test_real_browser_environment.py',
 )
-# What a child that never settles looks like, spelled EVERY way this tree
-# spells it. A sweep keyed on one spelling's surface tokens is a sweep over
-# one spelling, and a `setTimeout(() => {}, 900)` wedge was outside the
-# population entirely.
+# What a child that never settles looks like, in the spellings this census
+# can SEE. Both are CALLS, and the parenthesis is the whole narrowing: a
+# harness that installs its own fake timer writes `global.setTimeout = …`,
+# which is the keepalive hazard the scope note above is about, since that
+# assignment is the code that makes sure no real timer ever arms. An empty
+# `while (true) {}` is out for a narrower reason than it looks — both sites
+# inside the watched scope install a stand-in `Popen` that raises at once, so
+# neither waits.
 #
-# Both are CALLS, and the parenthesis is the whole narrowing. A harness that
-# installs its own fake timer writes `global.setTimeout = …`, and that is the
-# keepalive hazard the scope note above is about: the assignment is not a
-# child holding an event loop open, it is the code that makes sure no real
-# timer ever arms. An empty `while (true) {}` is left out for the other
-# half of the same reason — in this tree it is how a stand-in's child is
-# described, and a stand-in raises at once rather than waiting.
+# **This tuple is not the tree's full vocabulary, and the gap is named rather
+# than left for a reader to find.** This tree also spells a never-settling
+# child `new Promise(() => {})` (eighty sites, the commonest spelling of
+# all) and `setImmediate(function starve() {…})` (twenty). Neither is in the
+# tuple, so a control written that way is OUTSIDE the population and this
+# census would not ask it for a bound. Widening the tuple to cover them was
+# measured and refused: it names `test_gate_extensions.py`'s two hang
+# controls, which answer a never-settling promise INSIDE the harness and
+# launch no child at all, so the marker alone cannot tell a wedge from a
+# fixture. Distinguishing them needs a launch predicate, and the tree's own
+# (`tests/_node_launch_sweep.py`) reports no launch for two of the five
+# watched suites, because their children are launched by imported helpers.
+# So the limit stands until there is a predicate that works on all five.
 STALL_SOURCES = ('setInterval(', 'setTimeout(')
 # How far the reach follows a stall source that is not in the control's own
 # text. Bounded because an unbounded walk over a cyclic tree is a hang, and
@@ -351,7 +361,14 @@ STALL_REACH_DEPTH = 8
 
 
 def _module_level(tree):
-    """The module's own constants and functions, by the names they bind."""
+    """The module's own constants and functions, by the names they bind.
+
+    Module level only, and that is a narrower reading than the walk beside
+    it: a constant built by `+=`, by an annotation, or inside a class body
+    is not in this table, and a stall reached only through such a name is
+    outside the population. Stated here rather than left for a reader to
+    compare against `_stalling_controls`'s claim.
+    """
     constants, functions = {}, {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -405,8 +422,10 @@ def _stalling_controls(tree):
     A `test_` function, and only that: a helper that BUILDS a stall source
     launches nothing, so requiring a bound of it would be a refusal of
     correct code, while the control that calls it is the one the bound
-    belongs to. The whole tree is walked rather than `tree.body`, so a
-    control is in the population wherever it is written.
+    belongs to. The FUNCTION walk is over the whole tree rather than
+    `tree.body`, so a control is in the population wherever it is written;
+    the constant and function table it is matched against is module level
+    only, which `_module_level` says.
     """
     module = _module_level(tree)
     return [function for function in ast.walk(tree)
