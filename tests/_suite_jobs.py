@@ -303,36 +303,6 @@ def _executable_shape(path):
     return path.suffix in _SCRIPT_SHAPES or path.name in BUILD_FILES
 
 
-def _declared_tool_actions():
-    """`tool -> {(action, workflow)}` for every tool a workflow action names.
-
-    The last segment of an action name, split into words, because that is
-    where a setup action says what it sets up: `actions/setup-node`
-    declares `node`. Read off the workflows rather than off a table, so
-    "no action exists for this tool" is a fact about this tree rather than
-    a sentence somebody wrote — which is the difference between an
-    exemption a control checks and an exemption a control believes.
-
-    Every action in every workflow counts, not only the ones in a
-    suite-running job: a tool is exempt precisely when the repository has
-    no way to declare it anywhere, and an `eslint` job's `actions/setup-node`
-    is a way to declare it that this tree still has.
-    """
-    declared = {}
-    for source in sorted(WORKFLOW_DIR.glob('*.yml')) + sorted(
-            WORKFLOW_DIR.glob('*.yaml')):
-        workflow = source.read_text(encoding='utf-8')
-        for job in _job_names(workflow):
-            for step in _job_steps(workflow, job):
-                action = _action_name(step)
-                if not action:
-                    continue
-                for word in re.findall(r'[a-z0-9]+',
-                                       action.rsplit('/', 1)[-1]):
-                    declared.setdefault(word, set()).add((action, source.name))
-    return declared
-
-
 def _unclassifiable_steps():
     """`(source, job, step, path)` for every step the walk cannot classify.
 
