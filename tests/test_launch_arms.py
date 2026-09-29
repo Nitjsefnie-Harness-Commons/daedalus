@@ -254,8 +254,8 @@ def test_every_arm_is_uniquely_addressed(tmp):
             f'not distinct: {cuts}')
     shared = sorted(where for where, cuts in on_one_line.items()
                     if len(cuts) > 1)
-    assert shared == [('_launch_audit.py', 546),
-                      ('_launch_audit.py', 568)], (
+    assert shared == [('_launch_audit.py', 544),
+                      ('_launch_audit.py', 566)], (
         'the same-line pairs the table carries, each two operands of '
         'one disjunction; a new one is a decision, not an accident: '
         f'{shared}')
@@ -265,8 +265,8 @@ def test_every_arm_the_text_cannot_pin_is_settled_by_deleting_it(tmp):
     """Where the spelling cannot say which arm is meant, the cut does.
 
     An address is a claim about a clause, and a claim the source cannot
-    repeat back is not one the text can check: `_launch_audit.py:169` and
-    `:170` carry byte-identical text and differ only in indentation, so
+    repeat back is not one the text can check: `_launch_audit.py:167` and
+    `:168` carry byte-identical text and differ only in indentation, so
     exchanging the two entries' `line` and `cut` leaves the line check,
     the uniqueness check and the span check all green while the table
     says an undriven arm is CONTROLLED.
@@ -527,7 +527,7 @@ def test_every_controlled_non_member_is_controlled_by_its_evidence(tmp):
     shape an arm carries them, for 22 clauses in no arm at all -- so
     they sit outside the 150-arm sweep, the crash/value partition and
     the `uncontrolled` count, and nothing re-derived either.
-    `_launch_audit.py:303` is the sharpest case: its evidence row is
+    `_launch_audit.py:301` is the sharpest case: its evidence row is
     named by no arm, so that clause's only recorded state lived in the
     one structure nothing measures.
 
