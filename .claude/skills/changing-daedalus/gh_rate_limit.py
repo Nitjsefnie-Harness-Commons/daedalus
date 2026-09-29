@@ -27,10 +27,10 @@ it: an `errors[]` entry is read whatever the answer delivered; the
 header, the body's own text and the complaint only when it did not. The
 difference is WHO OWNS THE WORDS. An entry's `type` and `code` are
 labels the server writes and no caller can put its own data into, so
-asking a delivered answer about one cannot read its data.
-The other three are places a caller's field, or a coincidence, spells
-the same two words - and that is not a theory, it is what the widening
-cost before this gate existed. Measured on this branch without it: a 200
+asking a delivered answer about one cannot read its data. The other
+three are places a caller's field, or a coincidence, spells the same
+two words - and that is not a theory, it is what the widening cost
+before this gate existed. Measured on this branch without it: a 200
 that SUCCEEDED, carrying complete data, with a `gh` warning on stderr
 that merely mentions a limit, was answered `RateLimited(resume_at=None)`
 - a flat minute's pause over a call that worked; and the LAST successful
