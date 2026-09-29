@@ -418,6 +418,7 @@ def test_no_posix_only_api_sits_in_a_function_that_never_asks_the_platform(
 # suite's own budget to hold.
 STALLING_CONTROL_MODULES = (
     'test_noderun_deadline.py',
+    'test_real_browser_control_extension.py',
     'test_real_browser_harness.py',
     'test_real_browser_environment.py',
 )

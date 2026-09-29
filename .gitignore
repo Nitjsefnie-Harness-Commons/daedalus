@@ -29,8 +29,6 @@
 
 # ─── root ───
 !/.gitignore
-!/.gitignore
-!/.gitignore
 !/.gitleaks.toml
 !/.pylintrc
 !/AGENTS.md
@@ -734,6 +732,7 @@
 !/tests/test_real_browser_boundary.py
 !/tests/test_real_browser_cdp_timeouts.py
 !/tests/test_real_browser_classification.py
+!/tests/test_real_browser_control_extension.py
 !/tests/test_real_browser_environment.py
 !/tests/test_real_browser_eval.py
 !/tests/test_real_browser_fixture_waits.py

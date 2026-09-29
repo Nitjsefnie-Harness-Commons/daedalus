@@ -89,7 +89,7 @@ COMPOSED_BOUND_SITES = (
     ('_realbrowser.py', 'NODE_PROBE'),
     ('_realbrowser.py', 'MINIMAL_SPAWN'),
     ('_gm_harness.py', 'GM_CHILD'),
-    ('test_real_browser_classification.py', 'CONTROL_CHILD'),
+    ('test_real_browser_control_extension.py', 'CONTROL_CHILD'),
     ('test_real_browser_environment.py', 'REPO_PROBE'),
     ('test_real_browser_environment.py', 'WORKER_PROBE'),
     ('test_real_browser_harness.py', 'WORKER_CHECK'),
