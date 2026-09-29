@@ -1110,6 +1110,7 @@
     "_wait_slot": {"python": ["tests/_launch_path.py"]},
     "_waited": {"python": ["tests/_mcp_tool_commands.py"]},
     "_wanted": {"python": ["tests/_dashfield.py"]},
+    "_windows_is_live": {"python": ["tests/_processtree.py"]},
     "_windows_process_cpu_seconds": {"python": ["tests/_dashnode.py"]},
     "_word_at": {"python": ["tests/_jsroute_keys.py"]},
     "_worker_absence_verdict": {"python": ["tests/_realbrowser_workers.py"]},
