@@ -9,7 +9,9 @@ classification has to be a type of its own rather than a bare
 `TimeoutExpired` naming the whole command. That is the property these
 controls pin, and they are here rather than in
 `tests/test_real_browser_harness.py` because that file sits at its own size
-ceiling and this cluster was a quarter of it.
+ceiling. No ratio of the two is claimed: the split was a size-gate remedy,
+and a ratio of two files that both move is a figure with nothing holding it
+up.
 """
 import base64
 import contextlib
