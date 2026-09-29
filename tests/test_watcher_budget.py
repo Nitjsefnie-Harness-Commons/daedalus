@@ -319,7 +319,9 @@ def test_the_base_figure_is_read_off_the_base_script(tmp):
 
 
 def test_the_children_die_with_their_parent(tmp):
-    fake = _fake_gh.FakeGh(tmp, idle_answers())
+    """The liveness reading below is a state, not a sample: the gate holds
+    each child inside a call. The control for the hold is in test_fake_gh."""
+    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
     parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
                      PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
                      '--debounce', '1', '--max-hold', '5'], fake.env())
@@ -329,13 +331,14 @@ def test_the_children_die_with_their_parent(tmp):
         pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err.lines
                 if _announces_pid(line)]
         _await_calls(fake, 2, parent)
-        assert all(_pid_alive(pid) for pid in pids), pids
+        assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
         parent.proc.kill()
         parent.proc.wait(timeout=60)
         waits.await_gone(pids, parent, f'children {pids} to die with the '
                          f'parent', _pid_alive)
         assert not any(_pid_alive(pid) for pid in pids), pids
     finally:
+        fake.open_gate()
         parent.stop()
 
 
@@ -563,7 +566,7 @@ def test_the_once_trial_counts_the_checks_that_have_not_concluded(tmp):
 
 def test_a_graceful_exit_leaves_no_children_behind(tmp):
     """The teardown path, which a hard kill never reaches."""
-    fake = _fake_gh.FakeGh(tmp, idle_answers())
+    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
     parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
                      PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
                      '--debounce', '1', '--max-hold', '5'], fake.env())
@@ -573,7 +576,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err.lines
                 if _announces_pid(line)]
         _await_calls(fake, 2, parent)
-        assert all(_pid_alive(pid) for pid in pids), pids
+        assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
         if sys.platform.startswith('win'):
             parent.proc.send_signal(
                 getattr(signal, 'CTRL_BREAK_EVENT'))
@@ -584,6 +587,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
                          f'graceful exit', _pid_alive)
         assert not any(_pid_alive(pid) for pid in pids), pids
     finally:
+        fake.open_gate()
         parent.stop()
 
 
