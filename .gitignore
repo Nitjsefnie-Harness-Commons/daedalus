@@ -431,7 +431,6 @@
 !/tests/_pyroute_positions.py
 !/tests/_pyroute_reads.py
 !/tests/_pyroute_removal.py
-!/tests/_pyroute_retirement_sites.py
 !/tests/_pyroute_setops.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
@@ -454,6 +453,7 @@
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_reserved_names.py
+!/tests/_retirement_sweep.py
 !/tests/_scratch_index.py
 !/tests/_seg_lock_seam.py
 !/tests/_segment_job_record.py
