@@ -1,27 +1,34 @@
-"""The run builder and the frozen clock the ci_wait suites drive.
+"""The run builder, the frozen clock and the verdict the ci_wait suites drive.
 
 Not a suite itself — `run_tests.py` only loads `test_*.py`.
 
-These three live here rather than in any one suite because three suites now
-need them: `test_ci_wait.py` and `test_ci_wait_gate.py` share the verdict
-contract, and `test_ci_gate.py` asks the gate predicate what it answers. A
+These four live here rather than in any one suite because three suites now
+need them: `test_ci_wait.py` and `test_ci_wait_gate.py` both classify runs
+through the verdict contract, and `test_ci_gate.py` asks the gate predicate
+what it answers. A
 helper declared in one and imported from the other is a suite importing a
 sibling suite, which `tests/test_suite_import_boundaries.py` refuses. A
 `tests/_*.py` module is where a shared helper belongs; this is that module
 for these three.
 
-All three carry a `ci_wait` prefix and none keeps the bare name it had in
-its declaring suite. That is the same reason twice: both `_run` and
-`_Clock` are names suites in this tree already declare, and neither is
+All four carry a `ci_wait` prefix and none keeps the bare name it had in
+its declaring suite. That is the same reason twice for `_run` and
+`_Clock`: both are names suites in this tree already declare, and neither is
 declared generically - `tests/_boundary.py`'s `_run` is a node-scenario
 runner's, and the `_Clock` declarations belong to suites that are
 genuinely different classes (one records each attempt and may refuse, one
 is a settable wall clock). A `tests/_*.py` module taking a bare `_run` or
 `_Clock` would own a name suites already use, trading the sibling-import
 red for a re-implementation red - and the allowance rows that would clear
-it belong to suites this branch has no business editing.
+it belong to suites this branch has no business editing. `_verdict` is the
+same case a third time, ten suites over, and its loader is spelled here
+rather than named `_ci_wait` for the same reason: four modules declare
+that name at module scope and none of them can import this one.
 """
 import contextlib
+
+import _util
+from _repo import ROOT
 
 
 def _ci_wait_run(rid, conclusion, started, workflow: int | None = 11,
@@ -79,3 +86,19 @@ def _frozen_ci_wait_clock(mod, clock):
         yield clock
     finally:
         mod.time, mod.gh_client.time = real
+
+
+def _ci_wait_contract():
+    """ci_wait.py loaded under this module's own contract name.
+
+    The two suites that classify runs each keep a `_ci_wait` of their own,
+    because each wants its own copy of the module; `_util.load` executes the
+    file per call, so the copy a verdict reads is the copy the call made.
+    """
+    return _util.load(
+        ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'ci_wait.py',
+        'ci_wait_verdict_contract')
+
+
+def _ci_wait_verdict(runs):
+    return _ci_wait_contract().verdict(runs)

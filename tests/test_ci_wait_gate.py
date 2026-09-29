@@ -28,7 +28,8 @@ import _util  # noqa: E402
 from _ci_wait_fixtures import (  # noqa: E402
     _ci_wait_run as _run,
     _ci_wait_clock as _Clock,
-    _frozen_ci_wait_clock as _frozen_wait_clock)
+    _frozen_ci_wait_clock as _frozen_wait_clock,
+    _ci_wait_verdict)
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -39,10 +40,6 @@ def _ci_wait():
     return _util.load(SOURCE, 'ci_wait_gate_contract')
 
 
-def _verdict(runs):
-    return _ci_wait().verdict(runs)
-
-
 # ---- the required-workflow expectation (issue 1217) ----
 
 def test_a_green_run_of_the_required_workflow_is_acceptable(tmp):
@@ -51,7 +48,7 @@ def test_a_green_run_of_the_required_workflow_is_acceptable(tmp):
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness'),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
 
 
 def test_a_green_set_without_the_required_run_is_incomplete(tmp):
@@ -64,21 +61,21 @@ def test_a_green_set_without_the_required_run_is_incomplete(tmp):
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness'),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL'),
     ]
-    assert _verdict(runs) == ('incomplete', [])
+    assert _ci_wait_verdict(runs) == ('incomplete', [])
 
 
 def test_no_runs_at_all_is_waiting_not_incomplete(tmp):
     """Absence of the required workflow must not mask the "nothing ran" case,
     which is waiting and says so in the exit-2 report."""
     del tmp
-    assert _verdict([]) == ('waiting', [])
+    assert _ci_wait_verdict([]) == ('waiting', [])
 
 
 def test_a_red_required_run_fails_rather_than_reading_as_incomplete(tmp):
     """Step 4 precedes step 5: a present-but-red gate is a failure, and the
     refusal that a missing gate earns must never swallow it."""
     del tmp
-    state, offenders = _verdict(
+    state, offenders = _ci_wait_verdict(
         [_run(1, 'failure', '2026-09-20T10:00:00Z', name='tests')])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
@@ -97,7 +94,7 @@ def test_the_newest_run_of_the_required_workflow_satisfies_the_gate(tmp):
         _run(1, 'cancelled', '2026-09-20T10:00:00Z', name='tests'),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('acceptable', [])
+    assert _ci_wait_verdict(runs) == ('acceptable', [])
 
 
 def test_an_empty_required_set_reproduces_the_previous_verdicts(tmp):
@@ -121,7 +118,7 @@ def test_a_resembling_name_does_not_satisfy_the_requirement(tmp):
     del tmp
     for name in ('Tests', 'test', 'tests ', 'unit tests', 'tests.yml'):
         runs = [_run(1, 'success', '2026-09-20T10:00:00Z', name=name)]
-        assert _verdict(runs) == ('incomplete', []), name
+        assert _ci_wait_verdict(runs) == ('incomplete', []), name
 
 
 # ---- the refusal on an incomplete set (issue 1217) ----
