@@ -16,7 +16,7 @@ import ast
 from _control_calls import ModuleNames, shared_helper_path
 
 # A HOP is one shared-helper file a resolution reads, so this bounds files
-# crossed rather than the nesting _control_writes.py's _MAX_PROOF_DEPTH
+# crossed rather than the nesting _control_paths.py's _MAX_PROOF_DEPTH
 # bounds inside one file: a helper two files deep can prove a path one
 # call deep.
 MAX_SHARED_HOPS = 2
