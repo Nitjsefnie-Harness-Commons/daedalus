@@ -160,11 +160,12 @@ def test_the_growth_rate_is_measured_against_the_tree_not_asserted(tmp):
     statement about the repository rather than a fixture defect, and it
     is the same trade every other operating-point control here makes.
 
-    The window is read out of `SUITES_PER_DAY_BASIS` rather than
-    written here, so the two cannot disagree, and the history is walked
-    on `HEAD` rather than on a named ref: a `refs/pull/N/merge`
-    checkout has no `origin/main`, and this control runs in the `suites`
-    job.
+    The window is read out of `SUITES_PER_DAY_BASIS` AND pinned to the
+    set the constant was measured over, so the note cannot quietly name
+    a window too short to distinguish a well-chosen one from a trivial
+    one, and the history is walked on `HEAD` rather than on a named ref:
+    a `refs/pull/N/merge` checkout has no `origin/main`, and this
+    control runs in the `suites` job.
 
     The note names the WINDOWS and no figure. It used to name the
     suite count at the head of each window and the rate each one
@@ -242,14 +243,33 @@ def _rates(history, now_suites, windows):
 # walks, so a note naming a window the control ignores names a
 # measurement nothing checked.
 _WINDOWS = r'over windows of ([\d, and]+?) days back'
+# The windows the constant was MEASURED over, which the note has to
+# name: a one-day window would pass the range whatever this tree grows
+# at, so a control that only followed the note could not tell a
+# well-chosen window from a trivial one.
+MEASURED_WINDOWS = (16, 7, 4)
 
 
 def _stated_windows():
-    """The window lengths `SUITES_PER_DAY_BASIS` names, in days."""
+    """The window lengths `SUITES_PER_DAY_BASIS` names, in days.
+
+    Parsed AND pinned. Parsing alone is a reach into the note rather
+    than a check of it: a note edited down to a one-day window would
+    name one window, the control would measure that one, and a one-day
+    diff of this tree sits inside the range whatever it grows at, so
+    the control would pass on a note that no longer says what the
+    constant was measured over. The pin is what makes the wording
+    load-bearing, and it names the measured set in the failure.
+    """
     basis = _coverage().SUITES_PER_DAY_BASIS
     match = re.search(_WINDOWS, basis)
     assert match, f'the rate names no window to measure: {basis}'
-    return [int(days) for days in re.findall(r'\d+', match.group(1))]
+    windows = tuple(int(days) for days in re.findall(r'\d+', match.group(1)))
+    assert windows == MEASURED_WINDOWS, (
+        f'the rate names windows {windows}, not the {MEASURED_WINDOWS} it '
+        'was measured over; re-measure the rate over these before changing '
+        'what the note claims')
+    return windows
 
 
 def test_a_truncated_recorded_set_is_refused_under_the_share_bound(tmp):

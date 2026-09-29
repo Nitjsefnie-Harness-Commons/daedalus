@@ -47,14 +47,13 @@ summary and publishes; `MAX_ESTIMATED_SUITE_SHARE` (a third) refuses.
 THE TIER IS A CONSEQUENCE, NOT A COMPROMISE. An unmeasured suite is
 priced at the recorded MEDIAN, so what a share costs depends on HOW the
 file came to be missing those suites, and there are two ways with very
-different prices. Both tables below are measured over ONE TREE -- the
-file's OWN suite set, its 328 recorded weights plus every name its own
-coverage clause lists, never the live tree -- so a number here is a
-statement about this file's measured distribution and not about how
-many suites the repository has this week. The shipped weights total
-356.4 reference multiples, with a recorded mean of 1.087 against a
-median of 0.2118: a ratio of 5.13, and that ratio is the third
-condition's whole subject.
+different prices. Every number in this docstring is a figure of the
+SHIPPED FILE'S OWN RECORDED SET, which is a committed artifact and
+cannot move under a merge; a figure of a TREE is not quoted here at
+all, because a merge moves it and a stale one in a comment rots
+unwatched. The shipped weights total 356.4 reference multiples, with a
+recorded mean of 1.087 against a median of 0.2118: a ratio of 5.13, and
+that ratio is the third condition's whole subject.
 
 A BIASED recorded set is the shape a refresh leaves when it writes the
 measured set alone, or keeps the lightest of what it measured. It is
@@ -62,16 +61,6 @@ starved of the heavy weights, so the median prices a whole population at
 one sample's rate. CONSTRUCTION A: keep the `k` LIGHTEST of the 328
 recorded weights, drop the rest, let the planner estimate every suite the
 file no longer records.
-
-      k kept   share   weight share   skew   plan total   understated
-        320     2.4%        0.6%      4.10       271.6        1.31x
-        300     8.5%        3.2%      2.87       155.2        2.30x
-        280    14.6%        6.2%      2.59       103.3        3.45x
-        260    20.7%       10.0%      2.34        73.6        4.84x
-        240    26.8%       14.4%      2.18        54.6        6.53x
-        222    32.3%       20.4%      1.87        42.6        8.36x
-        200    39.0%       28.6%      1.60        32.6       10.93x
-        164    50.0%       46.0%      1.18        22.9       15.57x
 
 A DRIFTED recorded set is a different thing. The write is a union, so a
 missed daily refresh loses no weight: the file still records everything
@@ -83,28 +72,19 @@ each arrival at what a draw from the recorded distribution is really
 worth -- the recorded MEAN of 1.087, against the 0.2118 the planner
 lends it.
 
-      k arrivals   share   plan total   honest total   understated
-           24      6.8%         361.5          382.5        1.06x
-           40     10.9%         364.8          399.8        1.10x
-           72     18.0%         371.6          434.6        1.17x
-          164     33.3%         391.1          534.6        1.37x
-
-So at the same third of the tree, one shape is 1.37x out and the other
-8.36x, and that gap is what sets the tiers rather than either share
-alone. It also sets the third condition, because the two tables differ in
-a fourth column neither share reads: a drifted set keeps the whole
-measured population, so its skew is 5.13 at every arrival count, and a
-truncated set's skew collapses towards 1 as the tail is cut away. The
-guard could not see that from `k` alone, which is why the band below
-existed; `MIN_RECORDED_SKEW` closes it.
+The two shapes differ in a column neither share reads: a drifted set
+keeps the whole measured population, so its skew is 5.13 at every
+arrival count, and a truncated set's skew collapses towards 1 as the
+tail is cut away. That gap is what sets the tiers rather than either
+share alone, and no share can see it, which is why `MIN_RECORDED_SKEW`
+exists at all.
 
 The note is a tenth because that is roughly where the BIASED shape's plan
-is out by 2x (construction A reaches 2.30x at 8.5%), and 2x is the
-tolerance the plan's purpose sets: the cell count is
-`ceil(total / target)`, so a total out by 2x is a matrix carrying half
-the parallelism the tree needs. The shipped file's own estimated share
-is below the note tier, so the note is silent for it today, which is
-the point.
+is out by 2x, and 2x is the tolerance the plan's purpose sets: the
+cell count is `ceil(total / target)`, so a total out by 2x is a matrix
+carrying half the parallelism the tree needs. The shipped file's own
+estimated share is below the note tier, so the note is silent for it
+today, which is the point.
 
 The refusal is a third, and it is DERIVED rather than chosen: with `m`
 recorded weights summing `S` at median `e`, at least `floor(m/2)` of them
@@ -116,8 +96,7 @@ corner of it, and where the two suite bounds stop being redundant: the
 weight comparison can only fire above the same line, and in fact can
 never reach its own bound, since at `k = m/2` the largest `k` the suite
 bound admits, the share is at most `m / (3m + 2)` -- a third. A drifted
-file at a third is 1.37x out, which is a slow matrix; a biased one at a
-third is 8.36x out, which is a fiction.
+file at a third is a slow matrix; a biased one at a third is a fiction.
 
 WHAT THE FUSE IS NOW, AND WHAT IT COSTS. The refresher is a daily cron at
 06:38 UTC, so a missed run is not a hypothetical, and this tree grows at
@@ -131,24 +110,19 @@ it, and a refusal here is `Plan the matrix` exiting 1 in
 all. Two days of a collapsed run, a rate limit or an Actions outage
 would have been a repo-wide CI outage.
 
-That band is the price of the tier, and it is a real one. A BIASED file
-at 10.9% estimated is between 1.10x out (construction B, 40 arrivals)
-and 3.45x (construction A, 48 dropped, 14.6% estimated) -- two shapes
-at the point each crosses -- and is published with a note instead of
-refused. The band is the part no share can close and `MIN_RECORDED_SKEW`
-only partly does: between a skew of 2.0 and 2.34 a biased plan is 4.8x
-to 6.5x out and is still published -- 4.82x at the 260 lightest and
-6.49x at the 240, the two rows of the live-tree construction under
-`MIN_RECORDED_SKEW` whose skew falls in that interval, and 4.84x and
-6.53x in the file's own 328 above, which is the same shape measured
-over the file rather than over the tree -- because its recorded set
-still carries enough tail to look like a sample. That is a priced
-acceptance and the constant carries the numbers, the trade and the
-reason it is not closed
--- which is a number about this tree, not about a distribution a
-nightly refresh re-measures. The alternative -- refusing the drifted
-file too -- is not a stricter guard but a broken one, because the
-alternative to a wrong number is not a right number, it is no number.
+The band above `MIN_RECORDED_SKEW` is the price of the tier and the
+price is real: the skew floor is the one condition that tells a BIASED
+recorded set from a DRIFTED one, so a biased file still above it is
+PUBLISHED with its plan lopsided rather than refused -- a priced
+acceptance rather than an oversight, because every suite in that plan
+still runs and a lopsided matrix and no matrix are not comparable
+outcomes -- ruled by the maintainer, and `python3
+scripts/ci/timings_bounds.py` prints the band the shipped file's own
+recorded set admits, at every truncation, because a multiplier measured
+over a tree moves with the tree and a stale one written here would rot
+unwatched. The alternative -- refusing the drifted file too -- is not a
+stricter guard but a broken one, because the alternative to a wrong
+number is not a right number, it is no number.
 
 A refusal rather than a note above it because there is nothing a reader
 can do with a matrix whose load is mostly invented: unlike a target the
@@ -182,34 +156,25 @@ NOTE_ESTIMATED_SUITE_SHARE = 0.10
 # The ratio of a recorded set's own mean to its own median below which
 # the set is not a SAMPLE of a tree but the bottom of one, and the
 # median it lends the unmeasured suites is a price from the floor of
-# the distribution. See `recorded_skew` and the docstring's cost table.
+# the distribution. See `recorded_skew`; `python3
+# scripts/ci/timings_bounds.py` prints the band this file's own
+# recorded set admits, at every truncation.
 #
-# 2.0, AND THE NUMBER IS A DECISION, NOT A GAP. The construction: over
-# the LIVE TREE -- the frame the table below is measured in, and the one
-# a merge moves, so no figure of it is quoted here -- keep the `k`
-# LIGHTEST recorded weights, drop the rest, and let the planner
-# estimate every suite the file no longer records.
-#
-#   k-rec  est-share  skew   plan total   understated    2.0    2.2
-#     328      1.8%   5.13       357.6        1.00x       pub    pub
-#     300     10.2%   2.87       156.3        2.29x       pub    pub
-#     260     22.2%   2.34        74.2        4.82x       pub    pub
-#     240     28.1%   2.18        55.1        6.49x       pub   REF
-#     222     33.5%   1.87        43.1        8.29x       REF    REF
-#     200     40.1%   1.60        33.0       10.82x       REF    REF
+# 2.0, AND THE NUMBER IS A DECISION, NOT A GAP. The construction: keep
+# the `k` LIGHTEST recorded weights, drop the rest, and let the planner
+# estimate every suite the file no longer records. The band this leaves
+# is not quoted here, because every multiplier in it is a figure of the
+# tree rather than of the file, and a merge moves it.
 #
 # 2.0 DOES ITS JOB: the file that motivated this condition -- the 222
-# lightest, 8.29x out, published behind a summary reading
+# lightest, published behind a summary reading
 # `heaviest/median 1.000` -- sits at 1.87 and is refused, and so is
-# everything more truncated. The residual band is 2.0 to 2.34, which is
-# 4.8x to 6.5x out -- the 260 lightest at 4.82x and the 240 lightest at
-# 6.49x, the only two rows above whose skew falls in that interval --
-# and it is a PRICED ACCEPTANCE rather than an oversight: a plan in
-# that band is lopsided, and every suite in it still runs, so a
-# lopsided matrix and no matrix are not comparable outcomes. Ruled by
-# the maintainer.
+# everything more truncated. The residual band above the floor is a
+# PRICED ACCEPTANCE rather than an oversight: a plan in that band is
+# lopsided, and every suite in it still runs, so a lopsided matrix and
+# no matrix are not comparable outcomes. Ruled by the maintainer.
 #
-# 2.2 WOULD BUY the 240-lightest file at 6.49x, and IS NOT TAKEN, for a
+# 2.2 WOULD BUY the 240-lightest file back, and IS NOT TAKEN, for a
 # reason that is NOT the drift path. It is tempting to read 2.2 as
 # costing the fuse -- as though arrivals priced at the recorded median
 # dilute the recorded set and walk its skew down to the floor. They do
