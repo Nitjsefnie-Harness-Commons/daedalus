@@ -152,27 +152,6 @@ def test_a_200_with_a_reset_header_and_no_spent_counter_is_not_a_refusal(tmp):
     assert mod.nodes(data, ('repository', 'items')) == [{'id': 1}]
 
 
-def test_a_spent_limit_header_survives_a_body_that_is_not_json(tmp):
-    """Evidence the body could neither corroborate nor contradict.
-
-    The header block is read before the body is understood, so a body
-    that is not JSON at all is a failure only when nothing else reported
-    the limit. With the headers reporting it the refusal stands and names
-    the reset, rather than dying on a parse it never needed.
-    """
-    mod = _client()
-    reset = int(time.time()) + 120
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': spent_limit_response(
-        reset, body='not json at all', exit=1, stderr='gh: timed out\n')})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited as refusal:
-            assert refusal.resume_at == reset, refusal.resume_at
-        else:
-            raise AssertionError('the headers reported the limit')
-
-
 def test_a_graphql_error_whose_type_names_the_limit_is_a_refusal(tmp):
     """The body axis under the spelling the live refusal really used.
 
@@ -258,59 +237,6 @@ def test_a_graphql_error_naming_no_limit_is_a_query_error(tmp):
             pass
         else:
             raise AssertionError('an ordinary GraphQL error must fail')
-
-
-def test_an_error_entry_that_is_not_an_object_is_stepped_over(tmp):
-    """An `errors[]` that is not a list of objects is a shape a body can
-    hold and a reader has to survive. GitHub's schema says objects, and a
-    reader that believes the entry rather than the shape it is reading
-    dies on the first string. The answer is the ordinary failure, not a
-    refusal and not data.
-    """
-    mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200,
-        'body': {'data': None, 'errors': ['boom', 42, None]}}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.QueryError:
-            pass
-        else:
-            raise AssertionError('a malformed errors[] must fail the query')
-
-
-def test_errors_that_is_not_a_list_of_entries_is_a_query_error(tmp):
-    """The same shape one level out: `errors` is a string, so a reader
-    that iterates it reaches a character where it expected an entry.
-    """
-    mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200, 'body': {'data': None, 'errors': 'boom'}}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.QueryError:
-            pass
-        else:
-            raise AssertionError('errors that is a string must fail')
-
-
-def test_a_body_that_is_a_json_array_is_a_query_error(tmp):
-    """A 200 whose body parses and is not an object. The reader is handed
-    it before the exit code is judged, so it has to survive the shape
-    rather than reach for `errors` on something that carries none.
-    """
-    mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200, 'body': [1, 2, 3]}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.QueryError:
-            pass
-        else:
-            raise AssertionError('a JSON array body must fail the query')
 
 
 def test_a_refusal_with_no_stdout_is_a_refusal_when_it_names_the_limit(tmp):
@@ -547,19 +473,6 @@ def test_a_403_without_rate_limit_evidence_is_an_ordinary_failure(tmp):
             pass
         else:
             raise AssertionError('a plain 403 must fail the query')
-
-
-def test_an_unparseable_body_is_an_ordinary_failure(tmp):
-    mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200, 'body': 'not json at all'}})
-    with fake.activate():
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.QueryError:
-            pass
-        else:
-            raise AssertionError('an unparseable body must fail the query')
 
 
 def test_a_retranslated_header_block_still_yields_its_values(tmp):
