@@ -28,11 +28,12 @@ def test_only_the_keys_own_definition_is_exempt(tmp):
     below is a complete statement in a file that does not hold a key,
     and it is counted.
 
-    What the key-holder gets is the same row, and the module level: a
-    function-local or `if`-guarded assignment in it is counted too, so
-    the one exempt site is the module's own top-level declaration and
-    not anywhere an assignment can reach. A second declaration beside
-    the first stays counted, and so does every copy that is prose.
+    What the key-holder gets is the same row at its top level, and only
+    there: a nested, `if`-guarded, attribute-targeted or chained
+    declaration is counted, so is one whose value merely CONTAINS the
+    phrase, and so is a second beside the first. An annotated
+    declaration is exempt like a bare one, which is why the last row
+    reads 3 where the two before it read 4.
     """
     phrase = 'a synthetic probe phrase'
     holder = '_coverage_authority_scan.py'
