@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
+from _dashqueue import _events  # noqa: E402
 
 _BASE = tempfile.mkdtemp(prefix='resultroutes_base_')
 atexit.register(shutil.rmtree, _BASE, ignore_errors=True)
@@ -53,15 +54,6 @@ def _delivery(token, tab, did):
 
 def _read(path):
     return json.loads(path.read_text(encoding='utf-8'))
-
-
-def _events(cmd_dir, token):
-    """Every dashboard event the routes published under `cmd_dir`."""
-    queue = Path(cmd_dir) / f'{token}_dashboard'
-    if not queue.is_dir():
-        return []
-    return [json.loads(path.read_text(encoding='utf-8'))
-            for path in sorted(queue.iterdir())]
 
 
 def _configured_tree():
