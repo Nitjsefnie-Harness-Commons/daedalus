@@ -40,6 +40,10 @@ _ERROR_ACCESS_DENIED = 5
 # `ERROR_INVALID_PARAMETER` — the ONLY null-handle code that means there was
 # no such pid, and so the only one that reports gone.
 _ERROR_INVALID_PARAMETER = 87
+# `STILL_ACTIVE` (259) is the one exit code `GetExitCodeProcess` reports
+# for a process still running; every other value is an exit code the process
+# has already published.
+_STILL_ACTIVE = 259
 
 
 def process_is_gone(pid, settle_s=SETTLE_S):
@@ -106,13 +110,19 @@ def _windows_kernel32():
     kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int,
                                      ctypes.c_ulong)
     kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.GetExitCodeProcess.restype = ctypes.c_int
+    kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
     return kernel32
 
 
 def _open_handle_says_live(kernel32, pid):
     """Whether this `OpenProcess` names a process that still exists.
 
-    A handle is a yes. A null handle is NOT a no, and which way it fails
+    A handle is NOT a yes. Windows keeps a terminated process's object open
+    while any handle to it survives, and `taskkill /F` leaves one, so a
+    handle that opens says the object exists and not that the process runs.
+    The question is asked of the HANDLE, through `GetExitCodeProcess`. A
+    null handle is not a no either, and which way it fails
     depends on the code behind it:
 
     * `ERROR_INVALID_PARAMETER` (87) — the only code that positively means
@@ -133,10 +143,18 @@ def _open_handle_says_live(kernel32, pid):
     """
     handle = kernel32.OpenProcess(
         _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if handle:
+    if not handle:
+        return ctypes.get_last_error() != _ERROR_INVALID_PARAMETER
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            # The process exists and its exit code is unreadable, which is no
+            # evidence that it is running: a receipt must not report a kill
+            # it did not see, and must not invent one either.
+            return True
+        return code.value == _STILL_ACTIVE
+    finally:
         kernel32.CloseHandle(handle)
-        return True
-    return ctypes.get_last_error() != _ERROR_INVALID_PARAMETER
 
 
 def process_group(process):

@@ -113,6 +113,47 @@ def coverage_free_environment(environment):
     }
 
 
+# The variables a WINDOWS child needs in order to boot, whatever the caller
+# hands this. Node loads its CSPRNG provider out of %SystemRoot%\System32, so
+# a child launched with a hand-built environment that omits `SystemRoot`
+# aborts inside `ncrypto::CSPRNG` during `InitializeOncePerProcess` — a
+# failure that reads as an assertion about entropy and is really about the
+# environment. `subprocess` documents the same requirement: an explicit
+# `env=` must include `SYSTEMROOT` for the child to start at all.
+#
+# The floor is applied HERE rather than at a launch, because this is the one
+# function every launch already routes its `env=` through: a second wrapper
+# at the call site hides `child_coverage(...)` from the guards that read
+# the declaration, and a guard that learns a second acceptable shape has
+# grown its exemption set.
+#
+# POSIX has no such floor — a child with only `PATH` starts there — which is
+# why this is invisible on Linux and fatal on all four `windows-latest` legs.
+_PLATFORM_BOOT_ENV = ('SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'COMSPEC',
+                      'PATHEXT', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA',
+                      'USERPROFILE', 'PROGRAMFILES', 'PROGRAMDATA',
+                      'HOMEDRIVE', 'HOMEPATH', 'OS', 'PROCESSOR_ARCHITECTURE',
+                      'NUMBER_OF_PROCESSORS')
+
+
+def _with_platform_boot_names(environment):
+    """The child's environment plus the platform's own boot names.
+
+    A caller that hands a launch a dict is choosing the child's variables,
+    and that choice is honoured in full — except that a platform may refuse
+    to start a process without some of its own. Those come from THIS
+    process when the caller's environment omits them, and from nowhere when
+    it does not: there is no process left to copy them out of by the time
+    the child is already aborting. `setdefault`, so a name the caller chose
+    still wins.
+    """
+    if sys.platform != 'win32':
+        return environment
+    for name in _PLATFORM_BOOT_ENV:
+        environment.setdefault(name, os.environ.get(name, ''))
+    return environment
+
+
 def child_coverage(mode, environment=None, cwd=None):
     """Declare whether one subprocess keeps the coverage collector.
 
@@ -142,7 +183,7 @@ def child_coverage(mode, environment=None, cwd=None):
             raise ValueError(
                 "child_coverage('scrub') retained coverage names: "
                 + ', '.join(leaked))
-        return scrubbed
+        return _with_platform_boot_names(scrubbed)
     if mode == 'keep':
         if cwd is None:
             raise ValueError(
@@ -160,7 +201,7 @@ def child_coverage(mode, environment=None, cwd=None):
             raise ValueError(
                 "child_coverage('keep') dropped coverage names: "
                 + ', '.join(dropped))
-        return kept
+        return _with_platform_boot_names(kept)
     raise ValueError(
         f"child_coverage mode must be 'scrub' or 'keep': {mode!r}")
 

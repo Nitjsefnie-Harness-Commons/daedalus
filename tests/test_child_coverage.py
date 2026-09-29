@@ -6,11 +6,13 @@ tests/test_coverage_environment.py; this suite pins what the helper does
 at runtime.
 """
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _noderun  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -114,6 +116,101 @@ def test_child_coverage_scrubs_a_real_child(tmp):
         capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == '[]\n', result.stdout
+
+
+def _node():
+    """The node a real child runs under, or a named failure."""
+    node = shutil.which('node')
+    assert node, 'node is required to execute the harness'
+    return node
+
+
+def test_an_environment_the_caller_built_reaches_the_child(tmp):
+    """`environment` is threaded, and a value only the caller holds arrives.
+
+    `test_js_coverage.py` points `NODE_V8_COVERAGE` at a dumps directory it
+    builds per test, so the child must be handed THAT environment rather
+    than this process's. A launcher that accepted the parameter and then
+    read `os.environ` would satisfy every signature-shaped check here and
+    send the child to the wrong directory, so the assertion is on what the
+    child actually saw.
+
+    The other half is the same property read from the default: with no
+    environment passed, the child gets THIS PROCESS's, so a value planted
+    in `os.environ` rather than in the caller's dict reaches it too — and
+    the two cannot agree by accident, because the last launch uses a third
+    value and asserts that one instead.
+    """
+    source = "process.stdout.write(process.env.NODE_V8_COVERAGE || 'none');"
+    caller_only = str(Path(tmp) / 'caller-only-dumps')
+    environment = dict(os.environ)
+    environment['NODE_V8_COVERAGE'] = caller_only
+    result = _noderun.run_node_argv(
+        _node(), ['-e', source], tmp,
+        environment=_util.child_coverage('scrub', environment))
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    assert result.stdout == caller_only, result.stdout
+    # And the same child launched with NO environment sees this process's,
+    # which is what shows the assertion above is the parameter doing the
+    # work rather than the value simply being in the air.
+    os.environ['NODE_V8_COVERAGE'] = caller_only
+    try:
+        without = _noderun.run_node_argv(_node(), ['-e', source], tmp)
+    finally:
+        del os.environ['NODE_V8_COVERAGE']
+    assert without.returncode == 0, (without.returncode, without.stderr)
+    assert without.stdout == caller_only, (
+        'a launch with no environment did not fall back to this process\'s')
+    # A different value entirely, so the two halves cannot agree by luck.
+    other = str(Path(tmp) / 'other-dumps')
+    second = dict(os.environ)
+    second['NODE_V8_COVERAGE'] = other
+    third = _noderun.run_node_argv(
+        _node(), ['-e', source], tmp,
+        environment=_util.child_coverage('scrub', second))
+    assert third.stdout == other, third.stdout
+    # And the scrub runs over the CALLER's dict rather than over this
+    # process's, which is the other half of what the docstring at
+    # `tests/_noderun.py:260` claims. A coverage name planted in the
+    # environment the caller supplies is stripped before the launch, and an
+    # unrelated marker in the same dict still reaches the child — so this
+    # is a scrub and not a wholesale replacement. A launcher that read
+    # `os.environ` where the caller passed a dict would show 'none' for the
+    # marker too, and that is the whole difference between the two.
+    scrub_source = ("process.stdout.write(String("
+                    "process.env.COVERAGE_PROCESS_START || 'none') + '|' + "
+                    "String(process.env.DAEDALUS_ENV_MARKER || 'none'));")
+    scrubbed = _noderun.run_node_argv(
+        _node(), ['-e', scrub_source], tmp,
+        environment=_util.child_coverage('scrub', {
+            'PATH': os.environ.get('PATH', ''),
+            'COVERAGE_PROCESS_START': str(Path(tmp) / 'dumps'),
+            'DAEDALUS_ENV_MARKER': 'reached'}))
+    assert scrubbed.returncode == 0, (scrubbed.returncode, scrubbed.stderr)
+    assert scrubbed.stdout == 'none|reached', scrubbed.stdout
+    # That launch handed the child PATH and nothing else, and the caller's
+    # environment REPLACES the child's — so every name it did not copy was
+    # removed as surely as a scrub removed one. `SystemRoot` is where Node
+    # loads its CSPRNG provider, so on Windows that child aborts in
+    # `ncrypto::CSPRNG` during `InitializeOncePerProcess`: an assertion about
+    # entropy that is really about the environment. POSIX has no such floor,
+    # which is why it is invisible on Linux and fatal on every
+    # `windows-latest` leg.
+    from unittest import mock  # noqa: E402
+    hand_built = {'PATH': os.environ.get('PATH', '')}
+    with mock.patch.object(sys, 'platform', 'win32'), \
+            mock.patch.dict(os.environ, {'SYSTEMROOT': 'C:\\Windows'}):
+        child = _util.child_coverage('scrub', dict(hand_built))
+    assert child.get('SYSTEMROOT') == 'C:\\Windows', (
+        'a Windows child was launched without the name its CSPRNG provider '
+        'lives under')
+    # Forced, not inherited: asserting the POSIX arm by RUNNING it pins the
+    # host, and this control read 6/6 here and failed on every runner. The
+    # platform this suite runs on is not the property under test.
+    with mock.patch.object(sys, 'platform', 'linux'):
+        posix = _util.child_coverage('scrub', dict(hand_built))
+    assert 'SYSTEMROOT' not in posix, (
+        'the platform boot floor was applied off Windows')
 
 
 if __name__ == '__main__':

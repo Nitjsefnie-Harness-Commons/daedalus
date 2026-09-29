@@ -188,6 +188,46 @@ def test_a_passed_bound_names_the_wedge_and_kills_the_tree(tmp):
         process.wait(timeout=REAP_BOUND_S)
 
 
+def test_the_receipt_asks_the_handle_whether_the_process_ended(tmp):
+    """A handle is not a verdict: Windows keeps a dead process open.
+
+    `taskkill /F` terminates a process and leaves its object open while any
+    handle to it survives, so `OpenProcess` succeeding says the object
+    exists, not that the process runs. The question is asked of the HANDLE —
+    `GetExitCodeProcess` reports `STILL_ACTIVE` for a running process and
+    the published exit code for one that has ended — and that is the reading
+    a Windows leg needs and no POSIX leg can reach on its own.
+
+    Driven here through the seam the classifier already has: a stand-in
+    `kernel32` whose handle opens and whose exit code is the test's to
+    choose.
+    """
+    from unittest import mock
+
+    import _processtree as tree
+
+    del tmp
+
+    def kernel32_reporting(exit_code):
+        kernel32 = mock.Mock()
+        kernel32.OpenProcess.return_value = 7
+
+        def get_exit_code(_handle, out):
+            out._obj.value = exit_code
+            return 1
+
+        kernel32.GetExitCodeProcess.side_effect = get_exit_code
+        return kernel32
+
+    assert tree._open_handle_says_live(
+        kernel32_reporting(tree._STILL_ACTIVE), 4242), (
+        'a running process read as gone')
+    for exited in (0, 1, 0xC0000005):
+        assert not tree._open_handle_says_live(
+            kernel32_reporting(exited), 4242), (
+            f'an ended process ({exited:#x}) read as running')
+
+
 def test_the_receipt_tells_a_live_process_from_a_dead_one(tmp):
     """The receipt can fail, in both directions, or it is not a receipt.
 
@@ -269,8 +309,15 @@ def test_the_receipt_reads_both_null_handles_and_only_one_is_a_dead_pid(tmp):
     assert unclassified, (
         'ERROR_INVALID_HANDLE null handle read as gone, so a code this '
         'reading has never seen invents a kill')
-    assert tree._open_handle_says_live(kernel32_returning(7), 4245), (
-        'an opened handle did not read as live')
+    live = kernel32_returning(7)
+
+    def still_active(_handle, out):
+        out._obj.value = tree._STILL_ACTIVE
+        return 1
+
+    live.GetExitCodeProcess.side_effect = still_active
+    assert tree._open_handle_says_live(live, 4245), (
+        'an opened handle for a running process did not read as live')
 
 
 def test_a_child_that_announces_after_the_bound_is_still_found(tmp):

@@ -13,7 +13,6 @@ replacing the cleanup report both left every suite green. These are the two
 controls that close that.
 """
 import ast
-import os
 import shutil
 import subprocess
 import sys
@@ -31,20 +30,15 @@ TESTS = Path(__file__).resolve().parent
 # --- the outer bound, which is not the subject's own defence ----------------
 #
 # A control that provokes an expiry sets its budget inside
-# `tests/_noderun.py` — which is precisely the code a reversion removes. So
-# against a launch reverted to an UNBOUNDED one, the control's only defence
-# is the machinery it is testing, and it hangs until something external
-# kills it: a silent stall rather than a named failure. This bound is held by
-# the control, from `tests/_outer_bound.py`, on the call.
+# `tests/_noderun.py` — precisely the code a reversion removes. Against an
+# UNBOUNDED launch the control's only defence is the machinery it is testing,
+# and it hangs until something external kills it. This bound is held by the
+# control, from `tests/_outer_bound.py`, on the call.
 #
 # It must clear the healthy path with room to spare and still fire well
 # inside any external bound. The healthy budgets are the ones the three
-# controls set for themselves — `round(CHILD_DEADLINE_S * 0.1)` = 11s at the
-# jsroute call site, and `round(CHILD_DEADLINE_S * 0.25)` = 27s and
-# `round(GM_CHILD_DEADLINE_S * 0.25)` = 22s at the other two — so the
-# tightest margin 57s has to keep is over that 27s. Turning a wedge into a
-# named failure costs about a minute where the alternative costs whatever
-# the runner's ceiling costs. The samples are this bound's own observed
+# controls set for themselves — 11s, 27s and 22s — so the tightest margin
+# 57s keeps is over that 27s. The samples are this bound's own observed
 # expiries, which is circular on its face: what they record is the wedge,
 # and what the figure owes is the margin above the healthy budgets.
 OUTER_BOUND_SAMPLES = (52.0, 55.0, 57.0)
@@ -56,9 +50,9 @@ OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 # Three controls below drive a real child that never settles, and each used
 # to wait out its site's composed figure — 107s at the two launcher sites,
 # 90s at the GM one, about a tenth each of the 900s `run_tests.py` allows a
-# suite — on every leg of a twelve-cell matrix
-# (`scripts/ci/classify_changes.py`'s `FULL_MATRIX`, 3 operating systems by 4
-# interpreters, four of the cells `windows-latest`) and on the `speed` suite.
+# suite — on every leg of the twelve-cell matrix
+# (`scripts/ci/classify_changes.py`'s `FULL_MATRIX`, four of them
+# `windows-latest`) and on the `speed` suite.
 # Each child writes a line and then holds the event loop open forever, so
 # the deadline's one job is to clear node's own startup. The figures are
 # arithmetic and the AST control pins the chain; the FIRING does not depend
@@ -66,8 +60,7 @@ OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 # one-second budget. What is given up is named here rather than traded
 # silently: that 107 and 90 fire in particular.
 #
-# The table is what the budget must clear — node's own startup, measured
-# `Popen` to first line for exactly the source the first control runs.
+# The table is what the budget must clear: node's own startup.
 STALLED_CHILD_START_SAMPLES_S = (0.048, 0.054, 0.080, 0.147, 0.158)
 STALLED_CHILD_START_SLOWEST_S = max(STALLED_CHILD_START_SAMPLES_S)
 
@@ -622,73 +615,6 @@ def test_a_call_site_bound_reports_its_own_stalled_child(tmp):
     assert 'the storage child spoke before it wedged' in caught.stdout, (
         caught.stdout)
     assert caught.deadline_s == budget, caught.deadline_s
-
-
-def test_an_environment_the_caller_built_reaches_the_child(tmp):
-    """`environment` is threaded, and a value only the caller holds arrives.
-
-    `test_js_coverage.py` points `NODE_V8_COVERAGE` at a dumps directory it
-    builds per test, so the child must be handed THAT environment rather
-    than this process's. A launcher that accepted the parameter and then
-    read `os.environ` would satisfy every signature-shaped check here and
-    send the child to the wrong directory, so the assertion is on what the
-    child actually saw.
-
-    The other half is the same property read from the default: with no
-    environment passed, the child gets THIS PROCESS's, so a value planted
-    in `os.environ` rather than in the caller's dict reaches it too — and
-    the two cannot agree by accident, because the last launch uses a third
-    value and asserts that one instead.
-    """
-    import _noderun  # noqa: E402
-
-    source = "process.stdout.write(process.env.NODE_V8_COVERAGE || 'none');"
-    caller_only = str(Path(tmp) / 'caller-only-dumps')
-    environment = dict(os.environ)
-    environment['NODE_V8_COVERAGE'] = caller_only
-    result = _noderun.run_node_argv(
-        _node(), ['-e', source], tmp,
-        environment=_util.child_coverage('scrub', environment))
-    assert result.returncode == 0, (result.returncode, result.stderr)
-    assert result.stdout == caller_only, result.stdout
-    # And the same child launched with NO environment sees this process's,
-    # which is what shows the assertion above is the parameter doing the
-    # work rather than the value simply being in the air.
-    os.environ['NODE_V8_COVERAGE'] = caller_only
-    try:
-        without = _noderun.run_node_argv(_node(), ['-e', source], tmp)
-    finally:
-        del os.environ['NODE_V8_COVERAGE']
-    assert without.returncode == 0, (without.returncode, without.stderr)
-    assert without.stdout == caller_only, (
-        'a launch with no environment did not fall back to this process\'s')
-    # A different value entirely, so the two halves cannot agree by luck.
-    other = str(Path(tmp) / 'other-dumps')
-    second = dict(os.environ)
-    second['NODE_V8_COVERAGE'] = other
-    third = _noderun.run_node_argv(
-        _node(), ['-e', source], tmp,
-        environment=_util.child_coverage('scrub', second))
-    assert third.stdout == other, third.stdout
-    # And the scrub runs over the CALLER's dict rather than over this
-    # process's, which is the other half of what the docstring at
-    # `tests/_noderun.py:260` claims. A coverage name planted in the
-    # environment the caller supplies is stripped before the launch, and an
-    # unrelated marker in the same dict still reaches the child — so this
-    # is a scrub and not a wholesale replacement. A launcher that read
-    # `os.environ` where the caller passed a dict would show 'none' for the
-    # marker too, and that is the whole difference between the two.
-    scrub_source = ("process.stdout.write(String("
-                    "process.env.COVERAGE_PROCESS_START || 'none') + '|' + "
-                    "String(process.env.DAEDALUS_ENV_MARKER || 'none'));")
-    scrubbed = _noderun.run_node_argv(
-        _node(), ['-e', scrub_source], tmp,
-        environment=_util.child_coverage('scrub', {
-            'PATH': os.environ.get('PATH', ''),
-            'COVERAGE_PROCESS_START': str(Path(tmp) / 'dumps'),
-            'DAEDALUS_ENV_MARKER': 'reached'}))
-    assert scrubbed.returncode == 0, (scrubbed.returncode, scrubbed.stderr)
-    assert scrubbed.stdout == 'none|reached', scrubbed.stdout
 
 
 def main():
