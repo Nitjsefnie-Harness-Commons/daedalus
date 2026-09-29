@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_dead_code  # noqa: E402
 import _mcp_import_closure  # noqa: E402
+from _mcp_import_fixtures import _write_tree  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -46,13 +47,6 @@ sys.stderr.write(json.dumps({
     'loaded': sorted(name for name in sys.modules
                      if name.startswith('pkg.'))}))
 '''
-
-
-def _write_tree(directory, files):
-    for name, source in files.items():
-        path = directory / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding='utf-8')
 
 
 def _scan_set(_tmp):
