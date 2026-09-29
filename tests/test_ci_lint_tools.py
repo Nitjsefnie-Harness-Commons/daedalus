@@ -15,12 +15,21 @@ control already on that set, through `tests/_suite_jobs.py`.
 
 Every control here is a guard: a green run proves the tree still matches
 it and nothing more. The proof that it bites is a planted defect in a
-real target — the installer step removed from a real suite job, a skip
-arm added to a real suite for a binary nothing installs, and a third
-suite runner planted in a workflow the door walk then has to classify.
-Every workflow is read now: `_door_jobs` globs `*.yml` and `*.yaml`, so
-no workflow is one this file does not look at, and the bound on what the
-walk can see is stated in `tests/_suite_jobs.py` where it lives.
+real target — the installer step removed from a real suite job, the setup
+step removed from a real suite job, a skip arm added to a real suite for a
+binary nothing installs, and a third suite runner planted in a workflow
+the door walk then has to classify. Every workflow is read now:
+`_door_jobs` globs `*.yml` and `*.yaml`, so no workflow is one this file
+does not look at, and the bound on what the walk can see is stated in
+`tests/_suite_jobs.py` where it lives.
+
+THREE mechanisms answer a tool the suites skip on, and the controls below
+are split across them so each asks about its own: the shared installer
+installs one, a setup step declares another, and a claim about the runner
+image excuses a third. The closure control holds the three to the derived
+set, so the next tool a suite skips on reaches one of them rather than a
+fourth hand-written exemption — which is what `node` was, and the reason
+the `node` entry cannot come back.
 """
 import os
 import re
@@ -33,7 +42,8 @@ import _util  # noqa: E402
 from _lint_tool_roles import (  # noqa: E402
     _derive_tool_roles, _tool_roles)
 from _actionlint import _job_step as _actionlint_job_step  # noqa: E402
-from _suite_jobs import NAMES, RUNNER, _door_jobs  # noqa: E402
+from _suite_jobs import (  # noqa: E402
+    NAMES, RUNNER, _actions_before, _door_jobs, _suite_step)
 from _wfgraph import _tests_yml  # noqa: E402
 
 ROOT = _util.ROOT
@@ -99,12 +109,28 @@ SUITE_DOORS = {
 # skipping on a binary nothing installs read green. Each entry is a claim
 # about the runner image, written down so a human can check it and change
 # it, and no derivation can be asked to confirm it.
+#
+# `actions/checkout` is not a declaration of git: it is a client of it, and
+# an action that runs git is not a step that says a machine may lack it.
 SHIPPED_BY_THE_IMAGE = {
     'git': 'every job here checks out through actions/checkout, which '
            'runs git, and the hosted images ship it',
-    'node': 'the hosted images ship it and no workflow step installs it, '
-            'so a suite that skips on node skips on every leg; that is a '
-            'property of the image, and it is the reason this entry exists',
+}
+# Tools a suite skips on that no job installs through
+# `scripts/ci/install_lint_tools.py`, and the setup action a job has to
+# carry to DECLARE it. A third mechanism beside the installer's TOOLS and
+# the image claim, because a tool the runtime distributes is provisioned by
+# a step rather than by an install list, and a control that asked the
+# installer to install it would be asking for a mechanism this repository
+# does not use.
+#
+# The action NAME, never the pinned commit: which action a job names is a
+# property of the job, while the commit it is pinned at is a property of the
+# workflow, and a table holding the SHA would have to be edited on every
+# dependabot bump to keep saying the same thing. The pin every declaration
+# has to use is a different control's, on a family of actions.
+DECLARED_BY = {
+    'node': 'actions/setup-node',
 }
 
 
@@ -328,8 +354,8 @@ def test_a_tool_the_tree_also_asserts_is_still_required(tmp):
             f'skipped={sorted(skipped)}, present={sorted(present)}')
 
 
-def _unjournalled(sources=None):
-    """The tools a suite may run without, minus what the runner image brings.
+def _unjournalled(sources=None, share=()):
+    """The tools a suite may run without, minus the mechanisms that answer.
 
     The property is *a tool the suites can skip on*, so the required set is
     the skip set itself. The earlier narrowing subtracted the tools the tree
@@ -343,6 +369,15 @@ def _unjournalled(sources=None):
     green with no job installing `jq`. So the subtraction is gone, and
     what genuinely needs no install is named below with a reason per entry.
 
+    There are now THREE mechanisms rather than one, and each has its own
+    control, so this asks the question for all of them or for one: a caller
+    that names no `share` gets the residue no mechanism answers, and a
+    caller that names a mechanism's share gets back what is left of the
+    residue for that mechanism alone. Without the split the installer
+    control would demand a job install `node`, which is not a question it
+    can be answered on — setup-node is a different mechanism, and a control
+    asking the wrong one reads either a defect or the mechanism working.
+
     The `requires=` channel on `_util.runner` is the other machine-readable
     one, and it is not read here: its only value in the tree is the prose
     string `'Chromium and Node'`, so a control that demanded a job install
@@ -351,7 +386,8 @@ def _unjournalled(sources=None):
     """
     skipped, _present = (_tool_roles() if sources is None
                          else _derive_tool_roles(sources))
-    return skipped - set(SHIPPED_BY_THE_IMAGE)
+    return ((skipped - _declared_tools() - set(SHIPPED_BY_THE_IMAGE)
+             - set(DECLARED_BY)) | set(share))
 
 
 def _require_resolvable(tools):
@@ -391,14 +427,15 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
         'reading a set too small to be the whole set of them: '
         f'{[(source, job) for source, job, _, _ in found]}')
     declared = ', '.join(sorted(_declared_tools()))
-    unjournalled = sorted(_unjournalled() - _declared_tools())
+    unjournalled = sorted(_unjournalled())
     assert not unjournalled, (
         f'the suites under tests/ skip on {", ".join(unjournalled)}, and '
         'no job installs them, so a suite-running job on a runner without '
         'them skips in silence on every leg; '
         f'scripts/ci/install_lint_tools.py declares {declared}, and the '
-        'next binary a suite skips on has to be added there, or listed in '
-        'SHIPPED_BY_THE_IMAGE with the reason no job has to install it')
+        'next binary a suite skips on has to be added there, or declared '
+        'in DECLARED_BY with the setup action a job must carry, or listed '
+        'in SHIPPED_BY_THE_IMAGE with the reason no job has to install it')
     for source, job, runs, _mechanism in found:
         assert any(_runs_installer(run) for run in runs), (
             f'the {job} job in {source} finds its suites by discovery, so a '
@@ -407,6 +444,134 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
             f'job never runs {INSTALLER_PATH!r}, so on a runner without '
             'them those suites skip instead of running and the job reports '
             'green')
+
+
+def _workflow_text(source):
+    """The tracked workflow of a derived door, read fresh."""
+    return (ROOT / '.github' / 'workflows' / source).read_text(
+        encoding='utf-8')
+
+
+def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
+    """A tool the installer does not install is declared by a step, first.
+
+    The four jobs that reach the suites all inherit `node` from the
+    `ubuntu-latest` image, and nothing in this repository says so. That is a
+    claim about a hosted image rather than about the job: the moment the
+    image drops node, or a job moves to a runner that never had it, every
+    suite that skips on it goes quiet on every leg at once and the matrix
+    reports green having verified nothing.
+
+    ORDER is the property, not membership. A `setup-node` step after
+    `python run_tests.py` declares nothing — the suites have already skipped
+    by then — and a set-membership check passes it, so the check is written
+    against the steps that come BEFORE the first step reaching the suites.
+    Which step that is comes from `_suite_step`, the same walk the door
+    derivation uses, so the two cannot disagree about it.
+    """
+    del tmp
+    declared_share = set(DECLARED_BY)
+    for source, job, _runs, _mechanism in _runner_doors():
+        workflow = _workflow_text(source)
+        reach = _suite_step(workflow, job)
+        assert reach is not None, (
+            f'the {job} job in {source} is a door and no step in it reaches '
+            'the suites any more; the two are read from one function and '
+            'disagreeing means one of them is stale')
+        before = _actions_before(workflow, job, reach[0])
+        missing = sorted(declared_share - before)
+        assert not missing, (
+            f'the {job} job in {source} finds its suites by discovery, and '
+            f'its first suite-running step is step {reach[0] + 1}, before '
+            f'which it uses {sorted(before) or "no action at all"}. The '
+            f'suites it finds skip on {", ".join(sorted(missing))}, which '
+            f'the shared installer does not install, so add the step that '
+            'declares it '
+            f'({", ".join(DECLARED_BY[tool] for tool in missing)}) ABOVE that '
+            'step. A declaration placed after it is not a declaration: the '
+            'suites have already skipped by then.')
+
+
+def _mechanism_shares():
+    """`(name, tools)` for each mechanism a skipped tool can be answered by."""
+    return (('scripts/ci/install_lint_tools.py',
+             frozenset(_declared_tools())),
+            ('SHIPPED_BY_THE_IMAGE', frozenset(SHIPPED_BY_THE_IMAGE)),
+            ('DECLARED_BY', frozenset(DECLARED_BY)))
+
+
+def _mechanism_residue(sources=None):
+    """`(residue, overlap, stale)` for the mechanisms and the skip set.
+
+    A tool the suites skip on is answered by exactly one mechanism, and
+    this is the question that holds the three of them to it: answered by
+    none, answered by more than one, or held in a share the tree no longer
+    derives. `sources` is the seam the derivation already has, so a suite
+    that skips on a tool no mechanism answers is asked about without planting
+    a file in `tests/`.
+    """
+    skipped, _present = (_tool_roles() if sources is None
+                         else _derive_tool_roles(sources))
+    shares = _mechanism_shares()
+    answered = {tool for _name, tools in shares for tool in tools}
+    residue = sorted(skipped - answered)
+    overlap = sorted(tool for tool in skipped
+                     if sum(tool in tools for _name, tools in shares) > 1)
+    stale = sorted((name, sorted(tools - skipped))
+                   for name, tools in shares if tools - skipped)
+    return residue, overlap, stale
+
+
+def test_every_skipped_tool_is_answered_by_exactly_one_mechanism(tmp):
+    """A tool the suites skip on reaches a mechanism, or this is not a set.
+
+    Three mechanisms answer a skipped tool: the shared installer installs
+    it, a step declares it, or a claim about the runner image says the image
+    has it. Nothing keeps a fourth tool from being waved through with a
+    hand-written exemption, which is exactly what `node` was — an entry
+    whose reason read "the hosted images ship it and no workflow step
+    installs it", so the control stated the defect as the rule that permitted
+    it and a suite skipping on node was green on every leg by construction.
+
+    The three failure shapes are the ones a reader can act on: a tool no
+    mechanism answers (add it to one), a tool two of them claim (one of the
+    two is redundant, and while both stand neither is checked), and an entry
+    for a tool the tree no longer skips on (the claim outlived its
+    subject). Modelled on the door control above, which is the same
+    residue-versus-derived question over the job set.
+    """
+    del tmp
+    residue, overlap, stale = _mechanism_residue()
+    assert not residue and not overlap and not stale, (
+        'tools the suites skip on that the mechanisms do not account for '
+        f'between them: {residue}; tools claimed by more than one mechanism, '
+        f'so none of them is the one being enforced: {overlap}; entries in a '
+        f'mechanism that no suite skips on any more: {stale}. Every skipped '
+        'tool is installed by scripts/ci/install_lint_tools.py, declared by a '
+        'setup step in DECLARED_BY, or named in SHIPPED_BY_THE_IMAGE with the '
+        'reason the image has it — exactly one of the three, and a new one '
+        'goes in the table that mechanism owns rather than in a new table.')
+
+
+def test_the_derivation_reaches_the_mechanism_closure_not_only_the_table(tmp):
+    """The other half of the control above: a tool no mechanism answers.
+
+    The tree on this run is answered by all three mechanisms, so a green
+    residue here says nothing about whether the DERIVATION would notice a
+    fourth tool. A suite that skips on a binary nothing installs is the
+    defect the whole file is for, and it reaches this control only through
+    the recognisers — so it is driven through the `sources` seam, which is
+    what that seam is for, rather than by planting a file in `tests/`.
+    """
+    del tmp
+    source = [_PREAMBLE + 'if not shutil.which(TOOL):\n'
+              '    _util.skip("no parser")\n']
+    residue, overlap, stale = _mechanism_residue(source)
+    assert residue == ['gojq'], (
+        'a suite that skips on gojq puts no tool in the residue, so the '
+        'closure this control reads is not over the derived skip set and a '
+        'binary nothing installs reads as answered: '
+        f'residue={residue}, overlap={overlap}, stale={stale}')
 
 
 def _unjournalled_sentence():
@@ -418,7 +583,7 @@ def _unjournalled_sentence():
     output that the suites it discovers skip on actionlint and shellcheck,
     which no suite here does.
     """
-    unjournalled = sorted(_unjournalled() - _declared_tools())
+    unjournalled = sorted(_unjournalled())
     return (', '.join(unjournalled) if unjournalled
             else 'no tool this control can currently derive')
 
