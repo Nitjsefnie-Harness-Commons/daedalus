@@ -10,16 +10,17 @@ import ast
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _coverage_suite_fixture import coverage_tree  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _coverage_suite_fixture import (  # noqa: E402
+    coverage_group, coverage_tree, kill_recorded, records, settle_gone)
+from _repo import ROOT, iter_tree_files  # noqa: E402
 
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                          'suite_bound_under_test')
+_BOUND_SOURCE = ROOT / 'scripts' / 'ci' / 'suite_bound.py'
 
 _WEDGED_SUITE = """import os, time
 from pathlib import Path
@@ -32,12 +33,40 @@ time.sleep(120)
 
 _FAST_SUITE = "print('measured output arrived', flush=True)\n"
 
-_GRANDCHILD_SUITE = """import subprocess, sys, time
+# A suite that answers SIGTERM. `pyproject.toml` sets `sigterm = true` so a
+# terminated suite still flushes what it measured, and this is the suite
+# that flush is for: a launcher that kills rather than asks gives it no
+# chance, and the marker below is the only evidence either way.
+_STOPPABLE_SUITE = """import os, signal, sys, time
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
+
+
+def _stopped(signum, frame):
+    del signum, frame
+    (root / 'stopped.pid').write_text(str(os.getpid()), encoding='ascii')
+    print('suite was asked to stop and flushed', flush=True)
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, _stopped)
+print('wedged suite reached its own body', flush=True)
+time.sleep(120)
+"""
+
+# A suite that IGNORES SIGTERM, and a child of its own that does the same.
+# Only the second phase of the tree kill reaches either of them, so this is
+# the control that keeps the escalation from being decoration.
+_STUBBORN_GRANDCHILD_SUITE = """import signal, subprocess, sys, time
+from pathlib import Path
+
+root = Path(__file__).resolve().parent
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
 child = subprocess.Popen(
-    [sys.executable, '-c', 'import time; time.sleep(120)'],
+    [sys.executable, '-c',
+     'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN);'
+     ' time.sleep(120)'],
     stdin=subprocess.DEVNULL)
 (root / 'grandchild.pid').write_text(str(child.pid), encoding='ascii')
 print('wedged suite reached its own body', flush=True)
@@ -45,18 +74,20 @@ time.sleep(120)
 """
 
 # The bound this control shrinks, as a FRACTION of the one definition the
-# launcher resolves when it launches. A number typed here would be a second
-# premise, and it would stop relating to the default the moment that
-# default moved -- the drift this issue is about. The suite's own sleep is
-# a multiple of it, so the bound is what ends the run on any machine: no
-# assertion anywhere below reads a wall clock.
+# launcher reads. A number typed here would be a second premise, and it
+# would stop relating to the default the moment that default moved -- the
+# drift this issue is about. The suite's own sleep is a multiple of it, so
+# the bound is what ends the run on any machine: no assertion anywhere
+# below reads a wall clock.
 _WEDGE_BOUND_S = max(1, round(
     SUITE_BOUND.DEFAULT_SUITE_TIMEOUT_S * 0.002))
 # This control's own ceiling, derived from the bound it observes so the two
 # cannot drift into one another, and INDEPENDENT of it: the bound under
 # test cannot also be what ends the control that proves it, or a launcher
 # that never ends its wedged suite reproduces the hang and reports nothing.
-_WEDGE_OUTER_S = _WEDGE_BOUND_S * 20
+# It also has to outlast the launcher's SIGTERM grace window, which is
+# spent before the escalation can reach a suite that ignores the request.
+_WEDGE_OUTER_S = _WEDGE_BOUND_S * 20 + SUITE_BOUND.CLEANUP_TIMEOUT_S * 2
 # Reaping a killed tree is itself bounded, by a deadline read off the
 # clock rather than asserted as a margin.
 _WEDGE_SETTLE_S = 10
@@ -79,64 +110,22 @@ UNUSABLE_BOUNDS = (
 )
 
 
-def _coverage_group(stdout, name):
-    """The block the coverage launcher printed for `name`."""
-    start = stdout.index(f'::group::tests/{name}\n')
-    end = stdout.index('::endgroup::\n', start)
-    return stdout[start:end]
+def _assert_one_record(text, bound, name):
+    """The one timeout record in `text`, whole, naming `name` at `bound`.
 
-
-def _record_of(bound):
-    return f'SUITE TIMED OUT after {float(bound)} s (returncode '
-
-
-def _kill_recorded(path):
-    """SIGKILL a pid a planted suite wrote down, so a red control leaks none.
-
-    The outer bound kills the launcher, not the suite the launcher started:
-    each suite is launched into a session of its own precisely so the kill
-    can reach its tree, which is also what stops the fixture's own timeout
-    from reaching it.
+    Matched whole, because a prefix stops before the suite name and the
+    launcher prints that name in the group header anyway -- so a prefix
+    pin is satisfied by a sibling occurrence and says nothing about the
+    record. The name has to be where the record puts it.
     """
-    try:
-        pid = int(path.read_text(encoding='ascii'))
-    except (OSError, ValueError):
-        return
-    try:
-        os.kill(pid, 9)
-    except OSError:
-        return
-
-
-def _pid_alive(pid):
-    """Whether this host can still signal `pid`.
-
-    Signal 0 is the POSIX probe and has no meaning on Windows, where
-    `os.kill(pid, 0)` is a request to terminate with exit code 0 -- a
-    probe that killed what it measured would report a survivor gone.
-    """
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-
-
-def _settle_gone(pid, seconds):
-    """Wait out a kill's own settling, on a deadline, not a margin."""
-    deadline = time.monotonic() + seconds
-    while _pid_alive(pid) and time.monotonic() < deadline:
-        time.sleep(0.05)
-    return not _pid_alive(pid)
-
-
-def _refusal(result, value, expected):
-    """What a launcher said about a bound it would not accept."""
-    reported = result.stdout + result.stderr
-    assert result.returncode != 0, (value, result.returncode, reported)
-    assert 'DAEDALUS_SUITE_TIMEOUT' in reported, (value, reported)
-    assert expected in reported, (value, reported)
-    return reported
+    found = records(text)
+    assert len(found) == 1, (
+        f'expected exactly one whole timeout record naming {name}, found '
+        f'{len(found)}; the text was: {text}')
+    record = found[0].groupdict()
+    assert record['name'] == name, record
+    assert record['bound'] == str(float(bound)), record
+    return record
 
 
 def test_a_wedged_suite_is_named_and_fails_the_run(tmp):
@@ -148,18 +137,19 @@ def test_a_wedged_suite_is_named_and_fails_the_run(tmp):
                   'test_fast.py': _FAST_SUITE},
             suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
     finally:
-        _kill_recorded(recorded)
+        kill_recorded(recorded)
     assert result.returncode != 0, (result.returncode, result.stdout,
                                     result.stderr)
-    group = _coverage_group(result.stdout, 'test_wedged.py')
-    assert _record_of(_WEDGE_BOUND_S) in group, group
-    assert 'test_wedged.py' in group, group
+    group = coverage_group(result.stdout, 'test_wedged.py')
+    _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
     assert 'test_wedged.py' in result.stderr, result.stderr
     assert 'TIMED OUT' in result.stderr, result.stderr
-    # The sibling that finished is still measured, and is not swept up in
-    # the refusal: partial coverage is a different report from none.
-    assert 'measured output arrived' in _coverage_group(
-        result.stdout, 'test_fast.py'), result.stdout
+    # The sibling that finished kept its own block and is named in no
+    # record, which is what makes the refusal a diagnosis rather than a
+    # blanket verdict on the run.
+    sibling = coverage_group(result.stdout, 'test_fast.py')
+    assert 'measured output arrived' in sibling, result.stdout
+    assert not records(sibling), sibling
 
 
 def test_a_fast_suite_is_measured_and_not_reported_as_timed_out(tmp):
@@ -169,10 +159,33 @@ def test_a_fast_suite_is_measured_and_not_reported_as_timed_out(tmp):
         outer_timeout=_WEDGE_OUTER_S)
     assert result.returncode == 0, (result.returncode, result.stdout,
                                     result.stderr)
-    group = _coverage_group(result.stdout, 'test_fast.py')
+    group = coverage_group(result.stdout, 'test_fast.py')
     assert 'measured output arrived' in group, group
     assert 'SUITE TIMED OUT' not in result.stdout, result.stdout
     assert result.stderr == '', result.stderr
+
+
+def test_a_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
+    """The kill asks first, so a suite that flushes on SIGTERM still does.
+
+    `pyproject.toml` sets `sigterm = true` for exactly this: a terminated
+    suite still writes what it measured. A launcher that SIGKILLs first
+    takes that away, and nothing else in the tree would notice.
+    """
+    marker = Path(tmp) / 'tree' / 'tests' / 'stopped.pid'
+    try:
+        result, _invocations = coverage_tree(
+            tmp, {'test_wedged.py': _STOPPABLE_SUITE},
+            suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
+    finally:
+        kill_recorded(marker)
+    group = coverage_group(result.stdout, 'test_wedged.py')
+    record = _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
+    assert marker.exists(), (
+        f'the suite was killed rather than asked to stop, so it flushed '
+        f'nothing; the record says returncode {record["returncode"]}')
+    assert 'suite was asked to stop and flushed' in group, group
+    assert int(record['returncode']) == 0, record
 
 
 def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
@@ -183,8 +196,8 @@ def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
             tmp, {'test_wedged.py': _WEDGED_SUITE},
             suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
     finally:
-        _kill_recorded(recorded)
-    group = _coverage_group(result.stdout, 'test_wedged.py')
+        kill_recorded(recorded)
+    group = coverage_group(result.stdout, 'test_wedged.py')
     route = 'taskkill' if sys.platform == 'win32' else 'process group'
     assert route in group, (
         f'the record does not name the {route} route the kill took: {group}')
@@ -193,22 +206,72 @@ def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
 def test_a_timed_out_suites_own_child_does_not_survive_it(tmp):
     """The direct child is not the tree; the tree is what a wedge leaves."""
     if sys.platform == 'win32':
-        _util.skip('the liveness probe is POSIX; see _pid_alive')
+        _util.skip('the liveness probe is POSIX; see pid_alive')
     recorded = Path(tmp) / 'tree' / 'tests' / 'grandchild.pid'
     try:
         result, _invocations = coverage_tree(
-            tmp, {'test_wedged.py': _GRANDCHILD_SUITE},
+            tmp, {'test_wedged.py': _STUBBORN_GRANDCHILD_SUITE},
             suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
         assert result.returncode != 0, (result.returncode, result.stdout,
                                         result.stderr)
         pid = int(recorded.read_text(encoding='ascii'))
-        group = _coverage_group(result.stdout, 'test_wedged.py')
-        assert _settle_gone(pid, _WEDGE_SETTLE_S), (
-            f'pid {pid} outlived the bound the launcher enforced, so the '
-            f'direct child was killed and its own tree left running; the '
-            f'record says: {group}')
+        group = coverage_group(result.stdout, 'test_wedged.py')
+        assert settle_gone(pid, _WEDGE_SETTLE_S), (
+            f'pid {pid} outlived the bound the launcher enforced. It ignores '
+            f'SIGTERM, so only the escalation reaches it, and it did not; '
+            f'the record says: {group}')
     finally:
-        _kill_recorded(recorded)
+        kill_recorded(recorded)
+
+
+def test_a_wedge_under_require_all_prints_the_timeout_and_nothing_else(tmp):
+    """The timeout is the diagnosis, and it is the one this run gets.
+
+    The `--require-all` refusals share this stderr with it, so which of
+    them a wedge suppresses is a precedence the launcher chose and nothing
+    else holds: without this control the order could be flipped back with
+    the suite still green.
+    """
+    recorded = Path(tmp) / 'tree' / 'tests' / 'suite.pid'
+    try:
+        result, _invocations = coverage_tree(
+            tmp, {'test_wedged.py': _WEDGED_SUITE,
+                  'test_failing.py': 'raise SystemExit(1)\n'},
+            suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S,
+            args=('--require-all',))
+    finally:
+        kill_recorded(recorded)
+    assert result.returncode != 0, (result.returncode, result.stdout,
+                                    result.stderr)
+    assert 'TIMED OUT: tests/test_wedged.py' in result.stderr, result.stderr
+    for shadowed in ('refusing partial coverage',
+                     'refusing to\nreport a coverage number'):
+        assert shadowed not in result.stderr, result.stderr
+
+
+def test_the_coverage_launcher_binds_the_module_the_workflow_path_finds(tmp):
+    """The import path `coverage-matrix` runs, which is not the one the
+    other controls here exercise.
+
+    A workflow step runs the launcher by path, so `sys.path[0]` is
+    `scripts/ci` and the repository root is on no path at all: the package
+    spelling cannot resolve and the flat one is the only spelling there
+    is. Every other control in this repository puts its synthetic tree on
+    `PYTHONPATH`, which resolves the package spelling instead. So this
+    control leaves `PYTHONPATH` alone, and its passing IS the evidence
+    that the fallback imports and binds what the launcher calls.
+    """
+    recorded = Path(tmp) / 'tree' / 'tests' / 'suite.pid'
+    try:
+        result, _invocations = coverage_tree(
+            tmp, {'test_wedged.py': _WEDGED_SUITE},
+            outer_timeout=_WEDGE_OUTER_S,
+            timeout_env={'DAEDALUS_SUITE_TIMEOUT': str(_WEDGE_BOUND_S)},
+            tree_on_path=False)
+    finally:
+        kill_recorded(recorded)
+    group = coverage_group(result.stdout, 'test_wedged.py')
+    _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
 
 
 def test_the_coverage_launcher_refuses_every_unusable_bound(tmp):
@@ -217,6 +280,15 @@ def test_the_coverage_launcher_refuses_every_unusable_bound(tmp):
             tmp, {'test_fast.py': _FAST_SUITE},
             timeout_env={'DAEDALUS_SUITE_TIMEOUT': value})
         _refusal(result, value, expected)
+
+
+def _refusal(result, value, expected):
+    """What a launcher said about a bound it would not accept."""
+    reported = result.stdout + result.stderr
+    assert result.returncode != 0, (value, result.returncode, reported)
+    assert 'DAEDALUS_SUITE_TIMEOUT' in reported, (value, reported)
+    assert expected in reported, (value, reported)
+    return reported
 
 
 def test_the_two_launchers_refuse_a_bound_identically(tmp):
@@ -246,6 +318,30 @@ def test_the_two_launchers_refuse_a_bound_identically(tmp):
                                               from_coverage)
 
 
+def test_every_wait_this_module_makes_is_bounded(_tmp):
+    """A bounded cleanup path is the only one that can be trusted to end.
+
+    Read from the source rather than from a run, and this is one of the two
+    properties a source read is sound for. The bound is unobservable at
+    runtime: a process the kill has already reached always reaps, so the
+    wait returns whether or not it carried a bound, and no run can tell
+    the two apart. Dropping the bound on any `wait` or `communicate` in
+    this module turns this red.
+    """
+    unbounded = []
+    for node in ast.walk(ast.parse(
+            _BOUND_SOURCE.read_text(encoding='utf-8'))):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if not (isinstance(function, ast.Attribute)
+                and function.attr in ('wait', 'communicate')):
+            continue
+        if not any(keyword.arg == 'timeout' for keyword in node.keywords):
+            unbounded.append(f'{_BOUND_SOURCE.name}:{node.lineno}')
+    assert not unbounded, f'these waits carry no bound: {unbounded}'
+
+
 def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
     """A second copy of the number is a premise that can drift from the first.
 
@@ -253,12 +349,20 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
     reads the tree, not a run, so it can say a definition is duplicated. It
     says nothing about behaviour, and nothing here asks it to -- the two
     controls above ask that by running the launchers.
+
+    The walk is every tracked Python file OUTSIDE `tests/`, not only the
+    two launchers. A copy planted in `daedalus_bridge/`, `daedalus_cli/`
+    or `daedalus_mcp/` is a second premise exactly as much as one in
+    `scripts/`, and this branch's own argument is that the number is the
+    product's one. `tests/` is excluded because these controls
+    legitimately name the constant and the setting.
     """
     definitions, readers = [], []
-    tracked = sorted((ROOT / 'scripts').rglob('*.py'))
-    for path in tracked + [ROOT / 'run_tests.py']:
-        source = path.read_text(encoding='utf-8')
+    for path in iter_tree_files(ROOT):
         relative = path.relative_to(ROOT).as_posix()
+        if not relative.endswith('.py') or relative.startswith('tests/'):
+            continue
+        source = path.read_text(encoding='utf-8', errors='surrogateescape')
         for node in ast.walk(ast.parse(source)):
             if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                 continue

@@ -1,9 +1,17 @@
-"""Fabricate isolated repositories for coverage_suites.py controls."""
+"""Fabricate isolated repositories for the two suite launchers' controls.
+
+The runners themselves and the helpers a control needs to read what a
+launcher did are both here rather than in either suite: `tests/` forbids a
+suite importing another suite, so a helper both of them want has to live
+in a module under `tests/` that is not one.
+"""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import _util
@@ -34,6 +42,71 @@ _FAKE_COVERAGE_INIT = """def process_startup(**_kwargs):
 
 
 SYNTHETIC_PROCESS_START = 'fabricated coverage startup'
+
+# The whole timeout record, not a prefix of it. A pin that stops before
+# the suite name is satisfied by a sibling occurrence the launcher printed
+# for any suite, so a control that wants the name must match the line: the
+# name has to sit where the record puts it, or it is not in the record.
+# The two numbers are the ones a reader cannot know in advance, and each
+# is required to be a number rather than anything at all.
+RECORD = re.compile(
+    r'SUITE TIMED OUT after (?P<bound>\S+) s '
+    r'\(returncode (?P<returncode>-?\d+)\) in (?P<name>\S+?); '
+    r'(?P<cleanup>[^\n]*); its last lines are above\n')
+
+
+def records(text):
+    """Every timeout record in `text`, parsed whole."""
+    return list(RECORD.finditer(text))
+
+
+def coverage_group(stdout, name):
+    """The block the coverage launcher printed for `name`."""
+    start = stdout.index(f'::group::tests/{name}\n')
+    end = stdout.index('::endgroup::\n', start)
+    return stdout[start:end]
+
+
+def kill_recorded(path):
+    """SIGKILL a pid a planted suite wrote down, so a red control leaks none.
+
+    The fixture's own outer bound is `subprocess.run(timeout=...)` on the
+    launcher's pid, and it kills that pid and nothing else -- each suite
+    is in a session of its own, which is what lets the launcher's kill
+    reach the tree and also what puts the suite out of the outer bound's
+    reach. So a control that goes red before the launcher ended its suite
+    leaves that suite running, and this is the other half of the contract.
+    """
+    try:
+        pid = int(path.read_text(encoding='ascii'))
+    except (OSError, ValueError):
+        return
+    try:
+        os.kill(pid, 9)
+    except OSError:
+        return
+
+
+def pid_alive(pid):
+    """Whether this host can still signal `pid`.
+
+    Signal 0 is the POSIX probe and has no meaning on Windows, where
+    `os.kill(pid, 0)` is a request to terminate with exit code 0 -- a
+    probe that killed what it measured would report a survivor gone.
+    """
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def settle_gone(pid, seconds):
+    """Wait out a kill's own settling, on a deadline, not a margin."""
+    deadline = time.monotonic() + seconds
+    while pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return not pid_alive(pid)
 
 
 def _launch_failure_site(unlaunchable):
@@ -69,12 +142,24 @@ subprocess.Popen = Popen
 def _suite_bound_site(bound):
     """Rewrite the one definition of the per-suite bound, in the child.
 
-    The launcher resolves the bound when it launches, so setting the
-    constant the module publishes is what a control that shrinks the real
-    default must do: a parameter default captured at `def` time would not
-    see it, and the control would go green against an unbounded launcher.
+    The launcher reads the bound when it starts, so setting the constant
+    the module publishes is what a control that shrinks the real default
+    must do: a value captured when the module was written would not see
+    it, and the control would go green against an unbounded launcher.
+
+    It patches the FLAT name, under this tree's own `scripts/ci`, because
+    that is the module the launcher binds: the fixture runs it by path,
+    so `sys.path[0]` is `scripts/ci` and `scripts.ci.suite_bound` is not
+    what it imports. `site` reads the path the interpreter has built
+    before it imports one, and a script's own directory is put on the
+    path after that, so the directory is inserted here rather than left
+    to the launch.
     """
-    return ('import scripts.ci.suite_bound as _suite_bound\n'
+    return ('import sys\n'
+            'from pathlib import Path\n'
+            '_tree = Path(__file__).resolve().parent\n'
+            "sys.path.insert(0, str(_tree / 'scripts' / 'ci'))\n"
+            'import suite_bound as _suite_bound\n'
             f'_suite_bound.DEFAULT_SUITE_TIMEOUT_S = {bound!r}\n')
 
 
@@ -88,16 +173,28 @@ os.cpu_count = lambda: {cpu_count}
 def coverage_tree(
         tmp, suites, unlaunchable=(), cpu_count=None, args=(),
         real_coverage=False, suite_bound=None, outer_timeout=120,
-        timeout_env=None):
+        timeout_env=None, tree_on_path=True):
     """Copy the runner over fabricated suites and execute it there.
 
     `suite_bound` rewrites the one per-suite bound the copied launcher
-    resolves at launch time, which is how a control shrinks the real
-    default instead of carrying a second number of its own. `outer_timeout`
-    is THIS fixture's limit on the launcher, independent of the bound the
+    reads at startup, which is how a control shrinks the real default
+    instead of carrying a second number of its own. `outer_timeout` is
+    THIS fixture's limit on the launcher, independent of the bound the
     launcher itself applies: without one, a launcher that never ends its
     wedged suite reproduces the hang the control exists to catch, and the
-    control's own verdict never arrives.
+    control's own verdict never arrives. What that produces is a
+    `TimeoutExpired` naming the launcher, which is red and named and not
+    an absence of findings -- a control that reports "the bound did not
+    hold" instead has to look elsewhere.
+
+    `tree_on_path` is the import path the launcher resolves its shared
+    bound over. Left on, the tree goes on `PYTHONPATH` and the package
+    spelling wins, which is what every other control here measures.
+    Turned off, the tree is on no path at all -- the shape a workflow step
+    has, which runs the file by path with only `scripts/ci` importable.
+    A control that wants the workflow's spelling turns it off and drives
+    the bound through `timeout_env` instead of through the constant,
+    because the patch that sets the constant names the package.
     """
     root = Path(tmp) / 'tree'
     (root / 'scripts' / 'ci').mkdir(parents=True, exist_ok=True)
@@ -124,16 +221,23 @@ def coverage_tree(
         env['COVERAGE_PROCESS_START'] = SYNTHETIC_PROCESS_START
     env['COVERAGE_FILE'] = str(root / '.coverage')
     env['PYTHONDONTWRITEBYTECODE'] = '1'
-    inherited_path = env.get('PYTHONPATH')
-    env['PYTHONPATH'] = str(root)
-    if inherited_path:
-        env['PYTHONPATH'] += os.pathsep + inherited_path
+    if tree_on_path:
+        inherited_path = env.get('PYTHONPATH')
+        env['PYTHONPATH'] = str(root)
+        if inherited_path:
+            env['PYTHONPATH'] += os.pathsep + inherited_path
+    else:
+        env.pop('PYTHONPATH', None)
     sitecustomize = ''
     if unlaunchable:
         sitecustomize += _launch_failure_site(unlaunchable)
     if cpu_count is not None:
         sitecustomize += _cpu_count_site(cpu_count)
     if suite_bound is not None:
+        assert tree_on_path, (
+            'the constant is patched under its package name, which needs '
+            'the tree on the path; drive the bound through timeout_env '
+            'instead when the tree is off it')
         sitecustomize += _suite_bound_site(suite_bound)
     if sitecustomize:
         (root / 'sitecustomize.py').write_text(
