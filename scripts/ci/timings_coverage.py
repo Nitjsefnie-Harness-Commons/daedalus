@@ -47,11 +47,7 @@ summary and publishes; `MAX_ESTIMATED_SUITE_SHARE` (a third) refuses.
 THE TIER IS A CONSEQUENCE, NOT A COMPROMISE. An unmeasured suite is
 priced at the recorded MEDIAN, so what a share costs depends on HOW the
 file came to be missing those suites, and there are two ways with very
-different prices. Every number in this docstring is a figure of the
-SHIPPED FILE'S OWN RECORDED SET, which is a committed artifact and
-cannot move under a merge; a figure of a TREE is not quoted here at
-all, because a merge moves it and a stale one in a comment rots
-unwatched. The shipped weights total 356.4 reference multiples, with a
+different prices. The shipped weights total 356.4 reference multiples, with a
 recorded mean of 1.087 against a median of 0.2118: a ratio of 5.13, and
 that ratio is the third condition's whole subject.
 
@@ -82,9 +78,7 @@ exists at all.
 The note is a tenth because that is roughly where the BIASED shape's plan
 is out by 2x, and 2x is the tolerance the plan's purpose sets: the
 cell count is `ceil(total / target)`, so a total out by 2x is a matrix
-carrying half the parallelism the tree needs. The shipped file's own
-estimated share is below the note tier, so the note is silent for it
-today, which is the point.
+carrying half the parallelism the tree needs.
 
 The refusal is a third, and it is DERIVED rather than chosen: with `m`
 recorded weights summing `S` at median `e`, at least `floor(m/2)` of them
@@ -102,8 +96,7 @@ WHAT THE FUSE IS NOW, AND WHAT IT COSTS. The refresher is a daily cron at
 06:38 UTC, so a missed run is not a hypothetical, and this tree grows at
 `SUITES_PER_DAY` a day -- a measured RANGE, because the rate is not a
 constant (see the constant). Against a 328-suite recorded set the note
-reaches at 37 arrivals and the refusal at 165, which is 1.2 to 4.6 days
-and 5.5 to 20.6 days at the measured rate. At the bound this module
+reaches at 37 arrivals and the refusal at 165. At the bound this module
 carried before, one missed refresh put the file over a tenth and REFUSED
 it, and a refusal here is `Plan the matrix` exiting 1 in
 `.github/workflows/tests.yml`: no pull request could create a matrix at
@@ -113,7 +106,7 @@ would have been a repo-wide CI outage.
 The band above `MIN_RECORDED_SKEW` is the price of the tier and the
 price is real: the skew floor is the one condition that tells a BIASED
 recorded set from a DRIFTED one, so a biased file still above it is
-PUBLISHED with its plan lopsided rather than refused -- a priced
+PUBLISHED with a plan up to several times the tree's load -- a priced
 acceptance rather than an oversight, because every suite in that plan
 still runs and a lopsided matrix and no matrix are not comparable
 outcomes -- ruled by the maintainer, and `python3
