@@ -105,52 +105,52 @@ SECONDARY_CONTROLLED = {
 # `tests/test_launch_arms.py` re-derives it and refuses a non-member
 # this tuple does not name.
 MARKER_NON_MEMBERS = (
-    ('_launch_audit.py', 53, 'CONTROLLED',
+    ('_launch_audit.py', 52, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
     ('_stdlib_read.py', 45, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
-    ('_launch_audit.py', 79, 'INERT',
+    ('_launch_audit.py', 77, 'INERT',
      "normalize returning its own argument; callers only test it"),
-    ('_launch_audit.py', 88, 'INERT',
+    ('_launch_audit.py', 86, 'INERT',
      "callee_of's `or None`; deleting its last statement returns "
      'the same value'),
-    ('_launch_audit.py', 195, 'MERGED',
+    ('_launch_audit.py', 193, 'MERGED',
      'the ast.Import chain head; every member is listed, at :197 '
      'imp.subprocess-alias, :202 imp.machinery, :204 imp.dotted and '
      ':208 imp.plain'),
-    ('_launch_audit.py', 230, 'CONTROLLED',
+    ('_launch_audit.py', 228, 'CONTROLLED',
      'a-from-import-of-an-excluded-root-member-is-refused'),
-    ('_launch_audit.py', 209, 'MERGED',
+    ('_launch_audit.py', 207, 'MERGED',
      'the ast.ImportFrom chain head; every member is listed, at :210 '
      'imp.from-subprocess, :218 imp.from-partial and :221 '
      'imp.from-import-module, and its else branch is inside its span'),
-    ('_launch_audit.py', 292, 'CONTROLLED',
+    ('_launch_audit.py', 290, 'CONTROLLED',
      'parameter-shadows-a-module-import-is-unproved'),
-    ('_launch_audit.py', 295, 'CONTROLLED',
+    ('_launch_audit.py', 293, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
-    ('_launch_audit.py', 338, 'CONTROLLED',
+    ('_launch_audit.py', 336, 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
-    ('_launch_audit.py', 397, 'CONTROLLED',
+    ('_launch_audit.py', 395, 'CONTROLLED',
      'call-func-receiver-is-unresolved'),
-    ('_launch_audit.py', 406, 'MERGED',
-     'the head of a one-member chain; :408 ch.machinery-member is its '
+    ('_launch_audit.py', 404, 'MERGED',
+     'the head of a one-member chain; :406 ch.machinery-member is its '
      'only member and is listed'),
-    ('_launch_audit.py', 594, 'INERT',
+    ('_launch_audit.py', 592, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 613, 'CONTROLLED',
+    ('_launch_audit.py', 611, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 680, 'CONTROLLED',
+    ('_launch_audit.py', 678, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 697, 'CONTROLLED',
+    ('_launch_audit.py', 695, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     # The chain limb stays in the analyser and is recorded here rather
     # than in the enumeration for the reason above; the root predicate
     # it reads moved to `_stdlib_read.py` with the rest of the standard
     # library the analyser reads, and its clauses are named beside it.
-    ('_launch_audit.py', 525, 'CONTROLLED',
+    ('_launch_audit.py', 523, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 527, 'CONTROLLED',
+    ('_launch_audit.py', 525, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_stdlib_read.py', 56, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
@@ -223,7 +223,7 @@ ARM_NOTES = {
 # asked about the RECEIVER of the bounded call, `origin` about the
 # top-level base of the callee of the value that receiver is bound
 # to. So the `placed` bound `pf.in-bound` cites cannot decide it --
-# :422 places a call whose receiver is a name in `bound` and never
+# :420 places a call whose receiver is a name in `bound` and never
 # looks at what that name holds. The only name satisfying both
 # `origin in safe_names` and `origin in bound` here is `subprocess`:
 # the plain import puts it in `safe_names` (:207-209) and rebinding

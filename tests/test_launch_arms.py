@@ -255,9 +255,10 @@ def test_every_arm_is_uniquely_addressed(tmp):
     shared = sorted(where for where, cuts in on_one_line.items()
                     if len(cuts) > 1)
     assert shared == [('_launch_audit.py', 546),
-                   ('_launch_audit.py', 568)], (
-        'the same-line pairs the table carries, each two operands of one '
-        f'disjunction; a new one is a decision, not an accident: {shared}')
+                      ('_launch_audit.py', 568)], (
+        'the same-line pairs the table carries, each two operands of '
+        'one disjunction; a new one is a decision, not an accident: '
+        f'{shared}')
 
 
 def test_every_arm_the_text_cannot_pin_is_settled_by_deleting_it(tmp):
