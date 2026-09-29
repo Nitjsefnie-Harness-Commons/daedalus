@@ -538,7 +538,9 @@ class _ModuleJudgement:
         self.violations = []
         self.shared = reach is not None
         self.tree = tree
-        self.scopes = self._scopes(tree, set(self.helpers.values()), reach)
+        self.scopes = self._scopes(
+            tree, {id(function) for function in self.helpers.values()},
+            reach)
 
     def _imported(self, node):
         if not isinstance(node.func, ast.Name):
@@ -549,26 +551,37 @@ class _ModuleJudgement:
     def _scopes(tree, helper_nodes, reach):
         """The scopes of this module that are judged.
 
-        The local contract judges the module itself — so every function's
-        signature is judged with the module's own names — and every nested
-        scope beside it. An imported helper's module belongs to that
-        module, so its top-level statements are not judged; what the
-        imported call reaches is, and that includes the nested scopes
-        inside a reached function, or the two forms would diverge with the
-        imported one weaker.
+        One rule, over the roots rather than over a kind of root: every
+        scope inside a root is judged, whatever the root is. A root is
+        the module itself for a local judgement, and each reached
+        top-level scope for an imported one — so a reached class is
+        judged with its methods and its nested classes the same way a
+        reached function is judged with its nested `def`, and a kind of
+        reached scope added later cannot arrive without its regions.
+
+        The only exclusion is `helper_nodes`: a reached function's own
+        body is judged by the seeding loop, not twice.
         """
-        if reach is None:
-            return [tree] + [node for node in ast.walk(tree)
-                             if isinstance(node, _SCOPES[1:])
-                             and node not in helper_nodes]
-        return ([node for node in tree.body
-                 if isinstance(node, ast.ClassDef) and node.name in reach]
-                + [node for function in tree.body
-                   if isinstance(function, (ast.FunctionDef,
-                                            ast.AsyncFunctionDef))
-                   and function.name in reach
-                   for node in ast.walk(function)
-                   if isinstance(node, _SCOPES[1:]) and node is not function])
+        roots = ([tree] if reach is None else
+                 [node for node in tree.body
+                  if isinstance(node, _SCOPES) and node.name in reach])
+        return [node for root in roots
+                for node in ast.walk(root)
+                if isinstance(node, _SCOPES) and id(node) not in helper_nodes]
+
+    def judge_helper(self, name, seeding):
+        """Everything one reached helper owes: its body and its signature.
+
+        The single per-helper entry, and both the ordered path and the
+        cyclic fallback come through it. A signature is a region of the
+        definition rather than of the body, and it is listed here rather
+        than judged from the loop that orders the bodies — which is what
+        a helper the loop cannot order was silently skipping.
+        """
+        function = self.helpers[name]
+        self.judge(function, seeding)
+        if self.shared:
+            self._judge_signature(function)
 
     def _judge_signature(self, function):
         """The expressions a reached function's own signature evaluates.
@@ -660,15 +673,17 @@ class _ModuleJudgement:
         while pending:
             ready = [name for name in pending if callers[name] <= judged]
             if not ready:
-                for function in pending.values():
-                    self.judge(function, None)
+                # A cycle, or a helper no caller reaches: judged
+                # unseeded, and through the same entry as the ordered
+                # path, so a region the ordered path judges is not
+                # missing here.
+                for name in sorted(pending):
+                    self.judge_helper(name, None)
                 break
             for name in ready:
-                function = pending.pop(name)
-                self.judge(function, self.seedings.get(name))
-                if self.shared:
-                    self._judge_signature(function)
-                judged.add(function)
+                pending.pop(name)
+                self.judge_helper(name, self.seedings.get(name))
+                judged.add(self.helpers[name])
         for name in sorted(self.seedings):
             if name not in self.helpers:
                 self._judge_imported(name, self.seedings[name])
