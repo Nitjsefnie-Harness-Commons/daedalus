@@ -250,7 +250,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(node, ast.Lambda):
             defaults = argument_defaults(node.args)
             for default in defaults:
-                current_pairs = check_expression(default, current_pairs)
+                current_pairs = check_store(default, current_pairs)
             if defaults: check_expression(node.body, [callable_state(
                 node, callable_pairs(current_pairs), annotations_eager)])
             for state in current_pairs:
@@ -419,7 +419,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if pairs: fallback = _copy_state_pair(pairs[0])
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for value in definition_values(statement, annotations_eager):
-                pairs = check_expression(value, pairs)
+                pairs = check_store(value, pairs)
             defining = pairs or ([fallback] if fallback is not None else [])
             local_names, global_names, _ = lexical_scope_names(
                 statement, annotations_eager)
