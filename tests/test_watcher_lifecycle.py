@@ -78,6 +78,28 @@ def _aggregator(tmp, fake):
                    '--debounce', '1', '--max-hold', '5'], fake.env())
 
 
+def _still_watching(parent):
+    """The aggregator up at the moment the test signals it.
+
+    A signal naming a process that has already gone does nothing, and by
+    then the aggregator's own death has taken both watchers with it -
+    through the watchdog, not this test's signal - so `await_gone` returns
+    at once and the case passes without ever running its subject. The
+    subject is not "the children were alive at the reading"; it is "this
+    test's signal is what ended them".
+
+    The gap between this check and the signal is the irreducible one: it is
+    the width of one check, not the width of the test, and no precondition
+    read can close it - a read is a sample, and a sample cannot be
+    simultaneous with the thing it is about. What closing the gap buys is
+    that anything landing in it is a red naming the aggregator rather than
+    a pass that proved nothing.
+    """
+    assert parent.alive(), (
+        f'the aggregator to still be watching when the test signals it '
+        f'(exit {parent.proc.returncode}):\n{parent.captured()}')
+
+
 def _held_at_the_reading(fake, parent):
     """Both watchers named, both inside a held call, aggregator still up.
 
@@ -110,6 +132,7 @@ def test_the_children_die_with_their_parent(tmp):
     try:
         pids = _held_at_the_reading(fake, parent)
         assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
+        _still_watching(parent)
         parent.proc.kill()
         parent.proc.wait(timeout=60)
         waits.await_gone(pids, parent, f'children {pids} to die with the '
@@ -127,6 +150,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
     try:
         pids = _held_at_the_reading(fake, parent)
         assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
+        _still_watching(parent)
         if sys.platform.startswith('win'):
             parent.proc.send_signal(
                 getattr(signal, 'CTRL_BREAK_EVENT'))
