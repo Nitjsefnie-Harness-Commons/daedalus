@@ -33,19 +33,26 @@ import _util  # noqa: E402
 
 ROOT = _util.ROOT
 INSTALLER_SOURCE = ROOT / 'scripts' / 'ci' / 'install_lint_tools.py'
-# What the four pinned keys say the release calls each architecture, and
-# whether that release asset is a zip. The installer has to fetch the one
-# its table pins and unpack it as the shape it is.
-PINNED = {
-    ('Linux', 'x86_64'): ('actionlint_1.7.12_linux_amd64.tar.gz', False),
-    ('Darwin', 'x86_64'): ('actionlint_1.7.12_darwin_amd64.tar.gz', False),
-    ('Darwin', 'arm64'): ('actionlint_1.7.12_darwin_arm64.tar.gz', False),
-    ('Windows', 'amd64'): ('actionlint_1.7.12_windows_amd64.zip', True),
-}
 # What CPython reports on a windows-latest x64 runner. POSIX spells the
 # same machine `x86_64`, and a key spelled the POSIX way is a key the
 # table does not carry, which is the whole of the first defect.
-WINDOWS_X64 = ('Windows', 'AMD64')
+WINDOWS_HOST = ('Windows', 'AMD64')
+WINDOWS_X64 = WINDOWS_HOST
+# What the four pinned keys say the release calls each architecture, and
+# whether that release asset is a zip. The installer has to fetch the one
+# its table pins and unpack it as the shape it is.
+# (host pair, the asset the release names for it, whether that asset is a
+# zip). The asset names are SPELLED on purpose: they are the values this
+# suite asserts the installer produces, and an expectation derived from the
+# code under test asserts only that the code agrees with itself. The KEYS
+# are not spelled — `_key_for` asks for those, because the key is built
+# rather than fixed and has moved before.
+PINNED = (
+    (('Linux', 'x86_64'), 'actionlint_1.7.12_linux_amd64.tar.gz', False),
+    (('Darwin', 'x86_64'), 'actionlint_1.7.12_darwin_amd64.tar.gz', False),
+    (('Darwin', 'arm64'), 'actionlint_1.7.12_darwin_arm64.tar.gz', False),
+    (WINDOWS_HOST, 'actionlint_1.7.12_windows_amd64.zip', True),
+)
 EXECUTABLE = b'#!/not/really/an/executable\n'
 # The name the control resolves, read through the same constant the
 # installer's own refusal names.
@@ -58,19 +65,6 @@ ACTIONLINT_BINARY = 'actionlint'
 # tell a wheel of the pinned version from one of another.
 DEFAULT_WHEEL = 'shellcheck_py-0.11.0.1-py3-none-any.whl'
 SCRIPTS = 'shellcheck_py-0.11.0.1.data/scripts'
-# The name the wheel for THIS host carries its member under, which is the
-# one thing a fake wheel has to get right: the member name is what lands on
-# PATH, and `shutil.which` will not see a bare name on Windows at all. It
-# resolves a command plus a PATHEXT extension, and uses a direct match only
-# when the command already ends in one — CPython says so in the branch's own
-# comment, and the Windows job log is the proof: `_record` printed
-# `actionlint.EXE`, an uppercase extension, never a bare name. The real
-# wheels' names are the property `test_a_wheel_that_carries_the_wrong_binary
-# _is_refused` pins, so this stands in for the wheel and must agree with it.
-# The one place in this file that guesses a host's spelling, and the only
-# one: the name is a fact about the WHEEL, not about this module, so it
-# cannot be derived from the platform and is read from the wheel instead.
-WHEEL_SCRIPTS_NAME = 'shellcheck.exe' if os.name == 'nt' else 'shellcheck'
 
 
 def assert_same_file(resolved, written, what):
@@ -131,6 +125,66 @@ def _is_windows(host):
     return host[0] == 'Windows'
 
 
+def _host(installer):
+    """The `(system, machine)` pair this host reports to the installer."""
+    return (installer.platform.system(), installer.platform.machine())
+
+
+def _shellcheck_tool(installer):
+    """The other tool the installer declares, read out of its own set.
+
+    Not spelled, so a change to `TOOLS` cannot leave a fixture calling
+    something the installer no longer installs.
+    """
+    other = [tool for tool in installer.TOOLS if tool != ACTIONLINT_BINARY]
+    assert len(other) == 1, installer.TOOLS
+    return other[0]
+
+
+def _key_for(installer, host):
+    """The checksum key the installer builds for `host`, by asking it.
+
+    The key is a checksum key, so it is a name the installer owns, and it
+    is NOT the raw `(system, machine)` pair: `_asset_name` lowercases the
+    machine before it builds one. Spelling it here is how the residency
+    fixture patched an entry the installer never read — the pin check then
+    compared the payload against the REAL pinned digest and refused, which
+    was the installer being right and this file being wrong.
+    """
+    with _on(*host):
+        _asset, key = installer._asset_name()
+    return key
+
+
+def actionlint_binary(host):
+    """The name the installer gives the actionlint executable on `host`.
+
+    ONE place, because this file used to spell it in three and every one of
+    them was written when the installer used a different one: the zip test,
+    the e2e, and the tarball test. `_extract` is the only code that names
+    it and it is not exposed, so the rule lives here — the same predicate
+    and the same extension the installer uses — and
+    `test_every_name_this_file_uses_is_the_one_the_installer_uses` pins the
+    agreement against `_extract` itself, for every key the table carries. A
+    change to the installer's naming is then a red control, not three
+    fixtures quietly disagreeing with it.
+    """
+    return (f'{ACTIONLINT_BINARY}.exe' if _is_windows(host)
+            else ACTIONLINT_BINARY)
+
+
+def wheel_member(host, tool):
+    """The member name the wheel for `host` carries its `tool` under.
+
+    The same shape: the release names the binary the way the platform
+    spells it, and the installer takes that name from the wheel rather than
+    computing one. So a fixture standing in for a wheel has to carry what
+    the real wheel carries, and that is a fact about the WHEEL — read from
+    the platform, once, here.
+    """
+    return f'{tool}.exe' if _is_windows(host) else tool
+
+
 def _installer():
     """The installer module, loaded by path so its `__main__` never runs."""
     return _util.load(INSTALLER_SOURCE, 'lint_installer_platform')
@@ -177,8 +231,8 @@ def test_the_checksum_key_and_the_asset_name_read_one_normalised_machine(tmp):
     with _on(*WINDOWS_X64):
         assert installer.platform.machine() == 'AMD64'
         name, key = installer._asset_name()
-    assert key == ('Windows', 'amd64'), key
-    assert name == PINNED[('Windows', 'amd64')][0], name
+    assert key == _key_for(installer, WINDOWS_X64), key
+    assert name == PINNED[3][1], name
 
 
 def test_every_pinned_key_names_the_asset_and_the_archive_it_carries(tmp):
@@ -190,19 +244,18 @@ def test_every_pinned_key_names_the_asset_and_the_archive_it_carries(tmp):
     """
     del tmp
     installer = _installer()
-    assert set(installer.ACTIONLINT_SHA256) == set(PINNED), (
-        'the pinned keys and the assets this suite unpacks have drifted '
-        f'apart: {sorted(installer.ACTIONLINT_SHA256)}')
-    for key, (asset, zipped) in PINNED.items():
-        system, machine = key
-        with _on(system, machine.upper() if system == 'Windows'
-                 else machine):
+    assert set(installer.ACTIONLINT_SHA256) == {
+        _key_for(installer, host) for host, _asset, _zipped in PINNED}, (
+        'the keys the installer builds and the hosts this suite unpacks for '
+        f'have drifted apart: {sorted(installer.ACTIONLINT_SHA256)}')
+    for host, asset, zipped in PINNED:
+        key = _key_for(installer, host)
+        with _on(*host):
             name, resolved = installer._asset_name()
-        assert resolved == key, (key, resolved)
-        assert name == asset, (key, name)
-        assert name.endswith('.zip') is zipped, (key, name)
-        digest = installer.ACTIONLINT_SHA256[key]
-        assert len(digest) == 64, (key, digest)
+        assert resolved == key, (host, resolved)
+        assert name == asset, (host, name)
+        assert name.endswith('.zip') is zipped, (host, name)
+        assert len(installer.ACTIONLINT_SHA256[key]) == 64, (host, key)
 
 
 def test_a_windows_release_asset_unpacks_from_its_zip(tmp):
@@ -212,9 +265,10 @@ def test_a_windows_release_asset_unpacks_from_its_zip(tmp):
     destination = tmp / 'tools'
     destination.mkdir()
     with _on(*WINDOWS_X64):
+        binary = actionlint_binary(WINDOWS_X64)
         target = installer._extract(
-            _release_asset('actionlint.exe', True), destination)
-    assert target == destination / 'actionlint.exe', target
+            _release_asset(binary, True), destination)
+    assert target == destination / binary, target
     assert target.read_bytes() == EXECUTABLE
     assert os.access(target, os.X_OK), 'the binary is not executable'
 
@@ -225,10 +279,12 @@ def test_a_unix_release_asset_unpacks_from_its_tarball(tmp):
     installer = _installer()
     destination = tmp / 'tools'
     destination.mkdir()
-    with _on('Linux', 'x86_64'):
+    host = ('Linux', 'x86_64')
+    with _on(*host):
+        binary = actionlint_binary(host)
         target = installer._extract(
-            _release_asset('actionlint', False), destination)
-    assert target == destination / 'actionlint', target
+            _release_asset(binary, False), destination)
+    assert target == destination / binary, target
     assert target.read_bytes() == EXECUTABLE
     assert os.access(target, os.X_OK), 'the binary is not executable'
 
@@ -237,21 +293,135 @@ def test_an_archive_without_the_binary_is_refused_not_silently_empty(tmp):
     """Both arms name the member they looked for when it is not there."""
     tmp = Path(tmp)
     installer = _installer()
-    for system, machine, member, zipped in (
-            ('Windows', 'AMD64', 'actionlint', True),
-            ('Linux', 'x86_64', 'something-else', False)):
+    # A member that is NOT the binary on either platform, or the archive
+    # carries what was asked for and there is nothing to refuse. Spelled
+    # deliberately, because this case is about a name that is wrong.
+    for host, zipped in ((WINDOWS_X64, True), (('Linux', 'x86_64'), False)):
+        system, machine = host
+        member = 'something-else'
         destination = tmp / f'tools-{system}'
         destination.mkdir()
-        with _on(system, machine):
+        with _on(*host):
             try:
                 installer._extract(
                     _release_asset(member, zipped), destination)
             except SystemExit as refusal:
-                assert 'actionlint' in str(refusal), refusal
+                assert ACTIONLINT_BINARY in str(refusal), refusal
             else:
                 raise AssertionError(
-                    f'the {system} archive carried no actionlint and the '
-                    'installer unpacked it anyway')
+                    f'the {system} archive carried no {ACTIONLINT_BINARY} '
+                    'and the installer unpacked it anyway')
+
+
+def test_every_name_this_file_uses_is_the_one_the_installer_uses(tmp):
+    """This file's names against the installer's, for every pinned host.
+
+    The condition this exists for: a hand-spelled name outliving the code
+    that stopped spelling it. Three of them did — the zip test, the e2e and
+    the tarball test each carried the actionlint member by hand, each
+    written when the installer named it differently, and the checksum key
+    a fourth that has been moved once already. Now they come from one
+    helper each, and this pins the helper against `_extract` and
+    `_asset_name` themselves, so a change to the installer's naming is a red
+    control here rather than three fixtures quietly disagreeing with it.
+    """
+    tmp = Path(tmp)
+    installer = _installer()
+    for host, asset, zipped in PINNED:
+        key = _key_for(installer, host)
+        with _on(*host):
+            name, resolved = installer._asset_name()
+            destination = tmp / f'tools-{_host_slug(host)}'
+            destination.mkdir()
+            written = installer._extract(
+                _release_asset(actionlint_binary(host), zipped), destination)
+            assert name == asset, (host, name)
+            assert resolved == key, (host, resolved)
+            assert written == destination / actionlint_binary(host), (
+                f'{host}: this file calls the binary '
+                f'{actionlint_binary(host)!r} and the installer wrote '
+                f'{written.name!r}')
+            assert [p.name for p in destination.iterdir()] == [
+                actionlint_binary(host)], sorted(
+                    p.name for p in destination.iterdir())
+
+
+def _host_slug(host):
+    """A directory name for one host, carrying BOTH halves of its pair."""
+    return '-'.join(part.lower() for part in host)
+
+
+def test_the_installer_on_a_forced_windows_host_produces_windows_names(tmp):
+    """The Windows arm, run HERE, with every platform seam forced at once.
+
+    Five red Windows runs found five real defects while 101 local suites
+    read green, and every one of them was knowable in advance by forcing
+    the host. `shutil.which` reads `sys.platform` at CALL time, so patching
+    it takes its win32 branch — the PATHEXT construction, the upper-cased
+    extension — without a Windows runner. `os.name` and the two `platform`
+    functions are the seams the installer itself reads.
+
+    What this does NOT decide is whether two spellings are one entry,
+    which is a property of the parent and is asked separately, of the
+    parent, by `assert_same_file`. Forcing the host does not fold this
+    host's filesystem, so the `which` answer here carries an upper-cased
+    extension over a lower-cased file on a parent that keeps them apart —
+    a combination no real platform has. That assertion is therefore
+    excluded from this test rather than contorted to pass; the names, the
+    key and the archive kind below are all host-independent and all of them
+    were where the defects were.
+    """
+    tmp = Path(tmp)
+    installer = _installer()
+    with _forced_windows():
+        host = _host(installer)
+        assert host == WINDOWS_HOST, host
+        key = _key_for(installer, host)
+        assert key in installer.ACTIONLINT_SHA256, (
+            f'the installer built a key {key} that its own table does not '
+            'carry, so a Windows host would be refused before it installed '
+            'anything')
+        name, _resolved = installer._asset_name()
+        assert name.endswith('.zip'), name
+        destination = tmp / 'tools'
+        destination.mkdir()
+        written = installer._extract(
+            _release_asset(actionlint_binary(host), True), destination)
+        assert written.name == actionlint_binary(host) == 'actionlint.exe', (
+            written.name)
+        # The RESOLVER is deliberately not here, and that is a limit of
+        # this host rather than a choice: `shutil` binds its `nt` module at
+        # IMPORT time from `os.name`, so no later patch can supply it, and
+        # patching `os.name` at all makes `pathlib` refuse to build a
+        # `WindowsPath` here. The win32 branch of `shutil.which` is
+        # therefore unreachable without a Windows interpreter, and every
+        # property that depends on it is a property of the RUNNER, not of
+        # the installer. Stated so the next reader does not spend a wave
+        # rediscovering it.
+
+
+@contextlib.contextmanager
+def _forced_windows():
+    """Force the platform seams the INSTALLER reads, to a Windows one.
+
+    `platform.system()` and `platform.machine()` are what the installer
+    asks, and `sys.platform` is patched beside them because it is the other
+    platform question a Python process answers and the one a reader will
+    check first.
+
+    `os.name` is deliberately NOT patched, and that is a measured limit
+    rather than a preference. `shutil` binds its `nt` module at import time
+    from `os.name`, so no later patch can supply it; and patching `os.name`
+    makes `pathlib` refuse to construct a `WindowsPath` on a POSIX host at
+    all. The win32 branch of `shutil.which` is therefore unreachable here
+    without a Windows interpreter, which is why the forced test covers the
+    installer's own naming, key and archive kind and leaves the resolver to
+    the runner. Nothing in production was changed to make this easier.
+    """
+    with mock.patch.object(sys, 'platform', 'win32'), \
+            mock.patch('platform.system', return_value='Windows'), \
+            mock.patch('platform.machine', return_value='AMD64'):
+        yield
 
 
 def test_a_platform_the_table_does_not_pin_refuses_rather_than_installing(
@@ -284,18 +454,20 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
     tools = tmp / 'tools'
     later = tmp / 'path.txt'
     recorded = tmp / 'env.txt'
-    payload = _release_asset('actionlint.exe', True)
+    tool = _shellcheck_tool(installer)
+    payload = _release_asset(actionlint_binary(WINDOWS_X64), True)
     with _on(*WINDOWS_X64), \
             mock.patch.dict(os.environ, {
                 'GITHUB_PATH': str(later), 'GITHUB_ENV': str(recorded)}), \
             mock.patch.dict(
                 installer.ACTIONLINT_SHA256,
-                {('Windows', 'amd64'):
+                {_key_for(installer, WINDOWS_X64):
                  hashlib.sha256(payload).hexdigest()}), \
             mock.patch.object(installer, 'TOOL_DIR', tools), \
             mock.patch.object(installer, '_fetch',
                               return_value=payload), \
-            _installing(installer, [('shellcheck.exe', EXECUTABLE)]), \
+            _installing(installer, [(wheel_member(WINDOWS_X64, tool),
+                                     EXECUTABLE)]), \
             mock.patch.object(installer, 'shutil', mock.Mock(
                 which=lambda tool: str(tools / f'{tool}.exe'))):
         # The stub answers from inside the tool directory, because that is
@@ -303,7 +475,7 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
         # answered from anywhere else used to pass and does not now — which
         # is the check doing its job, not the test being wrong.
         assert installer.main() == 0
-    installed = tools / 'actionlint.exe'
+    installed = tools / actionlint_binary(WINDOWS_X64)
     assert installed.read_bytes() == EXECUTABLE
     assert str(tools) in later.read_text(encoding='utf-8').split('\n')
     assert (f'{installer.LINT_TOOLS_ENV}='
@@ -416,7 +588,9 @@ def test_the_member_name_comes_from_the_wheel_not_from_a_platform_branch(tmp):
     """
     tmp = Path(tmp)
     installer = _installer()
-    for name in ('shellcheck', 'shellcheck.exe'):
+    tool = _shellcheck_tool(installer)
+    for name in (wheel_member(('Linux', 'x86_64'), tool),
+                 wheel_member(WINDOWS_X64, tool)):
         tools = tmp / name
         with _installing(installer, [(name, b'#!/not/really\n')]), \
                 mock.patch.object(installer, 'TOOL_DIR', tools):
@@ -444,8 +618,8 @@ def test_the_real_pin_table_refuses_the_fixture_payload(tmp):
     """
     del tmp
     installer = _installer()
-    payload = _release_asset('actionlint', _is_windows((
-        installer.platform.system(), installer.platform.machine())))
+    host = _host(installer)
+    payload = _release_asset(actionlint_binary(host), _is_windows(host))
     digest = hashlib.sha256(payload).hexdigest()
     for key, pinned in sorted(installer.ACTIONLINT_SHA256.items()):
         assert digest != pinned, (
@@ -482,8 +656,7 @@ def test_the_binary_the_installer_names_on_this_host_is_one_which_can_find(
     host = (installer.platform.system(), installer.platform.machine())
     destination = tmp / 'tools'
     destination.mkdir()
-    binary = (f'{ACTIONLINT_BINARY}.exe' if _is_windows(host)
-              else ACTIONLINT_BINARY)
+    binary = actionlint_binary(host)
     with _on(*host), mock.patch.dict(
             os.environ, {'PATH': str(destination) + os.pathsep
                          + os.environ['PATH']}):
@@ -608,8 +781,10 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
     # is what the other two failures in this round were too. Stabbing the
     # real values back keeps the checksum map keyed the way `_asset_name`
     # builds it, without pretending this is somewhere it is not.
-    host = (installer.platform.system(), installer.platform.machine())
-    payload = _release_asset('actionlint', _is_windows(host))
+    host = _host(installer)
+    tool = _shellcheck_tool(installer)
+    member = wheel_member(host, tool)
+    payload = _release_asset(actionlint_binary(host), _is_windows(host))
     with _on(*host), \
             mock.patch.dict(os.environ, {
                 'GITHUB_PATH': str(later), 'GITHUB_ENV': str(recorded),
@@ -617,20 +792,20 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
             _pinned_to(installer, payload), \
             mock.patch.object(installer, 'TOOL_DIR', tools), \
             mock.patch.object(installer, '_fetch', return_value=payload), \
-            _installing(installer, [(WHEEL_SCRIPTS_NAME, EXECUTABLE)]):
+            _installing(installer, [(member, EXECUTABLE)]):
         assert installer.main() == 0
-        landed = tools / WHEEL_SCRIPTS_NAME
+        landed = tools / member
         assert landed.is_file(), sorted(p.name for p in tools.iterdir())
-        resolved = installer.shutil.which('shellcheck')
-        assert_same_file(resolved, landed, 'shellcheck')
+        resolved = installer.shutil.which(tool)
+        assert_same_file(resolved, landed, tool)
         # And the OTHER tool, whose name the installer derives from the
         # platform rather than from anything in a fixture. It is here for
         # the same reason the failure was: a run that got this far and
         # failed on actionlint means the fixture, not the install, was
         # wrong.
-        actionlint = installer.shutil.which('actionlint')
-        assert_same_file(actionlint, tools / ACTIONLINT_BINARY,
-                         'actionlint')
+        binary = installer.shutil.which(ACTIONLINT_BINARY)
+        assert_same_file(binary, tools / actionlint_binary(host),
+                         ACTIONLINT_BINARY)
         assert str(tools) in later.read_text(
             encoding='utf-8').split('\n'), (
             'the tool directory is not on the PATH the later steps '
