@@ -18,16 +18,17 @@ or absent header cannot hang or hot-loop a watcher - and resumes. The
 parent-death guarantee is the pipe's, below, and a thread rather than the
 poll loop's business.
 
-`paginate` is the GraphQL spelling of `--paginate`: it loops while any named
-connection reports another page and feeds each `endCursor` back as its own
-`after`, one `gh` invocation per page, so nothing is missed.
+`paginate` is the GraphQL spelling of `--paginate`: one `gh` invocation
+per page, following every `endCursor`, so nothing is missed.
 
-`checkRuns` is nested inside the paginated `checkSuites`, which `paginate`
-pages only at the OUTER level, so a suite carrying more than `PAGE_SIZE`
-check runs would be truncated at the bound, silently. One per job here.
-
-This file is AT the 500-line production ceiling, and the room was made by
-cutting prose: a generic client has no subject seam to relocate to.
+`checkRuns` nests inside the paginated `checkSuites`, which `paginate`
+pages at the OUTER level only, so over `PAGE_SIZE` per suite is
+truncated silently; one per job here. This file is AT the 500 ceiling,
+room made by cutting prose, which cannot be repeated. SEAM: transport,
+then the CI read (`checkSuites`, `ci_state` - the block branches keep
+changing), then process lifetime; moving the middle to a `gh_ci.py`
+lands the file near 400, NOT now: `test_watcher_budget.py`'s `_base_script`
+extracts ONE file per tree.
 
 `DAEDALUS_GH` overrides the executable, which is how the suites put a fake
 `gh` in front of a watcher where a bare `gh` name does not resolve.
@@ -67,9 +68,8 @@ STAMP = '%Y-%m-%dT%H:%M:%SZ'
 # The pipe's own name, not the bridge's: a process may run a bridge child
 # and a watcher child at once without the two watching each other.
 PARENT_WATCH_ENV = 'DAEDALUS_WATCH_PARENT_FD'
-# The set `ci_gate.ACCEPTABLE` judges published CHECK runs by, spelled
-# here because a suite extracts this module WITHOUT its siblings and
-# cannot import `ci_gate`; a control holds the two EQUAL.
+# What `ci_gate.ACCEPTABLE` judges published CHECK runs by, spelled
+# here because a suite extracts this module without its siblings.
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 
 RUNS_QUERY = f'''query WatchRuns(

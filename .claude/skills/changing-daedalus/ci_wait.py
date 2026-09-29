@@ -232,18 +232,18 @@ def verdict(runs, checks=(), *, required=REQUIRED_WORKFLOWS,
                  if run.get('conclusion') not in ACCEPTABLE]
     if offenders:
         return 'unacceptable', offenders
-    # A check run that has not concluded is a WAIT, exactly as a
-    # workflow run that has not concluded is, and the limb above is
-    # the reason both exist: a null conclusion is the absence of a
-    # verdict, not a red one, and the offender loop would print it
-    # verbatim as `name: None`.
+    offenders = ci_gate.red_published(checks, required=required_checks)
+    if offenders:
+        return 'unacceptable', offenders
+    # A required check that has NOT concluded is a WAIT, as a workflow
+    # run that has not concluded is: a null conclusion is the absence
+    # of a verdict, not a red one. It sits BELOW the limb above,
+    # because a red check beside a running one of the same name is a
+    # failure a guard answering first would never read.
     if any(check.get('status') != 'completed'
            for check in checks
            if check.get('name') in required_checks):
         return 'waiting', []
-    offenders = ci_gate.red_published(checks, required=required_checks)
-    if offenders:
-        return 'unacceptable', offenders
     if (ci_gate.missing_required(runs, required=required)
             or ci_gate.missing_published(checks, required=required_checks)):
         return 'incomplete', []
@@ -267,13 +267,14 @@ def _print_states(label, entries, out):
               f'{suffix}', file=out, flush=True)
 
 
-def _timeout_report(runs, timeout, sha, out, missing=None, grace=None,
-                    note=''):
+def _timeout_report(runs, checks, timeout, sha, out, missing=None,
+                    grace=None, note='', required_checks=PUBLISHED_CHECKS):
     """The exit-2 line about the runs the bound was reached with.
 
     `missing` is a wait the bound can end before the grace does, and it
     is its own line because every run in that state HAS concluded, so the
-    "still open:" report would name nothing.
+    "still open:" report would name nothing - which is also true of a
+    required check that has not concluded, so that is named too.
     """
     if not runs:
         print(f'wait exceeded {timeout}s on {sha[:12]}: no workflow '
@@ -285,11 +286,17 @@ def _timeout_report(runs, timeout, sha, out, missing=None, grace=None,
               'elapsed, so this head is not certified', file=out, flush=True)
         _print_note(note, out)
         return
-    open_runs = ', '.join(
-        f'{run.get("name")} ({run.get("status")})'
-        for run in runs if run.get('status') != 'completed')
+    # The same data the state was read from, in the same shape, so the
+    # line and the verdict cannot drift: a required CHECK that has not
+    # concluded is a third thing a bound expires on, with no run id.
+    open_entries = [f'{run.get("name")} ({run.get("status")})'
+                    for run in runs if run.get('status') != 'completed']
+    open_entries += [f'{check.get("name")} ({check.get("status")})'
+                     for check in checks
+                     if check.get('status') != 'completed'
+                     and check.get('name') in required_checks]
     print(f'wait exceeded {timeout}s on {sha[:12]}: still open: '
-          f'{open_runs}', file=out, flush=True)
+          f'{", ".join(open_entries)}', file=out, flush=True)
 
 
 def _blocked(pull_requests):
@@ -362,7 +369,8 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
                 print(f'wait exceeded {timeout}s on {sha[:12]}: still rate '
                       'limited, no verdict to report', file=out, flush=True)
             else:
-                _timeout_report(runs, timeout, sha, out, missing, grace, note)
+                _timeout_report(runs, checks, timeout, sha, out, missing,
+                                grace, note, required_checks)
             return 2
         state, offenders = verdict(runs, checks, required=required,
                                    required_checks=required_checks)
@@ -415,7 +423,8 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
                 return 4
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            _timeout_report(runs, timeout, sha, out, missing, grace, note)
+            _timeout_report(runs, checks, timeout, sha, out, missing,
+                            grace, note, required_checks)
             return 2
         watcher.sleep(max(0, min(interval, remaining)))
 

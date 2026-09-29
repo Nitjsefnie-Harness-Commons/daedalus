@@ -544,6 +544,58 @@ def test_an_unconcluded_check_is_a_wait_not_a_red_verdict(tmp):
         'acceptable', []), other
 
 
+def test_a_red_verdict_is_not_swallowed_by_a_running_one_of_its_name(tmp):
+    """Two check runs of ONE name, one red and one still running.
+
+    The status guard in `verdict` sits before the red-check limb, which is
+    right when the unconcluded check is alone and wrong here: the running
+    one answers `waiting` and the red one beside it is never read. A
+    publisher that PATCHes rather than adding a second run is the reason
+    this is not reachable on this repository, and a reader that cannot
+    survive the shape is reading a shape it should not depend on being
+    absent.
+
+    The remedy is in the predicate rather than in `verdict`: a check that
+    has not concluded cannot be red, so `red_published` asks both and the
+    guard stays where it is.
+    """
+    del tmp
+    mod = _ci_wait()
+    checks = [_check(PUBLISHED, 'failure'), _check(PUBLISHED, None,
+                                                   status='in_progress')]
+    state, offenders = mod.verdict([_head_run('tests')], checks)
+    assert state == 'unacceptable', state
+    assert [c['conclusion'] for c in offenders] == ['failure'], offenders
+
+
+def test_the_bound_report_names_the_check_that_is_still_running(tmp):
+    """The exit-2 line for the state the status guard introduced.
+
+    An unconcluded required check makes `verdict` answer `waiting`, which
+    never sets `missing` - so the bound expires on the branch that names
+    the runs still open, every one of which HAS concluded, and the line
+    reads `still open:` with nothing after it. That is precisely the case
+    `_timeout_report`'s own docstring gives a separate line for.
+
+    Named from the same data the state is read from, so the line and the
+    verdict cannot drift.
+    """
+    mod = _ci_wait()
+    clock = _Clock()
+    suites = _green('tests') + [suite(7, workflow=None, check_runs=[
+        _node(7, PUBLISHED, None, status='IN_PROGRESS')])]
+    fake = _fake_gh.FakeGh(tmp, _answers(suites))
+    out, err = io.StringIO(), io.StringIO()
+    with fake.activate(), _frozen_wait_clock(mod, clock), \
+            contextlib.redirect_stderr(err):
+        code = mod.wait(DEFAULT_REPO, SHA, 10, 20, out, grace=300)
+    text = out.getvalue()
+    assert code == 2, text
+    # The prefix is right; what was wrong was an EMPTY list after it.
+    assert f'still open: {PUBLISHED} (in_progress)' in text, text
+    assert not text.rstrip().endswith('still open:'), text
+
+
 def test_a_check_run_still_running_normalises_to_no_conclusion(tmp):
     """`conclusion` is null until a check concludes, and a reader that
     left the API's null in place would compare None against the

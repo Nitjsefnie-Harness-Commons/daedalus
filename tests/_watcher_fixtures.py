@@ -321,8 +321,10 @@ def idle_answers():
         'statusCheckRollup': ci_page([check(1, 'pylint')]),
         # The published verdict comes along: since issue 1360 `ci_wait`
         # reads it, so a fixture without one is a head whose publisher
-        # wrote nothing, and these controls measure the cost of a wait
-        # that CERTIFIES rather than one that never ends.
+        # wrote nothing, and these controls would measure a wait that
+        # never ends. They measure the cost of a wait that COMPLETES,
+        # not one that certifies: neutering `ci_wait.PUBLISHED_CHECKS`
+        # leaves this whole family green.
         RUNS_QUERY: runs_page([suite(1, name='tests'),
                               published_suite()]),
         **base_answers(),
