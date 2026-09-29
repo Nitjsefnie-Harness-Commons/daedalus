@@ -332,6 +332,35 @@ def test_a_name_two_on_path_modules_declare_still_refuses(tmp):
     assert path.body_named('_run') is None
 
 
+def test_a_child_receiving_module_is_admitted_whole(tmp):
+    """The callee closure admits its module WHOLE, and that is in scope.
+
+    `tests/_processtree.py` reaches the path only through this closure:
+    `cleanup_process_tree` is called with a launched child, which a
+    caller-only closure cannot see. The closure then puts the module's
+    whole function set in `in_path`, so a `process.wait(30)` inside
+    `_reap` — a function no on-path caller reaches — is a live bound this
+    audit is meant to catch, and it is caught only because the admission
+    is whole.
+
+    Narrowing the admission to the functions the closure reached leaves
+    every census-family suite green, so the granularity is pinned here.
+    The precondition is asserted first, so a tree that stops admitting the
+    module fails saying so instead of passing vacuously.
+    """
+    del tmp
+    paths = census.path_functions(TESTS)
+    defining = set(path.bodies().get('_processtree.py', {}))
+    in_path = set(paths.get('_processtree.py', ()))
+    assert 'cleanup_process_tree' in in_path, (
+        'the shipped tree no longer admits `_processtree.py` through the '
+        'callee closure, so this control no longer pins the granularity: '
+        f'{sorted(paths)}')
+    assert in_path == defining, (
+        'the callee closure narrowed `_processtree.py` to the functions it '
+        f'reached — {sorted(in_path)} of {sorted(defining)}')
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='launchpath_')

@@ -425,7 +425,7 @@ def bodies():
 
 
 def body_named(name):
-    """A DECLARED path function's body by bare name, or None.
+    """A path function's body by bare name, or None.
 
     The holder set is the modules whose `in_path` contains `name`, not
     every module on the path that defines it: a module is on the path for
@@ -437,13 +437,9 @@ def body_named(name):
     path for their own declared functions already, so gating on `in_path`
     loses nothing they legitimately own.
 
-    `in_path` is a declaration for the caller closure only: the callee
-    closure admits a module whole (`known[relative] = set(functions)`), so
-    for `tests/_processtree.py` it names every function the module defines
-    and a name resolved there need not be one the closure reached. That is
-    a pinned scope decision, not a gap — the control
-    `test_the_module_that_ends_the_child_is_on_the_path` puts
-    `_processtree.py` IN and `_util.py` OUT.
+    `in_path` is a declaration for the caller closure only; for a module
+    the callee closure admits whole it names every function, and
+    `test_a_child_receiving_module_is_admitted_whole` is what holds that.
     """
     owner = _module_owner(name)
     return _BODIES[owner][name] if owner is not None else None
@@ -611,6 +607,13 @@ def path_functions(tests_dir, launcher_modules=LAZY_MODULES):
     # decided. Naming the known ones was the gap — a second receiving module
     # was invisible, and a live `process.wait(5)` in it read clean. The
     # named pair stays as a pinned assertion, not as the gate.
+    #
+    # It admits the module WHOLE, and that is load-bearing rather than
+    # incidental: a `process.wait(30)` inside `_reap`, which no on-path
+    # caller reaches, is caught only because `_reap` is in scope. Narrowing
+    # the admission to the functions the closure actually reached keeps
+    # every census-family suite green, so the granularity is held by
+    # `test_a_child_receiving_module_is_admitted_whole` alone.
     for relative, functions in own.items():
         if relative in known:
             continue
