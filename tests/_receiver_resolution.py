@@ -77,7 +77,7 @@ def _global_rebindings(tree):
 
 
 def _global_names(node, tree):
-    """The names the function ENCLOSING `node` declares `global`.
+    """The names the INNERMOST function enclosing `node` declares `global`.
 
     Scoped to the enclosing function, and that is the whole of what
     `node` is for: the parameter is what makes the answer per-rebinding
@@ -85,16 +85,33 @@ def _global_names(node, tree):
     and decided nothing about `node`, so one `global urlopen` in any
     function turned every rebinding of `urlopen` in the module into a
     module-scope rebinding.
+
+    INNERMOST, and the search is by NARROWEST span for a reason worth
+    stating: `ast.walk` is BREADTH-first, so an outer def is visited
+    before the inner one nested in it, and its first hit is the
+    OUTERMOST def — a `global urlopen` in `outer` was answering for a
+    rebinding inside `def inner` nested in it, where the declaration does
+    not apply and the assignment is a local that shadows the import.
+    Widest span is NOT the fix and reads as one: an outer def encloses the
+    inner, so it is always the wider, and measured over seven nested
+    shapes the widest-span search agreed with the breadth-first first hit
+    on every one. Narrowest span is what picks the def the node is
+    actually in.
     """
+    innermost, span = None, None
     for outer in ast.walk(tree):
         if not path._is_def(outer) or node not in ast.walk(outer):
             continue
-        declared = set()
-        for child in ast.walk(outer):
-            if isinstance(child, ast.Global):
-                declared.update(child.names)
-        return declared
-    return set()
+        width = (outer.end_lineno or outer.lineno) - outer.lineno
+        if span is None or width < span:
+            innermost, span = outer, width
+    if innermost is None:
+        return set()
+    declared = set()
+    for child in ast.walk(innermost):
+        if isinstance(child, ast.Global):
+            declared.update(child.names)
+    return declared
 
 
 def _dotted_bindings(tree):
