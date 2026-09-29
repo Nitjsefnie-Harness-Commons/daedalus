@@ -3,34 +3,23 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 The job lints every file under .github/workflows in both extensions GitHub
-accepts and fails on a nonzero exit. Nothing local ran it, so a shellcheck
-or schema finding in a tracked workflow sat in the tree unremarked by every
-suite a contributor could run. The step's own shape is pinned elsewhere; this
-is the verdict it produces.
+accepts and fails on a nonzero exit; the step's own shape is pinned in the
+suite, this is the verdict it produces.
 
-TWO BINARIES, BECAUSE actionlint REPORTS NOTHING WITHOUT shellcheck.
-actionlint shells out to shellcheck for every `run:` block, and with
+TWO BINARIES, BECAUSE actionlint REPORTS NOTHING WITHOUT shellcheck. With
 shellcheck off PATH it exits 0 and prints nothing over a workflow carrying a
 real finding — the guard standing in for a lint and quietly running a weaker
-one. The repository's own comment calls that block "where most real bugs
-live". Nothing here installs or pins shellcheck, so there is no version to
+one. Nothing here installs or pins shellcheck, so there is no version to
 match against and none is invented: its PRESENCE is required, and its absence
 is a skip that names it.
 
 FOUR REFUSALS, EACH WITH ITS OWN MARKER. Pinning the outcome of a branch is
-not pinning the branch: a test asserting loose substrings is answered by a
-neighbour's message the moment its own arm is removed, and the arm it meant to
-prove can go missing behind a green run. Each reason therefore carries a
-marker no other arm can produce, and each test pins its own.
+not pinning the branch: loose substrings are answered by a neighbour's
+message the moment their own arm is removed.
 
-The version is read out of the actionlint job's `env` rather than written
-here, so raising the pin is one edit and the two cannot drift.
-
-The expansion is `Path.glob` over both extensions, which has what the step's
-`nullglob` buys the shell: an extension nothing matches contributes nothing
-rather than a literal pattern. It is Python rather than a shell script, so a
-windows-latest leg expands the same set — there a bare `bash` is the WSL
-launcher, not Git's.
+The expansion is `Path.glob`, which has what the step's `nullglob` buys the
+shell, and is the same expansion on a windows-latest leg where a bare `bash`
+is the WSL launcher.
 """
 import re
 import shutil
@@ -42,9 +31,8 @@ from _repo import ROOT
 from _wfgraph import _tests_yml
 from _yamlsteps import complete_job_mapping
 
-# Two names for one word today, and two facts: the binary a local run
-# resolves on PATH, and the job whose env carries the pin. Bound to one
-# constant they could only ever move together.
+# Two names for one word today, and two facts: the binary a run resolves
+# on PATH, and the job whose env carries the pin.
 _ACTIONLINT = 'actionlint'
 _ACTIONLINT_JOB = 'actionlint'
 _SHELLCHECK = 'shellcheck'
@@ -55,12 +43,10 @@ _VERSION = 'actionlint-version'
 _SHELLCHECK_ABSENT = 'shellcheck-absent'
 _NO_WORKFLOWS = 'no-workflows'
 
-# What actionlint prints for a real finding, in the shape it prints it.
 _PLANTED_FINDING = ('claim.yml:58:9: shellcheck reported issue in this '
                     'script: SC2183:warning:1:8: This format string has 3 '
                     'variables, but is passed 2 arguments [shellcheck]')
-# A whole extra job, to append to a real workflow: three variables and two
-# arguments is the SC2183 a `run:` block earns for free.
+# Appended to a real workflow; three variables and two arguments is its SC2183.
 _PLANTED_JOB = """
   planted-lint-finding:
     runs-on: ubuntu-latest
@@ -73,10 +59,8 @@ _PLANTED_JOB = """
 def _pinned_actionlint_version(job=None):
     """The version the actionlint job pins, read from the job's own env.
 
-    `job` is a parameter so a test can hand this a mapping pinning some
-    other version and see that the value comes out of it. Left out, it
-    takes the route every real run takes, and `_pin` is what that route is
-    checked against.
+    `job` is a parameter for a test to pin some other version; left out,
+    this takes the route every real run takes, checked against `_pin`.
     """
     if job is None:
         job = complete_job_mapping(_tests_yml(), _ACTIONLINT_JOB) or {}
@@ -89,9 +73,7 @@ def _pin():
     """ACTIONLINT_VERSION, read out of the workflow's own bytes.
 
     A second reader on purpose, where `_yamlsteps` is the first: a pin
-    written down rather than read has to disagree with something, and this
-    is what it disagrees with. Raising the pin in the workflow is then one
-    edit, here and in the reasons alike.
+    written down rather than read has to disagree with something.
     """
     found = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
                        _tests_yml(), re.MULTILINE)
@@ -117,11 +99,8 @@ def _workflow_paths(root):
 def _expanded_names(tmp):
     """Name one file per extension under a throwaway tree, and expand it.
 
-    The fixture is here rather than in the suite so the suite's own lines
-    carry the expectation and nothing else. The expectation is both
-    extensions and neither literal pattern: an extension nothing matches
-    contributes nothing, which is what the step's `nullglob` buys in the
-    shell, and a `.txt` in the directory is not a workflow.
+    The fixture lives here so the suite's lines carry the expectation and
+    nothing else: both extensions, and neither literal pattern.
     """
     directory = Path(tmp) / 'tree' / '.github' / 'workflows'
     directory.mkdir(parents=True)
@@ -144,13 +123,10 @@ def _planted_workflow_tree(tmp):
 def _facts(overrides):
     """One lint run's facts, defaulted to a run that lints clean.
 
-    `overrides` is a mapping a caller passes positionally rather than
-    unpacked into this call: a `**`-carrying call is a bounded launch to
-    the audit in `tests/test_repo_layout.py`, whatever it calls.
-
-    The installed version defaults to the PIN read from the workflow, so
-    raising the pin in `.github/workflows/tests.yml` needs no edit here and
-    no fixture carries a version this branch wrote down.
+    `overrides` arrives positionally: a `**`-carrying call is a bounded
+    launch to the audit in `tests/test_repo_layout.py`, whatever it calls.
+    The installed version defaults to the PIN, so raising it needs no edit
+    here and no fixture carries a version this branch wrote down.
     """
     pinned = _pinned_actionlint_version()
     facts = {'binary': _ACTIONLINT, 'shellcheck': _SHELLCHECK,
@@ -170,12 +146,11 @@ def _installed_actionlint_version(binary):
 def _run_actionlint(binary, shellcheck, files):
     """One lint run's exit code and output, or None if it did not run.
 
-    No arguments is not a run: actionlint handed none lints its working
-    directory, which is a verdict about a tree nobody named. Nor is a run
-    without shellcheck a run: that is the whole of what it would check —
-    and this check is the second layer, `_assert_actionlint_clean`'s skip
-    arm deciding first, so it fires only where the facts were wired
-    wrongly, and it is what turns that wiring loud instead of clean.
+    No arguments is not a run — actionlint handed none lints its working
+    directory — and neither is a run without shellcheck, which is the whole
+    of what it would check. That check is the second layer, the skip arm
+    deciding first, so it fires only where the facts were wired wrongly,
+    and it is what turns that wiring loud instead of clean.
     """
     if not binary or not shellcheck or not files:
         return None
@@ -188,11 +163,9 @@ def _run_actionlint(binary, shellcheck, files):
 def _assert_actionlint_clean(facts):
     """Decide what one lint run means, from the facts it produced.
 
-    Facts rather than a running, so every arm here is a test reaches
-    without either binary rather than a branch only a machine with this
-    toolchain installed reaches. One mapping rather than seven keywords, for
-    the same reason `_facts` takes one: no call site in either direction
-    unpacks a mapping into a call.
+    Facts rather than a running, so every arm is a test reaches without
+    either binary. One mapping rather than seven keywords, for the reason
+    `_facts` takes one.
     """
     binary, shellcheck, installed = (
         facts['binary'], facts['shellcheck'], facts['installed'])
@@ -216,18 +189,15 @@ def _assert_actionlint_clean(facts):
             f'{_SHELLCHECK_ABSENT}: shellcheck is not installed, and '
             'actionlint reports nothing without it — every run: block goes '
             'unchecked while its exit code stays 0')
-    # The exit code, not a score and not a finding count: a linter that
-    # exits nonzero has failed whatever it thinks of the tree.
+    # The exit code, not a score or a count: a nonzero exit is a red lint.
     assert returncode == 0, f'actionlint exited {returncode}:\n{output}'
 
 
 def _lint_skips(overrides):
     """Drive one skip arm on its own facts, and return the reason it gave.
 
-    Returning the reason rather than asserting on it leaves the marker to
-    the calling test, which is what makes each arm's own reason the thing
-    under test. An arm that did not skip has reported a verdict, and that is
-    the refusal.
+    Returning the reason leaves the marker to the calling test, which is
+    what makes each arm's own reason the thing under test.
     """
     try:
         _assert_actionlint_clean(_facts(overrides))
