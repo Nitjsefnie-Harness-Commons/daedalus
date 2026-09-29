@@ -48,6 +48,16 @@ CONTAINER_MUTATORS = (_mutating_surface(list) | _mutating_surface(dict)
 _NESTED_SCOPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
                   ast.ClassDef)
 _SEQUENCE_KINDS = ('list', 'tuple', 'set')
+# The sequence kinds whose instances take `x[k] = v` or `del x[k]`; any
+# other kind refuses both, so nothing is written and nothing is removed and
+# every recorded position still holds what it held. The mirror of
+# `_ASSIGNS_BY_INDEX` in `_pyroute_stores` for the two signs a subscript
+# target carries, narrowed to the sequence arm: a mapping's subscript
+# delete is followed precisely and never reaches this rule. `tuple` and
+# `set` take neither sign, and a set is not addressable by position at
+# all. An augmented assignment is not a subscript sign and keeps the wider
+# set, so this constant is applied only where the target is a subscript.
+_ITEM_WRITABLE_SEQUENCES = ('list',)
 # The container types the surface was taken from. A call through one of these
 # names is the type, not an instance of it, so its first argument is the
 # receiver the bound form writes as `func.value`.
@@ -180,6 +190,14 @@ def _stored(statement, state):
     a delete of any index, a slice store, and an augmented assignment. The
     store path claims the one augmented form it applies itself, so a mapping
     union keeps its precise merge and everything else is this rule's.
+
+    A subscript target is claimed only by a kind that takes one. A tuple
+    raises `TypeError` on both a slice store and a delete, and a set is not
+    addressable at all, so neither moves a recorded position -- claiming
+    them would report a read the runtime proves, which is a false positive
+    rather than a disclosure. The choice is the kind's, not the key's: both
+    refuse at an index and at a slice alike, and both spellings reach here
+    the same way.
     """
     if isinstance(statement, ast.AugAssign):
         owner = _receiver_value(statement.target, state)
@@ -194,7 +212,7 @@ def _stored(statement, state):
             continue
         owner = _receiver_value(target.value, state)
         if (isinstance(owner, DeferredContainer)
-                and owner.kind in _SEQUENCE_KINDS):
+                and owner.kind in _ITEM_WRITABLE_SEQUENCES):
             found.append(owner)
     return found
 
