@@ -19,7 +19,8 @@ tests.
 One arm of `await_polls` does end on that shape. A marker assignment
 no-opped in either watcher leaves the loop child up, healthy and publishing
 nothing new, and the budget controls waiting on one would spin until the
-job's own limit ended the run nameless. The arm bounds CALLS PER PUBLISHED
+launcher's bound on the suite ended the run, naming the suite rather than
+the control. The arm bounds CALLS PER PUBLISHED
 MARKER, not seconds: a run
 whose polls are no wider than the tolerance spends about that many calls
 per marker however long it runs, so a loaded runner reaches it later or
@@ -31,8 +32,9 @@ one marker than any single poll is expected to. What the arm cannot
 settle on its own it does not claim to, and it says how many rows are
 ambiguous rather than marking one: two of the four. Marking one row
 unresolvable says nothing about the others, so the count is named rather
-than one row flagged. `await_lines` and `await_calls` take no such bound,
-and the trade they take is unchanged.
+than one row flagged. `await_lines` and `await_calls` take no such bound
+either; the same launcher's bound on the suite is what ends them, and it
+names the suite rather than the wait.
 """
 import os
 import sys
