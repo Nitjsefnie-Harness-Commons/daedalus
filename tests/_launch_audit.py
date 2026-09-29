@@ -11,10 +11,10 @@ analyser can place, with a head that reads as the constant `git`, is
 refused. Any OTHER call carrying a `timeout=` or a `**`-unpacked mapping
 is reported as an `unplaced` site at an unreadable head unless its
 receiver is PROVED a fixed, non-launch value — a bare name this module
-binds and the analyser read, or an attribute chain spelled from a dotted
-import of a stdlib root. A receiver the analyser cannot prove is never
-passed over, so a bounded git launch cannot reach the tree however the
-module was obtained or reached, without a refusal or an allowance row.
+binds and the analyser read, or an attribute chain from a dotted stdlib
+import the module has not rebound. A receiver the analyser cannot
+prove is never passed over, so a bounded git launch reaches the tree
+only as a refusal, an allowance row, or the interpreter's own code.
 Only the argv and head reading lives in `_argv_read.py`, which binds no
 configuration of its own.
 """
