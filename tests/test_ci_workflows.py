@@ -306,7 +306,6 @@ def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
 
 
 def test_the_tracked_workflows_pass_actionlint(tmp):
-    """The step's shape is pinned above; this is the verdict it produces."""
     del tmp
     _lint_workflows(ROOT)
 
