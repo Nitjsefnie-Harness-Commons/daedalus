@@ -10,29 +10,19 @@ def dict_length(items, counted=True):
 
 
 def retired_into(retired, items):
-    """The retired keys that survived into `items`.
-
-    A retirement is a fact about the values a container RECORDED, so a
+    """A retirement is a fact about the values a container RECORDED, so a
     container built out of those values carries the fact with them: the
     destination cannot claim at a key the source has disowned that its own
-    value there is current. A key the fold did not write is not the
-    source's to retire, and the unknown-key slot names no key, so it is
-    neither carried nor consulted here.
-    """
+    value there is current."""
     return retired & set(items)
 
 
 def stale_after_store(owner, written=(), unreadable=False):
-    """The keys a store leaves holding a value it may have replaced.
-
-    An unreadable store folded in a source whose keys the model could not
-    read, and such a source may name any key the container already held, so
-    every entry it carried in is a candidate from there on. A key the store
-    wrote from a value the model DID read is exact, and a key an earlier
-    unreadable store retired stays retired unless this one wrote it. The
-    unknown-key slot is not one of these: it names no key, and the read
-    arms consult it themselves.
-    """
+    """An unreadable store folded in a source whose keys the model could not
+    read, and such a source may name any key the container already held.
+    `written` are exact, and an earlier retirement stands until this store
+    writes it. The unknown-key slot is never one of these: it names no key,
+    and the read arms consult it themselves."""
     if unreadable:
         return (owner.stale | (set(owner.items) - {DYNAMIC_KEY})) \
             - set(written)
@@ -40,12 +30,9 @@ def stale_after_store(owner, written=(), unreadable=False):
 
 
 def container_copy(owner, items, unknown_length=False, stale=None):
-    """A copy of owner holding items; a dict's length is recounted, and
-    the keys an earlier unreadable store retired carry over unless this
-    copy says which of them are current again. The unknown-key slot is
-    stripped from the set whichever way it arrives: it names no key, so a
-    retirement at it would be a fact about nothing, and the read arms
-    consult it on their own."""
+    """A copy of owner holding items; a dict's length is recounted. The
+    unknown-key slot is stripped from the retirement whichever way it
+    arrives."""
     length = owner.length
     if owner.kind == 'dict':
         length = dict_length(

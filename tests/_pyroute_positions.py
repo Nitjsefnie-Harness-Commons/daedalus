@@ -23,9 +23,8 @@ def at_position(container, index):
     items = container.items
     if container.kind == 'dict':
         if index in container.stale:
-            # A store the model could not read has since put something else
-            # at this key, so what the model recorded there is one more
-            # candidate rather than the answer.
+            # A store the model could not read may have put something else
+            # at this key, so the recorded value is one more candidate.
             return [items.get(index), UNPROVABLE_SENDER,
                     items.get(DYNAMIC_KEY)]
         return [items.get(index), items.get(DYNAMIC_KEY)]

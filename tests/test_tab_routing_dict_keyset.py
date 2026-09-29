@@ -111,9 +111,8 @@ _POPPED = _FRESH + '\nd.pop("j", None)'
 
 # A store whose key the model cannot resolve may have named the key the
 # container already held, but it also wrote the value it read to the
-# unknown-key slot every read arm joins, so it retires nothing: these are
-# the numbers the base commit measures, and the store's own fold is the
-# more precise account of the computed key.
+# unknown-key slot every read arm joins, so it retires nothing: the store's
+# own fold already accounts for the computed key, and more precisely.
 _COMPUTED = 'd = {"k": ordinary}\nd[args.values] = relay()'
 
 _AXES = {
