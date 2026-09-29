@@ -441,6 +441,7 @@
 !/tests/_realbrowser_pages.py
 !/tests/_realbrowser_workers.py
 !/tests/_receiver_mutation_specs.py
+!/tests/_receiver_resolution.py
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_reserved_names.py
@@ -651,6 +652,10 @@
 !/tests/test_jsread_mask.py
 !/tests/test_launch_arm_cuts.py
 !/tests/test_launch_arms.py
+!/tests/test_launch_census_adds.py
+!/tests/test_launch_census_boundaries.py
+!/tests/test_launch_census_receivers.py
+!/tests/test_launch_census_scopes.py
 !/tests/test_launch_control_boundary.py
 !/tests/test_launch_deadline_positions.py
 !/tests/test_launch_path.py
