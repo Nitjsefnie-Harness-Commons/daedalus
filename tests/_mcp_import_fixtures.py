@@ -1,13 +1,11 @@
 """The on-disk composition the import-closure suites hand the scan.
 
-`composition_scan_set` reads a file tree, so every case in
-`test_mcp_import_closure.py`, `test_mcp_import_values.py`,
-`test_mcp_import_code_eval.py`, `test_mcp_import_selection.py` and
-`test_mcp_selection_sweep.py` has to put a synthetic package on disk
-before it can ask the scan anything. The tree writer, the refusal
-assertion and the callee verdict were each a private `def` in more than
-one of those suites, so a change to how a fixture is built reached some
-of the cases and not others; they live here so there is one copy.
+`composition_scan_set` reads a file tree, so every case in the
+import-closure suites has to put a synthetic package on disk before it
+can ask the scan anything. The tree writer, the refusal assertion and
+the callee verdict were each a private `def` in more than one of those
+suites, so a change to how a fixture is built reached some of the cases
+and not others; they live here so there is one copy.
 
 The refusal assertion is named for the assertion it makes rather than for
 what it generically is, because `main` already binds a different
