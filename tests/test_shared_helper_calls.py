@@ -223,6 +223,66 @@ def test_every_region_is_judged_on_the_path_that_cannot_order(tmp):
         'control-owned' for line in _EVERY_REGION_LINES]
 
 
+def test_a_pure_import_row_never_names_a_writer(tmp):
+    """(m) the cost the precedence pays, held up by reading every body.
+
+    A `_PURE_IMPORTS` hit is answered before the resolution runs, so the
+    callee behind it is trusted WITHOUT its body being read — and every
+    such row names a function in a `tests/_*.py` module, which is exactly
+    what this branch stopped trusting on sight. The trust is only sound
+    while no such body writes, so every row's body is judged and must
+    come back clean. A row whose body cannot be walked is a finding about
+    itself, not a row to skip.
+
+    The body is reached by copying the helper to a module name no row
+    names and importing from THAT. Importing from the real module would
+    be answered by the row itself — the short-circuit under test — and
+    this control would be unable to fail.
+    """
+    from _control_calls import _PURE_IMPORTS
+
+    # What counts is a WRITE, read off the guard's own verdict rather than
+    # a second notion of writing: `X target path is not control-owned` is
+    # the refusal the guard issues for a call it modelled as a writer. An
+    # `X is not a modelled call` message is the guard declining to
+    # recognise a call, which says nothing about writing — these helper
+    # bodies are analysis code full of them.
+    #
+    # The guard's own entry point is exempt for a sharper reason: judging
+    # the guard through the guard reports the guard's internals, and the
+    # row exists to keep exactly that away from real controls. The
+    # exemption is named rather than loosened, and the assertion below
+    # pins it to this one row.
+    SELF = ('_control_writes', 'control_write_violations')
+    judged, skipped = [], []
+    for module, name in sorted(_PURE_IMPORTS):
+        if (module, name) == SELF:
+            continue
+        helper = ROOT / 'tests' / f'{module}.py'
+        if not helper.is_file():
+            skipped.append(f'{module}.{name}')
+            continue
+        root = Path(tmp) / f'{module}.{name}'
+        (root / 'tests').mkdir(parents=True)
+        (root / 'tests' / '_rowed.py').write_bytes(helper.read_bytes())
+        source = root / 'test_control.py'
+        source.write_text(
+            _PRELUDE + f'from _rowed import {name}\n'
+            'def test_control(tmp):\n    del tmp\n'
+            f'    {name}(tmp)\n', encoding='utf-8')
+        writes = [m for m in control_write_violations(source, root)
+                  if m.endswith('target path is not control-owned')]
+        assert not writes, (
+            f'{module}.{name} is a pure row whose body writes, so the row '
+            f'exempts a writer and the call site never learns: {writes}')
+        judged.append(f'{module}.{name}')
+    assert SELF in _PURE_IMPORTS, 'the exemption names a row that is gone'
+    assert len(judged) + len(skipped) + 1 == len(_PURE_IMPORTS), (
+        'a row was neither judged, skipped, nor exempted')
+    assert skipped == ['pathlib.Path'], skipped
+    assert judged, 'no _PURE_IMPORTS row names a tests/ module'
+
+
 def test_the_unjudged_scan_reports_a_known_omission(tmp):
     """(l) the scan that is supposed to catch a hole is itself a control.
 
