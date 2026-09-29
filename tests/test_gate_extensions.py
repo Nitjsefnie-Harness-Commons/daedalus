@@ -285,7 +285,6 @@ def test_a_stalled_inline_child_is_reported_with_its_own_output(tmp):
             "the outer bound fired, so the inline child's own bound never ended "
             "it, which is what this control exists to prevent. What the "
             f"bound reports: {wedged}"
-            f'{wedged}'
         ) from wedged
     finally:
         _noderun.CHILD_DEADLINE_S = real_deadline

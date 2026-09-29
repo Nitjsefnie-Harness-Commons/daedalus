@@ -7,10 +7,8 @@ child, and the three that must NOT have one — the expiry message, the
 unlink door, and the report's completeness — are here, so the file that
 drives the launcher is not also the file that fakes it.
 
-The receipt that tells a real kill from a reported one is NOT here. It is
-`tests/_processtree.py`'s `process_is_gone`, beside the kill it reads, and it
-answers for a whole tree rather than for one pid out of a child's stdout —
-which is what a tree-scoped cleanup needs and what a stand-in cannot be.
+The receipt that tells a real kill from a reported one is not here: it is
+`tests/_processtree.py`'s `process_is_gone`, beside the kill it reads.
 """
 import subprocess
 
