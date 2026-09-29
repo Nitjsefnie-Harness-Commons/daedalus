@@ -168,7 +168,13 @@ def test_a_raise_carrying_the_deadline_is_discharged_when_imported(tmp):
     behaviour is right — refusing would be a false red on a fixture that
     raises its own error — and the sentence was the opposite of it.
 
-    The two directions are pinned together, so neither can move alone.
+    The two directions are pinned together, so neither can move alone. The
+    third is the one the two masked: the arm asks the resolved callee what
+    it IS, so an IMPORTED class that is not an exception is refused, and
+    both neighbours hold under the test being dropped -- the imported
+    `TimeoutExpired` really is a `BaseException` and the module-defined
+    `Refused` is `_live_object`-unreachable. Nothing here was a raised
+    NON-exception, so a mutation table found the arm unpinned.
     """
     del tmp
     imported = ('import subprocess\n\n'
@@ -180,6 +186,11 @@ def test_a_raise_carrying_the_deadline_is_discharged_when_imported(tmp):
              'def outer_timeout(args, timeout=None):\n'
              '    raise Refused(args, timeout)\n')
     assert _rows(local) == [(5, 'timeout parameter')], _rows(local)
+    not_an_exception = ('import socket\n\n\n'
+                        'def outer_timeout(args, timeout=None):\n'
+                        '    raise socket.socket(args, timeout)\n')
+    assert _rows(not_an_exception) == [(4, 'timeout parameter')], (
+        not_an_exception, _rows(not_an_exception))
 
 
 def test_the_module_docstring_names_the_rule_that_is_there(tmp):

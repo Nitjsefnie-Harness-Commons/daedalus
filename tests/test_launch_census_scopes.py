@@ -77,6 +77,40 @@ def test_a_global_in_an_enclosing_def_does_not_reach_the_nested_one(tmp):
         'read as module-wide and a real network read was refused')
 
 
+# The declaration is in a THIRD def -- neither the one the rebinding is
+# written in nor the one the read is written in -- so the rebinding really
+# is module-wide and the read is no longer the network read it is spelled
+# as. This is the row the EXEMPTION needs, and it is not either row above:
+# `_shadowed_parameters` scopes its own pop to the def the rebinding is in,
+# so a same-def shape cannot see a module-wide pop, and the `NESTED_DEF`
+# row puts the declaration where it does not reach.
+GLOBAL_ELSEWHERE = (
+    IMPORT + '\n\ndef other():\n    global urlopen\n    urlopen = object()'
+    '\n\n\n' + READ)
+
+
+def test_a_global_in_a_third_def_pops_the_import_for_a_read_elsewhere(tmp):
+    """The pop gate exempts a rebinding under `global` -- so it must pop.
+
+    `_dotted_bindings` skips the pop for any node `_global_rebindings`
+    reported, which is what lets a rebinding written under a `global` keep
+    its own effect on the module table. Drop that exemption and the pop
+    fires on every module-wide rebinding, the `urlopen` import survives
+    whatever the second binding did to it, and the read below is
+    discharged as a network read that no longer exists at runtime.
+
+    `test_launch_census_scopes.py`'s two rows are a claim about
+    `_global_names`' SCAN -- which declaration applies to which rebinding
+    -- and neither can see this EXEMPTION. The only other `global` rebind
+    in the tree is at module scope, where `global` means nothing.
+    """
+    del tmp
+    assert _rows(GLOBAL_ELSEWHERE), (
+        'the `global` exemption in the pop gate stopped exempting, so a '
+        'module-wide rebinding under `global` left the import standing and '
+        'a real network read was read as a live one')
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='launchcensusscopes_')
