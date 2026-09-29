@@ -356,6 +356,7 @@
     "_enclosing_parameters": {"python": ["tests/_command_type_readers.py"]},
     "_enclosing_scope": {"python": ["tests/_launch_census.py"]},
     "_enclosing_scopes": {"python": ["tests/_cmdqueue_faults.py"]},
+    "_encode": {"python": ["tests/_gate_freshness_fixtures.py"]},
     "_end_of": {"python": ["tests/_arm_sweep.py"]},
     "_enter_fixture": {"python": ["tests/_realbrowser_fixture_controls.py"]},
     "_entries": {"python": ["tests/_fake_gh.py"]},
