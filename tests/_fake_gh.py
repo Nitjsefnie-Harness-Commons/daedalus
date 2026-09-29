@@ -60,6 +60,30 @@ GRAPHQL_MARK = 'graphql'
 # because the process ran exactly one and exited.
 POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
+# A path whose existence releases the calls this fake is holding. Set only
+# where a case asks for a hold; every other answer is written at once.
+GATE = 'DAEDALUS_FAKE_GH_GATE'
+
+
+def _hold():
+    """Withhold this answer until the gate the caller named exists.
+
+    The call is logged before this runs, so a reader counting entries can
+    see a call entered and still open - a state, not the instant it happened
+    to look. A subject inside a held call cannot be gone, which is what
+    makes a liveness reading taken here a consequence rather than a sample.
+
+    There is no bound, and that is the point: a bound would turn the hold
+    into a guess, and a guess that expires silently reinstates the sample
+    it exists to replace. The caller opens the gate, so a subject held
+    here is released by the code that chose to hold it, and nothing else.
+    """
+    path = os.environ.get(GATE)
+    if path is None:
+        return
+    while not os.path.exists(path):
+        time.sleep(0.02)
+
 
 def _self_test(launcher):
     """Prove the launcher this platform writes actually executes."""
@@ -177,6 +201,7 @@ def main(argv):
     _logged(os.environ['DAEDALUS_FAKE_GH_LOG'],
             {'t': time.time(), 'argv': list(argv), 'request': request,
              'fragment': fragment, 'poll': os.environ.get(POLL_MARK)})
+    _hold()
     if response is None:
         sys.stderr.write(f'fake gh: no fixture carries {request[:200]!r}\n')
         return 1
@@ -230,11 +255,14 @@ class FakeGh:
     platform difference from a watcher that silently could not start.
     """
 
-    def __init__(self, directory, answers=None):
+    def __init__(self, directory, answers=None, gate=False):
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.answers_path = self.dir / 'answers.json'
         self.log = self.dir / 'calls.jsonl'
+        self.gate_path = self.dir / 'gate'
+        self.holding = bool(gate)
+        self.gate_path.unlink(missing_ok=True)
         self.launcher = self.dir / ('gh.bat' if WINDOWS else 'gh')
         # Copied beside the launcher, not referenced from where this module
         # lives: an install that moves keeps working and the launcher holds
@@ -267,7 +295,18 @@ class FakeGh:
         env['DAEDALUS_GH'] = str(self.launcher)
         env['DAEDALUS_FAKE_GH_LOG'] = str(self.log)
         env['DAEDALUS_FAKE_GH_ANSWERS'] = str(self.answers_path)
+        if self.holding:
+            env[GATE] = str(self.gate_path)
         return env
+
+    def open_gate(self):
+        """Release every call this fake is holding.
+
+        The release is a path appearing rather than a signal, so a caller
+        that opens it releases the calls already waiting and every one that
+        arrives after, with nothing to pair up.
+        """
+        self.gate_path.write_text('', encoding='utf-8')
 
     @contextlib.contextmanager
     def activate(self):

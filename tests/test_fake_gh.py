@@ -13,6 +13,7 @@ nothing else in the tree asserts.
 """
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -126,6 +127,60 @@ def test_the_fake_refuses_a_field_of_the_wrong_type_by_name(tmp):
             assert field in done.stderr, (field, done.stderr)
             assert repr(value) in done.stderr, (field, done.stderr)
             assert done.stdout == '', (field, done.stdout)
+
+
+def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
+    """A call answered at once is a call a reader can only sample.
+
+    `test_watcher_budget.py` decides whether a watcher is still running by
+    looking, and looking is a sample: the process can stop in the gap and
+    nothing says which side of it the look landed on. That is what made
+    `test_the_children_die_with_their_parent` report a red about two
+    watchers that were only following their aggregator out. Holding the
+    call turns the same question into a state - the call is logged and
+    unanswered, so the watcher is inside it and cannot be gone.
+
+    The log entry is written BEFORE the hold, which is the whole point: a
+    reader counting entries can see a call entered and still open, and that
+    is a fact about the process rather than about when anybody looked. The
+    hold has no bound, because a bound would make it a guess, and a guess
+    that expires is the sample it exists to replace.
+    """
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {'data': None}}, gate=True)
+    answer = subprocess.Popen(
+        [str(fake.launcher), 'api', '-i', 'graphql', '--input', '-'],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, encoding='utf-8',
+        errors='replace', env=fake.env())
+    try:
+        answer.stdin.write('{"query":"items(first: 2)"}')
+        answer.stdin.close()
+        entered = _await_entered(fake, 1)
+        assert entered, fake.calls()
+        # The process is up and has answered nothing: the entry is logged
+        # and the call is still open, which is the state a liveness reading
+        # is taken against. Reading the stream here would block until the
+        # process ends, which is the thing the hold is postponing.
+        assert answer.poll() is None, answer.returncode
+        fake.open_gate()
+        out, err = answer.communicate(timeout=60)
+        assert answer.returncode == 0, err
+        assert 'data' in out, 'the gate withheld the answer'
+    finally:
+        answer.kill()
+        answer.wait(timeout=60)
+
+
+def _await_entered(fake, count):
+    """The call log, once it holds `count` entries, without a bound.
+
+    A wait with no live process to give up on is the trade the watcher
+    waits take deliberately; this one is over a record the answer cannot
+    reach before the gate opens, so an entry appearing IS an entered call.
+    """
+    while len(fake.calls()) < count:
+        time.sleep(0.02)
+    return fake.calls()
 
 
 def main():
