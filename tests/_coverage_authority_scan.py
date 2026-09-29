@@ -7,8 +7,7 @@ carried the search keys, the squeeze and the holder count in a file that
 was six lines under the tests ceiling, so a concurrent branch's unrelated
 row would have been what decided the size gate. The control stays in that
 suite under the test name the rule is recorded by; the mechanism it calls
-came here. The exemption that lets this file hold the keys without
-claiming them is stated with the function below, not here.
+came here.
 """
 import ast
 import sys
@@ -50,18 +49,16 @@ def _written(text, node):
 def _defines(text, squeezed, key):
     """True when this module's top level declares the phrase as a key.
 
-    One shape, and only that one: a statement in the module body whose
-    single target is a `Name` and whose value is a string `Constant`.
     An explicit `+` is a `BinOp` and an f-string a `JoinedStr`, so
-    neither is a definition.
+    neither is the `Constant` a definition is.
 
-    The value is not enough on its own, and the second condition is
-    what makes the subtraction sound. A declaration spelled as adjacent
-    literals is folded into a `Constant` whose value IS the key while
-    its written text is not, so it contributes no occurrence to the
-    count; exempting it would spend the subtraction on a statement
-    beside it instead. Requiring the key to appear in the declaration's
-    own source means the occurrence it excuses is one the count found.
+    The value alone is not enough, and that is what makes the
+    subtraction sound. A declaration spelled as adjacent literals is
+    folded into a `Constant` whose value IS the key while its written
+    text is not, so it contributes no occurrence to the count; exempting
+    it would spend the subtraction on a statement beside it instead.
+    Requiring the key in the declaration's own source means the
+    occurrence it excuses is one the count found.
 
     The module body and not the whole tree, because a nested assignment
     sits inside some other scope and is a statement wherever it is
