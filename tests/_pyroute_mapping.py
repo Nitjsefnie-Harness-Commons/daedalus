@@ -189,11 +189,13 @@ def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
             return
         combined = dict(owner.items)
         _fold_items(combined, items)
+        # A key the call wrote as a `key=value` pair settles it, whatever
+        # the source retired there: the value is the one the runtime holds.
         replace_container(state, owner_name, owner, combined,
                           unknown_length=not counted,
                           stale=(stale_after_store(owner, items,
                                                    unreadable=not counted)
-                                 | carried))
+                                 | (carried - set(keywords))))
 
 
 def _apply_setdefault(state, call, owner, owner_name):
