@@ -344,9 +344,9 @@ def test_a_child_receiving_module_is_admitted_whole(tmp):
     is whole.
 
     Narrowing the admission to the functions the closure reached leaves
-    every census-family suite green, so the granularity is pinned here.
-    The precondition is asserted first, so a tree that stops admitting the
-    module fails saying so instead of passing vacuously.
+    every census-family suite green, so the granularity is pinned here. The
+    precondition is asserted first, so a tree that stops admitting the
+    module fails saying so rather than passing vacuously.
     """
     del tmp
     paths = census.path_functions(TESTS)
