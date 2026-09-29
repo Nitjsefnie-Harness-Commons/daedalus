@@ -137,7 +137,8 @@ def test_the_children_die_with_their_parent(tmp):
         parent.proc.wait(timeout=60)
         waits.await_gone(pids, parent, f'children {pids} to die with the '
                          f'parent', _pid_alive)
-        assert not any(_pid_alive(pid) for pid in pids), pids
+        assert not any(_pid_alive(pid) for pid in pids), (
+            pids, parent.captured())
     finally:
         fake.open_gate()
         parent.stop()
@@ -159,7 +160,8 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         parent.proc.wait(timeout=60)
         waits.await_gone(pids, parent, f'children {pids} to leave with a '
                          f'graceful exit', _pid_alive)
-        assert not any(_pid_alive(pid) for pid in pids), pids
+        assert not any(_pid_alive(pid) for pid in pids), (
+            pids, parent.captured())
     finally:
         fake.open_gate()
         parent.stop()
