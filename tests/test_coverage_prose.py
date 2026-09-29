@@ -80,16 +80,21 @@ one: a general coverage sentence and a claim about another module are the
 same thing to a position-based rule, no width of window separates them,
 and that is why three successive widenings of this one each pulled a new
 false alarm in from the other side. Within the window a sentence is
-judged only when it NAMES A SHIPPED JAVASCRIPT PATH, and at least one
-judged sentence must name the named module. A general coverage sentence
-whose predicate names no shipped path -- `no suite reaches the tree on
-its own` -- is a statement about modules in general, and holding it to
-this paragraph's module refused correct sentences that were never about
-it. What makes skipping it safe is the ORACLE: a window holding no
-sentence that names the named module is a refusal, not a pass, and a
-window holding only a predicate about a different module is that same
-refusal, so nothing can be dropped from judgement and leave the
-paragraph unchecked.
+judged on TWO conditions, and failing either leaves it ADMITTED: it
+carries a reach PREDICATE, and it NAMES A SHIPPED MODULE. At least one
+judged sentence must then name the named module. A claim names a shipped
+module in any of the forms this tree uses -- the full repo-relative path,
+the bare filename, or the shipped root the path sits in -- and all three
+are read off the same population the coverage report means by "shipped
+JavaScript", so a root added later is judged without a change here. Both
+conditions carry weight in the paragraph as shipped: the long sentence
+above names a dozen shipped modules and is admitted because it carries no
+predicate, and `no suite reaches the tree on its own` carries one and is
+admitted because it names no module. What makes skipping such a sentence
+safe is the ORACLE: a window holding no sentence that names the named
+module is a refusal, not a pass, and a window holding only a predicate
+about a different module is that same refusal, so nothing can be dropped
+from judgement and leave the paragraph unchecked.
 
 The price of that rule falls on BOTH sides, and the far side has paid it
 since before the window was symmetric: on the wave-2 base every reach
@@ -99,13 +104,16 @@ no longer refused for naming no module -- which the prose does not assert
 -- and no longer refused at all.
 
 What is left, after this rule: a reach-predicate sentence naming a
-shipped JavaScript path OTHER than the named module, sitting more than
-one sentence from the count phrase, is admitted. It was measured to be
+shipped module OTHER than the named module, sitting more than one
+sentence from the count phrase, is admitted. It was measured to be
 admitted, not merely suspected. Closing it is not a matter of reading
 the paragraph harder, because whether that other module is in fact
 unreached is not decidable from this tree either, for the reason at the
 top of this docstring. The honest name for the residual is a claim this
-control does not govern.
+control does not govern. The shapes to recognise it in are the shortest
+spelling -- `No suite runs `sse.js`.` -- a shipped root -- `No suite
+reaches `extension/`.` -- and a full path -- `No suite runs
+`extension/worker/tabs.js`.`
 
 No natural-language understanding is owed here, and the earlier claim
 that it was was measured false. `No suite runs `dashboard/app.js`.` and
@@ -287,12 +295,30 @@ def _reported(sentence):
                     if RUN_ATTRIBUTION.search(clause))
 
 
+def _module_names(sources):
+    """Every spelling of a shipped module the tree itself writes.
+
+    Three forms, all read off the one population: the full repo-relative
+    path, the bare filename, and the shipped root the path sits in. A
+    predicate naming a module in one of the three and not the others says
+    the same thing, so a rule reading only the full path judged fewer
+    claims than the position rule it replaced.
+    """
+    names = set(sources)
+    for rel in sources:
+        root, _, leaf = rel.rpartition('/')
+        if root:
+            names.add(f'{root}/')
+        names.add(leaf)
+    return names
+
+
 def _reach_claims(sentences):
     """Every reach claim this paragraph makes about its own module, paired
     with where it sits so the attribution can look at the sentence after it.
 
     A window sentence is judged on TWO conditions, and both are load-bearing.
-    It carries a reach predicate, and it NAMES A SHIPPED JAVASCRIPT PATH.
+    It carries a reach predicate, and it NAMES A SHIPPED MODULE.
     Position alone was the wrong axis: a general coverage sentence and a
     claim about a different module were the same thing to it, and no width
     of window separated them, which is why each widening of the window
@@ -300,13 +326,14 @@ def _reach_claims(sentences):
     `tracked_sources`, the same one the report means by "shipped
     JavaScript", so this file cannot drift from the definition.
 
-    Skipping a predicate that names no shipped path is safe only because of
-    the ORACLE in the test: a window left with no sentence naming this
+    Skipping a predicate that names no shipped module is safe only because
+    of the ORACLE in the test: a window left with no sentence naming this
     paragraph's module is a refusal, not a pass. That assertion is the
     property to test deliberately, and the module docstring says what it
     leaves open.
     """
     sources = tracked_sources(ROOT)
+    names = _module_names(sources)
     pairs = []
     for index, sentence in enumerate(sentences):
         if not COUNT_PHRASE.search(sentence):
@@ -316,7 +343,7 @@ def _reach_claims(sentences):
             claim = sentences[position]
             if not REACH_CLAIM.search(claim):
                 continue
-            if not any(rel in claim for rel in sources):
+            if not any(name in claim for name in names):
                 continue
             pairs.append((position, claim))
     return pairs
@@ -338,13 +365,13 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
     sentences that carry one are the count phrase's and its immediate
     neighbour on either side, so a rendering that writes the figure before
     the claim is judged as one that writes it after, and one that NAMES A
-    SHIPPED JAVASCRIPT PATH. A window whose only predicate is a general
+    SHIPPED MODULE. A window whose only predicate is a general
     coverage sentence, and one whose only predicate names a different
     shipped module, are both refusals: neither leaves this paragraph's own
     claim unchecked, which is the property that makes it safe to read a
-    predicate naming no shipped path as prose. A predicate match further
+    predicate naming no shipped module as prose. A predicate match further
     than a single neighbour is outside the window and is admitted whether
-    or not it names a shipped path; the residual that leaves is named in
+    or not it names a shipped module; the residual that leaves is named in
     the module docstring, with what it would take to close.
 
     Each claim then owes three things. It names the module, because a
