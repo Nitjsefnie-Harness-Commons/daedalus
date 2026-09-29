@@ -15,7 +15,6 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
