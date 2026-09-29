@@ -19,6 +19,8 @@ to keep a cross-reference true.
 """
 import ast
 
+import _launch_path as path
+
 
 def _names_a_target_binds(target):
     """Every NAME a target node binds, through a tuple or a star."""
@@ -102,3 +104,68 @@ def _rebindings(tree):
         else:
             found.extend((node, name) for name in type_param_names(node))
     return found
+
+
+def _every_use_proven(function, derived):
+    """Whether every Load of a derived name sits in a PROVEN position.
+
+    Four: an argument of a call, a `Compare` operand, the value of an
+    `Assign` whose targets are all plain Names, and a bare-Name `Assert`
+    message. Fail-closed: any other position is a refusal, so a use nobody
+    anticipated is never read as permission.
+
+    This checks WHERE the deadline's own names are USED, which is not the
+    same question as which statements to FOLLOW. The last five findings on
+    this branch were that mistake -- a rule reading a subset and treating the
+    complement as proof -- and following more forms would be the next member
+    of the same class. Here the list is positions, and the complement of a
+    position list is a refusal rather than a permission.
+
+    An argument of a call is judged by the caller's own sink and receiver
+    logic exactly as it always was; this gate only decides whether the
+    position is a position at all.
+
+    A Load inside a comprehension is the value of a COMPREHENSION, which has
+    its own scope and its own target binding -- not the value of the Assign
+    whose expression happens to contain it.
+    """
+    proven = set()
+    scoped = {id(inner)
+              for comp in ast.walk(function)
+              if isinstance(comp, ast.comprehension)
+              for inner in ast.walk(comp)}
+
+    def take(inner):
+        if (isinstance(inner, ast.Name) and inner.id in derived
+                and id(inner) not in scoped):
+            proven.add(id(inner))
+
+    def walk(parts):
+        for part in parts:
+            for inner in ast.walk(part):
+                take(inner)
+
+    for node in ast.walk(function):
+        if path._is_call(node):
+            walk([*node.args, *(k.value for k in node.keywords)])
+        elif isinstance(node, ast.Compare):
+            walk([node.left, *node.comparators])
+        elif (isinstance(node, ast.Assert) and isinstance(node.msg, ast.Name)
+              and node.msg.id in derived):
+            # The message is a NAME the assertion formats when it FAILS, so
+            # it reaches no child; only a bare Name is that, and anything
+            # nested under the message gets no exemption.
+            proven.add(id(node.msg))
+        elif (isinstance(node, ast.Assign) and node.value is not None
+                and all(isinstance(t, ast.Name) for t in node.targets)):
+            walk([node.value])
+        elif (isinstance(node, ast.AugAssign)
+              and isinstance(node.target, ast.Name)
+              and node.target.id in derived):
+            # `timeout += 1` READS the name it writes. The augmented target
+            # is the one Store-context Name that is also a Load, and no
+            # position list admits it.
+            return False
+    return all(id(inner) in proven for inner in ast.walk(function)
+               if isinstance(inner, ast.Name) and inner.id in derived
+               and isinstance(inner.ctx, ast.Load))
