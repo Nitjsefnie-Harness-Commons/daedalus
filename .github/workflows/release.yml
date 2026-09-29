@@ -179,6 +179,20 @@ jobs:
         with:
           python-version: "3.13"
 
+      # The suite step below globs every suite, and those suites skip on
+      # node. A release job that runs them inherits node from the hosted
+      # image and says nothing, which is the state the declaration control
+      # in test_ci_lint_tools.py refuses — a published release is the last
+      # place a silently-skipped suite belongs. Above the suite step, not
+      # beside it: the control reads ORDER, and a declaration after the
+      # suites have already run declares nothing.
+      # actions/setup-node v7.0.0
+      - uses: >-
+          actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
       - name: Install the build backend and test dependencies
         # The MCP suite skips without its extra, and test_diff_coverage needs
         # the statement analyzer pinned by requirements-test.txt. The suite
