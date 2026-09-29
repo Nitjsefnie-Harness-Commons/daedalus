@@ -468,6 +468,14 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
     against the steps that come BEFORE the first step reaching the suites.
     Which step that is comes from `_suite_step`, the same walk the door
     derivation uses, so the two cannot disagree about it.
+
+    The tool set is this mechanism's share of the derivation, asked of
+    `_unjournalled` the same way the installer control asks for its own. A
+    control that read `DECLARED_BY` directly would ask a different question
+    on a tree where the table names a tool no suite skips on, and would
+    demand a declaration for it; the closure control is what holds that
+    table to the tree, and it is a different control for a different
+    question.
     """
     del tmp
     for source, job, _runs, _mechanism in _runner_doors():
@@ -478,8 +486,9 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
             'the suites any more; the two are read from one function and '
             'disagreeing means one of them is stale')
         before = _actions_before(workflow, job, reach[0])
-        missing = sorted(tool for tool, action in DECLARED_BY.items()
-                         if action not in before)
+        share = _unjournalled(share=DECLARED_BY)
+        missing = sorted(tool for tool in share
+                         if DECLARED_BY[tool] not in before)
         assert not missing, (
             f'the {job} job in {source} finds its suites by discovery, and '
             f'its first suite-running step is step {reach[0] + 1}, before '
