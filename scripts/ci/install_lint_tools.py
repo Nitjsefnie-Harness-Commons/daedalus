@@ -3,26 +3,41 @@
 
 A suite that drives a real binary skips when the binary is absent, so a job
 that has not installed one reports green having verified nothing. Every job
-that runs a suite runner calls this script; the tool set it declares is what
+that reaches the suites calls this script; the tool set it declares is what
 `tests/test_ci_lint_tools.py` holds each of those jobs to.
 
 `actionlint` is downloaded and checksum-verified rather than piped from an
-install script, and the transfer is bounded in size. `shellcheck` is not
-fetched here: the PyPI package that ships the binary is pinned in
-requirements-test.txt, which every one of these jobs already installs, and
-running pip again between the restore and the save of the pip cache would
-change what that cache holds.
+install script, and the transfer is bounded in size. `shellcheck` is
+installed from its pinned wheel, at the pin READ OUT OF
+`requirements-test.txt` rather than written here: a version pin spelled in
+two files is a pin that will drift, and the whole point of a pin is that
+the thing running is the thing named. `requirements-test.txt` keeps the pin
+it always had, and the three jobs that install that file into their own
+environment still resolve a shellcheck from it — at the same version,
+because it is the same line of the same file. This script's copy lands in
+the tool directory, which is prepended to PATH, so on those three it is the
+copy that wins; that is the uniformity the pin is for, not a shadow of a
+different version.
 
-On a CI runner the installed directory is prepended to PATH for the steps
-that follow, and TOOLS is written to $GITHUB_ENV under LINT_TOOLS_ENV. A
-control reads that variable back and requires each tool to resolve; a broken
-install is a failure there, never a skip.
+A runner image shipping a shellcheck of its own is not a supply route this
+relies on. It was, once: the `timed` job invokes its interpreters by
+absolute path, so a venv's console scripts are invisible to the suites
+running under it, and the job resolved shellcheck 0.9.0 from the hosted
+image while the other three doors linted with the pinned 0.11.0.1. A pin
+that is not the version running on one of the four doors is the class of
+defect this script exists to remove, so every door now installs it.
+
+On a CI runner the installed directories are prepended to PATH for the
+steps that follow, and TOOLS is written to $GITHUB_ENV under
+LINT_TOOLS_ENV. A control reads that variable back and requires each tool
+to resolve; a broken install is a failure there, never a skip.
 """
 import hashlib
 import io
 import os
 import platform
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -30,11 +45,17 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-# What a suite may skip on, and therefore what a suite-running job installs.
-# The next binary a suite skips on is added here and nowhere else.
+ROOT = Path(__file__).resolve().parents[2]
+# What a suite may skip on, and therefore what a job reaching the suites
+# installs. The next binary a suite skips on is added here and nowhere else.
 TOOLS = ('actionlint', 'shellcheck')
 # The name this script writes TOOLS under, and the name the control reads.
 LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
+# The one place the shellcheck version is written down. This script reads
+# it and never repeats it, so a bump in this file moves every door at once
+# and there is no second copy to forget.
+REQUIREMENTS = ROOT / 'requirements-test.txt'
+SHELLCHECK_PACKAGE = 'shellcheck-py'
 ACTIONLINT_VERSION = '1.7.12'
 # sha256 of each release asset, taken from the release's own checksums.txt.
 # Bump the version and this table together. The key is (platform.system(),
@@ -145,26 +166,91 @@ def install_actionlint():
     print(f'actionlint {ACTIONLINT_VERSION} installed at {target}')
 
 
+def shellcheck_pin():
+    """The shellcheck version `requirements-test.txt` pins, read from it.
+
+    A pin written here as well would be a second copy, and the two would
+    drift the first time somebody bumped one. Zero pins and two pins are
+    both refused: a requirement spelled without a version would install
+    whatever is newest, which is the failure a pin exists to prevent.
+    """
+    wanted = f'{SHELLCHECK_PACKAGE}=='
+    found = [line for line in REQUIREMENTS.read_text(
+        encoding='utf-8').splitlines()
+        if line.strip() and not line.lstrip().startswith('#')
+        and line.split(';')[0].strip().startswith(wanted)]
+    if not found:
+        raise SystemExit(
+            f'{REQUIREMENTS.name} pins no {SHELLCHECK_PACKAGE}==<version>; '
+            'this script installs the version that file names, so a pin '
+            'there is the whole supply route')
+    if len(found) > 1:
+        raise SystemExit(
+            f'{REQUIREMENTS.name} pins {SHELLCHECK_PACKAGE} {len(found)} '
+            f'times, at {sorted(found)}; one file must name one version')
+    return found[0].split(';')[0].strip()[len(wanted):]
+
+
+def script_dir(target):
+    """Where pip puts console scripts under `--target` on this platform.
+
+    `bin` on POSIX, `Scripts` on Windows, and the difference is the whole
+    reason a Windows leg needs this computed rather than hardcoded: the
+    tool directory is on PATH either way, and a directory with no console
+    scripts in it resolves nothing.
+    """
+    return target / ('Scripts' if platform.system() == 'Windows' else 'bin')
+
+
+def install_shellcheck():
+    """Install the pinned shellcheck wheel into the tool directory."""
+    target = TOOL_DIR / SHELLCHECK_PACKAGE
+    subprocess.run(
+        [sys.executable, '-m', 'pip', 'install', '--quiet', '--upgrade',
+         '--target', str(target), f'{SHELLCHECK_PACKAGE}=='
+         f'{shellcheck_pin()}'],
+        check=True)
+    scripts = script_dir(target)
+    if not scripts.is_dir():
+        raise SystemExit(
+            f'pip installed {SHELLCHECK_PACKAGE} but left no console scripts '
+            f'in {scripts}, so the binary this script declares would not '
+            'resolve; installing it into a directory with nothing in it is '
+            'the same as not installing it')
+    print(f'shellcheck {shellcheck_pin()} installed at {scripts}')
+
+
 def _publish():
-    """Put the tool directory on PATH for this process and the steps after."""
-    os.environ['PATH'] = f'{TOOL_DIR}{os.pathsep}{os.environ["PATH"]}'
+    """Put the tool directories on PATH here and for the steps after."""
+    for directory in (TOOL_DIR, script_dir(TOOL_DIR / SHELLCHECK_PACKAGE)):
+        os.environ['PATH'] = f'{directory}{os.pathsep}{os.environ["PATH"]}'
     later = os.environ.get('GITHUB_PATH')
     if later:
         with open(later, 'a', encoding='utf-8') as handle:
             handle.write(f'{TOOL_DIR}\n')
+            handle.write(
+                f'{script_dir(TOOL_DIR / SHELLCHECK_PACKAGE)}\n')
 
 
 def _record():
-    """Write TOOLS where the control reads them, and verify each resolves."""
+    """Write TOOLS where the control reads them, and verify each resolves.
+
+    The check is against the PATH this script has just published, so what
+    it proves is that THIS install put each binary there — not that some
+    runner image happened to carry one. That is the difference the
+    `timed` job needed and did not have: it resolved a shellcheck from
+    the hosted image at a version no pin named, and this check passed.
+    """
     missing = [tool for tool in TOOLS if shutil.which(tool) is None]
     if missing:
         raise SystemExit(
             f'{", ".join(missing)} does not resolve on PATH after this '
-            'install. actionlint is installed by this script; shellcheck '
-            'comes from shellcheck-py in requirements-test.txt, so a job that '
-            'has not installed that file cannot run the suites this script '
-            'exists for. This is a failure and not a skip: a suite that skips '
-            'here reports success having verified nothing.')
+            'install, though this script installed both: actionlint from '
+            'its release and shellcheck from the wheel '
+            'requirements-test.txt pins. A tool resolving from anywhere '
+            'else is a tool no pin names, which is what this step exists '
+            'to stop. This is a failure and not a skip: a suite that '
+            'skips here reports success having verified nothing.')
     later = os.environ.get('GITHUB_ENV')
     if later:
         with open(later, 'a', encoding='utf-8') as handle:
@@ -176,6 +262,7 @@ def _record():
 
 def main():
     install_actionlint()
+    install_shellcheck()
     _publish()
     _record()
     return 0

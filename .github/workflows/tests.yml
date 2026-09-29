@@ -611,9 +611,10 @@ jobs:
       # The suites drive real binaries, and a suite that finds one missing
       # SKIPS — on every leg, silently, so a job can be green having verified
       # nothing. This is the step that turns those skips into runs. It runs
-      # after the install above because one of the two tools it names arrives
-      # with that install, and it runs no pip itself, so the cache save below
-      # still holds what this job's install put there.
+      # after the install above so both tools are first on PATH: this step
+      # installs each of them itself, at the pins that install names, so
+      # what the suites find is what this step put there rather than what
+      # the job happened to bring or what the runner image happened to ship.
       - name: Install the lint tools the suites drive
         run: python scripts/ci/install_lint_tools.py
 
@@ -624,10 +625,14 @@ jobs:
 
       # The gate is the answer to the cache-poisoning findings: an untrusted
       # event never writes cross-run state, and a push of main is the one
-      # trigger whose checkout this repository produced. No step between the
-      # install and here runs pip, so the save's position does not change what
-      # the cache holds, only who writes one: a run cancelled during the
-      # suites never reaches this step.
+      # trigger whose checkout this repository produced. The save's position
+      # does not change WHAT the cache holds, only who writes one: a run
+      # cancelled during the suites never reaches this step. The installer
+      # above runs pip, so the comment this replaced — that nothing between
+      # the install and here runs pip — is no longer true, and the claim now
+      # made in its place is the one that matters: that pip call installs
+      # the same wheel this job's own install already put in the restored
+      # key, so the save publishes nothing the restore did not already hold.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -1708,9 +1713,21 @@ jobs:
       # a suite that drives actionlint or shellcheck skips here on every
       # cell, silently, and the cell reports a duration for a suite that
       # did not run — which is worse than a red cell, because the number it
-      # publishes is then the runtime of a skip. `shellcheck` needs no
-      # step: each side's own requirements-test.txt already brings
-      # shellcheck-py into that side's virtualenv, twice over.
+      # publishes is then the runtime of a skip.
+      #
+      # This step supplies BOTH tools, and it is the only route either of
+      # them has in this job. The venvs built above cannot supply
+      # shellcheck to the suites: this job invokes its interpreters by
+      # absolute path and never puts a venv's bin directory on PATH, so a
+      # console script installed in one is invisible to `shutil.which` —
+      # which is how this job used to resolve a shellcheck from the
+      # ubuntu-latest image at 0.9.0 while the other three doors linted with
+      # the 0.11.0.1 that requirements-test.txt pins. A pin that is not the
+      # version running on one of the four doors is the class of defect this
+      # change exists to close, so the door no longer depends on what an
+      # image happens to ship. The installer READS that pin out of
+      # requirements-test.txt and installs that version, so the pin is in
+      # one file and is the version in use on every door.
       #
       # ONE asymmetry, stated rather than left to ordering: the job builds
       # two environments from two different trees and times suites on both,

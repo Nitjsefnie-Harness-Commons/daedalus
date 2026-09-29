@@ -49,9 +49,26 @@ ROOT = _util.ROOT
 # Matching the path with a substring covers both, because the prefixed form
 # ends with the root-relative one.
 #
-# What it does not do is tell a command from a comment that quotes the path
-# inside a `run:` block. The error runs toward a red control naming a
-# comment, which is a cheap edit, rather than toward a green one.
+# WHAT THIS CANNOT SEE, both directions, because a reader deciding how far
+# to trust a green run needs the bounds rather than the claim:
+#
+# - It cannot tell a step that RUNS the installer from a comment quoting
+#   the path inside a `run:` block. That error runs toward a red control
+#   naming a comment, which is a cheap edit.
+# - It cannot tell a step that runs the installer from a step that NAMES
+#   it and would fail at runtime. A path that does not resolve in the job's
+#   own directory layout is not a step that runs the installer, and this
+#   substring is green on it. That error runs the OTHER way — toward a
+#   green control over a broken job — and it is not hypothetical: this
+#   branch shipped exactly that, when `timed` named a root-relative script
+#   in a job that checks its trees out into subdirectories, and the
+#   control stayed green through two review rounds on the strength of this
+#   assertion. N1 fixed the instance; nothing in the tree catches the
+#   class, and no spelling of this assertion can, because the information
+#   that is missing is whether the file exists from where the step runs.
+#   The control that would need it is a workflow control resolving each
+#   `run:` path against a checkout layout, which does not exist here.
+INSTALLER_PATH = 'scripts/ci/install_lint_tools.py'
 INSTALLER_PATH = 'scripts/ci/install_lint_tools.py'
 LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 INSTALLER_SOURCE = ROOT / INSTALLER_PATH
@@ -125,12 +142,23 @@ def _declared_tools():
 # but it also means the table's real job is to hold one witness per way
 # the recogniser's STRUCTURE can fail, so that a structural change which
 # drops an arm is red rather than silent. The shapes still open, recorded
-# so the next round does not re-derive them: a `which` over a loop
-# variable, where the tool is never a candidate at all and no guard-shape
-# fix can reach it; `os.popen`; a string argv under `shell=True`; and a
-# locally named skip helper whose name is neither `skip*` nor `*Skipped`,
-# which is a class bound (the recogniser matches names, not call intent)
-# rather than one defect.
+# so the next round does not re-derive them, and kept in step with what
+# `tests/_lint_tool_roles._lookup_target_names` says it cannot read:
+#
+# - a `which` over a loop variable, where the tool is never a CANDIDATE at
+#   all, so no guard-shape fix reaches it;
+# - `os.popen`;
+# - a string argv under `shell=True`, where the whole command is one
+#   string rather than an argv element;
+# - a locally named skip helper whose name is neither `skip*` nor
+#   `*Skipped`, which is a class bound — the recogniser matches call
+#   NAMES, not call intent — rather than one defect;
+# - a multi-target assignment, `a = b = which(t)`, which is now READ (one
+#   value reaches every target) and is a row in the table below rather
+#   than an open shape. It was open until this round and the previous list
+#   did not say so, which is the failure this paragraph exists to stop
+#   repeating: a disclosure a reader consults has to name what the
+#   recogniser actually declines.
 GUARDED_ON = {
     'inline identity':
         'if shutil.which(TOOL) is None:\n    _util.skip("no parser")',
@@ -174,6 +202,12 @@ GUARDED_ON = {
     'second slot of a tuple-unpacked binding':
         'def probe():\n    _first, found = None, shutil.which(TOOL)\n'
         '    if not found:\n        _util.skip("no parser")\n',
+    'second name of a chained assignment':
+        'first = found = shutil.which(TOOL)\nif not found:\n'
+        '    _util.skip("no parser")',
+    'first name of a chained assignment':
+        'first = found = shutil.which(TOOL)\nif not first:\n'
+        '    _util.skip("no parser")',
     'command that cannot be started':
         'try:\n    subprocess.run([TOOL, "--version"], check=True)\n'
         'except FileNotFoundError:\n    _util.skip("no parser")',
