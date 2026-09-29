@@ -91,7 +91,11 @@ def _held_at_the_reading(fake, parent):
                       'both children to announce their pid')
     pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err.lines
             if _announces_pid(line)]
-    waits.await_calls(fake, 2, parent, '2 gh call(s)')
+    # The wait's own escape names the aggregator, because an aggregator that
+    # went early is the failure it reports - `os._exit` takes both watchers
+    # with it, and "2 gh call(s)" alone would not say which side moved.
+    waits.await_calls(fake, 2, parent,
+                      'the aggregator to make 2 gh call(s)')
     entered = fake.entered()
     assert len(entered) == 2, (
         f'both watchers to be held inside a call of their own: {entered}')
