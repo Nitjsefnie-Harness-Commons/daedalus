@@ -139,6 +139,19 @@ CHAIN_LIMB_ROWS = (
      "    pass\n"
      "email.mime.text.send(['git', 'status'], timeout=30)\n",
      [(7, 'unreadable', 'unplaced')]),
+    # A PARAMETER is a binding too, and `shadowed` reads it for the
+    # function the receiver is written in — so the one form the sweep has
+    # to add is a parameter of an ENCLOSING function, which the receiver
+    # does not see. Without it the chain limb proves a name the module
+    # has bound, one scope out.
+    ('a-root-bound-by-an-enclosing-function-parameter-is-not-proved',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "def outer(email):\n"
+     "    def inner():\n"
+     "        return email.mime.text.send(['git', 'status'], timeout=30)\n"
+     "    return inner\n",
+     [(5, 'unreadable', 'unplaced')]),
     # The negative for the collection itself rather than for the table:
     # every one of those five forms present in the module, on names that
     # are not the root. A guard that refused on any binding at all would
