@@ -79,6 +79,16 @@ def check(rid, name, conclusion='SUCCESS'):
             'url': f'https://github.com/o/r/runs/{rid}'}
 
 
+# The fragment a runs answer is keyed on, and the reason it is NOT
+# `checkSuites`: `_fake_gh` answers whichever fragment the request
+# carries, so keying on the connection answers a query that asks for
+# no check runs at all. Keyed on the SELECTION, a query with the
+# `checkRuns` clause deleted finds no fixture and is refused - which is
+# the only thing that authenticates the query text, and the change's
+# own central regression is a query that asks for less.
+RUNS_QUERY = 'checkRuns(first: 100)'
+
+
 def published(rid=7, name='gate freshness',
               conclusion='SUCCESS', status='COMPLETED'):
     """One check-run node, as the check suites now report it.
@@ -93,6 +103,19 @@ def published(rid=7, name='gate freshness',
             'conclusion': conclusion,
             'completedAt': '2026-09-20T10:10:00Z',
             'detailsUrl': f'https://github.com/o/r/runs/{rid}'}
+
+
+def published_suite(conclusion='SUCCESS', rid=7):
+    """The suite the Checks API creates for a verdict of its own.
+
+    It is not a workflow run's suite: the publisher POSTs a check run
+    that belongs to no run, so `workflow_runs` never sees it and only
+    its check runs are readable. A fixture that hangs one off the
+    `tests` run's own suite asserts a shape the live system does not
+    produce.
+    """
+    return suite(rid, conclusion=conclusion, workflow=None,
+                 check_runs=[published(rid, conclusion=conclusion)])
 
 
 def runs_page(suites=()):
@@ -300,7 +323,7 @@ def idle_answers():
         # reads it, so a fixture without one is a head whose publisher
         # wrote nothing, and these controls measure the cost of a wait
         # that CERTIFIES rather than one that never ends.
-        'checkSuites': runs_page([suite(1, name='tests', check_runs=[
-            published()])]),
+        RUNS_QUERY: runs_page([suite(1, name='tests'),
+                              published_suite()]),
         **base_answers(),
     }

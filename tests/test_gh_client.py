@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
+from _watcher_fixtures import RUNS_QUERY  # noqa: E402
 from _watcher_fixtures import THROTTLED  # noqa: E402
 from _watcher_fixtures import spent_limit_response  # noqa: E402
 
@@ -354,7 +355,7 @@ def _suite(rid, conclusion: str | None = 'SUCCESS',
 
 def test_a_run_past_the_first_page_is_still_read(tmp):
     mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': [
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: [
         _suite_page([_suite(1)], has_next=True, cursor='CURSOR-1'),
         _suite_page([_suite(2)])]})
     with fake.activate():
@@ -372,7 +373,7 @@ def test_a_run_past_the_first_page_is_still_read(tmp):
 
 def test_the_jobs_of_one_run_collapse_to_the_run(tmp):
     mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': _suite_page([
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: _suite_page([
         _suite(1, 'SUCCESS', 'COMPLETED', started='2026-09-20T10:00:00Z'),
         _suite(1, 'FAILURE', 'COMPLETED', started='2026-09-20T10:01:00Z')])})
     with fake.activate():
@@ -380,7 +381,7 @@ def test_the_jobs_of_one_run_collapse_to_the_run(tmp):
     assert len(runs) == 1
     assert runs[0]['conclusion'] == 'failure'
     assert runs[0]['status'] == 'completed'
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': _suite_page([
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: _suite_page([
         _suite(1, 'SUCCESS', 'COMPLETED', started='2026-09-20T10:00:00Z'),
         _suite(1, None, 'IN_PROGRESS',
                started='2026-09-20T10:01:00Z')])})
@@ -391,7 +392,7 @@ def test_the_jobs_of_one_run_collapse_to_the_run(tmp):
 
 def test_the_same_run_twice_in_one_page_is_one_run(tmp):
     mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': _suite_page(
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: _suite_page(
         [_suite(1), _suite(1), _suite(2)])})
     with fake.activate():
         runs = mod.workflow_runs('o', 'r', 'a' * 40)
@@ -400,7 +401,7 @@ def test_the_same_run_twice_in_one_page_is_one_run(tmp):
 
 def test_a_sha_with_no_run_yet_reads_as_no_runs(tmp):
     mod = _client()
-    fake = _fake_gh.FakeGh(tmp, {'checkSuites': {
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: {
         'data': {'repository': {'commit': None}}}})
     with fake.activate():
         assert mod.workflow_runs('o', 'r', 'a' * 40) == []
