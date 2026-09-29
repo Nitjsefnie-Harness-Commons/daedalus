@@ -695,6 +695,7 @@
     "_pattern_binds": {"python": ["tests/_coverage_bindings.py"]},
     "_pattern_target": {"python": ["tests/_jsroute_net.py"]},
     "_permitted": {"python": ["tests/_launch_census.py"]},
+    "_pin": {"python": ["tests/_actionlint.py"]},
     "_pinned": {"python": ["tests/_mcp_selection_sweep.py"]},
     "_pinned_actionlint_version": {"python": ["tests/_actionlint.py"]},
     "_place_upload": {"python": ["tests/_upload_fixture.py"]},
