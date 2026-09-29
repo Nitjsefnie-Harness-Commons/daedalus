@@ -213,7 +213,13 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
                               return_value=payload), \
             _installed(installer), \
             mock.patch.object(installer, 'shutil', mock.Mock(
-                which=lambda tool: f'C:\\hosted-tool\\{tool}.exe')):
+                which=lambda tool: str(installer.script_dir(
+                    tools / installer.SHELLCHECK_PACKAGE)
+                    / f'{tool}.exe'))):
+        # The stub answers from inside the tool directory, because that is
+        # the only place `_record` will accept an answer from. A stub that
+        # answered from anywhere else used to pass and does not now — which
+        # is the check doing its job, not the test being wrong.
         assert installer.main() == 0
     installed = tools / 'actionlint.exe'
     assert installed.read_bytes() == EXECUTABLE

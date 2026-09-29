@@ -152,12 +152,18 @@ def _declared_tools():
 # - a locally named skip helper whose name is neither `skip*` nor
 #   `*Skipped`, which is a class bound — the recogniser matches call
 #   NAMES, not call intent — rather than one defect;
-# - a multi-target assignment, `a = b = which(t)`, which is now READ (one
-#   value reaches every target) and is a row in the table below rather
-#   than an open shape. It was open until this round and the previous list
-#   did not say so, which is the failure this paragraph exists to stop
-#   repeating: a disclosure a reader consults has to name what the
-#   recogniser actually declines.
+# - a multi-target assignment, `a = b = which(t)` and the comma-separated
+#   `a = b, c = which(t), None` beside it, which are now READ and are rows
+#   in the table below rather than open shapes. They were open until this
+#   round, and the previous list did not say so, which is the failure this
+#   paragraph exists to stop repeating: a disclosure a reader consults has
+#   to name what the recogniser actually declines.
+#
+# And one shape that is named because it CANNOT RUN, so handling it would
+# be handling a program nobody can execute: `(a, b) = c = which(t)` unpacks
+# a path string into two names, which is a ValueError. It binds nothing,
+# and `_lookup_target_names` says so in the same words rather than leaving
+# a reader to assume the silence was an oversight.
 GUARDED_ON = {
     'inline identity':
         'if shutil.which(TOOL) is None:\n    _util.skip("no parser")',
@@ -207,6 +213,12 @@ GUARDED_ON = {
     'first name of a chained assignment':
         'first = found = shutil.which(TOOL)\nif not first:\n'
         '    _util.skip("no parser")',
+    'tuple target in a comma-separated target list':
+        'whole = first, rest = shutil.which(TOOL), None\n'
+        'if not first:\n    _util.skip("no parser")',
+    'name target in a comma-separated target list':
+        'whole = first, rest = shutil.which(TOOL), None\n'
+        'if not whole:\n    _util.skip("no parser")',
     'command that cannot be started':
         'try:\n    subprocess.run([TOOL, "--version"], check=True)\n'
         'except FileNotFoundError:\n    _util.skip("no parser")',

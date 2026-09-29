@@ -175,10 +175,20 @@ def shellcheck_pin():
     whatever is newest, which is the failure a pin exists to prevent.
     """
     wanted = f'{SHELLCHECK_PACKAGE}=='
-    found = [line for line in REQUIREMENTS.read_text(
-        encoding='utf-8').splitlines()
-        if line.strip() and not line.lstrip().startswith('#')
-        and line.split(';')[0].strip().startswith(wanted)]
+    try:
+        lines = REQUIREMENTS.read_text(encoding='utf-8').splitlines()
+    except OSError as why:
+        # The same register as every other refusal here. A traceback out of
+        # a version read is a stack trace about a file the reader is
+        # looking at, which is the one thing a message like this must not
+        # be when the file is missing, renamed, or unreadable on a runner.
+        raise SystemExit(
+            f'{REQUIREMENTS} could not be read ({why}); this script takes '
+            f'the {SHELLCHECK_PACKAGE} version from that file, so a file it '
+            'cannot read is a version it cannot install') from why
+    found = [line for line in lines
+             if line.strip() and not line.lstrip().startswith('#')
+             and line.split(';')[0].strip().startswith(wanted)]
     if not found:
         raise SystemExit(
             f'{REQUIREMENTS.name} pins no {SHELLCHECK_PACKAGE}==<version>; '
@@ -205,10 +215,10 @@ def script_dir(target):
 def install_shellcheck():
     """Install the pinned shellcheck wheel into the tool directory."""
     target = TOOL_DIR / SHELLCHECK_PACKAGE
+    version = shellcheck_pin()
     subprocess.run(
         [sys.executable, '-m', 'pip', 'install', '--quiet', '--upgrade',
-         '--target', str(target), f'{SHELLCHECK_PACKAGE}=='
-         f'{shellcheck_pin()}'],
+         '--target', str(target), f'{SHELLCHECK_PACKAGE}=={version}'],
         check=True)
     scripts = script_dir(target)
     if not scripts.is_dir():
@@ -217,7 +227,7 @@ def install_shellcheck():
             f'in {scripts}, so the binary this script declares would not '
             'resolve; installing it into a directory with nothing in it is '
             'the same as not installing it')
-    print(f'shellcheck {shellcheck_pin()} installed at {scripts}')
+    print(f'shellcheck {version} installed at {scripts}')
 
 
 def _publish():
@@ -232,32 +242,68 @@ def _publish():
                 f'{script_dir(TOOL_DIR / SHELLCHECK_PACKAGE)}\n')
 
 
+def _installed_here(path):
+    """Whether a resolved tool is the one this install put on PATH.
+
+    The comparison is on the resolved path's own directory rather than on
+    the PATH's order, because order is what the defect exploited: the
+    published directories are prepended, so anything that is NOT under one
+    of them answered the lookup from somewhere this script never wrote.
+    """
+    resolved = Path(path)
+    root = TOOL_DIR.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def _record():
     """Write TOOLS where the control reads them, and verify each resolves.
 
-    The check is against the PATH this script has just published, so what
-    it proves is that THIS install put each binary there — not that some
-    runner image happened to carry one. That is the difference the
-    `timed` job needed and did not have: it resolved a shellcheck from
-    the hosted image at a version no pin named, and this check passed.
+    "Resolves" is not enough, and this is the check's second revision. A
+    plain `shutil.which` scans the whole PATH, so it is satisfied by a
+    binary this install did nothing about: pip leaves an empty console
+    script directory, the hosted image's shellcheck answers instead, and
+    the check passes on ubuntu-latest — the image this whole change is
+    about. That is a pin that is not the version in use, passing because
+    something else on the machine supplied it, which is the defect class
+    this script was written to close, one function down.
+
+    So each tool must resolve INSIDE the directory this install published.
+    A tool found elsewhere is reported with the path that was found,
+    because "it resolved somewhere else" is exactly the part a reader
+    needs to see and the bare word `missing` would have hidden.
     """
-    missing = [tool for tool in TOOLS if shutil.which(tool) is None]
+    resolved = {tool: shutil.which(tool) for tool in TOOLS}
+    elsewhere = {tool: path for tool, path in resolved.items()
+                 if path is not None and not _installed_here(path)}
+    if elsewhere:
+        raise SystemExit(
+            f'{", ".join(sorted(elsewhere))} resolved outside {TOOL_DIR} — '
+            f'{sorted(elsewhere.values())} — so this install did not put it '
+            'on PATH and whatever answered was something else on the '
+            'machine. That is the failure this step exists to stop: a tool '
+            'no pin names, running in place of the one that does. This is '
+            'a failure and not a skip: a suite that skips here reports '
+            'success having verified nothing.')
+    missing = [tool for tool, path in resolved.items() if path is None]
     if missing:
         raise SystemExit(
             f'{", ".join(missing)} does not resolve on PATH after this '
             'install, though this script installed both: actionlint from '
             'its release and shellcheck from the wheel '
-            'requirements-test.txt pins. A tool resolving from anywhere '
-            'else is a tool no pin names, which is what this step exists '
-            'to stop. This is a failure and not a skip: a suite that '
-            'skips here reports success having verified nothing.')
+            'requirements-test.txt pins. This is a failure and not a '
+            'skip: a suite that skips here reports success having '
+            'verified nothing.')
     later = os.environ.get('GITHUB_ENV')
     if later:
         with open(later, 'a', encoding='utf-8') as handle:
             handle.write(f'{LINT_TOOLS_ENV}={",".join(TOOLS)}\n')
     print(f'{LINT_TOOLS_ENV}={",".join(TOOLS)}')
     for tool in TOOLS:
-        print(f'  {tool}: {shutil.which(tool)}')
+        print(f'  {tool}: {resolved[tool]}')
 
 
 def main():
