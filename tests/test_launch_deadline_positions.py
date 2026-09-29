@@ -284,6 +284,33 @@ def test_a_load_inside_a_comprehension_is_not_the_assign_value(tmp):
         "comprehension's iter would be read as the Assign's own value")
 
 
+def test_a_subscript_store_is_not_a_proven_position(tmp):
+    """The witness for the subscript-store arm, and it is a REFUSAL.
+
+    `spent.append(timeout)` is a PROVEN position -- the receiver is a
+    literal -- and the shape above discharges on it. A subscript STORE
+    reaches the very same call-argument position and still refuses,
+    because a store hands the number to a container the census resolves
+    no body for, so the position check cannot decide the row and the
+    store is what refuses it.
+
+    Every other row here is a NAME that travelled; this one is a store,
+    which is why a second guard masked it: the deadline reaches a call
+    argument, so `_every_use_proven` passes and the position gate has
+    nothing left to say. A mutation table found the arm unpinned.
+    """
+    del tmp
+    source = ('def g(timeout=None):\n'
+              '    box = []\n'
+              '    spent = []\n'
+              "    spent['seen'] = box.pop(timeout)\n"
+              '    return spent\n')
+    assert _census_for(source), (
+        'the subscript-store arm is not carrying this row; a signature '
+        'whose deadline reached a container the census resolves no body '
+        'for would discharge')
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='launchdeadlinepositions_')
