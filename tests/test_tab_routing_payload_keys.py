@@ -31,14 +31,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute import dict_assignments, py_tab_routing_violations  # noqa: E402
 
-# The filed shape's module: one function, a real send, and the sender
-# spelled as a local function so the last line is a genuine Python call.
 _SENDER = "    def ext_cmd(*a, **k): return k\n"
 _SPREAD = "    return ext_cmd('PUT', '/command', **cmd)\n"
 _CALL = 'f(ARGS)'
-# The truth a row states when the send never happens: a key the runtime
-# cannot pass raises before the call returns, so the sender is reached
-# with nothing.
 _RAISES = 'raises TypeError'
 
 
@@ -47,9 +42,6 @@ def _inside(*lines, tail=_SPREAD):
         f'    {line}\n' for line in lines) + tail
 
 
-# The foldable spellings, each a key bound to a name first. Every one
-# of them carries a real `tab` to the sender at runtime, and each reads
-# the same verdict the same payload spelled with a literal key gets.
 _ROWS = [
     ('spread', 1, {'tab': 5}, _CALL, _inside('k = "tab"', 'cmd = {k: 5}')),
     ('subscript', 1, {'id': 'x', 'tab': 5}, _CALL, _inside(
@@ -66,23 +58,17 @@ _ROWS = [
         'k = "tab"', 'cmd = {}', 'cmd |= {k: 5}')),
     ('beside-spread', 1, {'id': 'x', 'tab': 5}, _CALL, _inside(
         'k = "tab"', 'other = {"id": "x"}', 'cmd = {**other, k: 5}')),
-    # Verdict time, not flow time: the spread is written at the call, so
-    # the same fold is the only thing that can see the name.
+    # Verdict time: written at the call, so only the fold can see the name.
     ('inline-at-call', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
      + '    k = "tab"\n'
        "    return ext_cmd('PUT', '/command', **{k: 5})\n"),
-    # The member of this check's own domain that its first cut did not
-    # consider: a walrus in KEY position is a key position, and it
-    # carries a real tab at runtime exactly as the name it binds does.
+    # A member of its own domain the first cut did not consider: a walrus
+    # in KEY position carries a real tab at runtime, as the name it binds.
     ('walrus-key', 1, {'tab': 5}, _CALL, _inside('cmd = {(k := "tab"): 5}')),
-    # The controls. Each reads clean because the RUNTIME agrees, not
-    # because the fold gave up on the position.
     ('literal', 1, {'tab': 5}, _CALL, _inside("cmd = {'tab': 5}")),
-    # A key the program removes before the send is not a tracked key at
-    # the send, and the runtime agrees: the payload that arrives carries
-    # `id` and nothing else, or nothing at all. Every spelling folds the
-    # same key position, so a name-bound `pop` removes what a literal one
-    # removes and a `clear` removes them all.
+    # A key the program removes before the send is not a tracked key, and
+    # the runtime agrees. Every spelling folds the same key position, and a
+    # `clear` names no key and removes them all.
     ('del-literal', 0, {'id': 'x'}, _CALL, _inside(
         'cmd = {"id": "x", "tab": 5}', 'del cmd["tab"]')),
     ('del-name', 0, {'id': 'x'}, _CALL, _inside(
@@ -91,16 +77,14 @@ _ROWS = [
         'cmd = {"id": "x", "tab": 5}', 'cmd.pop("tab")')),
     ('pop-name', 0, {'id': 'x'}, _CALL, _inside(
         'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.pop(k)')),
-    # A default is the missing key's value, not a second key to remove.
     ('pop-default', 0, {'id': 'x'}, _CALL, _inside(
         'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.pop(k, None)')),
     ('clear-literal', 0, {}, _CALL, _inside(
         'cmd = {"id": "x", "tab": 5}', 'cmd.clear()')),
     ('clear-name', 0, {}, _CALL, _inside(
         'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.clear()')),
-    # A non-string key is provably not 'tab', and it is not a key the
-    # runtime can pass either: the splat raises before the call returns,
-    # so nothing reaches the sender at all.
+    # A non-string key is provably not 'tab', and the splat raises before
+    # the call returns, so nothing reaches the sender at all.
     ('nonstring', 0, _RAISES, _CALL, _inside(
         "cmd = {5: 'x', 'tab': 'extension'}")),
     ('other-string', 0, {'type': 'focus-tab'}, _CALL, _inside(
@@ -116,20 +100,17 @@ _ROWS = [
        '    return ext_cmd("PUT", "/command", **cmd)\n'),
 ]
 
-# The boundary this change does not cross. `state.literals` is empty in a
-# nested body, so a binding made OUTSIDE the body that reads the key is
-# not resolved, and the container model's `_literal_key` reads the same
-# table under the same boundary. Each row below DOES reach the
-# sender carrying a real `tab` - the truth is stated here because the
-# guard cannot see it, which is what makes them a separate defect and
-# not a member this change claims to close.
+# Two boundaries this change does not cross. Every row below carries a real
+# `tab` to the sender while reading clean; the truth is stated because the
+# guard cannot see it, which is what makes each a separate defect rather
+# than a member this change claims to close.
 #
-# The two walrus rows are the other boundary. `walrus-key` reads the
-# walrus in key position, which is a key position this change's reader
-# does consider. What the table does not carry is the walrus's BINDING,
-# so a name the walrus binds resolves nowhere after it - the two rows
-# below carry a real `tab` at runtime and read clean, and their fix site
-# is the table's own writer rather than this reader.
+# `state.literals` is empty in a nested body, so a binding made OUTSIDE it
+# is unresolved, and the container model's `_literal_key` reads the same
+# table under the same boundary (#1341). The walrus rows are the other:
+# `walrus-key` reads the walrus in key position, which this reader does
+# consider, but the table does not carry the walrus's BINDING, so a name
+# it binds resolves nowhere after it (#1343).
 _CROSS_SCOPE = [
     ('module-scope', 0, {'tab': 5}, _CALL,
      'TAB = "tab"\n' + _inside('cmd = {TAB: 5}')),
@@ -157,8 +138,6 @@ def _rows():
 def _sent(call, source):
     """What the row's own `ext_cmd` receives when the module is run."""
     scope = {}
-    # The runtime truth is an observation, not a claim: each row is run
-    # so the verdict is measured against what the module does.
     # pylint: disable=exec-used
     exec(compile(source, '<payload-key-row>', 'exec'), scope)
     try:
