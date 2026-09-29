@@ -349,6 +349,7 @@
 !/tests/_hotfix_outcome.py
 !/tests/_hotfix_quota_scenario.py
 !/tests/_hotfixharness.py
+!/tests/_imported_calls.py
 !/tests/_js_functions.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
@@ -451,6 +452,7 @@
 !/tests/_segment_job_record.py
 !/tests/_segments.py
 !/tests/_service_loader.py
+!/tests/_source_anchors.py
 !/tests/_speedharness.py
 !/tests/_stdlib_read.py
 !/tests/_step_ceiling.py
@@ -734,6 +736,7 @@
 !/tests/test_segment_storage.py
 !/tests/test_segment_store.py
 !/tests/test_segment_write_retry.py
+!/tests/test_shared_helper_calls.py
 !/tests/test_speed_acceptance.py
 !/tests/test_speed_gate.py
 !/tests/test_speed_gate_jobs.py

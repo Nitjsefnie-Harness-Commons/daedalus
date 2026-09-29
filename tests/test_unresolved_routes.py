@@ -6,7 +6,6 @@ class each one belongs to. The coverage guard is tests/_coverage_guard.py
 and the control-write checker is tests/_control_writes.py; this suite
 is one the latter scans, so its own writes stay below tmp.
 """
-import ast
 import sys
 from pathlib import Path
 
@@ -17,6 +16,9 @@ from _coverage_source_fixtures import (  # noqa: E402
     _normalized_source, _real_module_copy)
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
+from _source_anchors import (  # noqa: E402
+    after_call, after_import, before_first_call, first_call_line,
+    the_call_line)
 from _repo import ROOT  # noqa: E402
 
 _DECLARATION_LINE = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
@@ -42,77 +44,6 @@ def _control_and_helper_copy(tmp):
     root, control = _real_module_copy(
         tmp, Path('tests/test_coverage_environment.py'))
     return root, control, root / 'tests' / '_coverage_source_fixtures.py'
-
-
-def _nodes(tree, kind):
-    """Every node of one AST kind, so an anchor is a node and not a spelling."""
-    return [node for node in ast.walk(tree) if isinstance(node, kind)]
-
-
-def _calls_of(tree, name):
-    """Every call of the plain name `name` in a parsed module."""
-    return [node for node in _nodes(tree, ast.Call)
-            if isinstance(node.func, ast.Name) and node.func.id == name]
-
-
-def _after_call(text, called, plant):
-    """`text` with `plant` below its one call of `called`; the plant's line.
-
-    The call is located in the AST and the line is read back out of the
-    parse, so the anchor and the line the guard reports move together when
-    the file is reformatted. A count, not a first match: an edit to the
-    wrong occurrence is indistinguishable from no edit at all.
-    """
-    found = _calls_of(ast.parse(text), called)
-    assert len(found) == 1, f'the {called} anchor is not unique: {found}'
-    lines = text.split('\n')
-    lines[found[0].lineno:found[0].lineno] = [plant]
-    return '\n'.join(lines), found[0].lineno + 1
-
-
-def _after_import(text, module, plant):
-    """`text` with `plant` below its one `from <module>` import."""
-    found = [node for node in _nodes(ast.parse(text), ast.ImportFrom)
-             if node.module == module]
-    assert len(found) == 1, f'the {module} import is not unique: {found}'
-    lines = text.split('\n')
-    lines[found[0].end_lineno:found[0].end_lineno] = [plant]
-    return '\n'.join(lines)
-
-
-def _first_call_line(text, name):
-    """The first line at which `text` calls `name`.
-
-    Position, not spelling: the control calls the helper several times and
-    the plant belongs above the first of them.
-    """
-    lines = sorted(node.lineno for node in _calls_of(ast.parse(text), name))
-    assert lines, f'no call of {name} in this copy'
-    return lines[0]
-
-
-def _the_call_line(text, name):
-    """The line of `text`'s one call of `name`; a count, not a first match.
-
-    An edit to the wrong occurrence is indistinguishable from no edit at
-    all, so an anchor that is not unique is a refusal rather than a guess.
-    """
-    found = _calls_of(ast.parse(text), name)
-    assert len(found) == 1, f'the {name} call is not unique: {found}'
-    return found[0].lineno
-
-
-def _before_first_call(text, name, plant):
-    """`text` with `plant` above the first line that calls `name`.
-
-    The control calls the helper several times, so the anchor is the
-    first of them by position rather than a spelling: a reformat moves
-    the plant and the line the guard reports together.
-    """
-    first = _first_call_line(text, name)
-    lines = text.split('\n')
-    lines[first - 1:first - 1] = plant.split('\n')
-    return '\n'.join(lines)
 
 
 def _declaration_line(text):
@@ -168,11 +99,11 @@ def test_a_proved_helper_rebound_after_its_definition_is_not_proof(tmp):
     root, target = _real_module_copy(
         tmp, Path('tests/test_coverage_environment.py'))
     text = _normalized_source(target)
-    mutated = _after_import(
+    mutated = after_import(
         text, '_coverage_source_fixtures',
         "_real_module_copy = lambda _tmp, _relative: "
         "(ROOT, ROOT / 'README.md')")
-    call = _first_call_line(mutated, '_real_module_copy')
+    call = first_call_line(mutated, '_real_module_copy')
     target.write_bytes(mutated.encode('utf-8'))
     violations = control_write_violations(target, root)
     assert (f'tests/test_coverage_environment.py:{call}: _real_module_copy '
@@ -194,8 +125,8 @@ def test_a_path_replace_is_not_the_pure_string_replace(tmp):
     original = helper.read_bytes()
     plant = ("    (root / 'tests' / 'test_control_writes.py')"
              ".replace(ROOT / '.probe.py')")
-    text, line = _after_call(_normalized_source(helper), 'copy_test_tree',
-                             plant)
+    text, line = after_call(
+        _normalized_source(helper), 'copy_test_tree', plant)
     helper.write_bytes(text.encode('utf-8'))
     violations = control_write_violations(control, root)
     assert (f'tests/_coverage_source_fixtures.py:{line}: '
@@ -254,7 +185,7 @@ def test_an_import_bound_twice_resolves_to_neither_binding(tmp):
     root, control, helper = _control_and_helper_copy(tmp)
     helper.write_bytes(_normalized_source(helper).encode('utf-8')
                        + b"def copy_test_tree(root):\n    return root\n")
-    call = _the_call_line(_normalized_source(helper), 'copy_test_tree')
+    call = the_call_line(_normalized_source(helper), 'copy_test_tree')
     assert control_write_violations(control, root) == [
         f'tests/_coverage_source_fixtures.py:{call}: copy_test_tree '
         'callable is unresolved']
@@ -266,8 +197,8 @@ def test_a_starred_argument_does_not_make_path_replace_pure(tmp):
     original = helper.read_bytes()
     plant = ("    (root / 'tests' / 'test_control_writes.py')"
              ".replace(*[], ROOT / '.probe5.py')")
-    text, line = _after_call(_normalized_source(helper), 'copy_test_tree',
-                             plant)
+    text, line = after_call(
+        _normalized_source(helper), 'copy_test_tree', plant)
     helper.write_bytes(text.encode('utf-8'))
     violations = control_write_violations(control, root)
     assert (f'tests/_coverage_source_fixtures.py:{line}: '
@@ -282,8 +213,8 @@ def test_a_container_reached_through_an_alias_is_not_proof(tmp):
     root, target = _real_module_copy(
         tmp, Path('tests/test_coverage_environment.py'))
     text = _normalized_source(target)
-    first = _first_call_line(text, '_real_module_copy')
-    mutated = _before_first_call(
+    first = first_call_line(text, '_real_module_copy')
+    mutated = before_first_call(
         text, '_real_module_copy',
         "    first, *targets = _real_module_copy(tmp, relative)\n"
         "    alias = targets\n"

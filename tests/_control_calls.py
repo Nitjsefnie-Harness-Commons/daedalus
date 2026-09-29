@@ -3,12 +3,11 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 A call outside these tables is refused rather than ignored, so a new
-primitive a control needs is a reviewed line here, not a silent gap.
-One class sits outside the tables on purpose: a callee imported out of a
-`tests/_*.py` module under the root the caller passed in. Admissibility
-for that class is `shared_helper_path`, and it decides only which file
-the import names — reading the helper and judging its body is
-`tests/_control_writes.py`'s work, under the same write rules.
+primitive a control needs is a reviewed line here, not a silent gap. One
+class sits outside the tables: a callee imported out of a `tests/_*.py`
+module under the root the caller passed in. `shared_helper_path` decides
+only which file such an import names; reading that file and judging the
+body is `tests/_imported_calls.py`'s work, under the same write rules.
 """
 import ast
 from collections import Counter
