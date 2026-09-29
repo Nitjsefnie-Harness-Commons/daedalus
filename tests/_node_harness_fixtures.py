@@ -1,11 +1,14 @@
-"""The fixtures the Node-subprocess dashboard and overlap suites each copied.
+"""The fixtures the Node-subprocess dashboard, overlap and boundary suites each
+copied.
 
-Three helpers travelled here rather than staying local: two suites built the
+Four helpers travelled here rather than staying local: two suites built the
 dashboard Node harness from a source string the same way, two overlap suites
-wrote a temporary `background.js` the same way, and a dashboard retry suite
+wrote a temporary `background.js` the same way, a dashboard retry suite
 and an overlap bound suite read the crediting record a bound writes back the
-same way. Each was a byte-identical copy, so a fix to one shape reached one
-suite and not the other.
+same way, and a dashboard command-line suite and the extension boundary
+suite measured the argv Windows refuses the same way. Each was a
+byte-identical copy, so a fix to one shape reached one suite and not the
+other.
 
 The names say what the fixture does in these suites rather than what it is
 generically. `_harness` cannot be kept: `tests/test_dashboard_tab_events.py`
@@ -37,3 +40,8 @@ def _background_worker_file(tmp, source):
     path = Path(tmp) / 'background.js'
     path.write_text(source, encoding='utf-8')
     return path
+
+
+def _command_line_length(argv):
+    """The length Windows measures: the arguments joined by one space."""
+    return sum(len(argument) + 1 for argument in argv)
