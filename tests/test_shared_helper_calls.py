@@ -132,6 +132,28 @@ _MORE_REGIONS = (
      '    return _other(tmp)\n\n\n'
      'def _other(tmp):\n'
      '    return _helper(tmp)\n'),
+    # A ROOT class's header is a region a root function does not have, and
+    # it is the one the previous assembly could not reach: the header was
+    # judged only for `self.helpers`, which is functions only.
+    ('a base expression of a reached class', 3,
+     "class _C(dict(shot=(ROOT / '.pwned').write_text('x'))):\n"
+     '    pass\n\n\n'
+     'def _helper(tmp):\n    return _C\n'),
+    ('a decorator on a reached class', 4,
+     "def _dec(target):\n"
+     f"    (ROOT / '.pwned').write_text('x')\n"
+     '    return target\n\n\n'
+     '@_dec\n'
+     'class _C:\n    pass\n\n\n'
+     'def _helper(tmp):\n    return _C\n'),
+    ('a class keyword on a reached class', 3,
+     'class _C(metaclass=(ROOT / \'.pwned\').write_text(\'x\')):\n'
+     '    pass\n\n\n'
+     'def _helper(tmp):\n    return _C\n'),
+    ('a base-class subscript on a reached class', 3,
+     "class _C(list[dict(a=(ROOT / '.pwned').write_text('x'))]):\n"
+     '    pass\n\n\n'
+     'def _helper(tmp):\n    return _C\n'),
 )
 
 # One helper carrying EVERY region at once, in a call cycle so the
