@@ -7,37 +7,60 @@ a second spelling of "this is the report" is a second thing to widen, and
 the reader is what everything else in the tree asks.
 
 THE RULE, in one sentence: an answer reports exhaustion when it DID NOT
-DELIVER what was asked for and carries rate-limit evidence.
+DELIVER what was asked for and carries rate-limit evidence, or when it
+delivered and its own `errors[]` entry is the report.
 
-Delivered is three things at once, read once, by `delivered`: `gh`
-exited 0, it wrote something, and what it wrote is a JSON object with a
-non-null `data`. Evidence is a `Retry-After`; or a reset beside a spent
+Delivered is two things at once, read once, by `delivered`: `gh` exited
+0, and what it wrote is a JSON object with a non-null `data`.
+
+Evidence is a `Retry-After`; or a reset beside a spent
 `X-Ratelimit-Remaining`; or a reset on a 403 or 429; or a GraphQL
 `errors[]` entry whose `type` or `code` names a rate limit; or the
 answer's own text; or what `gh` wrote to stderr.
-
-Two halves, and the second is what makes the first safe.
 
 The evidence is read BEFORE the exit-code refusal, because the exit code
 is the last evidence and not the first: a throttled query answers 200
 and exits 1, so a reader that consults the code first raises over the
 carriers and never reaches what the answer actually said (issue 1338).
 
-The carriers fire only on an answer that did not deliver, and that is
-not a convenience - it is what the widening would otherwise cost.
-Measured on this branch before the gate: a 200 that SUCCEEDED, carrying
-complete data, with a `gh` warning on stderr that merely mentions a
-limit, was answered `RateLimited(resume_at=None)` - a flat minute's pause
-over a call that worked; and the LAST successful request before the
-window closes, carrying `X-Ratelimit-Remaining: 0` beside valid data,
-was discarded for the reset. Both are a real answer being thrown away by
-a rule that never asked whether it was one. So the words of an answer
-are read as text ONLY when the answer did not deliver, and that is the
-whole of the asymmetry: a delivered body's text is the caller's own
-data, and scanning a caller's data for "rate limit" is scanning the
-answer to a question nobody asked. A delivered body is read structurally,
-through `errors[]`, and nowhere else - a field of its own that mentions
-a limit is not a refusal.
+WHICH CARRIERS, and the one fact that decides it: an `errors[]` entry
+is read whatever the answer delivered, and the header, the body's own
+text and the complaint are read only when it did not. The difference is
+WHO OWNS THE WORDS. An entry's `type` and `code` are labels the server
+writes and no caller can put its own data into, so asking a delivered
+answer whether its entry is a rate-limit report cannot read its data.
+The other three are places a caller's field, or a coincidence, spells
+the same two words - and that is not a theory, it is what the widening
+cost before this gate existed. Measured on this branch without it: a 200
+that SUCCEEDED, carrying complete data, with a `gh` warning on stderr
+that merely mentions a limit, was answered `RateLimited(resume_at=None)`
+- a flat minute's pause over a call that worked; and the LAST successful
+request before the window closes, carrying `X-Ratelimit-Remaining: 0`
+beside valid data, was discarded for the reset.
+
+The `rateLimit` in that last sentence is not an example. It is the name
+of a REAL GraphQL extension, so a body-text reading fires on the very
+body that most certainly IS a refusal, and on bodies that are not. The
+body carrier is therefore scoped twice: to an answer that did not
+deliver, and to a status the API throttles with at all - so it still
+reads the 200 that carried no data, and the 403 whose JSON `message`
+names the limit, and declines a 404 whose message happens to mention one.
+
+REACHABILITY, so a reader can check it rather than believe it. Two
+queries exist in this tree and both name ONE top-level selection,
+`repository`: `RUNS_QUERY` here, and `HEAD_PULL_REQUESTS_QUERY` in
+`gh_head_prs.py`. A rate limit nested under `repository` would null part
+of it and leave `data` non-null, so a throttler reporting at a NESTED
+field produces `{"data": {"repository": {...}}, "errors": [RATE_LIMIT]}`,
+which a delivery-only gate reads as DELIVERED. That false negative is
+the whole reason `errors[]` is read on a delivered answer.
+
+What the tree holds is one capture, from 2026-09-29, and it is the OTHER
+shape: `{"errors":[{"type":"RATE_LIMIT", ...}]}` with no `data` member.
+Nothing here establishes that GitHub's throttler never produces the
+partial shape - the GraphQL specification permits a partial answer
+beside a non-null `errors[]`, and a `gh` double emits one in a single
+fixture - so this reader does not rely on it not arriving.
 
 A 403 carrying none of that is a permission refusal and stays a failure.
 That is the property the rule is shaped around - a pause must never be
@@ -94,6 +117,17 @@ def _names_a_rate_limit(text):
     if not text:
         return False
     return RATE_LIMIT.search(str(text).lower()) is not None
+
+
+# The statuses an API answers a rate limit with, and so the ones a body
+# of that answer carries the report in. 403 and 429 are the refusal
+# itself; 200 is the GraphQL transport succeeding over a query it
+# throttled, which is the shape issue 1338 is about. Every other status
+# is a failure of some other kind, and a body naming a limit under one
+# of them says so by accident - the words are as likely to be a bug
+# report's - so the text carrier declines it. The base read the text for
+# 403 and 429 alone, and this is the whole of what widens that.
+REFUSAL_STATUSES = frozenset({200, 403, 429})
 
 
 def _header_evidence(status, headers, now):
@@ -157,20 +191,23 @@ def _graphql_refusal(payload):
     return False, None
 
 
-def delivered(code, answered, payload):
+def delivered(code, payload):
     """Whether the answer delivered what the query asked for.
 
     Read once, by the one caller, and the whole co-condition of the rule:
-    `gh` said it succeeded, it wrote something, and what it wrote is a
-    JSON object carrying a non-null `data`. Anything else - a nonzero
-    exit, an empty stdout, a body that did not parse, a body with no
-    data beside its errors - is an answer that did not deliver, and only
-    those are read for rate-limit evidence.
+    `gh` said it succeeded, and what it wrote is a JSON object carrying
+    a non-null `data`. Anything else - a nonzero exit, a body that did
+    not parse, a body with no data beside its errors - is an answer that
+    did not deliver.
+
+    There is a third term in the rule as stated - stdout was non-empty -
+    and this function does not carry it, because `gh_client.graphql`
+    has already returned or raised on an empty stdout before it is
+    called. A clause no caller can make false is not a rule; it is
+    decoration, and it would be a second place to change the rule.
     """
-    return (code == 0
-            and bool(answered.strip())
-            and isinstance(payload, dict)
-            and payload.get('data') is not None)
+    return code == 0 and isinstance(payload, dict) \
+        and payload.get('data') is not None
 
 
 def exhausted(status, headers, body, complained='', payload=None, ok=False):
@@ -181,18 +218,25 @@ def exhausted(status, headers, body, complained='', payload=None, ok=False):
     whichever carrier reported one, so a header that counts down to the
     reset is not lost to a message that does not.
 
-    `ok` is the answer's delivery, from `delivered`, and it is checked
-    before any carrier: a delivered answer is not a refusal whatever it
-    carries, because the report that would pause is not about it. The
-    text carriers are gated by the same fact for the same reason, and
-    the module docstring carries the measurement that made it necessary.
+    `ok` is the answer's delivery, from `delivered`, and it decides
+    WHICH carriers are asked, not whether the answer is read. `errors[]`
+    is read whatever the answer delivered; the header, the body's own
+    text and the complaint are read only when it did not. The
+    difference is WHO OWNS THE WORDS: an `errors[]` entry's `type` and
+    `code` are labels the server writes, which no caller can put its own
+    data into, so asking a delivered answer about one cannot read its
+    data. The other three are places a caller's field, or a coincidence,
+    can spell the same two words - which is the measurement the module
+    docstring carries.
     """
-    if ok:
-        return False, None
     now = time.time()
+    entry = _graphql_refusal(payload)
+    if ok:
+        return entry
     found = [_header_evidence(status, headers, now),
-             _graphql_refusal(payload),
-             (_names_a_rate_limit(body), None),
+             entry,
+             (_names_a_rate_limit(body) if status in REFUSAL_STATUSES
+              else False, None),
              (_names_a_rate_limit(complained), None)]
     if not any(refused for refused, _ in found):
         return False, None
