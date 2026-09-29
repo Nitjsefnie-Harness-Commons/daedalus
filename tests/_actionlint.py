@@ -191,6 +191,25 @@ def _resolved(name, marker):
     return found
 
 
+def _assert_unlaunchable_binary_is_a_refusal(tmp):
+    """A binary that resolves but cannot start is a refusal, not a raise.
+
+    `shutil.which` is satisfied by a file it can see and execute; a file
+    whose interpreter is missing passes that check and fails at exec, with
+    the same `FileNotFoundError` the twelve CI legs raised. Built rather
+    than described, because a state nothing constructs is a state nothing
+    pins.
+    """
+    directory = Path(tmp) / 'unlaunchable'
+    directory.mkdir()
+    bogus = directory / _ACTIONLINT
+    bogus.write_text('#!/nonexistent/interpreter\n', encoding='utf-8')
+    bogus.chmod(0o755)
+    found = shutil.which(_ACTIONLINT, path=str(directory))
+    assert found, 'the fixture did not resolve, so it proves nothing'
+    assert _run_actionlint(found, _SHELLCHECK, [bogus]) is None
+
+
 def _assert_run_guard_both_ways():
     """The run-guard's two directions, on the binaries production resolves.
 
