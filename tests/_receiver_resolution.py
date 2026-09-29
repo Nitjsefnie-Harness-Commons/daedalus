@@ -28,7 +28,7 @@ import inspect
 import sys
 
 from _binding_names import (_every_use_proven, _names_a_target_binds,
-                            _rebindings)
+                            _receiver_escapes, _rebindings)
 import _launch_path as path
 
 # The modules a NETWORK READ is a member of. This names MODULES and never
@@ -475,6 +475,9 @@ def _reflective(tree):
             # arguments is what tells the two spellings apart.
             target = node.args[0] if len(node.args) == 3 else func.value
             poison.append(path._dotted_key(target))
+    for node in ast.walk(tree):
+        if path._is_def(node) and _receiver_escapes(node):
+            poison.append('self')
     return resolved, [base for base in poison if base]
 
 

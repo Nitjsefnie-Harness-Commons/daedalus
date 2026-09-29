@@ -753,6 +753,7 @@
     "_receiver_atom_cases": {"python": ["tests/_carrier_cases.py"]},
     "_receiver_carrier_cases": {"python": ["tests/_carrier_cases.py"]},
     "_receiver_chain": {"python": ["tests/_jsroute_tab.py"]},
+    "_receiver_escapes": {"python": ["tests/_binding_names.py"]},
     "_receiver_value": {"python": ["tests/_pyroute_reads.py"]},
     "_record_binding": {"python": ["tests/_control_writes.py"]},
     "_recording_run": {"python": ["tests/_classifier_calls.py"]},
