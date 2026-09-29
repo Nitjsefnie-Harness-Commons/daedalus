@@ -12,8 +12,8 @@ until there is one.
 The control is the escalation line itself, and the LINE is not enough to
 tell a counted pause from an uncounted one: a pause that reached the
 counter is still answer #1, and the escalation still fires at the same
-threshold. So each row also says WHICH failure came first, and reads the
-whole `poll failed (N)` sequence. One row - the CI one - has the negative
+threshold. So each row says WHICH failure came first. One row - the CI
+one - has the negative
 beside it: the same run with the pause removed escalates at the same
 number, so the pause is the only difference between them. The comment
 watcher does not, because its own negative is the same shape with a
@@ -79,14 +79,15 @@ def test_a_ci_pause_does_not_advance_the_failure_counter(tmp):
                           'the escalation line')
         line = _escalation_line(child)
         assert f'after {ESCALATE} consecutive failures' in line, line
-        counts = [int(row.split('poll failed (')[1].split(')')[0])
-                  for row in child.err.lines if _reports_a_failed_poll(row)]
-        assert counts[:ESCALATE] == list(range(1, ESCALATE + 1)), counts
-        # The FIRST failed poll is the permission refusal, not the pause.
-        # The count alone cannot tell a counted pause from an uncounted
-        # one - a pause that reached the counter would still leave five
-        # lines and an escalation at five - so what discriminates is
-        # WHICH failure came first.
+        # WHICH failure came first is what discriminates. The count of
+        # them does not: a pause that reached the counter is still
+        # answer one, and the escalation still fires at the same number.
+        # Nor is the count worth reading here - `poll failed` goes to
+        # stderr and the escalation to stdout, so the escalation can be
+        # read before the stderr drain has the last count line, and an
+        # assertion over that sequence failed one run in five on a
+        # loaded machine for no reason of its own. `first` is written
+        # several polls before the escalation and is stable.
         first = [row for row in child.err.lines
                  if _reports_a_failed_poll(row)][0]
         assert 'not accessible' in first, first
@@ -116,10 +117,10 @@ def test_the_same_ci_run_without_a_pause_escalates_at_the_same_number(tmp):
 def test_a_comment_pause_does_not_advance_the_failure_counter(tmp):
     """`pr_comment_watch` escalates the same way, so it gets its own
     witness rather than an inference from the sibling's control - and it
-    carries the two assertions the sibling needed and did not have: the
-    count sequence, and that the FIRST failed poll is the permission
-    refusal rather than the pause. Without them this row passed against
-    a plant that let the pause reach the counter.
+    carries the assertion the sibling needed and did not have: that the
+    FIRST failed poll is the permission refusal rather than the pause.
+    Without it this row passed against a plant that let the pause reach
+    the counter.
     """
     answers = dict(idle_answers())
     pause = refusal_response(429, {'Retry-After': '1'})
@@ -133,9 +134,6 @@ def test_a_comment_pause_does_not_advance_the_failure_counter(tmp):
                           'the escalation line')
         line = _escalation_line(child)
         assert f'after {ESCALATE} consecutive failures' in line, line
-        counts = [int(row.split('poll failed (')[1].split(')')[0])
-                  for row in child.err.lines if _reports_a_failed_poll(row)]
-        assert counts[:ESCALATE] == list(range(1, ESCALATE + 1)), counts
         first = [row for row in child.err.lines
                  if _reports_a_failed_poll(row)][0]
         assert 'not accessible' in first, first
