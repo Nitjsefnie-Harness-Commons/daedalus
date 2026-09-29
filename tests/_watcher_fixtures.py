@@ -14,6 +14,11 @@ import json
 PR = '195'
 BRANCH = 'issue-997'
 SHA = 'a' * 40
+# The commit the BEFORE half of the watcher budget is measured against.
+# Here rather than in either suite, because the comparison is only one
+# method while both halves are pinned to the same commit, and a copy
+# per file is a re-pin that can half-apply with the suite still green.
+BASE = '3cc3605f38f1b0c0d0e47d5252ad17154bad72ec'
 
 # The interval the measured watchers poll at, and what the hourly figure
 # divides by. Nothing in the measurement itself reads a clock.
