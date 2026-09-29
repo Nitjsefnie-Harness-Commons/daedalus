@@ -61,8 +61,17 @@ def records(text):
 
 
 def coverage_group(stdout, name):
-    """The block the coverage launcher printed for `name`."""
-    start = stdout.index(f'::group::tests/{name}\n')
+    """The block the coverage launcher printed for `name`, '' if none.
+
+    Empty rather than raising, because the call that has no block is a
+    launcher that never got far enough to print one — an import that did
+    not resolve, a name that does not exist — and a control that reports
+    "the group was never printed" names that, where a `ValueError` from
+    `.index` names nothing.
+    """
+    start = stdout.find(f'::group::tests/{name}\n')
+    if start < 0:
+        return ''
     end = stdout.index('::endgroup::\n', start)
     return stdout[start:end]
 
