@@ -12,8 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from test_tab_routing_js import _runtime_and_guard  # noqa: E402
-from _jsroute_controls import (  # noqa: E402
-    _family_observations, _focus_program)
+from _jsroute_controls import _family_observations  # noqa: E402
 
 
 _SEND = "send('focus-tab', { tab: chromeTab });\n"
