@@ -135,14 +135,14 @@ class NodeBoundExceeded(AssertionError):
 def _as_text(stream):
     """A `TimeoutExpired` stream as text, whatever the launch asked for.
 
-    `subprocess.run` hands the bytes it read straight to the exception, so a
-    launch with `text=True` still raises one carrying `bytes`; a report
-    printing `b'partial\\n'` where the child wrote text has lost the only
-    thing a reader needs. Undecodable bytes are replaced, not raised.
+    BYTES or TEXT depending on the launch, and the two do not agree across
+    platforms: a `windows-latest` leg hands this a `str` where a Linux leg
+    hands `bytes` for the same launch. Undecodable bytes are replaced.
     """
     if stream is None:
         return ''
-    return stream.decode('utf-8', 'replace')
+    return (stream if isinstance(stream, str)
+            else stream.decode('utf-8', 'replace'))
 
 
 def node_bound_expiry(why, deadline_s, context=""):
