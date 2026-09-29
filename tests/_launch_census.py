@@ -103,6 +103,25 @@ assignment rather than a gap: one control, one owner, and a control in
     negative space is untouched by construction rather than by a table: a
     child-ending call resolves to a `Popen` method or a `subprocess`
     member, and none of those is a member of the three modules;
+  - the lambda shadow-set MERGE, which is a consequence of the binding
+    machinery above rather than a second narrowing of its own.
+    `_shadowed_parameters` folds a lambda's parameters into the ENCLOSING
+    function's shadow set, so the class is EVERY shadow name one function
+    collects — a lambda's included — and the instance is a network read
+    refused because an unrelated lambda in the same function takes a
+    same-named parameter. The merge is what makes B13's `def` twin and
+    lambda read alike, and it is the price of that: more names in the
+    shadow set, more refusals, so this route cannot make the head refuse
+    less than `main`;
+  - the refused add POPS a resolving name, and the other consequence of
+    the same machinery. An add is honoured only when the name has ONE
+    binding, so a name that already resolved to a network read and is then
+    added a second time loses its binding instead — the class is a
+    RESOLVED name whose second binding cannot be proved to name the same
+    object, and two adds of one name is the instance. The read that used
+    to resolve is now refused, which errs the safe way, and
+    `tests/test_launch_census_boundaries.py` pins both directions: the
+    lone add that must stay discharged and the two adds that must not;
   - `sock.settimeout(timeout=5)` is STILL refused, and it is a known false
     red named here rather than left to be found. The reason is the
     filter and NOT that `socket.socket` is a class: three of the five
