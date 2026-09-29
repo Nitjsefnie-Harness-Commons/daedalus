@@ -55,10 +55,9 @@ def _parameters(node):
 def _launch_keywords():
     """What a launch may legitimately be handed, read from the stdlib.
 
-    From `inspect.signature` rather than from a list, so a keyword a future
-    interpreter adds is admitted and a misspelling of one is a refusal
-    rather than a silent pass. A hand list here is what made `pipesize` a
-    false red once already.
+    From `inspect.signature` rather than a list, so a keyword a future
+    interpreter adds is admitted and a misspelling is a refusal rather
+    than a silent pass. A hand list made `pipesize` a false red once.
     """
     popen = inspect.signature(
         subprocess.__dict__['Popen'].__init__).parameters
@@ -239,6 +238,13 @@ def launch_refusals(source, here, bound_sink=None):
                         defined_names.add(alias.asname or alias.name)
                     else:
                         safe_names.add(alias.asname or alias.name)
+    # A member from-imported out of an excluded stdlib root IS that
+    # root's launch, and a from-import is no way past the set.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module \
+                and node.module.split('.')[0] in _STDLIB_LAUNCH_ROOTS:
+            subprocess_names.update(
+                alias.asname or alias.name for alias in node.names)
     if not refusals and not any(
             isinstance(node, ast.Import)
             and any(alias.name == 'subprocess' and not alias.asname
@@ -450,9 +456,8 @@ def launch_refusals(source, here, bound_sink=None):
         """Is this call the import machinery, by any route that reaches it?
 
         `import importlib as il` and `il = importlib` differ in the
-        spelling the callee carries, so the base is followed through the
-        bindings: a name bound to the module, used to call a member of
-        it, is the same machinery call.
+        spelling the callee carries, so the base is followed through
+        the bindings: a name bound to the module is the same call.
         """
         if not isinstance(held, ast.Call):
             return False
@@ -487,8 +492,8 @@ def launch_refusals(source, here, bound_sink=None):
         to `getattr`, which hands back whatever the module holds. An
         attribute chain spelled from a dotted import of a stdlib root is
         the interpreter's own code, and is the one shape proved without
-        being a bare name — unless the module binds that root again, which
-        is a binding it cannot read and so the same unreadable name.
+        being a bare name — unless the module binds that root again,
+        which is the same unreadable name.
 
         A name the module binds to some OTHER call is proved, because
         the call itself is then the fixed value.
@@ -558,11 +563,9 @@ def launch_refusals(source, here, bound_sink=None):
 
         A call carrying a `timeout=` or a `**`-unpacked mapping is a
         bounded call, whatever it calls and whatever the timeout reads.
-        That is the whole of the second arm of the launch policy, and it
-        is what makes the policy decidable rather than a list of
-        spellings. A receiver `proved_fixed` declines is reported at
-        `unreadable`, so the rule demands a refusal or an allowance row
-        for it.
+        That is the whole of the second arm, and a receiver
+        `proved_fixed` declines is reported at `unreadable`, so the rule
+        demands a refusal or an allowance row for it.
         """
         func = node.func
         if not any(keyword.arg == 'timeout' or keyword.arg is None
