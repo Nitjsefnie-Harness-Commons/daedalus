@@ -9,12 +9,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _coverage_suite_fixture import coverage_tree  # noqa: E402
+from _coverage_suite_fixture import (  # noqa: E402
+    coverage_tree, kill_recorded, records, settle_gone)
 
 ROOT = _util.ROOT
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                          'runner_suite_bound')
 _OVERRUN_BOUND_S = 2
+# The runner's own outer bound, outlasting the launcher's SIGTERM grace
+# window so a control that goes red before the escalation reaches a suite
+# reports rather than waits.
+_RUNNER_OUTER_S = SUITE_BOUND.CLEANUP_TIMEOUT_S * 4
+# Reaping a killed tree is itself bounded, by a deadline read off the
+# clock rather than asserted as a margin.
+_WEDGE_SETTLE_S = 10
 
 _PASSING_SUITE = (
     'import json, os\n'
@@ -26,6 +34,40 @@ _PASSING_SUITE = (
 
 _STALLING_SUITE = (
     'import time\nprint("stalling", flush=True)\n'
+    'time.sleep(60)\n'
+)
+
+# A suite that answers SIGTERM and flushes, which is what
+# `pyproject.toml`'s `sigterm = true` exists for and what a runner that
+# kills its tree first would take away.
+_STOPPABLE_SUITE = (
+    'import json, os, signal, sys, time\n'
+    "summary = os.environ['DAEDALUS_TEST_SUMMARY']\n"
+    'def _stopped(signum, frame):\n'
+    '    del signum, frame\n'
+    "    json.dump({'total': 1, 'passed': 1, 'skipped': 0, 'failed': 0,\n"
+    "               'requires': None}, open(summary, 'w'))\n"
+    "    print('suite was asked to stop and flushed', flush=True)\n"
+    '    sys.exit(0)\n'
+    'signal.signal(signal.SIGTERM, _stopped)\n'
+    'print("stalling", flush=True)\n'
+    'time.sleep(60)\n'
+)
+
+# A suite that ignores SIGTERM and leaves a child of its own that does the
+# same, so only the escalation reaches either of them.
+_STUBBORN_SUITE = (
+    'import signal, subprocess, sys, time\n'
+    'from pathlib import Path\n'
+    'root = Path(__file__).resolve().parent\n'
+    'signal.signal(signal.SIGTERM, signal.SIG_IGN)\n'
+    "child = subprocess.Popen(\n"
+    "    [sys.executable, '-c', 'import signal, time; "
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'],\n"
+    '    stdin=subprocess.DEVNULL)\n'
+    "(root / 'grandchild.pid').write_text(str(child.pid),"
+    " encoding='ascii')\n"
+    'print("stalling", flush=True)\n'
     'time.sleep(60)\n'
 )
 
@@ -165,11 +207,68 @@ def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
     assert result.returncode == 1, (result.returncode, result.stdout)
-    # The runner's own record, in the stalled suite's own block.
+    # The runner's own record, in the stalled suite's own block, matched
+    # whole: the block is sliced to EXCLUDE the `=== name ===` header, so
+    # the suite name in the assertion below can only have come from the
+    # record itself.
     staller_block = _suite_block(result.stdout, 'test_staller.py')
-    assert _timeout_record(_OVERRUN_BOUND_S) in staller_block, result.stdout
+    found = records(staller_block)
+    assert len(found) == 1, (len(found), staller_block)
+    record = found[0].groupdict()
+    assert record['name'] == 'test_staller.py', record
+    assert record['bound'] == str(float(_OVERRUN_BOUND_S)), record
     assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
     assert '=== test_passer.py ===' in result.stdout, result.stdout
+
+
+def test_a_runner_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
+    """The runner's kill asks first, so a suite that flushes on SIGTERM does.
+
+    `pyproject.toml` sets `sigterm = true` so a terminated suite still
+    writes what it measured, and before the tree kill the runner's
+    `terminate()` is what gave it that chance. A runner that SIGKILLs the
+    group first takes it away, and a suite that reports its counts on the
+    way out reports none.
+    """
+    root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
+    result = _run_sandbox(
+        root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
+    block = _suite_block(result.stdout, 'test_stoppable.py')
+    found = records(block)
+    assert len(found) == 1, (len(found), block)
+    record = found[0].groupdict()
+    assert 'suite was asked to stop and flushed' in block, block
+    assert int(record['returncode']) == 0, record
+    # It reported its counts on the way out, so the aggregate counts it
+    # as what it says it did -- which is the pre-branch behaviour, and the
+    # reason the grace window is worth its ten seconds.
+    assert 'OVERALL: PASS' in result.stdout, result.stdout
+
+
+def test_a_runner_timed_out_suites_own_child_does_not_survive_it(tmp):
+    """The `suites` leg's launcher has to reach the tree as well.
+
+    The coverage launcher's tree kill is proved by a grandchild that
+    outlives its suite; without the same control here, dropping the group
+    kill from the runner's timeout path leaves every suite green.
+    """
+    if sys.platform == 'win32':
+        _util.skip('the liveness probe is POSIX; see pid_alive')
+    root = _sandbox(tmp, {'test_stubborn.py': _STUBBORN_SUITE})
+    recorded = root / 'tests' / 'grandchild.pid'
+    try:
+        result = _run_sandbox(
+            root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
+        assert result.returncode == 1, (result.returncode, result.stdout,
+                                        result.stderr)
+        pid = int(recorded.read_text(encoding='ascii'))
+        block = _suite_block(result.stdout, 'test_stubborn.py')
+        assert settle_gone(pid, _WEDGE_SETTLE_S), (
+            f'pid {pid} outlived the bound the runner enforced. It ignores '
+            f'SIGTERM, so only the escalation reaches it, and it did not; '
+            f'the record says: {records(block)}')
+    finally:
+        kill_recorded(recorded)
 
 
 def test_the_staller_is_named_when_the_bystander_misses_the_bound_too(tmp):
