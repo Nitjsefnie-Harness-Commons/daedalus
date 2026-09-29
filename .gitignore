@@ -658,6 +658,7 @@
 !/tests/test_hotfix_scope_clear.py
 !/tests/test_hotfix_store.py
 !/tests/test_http_transport.py
+!/tests/test_install_lint_tools.py
 !/tests/test_js_coverage.py
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
