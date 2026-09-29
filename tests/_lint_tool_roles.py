@@ -246,9 +246,9 @@ def _catches_a_missing_command(handler):
     """Whether an `except` clause names the error a missing binary raises."""
     if handler is None:
         return False
-    named = handler if isinstance(handler, ast.Tuple) else (handler,)
+    clauses = handler.elts if isinstance(handler, ast.Tuple) else [handler]
     return any(_dotted_or_bare_name(part) in _ABSENT_COMMAND_ERRORS
-               for clause in named for part in ast.walk(clause))
+               for clause in clauses for part in ast.walk(clause))
 
 
 def _names_subprocess(func, modules):

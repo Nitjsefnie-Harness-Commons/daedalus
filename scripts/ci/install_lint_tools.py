@@ -126,9 +126,11 @@ def _extract(payload, destination):
             target.write_bytes(archive.read(binary))
     else:
         with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
-            if binary not in archive.getnames():
+            member = (archive.extractfile(binary)
+                      if binary in archive.getnames() else None)
+            if member is None:
                 raise SystemExit(f'the archive carried no {binary}')
-            target.write_bytes(archive.extractfile(binary).read())
+            target.write_bytes(member.read())
     target.chmod(0o755)
     return target
 
