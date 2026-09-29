@@ -18,9 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT, git_index  # noqa: E402
 from _timed_basis import (  # noqa: E402
-    assert_the_generator_wrote_the_basis, verify_recorded_count,
-    verify_unmeasured_list,
-    write_run as _write_run)
+    assert_the_generator_wrote_the_basis, verify_clause_against_tree,
+    verify_recorded_count, verify_unmeasured_list, write_run as _write_run)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
@@ -511,16 +510,19 @@ def test_the_shipped_basis_is_what_this_generator_writes(tmp):
     tree-owned clause structurally: its count equals the names it lists,
     and its two halves -- carried against estimated -- sum to it.
 
-    Both cross-checks below read their subject out of that prose, so a
-    file and a generator wrong together would compare equal. The RUN is
-    the only independent witness, and it is on disk in the
-    timed-timings job alone, so both are printed on every run.
+    All three cross-checks below read their subject out of that prose, so
+    a file and a generator wrong together would compare equal. The RUN is
+    the only independent witness, and it is on disk in the timed-timings
+    job alone, so all three are printed on every run. The third adds the
+    TREE: the other two compare the clause with the runs over the file's
+    OWN claims, so a file claiming less than its tree is invisible to both.
     """
     planner = _planner()
     data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
     assert_the_generator_wrote_the_basis(tmp, data)
     print(verify_recorded_count(data, ROOT / 'runs'), file=sys.stderr)
     print(verify_unmeasured_list(data, ROOT / 'runs'), file=sys.stderr)
+    print(verify_clause_against_tree(data, ROOT / 'runs'), file=sys.stderr)
 
 
 def test_the_shipped_file_satisfies_the_margin_it_names(tmp):

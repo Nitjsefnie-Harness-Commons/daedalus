@@ -272,6 +272,61 @@ def verify_unmeasured_list(data, runs_root):
             f'suites, which is what the committed basis records')
 
 
+def verify_clause_against_tree(data, runs_root, tree=ROOT):
+    """The file's unmeasured clause against the TREE, using the runs.
+
+    `verify_unmeasured_list` compares the clause with the runs over the
+    file's OWN claims, so a file that claims less than its tree is not
+    visible to it: the committed file once said "every suite in the tree
+    is measured by these runs" while recording 328 of 340, and that
+    compared equal, because both sides were the file's 328.
+
+    The tree is the third witness and it is here rather than there
+    because it is the one the two deliberate trades in the byte compare
+    keep out: the file describes its HEAD, and `suites` checks out
+    `refs/pull/N/merge`, so a file-alone control that read the working
+    tree went red every time `main` gained a suite. This one runs only
+    where the runs are on disk -- the timed-timings job, whose checkout
+    is the tree the refresher just planned and wrote the file for -- and
+    returns the same UNCHECKED report everywhere else, so the trade is
+    untouched and the check is live exactly once.
+
+    Returns a one-line report including every way it could do nothing,
+    and raises only where it had the tree, the runs and the clause.
+    """
+    if not runs_root.is_dir():
+        return (f'no runs root at {runs_root}: the unmeasured clause went '
+                f'UNCHECKED here')
+    runs = _util.load(ROOT / 'scripts' / 'ci' / 'timings_runs.py',
+                      'timings_runs')
+    named = [part.strip() for part in data['measured_from'].split(',')]
+    by_id = {str(run_id): path
+             for run_id, path in runs.discover_runs(runs_root)}
+    missing = [run_id for run_id in named if run_id not in by_id]
+    if missing:
+        return (f'{runs_root} does not carry run {", ".join(missing)}, which '
+                f'the file names: the unmeasured clause went UNCHECKED here')
+    measured = set()
+    for run_id in named:
+        try:
+            measured |= runs.measured_suites(by_id[run_id], int(run_id))
+        except (runs.RefreshError, ValueError) as error:
+            return (f'run {run_id} under {runs_root} cannot be read '
+                    f'({error}): the unmeasured clause went UNCHECKED here')
+    names = set(_util.load(ROOT / 'scripts' / 'ci' / 'plan_timed_matrix.py',
+                           'plan_timed_matrix').suite_names(tree))
+    _c, _t, listed, _carried, _est = unmeasured_names(data['basis'])
+    assert set(listed) == names - measured, (
+        f'the committed basis says these runs did not measure '
+        f'{sorted(listed)}, and this tree holds {len(names)} suites of which '
+        f'these runs measured {len(names & measured)}: the file and the tree '
+        f'and the runs it was written from disagree about which suites they '
+        f'did not cover, this tree leaving {sorted(names - measured)} out')
+    return (f'{runs_root}: the run(s) {", ".join(named)} measured '
+            f'{len(names & measured)} of this tree\'s {len(names)} suites, '
+            f'which is what the committed basis records')
+
+
 def suite_file(path, seconds):
     """One `time_tests.py` summary: a tests map and no outcomes."""
     path.parent.mkdir(parents=True, exist_ok=True)
