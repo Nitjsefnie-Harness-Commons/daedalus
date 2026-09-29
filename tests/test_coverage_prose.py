@@ -73,27 +73,50 @@ refuse the paragraph's own claim the moment an editor split its sentence
 into a first half ending `...is the extension options page.` and a second
 beginning `It stands at 0 of 51 code lines`, with the claim stranded one
 sentence ahead of its own figure. Further than a single neighbour is NOT
-judged: a reach predicate that far out in a paragraph of coverage prose is
-a statement about modules in general, and holding it to this paragraph's
-module refused correct sentences that were never about it.
+judged, whatever it names.
 
-The price of the symmetry falls on the near side, and it is paid in prose
-this control now refuses. A reach predicate in the sentence immediately
-BEFORE the count phrase's is read as this paragraph's claim, so a general
-coverage sentence carrying one there -- `no suite reaches the tree on its
-own` -- is refused for naming no module, when the identical sentence two
-sentences out is admitted. A predicate that close is this paragraph's
-claim by position, and the control will not read it any other way.
+A window is not a predicate, though, and position was the wrong axis for
+one: a general coverage sentence and a claim about another module are the
+same thing to a position-based rule, no width of window separates them,
+and that is why three successive widenings of this one each pulled a new
+false alarm in from the other side. Within the window a sentence is
+judged only when it NAMES A SHIPPED JAVASCRIPT PATH, and at least one
+judged sentence must name the named module. A general coverage sentence
+whose predicate names no shipped path -- `no suite reaches the tree on
+its own` -- is a statement about modules in general, and holding it to
+this paragraph's module refused correct sentences that were never about
+it. What makes skipping it safe is the ORACLE: a window holding no
+sentence that names the named module is a refusal, not a pass, and a
+window holding only a predicate about a different module is that same
+refusal, so nothing can be dropped from judgement and leave the
+paragraph unchecked.
 
-That remaining window is where a false claim still passes, and the shape
-that does it is spelled here rather than left to be found. An innocent
-sentence is separated from the claim it would otherwise contradict by an
-ANAPHOR: `No suite runs `dashboard/app.js` either.` sits two sentences
-after the count phrase and is unjudged, where the same sentence without
-"either" names another module and is red. Only that one word carries the
-difference, and no predicate in this file reads anaphora, so closing it
-would mean parsing the paragraph as natural language -- the thing this
-suite declines to be.
+The price of that rule falls on BOTH sides, and the far side has paid it
+since before the window was symmetric: on the wave-2 base every reach
+predicate in the paragraph was judged, so a general coverage sentence one
+sentence after the count phrase was refused. What changed is that it is
+no longer refused for naming no module -- which the prose does not assert
+-- and no longer refused at all.
+
+What is left, after this rule: a reach-predicate sentence naming a
+shipped JavaScript path OTHER than the named module, sitting more than
+one sentence from the count phrase, is admitted. It was measured to be
+admitted, not merely suspected. Closing it is not a matter of reading
+the paragraph harder, because whether that other module is in fact
+unreached is not decidable from this tree either, for the reason at the
+top of this docstring. The honest name for the residual is a claim this
+control does not govern.
+
+No natural-language understanding is owed here, and the earlier claim
+that it was was measured false. `No suite runs `dashboard/app.js`.` and
+`No suite runs `dashboard/app.js` either.` were driven across the offsets
+-2, -1, +1, +2 and +3 from the count phrase, on both spellings: each pair
+takes the same verdict at each one -- red inside the window, admitted
+outside it -- and the anaphor changes no cell. An earlier version of
+this docstring reported the opposite and told a maintainer the innocent
+and defective sentences were in irreducible tension. They were not; the
+discriminator is distance and whether the sentence names a shipped path,
+and both are read here.
 
 The attribution is read off the claim sentence with the count phrase cut out
 of it, and naming the report is not enough: a sentence may name it while
@@ -268,13 +291,22 @@ def _reach_claims(sentences):
     """Every reach claim this paragraph makes about its own module, paired
     with where it sits so the attribution can look at the sentence after it.
 
-    The window -- the count phrase's sentence and its immediate neighbour on
-    EITHER side -- is stated with its full rationale, and with what the
-    symmetry costs, in the module docstring. It is symmetric because which
-    half of the claim an editor writes first is not this control's business,
-    and a one-sided window is what let a split of the shipped sentence drop
-    the claim out of the window entirely.
+    A window sentence is judged on TWO conditions, and both are load-bearing.
+    It carries a reach predicate, and it NAMES A SHIPPED JAVASCRIPT PATH.
+    Position alone was the wrong axis: a general coverage sentence and a
+    claim about a different module were the same thing to it, and no width
+    of window separated them, which is why each widening of the window
+    pulled a new false alarm in from the other side. The population is
+    `tracked_sources`, the same one the report means by "shipped
+    JavaScript", so this file cannot drift from the definition.
+
+    Skipping a predicate that names no shipped path is safe only because of
+    the ORACLE in the test: a window left with no sentence naming this
+    paragraph's module is a refusal, not a pass. That assertion is the
+    property to test deliberately, and the module docstring says what it
+    leaves open.
     """
+    sources = tracked_sources(ROOT)
     pairs = []
     for index, sentence in enumerate(sentences):
         if not COUNT_PHRASE.search(sentence):
@@ -282,8 +314,11 @@ def _reach_claims(sentences):
         window = range(max(0, index - 1), min(index + 2, len(sentences)))
         for position in window:
             claim = sentences[position]
-            if REACH_CLAIM.search(claim):
-                pairs.append((position, claim))
+            if not REACH_CLAIM.search(claim):
+                continue
+            if not any(rel in claim for rel in sources):
+                continue
+            pairs.append((position, claim))
     return pairs
 
 
@@ -302,13 +337,15 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
     over an empty paragraph, and that is the pass that reads as a green. The
     sentences that carry one are the count phrase's and its immediate
     neighbour on either side, so a rendering that writes the figure before
-    the claim is judged as one that writes it after; a predicate match
-    further than a single neighbour is prose about coverage in general and
-    is not this paragraph's claim to judge. The near side is not free: a
-    general coverage sentence carrying a predicate immediately before the
-    count phrase's is judged as this paragraph's claim and refused for
-    naming no module, where the same sentence one sentence further out is
-    admitted.
+    the claim is judged as one that writes it after, and one that NAMES A
+    SHIPPED JAVASCRIPT PATH. A window whose only predicate is a general
+    coverage sentence, and one whose only predicate names a different
+    shipped module, are both refusals: neither leaves this paragraph's own
+    claim unchecked, which is the property that makes it safe to read a
+    predicate naming no shipped path as prose. A predicate match further
+    than a single neighbour is outside the window and is admitted whether
+    or not it names a shipped path; the residual that leaves is named in
+    the module docstring, with what it would take to close.
 
     Each claim then owes three things. It names the module, because a
     paragraph can name it somewhere else and claim a different one here. It
@@ -332,10 +369,14 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
         'carry')
     sentences = _sentences(text)
     claims = _reach_claims(sentences)
-    assert claims, (
-        'the paragraph no longer claims the module is unreached, so every '
-        'assertion below is judging nothing and the count phrase beside it '
-        'has nothing to count')
+    assert any(UNREACHED in claim for _, claim in claims), (
+        f'the window around the count phrase holds no reach claim naming '
+        f'{UNREACHED}, so every assertion below is judging a claim that is '
+        f'not this paragraph\'s, or is judging nothing at all, and the count '
+        f'phrase has no claim resting on it. A window whose only predicate '
+        f'is a general coverage sentence, and one whose only predicate '
+        f'names a different shipped module, are both this refusal: neither '
+        f'is a paragraph whose own claim went unchecked')
     assert RUN_ATTRIBUTION.search(text), (
         'the paragraph no longer names the coverage step summary, so the '
         'figure it attributes there is attributed nowhere')
