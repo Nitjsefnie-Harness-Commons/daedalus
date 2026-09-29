@@ -610,10 +610,8 @@ def path_functions(tests_dir, launcher_modules=LAZY_MODULES):
     #
     # It admits the module WHOLE, and that is load-bearing rather than
     # incidental: a `process.wait(30)` inside `_reap`, which no on-path
-    # caller reaches, is caught only because `_reap` is in scope. Narrowing
-    # the admission to the functions the closure actually reached keeps
-    # every census-family suite green, so the granularity is held by
-    # `test_a_child_receiving_module_is_admitted_whole` alone.
+    # caller reaches, is caught only because `_reap` is in scope.
+    # `test_a_child_receiving_module_is_admitted_whole` holds the width.
     for relative, functions in own.items():
         if relative in known:
             continue
