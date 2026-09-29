@@ -308,6 +308,28 @@ def launch_refusals(source, here, bound_sink=None):
             ambiguous.add(name)
         binding_map[name] = value
     reader = ArgvReader(binding_map, ambiguous)
+    # `binding_map` is the WHOLE of what the chain limb below knows about
+    # rebinding, and it is filled from six spellings: a Name-target
+    # Assign, an AnnAssign, a NamedExpr, an argument default, a For
+    # target and a With target. A root bound any other way is absent
+    # from it and the limb would prove a name the module has rebound.
+    # So the limb reads a set collected by the AST's own vocabulary for
+    # a binding rather than by a list of the spellings: every `Store`
+    # target, every `ast.arg`, and every string the grammar keeps in a
+    # NAME FIELD of some node — which is how a handler's name, a `def`,
+    # a `class` and an import alias reach the tree. A binding form the
+    # interpreter adds is refused without anyone editing this, and the
+    # cost is stated in `proved_fixed`: a module that harmlessly
+    # rebinds a stdlib root this way loses the proof and is reported.
+    rebound = set(binding_map) | {
+        node.id for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
+    rebound |= {node.arg for node in ast.walk(tree)
+                if isinstance(node, ast.arg)}
+    rebound |= {
+        getattr(node, field, None) for node in ast.walk(tree)
+        for field in ('name', 'asname', 'rest')
+        if isinstance(getattr(node, field, None), str)}
 
     bound = set()
     module_factories = set()
@@ -479,7 +501,11 @@ def launch_refusals(source, here, bound_sink=None):
         attribute chain spelled from a dotted import of a stdlib root is
         the interpreter's own code, and is the one shape proved without
         being a bare name — unless the module binds that root again,
-        which is the same unreadable name.
+        in any form at all, which is the same unreadable name. The cost
+        of reading that in full: a module that harmlessly rebinds a
+        stdlib root under one of the forms the table cannot read loses
+        this proof and is reported instead. That is the right trade for
+        a guard whose failure mode is a launch nobody looked at.
 
         A name the module binds to some OTHER call is proved by it.
 
@@ -496,7 +522,7 @@ def launch_refusals(source, here, bound_sink=None):
         root = _dotted_stdlib_root(receiver, dotted_roots)
         shadowed = parameter_names.get(
             id(function_scopes.get(id(receiver))), ())
-        if root is not None and root not in binding_map \
+        if root is not None and root not in rebound \
                 and root not in shadowed:
             return True
         if not isinstance(receiver, ast.Name):
