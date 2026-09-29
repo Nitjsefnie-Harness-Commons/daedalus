@@ -341,9 +341,7 @@ def skew_band(tree, data, floor):
     """Every truncation a skew floor admits, and the multiplier it costs.
 
     The band `MIN_RECORDED_SKEW` prices, PRINTED rather than written
-    down: a multiplier measured over a tree moves with the tree, and the
-    two prose tables this replaces were each mis-stated once before a
-    suite caught them, so the band is a command and not a comment.
+    down: a multiplier measured over a tree moves with the tree.
     """
     recorded = data['suite_weights']
     names = suite_names(tree)
@@ -360,9 +358,9 @@ def skew_band(tree, data, floor):
 def main():
     """Print the skew band the shipped file admits, at every truncation."""
     data = read_timings(_REPO_ROOT / '.github' / 'suite-timings.json')
-    print('  k-rec  est  skew  understated')
-    for count, est, skew, ratio in skew_band(
-            _REPO_ROOT, data, MIN_RECORDED_SKEW):
+    rows = list(skew_band(_REPO_ROOT, data, MIN_RECORDED_SKEW))
+    print('  k-rec  est  skew  understated' if rows else '  (band is empty)')
+    for count, est, skew, ratio in rows:
         print(f'{count:6d} {est:4d} {skew:5.2f} {ratio:11.2f}x')
 
 
