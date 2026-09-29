@@ -1,34 +1,33 @@
 #!/usr/bin/env python3
 """Whether one `gh` answer is a rate-limit refusal, and when to resume.
 
-Its own module because it is one subject, and because `gh_client.py` had
-ten lines of headroom under the production ceiling when this was written:
-a second spelling of "this is the report" is a second thing to widen, and
-the reader is what everything else in the tree asks.
+Its own module because it is one subject, and because `gh_client.py` sits
+ten lines under the production ceiling: a second spelling of "this is the
+report" is a second thing to widen, and this is what the tree asks.
 
 THE RULE, in one sentence: an answer reports exhaustion when it DID NOT
 DELIVER what was asked for and carries rate-limit evidence, or when it
 delivered and its own `errors[]` entry is the report.
 
-Delivered is two things at once, read once, by `delivered`: `gh` exited
-0, and what it wrote is a JSON object with a non-null `data`.
+Delivered is two things at once, read once, by `delivered`.
 
 Evidence is a `Retry-After`; or a reset beside a spent
 `X-Ratelimit-Remaining`; or a reset on a 403 or 429; or a GraphQL
 `errors[]` entry whose `type` or `code` names a rate limit; or the
-answer's own text; or what `gh` wrote to stderr.
+answer's own text; or what `gh` wrote to stderr. Which of those is read
+on a delivered answer is `REFUSAL_STATUSES` and `exhausted` between them.
 
 The evidence is read BEFORE the exit-code refusal, because the exit code
 is the last evidence and not the first: a throttled query answers 200
 and exits 1, so a reader that consults the code first raises over the
 carriers and never reaches what the answer actually said (issue 1338).
 
-WHICH CARRIERS, and the one fact that decides it: an `errors[]` entry
-is read whatever the answer delivered, and the header, the body's own
-text and the complaint are read only when it did not. The difference is
-WHO OWNS THE WORDS. An entry's `type` and `code` are labels the server
-writes and no caller can put its own data into, so asking a delivered
-answer whether its entry is a rate-limit report cannot read its data.
+WHICH CARRIERS an answer is asked on, and the one fact that decides
+it: an `errors[]` entry is read whatever the answer delivered; the
+header, the body's own text and the complaint only when it did not. The
+difference is WHO OWNS THE WORDS. An entry's `type` and `code` are
+labels the server writes and no caller can put its own data into, so
+asking a delivered answer about one cannot read its data.
 The other three are places a caller's field, or a coincidence, spells
 the same two words - and that is not a theory, it is what the widening
 cost before this gate existed. Measured on this branch without it: a 200
@@ -36,15 +35,10 @@ that SUCCEEDED, carrying complete data, with a `gh` warning on stderr
 that merely mentions a limit, was answered `RateLimited(resume_at=None)`
 - a flat minute's pause over a call that worked; and the LAST successful
 request before the window closes, carrying `X-Ratelimit-Remaining: 0`
-beside valid data, was discarded for the reset.
-
-The `rateLimit` in that last sentence is not an example. It is the name
-of a REAL GraphQL extension, so a body-text reading fires on the very
-body that most certainly IS a refusal, and on bodies that are not. The
-body carrier is therefore scoped twice: to an answer that did not
-deliver, and to a status the API throttles with at all - so it still
-reads the 200 that carried no data, and the 403 whose JSON `message`
-names the limit, and declines a 404 whose message happens to mention one.
+beside valid data, was discarded for the reset. `rateLimit` is the name
+of a REAL GraphQL extension, which is why a body-text reading fires on
+the very body that most certainly IS a refusal, and on bodies that are
+not.
 
 REACHABILITY, so a reader can check it rather than believe it. Two
 queries exist in this tree and both name ONE top-level selection,
@@ -53,18 +47,17 @@ queries exist in this tree and both name ONE top-level selection,
 of it and leave `data` non-null, so a throttler reporting at a NESTED
 field produces `{"data": {"repository": {...}}, "errors": [RATE_LIMIT]}`,
 which a delivery-only gate reads as DELIVERED. That false negative is
-the whole reason `errors[]` is read on a delivered answer.
+why `errors[]` is read on a delivered answer at all.
 
 What the tree holds is one capture, from 2026-09-29, and it is the OTHER
 shape: `{"errors":[{"type":"RATE_LIMIT", ...}]}` with no `data` member.
-Nothing here establishes that GitHub's throttler never produces the
-partial shape - the GraphQL specification permits a partial answer
-beside a non-null `errors[]`, and a `gh` double emits one in a single
-fixture - so this reader does not rely on it not arriving.
+Nothing establishes that GitHub's throttler never produces the partial
+one - the GraphQL specification permits a partial answer beside a
+non-null `errors[]`, and a `gh` double emits it in a single fixture - so
+this reader does not rely on its not arriving.
 
-A 403 carrying none of that is a permission refusal and stays a failure.
-That is the property the rule is shaped around - a pause must never be
-the answer to a question about authority.
+A 403 carrying none of that is a permission refusal and stays a
+failure: a pause must never be the answer to a question about authority.
 """
 
 
@@ -110,40 +103,35 @@ RATE_LIMIT = re.compile(r'(?:^|[^a-z0-9])rate[^a-z0-9]*limit')
 def _names_a_rate_limit(text):
     """Whether a value is the report of a rate limit, in any spelling.
 
-    The one place that answers it. Every carrier below asks this question
-    and none of them asks it again by its own rules, so widening what
-    counts as the report is a change to this line and not to four.
+    The one place that answers it, so widening what counts as the
+    report is a change to this line and not to four.
     """
     if not text:
         return False
     return RATE_LIMIT.search(str(text).lower()) is not None
 
 
-# The statuses an API answers a rate limit with, and so the ones a body
-# of that answer carries the report in. 403 and 429 are the refusal
-# itself; 200 is the GraphQL transport succeeding over a query it
-# throttled, which is the shape issue 1338 is about. Every other status
-# is a failure of some other kind, and a body naming a limit under one
-# of them says so by accident - the words are as likely to be a bug
-# report's - so the text carrier declines it. The base read the text for
-# 403 and 429 alone, and this is the whole of what widens that.
+# The statuses an API answers a rate limit with, and so the only ones
+# whose bodies the text carrier reads. Every other status is a failure
+# of some other kind, and a body naming a limit under one of them says
+# so by accident - the words are as likely to be a bug report's. The
+# base read 403 and 429 alone, and this is the whole of what widens
+# that: 200, because a throttled GraphQL query is answered 200.
 REFUSAL_STATUSES = frozenset({200, 403, 429})
 
 
 def _header_evidence(status, headers, now):
     """(exhausted, when to resume) from the response headers alone.
 
-    A `Retry-After` is a report on its own, and a reset is a report
-    wherever it appears: beside a spent `X-Ratelimit-Remaining`, which is
-    the pair the live refusal carries on a 200 GitHub exits 1 over (issue
-    1338), or on a 403 or 429, where the status has already said the
-    request was refused and the reset says when to try again.
+    A `Retry-After` is a report on its own. A reset is one wherever it
+    appears: beside a spent counter, which is the pair the live refusal
+    carries on a 200 GitHub exits 1 over (issue 1338), or on a 403 or
+    429, where the status has already said the request was refused and
+    the reset says when to try again.
 
-    A reset on its own is neither, and neither is a spent counter with
-    no moment behind it: both say the limit is gone without saying when
-    it returns, and a wait needs a moment to wake at. Nor is the status
-    on its own ever the evidence - that is what keeps a permission
-    refusal a failure instead of a sleep.
+    Neither a reset on its own nor a spent counter with no moment
+    behind it is evidence: both say the limit is gone without saying
+    when it returns, and a wait needs a moment to wake at.
     """
     if headers.get('retry-after'):
         return True, _resume_at(headers, now)
@@ -160,11 +148,9 @@ def _graphql_refusal(payload):
 
     How GraphQL reports a throttled query: the transport succeeded, so the
     evidence is the entry's `type` or its `code` and its `rateLimit`
-    extension. Either field names the report - GitHub has answered the
-    same refusal with a `RATE_LIMITED` type and with a `RATE_LIMIT` type
-    beside a `graphql_rate_limit` code (issue 1338) - and an `errors[]`
-    that is not a list of objects is stepped over rather than believed,
-    because a body is data and the reader may not assume its shape.
+    extension. An `errors[]` that is not a list of objects is stepped
+    over rather than believed: a body is data, and the reader may not
+    assume its shape.
     """
     errors = payload.get('errors') if isinstance(payload, dict) else None
     for error in errors or []:
@@ -200,11 +186,10 @@ def delivered(code, payload):
     not parse, a body with no data beside its errors - is an answer that
     did not deliver.
 
-    There is a third term in the rule as stated - stdout was non-empty -
-    and this function does not carry it, because `gh_client.graphql`
-    has already returned or raised on an empty stdout before it is
-    called. A clause no caller can make false is not a rule; it is
-    decoration, and it would be a second place to change the rule.
+    The rule's third term - stdout was non-empty - is absent on purpose:
+    `gh_client.graphql` has already returned or raised on an empty stdout
+    before this is called, so a clause here could not be false, and a
+    second place to change the rule is a place to change it wrongly.
     """
     return code == 0 and isinstance(payload, dict) \
         and payload.get('data') is not None
@@ -219,15 +204,8 @@ def exhausted(status, headers, body, complained='', payload=None, ok=False):
     reset is not lost to a message that does not.
 
     `ok` is the answer's delivery, from `delivered`, and it decides
-    WHICH carriers are asked, not whether the answer is read. `errors[]`
-    is read whatever the answer delivered; the header, the body's own
-    text and the complaint are read only when it did not. The
-    difference is WHO OWNS THE WORDS: an `errors[]` entry's `type` and
-    `code` are labels the server writes, which no caller can put its own
-    data into, so asking a delivered answer about one cannot read its
-    data. The other three are places a caller's field, or a coincidence,
-    can spell the same two words - which is the measurement the module
-    docstring carries.
+    WHICH carriers are asked, not whether the answer is read. The reason
+    it draws the line there is the module docstring's.
     """
     now = time.time()
     entry = _graphql_refusal(payload)
@@ -248,9 +226,8 @@ def bare_complaint(complained):
 
     `gh` refusing before the transport produced a response leaves no
     status and no header block to read, so the complaint is the only
-    carrier there is. It is also the one carrier with no instant in it,
-    so the pause it leads to falls back to the caller's plain minute
-    rather than a moment nobody reported.
+    carrier there is - and the only one that can never name an instant,
+    so the pause it leads to falls back to the caller's plain minute.
     """
     if _names_a_rate_limit(complained):
         return RateLimited(complained.strip()[:200], None)
@@ -258,10 +235,5 @@ def bare_complaint(complained):
 
 
 def refusal_text(status, body, complained):
-    """The one line a refusal carries: the status, and what it said.
-
-    The body is the answer, and the complaint is what `gh` made of it, so
-    an answer with no body is rendered from the complaint rather than
-    from a status code and nothing else.
-    """
+    """The one line a refusal carries: the status, and what it said."""
     return f'HTTP {status}: {(body.strip() or complained.strip())[:200]}'
