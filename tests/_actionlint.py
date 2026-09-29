@@ -43,6 +43,7 @@ _BINARY_ABSENT = 'actionlint-absent'
 _VERSION = 'actionlint-version'
 _SHELLCHECK_ABSENT = 'shellcheck-absent'
 _NO_WORKFLOWS = 'no-workflows'
+_UNLAUNCHABLE = 'actionlint-unlaunchable'
 
 # Appended to a real workflow; three variables and two arguments is its SC2183.
 _PLANTED_JOB = """
@@ -136,15 +137,24 @@ def _facts(overrides):
     pinned = _pinned_actionlint_version()
     facts = {'binary': _ACTIONLINT, 'shellcheck': _SHELLCHECK,
              'installed': pinned, 'pinned': pinned, 'files': ['workflows'],
-             'returncode': 0, 'output': ''}
+             'returncode': 0, 'output': '', 'unlaunchable': False}
     facts.update(overrides)
     return facts
 
 
 def _installed_actionlint_version(binary):
-    """What `actionlint --version` reports, its first line."""
-    ran = subprocess.run([binary, '--version'], capture_output=True,
-                         text=True, timeout=_ACTIONLINT_TIMEOUT)
+    """What `actionlint --version` reports, or None when it cannot start.
+
+    None here is NOT the absent binary the version arm describes, and the
+    two are kept apart deliberately: a machine whose actionlint is broken
+    must not read as a machine with no actionlint. The caller pairs this
+    None with the refusal that names the difference.
+    """
+    try:
+        ran = subprocess.run([binary, '--version'], capture_output=True,
+                             text=True, timeout=_ACTIONLINT_TIMEOUT)
+    except OSError:
+        return None
     return ran.stdout.split('\n', 1)[0].strip()
 
 
@@ -191,8 +201,8 @@ def _resolved(name, marker):
     return found
 
 
-def _assert_unlaunchable_binary_is_a_refusal(tmp):
-    """A binary that resolves but cannot start is a refusal, not a raise.
+def _unlaunchable_binary(tmp):
+    """A `PATH` directory holding an executable that cannot be started.
 
     `shutil.which` is satisfied by a file it can see and execute; a file
     whose interpreter is missing passes that check and fails at exec, with
@@ -207,7 +217,42 @@ def _assert_unlaunchable_binary_is_a_refusal(tmp):
     bogus.chmod(0o755)
     found = shutil.which(_ACTIONLINT, path=str(directory))
     assert found, 'the fixture did not resolve, so it proves nothing'
-    assert _run_actionlint(found, _SHELLCHECK, [bogus]) is None
+    return found
+
+
+def _assert_caller_refuses_unlaunchable(binary):
+    """`_lint_workflows` refuses a present binary that cannot start.
+
+    A skip would be wrong twice over: the skip arms are for a tool that is
+    absent, and a machine with a broken actionlint must not read as a
+    machine with no actionlint. So this control fails on a skip as loudly
+    as it fails on a clean verdict — the failure it is closing raised
+    straight through this caller in two review rounds.
+    """
+    try:
+        _lint_workflows(ROOT, actionlint=binary)
+    except _util.Skipped as skip:
+        raise AssertionError(
+            'the production caller skipped a present, unlaunchable binary: '
+            f'{skip}') from None
+    except AssertionError as error:
+        assert _UNLAUNCHABLE in str(error), error
+        return
+    raise AssertionError('the production caller reported a clean lint from a '
+                         'binary that cannot start')
+
+
+def _assert_unlaunchable_binary_is_a_refusal(tmp):
+    """A binary that resolves but cannot start is refused at both depths.
+
+    Once against the guard, and once through `_lint_workflows`, which is
+    where a launch site the guard does not cover would raise. Two review
+    rounds found that class by reaching only the guard, so the second
+    depth is the point rather than a duplicate.
+    """
+    found = _unlaunchable_binary(tmp)
+    assert _run_actionlint(found, _SHELLCHECK, [found]) is None
+    _assert_caller_refuses_unlaunchable(found)
 
 
 def _assert_run_guard_both_ways():
@@ -236,11 +281,18 @@ def _assert_actionlint_clean(facts):
         facts['binary'], facts['shellcheck'], facts['installed'])
     pinned, files = facts['pinned'], facts['files']
     returncode, output = facts['returncode'], facts['output']
+    unlaunchable = facts['unlaunchable']
     if not binary:
         _util.skip(
             f'{_BINARY_ABSENT}: actionlint is not installed; the actionlint '
             f'job pins {pinned} and a lint this machine cannot run is not a '
             'pass')
+    # Ahead of the version arm on purpose: a present binary that cannot
+    # start reports no version, and read as a version mismatch it would be a
+    # SKIP saying actionlint is absent, which is the opposite of the truth.
+    assert not unlaunchable, (
+        f'{_UNLAUNCHABLE}: {binary} is on PATH and cannot be started, so no '
+        'lint ran and none is reported')
     assert files, (
         f'{_NO_WORKFLOWS}: no workflow files matched under .github/workflows; '
         'refusing to report a clean lint over an empty set')
@@ -280,17 +332,25 @@ def _lint_refuses(overrides):
     raise AssertionError(f'the run {overrides} reported clean')
 
 
-def _lint_workflows(root):
-    """Resolve both binaries, lint `root`'s workflows, decide."""
+def _lint_workflows(root, actionlint=None):
+    """Resolve both binaries, lint `root`'s workflows, decide.
+
+    `actionlint` is a parameter so a test can hand this a binary that
+    resolves and cannot start. `shutil.which` cannot tell that from a
+    working one, so without the parameter a launch site this function
+    does not guard is unreachable from any test — which is how the second
+    one in this module stayed unguarded through two review rounds.
+    """
     pinned = _pinned_actionlint_version()
-    binary = shutil.which(_ACTIONLINT)
+    binary = (shutil.which(_ACTIONLINT) if actionlint is None else actionlint)
     shellcheck = shutil.which(_SHELLCHECK)
     files = _workflow_paths(root)
     outcome = _run_actionlint(binary, shellcheck, files)
+    installed = _installed_actionlint_version(binary) if binary else None
     _assert_actionlint_clean({
         'binary': binary, 'shellcheck': shellcheck,
-        'installed': (_installed_actionlint_version(binary)
-                      if binary else None),
+        'installed': installed,
+        'unlaunchable': bool(binary) and installed is None,
         'pinned': pinned, 'files': files,
         'returncode': outcome[0] if outcome else None,
         'output': outcome[1] if outcome else ''})
