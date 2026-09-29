@@ -28,8 +28,9 @@ TESTS = Path(__file__).resolve().parent
 
 def _every_function(tree):
     """The forced `in_path` every real-file control reads the tree through."""
+    functions = (ast.FunctionDef, ast.AsyncFunctionDef)
     return frozenset(node.name for node in ast.walk(tree)
-                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+                     if isinstance(node, functions))
 
 
 def _real_rows(relative):
