@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _diff_coverage_fixtures import _written_file  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -46,13 +47,6 @@ _NO_LANGUAGE_NOTE = (
     'in both languages are not measured.')
 
 
-def _write(tmp, name, text):
-    """Write one fixture file under tmp and return its path."""
-    path = Path(tmp) / name
-    path.write_text(text, encoding='utf-8')
-    return path
-
-
 def _run(tmp, *args):
     """Run the reporter inside the fixture directory."""
     return subprocess.run(
@@ -86,18 +80,18 @@ def _run_main(tmp, *args):
 
 def _both_reports(tmp):
     """Write one report per language and return their CLI arguments."""
-    coverage_xml = _write(tmp, 'coverage.xml', _PYTHON_XML)
-    js_xml = _write(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
+    coverage_xml = _written_file(tmp, 'coverage.xml', _PYTHON_XML)
+    js_xml = _written_file(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
     return '--coverage', str(coverage_xml), '--js-coverage', str(js_xml)
 
 
 def test_a_covered_added_javascript_line_is_counted(tmp):
     """An added shipped-JavaScript line the run reached counts covered."""
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/extension/content.js\n'
-                  '+++ b/extension/content.js\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+reached()\n')
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/extension/content.js\n'
+                         '+++ b/extension/content.js\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+reached()\n')
     done = _run(tmp, *_both_reports(tmp), '--diff', str(diff))
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert '**100.0%** of added lines covered (1/1).' in done.stdout, (
@@ -110,11 +104,11 @@ def test_a_covered_added_javascript_line_is_counted(tmp):
 
 def test_an_uncovered_added_javascript_line_is_counted_missed(tmp):
     """A zero-hit JavaScript record is a miss, not an absent line."""
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/extension/content.js\n'
-                  '+++ b/extension/content.js\n'
-                  '@@ -1,0 +2 @@\n'
-                  '+unreached()\n')
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/extension/content.js\n'
+                         '+++ b/extension/content.js\n'
+                         '@@ -1,0 +2 @@\n'
+                         '+unreached()\n')
     done = _run(tmp, *_both_reports(tmp), '--diff', str(diff))
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert '**0.0%** of added lines covered (0/1).' in done.stdout, (
@@ -127,16 +121,16 @@ def test_one_diff_can_measure_both_languages(tmp):
     """One run totals the added statements of Python and JavaScript."""
     package = Path(tmp) / 'pkg'
     package.mkdir()
-    _write(package, 'mod.py', 'one = 1\n')
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/pkg/mod.py\n'
-                  '+++ b/pkg/mod.py\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+one = 1\n'
-                  '--- a/extension/content.js\n'
-                  '+++ b/extension/content.js\n'
-                  '@@ -1,0 +2 @@\n'
-                  '+unreached()\n')
+    _written_file(package, 'mod.py', 'one = 1\n')
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/pkg/mod.py\n'
+                         '+++ b/pkg/mod.py\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+one = 1\n'
+                         '--- a/extension/content.js\n'
+                         '+++ b/extension/content.js\n'
+                         '@@ -1,0 +2 @@\n'
+                         '+unreached()\n')
     done = _run(tmp, *_both_reports(tmp), '--diff', str(diff))
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert '**50.0%** of added lines covered (1/2).' in done.stdout, (
@@ -168,22 +162,22 @@ def test_the_guard_demands_shipped_javascript_only(tmp):
 
 def test_the_comment_names_an_unmeasured_shipped_javascript_file(tmp):
     """A partial JavaScript path mismatch is named and cannot claim 100%."""
-    _write(tmp, 'mod.py', 'reached = 1\n')
-    coverage_xml = _write(
+    _written_file(tmp, 'mod.py', 'reached = 1\n')
+    coverage_xml = _written_file(
         tmp, 'coverage.xml',
         '<coverage><class filename="mod.py"><lines>'
         '<line number="1" hits="1"/>'
         '</lines></class></coverage>\n')
-    js_xml = _write(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/mod.py\n'
-                  '+++ b/mod.py\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+reached = 1\n'
-                  '--- a/dashboard/app.js\n'
-                  '+++ b/dashboard/app.js\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+never_measured()\n')
+    js_xml = _written_file(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/mod.py\n'
+                         '+++ b/mod.py\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+reached = 1\n'
+                         '--- a/dashboard/app.js\n'
+                         '+++ b/dashboard/app.js\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+never_measured()\n')
     done = _run(tmp, '--coverage', str(coverage_xml),
                 '--js-coverage', str(js_xml), '--diff', str(diff))
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -197,17 +191,17 @@ def test_the_comment_names_an_unmeasured_shipped_javascript_file(tmp):
 
 def test_a_python_only_run_says_javascript_is_not_measured(tmp):
     """One report must not read as though it measured the whole change."""
-    _write(tmp, 'mod.py', 'reached = 1\n')
-    coverage_xml = _write(
+    _written_file(tmp, 'mod.py', 'reached = 1\n')
+    coverage_xml = _written_file(
         tmp, 'coverage.xml',
         '<coverage><class filename="mod.py"><lines>'
         '<line number="1" hits="1"/>'
         '</lines></class></coverage>\n')
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/mod.py\n'
-                  '+++ b/mod.py\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+reached = 1\n')
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/mod.py\n'
+                         '+++ b/mod.py\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+reached = 1\n')
     done = _run(tmp, '--coverage', str(coverage_xml),
                 '--diff', str(diff))
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -225,12 +219,12 @@ def test_a_javascript_report_under_coverage_is_read_as_javascript(tmp):
     extension/content.js row directly above "added JavaScript lines are
     not measured" — the table and the note contradicting each other.
     """
-    js_xml = _write(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/extension/content.js\n'
-                  '+++ b/extension/content.js\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+reached()\n')
+    js_xml = _written_file(tmp, 'javascript-coverage.xml', _JAVASCRIPT_XML)
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/extension/content.js\n'
+                         '+++ b/extension/content.js\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+reached()\n')
     done = _run(tmp, '--coverage', str(js_xml), '--diff', str(diff))
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert '| `extension/content.js` | 1 | 1 | — |' in done.stdout, (
@@ -241,21 +235,21 @@ def test_a_javascript_report_under_coverage_is_read_as_javascript(tmp):
 
 def test_a_python_only_run_over_a_mixed_diff_says_javascript_is_out(tmp):
     """Reading scope from the report keeps correct invocations honest."""
-    _write(tmp, 'mod.py', 'reached = 1\n')
-    coverage_xml = _write(
+    _written_file(tmp, 'mod.py', 'reached = 1\n')
+    coverage_xml = _written_file(
         tmp, 'coverage.xml',
         '<coverage><class filename="mod.py"><lines>'
         '<line number="1" hits="1"/>'
         '</lines></class></coverage>\n')
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/mod.py\n'
-                  '+++ b/mod.py\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+reached = 1\n'
-                  '--- a/extension/content.js\n'
-                  '+++ b/extension/content.js\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+never_measured()\n')
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/mod.py\n'
+                         '+++ b/mod.py\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+reached = 1\n'
+                         '--- a/extension/content.js\n'
+                         '+++ b/extension/content.js\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+never_measured()\n')
     done = _run(tmp, '--coverage', str(coverage_xml),
                 '--diff', str(diff))
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -296,16 +290,16 @@ def test_main_merges_both_reports_for_one_mixed_diff(tmp):
     """
     package = Path(tmp) / 'pkg'
     package.mkdir()
-    _write(package, 'mod.py', 'one = 1\n')
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/pkg/mod.py\n'
-                  '+++ b/pkg/mod.py\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+one = 1\n'
-                  '--- a/extension/content.js\n'
-                  '+++ b/extension/content.js\n'
-                  '@@ -0,0 +1 @@\n'
-                  '+reached()\n')
+    _written_file(package, 'mod.py', 'one = 1\n')
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/pkg/mod.py\n'
+                         '+++ b/pkg/mod.py\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+one = 1\n'
+                         '--- a/extension/content.js\n'
+                         '+++ b/extension/content.js\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+reached()\n')
     status, out = _run_main(tmp, *_both_reports(tmp), '--diff', str(diff))
     assert status == 0, (status, out)
     assert '**100.0%** of added lines covered (2/2).' in out, out

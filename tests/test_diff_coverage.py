@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _diff_coverage_fixtures import _written_file  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -77,13 +78,6 @@ Every measured added line was reached; the files above were not measured.
 
 Only the Python report was given, so added JavaScript lines are not measured.
 """
-
-
-def _write(tmp, name, text):
-    """Write one fixture file under tmp and return its path."""
-    path = Path(tmp) / name
-    path.write_text(text, encoding='utf-8')
-    return path
 
 
 def test_added_lines_follow_the_new_file_numbering(tmp):
@@ -300,7 +294,8 @@ def test_a_removed_line_of_dashes_keeps_the_rest_of_the_file(tmp):
 def test_executable_lines_keeps_the_best_hit_count(tmp):
     """One file split across classes keeps the hit count in either order."""
     for index, lines in enumerate(((0, 4), (4, 0))):
-        xml = _write(tmp, f'split-{index}.xml', f"""<?xml version="1.0" ?>
+        xml = _written_file(
+            tmp, f'split-{index}.xml', f"""<?xml version="1.0" ?>
 <coverage><packages><package name="p"><classes>
   <class filename="pkg/mod.py"><lines>
     <line number="1" hits="{lines[0]}"/>
@@ -322,7 +317,7 @@ def test_executable_lines_refuses_incomplete_or_malformed_records(tmp):
         ('malformed-number', '<line number="second" hits="0"/>'),
     )
     for label, record in cases:
-        xml = _write(
+        xml = _written_file(
             tmp, f'{label}.xml',
             '<coverage><class filename="pkg/mod.py"><lines>'
             f'<line number="1" hits="1"/>{record}'
@@ -420,15 +415,16 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
     """End to end: the script reads both inputs and prints the table."""
     package = Path(tmp) / 'pkg'
     package.mkdir()
-    _write(package, 'mod.py', 'one = 1\ntwo = 2\nthree = 3\n\n\n\nseven = 7\n')
-    coverage_xml = _write(tmp, 'coverage.xml', _COVERAGE_XML)
-    diff = _write(tmp, 'patch.diff',
-                  '--- a/pkg/mod.py\n'
-                  '+++ b/pkg/mod.py\n'
-                  '@@ -1,0 +1,3 @@\n'
-                  '+one\n'
-                  '+two\n'
-                  '+three\n')
+    _written_file(package, 'mod.py',
+                  'one = 1\ntwo = 2\nthree = 3\n\n\n\nseven = 7\n')
+    coverage_xml = _written_file(tmp, 'coverage.xml', _COVERAGE_XML)
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/pkg/mod.py\n'
+                         '+++ b/pkg/mod.py\n'
+                         '@@ -1,0 +1,3 @@\n'
+                         '+one\n'
+                         '+two\n'
+                         '+three\n')
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', str(diff)],
@@ -441,14 +437,14 @@ def test_the_cli_reports_the_percentage_and_the_misses(tmp):
 
 def test_the_cli_reports_wholly_uncovered_numeric_lines(tmp):
     """Numeric zero hits are usable and render a wholly uncovered patch."""
-    _write(tmp, 'zero.py', 'first = 1\nsecond = 2\n')
-    coverage_xml = _write(
+    _written_file(tmp, 'zero.py', 'first = 1\nsecond = 2\n')
+    coverage_xml = _written_file(
         tmp, 'zero.xml',
         '<coverage><class filename="zero.py"><lines>'
         '<line number="1" hits="0"/>'
         '<line number="2" hits="0"/>'
         '</lines></class></coverage>\n')
-    diff = _write(
+    diff = _written_file(
         tmp, 'zero.diff',
         'diff --git a/zero.py b/zero.py\n'
         '--- /dev/null\n'
@@ -476,10 +472,10 @@ def test_the_cli_reports_wholly_uncovered_numeric_lines(tmp):
 
 def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
     """Hunk counts end one file before the next plain file header."""
-    _write(tmp, 'a.py', 'covered_a = 1\n')
-    _write(tmp, 'b.py', 'untested_b = 1\n')
-    coverage_xml = _write(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
-    diff = _write(
+    _written_file(tmp, 'a.py', 'covered_a = 1\n')
+    _written_file(tmp, 'b.py', 'untested_b = 1\n')
+    coverage_xml = _written_file(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
+    diff = _written_file(
         tmp, 'plain.diff',
         '--- a/a.py\n'
         '+++ b/a.py\n'
@@ -500,10 +496,10 @@ def test_the_cli_reads_every_file_in_a_plain_unified_diff(tmp):
 
 def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
     """A tab-delimited header timestamp is metadata, not the path."""
-    _write(tmp, 'a.py', 'covered_a = 1\n')
-    _write(tmp, 'b.py', 'untested_b = 1\n')
-    coverage_xml = _write(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
-    diff = _write(
+    _written_file(tmp, 'a.py', 'covered_a = 1\n')
+    _written_file(tmp, 'b.py', 'untested_b = 1\n')
+    coverage_xml = _written_file(tmp, 'coverage.xml', _TWO_FILE_COVERAGE_XML)
+    diff = _written_file(
         tmp, 'timestamp.diff',
         'diff --git a/a.py b/a.py\n'
         '--- a/a.py\n'
@@ -526,13 +522,13 @@ def test_the_cli_removes_timestamps_from_unified_diff_paths(tmp):
 
 def test_the_cli_names_an_unmeasured_uppercase_python_file(tmp):
     """Python source suffix matching is case-insensitive."""
-    _write(tmp, 'present.py', 'reached = 1\n')
-    coverage_xml = _write(
+    _written_file(tmp, 'present.py', 'reached = 1\n')
+    coverage_xml = _written_file(
         tmp, 'coverage.xml',
         '<coverage><class filename="present.py"><lines>'
         '<line number="1" hits="1"/>'
         '</lines></class></coverage>\n')
-    diff = _write(
+    diff = _written_file(
         tmp, 'uppercase.diff',
         'diff --git a/present.py b/present.py\n'
         '--- /dev/null\n'
@@ -555,8 +551,8 @@ def test_the_cli_names_an_unmeasured_uppercase_python_file(tmp):
 
 def test_the_cli_refuses_missing_or_nonpositive_statement_coordinates(tmp):
     """Every added source statement needs one positive XML coordinate."""
-    _write(tmp, 'sample.py', 'covered = 1\nuncovered = 2\n')
-    diff = _write(
+    _written_file(tmp, 'sample.py', 'covered = 1\nuncovered = 2\n')
+    diff = _written_file(
         tmp, 'sample.diff',
         'diff --git a/sample.py b/sample.py\n'
         '--- /dev/null\n'
@@ -576,7 +572,7 @@ def test_the_cli_refuses_missing_or_nonpositive_statement_coordinates(tmp):
             '(must be positive)\n'),
     }
     for label, (lines, expected) in records.items():
-        coverage_xml = _write(
+        coverage_xml = _written_file(
             tmp, f'{label}.xml',
             '<coverage><class filename="sample.py"><lines>'
             f'{lines}</lines></class></coverage>\n')
@@ -603,13 +599,13 @@ def test_the_cli_fails_loudly_without_the_statement_analyzer(tmp):
 
 def test_the_cli_refuses_a_non_integer_coverage_hit_count(tmp):
     """A malformed hit count cannot remove an uncovered line."""
-    coverage_xml = _write(
+    coverage_xml = _written_file(
         tmp, 'coverage.xml',
         '<coverage><class filename="malformed.py"><lines>'
         '<line number="1" hits="1"/>'
         '<line number="2" hits="not-an-integer"/>'
         '</lines></class></coverage>\n')
-    diff = _write(
+    diff = _written_file(
         tmp, 'malformed.diff',
         'diff --git a/malformed.py b/malformed.py\n'
         '--- /dev/null\n'
@@ -638,7 +634,7 @@ def test_the_cli_does_not_round_a_miss_up_to_perfect(tmp):
 
 def test_non_cobertura_xml_is_an_error_not_clean_coverage(tmp):
     """A well-formed XML document with the wrong root must fail."""
-    coverage_xml = _write(
+    coverage_xml = _written_file(
         tmp, 'wrong-root.xml',
         '<html><class filename="evil.py"><line number="9" hits="12"/>'
         '</class></html>\n')
@@ -653,7 +649,7 @@ def test_non_cobertura_xml_is_an_error_not_clean_coverage(tmp):
 
 def test_coverage_without_usable_lines_is_an_error(tmp):
     """A named file without numeric line data must fail the measurement."""
-    coverage_xml = _write(
+    coverage_xml = _written_file(
         tmp, 'unusable.xml',
         '<coverage><class filename="x.py"><lines/></class></coverage>\n')
     done = subprocess.run(
@@ -666,8 +662,8 @@ def test_coverage_without_usable_lines_is_an_error(tmp):
 
 def test_an_empty_report_is_an_error_not_a_clean_result(tmp):
     """A measurement that did not happen must not read as nothing to cover."""
-    coverage_xml = _write(tmp, 'empty.xml',
-                          '<?xml version="1.0" ?><coverage/>\n')
+    coverage_xml = _written_file(tmp, 'empty.xml',
+                                 '<?xml version="1.0" ?><coverage/>\n')
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', '-'],
@@ -678,7 +674,7 @@ def test_an_empty_report_is_an_error_not_a_clean_result(tmp):
 
 def test_an_undecodable_path_is_reported_not_a_traceback(tmp):
     """A git-quoted path that is not UTF-8 gets the clean error treatment."""
-    coverage_xml = _write(tmp, 'coverage.xml', _COVERAGE_XML)
+    coverage_xml = _written_file(tmp, 'coverage.xml', _COVERAGE_XML)
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), '--coverage', str(coverage_xml),
          '--diff', '-'],
