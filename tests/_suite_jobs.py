@@ -15,6 +15,18 @@ a third runner, a `.yaml` workflow, a `uses:` step, a shell loop over
 basenames cannot see, so `_suite_step` reads the step's resolved inputs and
 follows the tracked file a step runs, which is where the mechanism is
 written down whatever the runner is called.
+
+Two bounds, and they are bounds on the WALK rather than on this control's
+reach. A step that merely NAMES a runner reaches the tree here even where
+it runs nothing — `time_tests.py --help` is a step that reaches the suite
+tree and not one that runs a suite — because the alternative is encoding
+which invocations of which runners do what, which is the basename
+fingerprint this module exists to refuse. And a step running a tracked
+file the walk cannot read — a `.sh` wrapper — reaches nothing here, which
+would drop its job out of the door set in silence. That second one is
+surfaced rather than fixed: `_unclassifiable_steps` names every step in it,
+`tests/test_ci_lint_tools.py` holds that set to files no interpreter can
+execute, and the walk still reads no shell.
 """
 import ast
 import re
@@ -228,15 +240,119 @@ def _action_name(step):
     `actions/setup-node` is a declaration whatever commit it is pinned at,
     and comparing the full `uses:` would make every bump a second control to
     update.
+
+    `''` for a step that runs a command rather than an action. The empty
+    string is a step's own `run:` text and is not an action, so a reader of
+    the set this feeds is shown the step's text and never a blank entry.
     """
     uses = str(step.get('uses') or '').strip()
     return uses.split('@', 1)[0] if uses else ''
 
 
+def _declarations_before(workflow, job, index):
+    """`(action, condition)` per action step before `index`, in order.
+
+    The condition is the step's `if:`, or `''` when it has none. It is
+    carried because whether such a step RUNS is not a property of its
+    `uses:`: a step guarded by `if: matrix.python == '3.99'` names an
+    action and executes on no cell, and a control that read the action name
+    alone would count a declaration nobody ever gets. A caller asking which
+    actions a job declares filters these out; a caller writing the message
+    for a refusal needs the condition it filtered.
+    """
+    return [(_action_name(step), str(step.get('if') or ''))
+            for step in _job_steps(workflow, job)[:index]
+            if _action_name(step)]
+
+
 def _actions_before(workflow, job, index):
-    """Every action name the steps before `index` use."""
-    return {_action_name(step)
-            for step in _job_steps(workflow, job)[:index]}
+    """Every action name an UNGATED step before `index` uses."""
+    steps = _declarations_before(workflow, job, index)
+    return {name for name, condition in steps if not condition}
+
+
+def _readable(path):
+    """Whether this walk can read a tracked file's own source.
+
+    Python and only Python: `_runs_suites` is `ast.parse` over the file, so
+    a `.sh` wrapper classifies to "not a runner" by the same path as a
+    Python file that genuinely is not one. That silence is what lets a job
+    reach the suites through a shell script and leave the door set without
+    anything saying so.
+    """
+    if path.suffix != '.py':
+        return False
+    try:
+        ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, SyntaxError, ValueError):
+        return False
+    return True
+
+
+# A tracked file an interpreter RUNS rather than reads. The walk reads
+# Python and nothing else, so a step naming one of these reaches nothing
+# here, and whether it reached the suites is a question this walk cannot
+# answer. The shape is what makes that a refusal rather than a shrug: a
+# step naming a manifest is inert whatever the manifest says, and a step
+# naming a shell wrapper is not.
+_SCRIPT_SHAPES = ('.sh', '.bash', '.mk')
+
+
+def _executable_shape(path):
+    """Whether a tracked file is one an interpreter would run."""
+    return path.suffix in _SCRIPT_SHAPES or path.name in BUILD_FILES
+
+
+def _declared_tool_actions():
+    """`tool -> {(action, workflow)}` for every tool a workflow action names.
+
+    The last segment of an action name, split into words, because that is
+    where a setup action says what it sets up: `actions/setup-node`
+    declares `node`. Read off the workflows rather than off a table, so
+    "no action exists for this tool" is a fact about this tree rather than
+    a sentence somebody wrote — which is the difference between an
+    exemption a control checks and an exemption a control believes.
+
+    Every action in every workflow counts, not only the ones in a
+    suite-running job: a tool is exempt precisely when the repository has
+    no way to declare it anywhere, and an `eslint` job's `actions/setup-node`
+    is a way to declare it that this tree still has.
+    """
+    declared = {}
+    for source in sorted(WORKFLOW_DIR.glob('*.yml')) + sorted(
+            WORKFLOW_DIR.glob('*.yaml')):
+        workflow = source.read_text(encoding='utf-8')
+        for job in _job_names(workflow):
+            for step in _job_steps(workflow, job):
+                action = _action_name(step)
+                if not action:
+                    continue
+                for word in re.findall(r'[a-z0-9]+',
+                                       action.rsplit('/', 1)[-1]):
+                    declared.setdefault(word, set()).add((action, source.name))
+    return declared
+
+
+def _unclassifiable_steps():
+    """`(source, job, step, path)` for every step the walk cannot classify.
+
+    A step naming a tracked file the walk cannot read reaches nothing here.
+    That is correct for a data file — a step that names a manifest runs no
+    suite — and silent for a shell wrapper, which runs exactly the suites
+    this module exists to find. The set is returned whole so a control can
+    hold the difference rather than have it assumed, and so a reader sees
+    the names rather than an absence.
+    """
+    found = []
+    for source in sorted(WORKFLOW_DIR.glob('*.yml')) + sorted(
+            WORKFLOW_DIR.glob('*.yaml')):
+        workflow = source.read_text(encoding='utf-8')
+        for job in _job_names(workflow):
+            for index, step in enumerate(_job_steps(workflow, job)):
+                for path in sorted(_named_files(_step_inputs(step))):
+                    if not _readable(path):
+                        found.append((source.name, job, index, path))
+    return found
 
 
 def _door_jobs():
