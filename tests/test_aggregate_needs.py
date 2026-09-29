@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wffixtures import _probe_workflow  # noqa: E402
 from _wfjobs import load, workflow_files  # noqa: E402
 from _yamlscalar import YAMLReadError  # noqa: E402
 
@@ -198,16 +199,8 @@ RUNNER = '    runs-on: ubuntu-latest\n    timeout-minutes: 5\n'
 PROBE = '  probe:\n' + RUNNER
 
 
-def _fixture(tmp, name, source):
-    """Write one fixture workflow into a fresh workflows directory."""
-    root = Path(tmp) / name
-    root.mkdir(parents=True, exist_ok=True)
-    (root / 'probe.yml').write_text(source, encoding='utf-8')
-    return root
-
-
 def _scan_fixture(tmp, name, source):
-    return _aggregate_violations(_fixture(tmp, name, source))
+    return _aggregate_violations(_probe_workflow(tmp, name, source))
 
 
 PASS_CASES = {

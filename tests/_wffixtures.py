@@ -1,5 +1,6 @@
 """Fixtures shared by the planted-workflow suites."""
 import os
+from pathlib import Path
 
 from _repo import ROOT
 from _yamlscalar import YAMLReadError
@@ -49,3 +50,11 @@ def _refuses(call, *args, contains=None):
             assert contains in message, message
         return message
     raise AssertionError(f'{call.__name__} accepted the planted defect')
+
+
+def _probe_workflow(tmp, name, source):
+    """Write one fixture workflow into a fresh workflows directory."""
+    root = Path(tmp) / name
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'probe.yml').write_text(source, encoding='utf-8')
+    return root

@@ -691,6 +691,7 @@
     "_post": {"python": ["tests/_mcp_tool_commands.py"]},
     "_probe_context": {"python": ["tests/_wfskip.py"]},
     "_probe_receivers": {"python": ["tests/_cmdqueue_faults.py"]},
+    "_probe_workflow": {"python": ["tests/_wffixtures.py"], "fixture": ["tests/_wffixtures.py"]},
     "_program_argument": {"python": ["tests/_mcp_import_closure.py"]},
     "_program_values": {"python": ["tests/_bash_resolver_scan.py"]},
     "_projected": {"python": ["tests/_mcp_selection_fold.py"]},
