@@ -35,7 +35,7 @@ ALIASES = {
     'list-unpack': '[s, t] = [self, 0]\ns.handles = spawn()',
     'starred-unpack': '*s, = (self,)\ns.handles = spawn()',
     'nested-tuple-unpack': ('(a, (s, b)) = (0, (self, 0))\n'
-                           's.handles = spawn()'),
+                            's.handles = spawn()'),
     'global': ('def _i():\n    global s\n    s = self\n_i()\n'
                's.handles = spawn()'),
     'arg-default': ('def _i(s=self):\n    s.handles = spawn()\n_i()'),
@@ -61,7 +61,7 @@ CLAUSE = {
                      's.handles = spawn()',
     'list-element-result': 's = [f(self)][0]\ns.handles = spawn()',
     'attribute-of-result': ('y = same(self)\nz = y.handles\n'
-                           'y.handles = spawn()'),
+                            'y.handles = spawn()'),
     'with-as-result': 'with CM(self) as s:\n    s.handles = spawn()',
     # A DISCARDED call argument is a call argument. It is listed to hold it:
     # it poisons like every other call argument, and no site depends on it.
