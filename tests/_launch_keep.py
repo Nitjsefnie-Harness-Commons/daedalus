@@ -21,7 +21,7 @@ def in_launch_population(name, source):
     the population is the tracked tree: a filter narrower than that is a
     second guess at what the control inspects, and it is a guess that
     fails silently. The `'subprocess' in source` test this replaces
-    skipped 440 of the 628 tracked files, and the analyser reports 103
+    skipped 440 of the 631 tracked files, and the analyser reports 92
     `unplaced` sites in them, so a bounded launch that reached a module
     by any route other than a `subprocess` spelling was gone rather than
     checked-and-passed.
