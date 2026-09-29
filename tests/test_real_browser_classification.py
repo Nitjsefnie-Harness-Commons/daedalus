@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _controlled_call import _call_failure  # noqa: E402
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _realbrowser_workers  # noqa: E402
@@ -28,14 +29,6 @@ def _control_diagnosis(tmp, answers, clock, poll=None):
 
 def _answered_diagnosis(tmp):
     return answered_diagnosis(tmp)
-
-
-def _call_failure(call):
-    try:
-        call()
-    except (AssertionError, _util.Skipped) as failure:
-        return failure
-    raise AssertionError('controlled call did not raise')
 
 
 def _fixture_failure(tmp):

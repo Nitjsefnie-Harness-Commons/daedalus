@@ -10,17 +10,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _controlled_call import _call_failure  # noqa: E402
 import _deliveries  # noqa: E402
 import _realbrowser_controls  # noqa: E402
-import _util  # noqa: E402
-
-
-def _call_failure(call):
-    try:
-        call()
-    except (AssertionError, _util.Skipped) as failure:
-        return failure
-    raise AssertionError('controlled call did not raise')
 
 
 def _unmatched_delivery_failure(call, raw, polled):

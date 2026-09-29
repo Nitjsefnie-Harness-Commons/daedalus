@@ -188,6 +188,7 @@
     "_cache_write_reason": {"python": ["tests/_workflow_cache_boundary.py"]},
     "_cache_writing_jobs": {"python": ["tests/_workflow_cache_boundary.py"]},
     "_call_argument_parts": {"python": ["tests/_coverage_bindings.py"]},
+    "_call_failure": {"python": ["tests/_controlled_call.py"]},
     "_call_mcp_tool": {"python": ["tests/_mcp_load.py"]},
     "_call_read": {"python": ["tests/_cli_arg_audit_resolver.py"]},
     "_call_receiver_parts": {"python": ["tests/_coverage_bindings.py"]},
