@@ -7,11 +7,11 @@ that runs a suite runner calls this script; the tool set it declares is what
 `tests/test_ci_lint_tools.py` holds each of those jobs to.
 
 `actionlint` is downloaded and checksum-verified rather than piped from an
-install script, and the transfer is bounded so a hung mirror fails the step
-instead of holding the runner. `shellcheck` is not fetched here: the PyPI
-package that ships the binary is pinned in requirements-test.txt, which every
-one of these jobs already installs, and running pip again between the restore
-and the save of the pip cache would change what that cache holds.
+install script, and the transfer is bounded in size. `shellcheck` is not
+fetched here: the PyPI package that ships the binary is pinned in
+requirements-test.txt, which every one of these jobs already installs, and
+running pip again between the restore and the save of the pip cache would
+change what that cache holds.
 
 On a CI runner the installed directory is prepended to PATH for the steps
 that follow, and TOOLS is written to $GITHUB_ENV under LINT_TOOLS_ENV. A
@@ -30,7 +30,6 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
 # What a suite may skip on, and therefore what a suite-running job installs.
 # The next binary a suite skips on is added here and nowhere else.
 TOOLS = ('actionlint', 'shellcheck')
@@ -38,7 +37,11 @@ TOOLS = ('actionlint', 'shellcheck')
 LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 ACTIONLINT_VERSION = '1.7.12'
 # sha256 of each release asset, taken from the release's own checksums.txt.
-# Bump the version and this table together.
+# Bump the version and this table together. The key is (platform.system(),
+# platform.machine().lower()), which is why the Windows row is amd64 and not
+# the x86_64 a POSIX host reports: the table is spelled in the same
+# normalised values the lookup builds, or the lookup misses a key the table
+# plainly has.
 ACTIONLINT_SHA256 = {
     ('Linux', 'x86_64'):
         '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8',
@@ -46,7 +49,7 @@ ACTIONLINT_SHA256 = {
         '5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644',
     ('Darwin', 'arm64'):
         'aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f',
-    ('Windows', 'x86_64'):
+    ('Windows', 'amd64'):
         '6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9',
 }
 RELEASE = 'https://github.com/rhysd/actionlint/releases/download'
@@ -60,9 +63,15 @@ TOOL_DIR = INSTALL_DIR / 'daedalus-lint-tools'
 
 
 def _asset_name():
-    """The release asset this host needs, and the machine it is for."""
+    """The release asset this host needs, and the key that pins it.
+
+    One normalised machine string feeds both the table key and the asset
+    name, so the two cannot disagree about which platform this is: a key
+    the table does not carry fails the install rather than resolving an
+    asset nothing was verified against.
+    """
     system = platform.system()
-    machine = platform.machine()
+    machine = platform.machine().lower()
     key = (system, machine)
     if key not in ACTIONLINT_SHA256:
         raise SystemExit(
@@ -71,12 +80,17 @@ def _asset_name():
             'installing an unpinned one')
     suffix = 'zip' if system == 'Windows' else 'tar.gz'
     name = (f'actionlint_{ACTIONLINT_VERSION}_{system.lower()}_'
-            f'{ARCHITECTURES[machine.lower()]}.{suffix}')
+            f'{ARCHITECTURES[machine]}.{suffix}')
     return name, key
 
 
 def _fetch(name):
-    """The release asset's bytes, bounded in both time and size."""
+    """The release asset's bytes, bounded in size, on a per-read timeout.
+
+    `timeout` bounds one socket operation, not the transfer, so a mirror
+    dribbling a byte a minute can hold the step for the whole download;
+    MAX_TRANSFER is the bound that is real.
+    """
     url = f'{RELEASE}/v{ACTIONLINT_VERSION}/{name}'
     with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
         payload = response.read(MAX_TRANSFER + 1)
@@ -92,23 +106,29 @@ def _verify(payload, key):
         raise SystemExit(
             f'{digest} is not the pinned sha256 of the {key[0]} '
             f'{ACTIONLINT_VERSION} asset; refusing to install it')
-    return digest
 
 
 def _extract(payload, destination):
-    """Unpack the one executable out of the verified archive."""
+    """Unpack the one executable out of the verified archive.
+
+    The archive kind follows the same `windows` that chose the binary name,
+    read once: the two shapes of release asset are a property of the
+    platform, and re-deriving it from the host a line later is how a zip
+    came to be handed to tarfile.
+    """
     windows = platform.system() == 'Windows'
     binary = 'actionlint.exe' if windows else 'actionlint'
     target = destination / binary
-    if binary.endswith('.zip'):
+    if windows:
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            archive.extract(binary, destination)
+            if binary not in archive.namelist():
+                raise SystemExit(f'the archive carried no {binary}')
+            target.write_bytes(archive.read(binary))
     else:
         with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
-            member = archive.extractfile(binary)
-            if member is None:
+            if binary not in archive.getnames():
                 raise SystemExit(f'the archive carried no {binary}')
-            target.write_bytes(member.read())
+            target.write_bytes(archive.extractfile(binary).read())
     target.chmod(0o755)
     return target
 
