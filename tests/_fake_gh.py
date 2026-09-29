@@ -63,6 +63,12 @@ POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 # A path whose existence releases the calls this fake is holding. Set only
 # where a case asks for a hold; every other answer is written at once.
 GATE = 'DAEDALUS_FAKE_GH_GATE'
+# Where a release is recorded, beside the call log and not inside it. A
+# release is the only terminal fact about a wait - a call that is still
+# waiting looks exactly like a call that has not been looked at - so a
+# control that can only sample the wait is a control that cannot see it.
+# Its own path, because a line in the call log would be counted as a call.
+RELEASES = 'DAEDALUS_FAKE_GH_RELEASES'
 
 
 def _hold():
@@ -83,6 +89,19 @@ def _hold():
         return
     while not os.path.exists(path):
         time.sleep(0.02)
+    _recorded_release(path)
+
+
+def _recorded_release(path):
+    """Leave the one terminal fact about this wait, for a reader to have.
+
+    Absent when no release log was named, so a fake that is not holding
+    writes nothing anywhere and the call log stays the whole record.
+    """
+    log = os.environ.get(RELEASES)
+    if log is None:
+        return
+    _logged(log, {'t': time.time(), 'gate': path})
 
 
 def _self_test(launcher):
@@ -261,8 +280,10 @@ class FakeGh:
         self.answers_path = self.dir / 'answers.json'
         self.log = self.dir / 'calls.jsonl'
         self.gate_path = self.dir / 'gate'
+        self.releases_path = self.dir / 'releases.jsonl'
         self.holding = bool(gate)
         self.gate_path.unlink(missing_ok=True)
+        self.releases_path.write_text('', encoding='utf-8')
         self.launcher = self.dir / ('gh.bat' if WINDOWS else 'gh')
         # Copied beside the launcher, not referenced from where this module
         # lives: an install that moves keeps working and the launcher holds
@@ -297,7 +318,17 @@ class FakeGh:
         env['DAEDALUS_FAKE_GH_ANSWERS'] = str(self.answers_path)
         if self.holding:
             env[GATE] = str(self.gate_path)
+            env[RELEASES] = str(self.releases_path)
         return env
+
+    def releases(self):
+        """Every release this fake recorded, or none if it held nothing.
+
+        The terminal counterpart of the call log: a call that is still held
+        is indistinguishable from a call nobody has looked at, so what a
+        control can read is which calls came back and which never did.
+        """
+        return _entries(self.releases_path)
 
     def open_gate(self):
         """Release every call this fake is holding.
