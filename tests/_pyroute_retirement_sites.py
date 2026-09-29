@@ -204,7 +204,7 @@ def revert_sites():
     survivors = []
     print(f'{"site":46s} {"controls that die":44s} survivors')
     for site in sorted(retirement_sites()):
-        module, _, function = site.rpartition('.')
+        module = site.rpartition('.')[0]
         path = HERE / (module + '.py')
         original = path.read_text(encoding='utf-8')
         old, new = REVERTS[site]

@@ -41,11 +41,9 @@ from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
 from _pyroute_retirement_sites import (  # noqa: E402
                               undecided_sites as _UNDECIDED,
                               retirement_sites)
-from _tabroute_keyset import (_CALL, _CLEAN,  # noqa: E402
-                              _DESTINATION_FOLDS, _DESTINATION_READS,
-                              _OPAQUE_RETIRE, _PRE, _RETIRED_SOURCE,
-                              _UNREADABLE, _row_verdict,
-                              _tracked_focus_verdict)
+from _tabroute_keyset import (_CLEAN, _DESTINATION_FOLDS,  # noqa: E402
+                              _DESTINATION_READS, _RETIRED_SOURCE,
+                              _row_verdict)
 
 
 def _retired_source_state():
@@ -217,7 +215,6 @@ def test_a_setdefault_settles_a_key_the_join_left_retired(tmp):
 def test_a_pop_of_a_retired_key_drops_its_retirement(tmp):
     """A `pop` takes the entry out, so it is no longer a held key at all."""
     state = _retired_source_state()
-    owner = state.callables['d']
     call = ast.parse('d.pop("k")').body[0]
     assert isinstance(call, ast.Expr)
     _apply_pop(state, call.value)

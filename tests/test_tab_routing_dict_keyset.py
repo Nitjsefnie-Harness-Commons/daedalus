@@ -72,7 +72,6 @@ on no name at all. Two of those three are repaired and in `_AXES`; the
 starred positional is the one member `_SILENT` still names, silent on the
 subscript alone.
 """
-import ast
 import sys
 from pathlib import Path
 
@@ -82,10 +81,9 @@ from _pyroute_reads import _mapping_lookup  # noqa: E402
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
                              DeferredAlternatives, DeferredContainer)
 from _tabroute_keyset import (_CLEAN, _COMPUTED, _FRESH,  # noqa: E402
-                              _OPAQUE_RETIRE, _POPPED, _PRE, _READS,
+                              _OPAQUE_RETIRE, _POPPED, _READS,
                               _REFRESHED, _UNACCOUNTABLE, _UNREADABLE,
-                              _row_body, _row_verdict,
-                              _tracked_focus_verdict)
+                              _row_body, _row_verdict)
 
 _verdict = _row_verdict
 _body = _row_body
