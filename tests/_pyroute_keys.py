@@ -136,12 +136,16 @@ def payload_literal_key(node, literals):
     `'tab'`. An expression the fold will not resolve names no tracked key
     here, because a program whose key is a call did not mean `'tab'`
     either — but that is a claim about the position, not about the
-    runtime: CPython folds adjacent literals, a constant `+` and a
-    field-free f-string at compile time, so such an expression can name
-    `'tab'` at runtime while reading None here. The boundary is the
-    parser's own folding, and widening the fold onto the shapes it
-    misses is #1352. So None means this position names no tracked key,
-    and a caller must not read it as an opaque one.
+    runtime. The bytecode compiler folds a constant `+` and a field-free
+    f-string, and both survive `ast.parse` as the `BinOp` and the
+    `JoinedStr` this reader is handed, so either can name `'tab'` at
+    runtime while reading None here. An adjacent-literal concatenation
+    is the parser's own fold rather than the compiler's, so `ast.parse`
+    hands it over already a `Constant` and it resolves — it is not one
+    of the shapes in question. The boundary is which folds happen
+    before this reader sees the tree, and widening the fold onto the
+    ones it misses is #1352. So None means this position names no
+    tracked key, and a caller must not read it as an opaque one.
     """
     if isinstance(node, ast.Name):
         value = (literals or {}).get(node.id, _UNSAFE_LITERAL)
