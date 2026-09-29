@@ -18,8 +18,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.ci.suite_bound import (  # noqa: E402
-    DEFAULT_SUITE_TIMEOUT_S, kill_process_tree, suite_timeout,
-    timeout_record)
+    kill_process_tree, suite_timeout, timeout_record)
+# Re-exported, not used here: `tests/test_suite_runner.py` drives
+# `_run_suite` with the bound the runner itself resolves, and that is this
+# name. A second copy of the number here is what this change removes.
+# pylint: disable-next=unused-import
+from scripts.ci.suite_bound import DEFAULT_SUITE_TIMEOUT_S  # noqa: E402,F401
 
 _SPAWN_LOCK = threading.Lock()
 
