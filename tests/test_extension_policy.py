@@ -20,19 +20,14 @@ from _token_policy import (_logs_bridge_token,  # noqa: E402
                            _token_log_offenders)
 from _token_mask import token_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _worker_sources import worker_source_paths  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    _worker_sources,
+    worker_source_paths)
 
 
 # GM.info is metadata about the shim, not a capability it grants, so the
 # install-time warning has nothing to say about it.
 _GM_NON_CAPABILITIES = frozenset({'GM.info'})
-
-
-def _worker_sources():
-    return [
-        (path.relative_to(ROOT).as_posix(), path.read_text(encoding='utf-8'))
-        for path in worker_source_paths()
-    ]
 
 
 def test_the_security_warning_names_every_capability_the_shim_grants(tmp):
