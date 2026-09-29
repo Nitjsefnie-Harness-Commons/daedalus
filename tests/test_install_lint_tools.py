@@ -18,6 +18,8 @@ import contextlib
 import hashlib
 import io
 import os
+import re
+import subprocess
 import sys
 import tarfile
 import zipfile
@@ -209,6 +211,7 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
             mock.patch.object(installer, 'TOOL_DIR', tools), \
             mock.patch.object(installer, '_fetch',
                               return_value=payload), \
+            _installed(installer), \
             mock.patch.object(installer, 'shutil', mock.Mock(
                 which=lambda tool: f'C:\\hosted-tool\\{tool}.exe')):
         assert installer.main() == 0
@@ -218,6 +221,134 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
     assert (f'{installer.LINT_TOOLS_ENV}='
             f'{",".join(installer.TOOLS)}') in recorded.read_text(
                 encoding='utf-8')
+
+
+def _installed(installer):
+    """Stand in for the wheel install, writing the console script it leaves.
+
+    pip is the one part of this step that cannot be exercised without a
+    network and a wheel index, and the part that has to be right is not
+    pip's: it is that the directory pip writes is the directory the step
+    puts on PATH. This writes one console script where pip would and
+    leaves everything else to the real code.
+    """
+    def run(command, **kwargs):
+        assert kwargs.get('check') is True, 'a pip failure must fail the step'
+        target = Path(command[command.index('--target') + 1])
+        scripts = installer.script_dir(target)
+        scripts.mkdir(parents=True)
+        (scripts / 'shellcheck').write_text('#!/bin/sh\nexit 0\n')
+        (scripts / 'shellcheck').chmod(0o755)
+        return subprocess.CompletedProcess(command, 0)
+    return mock.patch.object(installer.subprocess, 'run', side_effect=run)
+
+
+def test_the_shellcheck_version_is_written_down_exactly_once(tmp):
+    """The pin is read out of the requirements file, not repeated here.
+
+    Two copies of a pin is a pin that will drift: the first person to bump
+    one of them gets a job that installs a version no requirements file
+    names, which is the defect this change exists to close, wearing the
+    costume of the fix. So the installer's own source must not spell a
+    REQUIREMENT for shellcheck at the version the file names.
+
+    The requirement form and not the bare version, because a docstring
+    saying which version a job used to resolve from the runner image is
+    evidence a reader wants, and forbidding prose about a version would buy
+    nothing.
+    """
+    del tmp
+    installer = _installer()
+    version = installer.shellcheck_pin()
+    assert re.fullmatch(r'\d+(\.\d+)*', version), version
+    source = INSTALLER_SOURCE.read_text(encoding='utf-8')
+    requirement = f'{installer.SHELLCHECK_PACKAGE}=={version}'
+    assert requirement not in source, (
+        f'the installer spells {requirement} in its own source as well as '
+        'reading it from requirements-test.txt; one of the two will be the '
+        'one that is running')
+
+
+def test_a_requirements_file_that_names_no_single_version_is_refused(tmp):
+    """No pin, or two pins, is a refusal naming the file to fix."""
+    tmp = Path(tmp)
+    installer = _installer()
+    for label, body in {
+            'no pin at all': 'coverage==7.16.1\nPyYAML==6.0.3\n',
+            'an unpinned requirement': 'shellcheck-py\n',
+            'the same version twice': 'shellcheck-py==0.11.0.1\n'
+                                      'shellcheck-py==0.11.0.1\n',
+            'two different versions': 'shellcheck-py==0.11.0.1\n'
+                                      'shellcheck-py==0.10.0.1\n',
+    }.items():
+        requirements = tmp / f'requirements-{len(label)}-{body[7]}.txt'
+        requirements.write_text(body, encoding='utf-8')
+        with mock.patch.object(installer, 'REQUIREMENTS', requirements):
+            try:
+                installer.shellcheck_pin()
+            except SystemExit as refusal:
+                assert 'shellcheck' in str(refusal), refusal
+            else:
+                raise AssertionError(
+                    f'a requirements file with {label} produced a version, '
+                    'and the step would install something no pin names')
+
+
+def test_the_console_script_directory_is_the_one_this_platform_uses(tmp):
+    """`bin` here, `Scripts` on Windows, and the difference is load-bearing.
+
+    A tool directory on PATH with no console scripts in it resolves
+    nothing, so a wrong answer here is a step that installs a tool and
+    then fails to find it — which is what the refusal in the installer
+    exists to turn into a message rather than a mystery.
+    """
+    del tmp
+    installer = _installer()
+    with _on('Linux', 'x86_64'):
+        assert installer.script_dir(Path('/t')) == Path('/t/bin')
+    with _on(*WINDOWS_X64):
+        assert installer.script_dir(Path('/t')) == Path('/t/Scripts')
+
+
+def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
+    """The whole point, on a PATH that has neither binary on it.
+
+    `timed` used to pass this step because the ubuntu-latest image carries
+    a shellcheck of its own, at a version no pin names, and a check that
+    only asks "does it resolve" cannot tell that from an install. This
+    runs the real entry point with a PATH of nothing, and then looks at
+    WHERE the binary it found lives.
+    """
+    tmp = Path(tmp)
+    installer = _installer()
+    tools = tmp / 'tools'
+    later = tmp / 'path.txt'
+    recorded = tmp / 'env.txt'
+    payload = _release_asset('actionlint', False)
+    with _on('Linux', 'x86_64'), \
+            mock.patch.dict(os.environ, {
+                'GITHUB_PATH': str(later), 'GITHUB_ENV': str(recorded),
+                'PATH': '/usr/bin:/bin'}), \
+            mock.patch.dict(
+                installer.ACTIONLINT_SHA256,
+                {('Linux', 'x86_64'):
+                 hashlib.sha256(payload).hexdigest()}), \
+            mock.patch.object(installer, 'TOOL_DIR', tools), \
+            mock.patch.object(installer, '_fetch',
+                              return_value=payload), \
+            _installed(installer):
+        assert installer.main() == 0
+        scripts = installer.script_dir(tools / installer.SHELLCHECK_PACKAGE)
+        assert installer.shutil.which('shellcheck') == str(
+            scripts / 'shellcheck'), (
+            'shellcheck did not resolve into the directory this step '
+            'installed it into')
+        assert str(scripts) in later.read_text(
+            encoding='utf-8').split('\n'), (
+            'the console-script directory is not on the PATH the later steps '
+            'inherit, so a suite would find whatever the runner image '
+            'happens to carry instead')
+    assert recorded.read_text(encoding='utf-8')
 
 
 def main():
