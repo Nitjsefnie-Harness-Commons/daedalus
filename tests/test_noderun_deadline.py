@@ -24,6 +24,7 @@ import _launcher_stand_ins as stand_ins  # noqa: E402
 import _util  # noqa: E402
 from _outer_bound import (  # noqa: E402
     OuterBoundExpired, announcing_pid, outer_bound)
+from _processtree import process_is_gone  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
 
@@ -55,7 +56,11 @@ OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 # Three controls below drive a real child that never settles, and each used
 # to wait out its site's composed figure — 107s at the two launcher sites,
 # 90s at the GM one, about a tenth each of the 900s `run_tests.py` allows a
-# suite — on every leg of a twelve-cell matrix and on the `speed` suite.
+# suite — on every leg of a twelve-cell matrix and on the `speed` suite. The
+# twelve is `scripts/ci/classify_changes.py`'s `FULL_MATRIX` read as 3
+# operating systems by 4 interpreters, four of the cells being
+# `windows-latest`; it is written here as a figure rather than as a
+# disclosure of one that could not be checked, because it can.
 # Each child writes a line and then holds the event loop open forever, so
 # the deadline's one job is to clear node's own startup. The figures are
 # arithmetic and the AST control pins the chain; the FIRING does not depend
@@ -482,8 +487,9 @@ def test_a_child_that_never_settles_is_killed_and_reported(tmp):
         # it kills the child rather than only reporting it — so a wedge here
         # is a named failure, where it was a suite timeout.
         raise AssertionError(
-            'the outer bound fired: the child wedged and nothing in the '
-            'suite ended it, which is what this control exists to prevent'
+            "the outer bound fired, so the child's own bound never "
+            "ended it, which is what this control exists to prevent. "
+            f"What the bound reports: {wedged}"
         ) from wedged
     finally:
         _noderun.CHILD_DEADLINE_S = real_deadline
@@ -495,7 +501,7 @@ def test_a_child_that_never_settles_is_killed_and_reported(tmp):
     assert failure.deadline_s == budget, failure.deadline_s
     assert 'partial child output' in failure.stdout, failure.stdout
     assert failure.cleanup_diagnostic, 'the cleanup reported nothing'
-    assert stand_ins.child_is_gone(failure.stdout), (
+    assert process_is_gone(int(failure.stdout.splitlines()[0])), (
         'the cleanup reported a kill and left the child running')
     message = str(failure)
     assert _node() in message, message
@@ -551,8 +557,9 @@ def test_a_real_call_site_reports_its_own_stalled_child(tmp):
                 raise
     except OuterBoundExpired as wedged:
         raise AssertionError(
-            'the outer bound fired: the child wedged and nothing in the '
-            'suite ended it, which is what this control exists to prevent'
+            "the outer bound fired, so the child's own bound never "
+            "ended it, which is what this control exists to prevent. "
+            f"What the bound reports: {wedged}"
         ) from wedged
     finally:
         _noderun.CHILD_DEADLINE_S = real_deadline
@@ -606,8 +613,9 @@ def test_a_call_site_bound_reports_its_own_stalled_child(tmp):
                 caught = failure
     except OuterBoundExpired as wedged:
         raise AssertionError(
-            'the outer bound fired: the storage child wedged and nothing in '
-            'the suite ended it, which is what this control exists to prevent'
+            "the outer bound fired, so the storage child's own bound never "
+            "ended it, which is what this control exists to prevent. "
+            f"What the bound reports: {wedged}"
         ) from wedged
     finally:
         _gm_harness.GM_CHILD_DEADLINE_S = real_deadline

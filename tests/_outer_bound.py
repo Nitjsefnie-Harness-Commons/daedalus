@@ -16,7 +16,9 @@ wraps is never interrupted. A bound that raised INTO the blocked thread would
 have to be a signal, and a signal is what `windows-latest` does not have:
 `signal.SIGALRM` and `signal.setitimer` do not exist there, so the two
 controls that armed them raised `AttributeError` on the spot and four legs
-of a twelve-cell matrix were red.
+of a twelve-cell matrix were red — the four `windows-latest` cells of
+`scripts/ci/classify_changes.py`'s `FULL_MATRIX`, three operating systems by
+four interpreters.
 
 **It ends the wait rather than reporting it.** The child is killed, so a
 `Popen.wait()` with no timeout returns and the block finishes. A bound that

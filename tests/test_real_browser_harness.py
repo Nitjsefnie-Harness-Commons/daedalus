@@ -248,8 +248,9 @@ def test_the_cdp_harness_site_reports_its_own_stalled_child(tmp):
                 caught = failure
     except OuterBoundExpired as wedged:
         raise AssertionError(
-            'the outer bound fired: the CDP child wedged and nothing in the '
-            'suite ended it, which is what this control exists to prevent'
+            "the outer bound fired, so the CDP child's own bound never "
+            "ended it, which is what this control exists to prevent. "
+            f"What the bound reports: {wedged}"
         ) from wedged
     assert caught is not None, 'the wedged CDP harness finished'
     assert caught.deadline_s == CDP_HARNESS_DEADLINE_S, caught.deadline_s
@@ -568,8 +569,12 @@ OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 def _bounded(node, argv, deadline_s, source=None):
     """A `node` child under a bound this module composed, classified.
 
-    The stalled half of this site's control lives in
-    `tests/test_real_browser_cdp_stalls.py`, which reaches in here for it.
+    The stalled half of this site's control is
+    `test_the_cdp_harness_site_reports_its_own_stalled_child`, below: it
+    drives this helper, so the two stand together here. They stood apart
+    while the file sat at its size ceiling, and the suite that briefly held
+    the stalled half has since been deleted — which is why the pointer
+    names a control rather than a file.
     """
     try:
         return subprocess.run([node, *argv], capture_output=True,

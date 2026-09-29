@@ -304,9 +304,9 @@ def test_nonterminating_node_probe_is_harness_failure(tmp):
                     return
         except OuterBoundExpired as wedged:
             raise AssertionError(
-                'the outer bound fired: the probe wedged and nothing in the '
-                'suite ended it, which is what this control exists to '
-                'prevent'
+                "the outer bound fired, so the probe's own bound never ended "
+                "it, which is what this control exists to prevent. What the "
+                f"bound reports: {wedged}"
             ) from wedged
     raise AssertionError('the probe that never terminates finished')
 

@@ -10,11 +10,78 @@ would tie the two to each other's reasoning.
 Every outcome is named. A caller that discards this string has thrown away
 the only evidence of what happened to a process that had already stopped
 answering, which is the case the string exists for.
+
+The RECEIPT lives here for the same reason the kill does: `process_is_gone`
+is the only reading of a kill that is not the string the kill wrote about
+it, and a module that owns the kill is the one that can be asked whether it
+happened.
 """
 import os
 import signal
 import subprocess
 import sys
+import time
+
+
+# The receipt's own two figures. A killed process stays in the table until
+# something reaps it, so one read of a just-killed grandchild calls it alive;
+# and a tree kill does not take effect the instant it is issued, so one read
+# of a survivor calls it gone.
+SETTLE_S = 5
+SETTLE_POLL_S = 0.05
+
+
+def process_is_gone(pid, settle_s=SETTLE_S):
+    """Whether `pid` is no longer a live process, polled to a bound.
+
+    The receipt for a kill, and beside the kill rather than in a control,
+    because a probe that reports what the kill did is only evidence if it
+    can report the other thing too.
+
+    Non-destructive on every platform, which is the whole of it: a probe
+    that ends the process it is probing is not a probe. POSIX
+    `os.kill(pid, 0)` sends no signal — it raises for a pid the kernel has
+    reaped and returns for a live one. Windows has no such call, and
+    `os.kill(pid, 0)` there opens the process it is asked about and can end
+    it, so the answer is read from `tasklist`, which only reports. That is
+    the same split `tests/test_speedharness.py` records, and it is why this
+    is not a one-liner over `os.kill`.
+    """
+    deadline = time.monotonic() + settle_s
+    while True:
+        if not _process_is_live(pid):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(SETTLE_POLL_S)
+
+
+def _process_is_live(pid):
+    """One read of liveness, per platform, and never a signal."""
+    if sys.platform == 'win32':
+        return _tasklist_has(pid)
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        # It exists and belongs to somebody else, which is alive.
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _tasklist_has(pid):
+    """Whether `tasklist` reports `pid`, which is a query and not a kill."""
+    try:
+        result = subprocess.run(
+            ['tasklist', '/FI', f'PID eq {pid}', '/NH'],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            check=False, timeout=SETTLE_S)
+    except (OSError, subprocess.SubprocessError):
+        # A platform where the query could not be made answers "alive", so
+        # the receipt refuses rather than reporting a kill it did not see.
+        return True
+    return str(pid) in result.stdout
 
 
 def process_group(process):
@@ -122,9 +189,6 @@ def kill_process_tree(pid, cleanup_timeout):
     except OSError as error:
         return f'process-group lookup failed: {error}'
     try:
-        if process_group == os.getpgrp():
-            os.kill(pid, signal.SIGKILL)
-            return 'direct process kill requested for the current group'
         os.killpg(process_group, signal.SIGKILL)
         return f'process group {process_group} killed'
     except ProcessLookupError:

@@ -117,9 +117,9 @@ def test_the_control_probe_site_reports_its_own_stalled_child(tmp):
                     return
         except OuterBoundExpired as wedged:
             raise AssertionError(
-                'the outer bound fired: the control child wedged and nothing '
-                'in the suite ended it, which is what this control exists to '
-                'prevent'
+                "the outer bound fired, so the control child's own bound never ended "
+                "it, which is what this control exists to prevent. What the "
+                f"bound reports: {wedged}"
             ) from wedged
     raise AssertionError('the control script that wedges finished')
 
