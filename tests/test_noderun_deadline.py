@@ -37,28 +37,31 @@ TESTS = Path(__file__).resolve().parent
 # the control, from `tests/_outer_bound.py`, on the call.
 #
 # It must clear the healthy path with room to spare and still fire well
-# inside any external bound. The healthy budget is
-# `round(CHILD_DEADLINE_S * 0.1)` = 11s, and the slowest observed correct
-# run of the whole arm — a file recorded at about 120s — is well under a
-# minute; 57s is roughly five times the healthy budget, and turning a
-# wedge into a named failure costs a minute where the alternative costs
-# whatever the runner's ceiling costs.
+# inside any external bound. The healthy budgets are the ones the three
+# controls set for themselves — `round(CHILD_DEADLINE_S * 0.1)` = 11s at the
+# jsroute call site, and `round(CHILD_DEADLINE_S * 0.25)` = 27s and
+# `round(GM_CHILD_DEADLINE_S * 0.25)` = 22s at the other two — so the
+# tightest margin 57s has to keep is over that 27s. Turning a wedge into a
+# named failure costs about a minute where the alternative costs whatever
+# the runner's ceiling costs. The samples are this bound's own observed
+# expiries, which is circular on its face: what they record is the wedge,
+# and what the figure owes is the margin above the healthy budgets.
 OUTER_BOUND_SAMPLES = (52.0, 55.0, 57.0)
 OUTER_BOUND_SLOWEST_S = max(OUTER_BOUND_SAMPLES)
 OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 
 # --- the budget a STALLED child is given -----------------------------------
 #
-# Two controls below drive a real child that never settles, and each used to
-# wait out its site's composed figure: 208s of deliberate deadline firing, a
-# 23% of the 900s `run_tests.py` allows, on every leg of a twelve-cell
-# matrix and on the `speed` suite. Both children write a line and then hold
-# the event loop open forever, so the deadline's one job is to clear node's
-# own startup. The figures are arithmetic and the AST control pins the
-# chain; the FIRING does not depend on them, which the expiry-message
-# control above already shows at a one-second budget. What is given up is
-# named here rather than traded silently: that 107 and 90 fire in
-# particular.
+# Three controls below drive a real child that never settles, and each used
+# to wait out its site's composed figure — 107s at the two launcher sites,
+# 90s at the GM one, about a tenth each of the 900s `run_tests.py` allows a
+# suite — on every leg of a twelve-cell matrix and on the `speed` suite.
+# Each child writes a line and then holds the event loop open forever, so
+# the deadline's one job is to clear node's own startup. The figures are
+# arithmetic and the AST control pins the chain; the FIRING does not depend
+# on them, which the expiry-message control above already shows at a
+# one-second budget. What is given up is named here rather than traded
+# silently: that 107 and 90 fire in particular.
 #
 # The table is what the budget must clear — node's own startup, measured
 # `Popen` to first line for exactly the source the first control runs.
@@ -441,11 +444,18 @@ def test_a_child_that_never_settles_is_killed_and_reported(tmp):
     The kill, the report and the reap are all the launcher's own; only the
     budget is a quarter of the site's figure, for the reasons recorded above
     the sample table, and the deadline the report names is read back off
-    the failure rather than off the module.
+    the failure rather than off the module. The bound the control holds
+    while it waits is the outer one, for the reason given there.
     """
     import _noderun  # noqa: E402
 
-    source = ("process.stdout.write(process.pid + '\\n');"
+    # The pid is announced to a file as well as to stdout, because the bound
+    # that ends this control reading as a hang kills a child it can only
+    # reach through a pid, and the launcher's own cleanup is the thing a
+    # reversion removes.
+    pid_file = Path(tmp) / 'never-settles.pid'
+    source = (announcing_pid(pid_file) + '\n'
+              "process.stdout.write(process.pid + '\\n');"
               " process.stdout.write('partial child output\\n');"
               " setInterval(() => {}, 1000);")
     real_deadline = _noderun.CHILD_DEADLINE_S
@@ -453,16 +463,28 @@ def test_a_child_that_never_settles_is_killed_and_reported(tmp):
     _noderun.CHILD_DEADLINE_S = budget
     caught = None
     try:
-        _noderun.run_node_argv(_node(), ['-e', source], tmp)
-    except _noderun.ChildDeadlineExceeded as failure:
-        caught = failure
-    except BaseException as unexpected:  # noqa: BLE001
-        # A bare `TimeoutExpired` is the failure this entry point exists to
-        # replace, so it is named rather than merely re-raised: a reader
-        # needs to see WHICH of the two the launcher produced.
-        assert not isinstance(unexpected, subprocess.TimeoutExpired), (
-            'a bare TimeoutExpired reached the caller', unexpected)
-        raise
+        with outer_bound(OUTER_BOUND_S, pid_file, "the launcher's deadline"):
+            try:
+                _noderun.run_node_argv(_node(), ['-e', source], tmp)
+            except _noderun.ChildDeadlineExceeded as failure:
+                caught = failure
+            except BaseException as unexpected:  # noqa: BLE001
+                # A bare `TimeoutExpired` is the failure this entry point
+                # exists to replace, so it is named rather than merely
+                # re-raised: a reader needs to see WHICH of the two the
+                # launcher produced.
+                assert not isinstance(
+                    unexpected, subprocess.TimeoutExpired), (
+                    'a bare TimeoutExpired reached the caller', unexpected)
+                raise
+    except OuterBoundExpired as wedged:
+        # The bound fires only on a launch reverted to an unbounded one, and
+        # it kills the child rather than only reporting it — so a wedge here
+        # is a named failure, where it was a suite timeout.
+        raise AssertionError(
+            'the outer bound fired: the child wedged and nothing in the '
+            'suite ended it, which is what this control exists to prevent'
+        ) from wedged
     finally:
         _noderun.CHILD_DEADLINE_S = real_deadline
     assert caught is not None, 'the child that never settles finished'
@@ -559,22 +581,34 @@ def test_a_call_site_bound_reports_its_own_stalled_child(tmp):
     It costs a quarter of the site's composed budget, for the reasons
     recorded above the sample table. This child is a `-e` source of its own
     rather than the shipped scripts, so the healthy path is node's startup
-    and nothing else.
+    and nothing else. It is held by the outer bound for the reason given
+    there: the site keeps its own bound precisely so this module stays out
+    of the census's audited path, which means a reversion removes the very
+    thing that would have ended the wait.
     """
     import _gm_harness  # noqa: E402
     from _gm_harness import _run_node  # noqa: E402
     from _node_launch_routing import NodeBoundExceeded  # noqa: E402
 
-    stalling = ("process.stdout.write('the storage child spoke before it "
+    pid_file = Path(tmp) / 'storage-child.pid'
+    stalling = (announcing_pid(pid_file) + '\n'
+                "process.stdout.write('the storage child spoke before it "
                 "wedged\\n'); setInterval(() => {}, 1000);")
     real_deadline = _gm_harness.GM_CHILD_DEADLINE_S
     budget = round(real_deadline * 0.25)
     _gm_harness.GM_CHILD_DEADLINE_S = budget
     caught = None
     try:
-        _run_node(stalling)
-    except NodeBoundExceeded as failure:
-        caught = failure
+        with outer_bound(OUTER_BOUND_S, pid_file, 'the storage call site'):
+            try:
+                _run_node(stalling)
+            except NodeBoundExceeded as failure:
+                caught = failure
+    except OuterBoundExpired as wedged:
+        raise AssertionError(
+            'the outer bound fired: the storage child wedged and nothing in '
+            'the suite ended it, which is what this control exists to prevent'
+        ) from wedged
     finally:
         _gm_harness.GM_CHILD_DEADLINE_S = real_deadline
         del tmp

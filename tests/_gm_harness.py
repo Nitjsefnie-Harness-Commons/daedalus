@@ -417,7 +417,7 @@ Promise.all(settled).then(() => {
 # is architectural rather than behavioural: routing this site through
 # `tests/_noderun.py` puts this module and everything it calls inside
 # `tests/_launch_census.py`'s audited path, which this branch has already
-# grown from 48 modules to 58. The figure is composed from a recorded table
+# grown from 49 modules to 59. The figure is composed from a recorded table
 # rather than typed, the expiry is the named failure the rule asks for, and
 # `tests/test_node_launch_routing.py` reads all three of those — so the
 # deviation is from where the bound lives, never from what it is.

@@ -13,19 +13,24 @@ what a call-site bound is composed from instead.
 The cost of keeping those sites out of the shared launcher is a figure, so
 it is measured rather than asserted, and the measurement SAYS WHICH DIRECTION
 it moves. This branch did not hold the audited path down; it grew it. Ten
-modules reached `run_node_argv` in Task 2 and the path went 48 -> 58, the
-ten being exactly those modules. Routing the eight `CLASSIFYING_MODULES`
-through the shared launcher as well would take it to 70, twelve more, which
+modules reached `run_node_argv` in Task 2 and the path went 49 -> 59, the ten
+being exactly those modules. Routing the eight `CLASSIFYING_MODULES`
+through the shared launcher as well would take it to 67, eight more, which
 is the price the call-site shape is paying:
 
     cd tests && python3 -c "from pathlib import Path; import _launch_path \
-as p; print(len(p.path_functions(Path('.').resolve(), p.LAZY_MODULES)))"
+as p, _node_launch_routing as r; a = set(p.path_functions( \
+Path('.').resolve(), p.LAZY_MODULES)); print(len(a), \
+len(a | {m for m in r.CLASSIFYING_MODULES}))"
 
-at this head it prints 58, and at `origin/main` it prints 48. The 70 is a
-counterfactual and is produced by appending a caller of `run_node_argv` to
-each of the eight and running the same line; it is a simulation, and a
-simulation is not a number the repository states, so it is stated here as
-one with its method beside it rather than as a fact.
+The first number is 59 at this head and 49 at the branch point `7d3e714`,
+which is the base the "went 49 -> 59" is measured against; `origin/main`
+moves under the branch, so a figure stated against it goes stale with
+nothing here changing. The second is the counterfactual: it adds the eight
+classifying modules, and every one of them is outside the path today, which
+is the check that keeps the addition honest. It is a simulation, and a
+simulation is not a number the repository states, so it is stated here with
+its method beside it rather than as a fact.
 
 The success near the deadline is the site itself: every child here runs in
 a suite run, so seven of the eight figures are exercised in the PASSING

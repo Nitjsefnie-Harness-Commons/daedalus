@@ -13,6 +13,8 @@ import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
 from _node_launch_routing import (  # noqa: E402
     SITE_HANG_MULTIPLE, node_bound_expiry)
+from _outer_bound import (  # noqa: E402
+    OuterBoundExpired, announcing_pid, outer_bound)
 from _realbrowser_fixture_controls import _enter_fixture  # noqa: E402
 
 
@@ -55,6 +57,27 @@ WORKER_PROBE_SAMPLES_S = (0.084, 0.108, 0.115, 0.201,
                           1.089, 1.174, 0.201, 2.574)
 WORKER_PROBE_SLOWEST_S = max(WORKER_PROBE_SAMPLES_S)
 WORKER_PROBE_DEADLINE_S = round(WORKER_PROBE_SLOWEST_S * SITE_HANG_MULTIPLE)
+
+# The outer bound the stalling control below holds while it waits, held for
+# the reason `tests/_outer_bound.py` gives: the launch reverted to an
+# unbounded one removes the very thing that would have ended the wait, and
+# the suite ceiling's SIGTERM reports a job timeout rather than a control.
+# A sibling SUITE import is a seam this repository refuses, so the chain is
+# repeated here rather than carried in.
+#
+#   OUTER_BOUND_SAMPLES     the same measurement as the other three files
+#                           that hold one — these samples are of the bound's
+#                           own expiry, measured in test_noderun_deadline.py
+#   OUTER_BOUND_SLOWEST_S   max of those samples
+#   OUTER_BOUND_S           the bound, with no multiple
+#
+# The margin is over THIS file's own healthy path, which is the
+# `_realbrowser.NODE_PROBE_DEADLINE_S` the stalling control waits out and
+# nothing else: 57s is nearly four times that 15s. The samples are borrowed
+# rather than re-derived, so the two facts are stated apart on purpose.
+OUTER_BOUND_SAMPLES = (52.0, 55.0, 57.0)
+OUTER_BOUND_SLOWEST_S = max(OUTER_BOUND_SAMPLES)
+OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 
 
 def test_browser_environment_skip_has_runner_identity(tmp):
@@ -247,28 +270,44 @@ def test_nonterminating_node_probe_is_harness_failure(tmp):
     only evidence there is. So the control plants a real stalling child at
     the real call site, at the site's own composed deadline — a shortened
     one would be proving a different number — and reads the line back.
+
+    Which is also why it is held by the outer bound: the deadline it waits
+    out is the one a reversion removes, so without a bound of its own the
+    only thing that would end it is the runner's ceiling.
     """
     from _node_launch_routing import NodeBoundExceeded
-    del tmp
     node = shutil.which('node')
     assert node, 'Node is required to execute the probe control'
-    stalling = ("process.stdout.write('the probe spoke before it wedged\\n');"
+    probe_deadline = _realbrowser.NODE_PROBE_DEADLINE_S
+    pid_file = Path(tmp) / 'probe.pid'
+    stalling = (announcing_pid(pid_file) + '\n'
+                "process.stdout.write('the probe spoke before it wedged\\n');"
                 " setInterval(() => {}, 1000);")
     with mock.patch.object(
             _realbrowser.shutil, 'which', _which_with(node)), \
             mock.patch.object(
                 _realbrowser, 'NODE_WEBSOCKET_PROBE', stalling):
         try:
-            _realbrowser.browser_requirements()
-        except NodeBoundExceeded as failure:
-            # The assertions live IN the handler, so a reader is shown the
-            # classified failure itself rather than a variable that may or
-            # may not still be unset when the block ends.
-            assert failure.deadline_s == _realbrowser.NODE_PROBE_DEADLINE_S
-            assert 'the probe spoke before it wedged' in failure.stdout, (
-                failure.stdout)
-            assert isinstance(failure.stdout, str), type(failure.stdout)
-            return
+            with outer_bound(OUTER_BOUND_S, pid_file, 'the capability probe'):
+                try:
+                    _realbrowser.browser_requirements()
+                except NodeBoundExceeded as failure:
+                    # The assertions live IN the handler, so a reader is
+                    # shown the classified failure itself rather than a
+                    # variable that may or may not still be unset when the
+                    # block ends.
+                    assert failure.deadline_s == probe_deadline, (
+                        failure.deadline_s)
+                    assert 'the probe spoke before it wedged' in failure.stdout, (
+                        failure.stdout)
+                    assert isinstance(failure.stdout, str), type(failure.stdout)
+                    return
+        except OuterBoundExpired as wedged:
+            raise AssertionError(
+                'the outer bound fired: the probe wedged and nothing in the '
+                'suite ended it, which is what this control exists to '
+                'prevent'
+            ) from wedged
     raise AssertionError('the probe that never terminates finished')
 
 
