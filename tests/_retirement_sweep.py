@@ -1,38 +1,47 @@
 """The retirement's sites, derived from the guard's own source, and the
 sweep that reverts each of them.
 
-Named for what it is rather than for the family it reads: the universe is
-the guard family, identified by the `_pyroute*` naming, and a tool that
-reads that family is not itself a member of it. The earlier name made
-the driver the twenty-first site in its own census.
-
 A retirement is a per-key fact on a tracked container, and the rule it
 exists for is that a constant-key read of a retired key does not answer
 from the recorded value there. The rule lives at a handful of places and
 every one of them has to be right, so the enumeration of them belongs in
-the tree: a report cannot be re-run, and a site added in the tree with
-no decision taken about it is exactly the defect this module exists to
+the tree: a report cannot be re-run, and a site added in the tree with no
+decision taken about it is exactly the defect this module exists to
 prevent.
 
-**The enumeration is keyed on a PROPERTY, not on a spelling.** A site is
-a guard function that propagates or consults a retirement, which is to
-say one that mentions `stale` -- as a name, as an attribute, or as a
-keyword argument. A fold spelled with a different helper, or a retirement
-forwarded positionally, is still found; a fold that never touches one is
-not in the set whatever it is called. Keying on the callee name
-`_fold_items` would find today's four folds and miss the rest of the
-rule, which is the shape of the finding this module answers.
+**The universe is a property, not a filename.** A module is in it when it
+builds a tracked container or calls one of the helpers that copies one --
+the places a retirement can enter a value at all. Every `tests/` module is
+classified, and a module that is not in the universe carries a recorded
+reason in `MODULE_EXCLUSIONS`, so a module that has to be argued out of
+the sweep has to be argued out of the sweep in the tree. The `_pyroute*`
+naming coincides with the property today; a reviewer planted a real
+retirement-carrying builder in `tests/_tabroute_keyset.py`, a module the
+retirement suite already imports from, and the naming missed it while both
+census assertions passed. Coincidence is what this branch's previous five
+completeness claims rested on.
+
+**A site is a ROLE, not a spelling.** It is a function that carries,
+returns, filters, settles or consults the key set a retirement is recorded
+in: a `stale=` argument to a container build, a read of a container's
+marker, a set operation over its own arguments, or a call to another site.
+The role is what a neutral name cannot hide -- a reviewer planted
+`settle_into(marker, items) -> frozenset(marker) & set(items)`, which *is*
+the intersection helper, and a `startswith` vocabulary could not see it.
 
 **The sweep is here for the same reason.** `python3
-tests/_pyroute_retirement_sites.py` reverts each site in turn on the real
-code, runs the suites, and prints the controls that died. A control that
+tests/_retirement_sweep.py` reverts each site in turn on the real code,
+runs the suites, and prints the controls that died. A control that
 survives its own revert is not a control, and this branch has shipped
-three of them; the driver is what catches the fourth.
+several; the driver is what catches the next. A revert must be the defect
+the site guards and not something stronger: neutering a marker entirely
+kills more than removing the intersection does, and a control that only
+dies on the stronger mutation still passes on the real one.
 
 It lives in a `_`-prefixed module rather than a suite because it runs the
 suites: a suite importing a sibling suite re-executes that suite's whole
-module body, and this one has to import the guard modules rather than any
-suite. `test_the_retirement_census_is_the_guard_own_list` in
+module body, and this one has to read the guard modules rather than import
+any suite. `test_the_retirement_census_is_the_guard_own_list` in
 `test_tab_routing_dict_retirement.py` is the half of this that runs on
 every commit; this is the half that reverts the code.
 """
@@ -44,17 +53,25 @@ from pathlib import Path
 import _util
 
 HERE = Path(__file__).resolve().parent
-_RETIREMENT_VOCABULARY = ('stale', 'retired')
-GUARD_MODULES = tuple(sorted(
-    path.stem for path in HERE.glob('_pyroute*.py')))
+SELF = Path(__file__).resolve().stem
 
-# Every guard module, globbed rather than listed. A hand list is the same
-# defect as a hand site list: a module added to the family would be invisible
-# to the derivation, which is the one claim this branch has no business
-# making by hand. Filled in after HERE, further down.
+# The constructors and helpers whose use makes a module part of the guard
+# family. Keyed on the ROLE -- a module that builds a tracked container or
+# copies one is where a retirement can enter a value -- not on a filename.
+_CONSTRUCTORS = ('DeferredContainer', 'SpreadContainer')
+_COPY_HELPERS = ('container_copy', 'replace_container',
+                 'replace_deferred_storage', 'join_clean_occupancy')
+
+# Every `tests/` module the universe derivation does NOT put in, and why.
+# An exclusion is a decision, so it is recorded here: a module has to be
+# argued out of the sweep in the tree, not silently skipped by it.
+MODULE_EXCLUSIONS = {
+    '_retirement_sweep': 'the sweep tool itself; it reads the family',
+}
 
 # The suites a revert has to turn red in, and the test whose name must
 # appear among the failures.
+_SUITE_TIMEOUT = 900
 CONTROL_SUITES = ('tests/test_tab_routing_dict_retirement.py',
                   'tests/test_tab_routing_dict_keyset.py',
                   'tests/test_tab_routing_positions.py',
@@ -92,6 +109,15 @@ REVERTS = {
         "",
         "            return known.items, known.length is not None, "
         "frozenset()"),
+    '_pyroute_mapping._apply_set_store': (
+        '        folded = container_copy(previous, folded.items)',
+        '        folded = container_copy(previous, folded.items, False, '
+        'frozenset())'),
+    '_pyroute_reads._readback_popitem': (
+        "        replace_deferred_storage(state, owner, container_copy(\n"
+        "            owner, items, True))",
+        "        replace_deferred_storage(state, owner, container_copy(\n"
+        "            owner, items, True, frozenset()))"),
     '_pyroute_reads._apply_pop': (
         "        owner, items, key is _UNRESOLVED_KEY, stale_after_store(\n"
         "            owner, () if key is _UNRESOLVED_KEY else (key,))))",
@@ -118,8 +144,13 @@ REVERTS = {
     '_pyroute_stores._subscript_store': (
         "        stale=stale_after_store(\n"
         "            owner, () if dynamic else (literal,)))", "        )"),
+    # The DEFECT, not something stronger. `return frozenset()` drops the
+    # marker entirely and kills four controls, but removing only the
+    # intersection while still carrying is the over-carry this helper
+    # exists to prevent, and it killed nothing until a control distinguished
+    # the two forms. A revert must be the defect the site guards.
     '_pyroute_storage.retired_into': (
-        '    return retired & set(items)', '    return frozenset()'),
+        '    return retired & set(items)', '    return retired'),
     '_pyroute_storage.stale_after_store': (
         "    if unreadable:\n"
         "        return (owner.stale | (set(owner.items) - {DYNAMIC_KEY})) \\"
@@ -159,39 +190,181 @@ REVERTS = {
 }
 
 
-def _mentions_a_retirement(node):
-    """Whether a function propagates or consults one, by property.
+def _is_a_suite(tree):
+    """Whether a module is a suite rather than a module of the guard.
 
-    The vocabulary is the concept's two spellings in this tree: `stale` for
-    the marker itself and `retired` for what a fold inherits. Keying on one
-    of the two is what let `retired_into` -- the function that decides
-    what a fold inherits -- sit outside the sweep entirely.
+    A suite's `main` returns the runner's result. That is the property,
+    and it is structural: a fixture in a suite and a decision in the guard
+    are both functions that build a container, and what separates them is
+    which one the test runner drives.
     """
-    for child in ast.walk(node):
-        if isinstance(child, ast.Name) \
-                and child.id.startswith(_RETIREMENT_VOCABULARY):
-            return True
-        if isinstance(child, ast.Attribute) \
-                and child.attr.startswith(_RETIREMENT_VOCABULARY):
-            return True
-        if isinstance(child, ast.keyword) and child.arg \
-                and child.arg.startswith(_RETIREMENT_VOCABULARY):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == 'main':
+            return any('runner' in ast.dump(child)
+                       for child in ast.walk(node))
+    return False
+
+
+def _builds_a_container(tree):
+    """Whether a module builds or copies a tracked container."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = getattr(node.func, 'id', None) or getattr(
+            node.func, 'attr', None)
+        if callee in _CONSTRUCTORS or callee in _COPY_HELPERS:
             return True
     return False
 
 
-def retirement_sites():
-    """The guard functions that propagate or consult a retirement.
+def module_universe():
+    """The modules a retirement can enter a value through, and the reasons
+    every other `tests/` module is not one of them.
 
-    Read out of the guard's own source, so a site added without a
-    decision taken about it is found rather than shipped."""
-    sites = set()
-    for name in GUARD_MODULES:
+    Derived from what each module DOES rather than from what it is called,
+    so a retirement-carrying builder planted outside the `_pyroute*` family
+    is found by the same rule that finds today's. Every module is
+    classified: one that builds or copies a container is in, and one that
+    does not is out with its reason recorded, so nothing is skipped
+    silently and a module that has to be argued out is argued out in the
+    tree.
+    """
+    in_universe, excluded = [], {}
+    for path in sorted(HERE.glob('*.py')):
+        stem = path.stem
+        if stem == SELF:
+            excluded[stem] = MODULE_EXCLUSIONS[stem]
+            continue
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        if _is_a_suite(tree):
+            excluded[stem] = ('a suite: its main returns the test runner, '
+                              'so it holds controls, not guard decisions')
+        elif _builds_a_container(tree):
+            in_universe.append(stem)
+        else:
+            excluded[stem] = ('builds no tracked container and copies none, '
+                              'so a retirement cannot enter a value here')
+    return tuple(in_universe), excluded
+
+
+_MARKER_PARAMETER = 'stale'
+
+
+def _carries_positionally(functions, family=None):
+    """The functions that hand a retirement to a helper which takes one.
+
+    One level, not the whole call graph: `container_copy(owner, items,
+    unknown, stale_after_store(...))` passes the marker as an argument, and
+    a caller that merely forwards a container is not deciding anything.
+    """
+    carriers = set()
+    for name, node in functions.items():
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            callee = getattr(child.func, 'id', None)
+            known = dict(functions)
+            known.update(family or {})
+            target = known.get(callee) if callee else None
+            if target is None:
+                continue
+            if any(isinstance(argument, ast.arg)
+                   and argument.arg == _MARKER_PARAMETER
+                   for argument in target.args.args) and child.args:
+                carriers.add(name)
+    return carriers
+
+
+def _carries_or_consults(node):
+    """Whether a function carries a marker in or reads one out."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.keyword) and child.arg == 'stale':
+            return True
+        if isinstance(child, ast.Attribute) and child.attr == 'stale':
+            return True
+        if isinstance(child, ast.arg) and child.arg == 'stale':
+            return True
+    return False
+
+
+def _settles_a_key_set(node):
+    """Whether a function returns a set operation over its own arguments.
+
+    This is the axis a neutral name cannot hide: it is the shape of the
+    intersection helper, whatever the helper is called.
+    """
+    for child in ast.walk(node):
+        if not isinstance(child, ast.BinOp) or not isinstance(
+                child.op, (ast.BitAnd, ast.BitOr, ast.BitXor, ast.Sub)):
+            continue
+        if any(isinstance(side, ast.Call) and getattr(
+                side.func, 'id', None) in ('set', 'frozenset')
+                for side in (child.left, child.right)):
+            return True
+        if any(isinstance(side, (ast.Set, ast.List, ast.Tuple, ast.Dict))
+               for side in (child.left, child.right)):
+            return True
+    return False
+
+
+def _is_a_control(node):
+    """Whether a function asserts rather than decides.
+
+    A control is where the fact is checked, not where it is decided, and
+    reverting one changes the check rather than the guard. This is a role
+    read off the function's own body, not a name.
+    """
+    return any(isinstance(child, ast.Assert) for child in ast.walk(node))
+
+
+def _family_tables():
+    """Every function in the universe, by bare name, across the modules.
+
+    Cross-module, because carrying a retirement is usually a forward: the
+    read side hands the settled set to `container_copy`, which lives in the
+    storage module.
+    """
+    tables = {}
+    for name in module_universe()[0]:
         tree = ast.parse((HERE / (name + '.py')).read_text(encoding='utf-8'))
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) \
-                    and _mentions_a_retirement(node):
-                sites.add(f'{name}.{node.name}')
+            if isinstance(node, ast.FunctionDef):
+                tables.setdefault(node.name, node)
+    return tables
+
+
+def _site_functions(tree, family=None):
+    """The functions that carry, consult or settle a retirement's key set.
+
+    The three axes are structural, so a neutral name cannot hide the role:
+    a `stale=` argument or a container's marker is carrying or consulting,
+    and a set operation over the function's own arguments is settling. A
+    function that merely CALLS a site is not one -- the caller did not
+    decide anything -- and reading the call graph would pull in every
+    dispatcher, which is not what a revert target is.
+    """
+    functions = {node.name: node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef)}
+    sites = {name for name, node in functions.items()
+             if not _is_a_control(node)
+             and (_carries_or_consults(node) or _settles_a_key_set(node))}
+    sites |= {name for name in _carries_positionally(functions, family or {})
+              if not _is_a_control(functions[name])}
+    return functions, sites
+
+
+def retirement_sites():
+    """The functions that propagate or consult a retirement.
+
+    Read out of the guard's own source over the derived universe, so a
+    site added without a decision taken about it is found rather than
+    shipped."""
+    family = _family_tables()
+    sites = set()
+    for name in module_universe()[0]:
+        tree = ast.parse((HERE / (name + '.py')).read_text(encoding='utf-8'))
+        sites.update(f'{name}.{function}'
+                     for function in _site_functions(tree, family)[1])
     return frozenset(sites)
 
 
@@ -200,20 +373,41 @@ def undecided_sites():
     return retirement_sites() - set(REVERTS)
 
 
+def _clear_bytecode():
+    """Drop the compiled forms, before every child run.
+
+    Two same-length reverts of one module inside a second reuse the
+    earlier `.pyc`, and a byte-length-preserving revert is exactly the
+    kind that survives one.
+    """
+    for cached in HERE.glob('__pycache__/*.pyc'):
+        cached.unlink()
+
+
 def _red_controls():
-    """The failing test names across the control suites."""
-    red = []
+    """The failing test names across the control suites.
+
+    A suite that times out is recorded as a timeout and the sweep carries
+    on: one slow suite must not discard every verdict already collected,
+    which is what an unhandled `TimeoutExpired` did.
+    """
+    red, timed_out = [], []
     for suite in CONTROL_SUITES:
-        finished = subprocess.run(
-            [sys.executable, str(HERE / Path(suite).name)], cwd=HERE.parent,
-            env=_util.child_coverage('scrub'), capture_output=True,
-            text=True, timeout=900)
+        _clear_bytecode()
+        try:
+            finished = subprocess.run(
+                [sys.executable, str(HERE / Path(suite).name)],
+                cwd=HERE.parent, env=_util.child_coverage('scrub'),
+                capture_output=True, text=True, timeout=_SUITE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            timed_out.append(Path(suite).name)
+            continue
         for line in finished.stdout.splitlines():
             stripped = line.strip()
             if stripped.startswith(('FAIL', 'ERROR')):
                 red.append(f'{Path(suite).stem}.'
                            f'{stripped.split()[1].split(":")[0]}')
-    return red
+    return red, timed_out
 
 
 def revert_sites():
@@ -238,11 +432,24 @@ def revert_sites():
             print(f'{site:46s} ANCHOR-MISSING')
             survivors.append(site + ' (anchor missing)')
             continue
-        path.write_text(original.replace(old, new, 1), encoding='utf-8')
+        mutant = original.replace(old, new, 1)
         try:
-            red = _red_controls()
+            ast.parse(mutant)
+        except SyntaxError as error:
+            # A revert that does not parse would blank the module and every
+            # suite would fail for that reason, which reads exactly like a
+            # control that died. Say so instead.
+            print(f'{site:46s} MUTANT-DOES-NOT-PARSE: {error}')
+            survivors.append(site + ' (mutant does not parse)')
+            continue
+        path.write_text(mutant, encoding='utf-8')
+        try:
+            red, timed_out = _red_controls()
         finally:
             path.write_text(original, encoding='utf-8')
+        if timed_out:
+            print(f'{site:46s} TIMED OUT: {timed_out}')
+            continue
         print(f'{site:46s} {len(red):2d} red  {", ".join(red[:2])[:42]:44s} '
               f'{"NONE" if red else "*** SURVIVES ***"}')
         if not red:
