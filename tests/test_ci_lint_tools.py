@@ -279,12 +279,15 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
 def _declared_above(before, gated):
     """What a job declares above the boundary, phrased so it is true of it.
 
-    "no action at all" was a fallback for an empty `before`, and it was
-    false of the one job in this tree that reaches it: `timed` checks its
-    two trees out behind an `if:`, so every action it uses before the
-    boundary is a gated one. The message then said the job used no action
-    at all and named the gated actions in the next clause, so a reader had
-    to read past the assertion to learn the opposite of what it claimed.
+    "no action at all" was a fallback for an empty `before`, and it is
+    false of any job that reaches that state with a gated action to name:
+    the message denied the job every action and then listed the gated ones
+    in the next clause, so a reader had to read past the assertion to
+    learn the opposite of what it claimed. `timed` is the job that reaches
+    it — both of its pre-boundary checkouts are gated, and a gated action
+    is not one the control counts — on any tree where the declaration
+    above its boundary is not there, which is the tree this control's own
+    refusal is about.
     """
     if before:
         named = f'uses {sorted(before)}'
