@@ -156,13 +156,54 @@ def _run_actionlint(binary, shellcheck, files):
     of what it would check. That check is the second layer, the skip arm
     deciding first, so it fires only where the facts were wired wrongly,
     and it is what turns that wiring loud instead of clean.
+
+    `binary` is resolved here rather than trusted, so a caller that passes
+    a name instead of a path gets this same refusal rather than a
+    `FileNotFoundError` out of `subprocess` — an exception a runner counts
+    as a failure, which is the opposite of what every other arm here says.
+    A launch that still cannot start is a refusal on the same terms.
     """
-    if not binary or not shellcheck or not files:
+    resolved = shutil.which(binary) if binary else None
+    if not resolved or not shellcheck or not files:
         return None
-    ran = subprocess.run([binary, *(str(path) for path in files)],
-                         capture_output=True, text=True,
-                         timeout=_ACTIONLINT_TIMEOUT)
+    try:
+        ran = subprocess.run([resolved, *(str(path) for path in files)],
+                             capture_output=True, text=True,
+                             timeout=_ACTIONLINT_TIMEOUT)
+    except OSError:
+        return None
     return ran.returncode, ran.stdout + ran.stderr
+
+
+def _resolved(name, marker):
+    """One tool off PATH, or the refusal that stands in for it.
+
+    A test that reaches the real binary resolves it the way production
+    does. A caller that passed the bare name instead is the defect the
+    two-directional proof just made visible: the guard would refuse
+    correctly and the assertion would fail for a reason that has nothing
+    to do with the guard.
+    """
+    found = shutil.which(name)
+    if not found:
+        _util.skip(f'{marker}: {name} is not installed, and the run-guard is '
+                   'proven against the binary it resolves, not a name')
+    return found
+
+
+def _assert_run_guard_both_ways():
+    """The run-guard's two directions, on the binaries production resolves.
+
+    The absent half is what the guard decides first; the present half is
+    what proves that absence is the shellcheck fact and not a guard that
+    refuses every run. Both need the real tools, so a missing one skips
+    naming itself rather than launching and being counted a failure.
+    """
+    binary = _resolved(_ACTIONLINT, _BINARY_ABSENT)
+    shellcheck = _resolved(_SHELLCHECK, _SHELLCHECK_ABSENT)
+    files = _workflow_paths(ROOT)
+    assert _run_actionlint(binary, None, files) is None
+    assert _run_actionlint(binary, shellcheck, files)
 
 
 def _assert_actionlint_clean(facts):

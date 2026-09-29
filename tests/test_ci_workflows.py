@@ -13,11 +13,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _actionlint import (_ACTIONLINT, _SHELLCHECK,  # noqa: E402
-                         _expanded_names, _job_step, _lint_refuses,
-                         _lint_skips, _lint_workflows, _pin, _planted_finding,
-                         _pinned_actionlint_version, _planted_workflow_tree,
-                         _run_actionlint, _workflow_paths)
+from _actionlint import (_ACTIONLINT,  # noqa: E402
+                         _assert_run_guard_both_ways, _expanded_names,
+                         _job_step, _lint_refuses, _lint_skips,
+                         _lint_workflows, _pin, _planted_finding,
+                         _pinned_actionlint_version, _planted_workflow_tree)
 from _wffixtures import _refuses  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
@@ -334,8 +334,7 @@ def test_a_lint_run_without_shellcheck_is_skipped(tmp):
     del tmp
     reason = _lint_skips({'shellcheck': None})
     assert 'shellcheck-absent' in reason and 'shellcheck' in reason, reason
-    assert _run_actionlint(_ACTIONLINT, None, _workflow_paths(ROOT)) is None
-    assert _run_actionlint(_ACTIONLINT, _SHELLCHECK, _workflow_paths(ROOT))
+    _assert_run_guard_both_ways()
 
 
 def test_a_lint_run_at_another_version_is_skipped(tmp):
