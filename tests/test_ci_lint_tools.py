@@ -6,12 +6,12 @@ and a skip is a pass to every runner and every aggregate. So a job without
 the binary is green having verified nothing, silently, on every leg — the
 shape issue 1353 was for actionlint and shellcheck.
 
-Which jobs run a suite is derived from what the jobs run; which tools the
-suites can skip on is derived from the suites' own source. Nothing in
-either direction is maintained by hand except the residue one control
-names, and that is a claim about the complement rather than another list
-to keep in step. The job derivation is shared with the control already on
-that set, through `tests/_suite_jobs.py`.
+Which jobs reach a suite is derived from what the jobs' steps are given;
+which tools the suites can skip on is derived from the suites' own source.
+Nothing in either direction is maintained by hand except the residue one
+control names, and that is a claim about the complement rather than
+another list to keep in step. The job derivation is shared with the
+control already on that set, through `tests/_suite_jobs.py`.
 
 Every control here is a guard: a green run proves the tree still matches
 it and nothing more. The proof that it bites is a planted defect in a
@@ -20,18 +20,15 @@ arm added to a real suite for a binary nothing installs, and a suite
 job planted in a workflow this file never reads.
 """
 import os
-import re
 import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _suite_jobs import (  # noqa: E402
-    SUITE_RUNNERS, WORKFLOW_DIR, _ordered_job_runs, _workflow_jobs)
 from _lint_tool_roles import (  # noqa: E402
     _derive_tool_roles, _tool_roles)
-from _wfgraph import _job_names  # noqa: E402
+from _suite_jobs import NAMES, RUNNER, _door_jobs  # noqa: E402
 
 ROOT = _util.ROOT
 # The step every suite-running job carries, and the name the installer writes
@@ -41,18 +38,19 @@ ROOT = _util.ROOT
 LINT_INSTALLER = 'python scripts/ci/install_lint_tools.py'
 LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 INSTALLER_SOURCE = ROOT / 'scripts' / 'ci' / 'install_lint_tools.py'
-# A job reaches the suite tree either by naming a runner or by naming a suite
-# file. SUITE_RUNNERS recognises the first; the second is the door a third
-# spelling walks through, and it is the one this file has to account for.
-SUITE_DOOR = re.compile(
-    r'tests/test_|run_tests[.]py|coverage_suites[.]py|time_tests[.]py'
-    r'|pytest')
-# The doors that are not a sanctioned runner, and what each one is. A route
-# added without being named here is red until a human judges it, which is the
-# property no membership test over runner basenames can have on its own.
+# The doors that reach the suites without FINDING them: a fixed list of
+# suite paths written in the step, so a suite added tomorrow cannot walk
+# through one of these at all. What each entry owes is that its list stays
+# true — the suites it names are the suites it runs — and nothing about
+# installing tools, because nothing new can arrive through it.
+#
+# This is the residue of a DERIVED set, not a second copy of it. Every
+# other route is either a `RUNNER` door, which the control below holds to
+# the installer step, or a door this walk cannot see at all: a step whose
+# reach is decided by a composite action or a container entry point has no
+# source in this repository to read. That bound is the walk's, stated here
+# where the table meets it.
 SUITE_DOORS = {
-    ('tests.yml', 'timed'):
-        'scripts/ci/time_tests.py globs tests/test_*.py and runs each',
     ('timed-timings.yml', 'refresh'):
         'five suites are run by path rather than through a runner',
 }
@@ -74,32 +72,9 @@ SHIPPED_BY_THE_IMAGE = {
 }
 
 
-def _suite_jobs():
-    """Every job in every workflow that runs a suite runner."""
-    return [entry for runner in SUITE_RUNNERS
-            for entry in _workflow_jobs(runner)]
-
-
-def _door_jobs():
-    """`(workflow, job)` for every job whose `run:` reaches the suite tree.
-
-    The complement of `_suite_jobs`, and deliberately not the same walk: that
-    one reads a substring of each `run:` and globs `*.yml`, while the claim
-    this supports is about everything that substring cannot see — a suite
-    file named by path, a third runner, a `.yaml` workflow the runner list
-    never imagined. Both extensions, because a `.yaml` workflow is a
-    workflow.
-    """
-    sources = sorted(WORKFLOW_DIR.glob('*.yml')) + sorted(
-        WORKFLOW_DIR.glob('*.yaml'))
-    found = set()
-    for source in sources:
-        workflow = source.read_text(encoding='utf-8')
-        for job in _job_names(workflow):
-            if any(SUITE_DOOR.search(run)
-                   for run in _ordered_job_runs(workflow, job)):
-                found.add((source.name, job))
-    return found
+def _runner_doors():
+    """Every job that FINDS its suites, and so can be reached by a new one."""
+    return [door for door in _door_jobs() if door[3] == RUNNER]
 
 
 def _declared_tools():
@@ -291,15 +266,20 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
     the job that lints the workflows hands the suite jobs nothing. An
     installer step in one of them leaves the others skipping silently, which
     is the shape issue 1353 was.
+
+    The job set is the DERIVED one, not the two sanctioned runner
+    basenames. A job that reaches the suites by any other discovery
+    mechanism is a job a suite added tomorrow walks through, and a control
+    that cannot see it cannot hold it to anything.
     """
     del tmp
-    found = _suite_jobs()
+    found = _runner_doors()
     # Not vacuous: an enumeration that finds nothing is the same green a
     # correct one does not produce, so the set has to be bigger than one.
     assert len(found) >= 2, (
-        f'only {len(found)} job(s) run a suite runner, so this control is '
+        f'only {len(found)} job(s) find their suites, so this control is '
         'reading a set too small to be the whole set of them: '
-        f'{[(source, job) for source, job, _ in found]}')
+        f'{[(source, job) for source, job, _, _ in found]}')
     declared = ', '.join(sorted(_declared_tools()))
     unjournalled = sorted(_unjournalled() - _declared_tools())
     assert not unjournalled, (
@@ -309,13 +289,14 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
         f'scripts/ci/install_lint_tools.py declares {declared}, and the '
         'next binary a suite skips on has to be added there, or listed in '
         'SHIPPED_BY_THE_IMAGE with the reason no job has to install it')
-    for source, job, runs in found:
+    for source, job, runs, _mechanism in found:
         assert any(LINT_INSTALLER in run for run in runs), (
-            f'the {job} job in {source} runs a suite runner, which discovers '
-            f'every suite by glob; the suites it discovers skip on '
-            f'{_unjournalled_sentence()}, and the job never runs '
-            f'{LINT_INSTALLER!r}, so on a runner without them those suites '
-            'skip instead of running and the job reports green')
+            f'the {job} job in {source} finds its suites by discovery, so a '
+            'suite added tomorrow reaches it whatever it is called; the '
+            f'suites it finds skip on {_unjournalled_sentence()}, and the '
+            f'job never runs {LINT_INSTALLER!r}, so on a runner without '
+            'them those suites skip instead of running and the job reports '
+            'green')
 
 
 def _unjournalled_sentence():
@@ -352,25 +333,36 @@ def test_the_installer_declares_a_tool_and_the_suites_state_one(tmp):
 
 
 def test_no_job_reaches_the_suites_by_a_door_this_control_does_not_name(tmp):
-    """The job set is closed: the sanctioned runners, plus a named residue.
+    """The job set is closed: what the walk derives, plus what it cannot.
 
-    Membership in `_suite_jobs` is a substring test over two runner
-    basenames, so a job that reaches the suite tree by any other mechanism is
-    invisible to it — and a control that cannot see a job cannot hold it to
-    anything. Naming the doors that exist turns the enumeration into a claim
-    about the complement: a new route is red until somebody says what it is.
+    `_door_jobs` reads each step's resolved inputs and follows the tracked
+    file a step runs, so a third `scripts/ci/` runner, a shell loop over
+    `tests/*.py`, `unittest discover -s tests`, a `with:`-passed path and a
+    `.yaml` workflow are all routes it sees. What it cannot see is a route
+    whose reach lives outside this repository — a composite action, a
+    container entry point — and that bound belongs in the table beside the
+    doors it does see, not in a claim this control cannot make.
+
+    The two kinds are judged differently, which is why they are two
+    things. A `runner` door FINDS its suites, so a suite added tomorrow
+    walks through it and the control above holds it to the installer step.
+    A `names` door runs a list written in the step, so nothing new can
+    arrive through it and the only thing owed is that the list stays true
+    — which is what its reason says.
     """
     del tmp
-    sanctioned = {(source, job) for source, job, _ in _suite_jobs()}
-    residue = _door_jobs() - sanctioned
-    named = set(SUITE_DOORS)
-    assert residue == named, (
-        'doors into the suite tree that SUITE_DOORS does not name: '
-        f'{sorted(residue - named)}; named doors that are gone: '
-        f'{sorted(named - residue)}. The jobs reaching the suites are the '
-        'ones naming a sanctioned runner plus the ones SUITE_DOORS lists; '
-        'name the new door there with what it is, and judge whether it has '
-        'to install what the suites skip on')
+    named_doors = {(source, job) for source, job, _runs, mechanism
+                   in _door_jobs() if mechanism == NAMES}
+    residue = named_doors - set(SUITE_DOORS)
+    stale = set(SUITE_DOORS) - named_doors
+    assert not residue and not stale, (
+        'doors into the suite tree that reach the suites by naming them and '
+        f'SUITE_DOORS does not account for: {sorted(residue)}; entries in '
+        f'SUITE_DOORS that are no longer such a door: {sorted(stale)}. A '
+        'door that FINDS its suites needs no entry — the control above '
+        'holds it to the installer step. A door that NAMES them carries a '
+        'fixed list, so name it here with that fact, and say what the list '
+        'is, because nothing new can reach a job that does not glob.')
 
 
 def test_every_tool_the_installer_recorded_resolves_on_path(tmp):
