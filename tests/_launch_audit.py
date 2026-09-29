@@ -20,7 +20,6 @@ standard library itself says in `_stdlib_read.py`, neither of which
 binds configuration of its own.
 """
 import ast
-import sys
 
 from _argv_read import ArgvReader
 from _stdlib_read import (
@@ -51,7 +50,6 @@ def _parameters(node):
         if extra is not None:
             names.add(extra.arg)
     return names
-
 
 
 def launch_refusals(source, here, bound_sink=None):
@@ -695,4 +693,3 @@ def bound_sites(source, here):
     sink = []
     launch_refusals(source, here, bound_sink=sink)
     return sink
-
