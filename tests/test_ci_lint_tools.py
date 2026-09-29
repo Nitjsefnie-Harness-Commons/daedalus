@@ -184,7 +184,7 @@ def _command_words(tree):
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
-        if not _dotted_or_bare_name(node) in _SUBPROCESS:
+        if _dotted_or_bare_name(node) not in _SUBPROCESS:
             continue
         if not _names_subprocess(node.func):
             continue
