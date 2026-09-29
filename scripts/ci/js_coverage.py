@@ -13,7 +13,11 @@ from pathlib import Path
 from urllib.parse import unquote, unquote_to_bytes, urlsplit
 from urllib.request import url2pathname
 
-from js_lines import code_lines
+if __package__:
+    # pylint: disable-next=relative-beyond-top-level
+    from .js_lines import code_lines
+else:
+    from js_lines import code_lines
 
 
 @dataclass

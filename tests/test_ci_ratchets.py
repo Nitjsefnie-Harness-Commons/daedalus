@@ -11,10 +11,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ci_imports import (  # noqa: E402
+    package_closure, package_edges, package_selectors)
+from _ci_publisher import (  # noqa: E402
+    git as _git, publisher_commit_step as _publisher_commit_step,
+    publisher_python as _publisher_python,
+    publisher_step as _publisher_step,
+    run_publisher_case as _run_publisher_case,
+    seed_publisher_tree as _seed_publisher_tree)
 from _ghexpr import evaluate_if  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflowrun import run_step  # noqa: E402
+from _yamlsteps import complete_job_mapping  # noqa: E402
 
 sys.path[:0] = [str(ROOT), str(ROOT / 'scripts' / 'ci')]
 
@@ -77,23 +85,45 @@ def _value_error(call):
     return None
 
 
+PROMOTED_MODULES = (
+    'scripts.ci.compare_durations',
+    'scripts.ci.coverage_suites',
+    'scripts.ci.js_module_coverage',
+    'scripts.ci.line_lengths',
+    'scripts.ci.ratchet',
+    'scripts.ci.size_baseline',
+    'scripts.ci.thresholds',
+    'scripts.ci.type_error_baseline',
+    'scripts.ci.workflow_yaml',
+)
+
+
 def test_promoted_modules_import_by_package(tmp):
-    # `coverage_suites` is promoted because it selects its import on
-    # `__package__`, and no run by path -- which is the only shape CI uses --
-    # reaches the half that selects.
-    command = '; '.join((
-        'import scripts.ci.ratchet', 'import scripts.ci.size_baseline',
-        'import scripts.ci.line_lengths', 'import scripts.ci.thresholds',
-        'import scripts.ci.workflow_yaml',
-        'import scripts.ci.coverage_suites'))
+    del tmp
+    command = '; '.join(f'import {name}' for name in PROMOTED_MODULES)
     imported = subprocess.run(
         [sys.executable, '-c', command], cwd=str(ROOT), capture_output=True,
         text=True, timeout=60)
     assert imported.returncode == 0, (imported.stdout, imported.stderr)
-    assert all(__import__(name, fromlist=['*']) for name in (
-        'scripts.ci.ratchet', 'scripts.ci.size_baseline',
-        'scripts.ci.line_lengths', 'scripts.ci.thresholds',
-        'scripts.ci.workflow_yaml', 'scripts.ci.coverage_suites'))
+    assert all(__import__(name, fromlist=['*'])
+               for name in PROMOTED_MODULES)
+
+
+def test_every_package_selector_is_reachable_by_a_package_import(_tmp):
+    """A `__package__:` half nothing reaches is the half CI never runs.
+
+    Derived from the tree, so a promotion that is deleted takes this with
+    it. The requirement is REACHABILITY, not membership: a selector is
+    satisfied by being promoted itself or by being imported by something
+    that is, which is why `yamlanchor` needs no row of its own.
+    """
+    selectors = package_selectors(ROOT)
+    assert selectors, 'nothing selects on __package__; this cannot be true'
+    reached = package_closure(PROMOTED_MODULES, package_edges(ROOT))
+    orphaned = sorted(set(selectors) - reached)
+    assert not orphaned, (
+        f'these select an import on __package__ and no package import '
+        f'reaches them, so that half runs nowhere: {orphaned}')
 
 
 def test_measurement_rejects_bool_bad_numeric_and_nonfinite(_tmp):
@@ -293,117 +323,6 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
     assert bad.returncode != 0, (bad.stdout, bad.stderr)
     assert 'Coverage failure' in bad.stdout + bad.stderr
     assert 'calibration gap' not in bad.stdout + bad.stderr
-
-
-def _git(repo, *args):
-    return subprocess.run(('git', '-C', str(repo)) + args, check=True,
-                          capture_output=True, text=True,
-                          env=_util.child_coverage('scrub'))
-
-
-def _seed_publisher_tree(repo, data):
-    (repo / '.github').mkdir(parents=True)
-    (repo / 'scripts' / 'ci').mkdir(parents=True)
-    (repo / 'tests').mkdir()
-    _thresholds().write(repo / '.github' / 'ci-thresholds.json', data)
-    for path in (RATCHET_PATH, SIZE_PATH, LINES_PATH,
-                 JS_MODULE_PATH, JS_COVERAGE_PATH, JS_LINES_PATH,
-                 ROOT / 'scripts' / 'ci' / 'thresholds.py'):
-        shutil.copy2(path, repo / 'scripts' / 'ci' / path.name)
-    (repo / 'tests' / 'test_mcp_server.py').write_text(
-        'value = 1\n' * 1706, encoding='utf-8')
-    _git(repo, 'init', '-q')
-    _git(repo, 'config', 'user.email', 'tests@example.invalid')
-    _git(repo, 'config', 'user.name', 'Tests')
-    _git(repo, 'add', '.')
-    _git(repo, 'commit', '-qm', 'base')
-
-
-def _publisher_step():
-    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    job = complete_job_mapping(workflow, 'coverage')
-    return next(step for step in job['steps']
-                if step.get('name') == 'Work out the raise this run justifies')
-
-
-def _publisher_commit_step():
-    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    job = complete_job_mapping(workflow, 'coverage')
-    return next(step for step in job['steps']
-                if step.get('name') == 'Commit the raise')
-
-
-def _publisher_python(tmp, values, real_python=None):
-    """Create a command shim that stubs only coverage measurement commands."""
-    real = str(sys.executable) if real_python is None else real_python
-    shim = Path(tmp) / 'bin'
-    shim.parent.mkdir(parents=True, exist_ok=True)
-    shim.mkdir()
-    command = shim / 'python'
-    command.write_text(
-        '#!/bin/sh\n'
-        'if [ "$1" = "-m" ] && [ "$2" = "coverage" ]; then\n'
-        '  printf "%s\\n" "$PYTHON_MEASURED"\n'
-        '  exit 0\n'
-        'fi\n'
-        'if [ "$1" = "scripts/ci/js_coverage.py" ]; then\n'
-        '  printf "%s\\n" "$JAVASCRIPT_MEASURED"\n'
-        '  exit 0\n'
-        'fi\n'
-        'exec "$REAL_PYTHON" "$@"\n', encoding='utf-8')
-    command.chmod(0o755)
-    carried = dict(values)
-    carried['REAL_PYTHON'] = real
-    return shim, carried
-
-
-def _publisher_environment(tmp, values, writer_failure=False):
-    shim, values = _publisher_python(Path(tmp) / 'shim', values)
-    environment = dict(os.environ)
-    environment.update(values)
-    environment['PATH'] = f'{shim}{os.pathsep}{environment["PATH"]}'
-    output = Path(tmp) / 'github-output'
-    summary = Path(tmp) / 'github-summary'
-    output.touch()
-    summary.touch()
-    environment['GITHUB_OUTPUT'] = str(output)
-    environment['GITHUB_STEP_SUMMARY'] = str(summary)
-    if writer_failure:
-        hook = Path(tmp) / 'sitecustomize.py'
-        failure_flag = 'CI_THRESHOLDS_INJECT_REPLACE_FAILURE'
-        hook.write_text(
-            'import os\n'
-            f'if os.environ.get("{failure_flag}") == "1":\n'
-            '    def fail_replace(*args):\n'
-            '        raise OSError("injected replace failure")\n'
-            '    os.replace = fail_replace\n', encoding='utf-8')
-        environment['PYTHONPATH'] = (
-            f'{hook.parent}{os.pathsep}{environment.get("PYTHONPATH", "")}')
-        environment['CI_THRESHOLDS_INJECT_REPLACE_FAILURE'] = '1'
-    return environment, output, summary
-
-
-def _run_publisher_case(tmp, name, data, python_measured, javascript_measured,
-                        *, raw=None, writer_failure=False):
-    repo = Path(tmp) / name
-    repo.mkdir()
-    _seed_publisher_tree(repo, data)
-    threshold_path = repo / '.github' / 'ci-thresholds.json'
-    if raw is not None:
-        threshold_path.write_bytes(raw)
-        _git(repo, 'add', str(threshold_path.relative_to(repo)))
-        _git(repo, 'commit', '-qm', 'malformed base')
-    before = threshold_path.read_bytes()
-    environment, output, summary = _publisher_environment(
-        Path(tmp) / f'{name}-environment', {
-            'PYTHON_MEASURED': str(python_measured),
-            'JAVASCRIPT_MEASURED': str(javascript_measured),
-        }, writer_failure=writer_failure)
-    result = run_step(repo, _publisher_step(), environment,
-                      workflow={}, job={})
-    return repo, threshold_path, before, output, summary, result
 
 
 def test_publisher_python_carries_posix_and_windows_paths_without_embedding(
