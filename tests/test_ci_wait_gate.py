@@ -130,12 +130,14 @@ def test_an_empty_required_set_reproduces_the_previous_verdicts(tmp):
     mod = _ci_wait()
     green = [_run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]
     assert mod.verdict(green, required=frozenset(),
-                required_checks=frozenset()) == ('acceptable', [])
+                       required_checks=frozenset()) == (
+                           'acceptable', [])
     assert mod.verdict([], required=frozenset(),
-                required_checks=frozenset()) == ('waiting', [])
+                       required_checks=frozenset()) == (
+                           'waiting', [])
     red = [_run(1, 'failure', '2026-09-20T10:00:00Z', name='gate freshness')]
     state, offenders = mod.verdict(red, required=frozenset(),
-                required_checks=frozenset())
+                                   required_checks=frozenset())
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
 

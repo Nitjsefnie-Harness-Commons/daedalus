@@ -32,6 +32,7 @@ from _watcher_fixtures import ci_page  # noqa: E402
 from _watcher_fixtures import comment  # noqa: E402
 from _watcher_fixtures import idle_answers  # noqa: E402
 from _watcher_fixtures import pr_page  # noqa: E402
+from _watcher_fixtures import published  # noqa: E402
 from _watcher_fixtures import rate_limited_error  # noqa: E402
 from _watcher_fixtures import refusal_response  # noqa: E402
 from _watcher_fixtures import review  # noqa: E402
@@ -420,7 +421,8 @@ def test_a_refused_wait_pauses_and_still_answers(tmp):
     answers = dict(idle_answers())
     answers['checkSuites'] = [
         rate_limited_error(reset_at=reset_at.strftime(STAMP)),
-        runs_page([suite(1, name='tests')])]
+        runs_page([suite(1, name='tests',
+                         check_runs=[published()])])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -446,7 +448,8 @@ def test_a_wait_pauses_on_the_live_throttled_query_and_still_answers(tmp):
         reset_at=reset_at.strftime(STAMP), exit=1,
         stderr=f'gh: {THROTTLED}\n')
     answers = dict(idle_answers())
-    answers['checkSuites'] = [refusal, runs_page([suite(1, name='tests')])]
+    answers['checkSuites'] = [refusal, runs_page([
+        suite(1, name='tests', check_runs=[published()])])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -598,10 +601,11 @@ def test_a_plain_refusal_still_exits_three_at_once(tmp):
 
 def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
     answers = dict(idle_answers())
+    # The published verdict rides along, or the wait never certifies.
     answers['checkSuites'] = [runs_page([
         suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z', name='tests'),
         suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z',
-              name='tests')])]
+              name='tests', check_runs=[published()])])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -619,7 +623,7 @@ def test_a_superseded_failure_is_ignored_through_the_new_query(tmp):
     answers['checkSuites'] = [runs_page([
         suite(1, 'FAILURE', started='2026-09-20T10:00:00Z', name='tests'),
         suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z',
-              name='tests')])]
+              name='tests', check_runs=[published()])])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
