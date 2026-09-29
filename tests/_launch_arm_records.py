@@ -128,29 +128,29 @@ MARKER_NON_MEMBERS = (
      'parameter-shadows-a-module-import-is-unproved'),
     ('_launch_audit.py', 295, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
-    ('_launch_audit.py', 316, 'CONTROLLED',
+    ('_launch_audit.py', 338, 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
-    ('_launch_audit.py', 375, 'CONTROLLED',
+    ('_launch_audit.py', 397, 'CONTROLLED',
      'call-func-receiver-is-unresolved'),
-    ('_launch_audit.py', 384, 'MERGED',
-     'the head of a one-member chain; :386 ch.machinery-member is its '
+    ('_launch_audit.py', 406, 'MERGED',
+     'the head of a one-member chain; :408 ch.machinery-member is its '
      'only member and is listed'),
-    ('_launch_audit.py', 561, 'INERT',
+    ('_launch_audit.py', 587, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 580, 'CONTROLLED',
+    ('_launch_audit.py', 606, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 647, 'CONTROLLED',
+    ('_launch_audit.py', 673, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 664, 'CONTROLLED',
+    ('_launch_audit.py', 690, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     # The chain limb stays in the analyser and is recorded here rather
     # than in the enumeration for the reason above; the root predicate
     # it reads moved to `_stdlib_read.py` with the rest of the standard
     # library the analyser reads, and its clauses are named beside it.
-    ('_launch_audit.py', 499, 'CONTROLLED',
+    ('_launch_audit.py', 525, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 501, 'CONTROLLED',
+    ('_launch_audit.py', 527, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_stdlib_read.py', 56, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
@@ -192,7 +192,7 @@ MARKER_NON_MEMBERS = (
 # all ten and re-derives this set.
 NON_MEMBER_CRASH_HELD = frozenset({
     '_argv_read.py:153', '_launch_audit.py:53', '_stdlib_read.py:45',
-    '_launch_audit.py:375',
+    '_launch_audit.py:397',
 })
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
@@ -223,7 +223,7 @@ ARM_NOTES = {
 # asked about the RECEIVER of the bounded call, `origin` about the
 # top-level base of the callee of the value that receiver is bound
 # to. So the `placed` bound `pf.in-bound` cites cannot decide it --
-# :400 places a call whose receiver is a name in `bound` and never
+# :422 places a call whose receiver is a name in `bound` and never
 # looks at what that name holds. The only name satisfying both
 # `origin in safe_names` and `origin in bound` here is `subprocess`:
 # the plain import puts it in `safe_names` (:207-209) and rebinding
