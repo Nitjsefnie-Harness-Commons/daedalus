@@ -328,7 +328,7 @@ def test_ci_state_answers_both_questions_from_one_walk(tmp):
     with fake.activate():
         runs, checks = client.ci_state('o', 'r', SHA)
     assert len(fake.calls()) == 1, [call['request'][:60]
-                                     for call in fake.calls()]
+                                    for call in fake.calls()]
     assert [run['id'] for run in runs] == [1], runs
     # Normalised to the keys the run dicts already use, so one offender
     # loop prints either, and lowercased, because the API spells them in
@@ -408,7 +408,8 @@ def _page(suites, has_next=False, cursor=None):
 def _head_run(name, conclusion='success'):
     """One workflow run, as `verdict` reads it."""
     return {'id': 1, 'name': name, 'status': 'completed',
-            'conclusion': conclusion, 'html_url': 'https://github.com/o/r/actions/runs/1'}
+            'conclusion': conclusion,
+            'html_url': 'https://github.com/o/r/actions/runs/1'}
 
 
 def _client():

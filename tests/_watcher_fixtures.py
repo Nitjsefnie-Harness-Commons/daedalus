@@ -79,6 +79,22 @@ def check(rid, name, conclusion='SUCCESS'):
             'url': f'https://github.com/o/r/runs/{rid}'}
 
 
+def published(rid=7, name='gate freshness',
+              conclusion='SUCCESS', status='COMPLETED'):
+    """One check-run node, as the check suites now report it.
+
+    Distinct from `check` above, which is a `statusCheckRollup`
+    context: that is the rollup the CI watcher reads, and this is the
+    suite's own `checkRuns` the wait reads. A verdict a publisher
+    POSTed of its own arrives in a suite of its own, so `published`
+    is the one that has to be found among runs that say nothing.
+    """
+    return {'databaseId': rid, 'name': name, 'status': status,
+            'conclusion': conclusion,
+            'completedAt': '2026-09-20T10:10:00Z',
+            'detailsUrl': f'https://github.com/o/r/runs/{rid}'}
+
+
 def runs_page(suites=()):
     """One page of the single query the wait and the hold now make."""
     return {'data': {'repository': {'object': {'checkSuites': {
@@ -275,6 +291,11 @@ def idle_answers():
     return {
         'reviews(first: 100': pr_page(),
         'statusCheckRollup': ci_page([check(1, 'pylint')]),
-        'checkSuites': runs_page([suite(1, name='tests')]),
+        # The published verdict comes along: since issue 1360 `ci_wait`
+        # reads it, so a fixture without one is a head whose publisher
+        # wrote nothing, and these controls measure the cost of a wait
+        # that CERTIFIES rather than one that never ends.
+        'checkSuites': runs_page([suite(1, name='tests', check_runs=[
+            published()])]),
         **base_answers(),
     }
