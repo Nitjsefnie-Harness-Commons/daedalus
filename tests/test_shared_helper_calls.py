@@ -33,6 +33,34 @@ _OWNED_CALL = ('def test_owned(tmp):\n'
 _CHECKOUT_CALL = ('def test_checkout(tmp):\n'
                   '    del tmp\n'
                   '    _copy_here(ROOT)\n')
+_PWNED = "(ROOT / '.pwned').write_text('x')"
+_HELPER_CALL = 'from _shared import _helper\n'
+_CALLS_HELPER = ('def test_control(tmp):\n'
+                 '    del tmp\n'
+                 '    _helper(tmp)\n')
+# The five shapes the local contract judges and an imported helper must
+# judge too. Each body is written twice: once into `tests/_shared.py`, and
+# once verbatim into the control, so the two verdicts are the same
+# question asked of the same text.
+_REGIONS = (
+    ('a nested def', 'def _helper(tmp):\n'
+     '    def inner():\n'
+     "        (ROOT / '.pwned').write_text('x')\n"
+     '    inner()\n'),
+    ('a signature default',
+     "def _helper(tmp, out=(ROOT / '.pwned').write_text('x')):\n"
+     '    return out\n'),
+    ('a class body', "class _C:\n"
+     "    (ROOT / '.pwned').write_text('class body')\n\n\n"
+     'def _helper(tmp):\n    return _C\n'),
+    ('a lambda default',
+     "def _helper(tmp, f=lambda: (ROOT / '.pwned').write_text('x')):\n"
+     '    return f\n'),
+    ('a function reached only as a callback',
+     'def _evil(item):\n'
+     "    (ROOT / '.pwned').write_text(item)\n\n\n"
+     'def _helper(tmp):\n    return sorted(tmp, key=_evil)\n'),
+)
 
 
 def _plant(root, helper, control, name='_shared.py'):
@@ -65,6 +93,71 @@ def test_an_imported_helper_that_writes_in_the_repository_is_refused(tmp):
     checkout = _plant(root, _COPY_HERE, _IMPORT + _CHECKOUT_CALL)
     assert control_write_violations(checkout, root) == [
         'tests/_shared.py:3: write_text target path is not control-owned']
+
+
+def test_a_nested_def_inside_a_helper_is_judged(tmp):
+    """(l) the local contract judges a nested def; so must the imported one."""
+    root = Path(tmp)
+    body = _REGIONS[0][1]
+    imported = _plant(root, body, _HELPER_CALL + _CALLS_HELPER)
+    assert control_write_violations(imported, root) == [
+        'tests/_shared.py:3: write_text target path is not control-owned']
+    local = root / 'test_local.py'
+    local.write_text(_PRELUDE + body + _CALLS_HELPER, encoding='utf-8')
+    assert control_write_violations(local, root) == [
+        'test_local.py:5: write_text target path is not control-owned']
+
+
+def test_a_signature_default_inside_a_helper_is_judged(tmp):
+    """(l) a default is evaluated in the module that writes the def."""
+    root = Path(tmp)
+    body = _REGIONS[1][1]
+    imported = _plant(root, body, _HELPER_CALL + _CALLS_HELPER)
+    assert control_write_violations(imported, root) == [
+        'tests/_shared.py:1: write_text target path is not control-owned']
+    local = root / 'test_local.py'
+    local.write_text(_PRELUDE + body + _CALLS_HELPER, encoding='utf-8')
+    assert control_write_violations(local, root) == [
+        'test_local.py:3: write_text target path is not control-owned']
+
+
+def test_a_class_body_inside_a_helper_is_judged(tmp):
+    """(l) a class body the imported call reaches is its own scope."""
+    root = Path(tmp)
+    body = _REGIONS[2][1]
+    imported = _plant(root, body, _HELPER_CALL + _CALLS_HELPER)
+    assert control_write_violations(imported, root) == [
+        'tests/_shared.py:2: write_text target path is not control-owned']
+    local = root / 'test_local.py'
+    local.write_text(_PRELUDE + body + _CALLS_HELPER, encoding='utf-8')
+    assert control_write_violations(local, root) == [
+        'test_local.py:4: write_text target path is not control-owned']
+
+
+def test_a_lambda_default_inside_a_helper_is_judged(tmp):
+    """(l) a lambda in a signature is a scope like any nested one."""
+    root = Path(tmp)
+    body = _REGIONS[3][1]
+    imported = _plant(root, body, _HELPER_CALL + _CALLS_HELPER)
+    assert control_write_violations(imported, root) == [
+        'tests/_shared.py:1: write_text target path is not control-owned']
+    local = root / 'test_local.py'
+    local.write_text(_PRELUDE + body + _CALLS_HELPER, encoding='utf-8')
+    assert control_write_violations(local, root) == [
+        'test_local.py:3: write_text target path is not control-owned']
+
+
+def test_a_callback_inside_a_helper_is_judged(tmp):
+    """(l) reached as a value, not as a callee, it is still reached."""
+    root = Path(tmp)
+    body = _REGIONS[4][1]
+    imported = _plant(root, body, _HELPER_CALL + _CALLS_HELPER)
+    assert control_write_violations(imported, root) == [
+        'tests/_shared.py:2: write_text target path is not control-owned']
+    local = root / 'test_local.py'
+    local.write_text(_PRELUDE + body + _CALLS_HELPER, encoding='utf-8')
+    assert control_write_violations(local, root) == [
+        'test_local.py:4: write_text target path is not control-owned']
 
 
 def test_an_import_the_guard_cannot_locate_stays_unresolved(tmp):
