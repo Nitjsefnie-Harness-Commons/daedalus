@@ -7,8 +7,6 @@ same harness measures the base commit's scripts, extracted with `git show`,
 which is what makes the before/after comparison one method rather than two.
 """
 import json
-import os
-import signal
 import subprocess
 import sys
 import time
@@ -45,10 +43,6 @@ from _watcher_fixtures import THROTTLED  # noqa: E402
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 BASE = '3cc3605f38f1b0c0d0e47d5252ad17154bad72ec'
-
-
-def _announces_pid(line):
-    return 'watcher pid' in line
 
 
 def _reports_rate_limit(line):
@@ -106,32 +100,6 @@ def _await_calls(fake, count, child):
 
 def _hourly(per_poll, tick):
     return per_poll * (3600 / tick)
-
-
-def _pid_alive(pid):
-    """Whether a pid still names a process, on any platform CI runs."""
-    if sys.platform.startswith('win'):
-        import ctypes
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-        if not handle:
-            return False
-        ctypes.windll.kernel32.CloseHandle(handle)
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    state = Path(f'/proc/{pid}/stat')
-    if not state.exists():
-        return True          # a POSIX host with no procfs to consult
-    try:
-        text = state.read_text(encoding='utf-8', errors='replace')
-    except OSError:
-        return False         # it exited between the two checks
-    # An orphan nobody has reaped yet is a corpse, not a survivor.
-    return text.rsplit(')', 1)[-1].split()[0] != 'Z'
 
 
 def test_an_idle_comment_watch_costs_one_query_per_tick(tmp):
@@ -316,30 +284,6 @@ def test_the_base_figure_is_read_off_the_base_script(tmp):
           f'{figures[True]} with every surface read twice')
     assert figures[False], figures
     assert figures[True] == figures[False] + BASE_SURFACES, figures
-
-
-def test_the_children_die_with_their_parent(tmp):
-    """The liveness reading below is a state, not a sample: the gate holds
-    each child inside a call. The control for the hold is in test_fake_gh."""
-    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
-    parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
-                     PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
-                     '--debounce', '1', '--max-hold', '5'], fake.env())
-    try:
-        waits.await_lines(parent.err, _announces_pid, 2,
-                          'both children to announce their pid')
-        pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err.lines
-                if _announces_pid(line)]
-        _await_calls(fake, 2, parent)
-        assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
-        parent.proc.kill()
-        parent.proc.wait(timeout=60)
-        waits.await_gone(pids, parent, f'children {pids} to die with the '
-                         f'parent', _pid_alive)
-        assert not any(_pid_alive(pid) for pid in pids), pids
-    finally:
-        fake.open_gate()
-        parent.stop()
 
 
 def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
@@ -562,33 +506,6 @@ def test_the_once_trial_counts_the_checks_that_have_not_concluded(tmp):
         errors='replace', timeout=60)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     assert 'ok 2 check run(s), 1 concluded' in done.stderr, done.stderr
-
-
-def test_a_graceful_exit_leaves_no_children_behind(tmp):
-    """The teardown path, which a hard kill never reaches."""
-    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
-    parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
-                     PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
-                     '--debounce', '1', '--max-hold', '5'], fake.env())
-    try:
-        waits.await_lines(parent.err, _announces_pid, 2,
-                          'both children to announce their pid')
-        pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err.lines
-                if _announces_pid(line)]
-        _await_calls(fake, 2, parent)
-        assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
-        if sys.platform.startswith('win'):
-            parent.proc.send_signal(
-                getattr(signal, 'CTRL_BREAK_EVENT'))
-        else:
-            parent.proc.send_signal(signal.SIGINT)
-        parent.proc.wait(timeout=60)
-        waits.await_gone(pids, parent, f'children {pids} to leave with a '
-                         f'graceful exit', _pid_alive)
-        assert not any(_pid_alive(pid) for pid in pids), pids
-    finally:
-        fake.open_gate()
-        parent.stop()
 
 
 def test_a_plain_refusal_still_exits_three_at_once(tmp):

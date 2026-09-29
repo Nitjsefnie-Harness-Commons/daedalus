@@ -132,32 +132,44 @@ def test_the_fake_refuses_a_field_of_the_wrong_type_by_name(tmp):
 def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
     """A call answered at once is a call a reader can only sample.
 
-    `test_watcher_budget.py` decides whether a watcher is still running by
+    The watcher lifecycle cases decide whether a watcher is still running by
     looking, and looking is a sample: the process can stop in the gap and
     nothing says which side of it the look landed on. That is what made
     `test_the_children_die_with_their_parent` report a red about two
     watchers that were only following their aggregator out. Holding the
-    call turns the same question into a state - the call is logged and
-    unanswered, so the watcher is inside it and cannot be gone.
+    call closes the window in which a watcher exits of its OWN accord
+    between the log entry and the reading.
+
+    What it does not do is make the watcher unkillable, and the difference
+    matters: `gh_client._exit_at_eof` calls `os._exit(0)` from a daemon
+    thread, and `os._exit` ends the process from any thread - including
+    the one blocked in `subprocess.run` on the call being held here. So an
+    aggregator that dies still takes both watchers out from under the
+    reading, which is the signature the original CI cell carried. The
+    reading is therefore anchored on the aggregator by the cases
+    themselves (`tests/test_watcher_lifecycle.py`), not by this hold, and
+    a red there names the aggregator's exit rather than two dead pids.
 
     The log entry is written BEFORE the hold, which is the whole point: a
     reader counting entries can see a call entered and still open, and that
     is a fact about the process rather than about when anybody looked. The
-    hold has no bound, because a bound would make it a guess, and a guess
-    that expires is the sample it exists to replace - so the bound is the
-    one thing here that has to be asserted, and it is, by the pair of
-    release-record readings below.
+    hold has no bound in it, because a bound would make it a guess, and a
+    guess that expires is the sample it exists to replace - so the bound is
+    the one thing here that has to be asserted, and it is, by the pair of
+    readings below.
     """
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {'data': None}}, gate=True)
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2)': {'data': None}}, gate=True)
     answer = subprocess.Popen(
         [str(fake.launcher), 'api', '-i', 'graphql', '--input', '-'],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, encoding='utf-8',
         errors='replace', env=fake.env())
+    request_in = answer.stdin
+    assert request_in is not None, 'the fake is launched with a stdin pipe'
     try:
-        answer.stdin.write('{"query":"items(first: 2)"}')
-        answer.stdin.close()
-        entered = _await_entered(fake, 1)
+        request_in.write('{"query":"items(first: 2)"}')
+        request_in.close()
+        entered = _await_entered(fake, answer, 1)
         assert entered, fake.calls()
         # The wait is observable as UNBALANCED: nothing released while the
         # gate is shut. This half is what catches a hold that was given a
@@ -167,6 +179,7 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
         # which leaves this one true for the wrong reason. Neither half
         # alone is a gate; the pair is.
         assert fake.releases() == [], fake.releases()
+        assert len(fake.entered()) == 1, fake.entered()
         fake.open_gate()
         out, err = answer.communicate(timeout=60)
         assert answer.returncode == 0, err
@@ -175,18 +188,22 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
         answer.kill()
         answer.wait(timeout=60)
     released = fake.releases()
-    assert len(released) == 1, released
+    assert len(released) == 1, f'expected one recorded release: {released}'
     assert released[0]['gate'] == str(fake.gate_path), released
 
 
-def _await_entered(fake, count):
-    """The call log, once it holds `count` entries, without a bound.
+def _await_entered(fake, answer, count):
+    """The call log, once it holds `count` entries.
 
-    A wait with no live process to give up on is the trade the watcher
-    waits take deliberately; this one is over a record the answer cannot
-    reach before the gate opens, so an entry appearing IS an entered call.
+    Guarded on the process that would write them, exactly as
+    `waits.await_calls` is: a caller whose fake never logs would otherwise
+    spin for the whole job budget and name nothing, and this file's runner
+    imposes no per-test timeout to stop it.
     """
     while len(fake.calls()) < count:
+        assert answer.poll() is None, (
+            f'the fake never logged a call, and it exited '
+            f'{answer.returncode}:\n{answer.stderr.read()}')
         time.sleep(0.02)
     return fake.calls()
 
