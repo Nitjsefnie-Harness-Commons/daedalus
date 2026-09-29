@@ -348,6 +348,7 @@
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
+!/tests/_jsroute_controls.py
 !/tests/_jsroute_factory_cases.py
 !/tests/_jsroute_getter_arg_cases.py
 !/tests/_jsroute_getter_cases.py

@@ -12,6 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from test_tab_routing_js import _runtime_and_guard  # noqa: E402
+from _jsroute_controls import (  # noqa: E402
+    _family_observations, _focus_program)
 
 
 _SEND = "send('focus-tab', { tab: chromeTab });\n"
@@ -137,19 +139,6 @@ _ORDINARY = [
 ]
 
 
-def _program(body, promotes):
-    seed = 'ordinary' if promotes else 'extCmd'
-    return ("let send = " + seed + ";\n"
-            + body.replace('%S', 'extCmd' if promotes else 'ordinary')
-            + _SEND)
-
-
-def _observed(tmp, name, promotes):
-    path = Path(tmp) / name
-    return [(label, *_runtime_and_guard(_program(body, promotes), path))
-            for label, body in _FAMILIES]
-
-
 # The family still silent while it routes: a sender taken out of a
 # pattern's default reaches the body through a parameter no mention
 # names.
@@ -206,7 +195,8 @@ def test_recorded_spans_alone_account_for_a_mention(tmp):
         ('setter-array-destructure', True, True),
         ('setter-for-of-target', True, True),
     ]
-    observed = _observed(tmp, 'closure-promote.js', True)
+    observed = _family_observations(
+        tmp, 'closure-promote.js', True, _FAMILIES)
     silent = [row for row in observed
               if row[1] and not row[2] and row[0] not in _KNOWN_SILENT]
     assert not silent, silent
@@ -263,7 +253,8 @@ def test_demoting_closure_shapes_keep_their_verdicts(tmp):
         ('setter-array-destructure', False, True),
         ('setter-for-of-target', False, True),
     ]
-    observed = _observed(tmp, 'closure-demote.js', False)
+    observed = _family_observations(
+        tmp, 'closure-demote.js', False, _FAMILIES)
     assert not [row for row in observed if row[1] and not row[2]], observed
     assert observed == expected, observed
 
