@@ -56,6 +56,22 @@ SUITE_DOORS = {
     ('timed-timings.yml', 'refresh'):
         'five suites are run by path rather than through a runner',
 }
+# Tools the suites skip on that no job installs, named here with a reason
+# each rather than derived. The derivation cannot supply this list: it read
+# the tree's own `present` set as covering a tool, and `present` is an
+# assertion the tree may never reach — the jq assert in
+# `tests/_coverage_comment_publication.py` sits behind a stub-environment
+# condition that is false on every ordinary run, which is how a suite
+# skipping on a binary nothing installs read green. Each entry is a claim
+# about the runner image, written down so a human can check it and change
+# it, and no derivation can be asked to confirm it.
+SHIPPED_BY_THE_IMAGE = {
+    'git': 'every job here checks out through actions/checkout, which '
+           'runs git, and the hosted images ship it',
+    'node': 'the hosted images ship it and no workflow step installs it, '
+            'so a suite that skips on node skips on every leg; that is a '
+            'property of the image, and it is the reason this entry exists',
+}
 
 
 def _suite_jobs():
@@ -169,6 +185,22 @@ REQUIRED_ON = {
     'a command run without asking':
         'subprocess.run([TOOL, "--version"], check=True)',
 }
+# A tool the tree both insists on and tolerates the absence of. Nothing in
+# the tree is written this way today; two independent plants were, and both
+# read green, which is what these cases are here to refuse.
+BOTH_ON = {
+    'asserted elsewhere, skipped here':
+        'def required():\n    assert shutil.which(TOOL), "the parser is '
+        'the fixture"\n\n\n'
+        'def optional():\n    found = shutil.which(TOOL)\n'
+        '    if not found:\n        _util.skip("no parser")\n',
+    'run unguarded, skipped when it cannot start':
+        'def unguarded():\n    subprocess.run([TOOL, "--version"], '
+        'check=True)\n\n\n'
+        'def optional():\n    try:\n'
+        '        subprocess.run([TOOL, "--format", "json"], check=True)\n'
+        '    except FileNotFoundError:\n        _util.skip("no parser")\n',
+}
 
 
 def test_an_asserted_tool_is_a_requirement_and_not_a_skip(tmp):
@@ -188,8 +220,43 @@ def test_an_asserted_tool_is_a_requirement_and_not_a_skip(tmp):
             f'skipped={sorted(skipped)}, present={sorted(present)}')
 
 
-def _unjournalled():
-    """Skip-guarded tools that no suite treats as unconditionally present.
+def test_a_tool_the_tree_also_asserts_is_still_required(tmp):
+    """A skip is a skip, whatever another function says about the binary.
+
+    The required set was once `skipped - present`, on the argument that a
+    tool in both is covered by a control that fails rather than skips. That
+    argument is one the derivation cannot check — it cannot tell an assert
+    the tree always reaches from one behind a condition that is false on
+    every ordinary run — and two reviews drove a false green through it: a
+    `which('jq')` + skip arm grew the skip set, jq was in the present set
+    because of the assert behind `needs_jq_stub`, and the control stayed
+    green with no job installing jq. The second case is the sharper one,
+    because the old derivation read the FileNotFoundError skip as a tool
+    the tree had DECIDED may not be absent: it inverted the site.
+    """
+    del tmp
+    for label, body in BOTH_ON.items():
+        source = [_PREAMBLE + body + '\n']
+        skipped, present = _derive_tool_roles(source)
+        assert 'gojq' in _unjournalled(source), (
+            f'the {label} shape leaves gojq out of the required set: '
+            f'skipped={sorted(skipped)}, present={sorted(present)}')
+
+
+def _unjournalled(sources=None):
+    """The tools a suite may run without, minus what the runner image brings.
+
+    The property is *a tool the suites can skip on*, so the required set is
+    the skip set itself. The earlier narrowing subtracted the tools the tree
+    treats as present, on the argument that a tool in both is already
+    covered by a control which fails rather than skips — and that argument
+    is false of the code as written, because the derivation could not tell
+    an assert the tree always reaches from one it never does. Two reviews
+    drove a false green through it: a suite skipping on `jq` grew the skip
+    set, `jq` was in the present set because of an assert behind a stub
+    environment that is off on every ordinary run, and the control stayed
+    green with no job installing `jq`. So the subtraction is gone, and
+    what genuinely needs no install is named below with a reason per entry.
 
     The `requires=` channel on `_util.runner` is the other machine-readable
     one, and it is not read here: its only value in the tree is the prose
@@ -197,8 +264,9 @@ def _unjournalled():
     that string would be asserting something no job can satisfy and no plant
     could falsify. A tool named in prose is a requirement, not a binary.
     """
-    skipped, present = _tool_roles()
-    return skipped - present
+    skipped, _present = (_tool_roles() if sources is None
+                         else _derive_tool_roles(sources))
+    return skipped - set(SHIPPED_BY_THE_IMAGE)
 
 
 def _require_resolvable(tools):
@@ -235,18 +303,33 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
     declared = ', '.join(sorted(_declared_tools()))
     unjournalled = sorted(_unjournalled() - _declared_tools())
     assert not unjournalled, (
-        f'the suites skip on {", ".join(unjournalled)} and nothing treats '
-        'them as present, so a suite-running job that has not installed them '
-        'skips in silence on every leg; scripts/ci/install_lint_tools.py '
-        f'declares {declared}, and the next binary a suite skips on has to '
-        'be added there')
+        f'the suites under tests/ skip on {", ".join(unjournalled)}, and '
+        'no job installs them, so a suite-running job on a runner without '
+        'them skips in silence on every leg; '
+        f'scripts/ci/install_lint_tools.py declares {declared}, and the '
+        'next binary a suite skips on has to be added there, or listed in '
+        'SHIPPED_BY_THE_IMAGE with the reason no job has to install it')
     for source, job, runs in found:
         assert any(LINT_INSTALLER in run for run in runs), (
             f'the {job} job in {source} runs a suite runner, which discovers '
-            'every suite by glob, and the suites it discovers skip on '
-            f'{declared} when they are absent; the job never runs '
+            f'every suite by glob; the suites it discovers skip on '
+            f'{_unjournalled_sentence()}, and the job never runs '
             f'{LINT_INSTALLER!r}, so on a runner without them those suites '
             'skip instead of running and the job reports green')
+
+
+def _unjournalled_sentence():
+    """What the suites actually skip on, for a message that must be true.
+
+    The message this replaces named the installer's declaration and called
+    it the derived set. On this tree the two differ: the derived set is
+    empty until 1307's suites land, so the control was asserting in its own
+    output that the suites it discovers skip on actionlint and shellcheck,
+    which no suite here does.
+    """
+    unjournalled = sorted(_unjournalled() - _declared_tools())
+    return (', '.join(unjournalled) if unjournalled
+            else 'no tool this control can currently derive')
 
 
 def test_the_installer_declares_a_tool_and_the_suites_state_one(tmp):
@@ -261,9 +344,11 @@ def test_the_installer_declares_a_tool_and_the_suites_state_one(tmp):
         f'{LINT_INSTALLER!r} declares no tools, so it installs nothing and '
         'every job that runs it gains a step and no tool')
     assert present, (
-        'no suite treats a tool as unconditionally present either, so the '
-        'half that decides a tool needs no install cannot have anything to '
-        'exclude, and every tool would be demanded of every job')
+        'no suite treats a tool as unconditionally required either, so the '
+        'second half of the derivation is reading an empty set: the two '
+        'channels together are what tells a binary a job must install from '
+        'one the suite fails loudly without, and one of them going empty '
+        'means the recogniser that fills it has stopped recognising')
 
 
 def test_no_job_reaches_the_suites_by_a_door_this_control_does_not_name(tmp):
