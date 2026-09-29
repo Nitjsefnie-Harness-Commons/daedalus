@@ -50,7 +50,8 @@ from _lint_tool_roles import (  # noqa: E402
     BOTH_ON, GUARDED_ON, REQUIRED_ON, _PREAMBLE, _derive_tool_roles,
     _tool_roles)
 from _suite_jobs import (  # noqa: E402
-    NAMES, RUNNER, _actions_before, _declarations_before, _door_jobs,
+    NAMES, RUNNER, SCRIPT_PATH, _actions_before, _declarations_before,
+    _INERT_SHAPES, _PATH_EXTENSIONS, _SCRIPT_SHAPES, _door_jobs,
     _executable_shape, _suite_step, _unclassifiable_steps)
 from _wfgraph import _tests_yml  # noqa: E402
 
@@ -263,8 +264,7 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
         assert not missing, (
             f'the {job} job in {source} reaches the suite tree, and its '
             f'first step that does is step {reach[0] + 1}, before which it '
-            f'uses {sorted(before) or ["no action at all"]}'
-            f'{", and skips the gated " + str(gated) if gated else ""}. '
+            f'{_declared_above(before, gated)}. '
             f'The suites that tree holds skip on '
             f'{", ".join(sorted(missing))}, which the shared installer does '
             f'not install, so add the step that declares it '
@@ -274,6 +274,27 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
             'as the boundary — a step naming a runner counts even where it '
             'only asks one for its options — and the suites that follow '
             'would run on whatever the job happened to have.')
+
+
+def _declared_above(before, gated):
+    """What a job declares above the boundary, phrased so it is true of it.
+
+    "no action at all" was a fallback for an empty `before`, and it was
+    false of the one job in this tree that reaches it: `timed` checks its
+    two trees out behind an `if:`, so every action it uses before the
+    boundary is a gated one. The message then said the job used no action
+    at all and named the gated actions in the next clause, so a reader had
+    to read past the assertion to learn the opposite of what it claimed.
+    """
+    if before:
+        named = f'uses {sorted(before)}'
+    elif gated:
+        named = 'uses no ungated action'
+    else:
+        named = 'uses no action at all'
+    if gated:
+        named += f' and skips the gated {gated}'
+    return named
 
 
 def test_no_exempted_tool_has_a_setup_action_somewhere_in_the_tree(tmp):
@@ -316,6 +337,67 @@ def test_no_exempted_tool_has_a_setup_action_somewhere_in_the_tree(tmp):
         'legal.')
 
 
+def test_the_exemption_predicate_splits_a_name_into_the_words_it_sets_up(
+        tmp):
+    """The word-split is the predicate, and this is the only pin on it.
+
+    `_declared_tool_actions` maps an action to the tools it declares by
+    splitting the last segment of its name into words, because that is
+    where a setup action says what it sets up: `actions/setup-node`
+    declares `node`. Every action in this tree except that one is a single
+    word in its last segment, so it is the only input on which the
+    word-split and the whole-segment reading disagree — and it is the
+    action this branch's central claim turns on. Take the segment as one
+    name instead, put `node` back in `SHIPPED_BY_THE_IMAGE`, empty
+    `DECLARED_BY` and delete the setup steps the suite jobs carry, and
+    every other control in this file passes over a tree whose workflows
+    still use `actions/setup-node` and whose declarations carry no
+    `node` at all.
+
+    So what is pinned here is the disagreement, written as fixed names
+    rather than as a second run of the same regex over the same string:
+    each multi-word action in the tree is credited to the WORDS its last
+    segment carries, the segment itself is credited to nothing, and no
+    word that appears only in an action's owner or namespace is a tool at
+    all. Those are the three readings a simplification of that one line
+    reaches for — the segment, the whole name, and a special case for the
+    action this branch happens to need — and every one of them is a name
+    the derivation has to produce on its own.
+    """
+    del tmp
+    declared = _declared_tool_actions()
+    for action, words in (('actions/setup-node', ('setup', 'node')),
+                          ('actions/setup-python', ('setup', 'python')),
+                          ('actions/attest-build-provenance',
+                           ('attest', 'build', 'provenance'))):
+        credited = sorted(word for word, found in declared.items()
+                          if action in {name for name, _w in found})
+        uncredited = sorted(set(words) - set(credited))
+        assert not uncredited, (
+            f'{action} declares none of {uncredited}, so the derivation is '
+            'not splitting an action name into the words that name the tools '
+            f'it sets up: the words it credits that action are {credited}. '
+            'A setup action is a declaration of the tool in its name, and '
+            'this is the only assertion in the tree that says which part of '
+            'the name carries it — read the segment as one name and `node` '
+            'leaves the derived set, which is the whole exemption this '
+            'control above turns on.')
+    assert 'setup-node' not in declared, (
+        'the derivation credits an action with its last segment spelled as '
+        'one name, so `setup-node` is a tool the tree declares and `node` '
+        'is not. A hyphen in a setup action joins the words of what it sets '
+        'up; it does not rename the tool, and a segment-spelled key is a '
+        f'key no suite skips on: {sorted(declared)}.')
+    owner_words = sorted(word for word in ('actions', 'github')
+                         if word in declared)
+    assert not owner_words, (
+        f'the derivation credits the owner and namespace segments of an '
+        f'action name with tools: {owner_words}. A tool is a binary a suite '
+        'skips on, and an action names one in its LAST segment; reading the '
+        'whole name makes an exemption for a tool nobody installs illegal '
+        f'on the evidence of a word no step declares: {sorted(declared)}.')
+
+
 def test_no_job_reaches_the_suites_through_a_file_the_walk_cannot_read(tmp):
     """The walk's own limit, named rather than assumed.
 
@@ -333,7 +415,11 @@ def test_no_job_reaches_the_suites_through_a_file_the_walk_cannot_read(tmp):
 
     The message carries the whole unclassifiable set, so the data-file
     entries that are legitimately here are visible in every refusal rather
-    than only in this control's source.
+    than only in this control's source, and it names the universe it
+    speaks for: `_PATH_EXTENSIONS`, the extensions the walk's own path
+    pattern resolves. A tracked file in any other language is a step the
+    walk never resolves, so this refusal is not the answer for it and says
+    so rather than implying the set is every file an interpreter can run.
     """
     del tmp
     residue = _unclassifiable_steps()
@@ -345,12 +431,58 @@ def test_no_job_reaches_the_suites_through_a_file_the_walk_cannot_read(tmp):
     assert not executable, (
         'steps running a tracked file the door walk cannot classify, so the '
         f'job reaches the suite tree by nothing this walk can see: '
-        f'{executable}. The walk reads Python, so a wrapper in any other '
-        'language is a step that reaches nothing here and a job that leaves '
-        f'the door set in silence. Every unclassifiable step: {named}. '
-        'Give the suites their own entry in scripts/ci/, or point the step '
-        'at the runner directly — routing a suite run through a script is '
-        'what this refusal is about.')
+        f'{executable}. The walk reads Python, so a step running one of '
+        'these reaches nothing here and a job that reaches the suites that '
+        f'way leaves the door set in silence. Every unclassifiable step: '
+        f'{named}. Give the suites their own entry in scripts/ci/, or point '
+        'the step at the runner directly — routing a suite run through a '
+        'script is what this refusal is about. What it cannot answer for '
+        'is a tracked file the walk never resolves: the universe is '
+        f'_PATH_EXTENSIONS ({", ".join(_PATH_EXTENSIONS)}), and a wrapper '
+        'in any other language names nothing this walk can see.')
+
+
+def test_every_extension_the_walk_resolves_is_classified_exactly_once(tmp):
+    """The residue's universe is the path pattern's, and stays that way.
+
+    `_unclassifiable_steps` resolves a step's named file through
+    `SCRIPT_PATH` and then has to say whether that file is one an
+    interpreter runs. The two lists are the same fact read twice — which
+    extensions the walk resolves, and which of them a step runs — so they
+    are held to each other here, with the readable third (`.py`, the one
+    the walk parses) between them. An extension added to the pattern
+    without being classified would leave the residue control silent about
+    a file it can now see, which is the shape that reached the walk with
+    `.ps1`: a real authoring choice on the `windows-latest` leg that no
+    control in this file could answer for.
+    """
+    del tmp
+    resolved = {f'.{extension}' for extension in _PATH_EXTENSIONS}
+    unresolvable = sorted(extension for extension in resolved
+                          if not SCRIPT_PATH.search(f'ci/tool{extension}'))
+    assert not unresolvable, (
+        f'_PATH_EXTENSIONS names {unresolvable} and the path pattern does '
+        'not resolve it, so the two disagree about what this walk can see '
+        'and a control reading one of them is reading a set the other does '
+        f'not have: {sorted(resolved)}')
+    classes = ({'.py'}, set(_SCRIPT_SHAPES), set(_INERT_SHAPES))
+    claims = {shape: sum(shape in group for group in classes)
+              for shape in resolved}
+    twice = sorted(shape for shape, count in claims.items() if count > 1)
+    assert not twice, (
+        f'an extension is claimed by more than one class: {twice}. The '
+        'residue control reads a file as either one a step runs or one a '
+        'step reads, and a file both of those is a shape whose verdict no '
+        'single reading of it can be trusted for')
+    unclassified = sorted(shape for shape, count in claims.items()
+                          if not count)
+    assert not unclassified, (
+        f'the walk resolves {unclassified} and nothing says what a step '
+        f'naming one of those files is: {sorted(resolved)} is classified '
+        f'as run by an interpreter ({sorted(_SCRIPT_SHAPES)}), read as a '
+        f'manifest ({sorted(_INERT_SHAPES)}), or read as Python (.py), and '
+        'an extension outside all three is a step the residue control sees '
+        'and cannot judge.')
 
 
 def test_every_skipped_tool_is_answered_by_exactly_one_mechanism(tmp):
