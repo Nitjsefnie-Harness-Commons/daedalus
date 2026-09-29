@@ -193,8 +193,11 @@ def _taskkill(process):
     return f'taskkill failed with exit code {result.returncode}'
 
 
-def launch_suite(name, argv, *, cwd, output_path, env=None, timeout):
+def launch_suite(argv, *, cwd, output_path, env=None, timeout):
     """Start one suite, bound it, and end its whole tree if it overruns.
+
+    The suite is not named here: the record is the caller's, so a caller
+    cannot name it twice and get the two out of step.
 
     Returns `(returncode, cleanup)`. `cleanup` is empty exactly when the
     suite finished inside the bound, so a caller can tell a wedge from a
