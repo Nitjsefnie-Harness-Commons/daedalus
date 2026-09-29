@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Browser-free controls for how the CDP call site classifies its expiry.
+"""Browser-free controls for which CDP failure becomes a named type.
 
-The fixture distinguishes three outcomes a `cdp_call` can have — a response
-that arrived, a child that answered the deadline with its exit code, and a
-child that stopped answering altogether — and each is a different thing for
-a reader at 3am on `windows-latest`. These controls pin all three, and they
-are here rather than in `tests/test_real_browser_harness.py` because that
-file sits at its own size ceiling and this cluster was a quarter of it.
+A reader at 3am on `windows-latest` needs to know which of a call site's
+failures the site classifies and which it must leave alone: the child's own
+deadline and the outer one that bounds it are the same failure reached two
+ways, a failure that is not a timeout is not one however it ended, and the
+classification has to be a type of its own rather than a bare
+`TimeoutExpired` naming the whole command. That is the property these
+controls pin, and they are here rather than in
+`tests/test_real_browser_harness.py` because that file sits at its own size
+ceiling and this cluster was a quarter of it.
 """
 import base64
 import contextlib
