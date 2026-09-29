@@ -14,11 +14,10 @@ NOT weaken and is at its size ceiling, so the narrowing's own controls
 are here. Every claim the census's docstring makes about what it does not
 read has a plant below that would fail if the claim stopped being true.
 
-Nothing here runs the shipped tree for its verdict. Those three files are
-not on the launch path on main, so the census reports nothing at all for
-them and a control that read only that proves nothing; the real-file
-controls force the path instead, which is how the defect goes live when
-`_realbrowser.py` reaches `_noderun.py`.
+Every shape here is PLANTED. The same census read over the three shipped
+files these shapes live in — and the set of rows it emits there — is
+`tests/test_launch_real_files.py`, which is where a shape the fixture
+happens not to spell is caught.
 """
 import ast
 import importlib
@@ -32,17 +31,10 @@ from _launch_fixtures import (  # noqa: E402
     HANG_DETECTOR_PROGRAM as _DETECTOR, write_source_tree as _tree)
 import _util  # noqa: E402
 
-TESTS = Path(__file__).resolve().parent
-
 # The modules whose members the census derives a network read from. The
 # derivation is the stdlib's own, read through `inspect`; nothing here
 # names a member.
 NETWORK_MODULES = ('urllib.request', 'http.client', 'socket')
-
-# The fourteen sites of #1299 that are NOT on the launch path, so a
-# control that only ran the shipped tree would be green before and after.
-REAL_FILES = ('test_bridge_startup.py', 'test_parent_watch.py',
-              'test_real_browser_harness.py')
 
 
 def _rows(source, in_path=('run_gate',)):
@@ -65,55 +57,14 @@ def _forced_rows(source):
     against `origin/main` and this is how they were taken.
     """
     tree = ast.parse(source)
-    in_path = frozenset(
-        node.name for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
     return sorted((line, route) for _, line, route, _ in
-                  census._faults('planted.py', tree, in_path))
+                  census._faults('planted.py', tree, _every_function(tree)))
 
 
-def _real_rows(relative):
-    """The census reading a REAL file with every function forced in path.
-
-    The only way to reach these three files today: the path is forced, so
-    a row here is a row the census will emit the day the real-browser
-    harness joins the path.
-
-    Forcing can only OVER-report, never under-report. It puts every
-    function in the file into `in_path`, which widens the callee set the
-    reachability arm matches a bare name against and adds an enclosing
-    scope per function, so a row may appear that the real derivation
-    would not produce — and no row the real derivation produces is
-    missing. So a DISCHARGED row here is proof the rule is right about
-    those lines, and a KEPT row is weaker evidence than it looks, being a
-    bound under a reading strictly wider than the shipped one. Measured
-    on all three files at `6b055a10`, the forced row set equals the union
-    of the per-function solo derivations, so nothing is overstated today;
-    when issue 1121's branch lands the forcing becomes redundant and this
-    should read the real `census()` instead.
-    """
-    tree = ast.parse((TESTS / relative).read_text(encoding='utf-8'))
-    in_path = frozenset(
-        node.name for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
-    return census._faults(relative, tree, in_path)
-
-
-def _line_holding(relative, snippet, occurrence=1):
-    """The line number of a snippet in a real file, or a loud failure.
-
-    Addressed by TEXT rather than by a number, because the number moves
-    with every edit above it and a control that reds on an unrelated
-    addition teaches the reader to ignore it. A snippet that is GONE is
-    still a failure: the site was deleted or reworded, and the claim it
-    carried has to be re-decided rather than quietly dropped.
-    """
-    lines = (TESTS / relative).read_text(encoding='utf-8').splitlines()
-    found = [number for number, text in enumerate(lines, 1)
-             if snippet in text]
-    if len(found) < occurrence:
-        raise AssertionError((relative, snippet, occurrence, found))
-    return found[occurrence - 1]
+def _every_function(tree):
+    """The forced `in_path` the planted controls read the tree through."""
+    return frozenset(node.name for node in ast.walk(tree)
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
 
 
 # --- a network read is not a child bound ----------------------------------
@@ -565,107 +516,18 @@ def test_a_deadline_handed_to_a_child_slot_is_refused_with_no_launch_near(
             label, _rows(source), _routes(source, ('run_gate',)))
 
 
-# A function that makes its own container and puts the deadline in it, in
-# the two ways a body can hold one: a list it appends to, and a dict it
-# subscripts. The second is the neighbour this control's own fixture could
-# not express, and it was found by building it rather than by reasoning
-# about it.
+# A function that makes its own container and puts the deadline in it. The
+# dict spelling of the same double, `spent['seen'] = timeout`, is NOT here
+# and is a REFUSAL rather than a discharge, because a subscript store hands
+# the number to a container the census resolves no body for. It was here as a
+# discharge and the two contradicted; the control that pins the refusal is
+# `test_a_subscript_store_is_not_a_proven_position` in
+# `tests/test_launch_deadline_positions.py`.
 SELF_BOUND_DOUBLE = '''def g(argv, timeout=None):
     spent = []
     spent.append(timeout)
     raise RuntimeError('no')
 '''
-
-# The dict spelling of the same double, `spent['seen'] = timeout`, is
-# NOT here: it is I-3's shape, and I-3 pins it as a REFUSAL, because a
-# subscript store hands the number to a container the census resolves no
-# body for. It was here as a discharge and the two contradicted.
-
-
-# --- the real files, which are not on the path ----------------------------
-
-# The four shapes, in the files they live in. `urlopen` at 567 and 574
-# are the same line of text, so the second carries its occurrence.
-DISCHARGED = (
-    ('test_bridge_startup.py', 'def join(self, timeout=None):', 1),
-    ('test_bridge_startup.py', 'def refusing_await(', 1),
-    ('test_parent_watch.py', 'def _wait_for_exit(proc, info=None,', 1),
-    ('test_bridge_startup.py', 'urllib.request.urlopen(request, timeout=10)',
-     1),
-    ('test_real_browser_harness.py',
-     'urllib.request.urlopen(page_url, timeout=2)', 1),
-    ('test_real_browser_harness.py',
-     'urllib.request.urlopen(page_url, timeout=2)', 2),
-    ('test_real_browser_harness.py', 'def timed_out(', 1),
-    ('test_real_browser_harness.py', 'def outer_timeout(', 1),
-    ('test_real_browser_harness.py', 'def websocket_failed(', 1),
-)
-
-# The genuine child bounds, with the route and the reason each carries
-# today. `tests/test_real_browser_harness.py` also has a `thread.join`
-# site, which no rule may discharge: it is the shape the previous
-# narrowing of this rule missed, in a real file.
-WRITTEN = 'the bound is written at the call site, not named'
-UNCHAINED = ('the constant WAIT_TIMEOUT is not computed from a named '
-             'chain, so the figure behind it is written rather than '
-             'composed')
-CHILD_BOUNDS = (
-    ('test_bridge_startup.py', 'proc.wait(timeout=10)', 1, WRITTEN),
-    ('test_bridge_startup.py', 'await_listening_line(proc,', 1, WRITTEN),
-    ('test_bridge_startup.py', 'proc, drained, timeout=1)', 1, WRITTEN),
-    ('test_bridge_startup.py', 'proc.wait(timeout=10)', 2, WRITTEN),
-    ('test_bridge_startup.py', 'timeout=_util.COLD_START_TIMEOUT', 1,
-     WRITTEN),
-    ('test_parent_watch.py', 'proc.communicate(timeout=WAIT_TIMEOUT)', 1,
-     UNCHAINED),
-    ('test_parent_watch.py', 'proc.communicate(timeout=WAIT_TIMEOUT)', 2,
-     UNCHAINED),
-    ('test_parent_watch.py', 'proc.wait(timeout=10)', 1, WRITTEN),
-    ('test_parent_watch.py', '_wait_for_exit(process, info, timeout=0)', 1,
-     WRITTEN),
-    ('test_real_browser_harness.py', 'process.wait(timeout=10) == 0', 1,
-     WRITTEN),
-    ('test_real_browser_harness.py', 'process.wait(timeout=10)', 1, WRITTEN),
-    ('test_real_browser_harness.py', 'text=True, timeout=10)', 1, WRITTEN),
-    ('test_real_browser_harness.py', 'text=True, timeout=10)', 2, WRITTEN),
-    ('test_real_browser_harness.py', 'thread.join(timeout=2 *', 1, WRITTEN),
-)
-
-
-def test_the_real_files_discharge_the_four_shapes(tmp):
-    """Proof 1 on the real tree: the false positives are GONE.
-
-    Every site is a row the census emits today from these three files and
-    nothing else, so this is a live control rather than a restatement of
-    the shape: delete the narrowing and all ten come back.
-    """
-    del tmp
-    for relative, snippet, occurrence in DISCHARGED:
-        line = _line_holding(relative, snippet, occurrence)
-        rows = [row for row in _real_rows(relative) if row[1] == line]
-        assert not rows, (relative, line, snippet, rows)
-
-
-def test_the_real_files_keep_every_genuine_child_bound(tmp):
-    """Proof 2 on the real tree: the negative space holds.
-
-    Fourteen sites, the route each carries and the reason each carries,
-    byte for byte. Twelve of the table in the issue are here; its last
-    two rows name a `test_real_browser_harness.py` that has no
-    `communicate(timeout=WAIT_TIMEOUT)` at 487 or 490 — those lines are
-    `test_parent_watch.py`'s, and are in the list twice over — and the
-    `thread.join` site that table omits is here in their place, because
-    it is the shape a "not a subprocess" narrowing would discharge.
-    """
-    del tmp
-    for relative, snippet, occurrence, reason in CHILD_BOUNDS:
-        line = _line_holding(relative, snippet, occurrence)
-        rows = sorted(row for row in _real_rows(relative) if row[1] == line)
-        assert rows, (relative, line, snippet, 'the bound is no longer read')
-        assert all(row[3] == reason for row in rows), (relative, line, rows)
-        assert {row[2] for row in rows} <= {
-            'timeout= keyword',
-            'positional timeout on a launched child'}, (relative, line, rows)
 
 
 def main():
