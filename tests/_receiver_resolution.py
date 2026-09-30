@@ -12,19 +12,22 @@ object is a member of a stdlib network module, so `urlopen`, an aliased
 import of it, a module aliased at the import and a local bound from it
 are ONE receiver. The reachability arm asks for a PROOF that the number
 reaches no child and discharges only on one: every call it reaches having
-a receiver the tree binds to a literal, or every one of them only building
-what a `raise` raises -- and only once every use of the deadline sits in a
-position the rule can name.
+a receiver the tree binds to a literal, every one of them only building
+what a `raise` raises, or -- where the receiver is a PARAMETER, which
+nothing local can prove -- every call site of the function that owns it
+filling the parameter with a container that caller's own scope proves --
+and only once every use of the deadline sits in a position the rule can
+name.
 
-That is the whole of the rule, and each of the two is a proof rather
+That is the whole of the rule, and each of the three is a proof rather
 than a guess about what the census does not know.
-`deadline_reaches_a_child` is where that reasoning lives, and
-`literal_bindings` is what the second proof is read off; this is the map,
-not the argument. The decision point itself MOVED to
-`tests/_deadline_reach.py` when the call-site arm was added, because this
-file was already at its ceiling; `literal_bindings` stayed here with the
-binding readers it shares, and the module that reasons over it imports
-this one rather than the other way round.
+`literal_bindings` is what the first two are read off; this is the map,
+not the argument. The decision point that combines them,
+`deadline_reaches_a_child`, lives in `tests/_deadline_reach.py` -- it moved
+there when the call-site arm was added, because this file was already at
+its ceiling. `literal_bindings` stayed here with the binding readers it
+shares, and the module that reasons over it imports this one rather than
+the other way round.
 """
 import ast
 import importlib
@@ -351,19 +354,20 @@ def literal_bindings(tree):
     test body, while the deadline-carrying call sits in a third scope.
 
     A name is in the set only when EVERY writing of it is a literal: a
-    CONSERVATIVE JOIN, not a last-write-wins. The narrowing does not
-    recover `tests/test_real_browser_harness.py:131`: the deadline
-    reaches the `recorded` parameter, and the arm judges the parameter's
-    OWN function without consulting its callers, so the `recorded = []`
-    that module writes at 174 discharges nothing. `origin/main` refuses
-    that site too, so the census returns it to main's verdict — an
-    intended over-refusal, tracked as #1337, pinned by
-    `test_a_named_over_refusal_refuses`. The order is not available to
-    be right: `ast.walk` is breadth-first, so a nested write is applied
-    after a shallower one whatever the source says, and a table-wide
-    last-write-wins silences a class that holds a real child because a
-    LATER class bound the same attribute to a list. Differing reachable
-    states are unprovable, and unprovable here is a refusal.
+    CONSERVATIVE JOIN, not a last-write-wins. The join cannot reach
+    `tests/test_real_browser_harness.py:131` on its own, because the
+    deadline reaches the `recorded` PARAMETER and a parameter's value is
+    its caller's: the `recorded = []` that module writes at 174 is two
+    lines from the only call, and no local writing proves a value the
+    module did not write. `tests/_deadline_reach.py` discharges that site
+    by consulting the call sites instead, which is where the argument
+    lives; this table still refuses it, and it is the SECOND reading, not
+    the only one. The order is not available to be right: `ast.walk` is
+    breadth-first, so a nested write is applied after a shallower one
+    whatever the source says, and a table-wide last-write-wins silences a
+    class that holds a real child because a LATER class bound the same
+    attribute to a list. Differing reachable states are unprovable, and
+    unprovable here is a refusal.
 
     This is not the move `_dotted_bindings` makes: it adds a binding
     module-wide and discards only outside a function or class body, so

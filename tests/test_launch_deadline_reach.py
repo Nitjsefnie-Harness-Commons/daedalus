@@ -37,258 +37,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _deadline_plants import (LIST_HANDED, LIST_HANDED_RUNTIME,  # noqa: E402
+                              PREDICATES, RECORDER, RENAMED, SPELLINGS)
 import _launch_census as census  # noqa: E402
 import _util  # noqa: E402
-
-# The arm's positive shape, and the shape every row below is ONE delta
-# from. A test double is handed a recorder list, the deadline goes into
-# it, and the module writes the list as a container literal at the only
-# call site -- which is `tests/test_real_browser_harness.py:130-175` in
-# miniature, down to the recorder arriving as a PARAMETER.
-RECORDER = '''def build(recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    recorded = []
-    return build(recorded)
-'''
-
-# One row per predicate the arm is built from. Each is `RECORDER` with
-# exactly one line changed, so the delta is readable without a diff and a
-# mutation is attributable to one condition.
-PREDICATES = {
-    'a-call-passing-a-launch': RECORDER.replace(
-        '    return build(recorded)',
-        "    return build(subprocess.Popen(['x']))").replace(
-            'def build(recorded):', 'import subprocess\n\n\n'
-            'def build(recorded):', 1),
-    'a-container-the-caller-built-from-a-launch': '''import subprocess
-
-
-def build(recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    recorded = [subprocess.Popen(['x'])]
-    return build(recorded)
-''',
-    'a-spread-positional': RECORDER.replace(
-        '    return build(recorded)', '    return build(*[recorded])'),
-    'a-spread-keyword': RECORDER.replace(
-        '    return build(recorded)',
-        "    return build(**{'recorded': recorded})"),
-    'an-omitted-argument': '''def build(recorded=None):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    return build()
-''',
-    'a-name-the-caller-does-not-write-as-a-literal': '''def build(recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go(items):
-    recorded = items
-    return build(recorded)
-''',
-    'a-second-call-site-the-reader-cannot-see': '''import subprocess
-
-
-def build(recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    recorded = []
-    return build(recorded)
-
-
-def other():
-    return build(subprocess.Popen(['x']))
-''',
-    'no-call-site-in-the-module': '''def build(recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-''',
-    'a-receiver-that-is-not-a-parameter': '''def build():
-    def run(args, *, timeout):
-        return kids.wait(timeout)
-
-    return run
-''',
-    'a-call-site-that-is-itself-a-launch': '''import subprocess
-
-
-def run(recorded):
-    def inner(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return inner
-
-
-def go():
-    return subprocess.run([])
-''',
-    'a-call-site-written-at-module-scope': '''def build(recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    try:
-        pass
-    except ValueError as recorded:
-        pass
-
-
-recorded = []
-RUN = build(recorded)
-''',
-    'a-nested-helper-that-shadows-the-name': '''def build(recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    def inner(recorded):
-        recorded = []
-        return build(recorded)
-
-    return inner
-''',
-}
-
-# The two call-site SPELLINGS the arm reads, each with the refusal beside
-# its discharge so neither line is untested. Both are decided by the ARM
-# rather than by `literal_bindings`: the writing that proves the `Name` is
-# inside a function, and a function's own `ast.arg` is walked before it, so
-# the module-wide table cannot prove the name and the arm has to.
-SPELLINGS = {
-    'keyword': ('''def build(*, recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    recorded = []
-    return build(recorded=recorded)
-''', '''def build(*, recorded):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go(items):
-    recorded = items
-    return build(recorded=recorded)
-'''),
-    'positional-only': ('''def build(recorded, /):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go():
-    recorded = []
-    return build(recorded)
-''', '''def build(recorded, /):
-    def run(args, *, timeout):
-        recorded.append((list(args), timeout))
-        return None
-
-    return run
-
-
-def go(items):
-    recorded = items
-    return build(recorded)
-'''),
-}
-
-# The false green, in the shape the arm would admit if it stopped asking
-# what the caller actually passed. `drain` receives the child out of a
-# list the caller built, and the row the census must keep is the one on
-# `drain` -- `run_gate` beside it refuses for the launch it places, so the
-# two rows are read apart and only the second is the arm's.
-LIST_HANDED = '''import subprocess
-
-
-def run_gate(timeout):
-    kids = [subprocess.Popen(['sleep', '2'])]
-
-    def drain(kid, timeout=None):
-        return kid.wait(timeout)
-
-    return drain(kids[0], timeout=timeout)
-'''
-
-# The runtime leg of the same shape, and a REAL child: `drain` takes the
-# list and joins the child in it with a one-second deadline, against a
-# child that sleeps two. The margin is what makes BOUNDED an answer
-# rather than a race, and the deadline is the parameter's own value rather
-# than a literal so the leg exercises the route the row is about.
-LIST_HANDED_RUNTIME = '''import subprocess
-
-
-def spawn():
-    return subprocess.Popen(["sleep", "2"])
-
-
-def run_gate(timeout):
-    def drain(kids, timeout=None):
-        return kids[0].wait(timeout)
-
-    kids = [spawn()]
-    try:
-        drain(kids, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        kids[0].kill()
-        kids[0].wait()
-        return "BOUNDED"
-    kids[0].kill()
-    kids[0].wait()
-    return "NOT BOUNDED"
-'''
 
 
 def _census(source):
@@ -305,6 +57,16 @@ def _census(source):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
     return sorted((row[1], row[2]) for row in
                   census._faults('planted.py', tree, forced))
+
+
+def _line_of(source, snippet):
+    """The line a snippet is written on, addressed by its own text.
+
+    A line number moves with every unrelated edit to a plant, and a
+    control that reds on one teaches the reader to ignore it.
+    """
+    return next(number for number, text in enumerate(source.splitlines(), 1)
+                if snippet in text)
 
 
 def _run_line(source):
@@ -360,25 +122,28 @@ def test_a_recorder_handed_a_literal_at_every_call_site_discharges(tmp):
 
 def test_a_real_child_handed_through_a_list_to_a_double_is_still_refused(
         tmp):
-    """The false green, with a runtime leg that reaped something real.
+    """The false green, and the two claims it makes are DIFFERENT.
 
-    The census row is on `drain`, which launches nothing and whose only
-    hand-off is the `kids[0]` a caller passes it -- an argument the arm
-    cannot call a container, so the parameter is a value it knows nothing
-    about and the signature stays refused. Drop the "must be a proven
-    container" condition and this row disappears while every other row here
-    holds.
+    The census leg is the arm's: a real child in a list the caller built,
+    handed to a double, with the deadline going into that list. Every
+    other condition the arm checks is satisfied -- the receiver is a
+    parameter, the owner is called once, the call is inside a function, the
+    slot is filled, and the argument IS a container literal -- so the only
+    thing left holding the row is the "not a child" reading. An arm that
+    stopped asking that discharges this site, and the assertion below
+    changes; nothing else in the file does.
 
-    The runtime leg is the same shape with a real `Popen` in a real list,
-    so the refusal is not an artefact of a fixture that could not have run:
-    the child sleeps two seconds, the deadline is one, and `BOUNDED` is
-    what the census would be failing to report.
+    The runtime leg is Python's, not the arm's: a real `Popen` in a real
+    list, joined with a one-second deadline against a two-second child,
+    reporting `BOUNDED`. It is what makes the census leg a statement about
+    a child that can actually be reaped rather than about a list of things
+    that are not. It cannot discriminate between two versions of the rule
+    -- no runtime can -- and it is not claimed to.
     """
     del tmp
-    assert _census(LIST_HANDED) == [(4, 'timeout parameter'),
-                                    (7, 'timeout parameter'),
-                                    (10, 'timeout= keyword')], _census(
-                                        LIST_HANDED)
+    assert _census(LIST_HANDED) == [(
+        _line_of(LIST_HANDED, 'def run('), 'timeout parameter')], _census(
+            LIST_HANDED)
     assert _runtime(LIST_HANDED_RUNTIME) == 'BOUNDED', _runtime(
         LIST_HANDED_RUNTIME)
 
@@ -406,17 +171,19 @@ def test_a_container_the_caller_built_from_a_launch_is_still_refused(tmp):
 
 
 def test_a_spread_call_is_still_refused(tmp):
-    """`*recorded` and `**{'recorded': ...}` name no position to read.
+    """`*recorded` and `**{'recorded': ...}`, refused for different reasons.
 
-    Both are here because they are refused by DIFFERENT conditions, which
-    is the point the brief's own condition list did not settle. A
-    `Starred` in front of the argument is an `ast.Starred` where a
-    container would be, so the container condition refuses it; a `**`
+    A `Starred` in front of the slot is refused by the star check
+    (`test_a_star_before_a_later_slot_is_still_refused` carries the shape
+    that check exists for, where the star is NOT on the slot); a `**`
     fills no positional slot at all, so the omitted-argument condition
-    refuses it. A mutation table then measured that an explicit
-    `_spread_args` check on top of the two changed no verdict anywhere --
-    it was an arm nothing could distinguish from its absence, so it is not
-    in the rule, and these two rows are what hold the refusal that is.
+    refuses it.
+
+    The `**` half is also the reason the check is scoped to the slot and
+    is not `_binding_names._spread_args` verbatim: `build(recorded,
+    **extra)` is the `recorded` the call wrote, and it must keep
+    discharging, while `build(*spread, [])` against a three-parameter
+    signature is not the `[]` at index one. Both are pinned.
     """
     del tmp
     for label in ('a-spread-positional', 'a-spread-keyword'):
@@ -486,6 +253,78 @@ def test_a_call_site_that_is_itself_a_launch_is_still_refused(tmp):
     """
     del tmp
     _assert_refuses('a-call-site-that-is-itself-a-launch')
+
+
+def test_an_argument_is_read_by_its_own_name_not_the_parameter_s(tmp):
+    """The discriminating pair, and the one row the file lacked.
+
+    Every other row here spells the parameter and the argument with the
+    same identifier, so a reader that looked the argument up by the
+    parameter's name passed all of them -- the shared identifier is the
+    axis the defect lives on, and a suite that only ever holds one value of
+    an axis cannot falsify a reader wrong on it.
+
+    The refusal is the one that discriminates. The caller's scope carries
+    a literal `kid` AND a literal `captured`, and the argument is a third
+    name, `child`, that the caller takes as a parameter: read by the
+    parameter's name this discharges on the unrelated `kid`; read by the
+    argument's own name it is a caller's parameter, and a caller's
+    parameter is not a proven container.
+    """
+    del tmp
+    assert _census(RENAMED['discharge']) == [
+        (_line_of(RENAMED['discharge'], 'return build(captured)'),
+         'timeout= keyword')], _census(RENAMED['discharge'])
+    _assert_refuses('an-argument-named-other-than-the-parameter')
+
+
+def test_a_star_before_a_later_slot_is_still_refused(tmp):
+    """A `Starred` takes ONE index and expands to a runtime-many.
+
+    `slot` is a position in the SIGNATURE, so every index after a star is
+    unprovable -- and a one-parameter signature cannot show it, because
+    there the star lands ON the slot and the container condition refuses
+    it for a different reason. This row is the shape the check exists for:
+    the star is at 0, the parameter is at 1, and the argument the reader
+    would pick up is a literal while the value the body receives is a real
+    child out of the spread's second element.
+    """
+    del tmp
+    _assert_refuses('a-star-before-a-later-slot')
+
+
+def test_a_launch_called_inside_a_literal_container_is_still_refused(tmp):
+    """`build([Popen(...)])`: a container literal is a container, not a
+    receipt.
+
+    Nothing else in the arm sees this. The argument is a literal, so the
+    container condition admits it; it is not a `Name`, so the
+    launch-bound-names derivation never runs; and the call is not itself a
+    launcher. Only the walk over the argument's own subtree finds the
+    launch inside the list, which is why this row exists beside the
+    `_member_aliases` rows rather than instead of them.
+    """
+    del tmp
+    _assert_refuses('a-launch-called-inside-a-literal-container')
+
+
+def test_every_member_alias_spelling_of_a_launch_is_still_refused(tmp):
+    """`pop = subprocess.Popen` is a receiver spelling the reader knows.
+
+    `tests/_launch_path.py::_is_launch` counts a member bound to a name as
+    one of its four ways of naming a launch, and `_launch_bound_names` was
+    already handed the caller's own aliases. The walk over the argument
+    was not, so the three spellings of one call disagreed: the direct one
+    refused and the two aliased ones discharged. All three rows are here
+    because they are three spellings of one fact, and a suite holding only
+    the direct one cannot tell a reader that reads aliases from one that
+    reads the module name.
+    """
+    del tmp
+    for label in ('a-launch-called-inside-a-literal-container',
+                  'a-launch-through-a-local-member-alias',
+                  'a-launch-through-a-module-member-alias'):
+        _assert_refuses(label)
 
 
 def test_a_call_site_written_at_module_scope_is_still_refused(tmp):
