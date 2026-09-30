@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _lint_tool_roles import (  # noqa: E402
     _derive_tool_roles, _tool_roles)
+from _actionlint import _job_step as _actionlint_job_step  # noqa: E402
 from _suite_jobs import NAMES, RUNNER, _door_jobs  # noqa: E402
 from _wfgraph import _tests_yml  # noqa: E402
 
@@ -532,10 +533,13 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     What makes the drift SILENT is this suite's own subject. The
     workflow-lint suites read the JOB's pin, compare it against the
     installed binary, and SKIP on a mismatch: with the fork build on PATH
-    and the job pin reverted to `1.7.12`, the two tests that RUN a lint
-    skip and test_ci_workflows reports 31/33 with exit 0. A skip is a pass
-    to every runner and every aggregate, so the disagreement is pinned here,
-    where it is an assertion failure instead.
+    and the job pin reverted to `1.7.12`, test_ci_workflows reports 31/33
+    with exit 0, two of them skipping. "Two" is the two whose VERDICT the
+    mismatch decides, not the two that reach the binary: three tests launch
+    actionlint under a divergence, and a fourth (`test_a_lint_run_without_
+    shellcheck_is_skipped`) runs a full lint and never reaches the version
+    arm at all. A skip is a pass to every runner and every aggregate, so
+    the disagreement is pinned here, where it is an assertion failure.
     """
     del tmp
     installer = _util.load(INSTALLER_SOURCE, 'lint_installer_pins')
@@ -554,7 +558,21 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     # appends `/v${ACTIONLINT_VERSION}/...`, so its own line contains the
     # installer's RELEASE. An `or <org> in job` beside it would be
     # satisfied by that same occurrence whichever way this points.
-    assert installer.RELEASE in job, (
+    #
+    # The step that DOWNLOADS, not the file and not merely the step's text:
+    # a whole-file substring is satisfied by a comment quoting the old URL,
+    # and a step-scoped one is satisfied too, because the run block is a
+    # `>-` scalar that keeps its `#` lines. Both were planted, and both left
+    # this green with the two bases genuinely diverged. What is compared is
+    # the URL the step ASSIGNS, with comments dropped first — which is also
+    # the line the job actually fetches from.
+    downloaded = [line.strip() for line
+                  in _actionlint_job_step('Install actionlint').splitlines()
+                  if not line.lstrip().startswith('#')]
+    bases = {line for line in downloaded if 'releases/download' in line}
+    assert len(bases) == 1, (
+        f'the install step names {len(bases)} release bases: {sorted(bases)}')
+    assert installer.RELEASE in bases.pop(), (
         f'the job downloads from a release base that is not '
         f'{installer.RELEASE!r}; the checksum table the installer verifies '
         'belongs to a different release than the job downloads, so a match '
