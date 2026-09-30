@@ -286,6 +286,7 @@
 !/tests/_carrier_cases.py
 !/tests/_case_fold.py
 !/tests/_cdpharness.py
+!/tests/_child_boot_env.py
 !/tests/_ci_time_instrument.py
 !/tests/_ci_wait_fixtures.py
 !/tests/_classifier_calls.py
@@ -384,11 +385,13 @@
 !/tests/_launch_arms.py
 !/tests/_launch_audit.py
 !/tests/_launch_census.py
+!/tests/_launch_exemptions.py
 !/tests/_launch_fixtures.py
 !/tests/_launch_keep.py
 !/tests/_launch_path.py
 !/tests/_launch_plants.py
 !/tests/_launch_refusal_rows.py
+!/tests/_launcher_stand_ins.py
 !/tests/_lint_tool_mechanisms.py
 !/tests/_lint_tool_roles.py
 !/tests/_log_safe_cases.py
@@ -412,6 +415,7 @@
 !/tests/_netcapture_harness.py
 !/tests/_node_harness_fixtures.py
 !/tests/_node_launch_routing.py
+!/tests/_node_launch_sweep.py
 !/tests/_noderun.py
 !/tests/_noglibc.py
 !/tests/_outer_bound.py
