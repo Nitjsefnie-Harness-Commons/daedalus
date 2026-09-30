@@ -354,8 +354,18 @@ def record_binding(node, owners, verdicts):
     as still a proven container, because a `match` capture, an
     `except ... as`, an import alias and a `def` or `class` name all carry
     a plain `str` rather than an `ast.Name` and the `Store` arm never sees
-    them. The two callers below differ in the SCOPE they walk and in
-    nothing else; `owners` is theirs, built the same way.
+    them.
+
+    SHARED, exactly: the `Store`/`Del` step and the whole binder arm set
+    below, which is every decision this function makes. The two callers
+    pass a different SCOPE to walk and their own `owners`, built the same
+    way. ONE step differs, and it is not this one:
+    `literal_bindings` finishes with `_reflective`'s fold and its poison
+    loop, which the scoped reader does not run. That step cannot reach the
+    arm -- `_reflective` yields dotted keys only, the poison loop only
+    touches `base.*`, and `_owning_parameter` returns `None` for a dotted
+    receiver -- so every remaining divergence is in the REFUSING
+    direction.
 
     The one distinction inside the join is the `setdefault` a PARAMETER
     makes against the assignment every other binder makes. The two fail in
@@ -420,7 +430,20 @@ def literal_bindings(tree):
     test body, while the deadline-carrying call sits in a third scope.
 
     A name is in the set only when EVERY writing of it is a literal: a
-    CONSERVATIVE JOIN, not a last-write-wins. The join cannot reach
+    CONSERVATIVE JOIN, not a last-write-wins. `record_binding` is the
+    step, and the scoped reader in `tests/_deadline_reach.py` calls it
+    too, so the two cannot drift apart in the arms.
+
+    Measured identical over all 699 tracked Python files, and the
+    disclosure is the shape of it: the differential moved ZERO tracked
+    verdicts for `MatchAs`/`MatchStar`, `MatchMapping.rest` and
+    `ImportFrom` -- the three arms this reader exists to share are the
+    three the tracked corpus does not exercise. The rows that carry them
+    are in `tests/test_launch_deadline_reach.py`, which is why the
+    claim is "identical where the corpus reaches", not "identical
+    everywhere".
+
+    The join cannot reach
     `tests/test_real_browser_harness.py:131` on its own, because the
     deadline reaches the `recorded` PARAMETER and a parameter's value is
     its caller's: the `recorded = []` that module writes at 174 is two
