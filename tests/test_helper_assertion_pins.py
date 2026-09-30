@@ -15,8 +15,14 @@ helper: the call that must not raise, and the call that must. The
 negative alone would be satisfied by a helper that raised on everything
 and the positive alone by one that ignored the argument, so neither half
 discriminates without the other.
+
+The two helpers this suite declares are held to the same rule, which is
+what issue #1349 is about one level down: `_assertion_raised`'s own two
+statements are each observed by a case, and neither of its cases needs
+a real fixture to do it.
 """
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -84,12 +90,84 @@ def _refuses_asking_for(text):
     return _refuses(_job_needs, _NO_SUITES_JOB, 'suites', contains=text)
 
 
-def _bound_child(count):
-    """Run a real dashboard child settling `count` bounds, and return it."""
-    calls = ''.join(f"  await bounded(work, 'bound {index}', 300);\n"
-                    for index in range(1, count + 1))
+def _raises_only(text):
+    """A throwaway that raises an AssertionError carrying `text`.
+
+    The two cases below drive `_assertion_raised` against its own two
+    statements rather than against a real fixture, so each reads a
+    message this run chose and neither can pass because a scan or a
+    workflow happened to say something else.
+    """
+    def raising():
+        raise AssertionError(text)
+    return raising
+
+
+def _never_raises():
+    """A throwaway that answers normally, so nothing must come back."""
+    return 'answered'
+
+
+def _asks_for_a_phrase_no_message_carries():
+    """`_assertion_raised` handed a phrase the raised message lacks."""
+    _assertion_raised(
+        _raises_only('a message naming nothing'), mentions='never printed')
+
+
+def _bound_child(count, token):
+    """Run a real dashboard child settling `count` bounds.
+
+    Each bound is labelled with `token`, a value this run chose, so a
+    reader that answered a constant instead of the record the child
+    wrote cannot name it: the label the case asserts is not in any
+    earlier run's source.
+    """
+    calls = ''.join(
+        f"  await bounded(work, 'bound {token} {index}', 300);\n"
+        for index in range(1, count + 1))
     return _dashnode.run_dashboard_node(
         _node_harness(_BOUND_DRIVER % calls, bounded_steps=count))
+
+
+def _bound_label(token, index):
+    """The label the `index`th bound of a `token` run settles under."""
+    return f'bound {token} {index}'
+
+
+def test_the_assertion_check_refuses_a_message_naming_nothing(_tmp):
+    """`mentions` is this helper's own check, and this is its case.
+
+    The naive implementation is `_assertion_raised` with the `mentions`
+    branch dropped, which answers a message naming nothing exactly as it
+    answers the one beside it; only this call separates them.
+    """
+    del _tmp
+    _assertion_raised(
+        _raises_only('a message naming nothing'), mentions='a message')
+    _assertion_raised(
+        _asks_for_a_phrase_no_message_carries,
+        mentions='a message naming nothing')
+
+
+def test_the_assertion_check_reports_a_call_that_raised_nothing(_tmp):
+    """A call that answered is reported by name, not returned past.
+
+    The naive implementation is `_assertion_raised` whose trailing raise
+    was dropped, so it returns `None` for a call that raised nothing.
+    The refusal is read here rather than through a second
+    `_assertion_raised`, because that helper raises on the same input it
+    is being asked about: a wrapper cannot tell the two failures apart.
+    """
+    del _tmp
+    _assertion_raised(
+        _raises_only('answered by a refusal'), mentions='answered')
+    try:
+        _assertion_raised(_never_raises)
+    except AssertionError as refused:
+        assert '_never_raises' in str(refused), refused
+    else:
+        raise AssertionError(
+            'the assertion check returned for a call that raised nothing')
 
 
 def test_the_scan_refusal_helper_names_the_site_it_was_given(_tmp):
@@ -118,10 +196,17 @@ def test_the_scan_refusal_helper_names_the_reason_it_was_given(_tmp):
 
 
 def test_a_child_that_wrote_one_crediting_record_is_read(_tmp):
-    """The control the two refusals below are measured against."""
+    """The record carries the label this run chose for the bound.
+
+    The control the two refusals below are measured against, and the one
+    that cannot be a constant: the label is a token minted per run, so
+    `_bound_record` answering `{'label': 'bound 1'}` would not name it.
+    """
     del _tmp
-    result = _bound_child(1)
-    assert _bound_record(result)['label'] == 'bound 1', result.stderr
+    token = uuid.uuid4().hex
+    result = _bound_child(1, token)
+    assert _bound_record(result)['label'] == _bound_label(token, 1), (
+        result.stderr)
 
 
 def test_the_bound_record_reader_refuses_a_child_that_wrote_none(_tmp):
@@ -132,8 +217,7 @@ def test_the_bound_record_reader_refuses_a_child_that_wrote_none(_tmp):
     it was handed; this case refuses only the reported shape.
     """
     del _tmp
-    result = _bound_child(0)
-    assert '[bound]' not in result.stderr, result.stderr
+    result = _bound_child(0, uuid.uuid4().hex)
     _assertion_raised(_bound_record, result, mentions='[]')
 
 
@@ -143,12 +227,14 @@ def test_the_bound_record_reader_refuses_a_child_that_wrote_two(_tmp):
     The naive implementation is a check for at least one record: it
     refuses none of the two, and `records[0]` then reads the first
     silently, so a second settlement is spent and never reported. The
-    one-record control above is what tells `== 1` from `>= 1`.
+    one-record control above is what tells `== 1` from `>= 1`, and the
+    token in the phrase is what tells two records from one.
     """
     del _tmp
-    result = _bound_child(2)
-    assert result.stderr.count('[bound]') == 2, result.stderr
-    _assertion_raised(_bound_record, result, mentions='bound 2')
+    token = uuid.uuid4().hex
+    result = _bound_child(2, token)
+    _assertion_raised(
+        _bound_record, result, mentions=_bound_label(token, 2))
 
 
 def test_the_replaced_helper_refuses_a_block_the_workflow_lacks(tmp):
@@ -156,7 +242,9 @@ def test_the_replaced_helper_refuses_a_block_the_workflow_lacks(tmp):
 
     The naive implementation is a bare `workflow.replace(old, new, 1)`,
     which answers the workflow itself when `old` is absent, so the case
-    would plant nothing and read as the unplanted control.
+    would plant nothing and read as the unplanted control. The control is
+    what refuses a `_replaced` that refused everything: without it the
+    case would be satisfied by a helper that never rewrote anything.
     """
     del tmp
     assert _replaced(BLOCK_NEEDS, _NEEDS_SPELLED) != _tests_yml(), (
@@ -186,7 +274,7 @@ def test_the_refuses_helper_names_the_text_it_was_asked_for(tmp):
 
     The naive implementation is a helper that returned the message and
     left the reader to check it, which passes the control on the first
-    line and passes every case that only reads the return value.
+    lines and passes every case that only reads the return value.
     """
     del tmp
     message = _refuses(_job_needs, _NO_SUITES_JOB, 'suites')
