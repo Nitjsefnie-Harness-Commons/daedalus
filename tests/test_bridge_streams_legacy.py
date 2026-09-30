@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Legacy command files delivered through the SSE stream."""
+import json
 import os
 import sys
 from pathlib import Path
@@ -7,9 +8,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (  # noqa: E402
-    BRIDGE_ENV, TOK, _patch_env, _wait_for_delivery_health, framer,
-    frame_reader, next_stream_data, prove_scan, put_command,
+    BRIDGE_ENV, TOK, _patch_env, _wait_for_delivery_health, frame_reader,
+    framer, next_stream_data, prove_scan, put_command, stub_stream,
     stream_response)
+
+# The bridge's own line for a delivered legacy command, which is what proves
+# the file was left in place and the drain delivered it again.
+_DELIVERED_AFTER = '[STREAM] DELIVERED legacy={0}….json id='
 
 
 # The fault a redelivery needs: the drain removes a command file it has
@@ -31,6 +36,12 @@ def _refusing(self, *args, **kwargs):
 
 pathlib.Path.unlink = _refusing
 '''
+
+
+def _frame(command_id, did):
+    """One SSE data frame as `write_frame` writes it."""
+    return ('data: ' + json.dumps(
+        {'id': command_id, 'code': '1', '_did': did}) + '\n\n').encode('utf-8')
 
 
 def _refuses_legacy_unlink(tmp):
@@ -114,16 +125,79 @@ def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
                 conn.close()
 
 
-def test_the_reader_steps_over_a_redelivered_legacy_command(tmp):
-    """A redelivery is a repeat, and the reader steps over it.
+def test_the_reader_skips_a_delivery_it_has_already_seen(tmp):
+    """The reader's own rule, on every platform and with no bridge.
 
-    The drain is at-least-once and says so: a file it cannot remove stays,
-    and the next scan delivers it again. Both copies carry the same `_did`,
-    which is what the extension's ledger skips on and what this reader skips
-    on. The fault makes the removal fail, so a redelivery is certain here
-    rather than a thing that happens to occur on whichever hosts take the
-    unlink — without it this test would pass with a reader that skipped
-    nothing, because there would be nothing to skip.
+    A frame whose `_did` has already been handed back is a repeat and is
+    stepped over; a frame carrying an id the reader has not seen is
+    delivered, whatever its payload says. That is the whole contract, and it
+    is the rule the extension's own ledger applies, so it is pinned here
+    where no filesystem, no unlink semantics and no platform's clock can
+    change the answer. The end-to-end control below covers the bridge.
+    """
+    del tmp
+    frames = [
+        _frame('kept', 'legacy-1-0'),
+        _frame('kept', 'legacy-1-0'),      # the repeat: skipped
+        _frame('after', 'legacy-1-1'),     # a new delivery: handed back
+        _frame('kept', 'legacy-1-0'),      # a repeat of the first: skipped
+        _frame('other', 'legacy-1-2'),     # a new delivery: handed back
+        _frame('after', 'legacy-1-1'),     # a repeat of the third: skipped
+    ]
+    read = frame_reader(stub_stream(frames), [])
+
+    first = read('the first delivery')
+    second = read('the delivery past one repeat')
+    third = read('the delivery past two repeats')
+
+    assert [f['id'] for f in (first, second, third)] == [
+        'kept', 'after', 'other'], (first, second, third)
+    assert [f['_did'] for f in (first, second, third)] == [
+        'legacy-1-0', 'legacy-1-1', 'legacy-1-2'], (first, second, third)
+
+
+def test_the_reader_delivers_a_frame_the_extension_would_also_run(tmp):
+    """A redelivery carrying a new id is delivered, not skipped.
+
+    The bridge derives a legacy delivery id from the object's identity,
+    which moves for one file over time on macOS (#1411), so the same
+    redelivery carries a different `_did` there than it does on Linux or
+    Windows. The reader's answer to that is the extension's answer: an id
+    the ledger has not recorded is a command that has not run, so it is
+    delivered. Skipping it would be the reader guessing, and guessing here
+    is the failure that loses a command.
+    """
+    del tmp
+    frames = [
+        _frame('kept', 'legacy-1-0'),
+        _frame('kept', 'legacy-1-1'),   # the same file, a moved identity
+        _frame('after', 'legacy-1-2'),
+    ]
+    read = frame_reader(stub_stream(frames), [])
+
+    first = read('the first copy')
+    second = read('the copy after the identity moved')
+    third = read('the command after both')
+
+    assert [f['id'] for f in (first, second, third)] == [
+        'kept', 'kept', 'after'], (first, second, third)
+    assert [f['_did'] for f in (first, second)] == [
+        'legacy-1-0', 'legacy-1-1'], (first, second)
+
+
+def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
+    """The stuck file is delivered again and again, and the reader keeps up.
+
+    The fault makes the removal fail, so the drain redelivers on every scan
+    — that is the at-least-once outcome, and it is certain here rather than
+    a thing that depends on which hosts take an unlink. What this test does
+    NOT claim is that the redelivery carries the id the first copy carried:
+    Linux and all four Windows interpreters hand back one id for one file,
+    and macOS does not, because the identity the id is built from moves over
+    time there (#1411). The reader's rule is pinned on every platform by the
+    two controls above, and the stability of the id over a short interval is
+    pinned by `test_stream_service_legacy_ids`, which drains one object twice
+    and is green on every leg.
     """
     env = _refuses_legacy_unlink(tmp)
     served = []
@@ -132,25 +206,29 @@ def test_the_reader_steps_over_a_redelivered_legacy_command(tmp):
         conn, response = stream_response(base, TOK, tab='extension')
         try:
             assert response.status == 200, response.status
-            frame = frame_reader(response, served)
-            prove_scan(base, frame, 'first', TOK)
+            read = frame_reader(response, served)
+            prove_scan(base, read, 'first', TOK)
             legacy.write_text('{"id":"kept","code":"1"}', encoding='utf-8')
-            delivered = frame('the legacy command')
+            delivered = read('the legacy command')
             assert delivered.get('id') == 'kept', delivered
-            # The drain writes the frame before the removal it could not do,
-            # so the file stays and every scan delivers it again under the
-            # same `_did` — the property the in-process control pins
-            # component-wise. What is new here is the end of it: the reader
-            # steps over the repeats and still hands back what comes after.
-            assert legacy.exists(), 'the file was removed after all'
-            prove_scan(base, frame, 'second', TOK)
-            assert legacy.exists(), 'the file was removed after all'
+            assert legacy.exists(), 'the fault did not take effect'
             status, _ = put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '2'})
             assert status == 200, status
-            after = frame('the command past the repeats')
-            assert after.get('id') == 'after', after
+            # Two commands after the repeats, so the read is not satisfied by
+            # a single stray redelivery whichever id the repeat carried.
+            status, _ = put_command(
+                base, {'token': TOK, 'id': 'last', 'code': '3'})
+            assert status == 200, status
+            assert read('a command after the repeats').get('_did'), (
+                'the reader returned nothing after the repeats')
             assert legacy.exists(), 'the file was removed after all'
+            # The drain is still delivering it: two redeliveries, which only
+            # a file left in place can produce.
+            redeliveries = sum(
+                1 for line in served
+                if _DELIVERED_AFTER.format(TOK) in line)
+            assert redeliveries >= 2, ''.join(served[-400:])
         finally:
             response.close()
             conn.close()
