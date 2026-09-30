@@ -69,11 +69,13 @@ bare-name route only.
 import ast
 from dataclasses import dataclass
 
+from _pyroute_containers import SpreadContainer
+from _pyroute_keys import literal_iterable_cardinality
 from _pyroute_state import UNPROVABLE_SENDER, evaluated_value
 from _pyroute_values import (
-    DYNAMIC_KEY, DeferredAlternatives, DeferredContainer, callable_candidates,
-    expression_callables, generator_for, is_deferred_value, merge_yielded,
-    sender_value)
+    DYNAMIC_KEY, DeferredAlternatives, DeferredContainer, DeferredGenerator,
+    callable_candidates, expression_callables, generator_for, is_deferred_value,
+    merge_yielded, sender_value)
 
 
 @dataclass(frozen=True)
@@ -195,25 +197,118 @@ def _stream_element(stream):
 # position without the tuple claiming a length the runtime does not pair.
 _UNDECIDED = _Stream({}, None, UNPROVABLE_SENDER, optional=True)
 
+# What one state answers when a star's container it could not read. The
+# caller keeps it only when NO state could read the container, because a
+# state that resolved one is better informed rather than differently so.
+_CONTAINER_UNDECIDED = object()
 
-def _container_streams(value):
+
+def _comprehension_count(node):
+    """How many steps a comprehension's or generator expression's result
+    holds, read from the producer the source spells, or None when that count
+    is not literal. `literal_iterable_cardinality` is the helper the guard
+    already reads a generator's count with, so the two agree by construction
+    rather than by a second rule.
+
+    A container reached through a NAME has no node to read a producer from,
+    and a comprehension RESULT is modelled as one spread item whose own
+    length is a placeholder. Both are counts the model cannot state, so both
+    are declined."""
+    if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
+                             ast.DictComp)) or not node.generators:
+        return None
+    return literal_iterable_cardinality(node.generators[0].iter)
+
+
+def _producer_stream(node, state):
+    """The stream a comprehension's or generator expression's PRODUCT is, or
+    None when the producer is not a container the model holds.
+
+    Every step of such an expression yields the same modelled value, so the
+    product is that value -- and the PRODUCER is where it is read from, not
+    from the `yielded` the model records for the expression. `yielded` is
+    empty until the clause has bound its target, and the call is read both
+    before and after that point, so a container read from it is decided on
+    one reading of the call and declined on the other; the producer is the
+    same literal display at every point the call is read.
+    """
+    if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
+                             ast.DictComp)) or not node.generators:
+        return None
+    return _container_stream(evaluated_value(node.generators[0].iter, state))
+
+
+def _repeated_streams(count, value):
+    """The streams a container that yields the SAME modelled value once per
+    element of another yields.
+
+    A value repeated N times IS a container of N iterables -- which is the
+    whole of what a star needs, and it is why a comprehension is not a
+    one-element container to a reader that has to know how many streams stand
+    at the star's position. A count the model cannot state leaves the
+    container declined: a star over a container of unknown length is a count
+    of streams at that position that nothing names."""
+    if not isinstance(count, int) or count < 0:
+        return None
+    stream = _container_stream(value)
+    return None if stream is None else [stream] * count
+
+
+def _product_streams(node, state):
+    """The streams a generator expression's or comprehension's RESULT yields
+    as a container of iterables, or None when its length is not stated. A
+    set result is declined whatever its length: equal elements collapse and
+    the runtime picks the order, so a star over one is a count of streams
+    whose order nothing states."""
+    if isinstance(node, (ast.SetComp, ast.Set)):
+        return None
+    produced = _producer_stream(node, state)
+    if produced is None:
+        return None
+    return _repeated_streams(_comprehension_count(node),
+                             _stream_element(produced))
+
+
+def _container_streams(value, node=None, state=None):
     """The streams a container OF ITERABLES yields, or None when the value is
     not one. `zip(*operables)` and `update(**sources)` both pair the
     CONTAINER'S ELEMENTS rather than the container, so reading one is what
     decides how many streams a step has; substituting a token there instead
     is a value the model HOLDS and cannot PAIR, which is the fail-open this
     arm exists to remove. An element that is not a readable iterable is one
-    operand the call has and the model cannot place, and it says so."""
+    operand the call has and the model cannot place, and it says so.
+
+    What the container is SPELLED as does not decide any of this. A list, a
+    tuple, a mapping, a generator expression, a comprehension and a name
+    bound to any of them are all containers of iterables, and a reader that
+    recognises two of them and declines the rest reads clean on the ones it
+    declines -- which is the same fail-open wearing a different container.
+    `node` is the expression the container is spelled as and `state` is the
+    flow it is read in; a comprehension's contents come from the producer
+    the node spells, because that is the one reading of them that does not
+    depend on how far this state has walked."""
+    if isinstance(value, DeferredAlternatives):
+        branches = [_container_streams(item, node, state)
+                    for item in value.values]
+        return None if any(branch is None for branch in branches) else branches
+    if isinstance(value, (DeferredGenerator, SpreadContainer)):
+        return _product_streams(node, state)
     if not isinstance(value, DeferredContainer):
         return None
     if DYNAMIC_KEY in value.items:
+        return None
+    if value.kind == 'set':
         return None
     # An element that is not itself a readable iterable means the container
     # is not a container OF ITERABLES. For a `**` that is the ordinary
     # case -- `zip(a, b, **{"strict": True})` passes a KEYWORD, and reading
     # its value as a third stream would pair a stream the runtime never
-    # pairs -- so the count is undecided rather than guessed.
-    streams = [_container_stream(item) for item in value.items.values()]
+    # pairs -- so the count is undecided rather than guessed. Iterating a
+    # MAPPING yields its KEYS and never its values, so the keys are what is
+    # read there; reading the values pairs a stream the runtime never pairs.
+    elements = (value.items if value.kind == 'dict'
+                else tuple(value.items.values()))
+    streams = [_container_stream(item) for item in elements]
     return None if any(stream is None for stream in streams) else streams
 
 
@@ -234,7 +329,8 @@ def _keyword_streams(node, state):
     extra = []
     for keyword in node.keywords:
         if keyword.arg is None:
-            read = _container_streams(evaluated_value(keyword.value, state))
+            read = _container_streams(evaluated_value(keyword.value, state),
+                                    keyword.value, state)
             if read is None:
                 return extra, False
             extra.extend(read)
@@ -267,7 +363,8 @@ def _positional_streams(operands, state):
         if not isinstance(operand, ast.Starred):
             streams.append(_operand_stream(operand, state))
             continue
-        read = _container_streams(evaluated_value(operand.value, state))
+        read = _container_streams(evaluated_value(operand.value, state),
+                                operand.value, state)
         if read is None:
             return None
         streams.extend(read)
@@ -463,8 +560,9 @@ def _declaration_elements(declaration, node, state, analyze):
         # the tuple the model would otherwise build claims a length the
         # runtime never pairs over, so a destructuring target reads a
         # different number of names from it and the pair is refused
-        # outright. The elements with no position decided are the answer.
-        return _unreadable_elements()
+        # outright. The caller answers it, because whether ANY state could
+        # read the container is not a question one state can answer.
+        return _CONTAINER_UNDECIDED
     extra, decided = _keyword_streams(node, state)
     if not streams and not extra:
         return None
@@ -485,10 +583,24 @@ def multi_iterable_elements(consumer, node, states, analyze):
     shadowed in the source never reaches here: the caller reads the
     shadowing guards before it decides a name is the builtin, because a
     shadow decides the pairing at runtime and not the spelling that matched.
+
+    A state that could not read a star's container does not decide the call
+    on its own. The states are one expression read at more than one point,
+    and the one that resolved the container's contents is strictly better
+    informed than the one that did not -- so a decline is kept only when NO
+    state could read it, and is answered then with the elements no position
+    of a step is decided in. Deciding per state instead lets an earlier,
+    emptier reading of the same container override a later complete one, and
+    the target then binds an undecided value where the model held a routed
+    one, which reads clean.
     """
     declaration = _BY_NAME.get(consumer)
     if declaration is None:
         return None
-    return merge_yielded(
-        _declaration_elements(declaration, node, state, analyze)
-        for state in states)
+    elements = [_declaration_elements(declaration, node, state, analyze)
+                for state in states]
+    read = [element for element in elements
+            if element is not _CONTAINER_UNDECIDED]
+    if read:
+        return merge_yielded(read)
+    return None if not elements else _unreadable_elements()
