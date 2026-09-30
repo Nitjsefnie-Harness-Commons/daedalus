@@ -76,6 +76,13 @@ class _Stream:
     positions: dict
     length: int | None
     unplaced: object = None
+    # True for the one stream a star or a `**` MAY add and the model could
+    # not decide on. It does not count toward the tuple's arity -- the arity
+    # the runtime pairs over is the arity the model can NAME -- and it
+    # contributes its value to the unknown-key slot alone, so the token
+    # reaches every position without the tuple claiming a length the runtime
+    # does not pair.
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -149,19 +156,79 @@ def _operand_stream(operand, state):
     performs still pairs it and the tuple still reaches the target."""
     generator = generator_for(operand, state)
     if generator is not None:
+        # A generator the model tracks but whose yielded value it does not
+        # hold is a stream it cannot read, and it says so the way any other
+        # unreadable operand does. Reading it as an EMPTY stream instead is
+        # the fail-open this arm exists to remove: the runtime yields
+        # something, the model simply does not know what.
         return _Stream({0: generator.yielded} if generator.yielded is not None
-                       else {}, generator.remaining)
+                       else {},
+                       generator.remaining,
+                       None if generator.yielded is not None
+                       else UNPROVABLE_SENDER)
     return _container_stream(evaluated_value(operand, state)) \
         or _Stream({}, None, UNPROVABLE_SENDER)
 
 
-def _operand_element(operand, state):
-    """The join of every value one operand yields, which is what a step
-    reads from it."""
-    stream = _operand_stream(operand, state)
+def _stream_element(stream):
+    """The join of every value one stream yields, which is what a step reads
+    from it."""
     return merge_yielded((*stream.positions.values(),
                           *((stream.unplaced,)
                             if stream.unplaced is not None else ())))
+
+
+# One operand the guard cannot read, whatever the reason: a starred or a
+# `**`-unpacked value it holds nothing for, and an element of a container of
+# iterables that is not itself a readable iterable. It is the uncertainty
+# token at every position, because the pairing still pairs it.
+_UNREADABLE = _Stream({}, None, UNPROVABLE_SENDER)
+_UNDECIDED = _Stream({}, None, UNPROVABLE_SENDER, optional=True)
+
+
+def _container_streams(value):
+    """The streams a container OF ITERABLES yields, or None when the value is
+    not one. `zip(*operables)` and `update(**sources)` both pair the
+    CONTAINER'S ELEMENTS rather than the container, so reading one is what
+    decides how many streams a step has; substituting a token there instead
+    is a value the model HOLDS and cannot PAIR, which is the fail-open this
+    arm exists to remove. An element that is not a readable iterable is one
+    operand the call has and the model cannot place, and it says so."""
+    if not isinstance(value, DeferredContainer):
+        return None
+    if DYNAMIC_KEY in value.items:
+        return None
+    # An element that is not itself a readable iterable means the container
+    # is not a container OF ITERABLES. For a `**` that is the ordinary
+    # case -- `zip(a, b, **{"strict": True})` passes a KEYWORD, and reading
+    # its value as a third stream would pair a stream the runtime never
+    # pairs -- so the count is undecided rather than guessed.
+    streams = [_container_stream(item) for item in value.items.values()]
+    return None if any(stream is None for stream in streams) else streams
+
+
+def _unpacked_streams(node, state):
+    """The streams a star or a `**` unpacking contributes, and whether the
+    model could decide the count at all. It could when it can read the
+    unpacked value as a container: a starred operand's elements, or a `**`
+    mapping's values. It could NOT when that value is one the model holds
+    nothing for, and the arity is then undecided -- which is a statement
+    about how many streams a step pairs over, not about what any of them
+    holds, so the operand the call DID spell plainly is still read."""
+    extra = []
+    for argument in node.args:
+        if isinstance(argument, ast.Starred):
+            read = _container_streams(evaluated_value(argument.value, state))
+            if read is None:
+                return extra, False
+            extra.extend(read)
+    for keyword in node.keywords:
+        if keyword.arg is None:
+            read = _container_streams(evaluated_value(keyword.value, state))
+            if read is None:
+                return extra, False
+            extra.extend(read)
+    return extra, True
 
 
 def _paired_step(streams, index, arity):
@@ -184,12 +251,15 @@ def _paired_step(streams, index, arity):
     return DeferredContainer(items, arity, 'tuple')
 
 
-def _step_elements(streams, arity):
+def _step_elements(streams, arity=None):
     """The container a consumer's elements hold: one tuple per step the
     model can name, or the join of them at every position where it cannot.
     A pairing over no operand reaches no step at all, which is a consumer
     the runtime walks zero times rather than one holding nothing."""
-    lengths = [stream.length for stream in streams]
+    arity = (sum(1 for stream in streams if not stream.optional)
+             if arity is None else arity)
+    lengths = [stream.length for stream in streams
+               if not stream.optional]
     if all(isinstance(length, int) for length in lengths):
         steps = min(lengths)
         if steps == 0:
@@ -220,10 +290,11 @@ def _element(value):
 
 
 # pylint: disable-next=unused-argument
-def _positional_value(node, state, operands, analyze):
-    """The elements a positional pairing yields."""
-    streams = [_operand_stream(operand, state) for operand in operands]
-    return _step_elements(streams, len(operands))
+def _positional_value(node, state, streams, analyze):
+    """The elements a positional pairing yields. The arity is left to
+    `_step_elements`, which is what knows a stream the model could not
+    decide on does not count toward it."""
+    return _step_elements(streams)
 
 
 def _indexed_operands(node):
@@ -233,10 +304,11 @@ def _indexed_operands(node):
     return list(node.args[:1]) if len(node.args) <= 2 else None
 
 
-def _indexed_value(node, state, operands, analyze):
+# pylint: disable-next=unused-argument
+def _indexed_value(node, state, streams, analyze):
     """The elements an indexed pairing yields: the index base, and what the
     one operand contributes."""
-    stream = _operand_stream(operands[0], state)
+    stream = streams[0]
     base = next((keyword.value for keyword in node.keywords
                  if keyword.arg == 'start'), None)
     start = (_routed_item(evaluated_value(base, state))
@@ -259,8 +331,7 @@ def _indexed_value(node, state, operands, analyze):
         return DeferredContainer(
             {index: step(index) for index in range(stream.length)},
             stream.length, 'list')
-    item = DeferredContainer({0: start, 1: _operand_element(operands[0],
-                                                            state)},
+    item = DeferredContainer({0: start, 1: _stream_element(stream)},
                              2, 'tuple')
     return _element(item)
 
@@ -272,13 +343,13 @@ def _projected_operands(node):
     return list(node.args[1:]) if len(node.args) > 1 else None
 
 
-def _projected_value(node, state, operands, analyze):
+# pylint: disable-next=unused-argument
+def _projected_value(node, state, streams, analyze):
     """The elements a projection yields: the RESULT of its callable, walked
     so that the sends inside it are the flow's own and its return value is
     what reaches the target. The walk cannot say which step produces which
     result, so the element is the join of them at every position."""
-    streams = [_operand_stream(operand, state) for operand in operands]
-    steps = _step_elements(streams, len(operands))
+    steps = _step_elements(streams)
     if steps is None:
         return None
     func = node.args[0]
@@ -287,20 +358,24 @@ def _projected_value(node, state, operands, analyze):
     if not candidates:
         return _unreadable_elements()
     return _element(merge_yielded(
-        _projection_result(candidate, node, operands, state, analyze)
+        _projection_result(candidate, node, streams, state, analyze)
         for candidate in candidates))
 
 
-def _projection_result(candidate, node, operands, state, analyze):
+def _projection_result(candidate, node, streams, state, analyze):
     """What the projected callable returns when it is handed one step of the
-    pairing. Its parameters take the elements the operands yield, which is
+    pairing. Its parameters take the elements the streams yield, which is
     what the runtime passes as that step's tuple, and the call is
     synthesised rather than found because no call node exists: `map` calls
-    its callable without one."""
-    call = ast.Call(func=node.args[0], args=list(operands), keywords=[])
+    its callable without one. The arguments are synthetic NAMES carrying the
+    element of the stream at that position, so a stream the arm read out of
+    a starred operand binds exactly like one the source spelled plainly."""
+    arguments = [ast.Name(id=f'_pair{position}', ctx=ast.Load())
+                 for position in range(len(streams))]
+    call = ast.Call(func=node.args[0], args=arguments, keywords=[])
     prepared = state.copy()
-    for operand in operands:
-        prepared.evaluated[id(operand)] = _operand_element(operand, state)
+    for argument, stream in zip(arguments, streams):
+        prepared.evaluated[id(argument)] = _stream_element(stream)
     return analyze(candidate, [prepared], call)[1]
 
 
@@ -324,16 +399,30 @@ _BY_NAME = {name: declaration
 
 
 def _declaration_elements(declaration, node, state, analyze):
-    if any(keyword.arg is None for keyword in node.keywords) \
-            or any(isinstance(operand, ast.Starred) for operand in node.args):
-        return _unreadable_elements()
     if any(keyword.arg is not None
            and keyword.arg not in declaration.keywords
            for keyword in node.keywords):
         return None
     operands = declaration.operands(node)
-    return (declaration.value(node, state, operands, analyze)
-            if operands else None)
+    if not operands:
+        return None
+    # A starred operand is not a stream of its own: the call pairs the
+    # CONTAINER'S ELEMENTS, which is what `_unpacked_streams` reads. Leaving
+    # it in the operand list would pair the container and each of its
+    # elements, which is one stream too many and every one of them wrong.
+    streams = [_operand_stream(operand, state)
+               for operand in operands if not isinstance(operand, ast.Starred)]
+    extra, decided = _unpacked_streams(node, state)
+    if not streams and not extra:
+        return None
+    if decided:
+        return declaration.value(node, state, [*streams, *extra], analyze)
+    # The count a star or a `**` decides is not one the model could read.
+    # The operand the call spelled PLAINLY still is, so it is still read and
+    # the undecided one sits beside it carrying the token -- a value the
+    # model holds and cannot place, at the position it cannot place it.
+    return declaration.value(
+        node, state, [*streams, *extra, _UNDECIDED], analyze)
 
 
 def multi_iterable_elements(consumer, node, states, analyze):
