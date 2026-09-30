@@ -2,14 +2,13 @@
 """Legacy command files delivered through the SSE stream."""
 import os
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (  # noqa: E402
     BRIDGE_ENV, TOK, _wait_for_delivery_health, framer, next_stream_data,
-    put_command, stream_response)
+    prove_scan, put_command, stream_response)
 
 
 def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
@@ -39,8 +38,14 @@ def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
 
 def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
     """Visible partial files survive, while sibling temp names wait for
-    rename."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+    rename.
+
+    The reader is driven, never waited for: every `prove_scan` below is a scan
+    the reader provably finished, so each non-deletion assertion is about what
+    the drain did and never about how long the host took to do it.
+    """
+    served = []
+    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         commands = Path(docroot) / 'commands'
         legacy = commands / f'{TOK}.json'
         writer = open(legacy, 'w', encoding='utf-8')
@@ -51,25 +56,28 @@ def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
             os.fsync(writer.fileno())
             conn, response = stream_response(base, TOK, tab='extension')
             assert response.status == 200, response.status
-            time.sleep(1.25)
+            frame = framer(response, served)
+            prove_scan(base, response, served, 'first', TOK)
+            prove_scan(base, response, served, 'second', TOK)
             assert legacy.exists(), (
                 'the reader unlinked a visible file while its writer was open')
             writer.write(',"code":"first"}')
             writer.flush()
             os.fsync(writer.fileno())
             writer.close()
-            frame = next_stream_data(response, timeout=5)
-            assert frame.get('id') == 'held-open', frame
+            delivered = frame('the completed legacy file', timeout=5)
+            assert delivered.get('id') == 'held-open', delivered
 
             in_progress = commands / f'.{TOK}.json.tmp'
             in_progress.write_text(
                 '{"id":"atomic","code":"second"}', encoding='utf-8')
-            time.sleep(1.25)
+            prove_scan(base, response, served, 'third', TOK)
+            prove_scan(base, response, served, 'fourth', TOK)
             assert in_progress.exists(), (
                 'the reader deleted a sibling temp file')
             os.replace(in_progress, legacy)
-            frame = next_stream_data(response, timeout=5)
-            assert frame.get('id') == 'atomic', frame
+            renamed = frame('the renamed legacy file', timeout=5)
+            assert renamed.get('id') == 'atomic', renamed
         finally:
             if not writer.closed:
                 writer.close()
