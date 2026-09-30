@@ -370,8 +370,12 @@ def _projection_result(candidate, node, streams, state, analyze):
     its callable without one. The arguments are synthetic NAMES carrying the
     element of the stream at that position, so a stream the arm read out of
     a starred operand binds exactly like one the source spelled plainly."""
-    arguments = [ast.Name(id=f'_pair{position}', ctx=ast.Load())
-                 for position in range(len(streams))]
+    # The list is annotated because `ast.Call` declares `args` as
+    # `list[expr]` and a comprehension of `ast.Name` infers `list[Name]`,
+    # which is not assignable to it. The names themselves are unchanged.
+    arguments: list[ast.expr] = [
+        ast.Name(id=f'_pair{position}', ctx=ast.Load())
+        for position in range(len(streams))]
     call = ast.Call(func=node.args[0], args=arguments, keywords=[])
     prepared = state.copy()
     for argument, stream in zip(arguments, streams):
