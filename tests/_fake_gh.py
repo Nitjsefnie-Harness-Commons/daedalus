@@ -64,14 +64,11 @@ POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 # where a case asks for a hold; every other answer is written at once.
 GATE = 'DAEDALUS_FAKE_GH_GATE'
 # Where the hold's entry and its release are recorded, beside the call log
-# and not inside it. A release is the only terminal fact about a wait - a
-# call that is still waiting looks exactly like a call that has not been
-# looked at - so a control that can only sample the wait is a control that
-# cannot see it. Its own path, because a line in the call log would be
-# counted as a call. The ENTRY is recorded beside the release because the
-# two together are what a case that depends on the hold needs: the release
-# says the wait ended, the entry says it began, and a hold scoped away from
-# a call is invisible to either one alone.
+# and not inside it - a line in the call log would be counted as a call. A
+# release is the only terminal fact about a wait, because a call still
+# waiting looks exactly like one nobody has looked at; the entry is beside it
+# because a case that DEPENDS on the hold needs both, and a hold scoped away
+# from a call is invisible to either alone.
 RELEASES = 'DAEDALUS_FAKE_GH_RELEASES'
 
 
@@ -79,33 +76,30 @@ def _hold():
     """Withhold this answer until the gate the caller named exists.
 
     The call is logged before this runs, so a reader counting entries can
-    see a call entered and still open - a state, not the instant it happened
-    to look. What that buys is narrower than "the subject cannot be gone":
-    the subject cannot RETURN from the call, because the answer is not
-    written, and that is all. It can still be removed from under the call -
-    a signal, or a `gh_client` watchdog whose `os._exit` runs on any thread
-    - so a case that reads liveness here must still name the parent it is
-    reading about, or a parent that dies takes the reading with it.
+    see a call entered and still open - a state, not an instant. What that
+    buys is narrower than "the subject cannot be gone": it cannot RETURN
+    from the call, because the answer is not written, and that is all. A
+    signal, or a `gh_client` watchdog whose `os._exit` runs on any thread,
+    still removes it - so a case reading liveness here must name the parent
+    it is reading about, or a parent that dies takes the reading with it.
 
     There is no bound in here, and that is the point: a bound would turn
     the hold into a guess, and a guess that expires silently reinstates the
-    sample it exists to replace. Two bounds sit outside it, and a reader
-    needs both. `gh_client.GH_TIMEOUT` (120 s) bounds the `subprocess.run`
-    the caller is blocked in, so a hold does expire on a subject slow
-    enough to hit it. And the gate is opened by the caller's `finally`, so
-    a caller SIGKILLed outright leaves the fake in this loop for as long as
-    the box lives - measured at 42 s of CPU over 97 minutes, and the
-    leftover tmp tree is never cleaned.
+    sample it exists to replace. Two sit outside it. `gh_client.GH_TIMEOUT`
+    (120 s) bounds the `subprocess.run` the caller is blocked in, so a hold
+    does expire on a subject slow enough to reach it. And the gate is opened
+    by the caller's `finally`, so a caller SIGKILLed outright leaves the
+    fake here for the life of the box - measured at 42 s of CPU over 97
+    minutes, and its tmp tree is never cleaned.
     """
     path = os.environ.get(GATE)
     if path is None:
         return
-    # The entry goes INSIDE the wait, once, because that is what makes it
-    # mean anything: a reader counting entries is asserting that these
-    # calls are being held, and a record written one line above the loop
-    # says only that they arrived - so a hold skipped for exactly the
-    # watcher's own calls would satisfy it. Unconditional inside the loop
-    # would record once per poll and the count would not be a count.
+    # Inside the wait, once: a record written above the loop says the call
+    # arrived, not that it is held, so a hold skipped for exactly the
+    # watcher's own calls would satisfy a reader counting entries. Written
+    # unconditionally in the loop it would record once per poll, and the
+    # count would stop being a count.
     entered = False
     while not os.path.exists(path):
         if not entered:
@@ -353,9 +347,8 @@ class FakeGh:
     def releases(self):
         """Every release this fake recorded, or none if it held nothing.
 
-        The terminal counterpart of the call log: a call that is still held
-        is indistinguishable from a call nobody has looked at, so what a
-        control can read is which calls came back and which never did.
+        The terminal counterpart of the call log: which calls came back,
+        and which never did.
         """
         return [entry for entry in self.stages()
                 if entry['stage'] == 'release']
@@ -363,10 +356,8 @@ class FakeGh:
     def entered(self):
         """Every hold this fake began, or none if it held nothing.
 
-        The other half of the same record, and the one a case that
-        DEPENDS on the hold needs: a hold scoped away from a call leaves no
-        release to read either, so a case that only counts releases reads
-        the same whether the hold ran for it or not.
+        A case that only counts releases reads the same whether the hold
+        ran for it or not, which is why this half exists.
         """
         return [entry for entry in self.stages()
                 if entry['stage'] == 'entered']
