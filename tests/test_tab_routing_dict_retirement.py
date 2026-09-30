@@ -374,9 +374,20 @@ def test_a_set_fold_refuses_a_dict_operand(tmp):
                                 stale=frozenset({'k'}))
     state = _state_with(retired)
     for operator in (ast.BitOr, ast.BitAnd, ast.BitXor, ast.Sub):
-        operands = set_operands(operator, ast.Name(id='d', ctx=ast.Load()),
+        # A NODE, not the class. `set_operands` reads `isinstance(operator,
+        # SET_OPERATORS)`, and a class is not an instance of itself, so
+        # passing `ast.BitOr` returned None at that first check and this
+        # control never reached the mapping refusal it names. It was green
+        # for the wrong reason; deleting the refusal left it green too.
+        operands = set_operands(operator(), ast.Name(id='d', ctx=ast.Load()),
                                 ast.Name(id='e', ctx=ast.Load()), state)
         assert operands is None, (operator, operands)
+        # And the refusal is the reason, shown rather than assumed: with the
+        # dict operand replaced by nothing the model can call a set, the
+        # same call reaches the return.
+        plain = set_operands(
+            operator(), ast.Constant('a'), ast.Constant('b'), state)
+        assert plain is None, (operator, plain)
 
 
 def _state_with(container):
