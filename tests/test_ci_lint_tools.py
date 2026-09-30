@@ -43,9 +43,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _actionlint import _job_step as _actionlint_job_step  # noqa: E402
 from _lint_tool_mechanisms import (  # noqa: E402
-    DECLARED_BY, INSTALLER_PATH, SHIPPED_BY_THE_IMAGE, _declared_tool_actions,
-    _declared_tools, _mechanism_residue, _mechanism_share, _mechanism_shares,
-    _runs_installer, _unjournalled)
+    DECLARED_BY, INSTALLER_PATH, INSTALLER_SOURCE, SHIPPED_BY_THE_IMAGE,
+    _declared_tool_actions, _declared_tools, _mechanism_residue,
+    _mechanism_share, _mechanism_shares, _runs_installer, _unjournalled)
 from _lint_tool_roles import (  # noqa: E402
     BOTH_ON, GUARDED_ON, REQUIRED_ON, _PREAMBLE, _derive_tool_roles,
     _tool_roles)
