@@ -12,9 +12,13 @@ from _bridge import (  # noqa: E402
     framer, next_stream_data, prove_scan, put_command, stub_stream,
     stream_response)
 
-# The bridge's own line for a delivered legacy command, which is what proves
-# the file was left in place and the drain delivered it again.
-_DELIVERED_AFTER = '[STREAM] DELIVERED legacy={0}….json id='
+# What the bridge prints for a delivery of the command this test drops.
+# Matched on the command's own id and nothing else: the delivered line also
+# carries the redacted file name, and its ellipsis is written as UTF-8 by the
+# child and decoded by this process through the locale encoding, so a literal
+# ellipsis in the pattern matches on the platforms where both sides are UTF-8
+# and silently matches nothing on the ones where they are not.
+_DELIVERED_KEPT = ' id=kept'
 
 
 # The fault a redelivery needs: the drain removes a command file it has
@@ -227,7 +231,7 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
             # a file left in place can produce.
             redeliveries = sum(
                 1 for line in served
-                if _DELIVERED_AFTER.format(TOK) in line)
+                if _DELIVERED_KEPT in line)
             assert redeliveries >= 2, ''.join(served[-400:])
         finally:
             response.close()
