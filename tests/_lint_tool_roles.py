@@ -24,11 +24,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _receiver_resolution import _mentions  # noqa: E402
+from _deadline_reach import _mentions  # noqa: E402
 from _util import ROOT  # noqa: E402
 
 # `_mentions` is defined once for this tree, in
-# `tests/_receiver_resolution.py`, and imported rather than restated: its
+# `tests/_deadline_reach.py`, and imported rather than restated: its
 # second argument is a set of names, and a guard names one, so every call
 # here wraps the name in a set of one.
 
