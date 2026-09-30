@@ -8,11 +8,13 @@ tables to the skip set `tests/_lint_tool_roles.py` derives — so "which
 mechanism answers this tool" is one file's question and never a
 control's.
 
-Split out of `tests/test_ci_lint_tools.py`, which owns the controls, for
-the reason the role recognisers moved out of it for the same one: the
-mechanisms and the controls that hold them to the tree are read
-separately on purpose. Nothing here reads a control name; everything
-here answers one question about one tree.
+Split out of `tests/test_ci_lint_tools.py`, which owns the controls for
+the installer's half of the lint-tool set — the declaration, exemption and
+closure controls are in `tests/test_ci_tool_declarations.py` and read
+these tables too — for the reason the role recognisers moved out of it for
+the same one: the mechanisms and the controls that hold them to the tree
+are read separately on purpose. Nothing here reads a control name;
+everything here answers one question about one tree.
 """
 import re
 import sys
@@ -80,7 +82,7 @@ INSTALLER_SOURCE = ROOT / INSTALLER_PATH
 # names the tool, which the exempt-tool control derives from the workflows
 # themselves; that is what stopped the `node` entry this branch removed
 # from coming straight back, since restoring it with its own reason text
-# satisfied every other control in this file.
+# satisfied every other control then in the tree.
 SHIPPED_BY_THE_IMAGE = {
     'git': 'every job here checks out through actions/checkout, which '
            'runs git, and the hosted images ship it',

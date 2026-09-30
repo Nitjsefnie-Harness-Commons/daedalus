@@ -884,6 +884,7 @@
     "_run_node": {"python": ["tests/_gm_harness.py"]},
     "_run_spellings": {"python": ["tests/_sweep_launch_scan.py"]},
     "_runner": {"python": ["tests/_coverage_comment_publication.py"]},
+    "_runner_doors": {"python": ["tests/_suite_jobs.py"]},
     "_runner_seeding": {"python": ["tests/_control_writes.py"]},
     "_runs_installer": {"python": ["tests/_lint_tool_mechanisms.py"]},
     "_runs_suites": {"python": ["tests/_suite_jobs.py"]},

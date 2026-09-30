@@ -182,7 +182,7 @@ jobs:
       # The suite step below globs every suite, and those suites skip on
       # node. A release job that runs them inherits node from the hosted
       # image and says nothing, which is the state the declaration control
-      # in test_ci_lint_tools.py refuses — a published release is the last
+      # in test_ci_tool_declarations.py refuses — a published release is the last
       # place a silently-skipped suite belongs. Above the suite step, not
       # beside it: the control reads ORDER, and a declaration after the
       # suites have already run declares nothing.
