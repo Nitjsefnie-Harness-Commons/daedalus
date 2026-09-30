@@ -310,8 +310,15 @@ def test_the_state_signature_separates_a_retired_key_from_a_current_one(tmp):
     The property is what the term is FOR, and dropping the term fails it.
     """
     items = {'k': None}
-    current = DeferredContainer(dict(items), None, 'dict')
-    retired = DeferredContainer(dict(items), None, 'dict',
+    # The SAME identity, which is what a replacement shares: a state's
+    # container and the one that replaces it are the same object as far as
+    # the flow is concerned, and two containers with different identities
+    # never sign alike whatever the marker says. The first version of this
+    # control used two identities and therefore passed with the term
+    # removed.
+    identity = object()
+    current = DeferredContainer(dict(items), None, 'dict', identity=identity)
+    retired = DeferredContainer(dict(items), None, 'dict', identity=identity,
                                 stale=frozenset({'k'}))
     assert stored_signature(current) != stored_signature(retired), (
         'two containers differing only in freshness must not sign alike')
