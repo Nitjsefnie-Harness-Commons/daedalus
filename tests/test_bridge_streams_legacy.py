@@ -92,7 +92,7 @@ def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
             writer.flush()
             os.fsync(writer.fileno())
             writer.close()
-            delivered = frame('the completed legacy file', timeout=5)
+            delivered = frame('the completed legacy file')
             assert delivered.get('id') == 'held-open', delivered
 
             in_progress = commands / f'.{TOK}.json.tmp'
@@ -103,7 +103,7 @@ def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
             assert in_progress.exists(), (
                 'the reader deleted a sibling temp file')
             os.replace(in_progress, legacy)
-            renamed = frame('the renamed legacy file', timeout=5)
+            renamed = frame('the renamed legacy file')
             assert renamed.get('id') == 'atomic', renamed
         finally:
             if not writer.closed:
@@ -135,7 +135,7 @@ def test_a_legacy_file_the_bridge_cannot_remove_is_delivered_once(tmp):
             frame = frame_reader(response, served)
             prove_scan(base, frame, 'first', TOK)
             legacy.write_text('{"id":"kept","code":"1"}', encoding='utf-8')
-            delivered = frame('the legacy command', timeout=5)
+            delivered = frame('the legacy command')
             assert delivered.get('id') == 'kept', delivered
             # The drain writes the frame before the removal it could not do,
             # so the file stays and every scan delivers it again under the
@@ -148,7 +148,7 @@ def test_a_legacy_file_the_bridge_cannot_remove_is_delivered_once(tmp):
             status, _ = put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '2'})
             assert status == 200, status
-            after = frame('the command past the repeats', timeout=5)
+            after = frame('the command past the repeats')
             assert after.get('id') == 'after', after
             assert legacy.exists(), 'the file was removed after all'
         finally:

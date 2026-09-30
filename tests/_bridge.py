@@ -231,9 +231,9 @@ def frame_reader(response, served):
     """
     seen = set()
 
-    def read(what, **kwargs):
+    def read(what):
         while True:
-            got = framer(response, served)(what, **kwargs)
+            got = framer(response, served)(what)
             did = got.get('_did')
             if not isinstance(did, str) or did not in seen:
                 seen.add(did)
