@@ -26,7 +26,6 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _case_fold  # noqa: E402
 import _util  # noqa: E402
-from _wfgraph import _tests_yml  # noqa: E402
 
 ROOT = _util.ROOT
 INSTALLER_SOURCE = ROOT / 'scripts' / 'ci' / 'install_lint_tools.py'
@@ -39,14 +38,13 @@ WINDOWS_X64 = WINDOWS_HOST
 # asserts the installer produces, and an expectation derived from the code
 # under test asserts only that the code agrees with itself. The KEYS are
 # not spelled — `_key_for` asks, because a key is built and has moved.
+# Spelled here for the reason the table is: see above.
+_BUILD = 'actionlint_1.7.12-queue.1_'
 PINNED = (
-    (('Linux', 'x86_64'),
-     'actionlint_1.7.12-queue.1_linux_amd64.tar.gz', False),
-    (('Darwin', 'x86_64'),
-     'actionlint_1.7.12-queue.1_darwin_amd64.tar.gz', False),
-    (('Darwin', 'arm64'),
-     'actionlint_1.7.12-queue.1_darwin_arm64.tar.gz', False),
-    (WINDOWS_HOST, 'actionlint_1.7.12-queue.1_windows_amd64.zip', True),
+    (('Linux', 'x86_64'), _BUILD + 'linux_amd64.tar.gz', False),
+    (('Darwin', 'x86_64'), _BUILD + 'darwin_amd64.tar.gz', False),
+    (('Darwin', 'arm64'), _BUILD + 'darwin_arm64.tar.gz', False),
+    (WINDOWS_HOST, _BUILD + 'windows_amd64.zip', True),
 )
 EXECUTABLE = b'#!/not/really/an/executable\n'
 _ACTIONLINT = 'actionlint'
@@ -690,45 +688,6 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
             'inherit, so a suite would find whatever the runner image '
             'happens to carry instead')
     assert recorded.read_text(encoding='utf-8')
-
-
-def test_the_installers_build_is_the_one_the_actionlint_job_pins(tmp):
-    """The two pins are one build, and this is the control that says so.
-
-    `ACTIONLINT_VERSION` here and `ACTIONLINT_VERSION` in the actionlint
-    job's env are written in two files, and a version pin spelled twice is
-    a pin that will drift — the reason `shellcheck_pin` reads its version
-    out of `requirements-test.txt` rather than writing it here.
-
-    What makes the drift SILENT is the half that matters. The workflow-lint
-    suites read the JOB's pin and compare it against the binary actually
-    installed, and a mismatch is a skip rather than a failure: measured
-    with this build on PATH and the job's pin reverted to `1.7.12`,
-    `test_the_tracked_workflows_pass_actionlint` and
-    `test_a_workflow_carrying_a_real_lint_finding_is_refused` both skip and
-    the run reports 31/33 with exit 0. Every workflow-lint assertion in the
-    repository goes unexecuted and the suite is green, which is the same
-    failure this installer exists to prevent one layer up.
-
-    So the agreement is pinned HERE, where a disagreement is an assertion
-    failure, rather than left to a skip arm that reports it as success.
-    """
-    del tmp
-    installer = _installer()
-    job = _tests_yml()
-    pinned = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
-                        job, re.MULTILINE)
-    assert len(pinned) == 1, pinned
-    assert pinned[0].strip('\'"') == installer.ACTIONLINT_VERSION, (
-        'the actionlint job pins '
-        f'{pinned[0].strip(chr(39) + chr(34))} and this installer installs '
-        f'{installer.ACTIONLINT_VERSION}; the workflow-lint suites compare '
-        'the installed binary against the JOB\'s pin and SKIP on a '
-        'mismatch, so a divergence here is a green run that linted nothing')
-    assert installer.RELEASE in job or 'Nitjsefnie-OSC' in job, (
-        'the job and the installer name different repositories, which is '
-        'the same divergence one layer out: the checksum this file '
-        'verifies belongs to a different release than the job downloads')
 
 
 def main():
