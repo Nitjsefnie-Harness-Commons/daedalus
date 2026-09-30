@@ -189,10 +189,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         results = [expression.key, expression.value] if isinstance(
             expression, ast.DictComp) else [expression.elt]
         if isinstance(expression, ast.GeneratorExp):
-            # The one site the runtime evaluates a generator's element. The
-            # statement-level walk holds a bound generator's element back
-            # (`_own_nodes`), and this is where the hold is released for every
-            # consumer the model does follow.
+            # The one site the MODEL evaluates a generator's element, and only
+            # for the consumers it follows: `zip`, `enumerate` and a
+            # hand-popped `deque` advance the generator without the flow seeing
+            # it, and `_read_generators` is the only signal they leave. The
+            # walk holds a bound generator's element back, and this releases
+            # it -- for every state, because a state that never releases keeps
+            # facts the runtime has already moved.
             for entry in active:
                 invalidate_unmodelled(expression.elt, entry)
         for result in results: active = check_expression(

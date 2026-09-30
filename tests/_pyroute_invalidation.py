@@ -47,9 +47,10 @@ CONTAINER_MUTATORS = (_mutating_surface(list) | _mutating_surface(dict)
 
 _NESTED_SCOPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
                   ast.ClassDef)
-# The statements that bind their own value to a name. Nothing else does: a
-# generator expression reached through any other position is a value this
-# statement hands to something the model cannot follow, which may consume it.
+# The statements that bind a name to a value expression the statement carries.
+# A `for` target, `with ... as`, `except ... as` and an import all bind names,
+# but none binds a generator expression node; a `for` that did would be a false
+# green, because the loop consumes its iterable in the statement that binds it.
 _BINDING = (ast.Assign, ast.AnnAssign, ast.NamedExpr)
 _SEQUENCE_KINDS = ('list', 'tuple', 'set')
 # The sequence kinds whose instances take `x[k] = v` or `del x[k]`; any
@@ -82,17 +83,16 @@ def _own_nodes(statement, held):
     `held`: False, or an expression the rule was handed whole."""
     pending = [(statement, held)]
     while pending:
-        node, bound = pending.pop()
+        node, held = pending.pop()
         yield node
         if isinstance(node, _NESTED_SCOPES):
             continue
         if isinstance(node, ast.GeneratorExp):
-            if not bound:
+            if not held:
                 pending.append((node.elt, False))
             pending.extend((child, False) for child in node.generators)
             continue
-        binding = isinstance(node, _BINDING)
-        pending.extend((child, binding)
+        pending.extend((child, isinstance(node, _BINDING))
                        for child in ast.iter_child_nodes(node))
 
 
@@ -324,11 +324,13 @@ def _read_generators(nodes, state):
     merely passed on. It is also the only signal a consumer the model does
     not follow -- `zip`, `enumerate`, a `deque` popped by hand -- leaves
     behind, because that consumer advances the generator without the flow
-    ever seeing it. An expression handed to the rule whole reaches the flow
-    through `check_store`, and a `for` iterable is one of those: the flow
-    consumes it in the statement that hands it over, so the element of a
-    handed-over generator is released by the flow itself, in
-    `consume_generator`."""
+    ever seeing it.
+
+    An expression handed to the rule whole is held instead, and the flow
+    releases exactly one of those: a `for` iterable, which it consumes in the
+    statement that hands it over. An `if` or `while` test, a `match` guard,
+    a `with` context and a `def` default keep the hold for the rest of the
+    flow, which is right -- the runtime advances a generator in none."""
     for node in nodes:
         if not isinstance(node, ast.Name) or not isinstance(node.ctx,
                                                             ast.Load):
