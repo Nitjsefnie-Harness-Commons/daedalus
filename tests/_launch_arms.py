@@ -457,7 +457,7 @@ LAUNCH_ARMS = (
      'anything but a method on a bare name is not machinery', 'CONTROLLED',
      'factory-origin-cannot-be-named-is-unproved'),
     # mr.while-guard: see ARM_NOTES in _launch_arm_records.
-    ('mr.while-guard', '_launch_audit.py', 485, 'replace:485',
+    ('mr.while-guard', '_launch_audit.py', 485, 'replace:485:while True:',
      'while base in binding_map and base not in seen \\ and base not in a...',
      'the base-following loop stops on an unheld, seen or ambiguous base',
      'CONTROLLED', STEP_CEILING_CONTROL),

@@ -57,11 +57,11 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
     limb."""
     import builtins
     tree = ast.parse(source) if tree is None else tree
-    # LOAD-BEARING: one materialised BFS, walked below by the SAME passes
-    # in the SAME order. They are not independent — the pass that appends
-    # to `safe_names` is read by the launch pass, and `defined_names` is
-    # read by `derives` during the fixpoint — so merging them into one
-    # loop, or reordering them, changes answers.
+    # LOAD-BEARING: one materialised BFS, walked below by the passes in
+    # their existing order, which is forced by what each reads: the pass
+    # appending to `safe_names` is read by the launch pass, and
+    # `defined_names` by `derives` during the fixpoint below. Reorder them
+    # and `proved_fixed` reads `bound` before the fixpoint assigns it.
     nodes = [*ast.walk(tree)]
     safe_names = set(dir(builtins))
     partial_aliases = {'functools.partial', 'partial'}
@@ -264,10 +264,10 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
             for arg, default in zip(args.kwonlyargs, args.kw_defaults):
                 if default is not None:
                     bindings.append((arg.arg, default))
-            # LOAD-BEARING: `ast.walk(outer)` includes a nested `inner`'s
-            # returns and yields, so a return is attributed to EVERY
-            # enclosing function rather than to its nearest — a different
-            # answer, and the fixpoint below classifies on this table.
+            # LOAD-BEARING on the TABLE the fixpoint below classifies on:
+            # `ast.walk(outer)` includes a nested `inner`'s returns and
+            # yields, so a return lands on EVERY enclosing function rather
+            # than the nearest: it drops table rows, not answers.
             for statement in ast.walk(node):
                 if isinstance(statement, ast.Return) and statement.value:
                     returns.append((node.name, statement.value))

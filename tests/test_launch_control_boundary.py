@@ -34,17 +34,28 @@ def _control_population():
 
 
 def _refused_lines(here, refusals):
-    """The line numbers this file's OWN refusals name, as a set."""
-    lines = set()
+    """How many of this file's OWN refusals name each of its lines.
+
+    A count rather than a set, because the reach this control does NOT
+    have is a statement about sites named by SEVERAL refusals, and a set
+    has already thrown the multiplicity away.
+    """
+    lines = {}
     for refusal in refusals:
         match = _NAMES_A_LINE.match(refusal)
         if match and match.group('path') == here:
-            lines.add(int(match.group('line')))
+            line = int(match.group('line'))
+            lines[line] = lines.get(line, 0) + 1
     return lines
 
 
 def _dropped_sites():
-    """Every site the control's keep rule drops, and whether it is refused.
+    """`(reported, dropped, multiply-refused)` for the whole tree.
+
+    `dropped` rows carry whether any refusal names them; the third value
+    counts how many of them TWO OR MORE do, which is the reach this
+    control does not have. Both are returned so a reader re-derives them
+    by calling this rather than trusting a number in a docstring.
 
     The population and the rule are the control's own, both read from
     `tests/_launch_keep.py`, so narrowing either moves this control's
@@ -56,6 +67,7 @@ def _dropped_sites():
     """
     dropped = []
     reported = 0
+    multiply = 0
     for here, source in _control_population():
         sink = []
         refused = _refused_lines(here, launch_refusals(source, here, sink))
@@ -63,8 +75,10 @@ def _dropped_sites():
             reported += 1
             if control_keeps(head, kind):
                 continue
-            dropped.append((here, line, head, kind, line in refused))
-    return reported, dropped
+            naming = refused.get(line, 0)
+            multiply += naming > 1
+            dropped.append((here, line, head, kind, bool(naming)))
+    return reported, dropped, multiply
 
 
 def test_every_bounded_site_the_launch_control_drops_is_a_refusal(tmp):
@@ -74,15 +88,17 @@ def test_every_bounded_site_the_launch_control_drops_is_a_refusal(tmp):
     message, because a fix that repaired only the first would meet the
     rest by rerunning.
 
-    What this does NOT reach: 135 of the 139 dropped sites are named by
-    two or more refusals, so moving one refusal class leaves it green. The
-    sink's own contents are pinned by
+    What this does NOT reach: on the tree this was last measured, 150 of
+    the 155 dropped sites were named by two or more refusals, so moving
+    one refusal class leaves it green. `_dropped_sites` returns both, so
+    re-measure by calling it rather than by editing these. The sink's own
+    contents are pinned by
     `test_the_sink_pins_the_unplaced_and_ambiguous_branches` in
     `test_repo_layout.py`; this control reaches the refusal text, not the
     sink.
     """
     del tmp
-    reported, dropped = _dropped_sites()
+    reported, dropped, _ = _dropped_sites()
     assert reported, (
         'the launch analyser reported no bounded site in the tracked tree, '
         'so the boundary below was not checked at all')
@@ -95,6 +111,27 @@ def test_every_bounded_site_the_launch_control_drops_is_a_refusal(tmp):
         'control drops are named by no refusal:\n'
         + '\n'.join(f'  {here}:{line} a {kind} bound site at a {head} head'
                     for here, line, head, kind, _ in orphans))
+
+
+def test_a_non_python_tracked_path_is_outside_the_population(tmp):
+    """The `.py` half of the population, on a name that is not one.
+
+    `iter_tree_files` hands back every tracked path, 87 of which are not
+    Python, and `bound_sites` parses whatever it is given — so a Markdown
+    file reaching it raises `SyntaxError` inside this control rather than
+    failing a check. Every fixture in this suite and in the control's own
+    is named `probe.py`, so nothing else in either file would notice the
+    `.py` half going away.
+    """
+    del tmp
+    assert any(path.suffix != '.py' for path in iter_tree_files(ROOT)), (
+        'the tree holds no tracked non-Python path, so this fixture can no '
+        "longer tell `in_launch_population` from `lambda: True`")
+    assert not in_launch_population('notes.md', '# timeout\n'), (
+        'a tracked Markdown file is inside the launch control\'s population, '
+        'and the control parses what it is given: the `.py` half of '
+        '`in_launch_population` is unpinned, and the first non-Python file '
+        'this tree grows raises SyntaxError inside it')
 
 
 def test_a_refusal_line_is_parsed_and_not_matched_as_a_substring(tmp):
