@@ -215,6 +215,46 @@ def go(holder):
         pass
     return build(kid)(timeout=1)
 ''',
+    'a-match-mapping-rest-rebinding-the-name': '''def build(kid):
+    def run(timeout=None):
+        return kid.wait(timeout)
+
+    return run
+
+
+def go(holder):
+    kid = []
+    match holder:
+        case {'k': 1, **kid}:
+            pass
+    return build(kid)(timeout=1)
+''',
+    'an-import-rebinding-the-name': '''def build(kid):
+    def run(timeout=None):
+        return kid.wait(timeout)
+
+    return run
+
+
+def go():
+    import kid
+    kid = []
+    return build(kid)(timeout=1)
+''',
+    'a-nested-def-rebinding-the-name': '''def build(kid):
+    def run(timeout=None):
+        return kid.wait(timeout)
+
+    return run
+
+
+def go():
+    def kid():
+        return []
+
+    kid = []
+    return build(kid)(timeout=1)
+''',
     'a-receiver-that-is-not-a-parameter': '''def build():
     def run(args, *, timeout):
         return kids.wait(timeout)
