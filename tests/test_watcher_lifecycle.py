@@ -101,6 +101,26 @@ def _still_watching(parent):
         f'(exit {parent.proc.returncode}):\n{parent.captured()}')
 
 
+def _expected_exit(name):
+    """The returncode that means the test's own `name` ended the aggregator.
+
+    `None` off POSIX, and the platform is asked BEFORE the constant is
+    named, because a call site that writes `-signal.SIGKILL` in an
+    argument raises `AttributeError` on Windows before any guard inside
+    the callee can act. Asking here means no call site can forget, and
+    adding one cannot spell a constant that does not exist there.
+
+    `Popen.kill()` on Windows is `TerminateProcess`, which reports 1 - the
+    same code an aggregator exiting on its own reports - so the question is
+    not decidable there at all, and the graceful signal there is
+    `CTRL_BREAK_EVENT` rather than SIGINT. `None` says "not decidable"
+    once, and the check that consumes it does nothing.
+    """
+    if sys.platform.startswith('win'):
+        return None
+    return -getattr(signal, name)
+
+
 def _ended_by_the_signal(parent, expected):
     """The aggregator's return code, which settles what a sample cannot.
 
@@ -117,13 +137,11 @@ def _ended_by_the_signal(parent, expected):
     `_still_watching` silent in that last case. That gap was provoked 30
     times in 64 runs before this check existed.
 
-    `Popen.kill()` on Windows is `TerminateProcess`, which reports 1 - the
-    same code an aggregator exiting on its own reports - so the question
-    is not decidable there and the check is not made. That is a real gap
-    on the Windows legs, and saying so is cheaper than a check that
-    cannot fail.
+    `expected` is None wherever the question is not decidable, and that
+    is a real gap on the Windows legs rather than a check that cannot
+    fail.
     """
-    if sys.platform.startswith('win'):
+    if expected is None:
         return
     assert parent.proc.returncode == expected, (
         f'the aggregator to have been ended by the test signal {expected} '
@@ -158,19 +176,31 @@ def _held_at_the_reading(fake, parent):
 
 
 def test_the_children_die_with_their_parent(tmp):
+    """No second liveness read after `await_gone`, and that is deliberate.
+
+    `await_gone` returns only when no pid answers `_pid_alive`, and
+    `_pid_alive` is not monotone - a pid that exits between its own two
+    checks, or a pid the runner has recycled in the meantime, can read
+    alive after it read dead. A second read of the same predicate
+    therefore adds a red and no information: a real survivor raises
+    inside `await_gone`, with a message that names the pids and the
+    parent's exit. A CI leg carried that removed assert's message and
+    nothing else, and could not be read because the pre-kill read
+    carried the same one.
+    """
     fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
     parent = _aggregator(tmp, fake)
     try:
         pids = _held_at_the_reading(fake, parent)
-        assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
+        assert all(_pid_alive(pid) for pid in pids), (
+            f'both watchers alive at the liveness reading, each held '
+            f'inside a call of its own: {pids}\n{parent.captured()}')
         _still_watching(parent)
         parent.proc.kill()
         parent.proc.wait(timeout=60)
-        _ended_by_the_signal(parent, -signal.SIGKILL)
+        _ended_by_the_signal(parent, _expected_exit('SIGKILL'))
         waits.await_gone(pids, parent, f'children {pids} to die with the '
                          f'parent', _pid_alive)
-        assert not any(_pid_alive(pid) for pid in pids), (
-            pids, parent.captured())
     finally:
         fake.open_gate()
         parent.stop()
@@ -182,7 +212,9 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
     parent = _aggregator(tmp, fake)
     try:
         pids = _held_at_the_reading(fake, parent)
-        assert all(_pid_alive(pid) for pid in pids), (pids, parent.captured())
+        assert all(_pid_alive(pid) for pid in pids), (
+            f'both watchers alive at the liveness reading, each held '
+            f'inside a call of its own: {pids}\n{parent.captured()}')
         _still_watching(parent)
         if sys.platform.startswith('win'):
             parent.proc.send_signal(
@@ -190,11 +222,9 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         else:
             parent.proc.send_signal(signal.SIGINT)
         parent.proc.wait(timeout=60)
-        _ended_by_the_signal(parent, -signal.SIGINT)
+        _ended_by_the_signal(parent, _expected_exit('SIGINT'))
         waits.await_gone(pids, parent, f'children {pids} to leave with a '
                          f'graceful exit', _pid_alive)
-        assert not any(_pid_alive(pid) for pid in pids), (
-            pids, parent.captured())
     finally:
         fake.open_gate()
         parent.stop()
