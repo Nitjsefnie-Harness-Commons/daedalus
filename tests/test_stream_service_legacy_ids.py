@@ -91,6 +91,29 @@ def test_two_identical_legacy_drops_carry_two_delivery_ids(tmp):
     assert len(set(dids)) == 2, dids
 
 
+def test_an_id_the_drain_did_not_mint_is_kept_only_when_it_is_one(tmp):
+    """A publisher's own `_did` is its delivery identity, when it is one.
+
+    A value of some other type is not: the consumer's dedup ledger is a set of
+    strings and the result route drops anything else, so the drain replaces it
+    with an id it can stand behind.
+    """
+    service = _load_service('stream_service_legacy_own_id')
+    kept = Path(tmp) / 'tok_42.json'
+    kept.write_text('{"id":"mine","_did":"publisher-1"}', encoding='utf-8')
+    replaced = Path(tmp) / 'tok_43.json'
+    replaced.write_text('{"id":"mine","_did":7}', encoding='utf-8')
+    frames = []
+
+    assert service.drain_legacy_file(
+        kept, '42', command_ttl=100, frame_writer=frames.append) == 1
+    assert service.drain_legacy_file(
+        replaced, '43', command_ttl=100, frame_writer=frames.append) == 1
+
+    assert frames[0].get('_did') == 'publisher-1', frames
+    assert frames[1].get('_did', '').startswith('legacy-'), frames
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='streamlegacyids_')
