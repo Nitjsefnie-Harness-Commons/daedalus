@@ -31,10 +31,9 @@ def _clone(root, target):
     """The one clone invocation every fixture tree comes from.
 
     A detached source leaves the initial branch name to init.defaultBranch
-    and advises about it on stderr; naming it keeps the clone silent
-    whatever the source's HEAD points at. Git 2.48 also advises about the
-    detached checkout its internal clone performs, so that advice is
-    silenced by its own key.
+    and advises about it on stderr; naming it, and silencing Git 2.48's
+    own advice about its internal detached checkout, keeps the clone
+    silent whatever the source's HEAD points at.
     """
     return subprocess.run(
         ['git', '-c', 'init.defaultBranch=main',
@@ -67,24 +66,34 @@ def _tracked_python(root=ROOT):
     return paths
 
 
-def _enclosing_function(tree, line):
-    """The innermost function whose body spans `line`, else '<module>'."""
-    best_lineno = -1
-    best_name = '<module>'
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            end = getattr(node, 'end_lineno', node.lineno)
-            if node.lineno <= line <= end and node.lineno > best_lineno:
-                best_lineno = node.lineno
-                best_name = node.name
-    return best_name
+def _enclosing_names(tree):
+    """The innermost function spanning every line a call can sit on.
+
+    The question is per CALL and a tracked module holds thousands, so
+    walking the tree once for each cost the allowance-row walk more than
+    the rest of this suite; one walk answers it here instead, the shape
+    `tests/_launch_audit.py` gives its own scope table. The innermost is
+    the span with the highest `lineno` covering the line.
+    """
+    defs = (ast.FunctionDef, ast.AsyncFunctionDef)
+    spans = sorted((node.lineno,
+                    getattr(node, 'end_lineno', node.lineno), node.name)
+                   for node in ast.walk(tree) if isinstance(node, defs))
+    names = {}
+    for lineno, end, name in spans:
+        for line in range(lineno, end + 1):
+            names[line] = name
+    return names
+
+
+def _enclosing_function(names, line):
+    return names.get(line, '<module>')
 
 
 def _call_signature(node):
     """The callee as it is spelled, then its keyword names in order.
 
-    A `**` unpack carries no keyword name, so it contributes nothing
-    here: a row never has to be rewritten when one is introduced.
+    A `**` unpack carries no keyword name, so it contributes nothing here.
     """
     callee = ' '.join(ast.unparse(node.func).split())
     keywords = sorted(kw.arg for kw in node.keywords if kw.arg)
@@ -96,14 +105,12 @@ def _site_signature(tree, line):
 
     The keyword names ride along because `process.wait(timeout=10)` and
     `process.wait()` are different sites, and a positional timeout is not
-    the same call either. The tightest call whose own span holds the
-    line wins, and among those the RIGHTMOST, so a two-line launch
-    sharing its first line with a nested call is ordered the same way on
-    every run rather than by whichever node the traversal reached first.
+    the same call either. The tightest call whose own span holds the line
+    wins, and among those the RIGHTMOST, so a two-line launch sharing its
+    first line with a nested call is ordered the same way on every run.
 
-    The line is the analyser's, and it reports the `ast.Call` it
-    examined, so some call always spans it: `_launch_audit.py` appends
-    `node.lineno` and no other. If that ever stops holding, this raises
+    The line is the analyser's, and it reports the `ast.Call` it examined,
+    so some call always spans it. If that ever stops holding, this raises
     rather than inventing a key for a site it did not find.
     """
     tightest = None
@@ -121,35 +128,45 @@ def _site_signature(tree, line):
     return _call_signature(tightest)
 
 
-def _spelled_signatures(source):
+def _spelled_signatures(tree, names):
     """Each function the file binds, mapped to the calls it spells.
 
     Read from the parse rather than from the allowance table, so a row's
     function and signature are checked against what the file it names can
     actually say, and not against the table's own agreement with itself.
+    `ast.unparse` on every call in every tracked module costs more than
+    the rest of this suite, so only a row-named path is asked.
     """
-    tree = ast.parse(source)
     spelled = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            spelled.setdefault(
-                _enclosing_function(tree, node.lineno), set()
-            ).add(_call_signature(node))
+            enclosing = _enclosing_function(names, node.lineno)
+            spelled.setdefault(enclosing, set()).add(_call_signature(node))
     return spelled
 
 
-def _read_spelled(root, path, cache):
-    """`_spelled_signatures` for one path, read once per control run.
+def _module_record(root, path, cache):
+    """`[source, tree, enclosing]` for one path, read and parsed once.
 
-    `ast.unparse` on every call in every tracked module costs more than
-    the whole rest of this suite, and only the paths a row names are ever
-    asked about.
+    The population walk and the allowance rows ask about the same files
+    and each parsed its own copy of the same source: one representation
+    per file, never two parsers. A row may name a path the population
+    walk never read, which this reads.
     """
     if path not in cache:
-        text = (root / path).read_text(encoding='utf-8',
-                                       errors='surrogateescape')
-        cache[path] = _spelled_signatures(text)
-    return cache[path]
+        cache[path] = [(root / path).read_text(encoding='utf-8',
+                                               errors='surrogateescape')]
+    record = cache[path]
+    if len(record) == 1:
+        tree = ast.parse(record[0])
+        record.extend((tree, _enclosing_names(tree)))
+    return record
+
+
+def _snippet(source):
+    """`_module_record`'s record for a snippet, not a file in the tree."""
+    tree = ast.parse(source)
+    return [source, tree, _enclosing_names(tree)]
 
 
 def _row_text(key):
@@ -157,18 +174,18 @@ def _row_text(key):
     return '(' + ', '.join(repr(part) for part in key) + ')'
 
 
-def _row_defect(key, spelled):
+def _row_defect(key, cache):
     """What a row the analyser did not compute gets wrong, or ''.
 
-    Every shape the table can be mistyped into is a sentence rather
-    than a raise, so a fixer who shortens a key, mistypes a path or
-    approximates a signature gets the answer used everywhere else.
+    Every shape the table can be mistyped into is a sentence rather than a
+    raise, so a fixer who mistypes any component of one gets the answer.
     """
     if len(key) != 4:
         return f'names {len(key)} components, not one site'
     if not isinstance(key[0], str) or not (ROOT / key[0]).is_file():
         return f'names {key[0]!r}, which is not a file in this tree'
-    named = _read_spelled(ROOT, key[0], spelled)
+    _, tree, names = _module_record(ROOT, key[0], cache)
+    named = _spelled_signatures(tree, names)
     if key[2] not in named.get(key[1], set()):
         return (f'{key[0]} spells no {key[2]!r} inside a {key[1]!r}, or '
                 'binds no such function')
@@ -178,10 +195,9 @@ def _row_defect(key, spelled):
 def _shifted_note(key, keyed):
     """The rows a new call of this shape pushed onto a different site.
 
-    A bounded call inserted above baselined ones of the same shape
-    keeps every later ordinal where it was, so the rows below the new
-    ordinal now name the shifted sites — said here rather than left for
-    a fixer to infer.
+    A bounded call inserted above baselined ones of the same shape keeps
+    every later ordinal where it was, so the rows below the new ordinal
+    now name the shifted sites.
     """
     moved = [row for row in keyed if row[:3] == key[:3] and row[3] < key[3]]
     if not moved:
@@ -190,25 +206,27 @@ def _shifted_note(key, keyed):
             + ', '.join(_row_text(row) for row in moved))
 
 
-def _bound_sites(source, here):
+def _bound_sites(record, here):
     """Every in-scope bound site as its key, then the refusal text.
 
     The analyser computes each launch's head, so this consumes its
     structured classification rather than re-parsing the human-readable
     refusal; a message-format change cannot move the rule. The key names
-    the site by shape and position within its function, so an edit above
-    a baselined launch leaves the row alone while a second call of the
-    same shape in the same function becomes a site of its own. A launch
-    whose head the analyser could not read is out of scope by its own
-    stated boundary, named on the refusal rather than dropped. Which
-    sites that boundary keeps is `tests/_launch_keep.py`'s to say, read
-    by the control over the kept-out ones as well.
+    the site by shape and position within its function, so an edit above a
+    baselined launch leaves the row alone while a second call of the same
+    shape in the same function becomes a site of its own. A launch whose
+    head the analyser could not read is out of scope by its own stated
+    boundary, named on the refusal rather than dropped; which sites that
+    boundary keeps is `tests/_launch_keep.py`'s to say.
+
+    `record` is `_module_record`'s, so the control parses each file once
+    however many of its questions ask about it.
     """
-    tree = ast.parse(source)
+    source, tree, names = record
     found = []
     for line, head, kind in bound_sites(source, here, tree=tree):
         if control_keeps(head, kind):
-            found.append((line, _enclosing_function(tree, line),
+            found.append((line, _enclosing_function(names, line),
                           _site_signature(tree, line), kind))
     found.sort()
     seen = {}
@@ -283,8 +301,7 @@ def test_the_inventory_refuses_a_symlinked_tracked_python_file(tmp):
 
 def test_the_suite_clone_is_silent_whatever_the_source_head_state(tmp):
     """Cloning a detached source creates an initial branch, and git advises
-    about the name on stderr unless the clone names it — ten hint lines per
-    clone behind which a real stderr message would hide.
+    about the name on stderr unless the clone names it.
     """
     branch_source = Path(tmp) / 'branch-source'
     _clone(ROOT, branch_source)
@@ -383,24 +400,24 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     Scope is the tracked tree, not a hand-written module list, so a module
     added later is inside its reach with no hand edit. Every tracked
     Python file is read: the analyser refuses a bounded call whatever it
-    calls, and the old `'subprocess' in source` filter hid 440 of the 631
-    tracked files, which is a filter that fails silently.
+    calls, and every filter narrower than that has hidden real sites from
+    this control without a word (#1038, #1155, #1408).
 
     A launch that only reads the local repository, or sits inside an
     enclosing suite or CI bound, is bounded by that; a hang surfaces as
     the enclosing bound, a better failure than a margin on a loaded
-    runner. A launch that can block on a repository lock or the network,
-    or that runs as a standalone tool with nothing above it to catch a
-    hang, keeps a bound and a table row naming it.
+    runner. A launch that can block on a lock or the network, or that
+    runs as a standalone tool with nothing above it, keeps a bound and a
+    table row naming it.
 
     Which sites are in scope, and what makes a launch head readable, is
-    `tests/_launch_audit.py`'s to say and its own docstrings to state.
-    This consumes its structured classification rather than re-parsing
-    the human-readable refusal, so a message-format change cannot move
-    the rule. Reported is in scope, so each one demands a refusal or an
-    allowance row. A placed launch whose head the analyser cannot read
-    is reported at `unreadable` and, on its own, is not re-examined for
-    git: the boundary issue, filed, and not enforced here.
+    `tests/_launch_audit.py`'s to say. This consumes its structured
+    classification rather than re-parsing the human-readable refusal, so a
+    message-format change cannot move the rule. Reported is in scope, so
+    each one demands a refusal or an allowance row. A placed launch whose
+    head the analyser cannot read is reported at `unreadable` and, on its
+    own, is not re-examined for git: the boundary issue, filed, not
+    enforced here.
 
     The allowance is pinned from both sides, and a key is the site's own
     shape rather than a position, so an edit above a baselined launch is
@@ -410,22 +427,20 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     refusal; and a key two live sites share fails. That last one holds by
     the ordinal's construction, so the loop is the tripwire for a counter
     that stopped counting rather than a property the walk can break. One
-    assert reports all four, so a run answers the whole question and not
-    only the class its first failure happened to name. Matching is on the
-    (path, function, signature, ordinal) key, so another function of an
-    allowed module, a second launch of the same shape in an allowed
-    function, and a launch that has changed shape are each a refusal —
-    the exemption cannot be widened by a prefix or substring match, and
-    every finding about a live site names the key to paste.
+    assert reports all four, so a run answers the whole question. Matching
+    is on the (path, function, signature, ordinal) key, so another
+    function of an allowed module, a second launch of the same shape in an
+    allowed function, and a launch that has changed shape are each a
+    refusal, and every finding about a live site names the key to paste.
     """
     del tmp
     live = {}
+    modules = {}
     for path in _tracked_python():
-        source = (ROOT / path).read_text(encoding='utf-8',
-                                         errors='surrogateescape')
-        if not in_launch_population(path, source):
+        record = _module_record(ROOT, path, modules)
+        if not in_launch_population(path, record[0]):
             continue
-        for site in _bound_sites(source, path):
+        for site in _bound_sites(record, path):
             live.setdefault(site[:4], []).append(site[4])
 
     # Ordered by the rendered key, not the tuple, so a row of the wrong
@@ -470,13 +485,12 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                 f'two live bounded sites share the key {_row_text(key)}; the '
                 'ordinal separating repeats of one shape in a function is '
                 'what makes a key name a site')
-    spelled = {}
     for key in rows:
         if not live.get(key):
             findings.append(
                 f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} has no live '
                 'bounded git launch; a stale allowance is a refusal')
-        defect = _row_defect(key, spelled)
+        defect = _row_defect(key, modules)
         if defect:
             findings.append(
                 f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} {defect}; the '
@@ -490,11 +504,9 @@ def test_the_clone_helper_modules_carry_the_git_launch_policy(tmp):
     policy: fail loudly, clone silencing configs, readable argv, and the
     whole _launch_refusals surface red-exercised by LAUNCH_REFUSAL_ROWS.
 
-    This set is exactly the modules that carry the clone helper, chosen
-    because the helper lives there; it is not a list of every module that
-    launches git. The wall-clock bound is enforced tree-wide by
-    test_no_git_subprocess_invocation_carries_a_wall_clock_bound, which
-    reads its scope from the tracked tree.
+    This set is exactly the modules that carry the clone helper, not a list
+    of every module that launches git. The wall-clock bound is enforced
+    tree-wide by the test below, which reads its scope from that tree.
     """
     del tmp
     for name in ('test_repo_layout.py', '_scratch_index.py',
@@ -520,10 +532,9 @@ def test_the_head_label_separates_git_non_git_and_unreadable(tmp):
     that would silently widen the exempt set. The name-bound git shape is
     proven against the real tree-wide rule by a plant; no tracked bounded
     launch has an unreadable head to plant, so the unresolved-name shape
-    is pinned here against the real analyser, with the other shapes beside
-    it. The container shape pins the multi-argv branch (deleting it leaves
-    this shape unlabelled) and the interpreter shape pins the sys.executable
-    recognition in first_word, so neither branch is a line with no entry.
+    is pinned here. The container and interpreter shapes pin the multi-argv
+    branch and the `sys.executable` recognition, so neither is a line with
+    no entry.
     """
     del tmp
     shapes = (
@@ -568,21 +579,17 @@ def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
     """machinery_route's `seen` guard is load-bearing, and its mutant does
     not answer wrong — it does not stop.
 
-    A cycle is the only input the guard answers: every other one is
-    decided by an exit that needs no guard, a base the bindings table
-    does not hold, a name bound twice, or a target that is not a bare
-    name. So a cycle is the only shape that can tell whether the guard
-    is there, and its absence is a loop rather than a value. The step
-    count is what can tell that; `_step_ceiling` has why it is taken in
-    a child process, and why the count covers the whole analysis rather
-    than one frame.
+    A cycle is the only input the guard answers: every other one is decided
+    by an exit that needs no guard, and its absence is a loop rather than a
+    value. The step count is what can tell that; `_step_ceiling` has why it
+    is taken in a child process.
 
-    The two assertions pin the two halves of that. `child != os.getpid()`
-    pins the BOUNDARY, and it is the control that holds: an in-process
+    The two assertions pin the two halves. `child != os.getpid()` pins the
+    BOUNDARY, and it is the control that holds: an in-process
     `within_step_ceiling` returns this process's pid and goes red.
-    `sys.gettrace() is tracer` pins the SYMPTOM — the caller's tracer slot
-    is unchanged — and it is not the boundary on its own, because an
-    in-process version that restores cleanly passes it too.
+    `sys.gettrace() is tracer` pins the SYMPTOM, and it is not the boundary
+    on its own, because an in-process version that restores cleanly passes
+    it too.
     """
     del tmp
     source = ("import importlib\n"
@@ -606,18 +613,18 @@ def test_a_bounded_launch_key_survives_an_edit_above_the_site(tmp):
     exists to clear, planted here at forty lines rather than one so
     the shape is the one a real relocation produces.
 
-    The key is the row minus its refusal, because the refusal names
-    the line by design: it is the failure text, not the identity. The
-    fixture is pinned to exactly one site so an analyser that stopped
-    reporting cannot make the comparison pass on two empty lists.
+    The key is the row minus its refusal, because the refusal names the
+    line by design: it is the failure text, not the identity. The fixture
+    is pinned to one site so an analyser that stopped reporting cannot
+    make the comparison pass on two empty lists.
     """
     del tmp
     head = ('import subprocess\n'
             'def reap(process):\n')
     launch = '    process.wait(timeout=10)\n'
-    before = _bound_sites(head + launch, 'probe/reap.py')
-    after = _bound_sites(
-        head + '    # an unrelated edit above the launch\n' * 40 + launch,
+    before = _bound_sites(_snippet(head + launch), 'probe/reap.py')
+    after = _bound_sites(_snippet(
+        head + '    # an unrelated edit above the launch\n' * 40 + launch),
         'probe/reap.py')
     assert len(before) == 1, before
     assert [row[:-1] for row in before] == [row[:-1] for row in after], (
@@ -629,49 +636,48 @@ def test_a_launch_key_separates_keywords_unpacks_and_repeats(tmp):
 
     Two calls that differ only in their keywords are two sites, so the
     keyword names are in the key; a `**` unpack names no keyword, so it
-    adds nothing to the key and a row survives its introduction; and two
-    identical calls in one function are two sites, which is what the
-    ordinal is for. Each is driven through the real analyser, so a
-    signature that stopped reading its keywords, or an ordinal that
-    stopped counting, cannot leave the table's rows passing.
+    adds nothing and a row survives its introduction; and two identical
+    calls in one function are two sites, which is what the ordinal is for.
+    Each is driven through the real analyser, so a signature that stopped
+    reading its keywords, or an ordinal that stopped counting, cannot leave
+    the table's rows passing.
     """
     del tmp
-    keyed = _bound_sites(
+    keyed = _bound_sites(_snippet(
         'import subprocess\n'
         'def reap(process):\n'
         '    process.wait(timeout=10)\n'
-        "    process.wait(**{'timeout': 10, 'shell': True})\n",
+        "    process.wait(**{'timeout': 10, 'shell': True})\n"),
         'probe/keywords.py')
     assert [row[2] for row in keyed] == [
         'process.wait(timeout)', 'process.wait()'], keyed
-    unpacked = _bound_sites(
+    unpacked = _bound_sites(_snippet(
         'import subprocess\n'
         'def reap(process):\n'
-        "    process.wait(**{'timeout': 10})\n", 'probe/unpack.py')
+        "    process.wait(**{'timeout': 10})\n"), 'probe/unpack.py')
     assert [row[2] for row in unpacked] == ['process.wait()'], unpacked
-    repeated = _bound_sites(
+    repeated = _bound_sites(_snippet(
         'import subprocess\n'
         'def reap(process):\n'
         '    process.wait(timeout=10)\n'
-        '    process.wait(timeout=10)\n', 'probe/repeat.py')
+        '    process.wait(timeout=10)\n'), 'probe/repeat.py')
     assert [row[3] for row in repeated] == [1, 2], repeated
 
 
 def test_a_mistyped_or_moved_allowance_row_is_named_not_raised(tmp):
     """A row the analyser never computed is a sentence, never a raise.
 
-    A fixer's first draft after this rekey is the old (path, line,
-    function) row, so a short key, a path that does not resolve and a
-    guessed signature are shapes this control must answer in its own
-    words rather than with a traceback — and ordering the table by the
-    tuple raises on that first draft, an int meeting a str. A new call
-    of a shape that already has rows also leaves those rows naming other
-    sites, which the unplaced message now says.
+    A fixer's first draft after this rekey is the old (path, line, function)
+    row, so a short key, a path that does not resolve and a guessed
+    signature are shapes this control must answer in its own words rather
+    than with a traceback — and ordering the table by the tuple raises on
+    that first draft, an int meeting a str. A new call of a shape that
+    already has rows also leaves those rows naming other sites.
     """
     del tmp
     real = ('tests/_drain.py', 'kill_and_drain', 'process.wait(timeout)', 1)
-    spelled = {}
-    assert _row_defect(real, spelled) == '', real
+    modules = {}
+    assert _row_defect(real, modules) == '', real
     for key, expected in (
             (('tests/_drain.py',), 'names 1 components'),
             (('tests/_drain.py', 'kill_and_drain'), 'names 2 components'),
@@ -681,7 +687,7 @@ def test_a_mistyped_or_moved_allowance_row_is_named_not_raised(tmp):
              'spells no'),
             (('tests/_drain.py', 'kill_and_drain', 'process.wait(t=5)', 1),
              'spells no')):
-        defect = _row_defect(key, spelled)
+        defect = _row_defect(key, modules)
         assert expected in defect, (key, defect)
     old = ('run_tests.py', 52, '_terminate_and_reap')
     assert [len(k) for k in sorted([old, real], key=_row_text)] == [3, 4]
