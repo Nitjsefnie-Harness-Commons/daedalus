@@ -243,7 +243,12 @@ def _indexed_value(node, state, operands, analyze):
              if base is not None else None)
 
     def step(index):
-        items = {0: start, 1: stream.positions.get(index, stream.unplaced)}
+        # `items` is keyed by a tuple position AND by the unknown-key slot,
+        # whose key is an `object`, so the dict is left un-annotated: an
+        # inferred `dict[int, ...]` is exactly the type error the ratchet
+        # names.
+        items: dict = {0: start, 1: stream.positions.get(index,
+                                                         stream.unplaced)}
         if stream.unplaced is not None:
             items[DYNAMIC_KEY] = stream.unplaced
         return DeferredContainer(items, 2, 'tuple')
