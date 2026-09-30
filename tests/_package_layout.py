@@ -17,6 +17,7 @@ BRIDGE_PACKAGE = (
     'env_config.py',
     'http_transport.py',
     'json_body.py',
+    'legacy_ids.py',
     'log_safe.py',
     'mcp_bootstrap.py',
     'parent_watch.py',
