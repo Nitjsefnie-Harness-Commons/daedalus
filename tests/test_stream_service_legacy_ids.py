@@ -130,6 +130,39 @@ def test_a_failed_removal_holds_the_generation_a_name_reached(tmp):
     assert held != started, (held, started)
 
 
+def test_a_publisher_replacing_an_unremovable_file_gets_another_id(tmp):
+    """A different file at a name is a different command, vacate or not.
+
+    This is the case a vacate cannot report: the removal failed, so this
+    drain never emptied the name, and only the object standing at it says
+    anything changed. It cannot be a recycled inode either — a file that is
+    still there holds its own — so the generation is the only thing standing
+    between the two commands, and a reader that saw one id for both would
+    drop the second.
+    """
+    service = _load_service('stream_service_legacy_replaced')
+    legacy = Path(tmp) / 'tok.json'
+    in_progress = Path(tmp) / '.tok.json.tmp'
+    legacy.write_text('{"id":"first","code":"1"}', encoding='utf-8')
+    frames = []
+
+    with _refusing_unlink(legacy.name):
+        assert service.drain_legacy_file(
+            legacy, None, command_ttl=100,
+            frame_writer=frames.append) == 1
+        in_progress.write_text(
+            '{"id":"second","code":"1"}', encoding='utf-8')
+        os.replace(in_progress, legacy)
+        assert service.drain_legacy_file(
+            legacy, None, command_ttl=100,
+            frame_writer=frames.append) == 1
+
+    assert [frame.get('id') for frame in frames] == ['first', 'second'], frames
+    dids = [frame.get('_did') for frame in frames]
+    assert all(isinstance(did, str) and did for did in dids), frames
+    assert len(set(dids)) == 2, dids
+
+
 def test_sequential_drops_at_one_name_carry_distinct_ids(tmp):
     """One name re-dropped is as many commands as drops.
 
