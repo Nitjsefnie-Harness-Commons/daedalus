@@ -23,6 +23,7 @@ no workflow is one this file does not look at, and the bound on what the
 walk can see is stated in `tests/_suite_jobs.py` where it lives.
 """
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -32,6 +33,7 @@ import _util  # noqa: E402
 from _lint_tool_roles import (  # noqa: E402
     _derive_tool_roles, _tool_roles)
 from _suite_jobs import NAMES, RUNNER, _door_jobs  # noqa: E402
+from _wfgraph import _tests_yml  # noqa: E402
 
 ROOT = _util.ROOT
 # The shared installer's path, and the name it writes what it installed
@@ -517,6 +519,46 @@ def test_a_recorded_tool_path_cannot_find_is_reported_as_a_failure(tmp):
             f'{absent!r} does not resolve on PATH and the check passed it; '
             'the check is the last thing standing between a broken install '
             'and a green suite job')
+
+
+def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
+    """The job's pin and the installer's are one build, and this says so.
+
+    Both spell `ACTIONLINT_VERSION` in a different file, and a pin spelled
+    twice drifts — the reason the installer reads shellcheck's version out
+    of `requirements-test.txt` instead. Its own comment says why this one
+    keeps two.
+
+    What makes the drift SILENT is this suite's own subject. The
+    workflow-lint suites read the JOB's pin, compare it against the
+    installed binary, and SKIP on a mismatch: with the fork build on PATH
+    and the job pin reverted to `1.7.12`, the two tests that RUN a lint
+    skip and test_ci_workflows reports 31/33 with exit 0. A skip is a pass
+    to every runner and every aggregate, so the disagreement is pinned here,
+    where it is an assertion failure instead.
+    """
+    del tmp
+    installer = _util.load(INSTALLER_SOURCE, 'lint_installer_pins')
+    job = _tests_yml()
+    pinned = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
+                        job, re.MULTILINE)
+    assert len(pinned) == 1, pinned
+    assert pinned[0].strip('\'"') == installer.ACTIONLINT_VERSION, (
+        'the actionlint job pins '
+        f'{pinned[0].strip(chr(39) + chr(34))} and the installer installs '
+        f'{installer.ACTIONLINT_VERSION}; the workflow-lint suites SKIP when '
+        'the two disagree, so a divergence here is a green run that linted '
+        'nothing')
+    # The URL is a SUBSTRING of the job's, not the other way round, so this
+    # is one arm and not a disjunction: the job spells the release base and
+    # appends `/v${ACTIONLINT_VERSION}/...`, so its own line contains the
+    # installer's RELEASE. An `or <org> in job` beside it would be
+    # satisfied by that same occurrence whichever way this points.
+    assert installer.RELEASE in job, (
+        f'the job downloads from a release base that is not '
+        f'{installer.RELEASE!r}; the checksum table the installer verifies '
+        'belongs to a different release than the job downloads, so a match '
+        'on the version alone installs one build and lints with another')
 
 
 def main():
