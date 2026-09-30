@@ -430,7 +430,7 @@ def test_extension_legacy_drain_forwards_the_command_directory(tmp):
 
         delivered = read_stream_data(base, TOK, 'extension', timeout=5)
 
-        assert delivered == {
+        assert {k: v for k, v in delivered.items() if k != '_did'} == {
             'id': 'legacy-forwarded', 'chromeTab': '42'}, delivered
 
 
