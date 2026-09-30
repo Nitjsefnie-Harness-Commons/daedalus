@@ -536,10 +536,11 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     and the job pin reverted to `1.7.12`, test_ci_workflows reports 31/33
     with exit 0, two of them skipping. "Two" is the two whose VERDICT the
     mismatch decides, not the two that reach the binary: three tests launch
-    actionlint under a divergence, and a fourth (`test_a_lint_run_without_
-    shellcheck_is_skipped`) runs a full lint and never reaches the version
-    arm at all. A skip is a pass to every runner and every aggregate, so
-    the disagreement is pinned here, where it is an assertion failure.
+    actionlint under a divergence, and one of the three
+    (`test_a_lint_run_without_shellcheck_is_skipped`) runs a full lint and
+    never reaches the version arm at all. A skip is a pass to every runner
+    and every aggregate, so the disagreement is pinned here, where it is an
+    assertion failure.
     """
     del tmp
     installer = _util.load(INSTALLER_SOURCE, 'lint_installer_pins')
@@ -559,24 +560,35 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     # installer's RELEASE. An `or <org> in job` beside it would be
     # satisfied by that same occurrence whichever way this points.
     #
-    # The step that DOWNLOADS, not the file and not merely the step's text:
+    # The base the step NAMES, not the file and not merely the step's text:
     # a whole-file substring is satisfied by a comment quoting the old URL,
     # and a step-scoped one is satisfied too, because the run block is a
     # `>-` scalar that keeps its `#` lines. Both were planted, and both left
     # this green with the two bases genuinely diverged. What is compared is
-    # the URL the step ASSIGNS, with comments dropped first — which is also
-    # the line the job actually fetches from.
+    # the base on a non-comment line, and exactly one of them.
+    #
+    # ADMITTED SUBSET, and what it cannot see. This reads LINES, not shell:
+    # a base assembled from parts, split across a continuation, or consumed
+    # through a variable is invisible here, and one such shape was planted
+    # and left this green. A step that names the base correctly and then
+    # fetches elsewhere by another variable is the residue. It is not a
+    # silent pass in practice — the pinned sha256 fails on bytes that are
+    # not the ones verified — so what this bounds is the JOB, not the
+    # download. Red is the safe direction, and a line-based reading cannot
+    # do better than this without a shell evaluator.
     downloaded = [line.strip() for line
                   in _actionlint_job_step('Install actionlint').splitlines()
                   if not line.lstrip().startswith('#')]
     bases = {line for line in downloaded if 'releases/download' in line}
     assert len(bases) == 1, (
-        f'the install step names {len(bases)} release bases: {sorted(bases)}')
+        f'the install step names {len(bases)} release bases, and this '
+        f'control reads one line rather than a shell: {sorted(bases)}')
     assert installer.RELEASE in bases.pop(), (
-        f'the job downloads from a release base that is not '
-        f'{installer.RELEASE!r}; the checksum table the installer verifies '
-        'belongs to a different release than the job downloads, so a match '
-        'on the version alone installs one build and lints with another')
+        f'the install step names a release base that is not '
+        f'{installer.RELEASE!r}, so the checksum table the installer '
+        'verifies belongs to a different release than the job downloads: a '
+        'match on the version alone would install one build and lint with '
+        'another')
 
 
 def main():
