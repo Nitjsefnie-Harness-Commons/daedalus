@@ -45,10 +45,9 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     """A failed removal redelivers, and the repeat carries the same id.
 
     The expected id is recomputed from the file's own stat rather than
-    written out, so every component of it is load-bearing: only the change
-    time separates a fresh drop from an old one that landed on a recycled
-    inode, and an id the consumer already holds is one it skips — a command
-    that would silently never run.
+    written out, so every component of it is load-bearing — and the last one
+    is the generation, which advances only when the drain vacates a name and
+    so stands still for the redelivery this is about.
     """
     service = _load_service('stream_service_legacy_redelivery_id')
     legacy = Path(tmp) / 'tok_42.json'
@@ -67,11 +66,60 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     dids = [frame.get('_did') for frame in frames]
     stamp = os.stat(legacy)
     assert dids[0] == (
-        f'legacy-{stamp.st_dev}-{stamp.st_ino}-{stamp.st_ctime_ns}'), dids
+        f'legacy-{stamp.st_dev}-{stamp.st_ino}-{stamp.st_ctime_ns}-0'), dids
     # The consumer posts the `_did` back as a delivery id, which the bridge
     # refuses for a component it will not accept as a file name.
     assert not service.path_safety.unsafe_component(dids[0]), dids
     assert len(set(dids)) == 1, dids
+
+
+def test_sequential_drops_at_one_name_carry_distinct_ids(tmp):
+    """One name re-dropped is as many commands as drops.
+
+    Published the way `AGENTS.md` documents — sibling `.tmp`, then
+    `os.replace` — and drained between each, so every drop is delivered
+    before the next takes the name. What a file carries is not a generation:
+    a new file can be handed the inode the vacated one had, and its change
+    time moves only when the clock does, so consecutive drops can be
+    indistinguishable. The consumer's ledger is what decides, and an id it
+    already holds is a command that never runs.
+    """
+    service = _load_service('stream_service_legacy_sequential')
+    name = Path(tmp) / 'tok.json'
+    in_progress = Path(tmp) / '.tok.json.tmp'
+    frames = []
+
+    for index in range(8):
+        in_progress.write_text(
+            '{"id":"drop-%d","code":"1"}' % index, encoding='utf-8')
+        os.replace(in_progress, name)
+        assert service.drain_legacy_file(
+            name, None, command_ttl=100, frame_writer=frames.append) == 1
+
+    dids = [frame.get('_did') for frame in frames]
+    assert [frame.get('id') for frame in frames] == [
+        f'drop-{index}' for index in range(8)], frames
+    assert len(set(dids)) == 8, dids
+
+
+def test_the_untagged_legacy_frame_carries_a_delivery_id(tmp):
+    """The stamp is not under the `chromeTab` branch.
+
+    `serve_stream`'s broadcast call sites pass no tab, so a stamp indented
+    under `if chrome_tab is not None` would leave the one namespace every
+    stream reads with nothing to deduplicate on — the defect this change
+    exists to remove, restored for exactly those frames.
+    """
+    service = _load_service('stream_service_legacy_untagged')
+    legacy = Path(tmp) / 'tok.json'
+    legacy.write_text('{"id":"broadcast","code":"1"}', encoding='utf-8')
+    frames = []
+
+    assert service.drain_legacy_file(
+        legacy, None, command_ttl=100, frame_writer=frames.append) == 1
+
+    assert '_did' in frames[0], frames
+    assert frames[0]['_did'].startswith('legacy-'), frames
 
 
 def test_two_identical_legacy_drops_carry_two_delivery_ids(tmp):
