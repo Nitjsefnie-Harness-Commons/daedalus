@@ -189,7 +189,11 @@ REVERTS = {
     # see is a site the sweep can test, so it moved from the decided set to
     # here rather than having its reason narrowed until it was true.
     '_pyroute_reads._readback_popitem': (
-        '    replace_deferred_storage(state, owner, container_copy(owner, items))',
+        # Split into adjacent literals because the whole is over the line
+        # limit and the value has to stay byte-exact: it is the text a
+        # revert has to find.
+        '    replace_deferred_storage(state, owner, '
+        'container_copy(owner, items))',
         '    replace_deferred_storage(state, owner, container_copy(\n'
         '        owner, items, False, frozenset()))'),
     '_pyroute_storage.stale_after_store': (
