@@ -66,8 +66,8 @@ import ast
 
 from _binding_names import _every_use_proven
 import _launch_path as path
-from _receiver_resolution import (_LITERALS, _live_object, _resolve_dotted,
-                                  veto_bindings)
+from _receiver_resolution import (_LITERALS, _live_object,
+                                  _resolve_dotted, record_binding)
 
 
 def _mentions(node, names):
@@ -231,23 +231,7 @@ def _written_as_a_literal(scope, name):
               if isinstance(node, (ast.Assign, ast.AnnAssign))
               for child in ast.walk(node)}
     for node in ast.walk(scope):
-        ctx = getattr(node, 'ctx', None)
-        if isinstance(ctx, (ast.Store, ast.Del)) and not isinstance(
-                node, ast.Subscript):
-            key = path._dotted_key(node)
-            if not key:
-                continue
-            owner = owners.get(id(node))
-            if owner is None or owner.value is None:
-                verdicts[key] = False
-                continue
-            targets = (owner.targets if isinstance(owner, ast.Assign)
-                       else [owner.target])
-            same = any(path._dotted_key(t) == key for t in targets)
-            verdicts[key] = verdicts.get(key, True) and (
-                same and isinstance(owner.value, _LITERALS))
-            continue
-        veto_bindings(node, verdicts)
+        record_binding(node, owners, verdicts)
     return verdicts.get(name, False)
 
 

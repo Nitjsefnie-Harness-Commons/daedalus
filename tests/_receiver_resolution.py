@@ -343,29 +343,50 @@ _LITERALS = (ast.List, ast.Dict, ast.Set, ast.Tuple, ast.Constant,
              ast.JoinedStr, ast.ListComp, ast.DictComp, ast.SetComp)
 
 
-def veto_bindings(node, verdicts):
-    """The names `node` binds to something that is not a container.
+def record_binding(node, owners, verdicts):
+    """One STEP of the conservative join, for one node, into `verdicts`.
 
-    THE binder arm set of the conservative join, in one place, because a
-    join that keeps its own copy comes out WEAKER than the one it copies:
-    the binders that carry a plain `str` rather than an `ast.Name` --
-    a `match` capture, an `except ... as`, an import alias, a `def` or
-    `class` name -- are invisible to the `Store` arm that reads
-    `Name`/`Attribute` nodes, so a copy that dropped them read a rebound
-    name as still proven. That is not a narrower rule; it discharged a
-    site `literal_bindings` refuses, which is the direction that ends a
-    child silently.
+    Both the `Store` arm and the binder arm set live here, so the join has
+    ONE representation. A join that keeps its own copy of either half does
+    not stay narrower than the one it copies -- it stays WEAKER, which is
+    the direction that ends a child silently. A copy of this loop that
+    dropped the binders read a caller's `kid = []` rebound by `case [kid]`
+    as still a proven container, because a `match` capture, an
+    `except ... as`, an import alias and a `def` or `class` name all carry
+    a plain `str` rather than an `ast.Name` and the `Store` arm never sees
+    them. The two callers below differ in the SCOPE they walk and in
+    nothing else; `owners` is theirs, built the same way.
 
-    Mutates `verdicts` rather than returning names, so the one distinction
-    between the arms cannot be re-derived wrongly by a caller: a PARAMETER
-    `setdefault`s (it does not veto a key a literal store already proved)
-    and every other binder assigns. The two fail in opposite directions
-    and that is deliberate.
+    The one distinction inside the join is the `setdefault` a PARAMETER
+    makes against the assignment every other binder makes. The two fail in
+    opposite directions -- a store folds in with AND, a parameter cannot
+    overwrite what a store proved -- and that is deliberate, so it lives
+    here where no caller can re-derive it wrongly.
 
-    `verdicts` is the same table both joins build, so a caller that needs
-    only its own key reads it out afterwards rather than getting a
-    filtered set back.
+    `owners` maps every child of an `Assign`/`AnnAssign` to the statement
+    holding it, which is what lets the `Store` arm read the right-hand
+    side: the node CARRYING the context is the node that is bound, so for
+    `self.handles = []` the key is the `Attribute` and the `self` inside
+    it is Load. A `Subscript` store (`d[k] = v`) MUTATES and rebinds no
+    name, which is why it is excluded here rather than left to yield no
+    key.
     """
+    ctx = getattr(node, 'ctx', None)
+    if isinstance(ctx, (ast.Store, ast.Del)) and not isinstance(
+            node, ast.Subscript):
+        key = path._dotted_key(node)
+        if not key:
+            return
+        owner = owners.get(id(node))
+        if owner is None or owner.value is None:
+            verdicts[key] = False
+            return
+        targets = (owner.targets if isinstance(owner, ast.Assign)
+                   else [owner.target])
+        same = any(path._dotted_key(t) == key for t in targets)
+        verdicts[key] = verdicts.get(key, True) and (
+            same and isinstance(owner.value, _LITERALS))
+        return
     if isinstance(node, ast.arg):
         verdicts.setdefault(node.arg, False)
     elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
@@ -424,30 +445,7 @@ def literal_bindings(tree):
               if isinstance(node, (ast.Assign, ast.AnnAssign))
               for child in ast.walk(node)}
     for node in ast.walk(tree):
-        ctx = getattr(node, 'ctx', None)
-        if isinstance(ctx, (ast.Store, ast.Del)) and not isinstance(
-                node, ast.Subscript):
-            # The node CARRYING the context is the node that is bound:
-            # for `self.join_timeouts = []` that is the Attribute, and
-            # the `self` inside it is Load. Keying off the base Name
-            # instead is what left that binding unadjudicated, so the
-            # key is this node's own. A Subscript store (`d[k] = v`)
-            # MUTATES and rebinds no name, which is why it is excluded
-            # here rather than left to yield no key.
-            key = path._dotted_key(node)
-            if not key:
-                continue
-            owner = owners.get(id(node))
-            if owner is None or owner.value is None:
-                verdicts[key] = False
-                continue
-            targets = (owner.targets if isinstance(owner, ast.Assign)
-                       else [owner.target])
-            same = any(path._dotted_key(t) == key for t in targets)
-            verdicts[key] = verdicts.get(key, True) and (
-                same and isinstance(owner.value, _LITERALS))
-            continue
-        veto_bindings(node, verdicts)
+        record_binding(node, owners, verdicts)
     resolved, poison = _reflective(tree)
     for key, literal in resolved.items():
         verdicts[key] = verdicts.get(key, True) and literal
