@@ -9,29 +9,17 @@ this module. The second is what recovers the `test_real_browser_harness.py`
 site at line 131, and `tests/test_launch_real_files.py` holds it over a
 SHIPPED file.
 
-This is the arm's own controls, and the false-green direction is the whole
-of it. A rule that discharges more than its proof is invisible to every
-other suite here: the shipped-file control above is one site, and a second
-site an arm got wrong would be a second line nobody reads. So every
-predicate the arm is built from has a row of its own, each a SINGLE
-DELTA from a shape the arm discharges, so a mutant that drops one
-predicate turns exactly one row red and the rest stay green. A suite
-whose rows all move together cannot tell which predicate a mutation
-removed.
+The false-green direction is the whole of it, and a rule that discharges
+more than its proof is invisible to every other suite here: the
+shipped-file control is one site, and a second site an arm got wrong is a
+second line nobody reads. So every predicate has a row of its own, each a
+SINGLE DELTA from a shape the arm discharges, so a mutant that drops one
+turns exactly one row red. A suite whose rows all move together cannot
+tell which predicate a mutation removed.
 
-The first control is the one that has to exist at all. A real child in a
-list, the list handed to a nested double, and the double joining the child
-with a `timeout` is the false green an arm like this admits if it stops
-checking that the caller's container is not a child — and it carries a
-RUNTIME leg, so the row is proved against a child that was really reaped
-rather than a fabricated one alone. See `tests/_launch_plants.py` for why
-a plant that reports a verdict without reaping anything is not counted.
-
-The one thing this arm does not know is named beside it rather than here:
-a call from a module the census does not read is not among the sites
-consulted, and that limit lives in `tests/_launch_census.py`'s own "Not
-enforced" list with `test_the_cross_module_limit_is_named_beside_a_control`
-as the control that would fail if the reading changed.
+What the arm does NOT know is named where the rules are read, not here:
+`tests/_launch_census.py`'s "Not enforced" list, with
+`test_the_cross_module_limit_is_named_beside_a_control` as its control.
 """
 import sys
 from pathlib import Path
