@@ -358,9 +358,11 @@ def stamp_legacy_delivery_id(data, ident):
     would reach the consumer with nothing to deduplicate on. The object
     incarnation is the one identity that holds across the redelivery of a
     single file and differs for a second drop of the same command. A
-    publisher that stamped its own id keeps it, and the id is spelled with
-    characters the delivery-result path accepts, because the consumer posts
-    the `_did` back as a delivery id.
+    publisher that stamped its own id keeps it when that id is a non-empty
+    string — the extension's frame handler tests `_did` for truth before
+    recording it, so an empty one deduplicates nothing — and the stamped id
+    is spelled with characters the delivery-result path accepts, because the
+    consumer posts the `_did` back as a delivery id.
     """
     if not isinstance(data.get('_did'), str) or not data['_did']:
         data['_did'] = f'legacy-{ident[0]}-{ident[1]}-{ident[2]}'

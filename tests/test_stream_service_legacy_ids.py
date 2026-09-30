@@ -10,6 +10,7 @@ the id is derived from the object the drain read: the same on the
 redelivery of one file, different for a second drop of the same command.
 """
 import contextlib
+import os
 import pathlib
 import sys
 
@@ -44,7 +45,14 @@ def _refusing_unlink(name):
 
 
 def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
-    """A failed removal redelivers, and the repeat carries the same id."""
+    """A failed removal redelivers, and the repeat carries the same id.
+
+    The expected id is recomputed from the file's own stat rather than
+    written out here, so every component of it is load-bearing: only the
+    change time tells a fresh drop from an old one that landed on a
+    recycled inode, and an id the consumer has already recorded is one it
+    skips — a command that would silently never run.
+    """
     service = _load_service('stream_service_legacy_redelivery_id')
     legacy = Path(tmp) / 'tok_42.json'
     legacy.write_text('{"id":"held-open","code":"1"}', encoding='utf-8')
@@ -60,7 +68,9 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     assert attempted == [legacy.name, legacy.name], attempted
     assert legacy.exists(), 'a refused removal lost the command'
     dids = [frame.get('_did') for frame in frames]
-    assert all(isinstance(did, str) and did for did in dids), frames
+    stamp = os.stat(legacy)
+    assert dids[0] == (
+        f'legacy-{stamp.st_dev}-{stamp.st_ino}-{stamp.st_ctime_ns}'), dids
     # The consumer posts the `_did` back as a delivery id, where the bridge
     # refuses a component it will not accept as a file name.
     assert not service.path_safety.unsafe_component(dids[0]), dids
@@ -94,24 +104,32 @@ def test_two_identical_legacy_drops_carry_two_delivery_ids(tmp):
 def test_an_id_the_drain_did_not_mint_is_kept_only_when_it_is_one(tmp):
     """A publisher's own `_did` is its delivery identity, when it is one.
 
-    A value of some other type is not: the consumer's dedup ledger is a set of
-    strings and the result route drops anything else, so the drain replaces it
-    with an id it can stand behind.
+    Two values are not one, and both cost the command its identity. A value
+    of another type is not: the consumer's dedup ledger is a set of strings
+    and the result route drops anything else. Neither is the empty string:
+    the extension's frame handler tests `_did` for truth before recording
+    it, so an empty one deduplicates nothing and is never posted back as a
+    delivery id. The drain replaces both with an id it can stand behind.
     """
     service = _load_service('stream_service_legacy_own_id')
     kept = Path(tmp) / 'tok_42.json'
     kept.write_text('{"id":"mine","_did":"publisher-1"}', encoding='utf-8')
     replaced = Path(tmp) / 'tok_43.json'
     replaced.write_text('{"id":"mine","_did":7}', encoding='utf-8')
+    blank = Path(tmp) / 'tok_44.json'
+    blank.write_text('{"id":"mine","_did":""}', encoding='utf-8')
     frames = []
 
     assert service.drain_legacy_file(
         kept, '42', command_ttl=100, frame_writer=frames.append) == 1
     assert service.drain_legacy_file(
         replaced, '43', command_ttl=100, frame_writer=frames.append) == 1
+    assert service.drain_legacy_file(
+        blank, '44', command_ttl=100, frame_writer=frames.append) == 1
 
     assert frames[0].get('_did') == 'publisher-1', frames
     assert frames[1].get('_did', '').startswith('legacy-'), frames
+    assert frames[2].get('_did', '').startswith('legacy-'), frames
 
 
 def main():
