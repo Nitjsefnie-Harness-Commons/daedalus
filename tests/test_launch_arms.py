@@ -270,8 +270,8 @@ def test_every_arm_is_uniquely_addressed(tmp):
             f'not distinct: {cuts}')
     shared = sorted(where for where, cuts in on_one_line.items()
                     if len(cuts) > 1)
-    assert shared == [('_launch_audit.py', 544),
-                      ('_launch_audit.py', 566)], (
+    assert shared == [('_launch_audit.py', 548),
+                      ('_launch_audit.py', 570)], (
         'the same-line pairs the table carries, each two operands of '
         'one disjunction; a new one is a decision, not an accident: '
         f'{shared}')

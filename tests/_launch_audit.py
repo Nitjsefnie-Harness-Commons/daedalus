@@ -52,11 +52,17 @@ def _parameters(node):
     return names
 
 
-def launch_refusals(source, here, bound_sink=None):
+def launch_refusals(source, here, bound_sink=None, tree=None):
     """Every refusal limb one Python source's launches trip, naming its
     limb."""
     import builtins
-    tree = ast.parse(source)
+    tree = ast.parse(source) if tree is None else tree
+    # LOAD-BEARING: one materialised BFS, walked below by the SAME passes
+    # in the SAME order. They are not independent — the pass that appends
+    # to `safe_names` is read by the launch pass, and `defined_names` is
+    # read by `derives` during the fixpoint — so merging them into one
+    # loop, or reordering them, changes answers.
+    nodes = [*ast.walk(tree)]
     safe_names = set(dir(builtins))
     partial_aliases = {'functools.partial', 'partial'}
     import_module_aliases = {'importlib.import_module', 'import_module',
@@ -189,8 +195,12 @@ def launch_refusals(source, here, bound_sink=None):
     refusals = []
     defined_names = set()
     subprocess_names = set()
-    for node in ast.walk(tree):
+    plain_subprocess = False
+    for node in nodes:
         if isinstance(node, ast.Import):
+            plain_subprocess |= any(
+                alias.name == 'subprocess' and not alias.asname
+                for alias in node.names)
             for alias in node.names:
                 if alias.name == 'subprocess' and alias.asname:
                     subprocess_names.add(alias.asname)
@@ -217,30 +227,25 @@ def launch_refusals(source, here, bound_sink=None):
                         partial_aliases.add(alias.asname or alias.name)
                         defined_names.add(alias.asname or alias.name)
                     elif imported in import_module_aliases:
-                        import_module_aliases.add(alias.asname
-                                                  or alias.name)
+                        import_module_aliases.add(alias.asname or alias.name)
                         defined_names.add(alias.asname or alias.name)
                     else:
                         safe_names.add(alias.asname or alias.name)
     # A member from-imported out of an excluded stdlib root IS that
     # root's launch, and a from-import is no way past the set.
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom) and node.module \
                 and node.module.split('.')[0] in _STDLIB_LAUNCH_ROOTS:
             subprocess_names.update(
                 alias.asname or alias.name for alias in node.names)
-    if not refusals and not any(
-            isinstance(node, ast.Import)
-            and any(alias.name == 'subprocess' and not alias.asname
-                    for alias in node.names)
-            for node in ast.walk(tree)):
+    if not refusals and not plain_subprocess:
         refusals.append(
             f'{here} declares no plain "import subprocess"; the launch '
             'audit cannot vouch for any launch')
     bindings = []
     returns = []
     yields = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Assign):
             bindings.extend(
                 (target.id, node.value) for target in node.targets
@@ -253,22 +258,22 @@ def launch_refusals(source, here, bound_sink=None):
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             defined_names.add(node.name)
             args = node.args
-            defaults = args.defaults[-len(args.args):] \
-                if args.defaults else []
+            defaults = args.defaults[-len(args.args):] if args.defaults else []
             for arg, default in zip(args.args[-len(defaults):], defaults):
                 bindings.append((arg.arg, default))
             for arg, default in zip(args.kwonlyargs, args.kw_defaults):
                 if default is not None:
                     bindings.append((arg.arg, default))
-            returns.extend(
-                (node.name, statement.value)
-                for statement in ast.walk(node)
-                if isinstance(statement, ast.Return) and statement.value)
-            yields.extend(
-                (node.name, statement.value)
-                for statement in ast.walk(node)
-                if isinstance(statement, (ast.Yield, ast.YieldFrom))
-                and statement.value)
+            # LOAD-BEARING: `ast.walk(outer)` includes a nested `inner`'s
+            # returns and yields, so a return is attributed to EVERY
+            # enclosing function rather than to its nearest — a different
+            # answer, and the fixpoint below classifies on this table.
+            for statement in ast.walk(node):
+                if isinstance(statement, ast.Return) and statement.value:
+                    returns.append((node.name, statement.value))
+                if isinstance(statement, (ast.Yield, ast.YieldFrom)) \
+                        and statement.value:
+                    yields.append((node.name, statement.value))
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             if isinstance(node.target, ast.Name):
                 bindings.append((node.target.id, node.iter))
@@ -320,12 +325,11 @@ def launch_refusals(source, here, bound_sink=None):
     # the likeliest thing here to grow. Falsified by a `binding_map` key
     # that is neither.
     rebound = set(binding_map) | {
-        node.id for node in ast.walk(tree)
+        node.id for node in nodes
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
-    rebound |= {node.arg for node in ast.walk(tree)
-                if isinstance(node, ast.arg)}
+    rebound |= {node.arg for node in nodes if isinstance(node, ast.arg)}
     rebound |= {
-        getattr(node, field, None) for node in ast.walk(tree)
+        getattr(node, field, None) for node in nodes
         for field in ('name', 'asname', 'rest')
         if isinstance(getattr(node, field, None), str)}
 
@@ -354,7 +358,7 @@ def launch_refusals(source, here, bound_sink=None):
                     bound.add(name)
                     changed = True
 
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Name) \
                 and isinstance(node.ctx, ast.Store) \
                 and node.id not in bound:
@@ -391,7 +395,7 @@ def launch_refusals(source, here, bound_sink=None):
                     'value to an attribute or subscript target the audit '
                     'cannot follow')
     launches = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -593,7 +597,7 @@ def launch_refusals(source, here, bound_sink=None):
 
     if bound_sink is not None:
         placed = {id(node) for node in launches}
-        for node in ast.walk(tree):
+        for node in nodes:
             if isinstance(node, ast.Call) and id(node) not in placed \
                     and unplaced_bounded_call(node):
                 bound_sink.append((node.lineno, 'unreadable', 'unplaced'))
@@ -678,7 +682,7 @@ def launch_refusals(source, here, bound_sink=None):
     return refusals
 
 
-def bound_sites(source, here):
+def bound_sites(source, here, tree=None):
     """The analyser's own (lineno, head, kind) for every bounded launch.
 
     `kind` is one of four: 'timeout' (a readable `timeout=` at a launch),
@@ -687,9 +691,9 @@ def bound_sites(source, here):
     unreadable head), and 'keyword' (an argument the `subprocess` does not
     take). A caller consumes this instead of re-parsing the human-readable
     refusal, so a message-format change cannot move a guard that keys on
-    the head — and the gate keys on `kind == 'unplaced'` in particular, so
-    this list is what a reader of the gate is trusting.
+    the head — and the gate keys on `kind == 'unplaced'` in particular.
+    `tree` is an already-parsed `source`, for a caller that needs it anyway.
     """
     sink = []
-    launch_refusals(source, here, bound_sink=sink)
+    launch_refusals(source, here, bound_sink=sink, tree=tree)
     return sink

@@ -206,7 +206,7 @@ def _bound_sites(source, here):
     """
     tree = ast.parse(source)
     found = []
-    for line, head, kind in bound_sites(source, here):
+    for line, head, kind in bound_sites(source, here, tree=tree):
         if control_keeps(head, kind):
             found.append((line, _enclosing_function(tree, line),
                           _site_signature(tree, line), kind))

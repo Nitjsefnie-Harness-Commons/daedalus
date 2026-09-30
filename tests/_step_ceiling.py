@@ -33,16 +33,16 @@ from pathlib import Path
 
 from _launch_audit import bound_sites
 
-# A healthy analysis of the pinned source is 4,738 line events, 14 of
-# them inside machinery_route, and that figure is DETERMINISTIC: the
-# count is steps, not a duration, so a loaded machine or a slow runner
-# cannot change it and a correct tree cannot fail here. This ceiling is
-# a SAMPLE margin over that measurement, not a derived bound — the loop
-# it exists for has one, ~4 line events per distinct name in the source,
-# but the whole analysis has no derivation and grows with every line
-# added to the analyser. When the analyser grows, re-measure: if the
-# healthy count approaches this, raise the ceiling with the measurement
-# beside it, never without.
+# A healthy analysis of the pinned source is 2,811 line events, and
+# that figure is DETERMINISTIC: the count is steps, not a duration, so a
+# loaded machine or a slow runner cannot change it and a correct tree
+# cannot fail here. This ceiling is a SAMPLE margin over that
+# measurement, not a derived bound — the loop it exists for has one,
+# ~4 line events per distinct name in the source, but the whole
+# analysis has no derivation and grows with every line added to the
+# analyser. When the analyser grows, re-measure: if the healthy count
+# approaches this, raise the ceiling with the measurement beside it,
+# never without.
 ANALYSIS_STEP_CEILING = 100_000
 
 TESTS = str(Path(__file__).resolve().parent)
