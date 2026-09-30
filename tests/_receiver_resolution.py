@@ -343,6 +343,51 @@ _LITERALS = (ast.List, ast.Dict, ast.Set, ast.Tuple, ast.Constant,
              ast.JoinedStr, ast.ListComp, ast.DictComp, ast.SetComp)
 
 
+def veto_bindings(node, verdicts):
+    """The names `node` binds to something that is not a container.
+
+    THE binder arm set of the conservative join, in one place, because a
+    join that keeps its own copy comes out WEAKER than the one it copies:
+    the binders that carry a plain `str` rather than an `ast.Name` --
+    a `match` capture, an `except ... as`, an import alias, a `def` or
+    `class` name -- are invisible to the `Store` arm that reads
+    `Name`/`Attribute` nodes, so a copy that dropped them read a rebound
+    name as still proven. That is not a narrower rule; it discharged a
+    site `literal_bindings` refuses, which is the direction that ends a
+    child silently.
+
+    Mutates `verdicts` rather than returning names, so the one distinction
+    between the arms cannot be re-derived wrongly by a caller: a PARAMETER
+    `setdefault`s (it does not veto a key a literal store already proved)
+    and every other binder assigns. The two fail in opposite directions
+    and that is deliberate.
+
+    `verdicts` is the same table both joins build, so a caller that needs
+    only its own key reads it out afterwards rather than getting a
+    filtered set back.
+    """
+    if isinstance(node, ast.arg):
+        verdicts.setdefault(node.arg, False)
+    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                           ast.ClassDef)):
+        verdicts[node.name] = False
+    elif isinstance(node, ast.ExceptHandler) and node.name:
+        verdicts[node.name] = False
+    elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+        verdicts[node.name] = False
+    elif isinstance(node, ast.MatchMapping) and node.rest:
+        verdicts[node.rest] = False
+    elif isinstance(node, ast.ImportFrom):
+        for alias in node.names:
+            verdicts[alias.asname or alias.name] = False
+    elif isinstance(node, ast.Import):
+        for alias in node.names:
+            verdicts[alias.asname or alias.name.split('.')[0]] = False
+    elif getattr(node, 'type_params', None):
+        for param in type_params_of(node):
+            verdicts[param.name] = False
+
+
 def literal_bindings(tree):
     """`dotted name` for every name written as a LITERAL in EVERY scope.
 
@@ -402,26 +447,7 @@ def literal_bindings(tree):
             verdicts[key] = verdicts.get(key, True) and (
                 same and isinstance(owner.value, _LITERALS))
             continue
-        if isinstance(node, ast.arg):
-            verdicts.setdefault(node.arg, False)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                               ast.ClassDef)):
-            verdicts[node.name] = False
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            verdicts[node.name] = False
-        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
-            verdicts[node.name] = False
-        elif isinstance(node, ast.MatchMapping) and node.rest:
-            verdicts[node.rest] = False
-        elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                verdicts[alias.asname or alias.name] = False
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                verdicts[alias.asname or alias.name.split('.')[0]] = False
-        elif getattr(node, 'type_params', None):
-            for param in type_params_of(node):
-                verdicts[param.name] = False
+        veto_bindings(node, verdicts)
     resolved, poison = _reflective(tree)
     for key, literal in resolved.items():
         verdicts[key] = verdicts.get(key, True) and literal

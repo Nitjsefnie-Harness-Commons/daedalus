@@ -66,7 +66,8 @@ import ast
 
 from _binding_names import _every_use_proven
 import _launch_path as path
-from _receiver_resolution import (_LITERALS, _live_object, _resolve_dotted)
+from _receiver_resolution import (_LITERALS, _live_object, _resolve_dotted,
+                                  veto_bindings)
 
 
 def _mentions(node, names):
@@ -204,16 +205,26 @@ def _call_sites_named(tree, owner):
 def _written_as_a_literal(scope, name):
     """Whether EVERY writing of `name` inside `scope` is a container.
 
-    The same conservative join `literal_bindings` makes, and the same
-    reason it is a join: a name bound to a list on one line and to a child
-    on the next is a child, and a last-write-wins reading of the order the
-    two appear in would discharge it. A name the scope's OWN signature
-    binds vetoes the same way, because a caller's parameter is a name this
-    scope did not write — which is the veto `literal_bindings` applies
-    module-wide and the reason it cannot answer for a nested double. The
-    veto does NOT reach across scopes: a parameter of the double being
-    judged is not a writing in the caller, and treating it as one is what
-    made `recorded` unprovable in the first place.
+    The same conservative join `literal_bindings` makes, over a NARROWER
+    scope: that function reads a whole module, this one reads the caller's
+    own enclosing function, which is the only place a `Name` argument's
+    value can be written. The scope is the parameter and nothing else --
+    the ARM SET is shared, through `_receiver_resolution.veto_bindings`, so
+    a second copy of the join cannot come out weaker than the first.
+
+    That sharing is the whole of what was missing once. A `match` capture,
+    an `except ... as`, an import alias and a `def` or `class` name all
+    carry a plain `str` rather than an `ast.Name`, so the `Store` arm
+    below never sees them; a join that kept its own arm list and dropped
+    those four read a rebound name as still proven, and discharged sites
+    `literal_bindings` refuses. A narrowing that is weaker than the branch
+    it sits on is not a narrowing.
+
+    A name the scope's OWN signature binds vetoes the same way, because a
+    caller's parameter is a name this scope did not write. The veto does
+    NOT reach across scopes: a parameter of the double being judged is not
+    a writing in the caller, and treating it as one is what made
+    `recorded` unprovable in the first place.
     """
     verdicts = {}
     owners = {id(child): node for node in ast.walk(scope)
@@ -235,8 +246,8 @@ def _written_as_a_literal(scope, name):
             same = any(path._dotted_key(t) == key for t in targets)
             verdicts[key] = verdicts.get(key, True) and (
                 same and isinstance(owner.value, _LITERALS))
-        elif isinstance(node, ast.arg) and node.arg == name:
-            verdicts.setdefault(node.arg, False)
+            continue
+        veto_bindings(node, verdicts)
     return verdicts.get(name, False)
 
 
@@ -287,12 +298,19 @@ def _holds_no_child(argument, call, scope, tree, receivers, direct):
     `tests/_launch_path.py::_is_launch` counts a member bound to a name as
     one of its four receiver spellings -- so an empty alias set here made
     the direct spelling refuse and both aliased ones discharge, which is
-    the census disagreeing with itself about one call. The set is read over
-    the whole TREE, not the caller's body, because a member alias bound at
-    module scope is a module binding by nature: `_subprocess_receivers`
-    and `_from_import_launches` are both tree-wide for the same reason, and
-    a reader that read only the caller's body would catch the local
-    spelling and miss the module one.
+    the census disagreeing with itself about one call.
+
+    The set is read over the WHOLE TREE, which is strictly WIDER than the
+    caller's own body and says so plainly: an alias bound in an unrelated
+    sibling function is in it too, so `other()` binding `make` to `Popen`
+    can cost a `make` the caller wrote itself. That is the cost of one
+    derivation, paid in the direction that refuses rather than the one
+    that discharges, and it is why the reader is named here rather than
+    left to be discovered. The alternative -- the caller's body only --
+    catches the local spelling and misses the module one, because a member
+    alias bound at module scope is a module binding by nature, and
+    `_subprocess_receivers` and `_from_import_launches` are both tree-wide
+    for that same reason.
     """
     aliases = path._member_aliases(tree, receivers, direct)
     if any(path._is_launch(inner, receivers, direct, aliases)
