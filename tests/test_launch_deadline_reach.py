@@ -141,9 +141,9 @@ def test_a_real_child_handed_through_a_list_to_a_double_is_still_refused(
     -- no runtime can -- and it is not claimed to.
     """
     del tmp
-    assert _census(LIST_HANDED) == [(
-        _plant_line_of(LIST_HANDED, 'def run('), 'timeout parameter')], _census(
-            LIST_HANDED)
+    expected = [(_plant_line_of(LIST_HANDED, 'def run('),
+                 'timeout parameter')]
+    assert _census(LIST_HANDED) == expected, _census(LIST_HANDED)
     assert _runtime(LIST_HANDED_RUNTIME) == 'BOUNDED', _runtime(
         LIST_HANDED_RUNTIME)
 
