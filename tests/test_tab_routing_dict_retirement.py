@@ -35,9 +35,11 @@ from _pyroute_mapping import (_apply_mapping_store,  # noqa: E402
                              _mark_unprovable)
 from _pyroute_match import _bind_mapping  # noqa: E402
 from _pyroute_positions import at_position  # noqa: E402
+from _pyroute_setops import set_operands  # noqa: E402
 from _pyroute_reads import (_apply_pop, _dict_call_value,  # noqa: E402
                             _dict_value, _mapping_lookup,
-                            _merge_or_value, _readback_copy)
+                            _merge_or_value, _readback_copy,
+                            _readback_popitem)
 from _pyroute_state import FlowState  # noqa: E402
 from _pyroute_storage import (container_copy,  # noqa: E402
                               join_clean_occupancy, retired_into)
@@ -128,10 +130,16 @@ def test_the_retirement_census_is_the_guard_own_list(tmp):
     # literal `== 19` still passing, which is the whole failure this
     # derivation exists to prevent. The floor is a tripwire for the
     # derivation going blind; the exactness is the undecided check above.
+    # EQUALITY, both ways, not a subset and not a floor. A subset only
+    # catches a site that APPEARS; the reviewer blinded the settling axis
+    # with an early `return False`, the sites went 22 -> 21, `undecided`
+    # stayed empty and this census stayed green at 15/15. A floor of 20
+    # tolerates exactly that. A site that VANISHES has to be a failure,
+    # because every entry in the decided set was derived from the tree once
+    # and its absence now means the derivation stopped seeing it.
     decided = set(_REVERTS) | set(_DECIDED)
-    assert len(retirement_sites()) >= 20, sorted(retirement_sites())
-    assert set(retirement_sites()) <= decided, sorted(
-        set(retirement_sites()) - decided)
+    assert set(retirement_sites()) == decided, sorted(
+        set(retirement_sites()) ^ decided)
 
 
 def test_a_fold_carries_the_source_retirement_with_its_items(tmp):
@@ -350,6 +358,64 @@ def test_a_pattern_rest_carries_the_retirement_it_projected(tmp):
     rest = cast(DeferredContainer, state.callables['_rest'])
     assert rest.stale == frozenset({'k'}), rest.stale
     assert 'k' in rest.items, rest.items
+
+
+def test_a_set_fold_refuses_a_dict_operand(tmp):
+    """The controlling evidence for `_apply_set_store`'s recorded decision.
+
+    The decision is that its carry is unobservable because `set_operands`
+    refuses a mapping operand, so the container it copies is a set and
+    carries no retired dict keys. That was an argument; this measures it at
+    the boundary the argument depends on, and what would refute the decision
+    is a path delivering a dict operand -- which this drives, for each
+    operator the fold answers.
+    """
+    retired = DeferredContainer({'k': None}, None, 'dict',
+                                stale=frozenset({'k'}))
+    state = _state_with(retired)
+    for operator in (ast.BitOr, ast.BitAnd, ast.BitXor, ast.Sub):
+        operands = set_operands(operator, ast.Name(id='d', ctx=ast.Load()),
+                                ast.Name(id='e', ctx=ast.Load()), state)
+        assert operands is None, (operator, operands)
+
+
+def _state_with(container):
+    state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
+    state.callables['d'] = container
+    state.callables['e'] = DeferredContainer({0: None}, 1, 'set')
+    return state
+
+
+def test_a_popitem_projection_reads_both_ways(tmp):
+    """The controlling evidence for `_readback_popitem`'s recorded decision.
+
+    The decision is that the carry is unobservable because the projection
+    either joins every value into the unknown-key slot or deletes a key. The
+    second branch is the one that could surprise — a retirement naming a
+    key the container no longer holds — so both branches are driven and the
+    result read at exactly that key.
+    """
+    call = ast.parse('d.popitem()', mode='eval').body
+    # First branch: an unknown-length owner, so the projection folds every
+    # value into the unknown-key slot, which every read consults anyway.
+    joined_owner = DeferredContainer({'k': None}, None, 'dict',
+                                     stale=frozenset({'k'}))
+    state = _state_with(joined_owner)
+    _readback_popitem(call, state, joined_owner)
+    joined = cast(DeferredContainer, state.callables['d'])
+    assert DYNAMIC_KEY in joined.items, joined.items
+    # Second branch: a countable owner, so the projection deletes the key
+    # and the retirement is left naming an absent one. A read at that key
+    # joins rather than answering from a value -- the conservative
+    # over-join the decision claims, measured rather than argued.
+    tracked = DeferredContainer({'k': None}, 1, 'dict',
+                                stale=frozenset({'k'}))
+    state = _state_with(tracked)
+    _readback_popitem(call, state, tracked)
+    deleted = cast(DeferredContainer, state.callables['d'])
+    assert 'k' not in deleted.items, deleted.items
+    assert deleted.stale == frozenset({'k'}), deleted.stale
+    assert merge_yielded(at_position(deleted, 'k')) is not None
 
 
 def test_the_projection_drops_what_it_left_out(tmp):

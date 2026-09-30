@@ -71,16 +71,28 @@ _COPY_HELPERS = ('container_copy', 'replace_container',
 # mutate" are different facts and only one of them is a finding.
 NO_MUTATION = {
     '_pyroute_mapping._apply_set_store': (
-        'reached only when set_operands folds a binary SET operation, and '
-        'that refuses a mapping operand, so `previous` is a set or a '
-        'frozenset and carries no retired dict keys: the carry is a no-op '
-        'and so is any mutation of it'),
+        "the carry IS container_copy's own default here: the call passes "
+        "no stale, so container_copy takes `owner.stale` itself, and a "
+        "dict operand never reaches this fold: set_operands refuses one. "
+        'Nothing removes the carry at this call site except an explicit '
+        'frozenset(), and that drops a carry no control observes. '
+        'CONTROLLING CONTROL: test_a_set_fold_refuses_a_dict_operand. '
+        'WHAT WOULD REFUTE IT: any path that delivers a dict operand to '
+        '_apply_set_store; the control drives exactly that and the model '
+        'answers with None'),
     '_pyroute_reads._readback_popitem': (
-        'the projection either joins every value into the unknown-key slot, '
-        'which every read consults anyway, or deletes a key from the items, '
-        'leaving a retirement that names a key the container no longer '
-        'holds -- a conservative over-join, not a hole, and not something '
-        'a control can observe'),
+        "the carry IS container_copy's default here too, for the same "
+        "reason, and it is unobservable because the projection either "
+        "joins every value into the unknown-key slot, which every read "
+        "consults anyway, or deletes a key and leaves the retirement "
+        "naming a key the container no longer holds -- a conservative "
+        "over-join at an absent key, which a read of that key joins "
+        "rather than answering from a value. "
+        'CONTROLLING CONTROL: '
+        'test_a_popitem_projection_reads_both_ways. '
+        'WHAT WOULD REFUTE IT: a read at a retired key whose verdict '
+        'differs because of the over-join; the control checks both '
+        'branches'),
 }
 
 # Every `tests/` module the universe derivation does NOT put in, and why.
