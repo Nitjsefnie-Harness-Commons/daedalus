@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import (BRIDGE_ENV, TOK, framer, prove_scan,  # noqa: E402
+from _bridge import (BRIDGE_ENV, TOK, frame_reader, prove_scan,  # noqa: E402
                      put_command, stream_response)
 from _command_candidates import (  # noqa: E402
     _hard_link, _load_queue, _symlink, _write_command)
@@ -545,15 +545,16 @@ def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
         conn, response = stream_response(base, TOK, tab='extension')
         try:
             assert response.status == 200, response.status
-            prove_scan(base, response, served, 'first', TOK)
-            prove_scan(base, response, served, 'second', TOK)
+            frame = frame_reader(response, served)
+            prove_scan(base, frame, 'first', TOK)
+            prove_scan(base, frame, 'second', TOK)
             assert first.exists() and second.exists(), (
                 'an aliased legacy name was consumed')
             status, _ = put_command(
                 base, {'token': TOK, 'id': 'after', 'code': '1'})
             assert status == 200, status
-            frame = framer(response, served)('the first frame')
-            assert frame.get('id') == 'after', frame
+            after = frame('the first frame')
+            assert after.get('id') == 'after', after
             assert first.exists() and second.exists(), (
                 'an aliased legacy name was consumed')
         finally:
@@ -573,16 +574,17 @@ def test_a_stream_admitted_before_the_name_reads_nothing_outside(tmp):
             assert response.status == 200, response.status
             link = Path(docroot) / 'commands' / f'{TOK}_dup.json'
             _symlink(link, outside)
-            prove_scan(base, response, served, 'first', TOK, tab='dup')
-            prove_scan(base, response, served, 'second', TOK, tab='dup')
+            frame = frame_reader(response, served)
+            prove_scan(base, frame, 'first', TOK, tab='dup')
+            prove_scan(base, frame, 'second', TOK, tab='dup')
             assert link.is_symlink(), 'the refused alias was unlinked'
             assert json.loads(outside.read_text(encoding='utf-8')) == {
                 'id': 'outside-payload', 'code': '1'}
             status, _ = put_command(
                 base, {'token': TOK, 'tab': 'dup', 'id': 'after', 'code': '1'})
             assert status == 200, status
-            frame = framer(response, served)('the first frame')
-            assert frame.get('id') == 'after', frame
+            after = frame('the first frame')
+            assert after.get('id') == 'after', after
             assert link.is_symlink(), 'the refused alias was unlinked'
         finally:
             response.close()
