@@ -281,6 +281,16 @@ def test_an_operand_the_model_cannot_read_still_pairs(tmp):
         ('zip-unread-alone-routed-through', _SENDER,
          f'return [{_ROUTED_CALL} for _, v in zip(args.values, [ext_cmd])]',
          (1, 1)),
+        # The target IS the undecided position here, which is the only row
+        # that says the token reached the caller rather than merely sitting
+        # beside a routed value. `globals().values()` is a call the guard
+        # reads no route into -- no module path, no builtin receiver -- so
+        # the operand is one it holds no stream for at all.
+        ('zip-unread-is-the-called-position', '',
+         f'return [{_ROUTED_CALL} for v, _ in zip(globals().values(), '
+         '[ordinary])]', (1, 1)),
+        ('zip-unread-is-the-called-position-quiet', '',
+         'return [x for x in globals().values()]', (0, 0)),
         ('enumerate-unread-alone', _LIST,
          'return [x for _, x in enumerate(args.values)]', (0, 0)),
         ('map-unread-alone', _LIST,
