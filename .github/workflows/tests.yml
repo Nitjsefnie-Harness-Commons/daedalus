@@ -603,7 +603,7 @@ jobs:
       # The suites this job runs skip on node, so it declares node rather
       # than inheriting whatever the hosted image happens to carry; a
       # job that reaches the suites and does not say so is the shape
-      # test_ci_lint_tools.py's declaration control refuses, and it reads
+      # test_ci_tool_declarations.py's declaration control refuses, and it reads
       # ORDER, so this step has to stay above the first suite-running one.
       # No package-manager cache: this job has no lockfile, and a cache
       # written here is cross-run state no gate on this event reaches.
