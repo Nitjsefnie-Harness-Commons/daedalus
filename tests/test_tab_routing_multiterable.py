@@ -438,22 +438,42 @@ def test_a_shadowed_builtin_is_not_the_builtin(tmp):
 
 
 def test_the_module_path_boundary_is_stated_and_measured(tmp):
-    """The boundary in `_pyroute_multiter`'s docstring: the guard reads
-    `ast.Name.id` and `ast.Attribute.attr`, never a `func.value`-rooted
-    module path, so the same declarations spelled through `itertools` are
-    outside it. These rows pin the statement in both directions -- a bare
-    name is paired, an imported spelling is not read at all -- so a future
-    arm that closed the boundary fails here rather than quietly change what
-    the docstring claims. The first three are false greens the docstring
-    discloses; the fourth is the bare-name route the arm does close."""
+    """The boundary in `_pyroute_multiter`'s docstring, pinned in BOTH
+    directions. The guard reads `ast.Name.id` and `ast.Attribute.attr`,
+    never a `func.value`-rooted module path, so no spelling of one of the
+    three declarations THROUGH a module is paired -- `builtins.zip` is not
+    `zip`, and `itertools.chain` is not a pairing either.
+
+    Every row here is a false green the docstring discloses, and every one
+    of them is a row a mutant that CLOSES the boundary turns red: the lead's
+    mutant, which teaches the arm the `builtins.` path for all three, takes
+    `builtins.map` from 0 to 1 and nothing here noticed. `builtins.map`,
+    `builtins.zip` and `builtins.enumerate` are here for that reason and for
+    no other one -- an `itertools`-only control never reaches the arm at all,
+    because the pre-existing import rule already pins those. The last row is
+    the other direction: the bare name IS closed, so a narrowing that made a
+    bare name unreadable fails here too."""
     cases = [
-        ('imported-chain', 'from itertools import chain\n' + _LIST,
-         'return [f() for f in chain(l)]', (1, 0)),
-        ('qualified-chain', 'import itertools\n' + _LIST,
+        ('builtins-map', 'import builtins\n' + _LIST,
+         'return [f() for f in builtins.map(lambda g: g, l)]', (1, 0)),
+        ('builtins-zip', 'import builtins\n' + _LIST,
+         'return [v() for _, v in builtins.zip(l, l)]', (1, 0)),
+        ('builtins-enumerate', 'import builtins\n' + _LIST,
+         'return [v() for _, v in builtins.enumerate(l)]', (1, 0)),
+        ('itertools-qualified-chain', 'import itertools\n' + _LIST,
          'return [f() for f in itertools.chain(l)]', (1, 0)),
-        ('imported-starmap', 'from itertools import starmap\n' + _DICT,
+        ('itertools-from-import-chain',
+         'from itertools import chain\n' + _LIST,
+         'return [f() for f in chain(l)]', (1, 0)),
+        ('itertools-from-import-starmap',
+         'from itertools import starmap\n' + _DICT,
          'return [f() for f in starmap(lambda a, b: b, d.items())]', (1, 0)),
-        ('bare-name-paired', _LIST, 'return [f() for f in list(l)]', (1, 1)),
+        ('itertools-zip-longest', 'import itertools\n' + _LIST,
+         'return [x for _, x in itertools.zip_longest(l, l)]', (0, 0)),
+        ('itertools-pairwise', 'import itertools\n' + _LIST,
+         'return [x for x in itertools.pairwise(l)]', (0, 0)),
+        ('bare-closed', _LIST, 'return [f() for f in map(lambda g: g, l)]',
+         (1, 1)),
     ]
     _verdicts(tmp, cases)
 
