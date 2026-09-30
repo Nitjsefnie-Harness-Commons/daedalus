@@ -25,7 +25,7 @@ import _util  # noqa: E402
 from _pyroute_multiter import (  # noqa: E402
     INDEXED_PAIRING, MULTI_ITERABLE_DECLARATIONS, POSITIONAL_PAIRING,
     PROJECTION)
-from test_tab_routing import _tracked_focus_verdict  # noqa: E402
+from _tabroute_focus import _tracked_focus_verdict  # noqa: E402
 
 _PREAMBLE = (
     'send = ordinary\n'
