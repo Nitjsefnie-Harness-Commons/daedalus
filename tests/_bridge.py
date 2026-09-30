@@ -201,6 +201,19 @@ def framer(response, served):
     return frame
 
 
+# A total ceiling on the repeats one read will step over, in seconds. It
+# bounds nothing a healthy stream reaches: a read that is going to succeed
+# gets its command within a tick or two however deep the backlog in front of
+# it is, and the backlog itself drains as fast as the socket delivers it. It
+# exists for the case where the wanted command is never coming and the stream
+# is not silent either — a drain that has stopped writing the queue and is
+# only redelivering a legacy file, which is exactly the regression several of
+# these suites exist to catch. Each read keeps its own silence bound, so a
+# quiet stream still fails in the read; this is the escape for a stream that
+# never goes quiet, and it is on the failing path rather than the passing one.
+_REDELIVERY_BUDGET_SECONDS = 30
+
+
 def frame_reader(response, served):
     """Read frames from one stream, skipping the redeliveries a consumer skips.
 
@@ -219,24 +232,30 @@ def frame_reader(response, served):
     the reader redelivered or a frame the test enqueued itself. One
     mechanism, not two.
 
-    Skipping is unbounded, because how deep the run of repeats goes is the
-    socket's backlog and not the test's to know: a stuck file comes back
-    once per scan, the loop only waits on a scan that delivered nothing, so
-    it delivers that file continuously. A count would either be too small
-    and fail a healthy stream or too large and slow every run, and it would
-    be a margin on a number nothing controls — which is the shape this
-    suite was opened to remove. Each read still carries its own timeout, so
-    a stream that goes quiet or dies is reported by the read; what this
-    waits without a bound for is a command that is coming.
+    An id the extension could not key on is not a repeat and is not recorded:
+    the handler tests `_did` for truth, so an empty one deduplicates nothing,
+    and a value of some other type is not a delivery id at all. Such a frame
+    is handed back unread rather than raising out of a test helper over a
+    shape the bridge has not produced and the check here is not about.
     """
     seen = set()
 
     def read(what):
+        repeats = 0
+        give_up_at = time.monotonic() + _REDELIVERY_BUDGET_SECONDS
         while True:
             got = framer(response, served)(what)
             did = got.get('_did')
-            if not isinstance(did, str) or did not in seen:
-                seen.add(did)
+            if isinstance(did, str) and did:
+                if did not in seen:
+                    seen.add(did)
+                    return got
+                repeats += 1
+                if time.monotonic() > give_up_at:
+                    raise AssertionError(
+                        f'{what}: {repeats} redeliveries and no new command '
+                        f'within {_REDELIVERY_BUDGET_SECONDS} seconds')
+            else:
                 return got
 
     return read
