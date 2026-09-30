@@ -154,7 +154,7 @@ def _owning_parameter(function, receiver, tree):
     return None
 
 
-def _call_sites(tree, owner):
+def _call_sites_named(tree, owner):
     """`(call, the scope it is written in)` for every call of `owner`.
 
     By NAME, bare or as an attribute, and every match is taken rather than
@@ -272,7 +272,7 @@ def _parameter_never_holds_a_child(function, receiver, tree, receivers,
     if owned is None:
         return False
     owner, slot, name = owned
-    sites = _call_sites(tree, owner)
+    sites = _call_sites_named(tree, owner)
     if not sites:
         return False
     for call, scope in sites:
