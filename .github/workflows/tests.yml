@@ -1773,7 +1773,7 @@ jobs:
       # and this one installer step installs from the HEAD checkout into a
       # single shared tool directory that is on PATH for the base side too.
       # So the base side runs with binaries its own tree never declared —
-      # BOTH of them, actionlint 1.7.12 and the pinned shellcheck, because
+      # BOTH of them, the pinned actionlint and the pinned shellcheck, because
       # this step supplies both and the base side shares its PATH. That is
       # accepted, not overlooked: they are the same pinned versions in both
       # cases, the measurement is of suite runtime rather than of toolchain

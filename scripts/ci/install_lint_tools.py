@@ -7,7 +7,10 @@ that reaches the suites calls this script; the tool set it declares is what
 `tests/test_ci_lint_tools.py` holds each of those jobs to.
 
 `actionlint` is downloaded and checksum-verified rather than piped from an
-install script, and the transfer is bounded in size. `shellcheck` is
+install script, and the transfer is bounded in size. The `actionlint` build
+is a fork of ours, because upstream 1.7.12 rejects the `queue` key under a
+workflow's `concurrency:` section — a key GitHub documents — and that
+rejection is a parse error no directive can suppress. `shellcheck` is
 installed from its pinned wheel, at the pin READ OUT OF
 `requirements-test.txt` rather than written here: a version pin spelled in
 two files is a pin that will drift, and the whole point of a pin is that
@@ -62,7 +65,7 @@ SHELLCHECK_PACKAGE = 'shellcheck-py'
 # is read from the wheel rather than computed here.
 SHELLCHECK_BINARY = 'shellcheck'
 SCRIPTS_SCHEME = '.data/scripts/'
-ACTIONLINT_VERSION = '1.7.12'
+ACTIONLINT_VERSION = '1.7.12-queue.1'
 # sha256 of each release asset, taken from the release's own checksums.txt.
 # Bump the version and this table together. The key is (platform.system(),
 # platform.machine().lower()), which is why the Windows row is amd64 and not
@@ -71,15 +74,30 @@ ACTIONLINT_VERSION = '1.7.12'
 # plainly has.
 ACTIONLINT_SHA256 = {
     ('Linux', 'x86_64'):
-        '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8',
+        'dcc2c42a7caaa197dfe63584a3851f62ef260f80b2cf221baaf05479661e1521',
     ('Darwin', 'x86_64'):
-        '5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644',
+        'f8a7fa5b23fd73955174cb1e50854acb6a20db28e8a758a310a7c86b0e5d9614',
     ('Darwin', 'arm64'):
-        'aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f',
+        'ae90d22922d2fae0090078c7e55152eaffab3ef296fa70de29b2bc23c5978c85',
     ('Windows', 'amd64'):
-        '6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9',
+        '182449e11cf42e22e4729ec12f29156e2655e099136155c95893c448915c80f9',
 }
-RELEASE = 'https://github.com/rhysd/actionlint/releases/download'
+# A fork build, not an upstream release. 1.7.12 is the latest upstream
+# actionlint and it rejects `queue` under a workflow's `concurrency:` section,
+# a key GitHub documents, with a parse error no actionlint directive can
+# suppress — so a workflow here cannot express the key at all. This build is
+# upstream's v1.7.12 TAG plus rhysd/actionlint#654 cherry-picked unchanged,
+# so the source delta is exactly that patch; the binaries are not
+# byte-identical to upstream's assets (built with a newer Go). Every door
+# that reaches the suites must get the SAME build, which is why the pin
+# lives here rather than in the job that lints: a `queue` workflow that
+# passed the actionlint job would be linted by a different binary here.
+#
+# When #654 merges and ships upstream, move this back to an upstream version,
+# the rhysd URL, and the checksum table above with it. The checksum file
+# beside the asset is published by whoever published the binary, so what
+# bounds a replaced asset is this recorded table, read at review time.
+RELEASE = 'https://github.com/Nitjsefnie-OSC/actionlint/releases/download'
 # What the release calls each architecture, which is not what Python calls it.
 ARCHITECTURES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64',
                  'arm64': 'arm64'}
