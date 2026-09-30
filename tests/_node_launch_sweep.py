@@ -1,10 +1,11 @@
 """The walk: which launches a module holds, and what the tree fails on.
 
-`tests/_node_launch_routing.py` holds the RULE — the tables that close its
-population and the readers that decide whether one launch is bounded. This
-holds the part that goes looking: the population a sweep reads, the
-findings one module contributes, and the plants that put a real module's
-own bytes in front of both.
+`tests/_node_launch_routing.py` holds the RULE and the readers that decide
+whether one launch is bounded; `tests/_launch_exemptions.py` holds the
+tables that close its population, and both are read from here. This holds
+the part that goes looking: the population a sweep reads, the findings one
+module contributes, and the plants that put a real module's own bytes in
+front of both.
 
 The seam is the one a reader meets first. A question about a launch —
 "is this child bounded", "may this row excuse it" — is about the module
@@ -22,8 +23,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _launch_census as census  # noqa: E402
+from _launch_exemptions import (  # noqa: E402
+    CLASSIFYING_MODULES, NOT_FIXED_WORK, NOT_SITES, UNRESOLVED_LAUNCHES)
 from _node_launch_routing import (  # noqa: E402
-    CLASSIFYING_MODULES, NOT_FIXED_WORK, NOT_SITES, UNRESOLVED_LAUNCHES,
     VERDICT_NODE, VERDICT_UNRESOLVED, _assignments_in, _bounds_its_own_child,
     _deadline, _executable_verdict, _exempt, _imported_constants,
     _imported_stems, _sibling_constants, _TESTS_DIR)
