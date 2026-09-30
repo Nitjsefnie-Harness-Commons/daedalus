@@ -80,6 +80,13 @@ def test_a_failed_removal_holds_the_generation_a_name_reached(tmp):
     control above cannot see a failed removal that resets. Here the name has
     been vacated once already, and 0 is the value a consumer is most likely
     still to hold there, because it is the first id the name ever carried.
+
+    The identity is deliberately not re-derived from the file: the drain
+    reads it from its own descriptor and this is a path lookup, and the two
+    do not report the same incarnation on every interpreter — re-deriving it
+    here is what `test_a_legacy_command_the_drain_cannot_remove_
+    redelivers_one_id` does, and that one is green on every leg. What this
+    control adds is the generation, and it reads that off the id itself.
     """
     service = _load_service('stream_service_legacy_generation_held')
     legacy = Path(tmp) / 'tok.json'
@@ -100,10 +107,11 @@ def test_a_failed_removal_holds_the_generation_a_name_reached(tmp):
             frame_writer=frames.append) == 1
 
     dids = [frame.get('_did') for frame in frames]
-    stamp = os.stat(legacy)
-    assert dids[0] == (
-        f'legacy-{stamp.st_dev}-{stamp.st_ino}-{stamp.st_ctime_ns}-1'), dids
+    # One object, one id; and not the one a name this drain never vacated
+    # would carry. Both are properties of the id the drain wrote, so neither
+    # reads the filesystem a second way.
     assert len(set(dids)) == 1, dids
+    assert dids[0].rsplit('-', 1)[1] == '1', dids
 
 
 def test_sequential_drops_at_one_name_carry_distinct_ids(tmp):
