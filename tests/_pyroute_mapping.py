@@ -2,8 +2,7 @@
 import ast
 
 from _pyroute_invalidation import CONTAINER_MUTATORS, invalidate_unmodelled
-from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
-                           _literal_value)
+from _pyroute_keys import _UNRESOLVED_KEY, _literal_key
 from _pyroute_positions import alias_target_pairs, drop_shifted_positions
 from _pyroute_reads import (_apply_pop, _fold_items, _literal_pair_items,
                             _source_items)
@@ -326,13 +325,7 @@ def _apply_modelled_store(statement, state, claimed):
     targets = (statement.targets if isinstance(statement, ast.Assign)
                else [statement.target] if not isinstance(
                    statement, ast.Delete) else statement.targets)
-    literal = _literal_value(getattr(statement, 'value', None))
     for target in targets:
-        if isinstance(target, ast.Name):
-            if literal is _UNSAFE_LITERAL:
-                state.literals.pop(target.id, None)
-            else:
-                state.literals[target.id] = literal
         store_deferred_target(
             target, value, state, isinstance(statement, ast.Delete),
             value is None and raw is None

@@ -112,17 +112,61 @@ _ROWS = [
     ('ctor', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
      + '    k = "tab"\n    cmd = dict([(k, 5)])\n'
        '    return ext_cmd("PUT", "/command", **cmd)\n'),
+    # The binding forms a name-to-literal table that enumerated only `=`
+    # leaves out. Every one of them reaches the sender carrying a `tab`,
+    # and every one of them is a name a key position is free to spell, so
+    # a table carrying none of them reads a real violation clean.
+    ('walrus-binding-then-name-key', 1, {'tab': 5}, _CALL, _inside(
+        '(w := "tab")', 'k = w', 'cmd = {k: 5}')),
+    ('walrus-binding-then-subscript', 1, {'tab': 5}, _CALL, _inside(
+        'cmd = {}', '(k := "tab")', 'cmd[k] = 5')),
+    ('tuple-unpack', 1, {'tab': 5}, _CALL, _inside(
+        'j, = ("tab",)', 'cmd = {j: 5}')),
+    ('unpack-over-name', 1, {'tab': 5}, _CALL, _inside(
+        'keys = ("tab",)', 'j, = keys', 'cmd = {j: 5}')),
+    ('for-target-dictkey', 1, {'tab': 5}, _CALL, _inside(
+        'for j in ("tab",): cmd = {j: 5}')),
+    ('for-target-block', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
+     + '    for j in ("tab",):\n        cmd = {j: 5}\n' + _SPREAD),
+    ('for-target-over-name', 1, {'tab': 5}, _CALL, _inside(
+        'keys = ("tab",)', 'for j in keys: cmd = {j: 5}')),
+    # The same three forms binding a name to another key, and a later
+    # binding taking the later value: a writer that recorded the walrus, the
+    # unpack or the loop target and then let an ordinary `=` or a second
+    # turn of the loop stand would over-report all of these.
+    ('walrus-binds-other', 0, {'id': 5}, _CALL, _inside(
+        '(w := "id")', 'k = w', 'cmd = {k: 5}')),
+    ('tuple-unpack-other', 0, {'id': 5}, _CALL, _inside(
+        'j, = ("id",)', 'cmd = {j: 5}')),
+    ('for-target-other', 0, {'id': 5}, _CALL, _inside(
+        'for j in ("id",): cmd = {j: 5}')),
+    ('rebound-after-walrus', 0, {'id': 5}, _CALL, _inside(
+        '(w := "tab")', 'k = w', 'k = "id"', 'cmd = {k: 5}')),
+    ('rebound-after-unpack', 0, {'id': 5}, _CALL, _inside(
+        'j, = ("tab",)', 'j = "id"', 'cmd = {j: 5}')),
+    ('rebound-after-loop', 0, {'id': 5}, _CALL, _inside(
+        'for j in ("tab",): pass', 'j = "id"', 'cmd = {j: 5}')),
+    # A loop target takes every element in turn, so it carries the union.
+    # Two elements that are not the same name no position can spell, and
+    # the runtime here agrees; two that are the same do spell a key, and a
+    # writer that refused every union would miss it. A target whose parts
+    # do not line up with its value raises before it binds anything.
+    ('loop-union', 0, {'id': 5}, _CALL, _inside(
+        'for j in ("tab", "id"): cmd = {j: 5}')),
+    ('loop-union-agrees', 1, {'tab': 5}, _CALL, _inside(
+        'for j in ("tab", "tab"): cmd = {j: 5}')),
+    ('unpack-mismatch', 0, _RAISES, _CALL, _inside(
+        'j, k = 5', 'cmd = {j: 5}')),
 ]
 
-# Two boundaries this change does not cross. Every row below carries a real
-# `tab` to the sender while reading clean, which is what makes each a
+# Three boundaries this change does not cross. Every row below carries a
+# real `tab` to the sender while reading clean, which is what makes each a
 # separate defect rather than a member this change claims to close. The
 # literals table is empty in a nested body, so a binding made OUTSIDE one
 # is unresolved, and the container model's `_literal_key` reads that same
-# table under the same boundary (#1341). The walrus rows are the other
-# case: `walrus-key` above DOES read a walrus in key position, but the
-# table carries no walrus BINDING, so a name it binds resolves nowhere
-# after it (#1343).
+# table under the same boundary (#1341). The binding forms themselves -
+# the walrus, the unpack and the loop target - are `_ROWS` above, because
+# they were members of the mechanism this change closes (#1343).
 _CROSS_SCOPE = [
     ('module-scope', 0, {'tab': 5}, _CALL,
      'TAB = "tab"\n' + _inside('cmd = {TAB: 5}')),
@@ -130,10 +174,6 @@ _CROSS_SCOPE = [
      'def f(args, key="tab"):\n' + _SENDER + '    cmd = {key: 5}\n' + _SPREAD),
     ('parameter', 0, {'tab': 5}, "f(ARGS, 'tab')",
      'def f(args, key):\n' + _SENDER + '    cmd = {key: 5}\n' + _SPREAD),
-    ('walrus-binding-then-name-key', 0, {'tab': 5}, _CALL, _inside(
-        '(w := "tab")', 'k = w', 'cmd = {k: 5}')),
-    ('walrus-binding-then-subscript', 0, {'tab': 5}, _CALL, _inside(
-        'cmd = {}', '(k := "tab")', 'cmd[k] = 5')),
 ]
 
 
@@ -191,7 +231,10 @@ def test_a_delete_drops_the_literal_the_other_writer_drops(tmp):
     `ast.Delete` is where they used to differ - this one returning early
     where `_pyroute_mapping` forgot the name - so a key spelled with a
     name the program has deleted is a key the program cannot spell at
-    all, and must resolve to nothing.
+    all, and must resolve to nothing. The binding forms are the other
+    half of the same contract: a writer that taught one model the walrus,
+    the unpack and the loop target, and not the other, would leave the
+    two disagreeing about the same program.
     """
     path = Path(tmp) / 'deleted-name.py'
     path.write_text('k = "tab"\n'
@@ -201,6 +244,16 @@ def test_a_delete_drops_the_literal_the_other_writer_drops(tmp):
     found = dict_assignments(ast.parse(path.read_text(encoding='utf-8')))
     assert 'tab' in found['cmd']
     assert found['other'] == {}
+    forms = {
+        'walrus': '(w := "tab")\nk = w\ncmd = {k: 5}\n',
+        'unpack': 'j, = ("tab",)\ncmd = {j: 5}\n',
+        'loop': 'for j in ("tab",):\n    cmd = {j: 5}\n',
+        'loop-over-name': 'keys = ("tab",)\nfor j in keys:\n'
+                          '    cmd = {j: 5}\n',
+    }
+    spelled = {label: sorted(dict_assignments(ast.parse(source))['cmd'])
+               for label, source in forms.items()}
+    assert spelled == {label: ['tab'] for label in forms}, spelled
 
 
 def main():

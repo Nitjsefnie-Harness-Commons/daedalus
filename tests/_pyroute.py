@@ -39,7 +39,8 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             statement_cannot_raise)
 from _pyroute_match import walk_match
 from _pyroute_multiter import multi_iterable_elements
-from _pyroute_payload import dict_assignments as _dict_assignments
+from _pyroute_payload import (_bind_literals,
+                               dict_assignments as _dict_assignments)
 from _pyroute_violations import call_violations
 from _pyroute_targets import (bind_with_target, materialized_order,
                               probe_comprehension)
@@ -522,8 +523,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             pairs = dedupe_states([*body_pairs, *other_pairs])
             continue
         if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
-            header = (statement.iter if isinstance(
-                statement, (ast.For, ast.AsyncFor)) else statement.test)
+            iterating = isinstance(statement, (ast.For, ast.AsyncFor))
+            header = statement.iter if iterating else statement.test
             pairs = check_store(header, pairs)
             header_nonempty = iterable_nonempty(
                 header, pairs, literal_iterable_nonempty)
@@ -531,17 +532,14 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 generator_for(header, state).expression for state in pairs
                 if generator_for(header, state) is not None}
             yielded = None
-            if isinstance(statement, (ast.For, ast.AsyncFor)):
-                pairs, yielded = consume_iterable(
-                    header, pairs, exhaust=False)
+            if iterating:
+                pairs, yielded = consume_iterable(header, pairs, exhaust=False)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             zero_pairs = incoming
-            if (isinstance(statement, (ast.For, ast.AsyncFor))
-                    and header_nonempty is True):
+            if iterating and header_nonempty is True:
                 zero_pairs = []
             target_names = (bound_names(statement.target)
-                            if isinstance(statement, (ast.For, ast.AsyncFor))
-                            else set())
+                            if iterating else set())
             iteration_pairs = incoming
             post_body = []
             break_pairs = []
@@ -549,8 +547,10 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for _ in range(4):
                 entry = [_copy_state_pair(pair) for pair in iteration_pairs]
                 clear_names(entry, target_names)
-                if isinstance(statement, (ast.For, ast.AsyncFor)):
+                if iterating:
                     bind_deferred_states(statement.target, yielded, entry)
+                    for state in entry:
+                        _bind_literals(statement, state.literals)
                 exits = new_exits()
                 found, fallthrough = walk(statement.body, entry, exits)
                 violations.extend(found)
@@ -650,13 +650,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             continue
         pairs = check_expression(statement, pairs)
         targets = (statement.targets if isinstance(statement, ast.Assign)
-                   else [statement.target] if isinstance(
-                       statement, ast.AnnAssign) else ())
+                   else [statement.target]
+                   if isinstance(statement, ast.AnnAssign) else ())
         if any(isinstance(target, (ast.Tuple, ast.List))
                for target in targets):
-            pairs, _ = consume_iterable(
-                statement.value, pairs, exhaust=True)
+            pairs, _ = consume_iterable(statement.value, pairs, exhaust=True)
         for state in pairs:
+            _bind_literals(statement, state.literals)
             apply_state_dict_statement(statement, state)
             apply_alias_statement(statement, state)
             store_deferred_value(statement, state)
