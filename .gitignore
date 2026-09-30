@@ -74,8 +74,6 @@
 !/.github/ci-thresholds.json
 !/.github/dependabot.yml
 !/.github/reserved-test-names.json
-!/.github/reserved-test-names.json
-!/.github/reserved-test-names.json
 !/.github/suite-timings.json
 
 # ─── .github/ISSUE_TEMPLATE ───
