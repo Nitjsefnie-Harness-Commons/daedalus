@@ -44,9 +44,8 @@ from _pyroute_violations import call_violations
 from _pyroute_targets import (bind_with_target, materialized_order,
                               probe_comprehension)
 
-_copy_state_pair = FlowState.copy
+_copy_state_pair, _CALL_CACHE = FlowState.copy, {}
 dict_assignments = _dict_assignments
-_CALL_CACHE = {}
 
 
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
@@ -68,8 +67,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         projected = []
         for state in found:
             entry = _copy_state_pair(state)
-            entry.dicts = {}
-            entry.dict_origins = {}
+            entry.dicts, entry.dict_origins = {}, {}
             for name, origin in callable_dict_origins.items():
                 keys = entry.dict_namespaces.get(origin, {}).get(name)
                 if keys is None: continue
