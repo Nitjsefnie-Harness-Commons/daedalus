@@ -567,11 +567,14 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     # this green with the two bases genuinely diverged. What is compared is
     # the base on a non-comment line, and exactly one of them.
     #
-    # ADMITTED SUBSET, and what it cannot see. This reads LINES, not shell:
-    # a base assembled from parts, split across a continuation, or consumed
-    # through a variable is invisible here, and one such shape was planted
-    # and left this green. A step that names the base correctly and then
-    # fetches elsewhere by another variable is the residue. It is not a
+    # ADMITTED SUBSET, and what it cannot see. This reads LINES, not shell.
+    # A base ASSEMBLED FROM PARTS or split across a continuation is refused
+    # rather than seen: neither puts the whole base on one line, so this
+    # over-refuses a shape it might have accepted. A base consumed through a
+    # variable the control does handle — the whole base on one line, read
+    # once, is exactly what it looks for. What it cannot see is the residue
+    # a plant confirmed: a step that names the base correctly on one line
+    # and then fetches elsewhere through another variable. It is not a
     # silent pass in practice — the pinned sha256 fails on bytes that are
     # not the ones verified — so what this bounds is the JOB, not the
     # download. Red is the safe direction, and a line-based reading cannot
