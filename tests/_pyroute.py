@@ -16,6 +16,7 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              merge_yielded, load_callable_cells,
                              new_deferred_callable, new_deferred_generator,
                              payload_key, sender_value, sync_cells)
+from _pyroute_invalidation import invalidate_unmodelled
 from _pyroute_live import (clear_expression_cache, live_expression_value,
                            seed_then_resolve)
 from _pyroute_mapping import (apply_deferred_store as store_deferred_value,
@@ -187,6 +188,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 if truth is None: skipped.extend(copied(active))
         results = [expression.key, expression.value] if isinstance(
             expression, ast.DictComp) else [expression.elt]
+        if isinstance(expression, ast.GeneratorExp):
+            # The one site the runtime evaluates a generator's element. The
+            # statement-level walk holds a bound generator's element back
+            # (`_own_nodes`), and this is where the hold is released for every
+            # consumer the model does follow.
+            for entry in active:
+                invalidate_unmodelled(expression.elt, entry)
         for result in results: active = check_expression(
             clear_expression_cache(result, active), active)
         yielded = merge_yielded(

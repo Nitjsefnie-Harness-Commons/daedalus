@@ -47,6 +47,10 @@ CONTAINER_MUTATORS = (_mutating_surface(list) | _mutating_surface(dict)
 
 _NESTED_SCOPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
                   ast.ClassDef)
+# The statements that bind their own value to a name. Nothing else does: a
+# generator expression reached through any other position is a value this
+# statement hands to something the model cannot follow, which may consume it.
+_BINDING = (ast.Assign, ast.AnnAssign, ast.NamedExpr)
 _SEQUENCE_KINDS = ('list', 'tuple', 'set')
 # The sequence kinds whose instances take `x[k] = v` or `del x[k]`; any
 # other kind refuses both, so nothing is written and nothing is removed and
@@ -64,16 +68,32 @@ _ITEM_WRITABLE_SEQUENCES = ('list',)
 _CONTAINER_TYPES = frozenset({'dict', 'list', 'set'})
 
 
-def _own_nodes(statement):
+def _own_nodes(statement, held):
     """The statement's own nodes. A nested scope is walked by its own flow
     against its own state, so descending into one would invalidate a
-    container this statement never reached."""
-    pending = [statement]
+    container this statement never reached.
+
+    A generator expression is the second such form, for its element: Python
+    evaluates nothing after the outermost iterable until the generator is
+    advanced. Every `comprehension` is walked whole, so that outermost
+    iterable -- evaluated when the generator is built -- and the filters, the
+    clause targets and the clauses after the first stay in scope. The element
+    is walked only where the model cannot show it is unreachable, which is
+    `held`: False, or an expression the rule was handed whole."""
+    pending = [(statement, held)]
     while pending:
-        node = pending.pop()
+        node, bound = pending.pop()
         yield node
-        if not isinstance(node, _NESTED_SCOPES):
-            pending.extend(ast.iter_child_nodes(node))
+        if isinstance(node, _NESTED_SCOPES):
+            continue
+        if isinstance(node, ast.GeneratorExp):
+            if not bound:
+                pending.append((node.elt, False))
+            pending.extend((child, False) for child in node.generators)
+            continue
+        binding = isinstance(node, _BINDING)
+        pending.extend((child, binding)
+                       for child in ast.iter_child_nodes(node))
 
 
 def _containers(value):
@@ -278,20 +298,8 @@ def _invalidate(state, container, operands=()):
     sync_cells(state, names)
 
 
-def invalidate_unmodelled(statement, state, claimed=()):
-    """Drop the facts of every tracked container this statement mutates in
-    place by a path the model does not follow.
-
-    `claimed` names the calls and statements a precise handler already
-    applied, so a mutation the model followed keeps its exact result. Every
-    other mutation fails closed: the container's recorded values join the
-    unknown slot and its count becomes unknown, so a later read answers with
-    everything the container could hold rather than with one position from
-    before the mutation.
-    """
-    claimed = set(claimed)
-    done = set()
-    for node in _own_nodes(statement):
+def _invalidate_nodes(nodes, state, claimed, done):
+    for node in nodes:
         if id(node) in claimed:
             continue
         if isinstance(node, ast.Call):
@@ -306,3 +314,46 @@ def invalidate_unmodelled(statement, state, claimed=()):
                 continue
             done.add(id(container))
             _invalidate(state, container, _operands(node, state))
+
+
+def _read_generators(nodes, state):
+    """The generators this statement reaches, whose element it may advance.
+
+    A name that resolves to one is a read, and a read is not an advance, so
+    the release is the fail-closed direction: it reports a generator the flow
+    merely passed on. It is also the only signal a consumer the model does
+    not follow -- `zip`, `enumerate`, a `deque` popped by hand -- leaves
+    behind, because that consumer advances the generator without the flow
+    ever seeing it. An expression handed to the rule whole reaches the flow
+    through `check_store`, and a `for` iterable is one of those: the flow
+    consumes it in the statement that hands it over, so the element of a
+    handed-over generator is released by the flow itself, in
+    `consume_generator`."""
+    for node in nodes:
+        if not isinstance(node, ast.Name) or not isinstance(node.ctx,
+                                                            ast.Load):
+            continue
+        value = _known_value(node, state)
+        if isinstance(value, DeferredGenerator):
+            yield value
+
+
+def invalidate_unmodelled(statement, state, claimed=()):
+    """Drop the facts of every tracked container this statement mutates in
+    place by a path the model does not follow.
+
+    `claimed` names the calls and statements a precise handler already
+    applied, so a mutation the model followed keeps its exact result. Every
+    other mutation fails closed: the container's recorded values join the
+    unknown slot and its count becomes unknown, so a later read answers with
+    everything the container could hold rather than with one position from
+    before the mutation.
+    """
+    claimed = set(claimed)
+    done = set()
+    held = isinstance(statement, ast.GeneratorExp)
+    nodes = list(_own_nodes(statement, held))
+    for generator in _read_generators(nodes, state):
+        _invalidate_nodes(_own_nodes(generator.expression.elt, False),
+                          state, claimed, done)
+    _invalidate_nodes(nodes, state, claimed, done)

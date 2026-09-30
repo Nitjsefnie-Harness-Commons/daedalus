@@ -126,6 +126,89 @@ _POSITIONS = [
      'except ValueError:\n    pass', '', 'x[0]()'),
 ]
 
+# A generator expression evaluates its outermost iterable when the generator
+# object is built and evaluates everything after it only once the generator is
+# first advanced, so a mutating call in the element belongs to the statement
+# that advances the generator and to no other. The eager twins are here
+# because the timing is the whole rule: a list, set or dict comprehension
+# evaluates its element at construction, and the outermost iterable of a
+# generator is evaluated when the generator is built.
+_LAZY = [
+    ('generator_element_never_advanced', _LIST, 'g = (x.pop(0) for _ in [1])',
+     '', 'x[0]()', (0, 0)),
+    ('generator_element_in_a_binder', _LIST,
+     'def g(a=(x.pop(0) for _ in [1])):\n    pass', '', 'x[0]()', (0, 0)),
+    ('generator_element_advanced_through_a_binder', _LIST,
+     'def g(a=(x.pop(0) for _ in [1])):\n    return list(a)\ng()', '',
+     'x[0]()', (1, 1)),
+    ('generator_element_advanced_by_next', _LIST,
+     'g = (x.pop(0) for _ in [1])\nnext(g)', '', 'x[0]()', (1, 1)),
+    ('generator_element_advanced_by_list', _LIST,
+     'g = (x.pop(0) for _ in [1])\nlist(g)', '', 'x[0]()', (1, 1)),
+    ('generator_element_advanced_by_a_loop', _LIST,
+     'g = (x.pop(0) for _ in [1])\nfor _ in g:\n    break', '',
+     'x[0]()', (1, 1)),
+    ('generator_element_advanced_by_any', _LIST,
+     'g = (x.pop(0) for _ in [1])\nany(g)', '', 'x[0]()', (1, 1)),
+    # Consumers the model does not follow consume the generator all the same,
+    # so the rule cannot be released by the flow's own consumption model
+    # alone. Each of these advanced the generator and read nothing else.
+    ('generator_element_advanced_by_zip', _LIST,
+     'g = (x.pop(0) for _ in [1])\n[*zip(g)]', '', 'x[0]()', (1, 1)),
+    ('generator_element_advanced_by_enumerate', _LIST,
+     'g = (x.pop(0) for _ in [1])\n[_ for _, v in enumerate(g)]', '',
+     'x[0]()', (1, 1)),
+    ('generator_element_advanced_by_a_hand_pop', _LIST,
+     'from collections import deque\ng = (x.pop(0) for _ in [1])\n'
+     'deque(g).popleft()', '', 'x[0]()', (1, 1)),
+    ('generator_element_advanced_by_yield_from', _LIST,
+     'g = (x.pop(0) for _ in [1])\n'
+     'def h():\n    yield from g\nlist(h())', '', 'x[0]()', (1, 1)),
+    ('generator_element_advanced_in_a_nested_scope', _LIST,
+     'g = (x.pop(0) for _ in [1])\n'
+     'def h():\n    return list(g)\nh()', '', 'x[0]()', (1, 1)),
+    # A generator expression handed to a loop as the iterable is advanced by
+    # that loop, and it reaches the rule whole rather than as a stored value,
+    # so the name a read would resolve never exists. The two rows differ in
+    # whether the flow can count what the loop yields: pinning only the
+    # countable one lets a rule that watches the count stand in for the
+    # release, and an uncountable iterable is the shape it misses.
+    ('generator_element_as_a_loop_header', _LIST,
+     'for _ in (x.pop(0) for _ in [1]):\n    break', '', 'x[0]()', (1, 1)),
+    ('generator_element_as_an_uncountable_loop_header', _LIST,
+     'for _ in (x.pop(0) for y in args.values):\n    break', '',
+     'x[0]()', (1, 1)),
+    ('generator_element_handed_to_an_unfollowed_callee', _LIST,
+     '[*zip(x.pop(0) for _ in [1])]', '', 'x[0]()', (1, 1)),
+    ('generator_outermost_iterable', _LIST, 'g = (0 for _ in [x.pop(0)])', '',
+     'x[0]()', (1, 1)),
+    ('list_comprehension_element', _LIST, 'g = [x.pop(0) for _ in [1]]', '',
+     'x[0]()', (1, 1)),
+    ('set_comprehension_element', _LIST, 'g = {x.pop(0) for _ in [1]}', '',
+     'x[0]()', (1, 1)),
+    ('dict_comprehension_value', _LIST, 'g = {0: x.pop(0) for _ in [1]}', '',
+     'x[0]()', (1, 1)),
+    # A filter and a clause after the first are lazy as well, and the guard has
+    # no site that tells it whether the generator is advanced, so the shape
+    # stays reported. Pinning the over-report is what stops a later reader
+    # from taking it for the contract the element rows are fixing.
+    ('generator_filter_fails_closed', _LIST,
+     'g = (0 for _ in [1] if x.pop(0))', '', 'x[0]()', (0, 1)),
+    ('generator_second_clause_fails_closed', _LIST,
+     'g = (0 for _ in [1] for _ in [x.pop(0)])', '', 'x[0]()', (0, 1)),
+    # A generator this statement does not bind to a name is handed to
+    # something the model cannot follow, which may consume it, so its element
+    # is walked. Reading a bound generator without consuming it is the same
+    # over-report one step along.
+    ('generator_element_returned_fails_closed', _LIST,
+     'def g():\n    return (x.pop(0) for _ in [1])\ny = g()', '',
+     'x[0]()', (0, 1)),
+    ('generator_element_as_a_call_argument_fails_closed', _LIST,
+     'ordinary(x.pop(0) for _ in [1])', '', 'x[0]()', (0, 1)),
+    ('generator_read_without_being_advanced_fails_closed', _LIST,
+     'g = (x.pop(0) for _ in [1])\nordinary(g)', '', 'x[0]()', (0, 1)),
+]
+
 # A mutating call whose receiver the model cannot resolve is not a no-op the
 # guard may read clean: the call's own value stays unproved, so a `tab` routed
 # through it later reports. Each row is paired with a control whose receiver
@@ -350,6 +433,13 @@ def test_recorded_positions_that_still_hold_stay_standing(tmp):
 def test_every_unreached_position_fails_closed(tmp):
     missed = _missed(tmp, _POSITIONS, (1, 1))
     assert not missed, missed
+
+
+def test_a_generator_element_is_only_a_mutation_once_advanced(tmp):
+    observed = [(row[0], _verdict(tmp, *row[1:5])) for row in _LAZY]
+    wrong = [item for item, row in zip(observed, _LAZY)
+             if item[1] != row[5]]
+    assert not wrong, wrong
 
 
 def test_every_unreached_position_twin_stays_clean(tmp):
