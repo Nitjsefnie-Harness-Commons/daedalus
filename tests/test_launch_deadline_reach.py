@@ -379,6 +379,42 @@ def test_a_double_star_keeps_the_argument_the_call_actually_wrote(tmp):
     assert _census(DOUBLE_STAR) == [], _census(DOUBLE_STAR)
 
 
+def test_a_match_mapping_rest_that_rebinds_the_name_is_still_refused(tmp):
+    """`case {'k': 1, **kid}:` binds `kid` to the unmatched keys.
+
+    The third plain-`str` binder, and the one the other two rows do not
+    reach: `MatchMapping.rest` is a field of the mapping class rather
+    than a `MatchAs` pattern, so a reader that watches for the pattern
+    arms alone never sees it.
+    """
+    del tmp
+    _assert_refuses('a-match-mapping-rest-rebinding-the-name')
+
+
+def test_an_import_that_rebinds_the_name_is_still_refused(tmp):
+    """`import kid` inside the caller binds `kid` to a MODULE.
+
+    A module is not a container, and the caller rebinding the name to a
+    list two lines later does not make it one -- which is the whole
+    shape of this row and the reason the import arms are in the shared
+    set rather than considered unreachable: the name looks proven and is
+    not.
+    """
+    del tmp
+    _assert_refuses('an-import-rebinding-the-name')
+
+
+def test_a_nested_def_that_rebinds_the_name_is_still_refused(tmp):
+    """`def kid(): ...` inside the caller binds `kid` to a function.
+
+    A function is not a container either, and this is the fourth binder
+    that carries a plain string rather than an `ast.Name`, so the
+    reader's `Store` arm never sees it.
+    """
+    del tmp
+    _assert_refuses('a-nested-def-rebinding-the-name')
+
+
 def test_a_call_site_written_at_module_scope_is_still_refused(tmp):
     """The arm reads an enclosing FUNCTION, and this call is in none.
 
