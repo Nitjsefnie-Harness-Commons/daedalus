@@ -73,6 +73,39 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     assert len(set(dids)) == 1, dids
 
 
+def test_a_failed_removal_holds_the_generation_a_name_reached(tmp):
+    """A redelivery at an advanced name keeps its generation, not a fresh one.
+
+    At generation 0, "held" and "reset to 0" are one observation, so the
+    control above cannot see a failed removal that resets. Here the name has
+    been vacated once already, and 0 is the value a consumer is most likely
+    still to hold there, because it is the first id the name ever carried.
+    """
+    service = _load_service('stream_service_legacy_generation_held')
+    legacy = Path(tmp) / 'tok.json'
+    legacy.write_text('{"id":"first","code":"1"}', encoding='utf-8')
+
+    assert service.drain_legacy_file(
+        legacy, None, command_ttl=100,
+        frame_writer=lambda frame: None) == 1
+
+    legacy.write_text('{"id":"second","code":"1"}', encoding='utf-8')
+    frames = []
+    with _refusing_unlink(legacy.name):
+        assert service.drain_legacy_file(
+            legacy, None, command_ttl=100,
+            frame_writer=frames.append) == 1
+        assert service.drain_legacy_file(
+            legacy, None, command_ttl=100,
+            frame_writer=frames.append) == 1
+
+    dids = [frame.get('_did') for frame in frames]
+    stamp = os.stat(legacy)
+    assert dids[0] == (
+        f'legacy-{stamp.st_dev}-{stamp.st_ino}-{stamp.st_ctime_ns}-1'), dids
+    assert len(set(dids)) == 1, dids
+
+
 def test_sequential_drops_at_one_name_carry_distinct_ids(tmp):
     """One name re-dropped is as many commands as drops.
 
