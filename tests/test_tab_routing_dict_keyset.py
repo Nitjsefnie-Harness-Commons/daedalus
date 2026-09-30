@@ -171,6 +171,14 @@ _AXES = {
         _UNACCOUNTABLE + '\nd = {}\nd.update(**o)'),
     'update-unaccountable-name-doubled': (
         _UNACCOUNTABLE + '\nd = {}\nd.update(**{**o})'),
+    'ior-stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o'),
+    'stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(o)'),
+    'stale-unaccountable-name-doubled': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**o)'),
+    'stale-unaccountable-name-star': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(*[o])'),
     'ior-unaccountable-name': _UNACCOUNTABLE + '\nd = {}\nd |= o',
     'update-unaccountable-name-mixed': (
         _UNACCOUNTABLE + '\nd = {}\nd.update([("a", 1)], **o)'),
@@ -199,6 +207,16 @@ _AXES = {
 # no member took the second outcome and no member's name carried an
 # unprovable alias, so every row reads `(0, 0)` and the outcome said nothing
 # the cost did not. A source that starts marking a name again shows here.
+# The clean cost is NOT uniform any more, and the four rows that changed are
+# the fail-closed direction rather than a new defect. Their source is a
+# `zip` the arm can now read, so the value the source wrote at the key is a
+# lambda that calls `send(..., tab=...)` and the guard reports it. The clean
+# prelude stops the RECORDER, not the routing, so the runtime count is 0
+# while the model still holds a tab-sending callable -- which is the same
+# trade the 134-cell over-report disclosure makes. Main's uniform `(0, 0)`
+# was this arm being BLIND: the source was unreadable there, so nothing
+# joined and nothing was reported. Reading it correctly is what moved the
+# number, and the correct verdict for a routed source is a report.
 _COST = {
     'update-pairs': (0, 0),
     'update-pairs-tuple': (0, 0),
@@ -234,6 +252,10 @@ _COST = {
     'update-unaccountable-name': (0, 0),
     'update-unaccountable-name-star': (0, 0),
     'update-unaccountable-name-doubled': (0, 0),
+    'ior-stale-unaccountable-name': (0, 1),
+    'stale-unaccountable-name': (0, 1),
+    'stale-unaccountable-name-doubled': (0, 1),
+    'stale-unaccountable-name-star': (0, 1),
     'ior-unaccountable-name': (0, 0),
     'update-unaccountable-name-mixed': (0, 0),
     'update-unaccountable-name-mixed-keyed': (0, 0),
@@ -314,52 +336,33 @@ def test_every_axis_member_reports_on_every_read_form_and_costs_nothing(tmp):
                 label, name)
 
 
-# Members the resolved guard cannot decide, named rather than filed into a
-# table whose contract they no longer meet. None belongs in `_AXES` (a
-# member there must REPORT with a real call -- the clean cost is not zero),
-# none in `_SILENT` (a member there must read CLEAN -- these report), and
-# none in `_ACCOUNTED` (whose contract is that the model can see the key or
-# see it absent -- one of these reports where the value routes nothing).
+# ONE member the resolved guard cannot decide, named rather than filed into a
+# table whose contract it no longer meets. It belongs in none of them: not in
+# `_AXES` (a member there must REPORT with a real call, and this one reports
+# where the runtime routes nothing), not in `_SILENT` (a member there must
+# read clean), and not in `_ACCOUNTED` (whose contract is that the model can
+# see the key or see it absent -- here it CAN, and still reports).
 #
-# EVERY ONE OF THEM reads `(0, 0)` clean and `(1, 1)` routed on
-# `origin/main`, so each is a false positive the multi-iterable arm
-# introduced and none is a reading the suite had accepted. They were found by
-# re-deriving the census on the tree this branch pushes, not by carrying a
-# table across the rebase -- which is the only reason the number is known.
-# The costs are pinned, so a fix turns this red on the commit that has to
-# move the member out; that is the discipline `_SILENT` already uses and the
-# reason nothing here is deleted.
-_ACCOUNTED_SOURCE = (
-    'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
-    '\nd.update({"k": ordinary})', 'd.get("k", ordinary)')
-
+# It is a false positive the multi-iterable arm introduced: on `origin/main`
+# the same body reads `(0, 0)`. The cause is located. The pair's KEY is a
+# plain string, and a container of plain values is not one the guard's
+# display reader models -- `["j"]` evaluates to a container whose single
+# item is nothing -- so the arm cannot place the key half of the pair, the
+# mapping store never records `"j"`, and the value half joins the
+# unknown-key slot. A read of a DIFFERENT key, cleanly written after it,
+# then joins that routed value. The read-side of that is in
+# `tests/_pyroute_reads.py`, which this branch does not hold.
+#
+# The cost is pinned, so a fix turns this red on the commit that has to move
+# the member out -- the discipline `_SILENT` already uses, and the reason
+# the row is named rather than deleted.
 _UNDECIDED = {
-    # `|=` over a key the arm can now see written joins the recorded value
-    # with the arm's, and the join binds an unprovable sender. A literal
-    # source and a list of pairs through the same `|=` both read clean, so
-    # it is the CALL the arm reads and not the join itself.
-    'ior-stale-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o', (0, 1), (1, 2)),
-    # The `update` spelling of the same join, and the two shapes beside it
-    # that reach the same place.
-    'stale-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(o)',
-        (0, 1), (1, 2)),
-    'stale-unaccountable-name-doubled': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**o)',
-        (0, 1), (1, 2)),
-    'stale-unaccountable-name-star': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(*[o])',
-        (0, 1), (1, 1)),
-    # The same join through a second key, which the accounted table carried
-    # as its false-positive limb while the zip source was unreadable and the
-    # join never happened. Its CLEAN cost is still zero; the false positive
-    # is on the routed measurement, which is what the accounted contract
-    # pins.
     'fresh-key-ordinary': (
         'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
         '\nd.update({"k": ordinary})', (0, 0), (0, 1)),
 }
+
+_ACCOUNTED_SOURCE = _UNDECIDED['fresh-key-ordinary'][0], 'd.get("k", ordinary)'
 
 
 def test_every_undecided_member_is_pinned_at_its_real_verdict(tmp):
