@@ -99,7 +99,7 @@ def _raised_exceptions(function, bound):
     return frozenset(raised)
 
 
-def _enclosing(tree, node):
+def _def_enclosing(tree, node):
     """The function a node sits in, or None for the module's own scope.
 
     Innermost by narrowest span, and `node` itself is excluded: a def's own
@@ -150,7 +150,7 @@ def _owning_parameter(function, receiver, tree):
         slot = _parameter_slot(scope, receiver)
         if slot is not None:
             return scope, slot, receiver
-        scope = _enclosing(tree, scope)
+        scope = _def_enclosing(tree, scope)
     return None
 
 
@@ -172,7 +172,7 @@ def _call_sites(tree, owner):
         if ((isinstance(func, ast.Name) and func.id == owner.name)
                 or (isinstance(func, ast.Attribute)
                     and func.attr == owner.name)):
-            found.append((node, _enclosing(tree, node)))
+            found.append((node, _def_enclosing(tree, node)))
     return found
 
 
