@@ -29,16 +29,15 @@ permissions:
 
 concurrency:
   # Per issue, so two claims on one issue are answered one after the other and
-  # the first of a race still wins it. NOT cancel-in-progress: cancelling the
-  # run in progress would leave the loser of the race with silence.
+  # the first of a race still wins it.
   #
   # A group holds one PENDING run by default, and a newly queued run cancels
   # and replaces that one whatever `cancel-in-progress` says — so a third
   # claim arriving while one runs would drop the second commenter's claim with
   # no answer and no assignment. `queue: max` holds up to 100 pending runs
   # instead and cancels only past the 100th, which is as far as the guarantee
-  # goes. It may not be combined with `cancel-in-progress: true`, so the false
-  # above stays.
+  # goes. `queue: max` may not be combined with `cancel-in-progress: true`, so
+  # the false below is required, not merely chosen.
   group: claim-${{ github.event.issue.number }}
   cancel-in-progress: false
   queue: max
