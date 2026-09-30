@@ -77,7 +77,9 @@ def _own_nodes(statement, held):
     iterable and the lazy control forms beside it stay in scope. The element
     is walked only where the model cannot show it is unreachable, which is
     `held`: False, or an expression the rule was handed whole. The hold is
-    released by `_read_generators` and, for a `for` iterable, by the flow."""
+    released by `_read_generators` and, for a `for` iterable, by the flow --
+    in every state it holds, because a state the flow never releases keeps
+    facts the runtime has already moved."""
     pending = [(statement, held)]
     while pending:
         node, held = pending.pop()
@@ -206,9 +208,8 @@ def _stored(statement, state):
     raises `TypeError` on both a slice store and a delete, and a set is not
     addressable at all, so neither moves a recorded position -- claiming
     them would report a read the runtime proves, which is a false positive
-    rather than a disclosure. The choice is the kind's, not the key's: both
-    refuse at an index and at a slice alike, and both spellings reach here
-    the same way.
+    rather than a disclosure. The choice is the kind's, not the key's, and
+    both spellings reach here the same way.
     """
     if isinstance(statement, ast.AugAssign):
         owner = _receiver_value(statement.target, state)
