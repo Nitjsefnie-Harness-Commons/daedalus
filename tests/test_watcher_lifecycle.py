@@ -32,6 +32,7 @@ import _watcher_waits as waits  # noqa: E402
 from _watcher_fixtures import BRANCH  # noqa: E402
 from _watcher_fixtures import PR  # noqa: E402
 from _watcher_fixtures import idle_answers  # noqa: E402
+import _processtree as _tree  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -78,39 +79,6 @@ def _aggregator(tmp, fake):
     return _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
                    PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
                    '--debounce', '1', '--max-hold', '5'], fake.env())
-
-
-def _group_of(parent):
-    """The process group's id, taken while the parent is still unreaped.
-
-    `os.getpgid` on a reaped pid fails, and the group is the only thing
-    that reaches the watchers' `gh` grandchildren - nothing else names
-    them. So the id is captured before anything reaps the parent and taken
-    in the teardown, after the case has had its chance to fail.
-    """
-    return os.getpgid(parent.proc.pid)
-
-
-def _take_the_group(group):
-    """Kill whatever is left of a process group, by its captured id.
-
-    `cleanup_process_tree` cannot be handed an id: it re-derives the group
-    from a process, and by teardown the process is reaped. The zero
-    signal first is what makes this safe - the group exists exactly while
-    one of its members does, so it says whether there is anything left to
-    kill without signalling a number the kernel may have handed on.
-
-    POSIX only, and stated rather than pretended: `os.killpg` does not
-    exist on Windows, where `cleanup_process_tree` reaches the tree with
-    `taskkill /T` against a pid this teardown no longer has either.
-    """
-    if group is None or sys.platform.startswith('win'):
-        return
-    try:
-        os.killpg(group, 0)
-        os.killpg(group, signal.SIGKILL)
-    except OSError:
-        pass
 
 
 def _still_watching(parent):
@@ -225,7 +193,7 @@ def test_the_children_die_with_their_parent(tmp):
             f'both watchers alive at the liveness reading, each held '
             f'inside a call of its own: {pids}\n{parent.captured()}')
         _still_watching(parent)
-        group = _group_of(parent)
+        group = _tree.process_group(parent.proc)
         parent.proc.kill()
         parent.proc.wait(timeout=60)
         _ended_by_the_signal(parent, _expected_exit('SIGKILL'))
@@ -233,15 +201,14 @@ def test_the_children_die_with_their_parent(tmp):
                          f'parent', _pid_alive)
     finally:
         # Both, and only here. Nothing may sit between the signal and
-        # `await_gone`: a group kill taken in the body would kill the
-        # watchers outright and leave this case passing on the cleanup
-        # rather than on the aggregator's death closing their pipe. The
-        # group is captured before the reap and taken now, after the case
-        # has had its chance to fail; the gate is the teardown for the
-        # graceful path, whose aggregator reaps before the teardown it
-        # exists to exercise has run.
+        # `await_gone`: ending the watchers from the test would leave
+        # this case passing on the cleanup rather than on the aggregator's
+        # death closing the pipe they watch. The group is captured before
+        # the reap and ended now, after the case has had its chance to
+        # fail; the gate is the teardown for the graceful path, whose
+        # aggregator reaps before the teardown it exists to exercise.
         fake.open_gate()
-        _take_the_group(group)
+        _tree.cleanup_process_group(group, waits.CANCEL_BOUND)
         parent.stop()
 
 
@@ -256,6 +223,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
             f'both watchers alive at the liveness reading, each held '
             f'inside a call of its own: {pids}\n{parent.captured()}')
         _still_watching(parent)
+        group = _tree.process_group(parent.proc)
         if sys.platform.startswith('win'):
             parent.proc.send_signal(
                 getattr(signal, 'CTRL_BREAK_EVENT'))
@@ -267,15 +235,14 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
                          f'graceful exit', _pid_alive)
     finally:
         # Both, and only here. Nothing may sit between the signal and
-        # `await_gone`: a group kill taken in the body would kill the
-        # watchers outright and leave this case passing on the cleanup
-        # rather than on the aggregator's death closing their pipe. The
-        # group is captured before the reap and taken now, after the case
-        # has had its chance to fail; the gate is the teardown for the
-        # graceful path, whose aggregator reaps before the teardown it
-        # exists to exercise has run.
+        # `await_gone`: ending the watchers from the test would leave
+        # this case passing on the cleanup rather than on the aggregator's
+        # death closing the pipe they watch. The group is captured before
+        # the reap and ended now, after the case has had its chance to
+        # fail; the gate is the teardown for the graceful path, whose
+        # aggregator reaps before the teardown it exists to exercise.
         fake.open_gate()
-        _take_the_group(group)
+        _tree.cleanup_process_group(group, waits.CANCEL_BOUND)
         parent.stop()
 
 
