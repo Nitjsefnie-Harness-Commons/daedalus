@@ -201,8 +201,53 @@ def framer(response, served):
     return frame
 
 
-def prove_scan(base, response, served, tag, token, tab=None):
+def frame_reader(response, served):
+    """Read frames from one stream, skipping the redeliveries a consumer skips.
+
+    The bridge's drain is at-least-once, and that is the contract rather
+    than an accident: a command file it cannot remove stays, and the next
+    scan delivers it again. The extension's persisted ledger skips that
+    repeat on the `_did` both copies carry, so a reader standing in for the
+    extension has to as well — one unremoved file otherwise arrives as an
+    extra frame and every read after it is one frame out.
+
+    The caller owns the returned reader because the set has to outlive a
+    single read: a reader built per read forgets every `_did` the moment
+    after it sees it, and skips nothing. The same set is what makes
+    `prove_scan`'s two-frame form mean anything — both are about not
+    counting one delivery twice, whether the duplicate is a command file
+    the reader redelivered or a frame the test enqueued itself. One
+    mechanism, not two.
+
+    Skipping is unbounded, because how deep the run of repeats goes is the
+    socket's backlog and not the test's to know: a stuck file comes back
+    once per scan, the loop only waits on a scan that delivered nothing, so
+    it delivers that file continuously. A count would either be too small
+    and fail a healthy stream or too large and slow every run, and it would
+    be a margin on a number nothing controls — which is the shape this
+    suite was opened to remove. Each read still carries its own timeout, so
+    a stream that goes quiet or dies is reported by the read; what this
+    waits without a bound for is a command that is coming.
+    """
+    seen = set()
+
+    def read(what, **kwargs):
+        while True:
+            got = framer(response, served)(what, **kwargs)
+            did = got.get('_did')
+            if not isinstance(did, str) or did not in seen:
+                seen.add(did)
+                return got
+
+    return read
+
+
+def prove_scan(base, read, tag, token, tab=None):
     """Enqueue one command and read back the frame the reader delivered.
+
+    `read` is a `frame_reader`, and the set it owns is what makes a
+    redelivery skippable across calls — the same mechanism as the two-frame
+    form below, not a second one.
 
     `PUT /command` sets the wake event the stream's idle wait blocks on, so
     the reader is driven rather than waited for. ONE frame proves only the
@@ -214,7 +259,8 @@ def prove_scan(base, response, served, tag, token, tab=None):
     `:143` the same way — so the first frame arrives mid-scan. TWO frames
     are its end, which is what a non-deletion assertion needs: evidence the
     reader looked, rather than a sleep standing in for looking that passes
-    or fails on host load.
+    or fails on host load. A redelivery in between is stepped over, so what
+    comes back is the first command after those already had.
 
     That order is asserted somewhere this file cannot reach: it is the
     emission sequence one scan produces, and `test_stream_route`'s
@@ -229,7 +275,7 @@ def prove_scan(base, response, served, tag, token, tab=None):
         payload['tab'] = tab
     status, _ = put_command(base, payload)
     assert status == 200, status
-    delivered = framer(response, served)(f'the {tag} scan command')
+    delivered = read(f'the {tag} scan command')
     assert delivered.get('id') == f'scan-{tag}', delivered
     return delivered
 
