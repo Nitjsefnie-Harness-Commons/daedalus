@@ -136,6 +136,13 @@ _POSITIONS = [
 _LAZY = [
     ('generator_element_never_advanced', _LIST, 'g = (x.pop(0) for _ in [1])',
      '', 'x[0]()', (0, 0)),
+    # The other two statements that bind their own value to a name. One row
+    # per member: pinning `ast.Assign` alone leaves the set unpinned, and the
+    # member a later edit drops is never the one the table happened to name.
+    ('generator_element_in_an_annotated_assignment', _LIST,
+     'g: object = (x.pop(0) for _ in [1])', '', 'x[0]()', (0, 0)),
+    ('generator_element_in_a_named_expression', _LIST,
+     'if (g := (x.pop(0) for _ in [1])):\n    pass', '', 'x[0]()', (0, 0)),
     ('generator_element_in_a_binder', _LIST,
      'def g(a=(x.pop(0) for _ in [1])):\n    pass', '', 'x[0]()', (0, 0)),
     ('generator_element_advanced_through_a_binder', _LIST,
@@ -199,7 +206,9 @@ _LAZY = [
     # A generator this statement does not bind to a name is handed to
     # something the model cannot follow, which may consume it, so its element
     # is walked. Reading a bound generator without consuming it is the same
-    # over-report one step along.
+    # over-report one step along. A `del` is not a read, so the release must
+    # not fire on one; and the release walks a nested generator's own element,
+    # which is the conservative half of the choice it makes there.
     ('generator_element_returned_fails_closed', _LIST,
      'def g():\n    return (x.pop(0) for _ in [1])\ny = g()', '',
      'x[0]()', (0, 1)),
@@ -207,6 +216,11 @@ _LAZY = [
      'ordinary(x.pop(0) for _ in [1])', '', 'x[0]()', (0, 1)),
     ('generator_read_without_being_advanced_fails_closed', _LIST,
      'g = (x.pop(0) for _ in [1])\nordinary(g)', '', 'x[0]()', (0, 1)),
+    ('generator_deleted_before_being_read', _LIST,
+     'g = (x.pop(0) for _ in [1])\ndel g', '', 'x[0]()', (0, 0)),
+    ('release_walks_a_nested_generator_element', _LIST,
+     'g = ((x.pop(0) for _ in [1]) for _ in [1])\nordinary(g)', '',
+     'x[0]()', (0, 1)),
 ]
 
 # A mutating call whose receiver the model cannot resolve is not a no-op the
