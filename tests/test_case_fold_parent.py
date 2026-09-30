@@ -583,7 +583,11 @@ def test_the_extensions_own_legacy_file_the_parent_folds(tmp):
             command_ttl=100, frame_writer=frames.append)
 
         assert delivered == 1, delivered
-        assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+        # The drain stamps a delivery id on the frame too; the fold check is
+        # about which file was addressed, and the id is pinned where it is
+        # derived.
+        routed = [(f['id'], f.get('chromeTab')) for f in frames]
+        assert routed == [('tab', '42')], routed
         assert extension.exists(), extension
         assert dashboard.exists(), dashboard
 
