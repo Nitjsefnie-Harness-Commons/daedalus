@@ -14,10 +14,10 @@ number reaches no child. The second is read at the receiver, where a call
 on a container the tree binds to a literal is harmless because a container
 cannot end a child — and, where the receiver is a PARAMETER, at the CALL
 SITES instead, because a parameter's value comes from the caller and no
-local writing can prove it. That is the arm `tests/test_real_browser_
-harness.py:131` needs and `origin/main` refuses, and it is the shape a
-test double's recorder is written in: the double is handed a list, and
-every module that hands it one can be read.
+local writing can prove it. That is the arm the `test_real_browser_
+harness.py` site at line 131 needs and `origin/main` refuses, and it is
+the shape a test double's recorder is written in: the double is handed a
+list, and every module that hands it one can be read.
 
 The failure direction is unchanged and is the whole of the discipline: this
 arm only ever turns a `return True` into a `return False`, and only on a
@@ -38,9 +38,11 @@ is what an unreachable arm looks like from the outside.
 What the arm is NOT is complete, and the limit is a boundary rather than a
 gap in the rule: a call from a module the census does not read is not
 among the sites consulted, so a value handed in from outside this tree is
-a receiver the arm cannot discharge. It is named in `tests/_launch_census.
-py`'s own "Not enforced" list beside the control that would fail if the
-reading changed.
+a receiver the arm cannot discharge. A call site is also matched to its
+owning function by NAME, so a same-named method of another class is a site
+this reader cannot attribute -- and, like the cross-module case, it is
+named in `tests/_launch_census.py`'s own "Not enforced" list beside the
+control that would fail if the reading changed.
 """
 import ast
 
