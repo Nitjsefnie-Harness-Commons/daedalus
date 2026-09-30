@@ -1337,6 +1337,7 @@
     "forwardRequest": {"javascript": ["tests/_overlap.py"]},
     "frameChrome": {"javascript": ["tests/_gm_harness.py"]},
     "frame_read": {"python": ["tests/_cli_arg_audit_resolver.py"]},
+    "frame_reader": {"python": ["tests/_bridge.py"]},
     "framer": {"python": ["tests/_bridge.py"]},
     "free_port": {"python": ["tests/_util.py"]},
     "from_line": {"python": ["tests/_launch_arm_pinning.py"]},
