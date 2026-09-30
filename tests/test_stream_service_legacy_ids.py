@@ -44,10 +44,11 @@ def _refusing_unlink(name):
 def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     """A failed removal redelivers, and the repeat carries the same id.
 
-    The expected id is recomputed from the file's own stat rather than
-    written out, so every component of it is load-bearing — and the last one
-    is the generation, which advances only when the drain vacates a name and
-    so stands still for the redelivery this is about.
+    The id's shape and the values behind it are both pinned, because the
+    first review round found a mutant that deleted a component and passed:
+    every component has to be load-bearing, and the generation is the one
+    that stands still here — it advances only when the drain vacates a name,
+    which a failed removal is not.
     """
     service = _load_service('stream_service_legacy_redelivery_id')
     legacy = Path(tmp) / 'tok_42.json'
@@ -64,9 +65,28 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     assert attempted == [legacy.name, legacy.name], attempted
     assert legacy.exists(), 'a refused removal lost the command'
     dids = [frame.get('_did') for frame in frames]
-    stamp = os.stat(legacy)
-    assert dids[0] == (
-        f'legacy-{stamp.st_dev}-{stamp.st_ino}-{stamp.st_ctime_ns}-0'), dids
+    # Every component, and the values behind them, but never a comparison
+    # between two ways of reading one object: the drain takes its identity
+    # from a descriptor and a path lookup does not report the same one on
+    # every interpreter — Windows 3.12 does not, and a control that needs a
+    # platform to agree with itself is not pinning this. So the shape is
+    # checked first and on its own, where dropping a component or keeping
+    # only the change time is a change of arity and dies however the
+    # platform reads the file.
+    parts = dids[0].split('-')
+    assert parts[0] == 'legacy' and len(parts) == 5, dids
+    assert all(part.isdigit() for part in parts[1:]), dids
+    assert parts[4] == '0', dids
+    # The values, from the same mechanism the drain reads them by: its own
+    # descriptor, not the name.
+    handle = os.open(legacy, os.O_RDONLY)
+    try:
+        by_descriptor = os.fstat(handle)
+    finally:
+        os.close(handle)
+    assert parts[1:4] == [
+        str(by_descriptor.st_dev), str(by_descriptor.st_ino),
+        str(by_descriptor.st_ctime_ns)], dids
     # The consumer posts the `_did` back as a delivery id, which the bridge
     # refuses for a component it will not accept as a file name.
     assert not service.path_safety.unsafe_component(dids[0]), dids
