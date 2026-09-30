@@ -214,6 +214,42 @@ def framer(response, served):
 _REDELIVERY_BUDGET_SECONDS = 30
 
 
+def stub_stream(frames):
+    """A response that yields `frames` and then goes quiet like a socket.
+
+    `frames` is a list of raw SSE lines; a reader that wants more than it is
+    given blocks for whatever bound it set and then times out, which is what
+    a real stream does when nothing more is coming. This is what lets the
+    reader's own rule be exercised without a bridge, a filesystem, or a
+    platform's unlink semantics.
+    """
+    pending = list(frames)
+
+    class _Socket:
+        def __init__(self):
+            self.timeout = None
+
+        def settimeout(self, value):
+            self.timeout = value
+
+        def gettimeout(self):
+            return self.timeout
+
+    class _Stub:
+        def __init__(self):
+            self.fp = type('fp', (), {})()
+            self.fp.raw = type('raw', (), {})()
+            self.fp.raw._sock = _Socket()
+
+        def readline(self):
+            if pending:
+                return pending.pop(0)
+            time.sleep(self.fp.raw._sock.gettimeout() or 10)
+            raise socket.timeout('the stub carried nothing more')
+
+    return _Stub()
+
+
 def frame_reader(response, served):
     """Read frames from one stream, skipping the redeliveries a consumer skips.
 
