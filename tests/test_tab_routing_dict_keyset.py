@@ -51,9 +51,10 @@ refused read resolves to a tracked callable, so the guard reads that
 callable's body and the shape stays clean. A declared read joins to an
 unprovable sender, and a `tab` through a name holding one is reported
 whatever that callable would have done. Once every source whose pairs the
-model can read was read, no member pays the second cost: every `_AXES` row
-costs `(0, 0)`, and `_SILENT` carries the one member whose read form does
-not.
+model can read was read, no member pays the second cost but one: every
+`_AXES` row costs `(0, 0)` but the row whose source sits behind a starred
+positional, which no spelling of the call accounts for, and `_SILENT`
+carries the one member whose read form does not.
 
 **Not this suite's bucket.** A store path that folds an unreadable source
 into its OWNER's `DYNAMIC_KEY` slot -- `dict(...)`, `{**...}`, `|=`,
@@ -207,16 +208,16 @@ _AXES = {
 # no member took the second outcome and no member's name carried an
 # unprovable alias, so every row reads `(0, 0)` and the outcome said nothing
 # the cost did not. A source that starts marking a name again shows here.
-# The clean cost is NOT uniform any more, and the four rows that changed are
-# the fail-closed direction rather than a new defect. Their source is a
-# `zip` the arm can now read, so the value the source wrote at the key is a
-# lambda that calls `send(..., tab=...)` and the guard reports it. The clean
-# prelude stops the RECORDER, not the routing, so the runtime count is 0
-# while the model still holds a tab-sending callable -- which is the same
-# trade the 134-cell over-report disclosure makes. Main's uniform `(0, 0)`
-# was this arm being BLIND: the source was unreadable there, so nothing
-# joined and nothing was reported. Reading it correctly is what moved the
-# number, and the correct verdict for a routed source is a report.
+# The clean cost is uniform again but for ONE row, and that row is a source
+# the model cannot read by any spelling: its source sits behind a starred
+# positional, where no syntax of the call says what is paired, so the
+# unknown-key slot is all the model has and every read form joins it. The
+# three rows that read `(0, 1)` while their source was a `zip` reached it
+# the way the false positive this branch fixes did -- the arm's container
+# for the pairing, which holds nothing at a key that is a plain string, so
+# the value joined the slot and a read of a DIFFERENT key joined it too.
+# Reading the spelling instead gives the destination the key, the value
+# stays at it, and the read answers from the key it was asked about.
 _COST = {
     'update-pairs': (0, 0),
     'update-pairs-tuple': (0, 0),
@@ -252,9 +253,9 @@ _COST = {
     'update-unaccountable-name': (0, 0),
     'update-unaccountable-name-star': (0, 0),
     'update-unaccountable-name-doubled': (0, 0),
-    'ior-stale-unaccountable-name': (0, 1),
-    'stale-unaccountable-name': (0, 1),
-    'stale-unaccountable-name-doubled': (0, 1),
+    'ior-stale-unaccountable-name': (0, 0),
+    'stale-unaccountable-name': (0, 0),
+    'stale-unaccountable-name-doubled': (0, 0),
     'stale-unaccountable-name-star': (0, 1),
     'ior-unaccountable-name': (0, 0),
     'update-unaccountable-name-mixed': (0, 0),
@@ -281,6 +282,15 @@ _ACCOUNTED = {
     'star-modelled-clean': ('o = {"k": ordinary}\nd = {**o}', 'd["k"]'),
     'ior-modelled-clean': ('o = {"k": ordinary}\nd = {}\nd |= o', 'd["k"]'),
     'dict-call-clean': ('d = dict([("k", ordinary)])', 'd["k"]'),
+    # A pair source whose own syntax SPELLS its keys. The `zip` names its
+    # key half in the FIRST column, so the destination holds `"j"` with the
+    # routed value at it, and the `"k"` written cleanly afterwards is
+    # answered from what the model wrote there. The routed value never
+    # reaches the unknown-key slot, so no read of `"k"` joins it -- which is
+    # the whole of what `_UNDECIDED` named as undecidable.
+    'fresh-key-ordinary': (
+        'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
+        '\nd.update({"k": ordinary})', 'd.get("k", ordinary)'),
 }
 
 # Which read forms a parked member is silent on, per member: the starred
@@ -334,59 +344,6 @@ def test_every_axis_member_reports_on_every_read_form_and_costs_nothing(tmp):
                 label, name, calls, found)
             assert _verdict(tmp, _AXES[label], read, _CLEAN) == cost, (
                 label, name)
-
-
-# ONE member the resolved guard cannot decide, named rather than filed into a
-# table whose contract it no longer meets. It belongs in none of them: not in
-# `_AXES` (a member there must REPORT with a real call, and this one reports
-# where the runtime routes nothing), not in `_SILENT` (a member there must
-# read clean), and not in `_ACCOUNTED` (whose contract is that the model can
-# see the key or see it absent -- here it CAN, and still reports).
-#
-# It is a false positive the multi-iterable arm introduced: on `origin/main`
-# the same body reads `(0, 0)`. The cause is located. The pair's KEY is a
-# plain string, and a container of plain values is not one the guard's
-# display reader models -- `["j"]` evaluates to a container whose single
-# item is nothing -- so the arm cannot place the key half of the pair, the
-# mapping store never records `"j"`, and the value half joins the
-# unknown-key slot. A read of a DIFFERENT key, cleanly written after it,
-# then joins that routed value. The read-side of that is in
-# `tests/_pyroute_reads.py`, which this branch does not hold.
-#
-# The cost is pinned, so a fix turns this red on the commit that has to move
-# the member out -- the discipline `_SILENT` already uses, and the reason
-# the row is named rather than deleted.
-_UNDECIDED = {
-    'fresh-key-ordinary': (
-        'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
-        '\nd.update({"k": ordinary})', (0, 0), (0, 1)),
-}
-
-_ACCOUNTED_SOURCE = _UNDECIDED['fresh-key-ordinary'][0], 'd.get("k", ordinary)'
-
-
-def test_every_undecided_member_is_pinned_at_its_real_verdict(tmp):
-    """The members the resolved guard cannot decide, pinned where they are.
-
-    Each is named in `_UNDECIDED` with the cost it actually costs, and the
-    pin is the defect: a fix turns this red on the commit that has to move
-    the member out, exactly as a repair of a `_SILENT` member turns that
-    table's own test red. What this does NOT do is accept the verdict -- the
-    table exists to name a false positive, not to license one."""
-    for label, (store, clean_cost, routed) in sorted(_UNDECIDED.items()):
-        for name, read in sorted(_READS.items()):
-            assert _verdict(tmp, store, read, _CLEAN) == clean_cost, (
-                label, name, _verdict(tmp, store, read, _CLEAN))
-        if label == 'fresh-key-ordinary':
-            # Carried on ONE read: the accounted table's own member, whose
-            # contract is a single named read rather than every form.
-            store, read = _ACCOUNTED_SOURCE
-            assert _verdict(tmp, store, read) == routed, (
-                label, read, _verdict(tmp, store, read))
-        else:
-            for name, read in sorted(_READS.items()):
-                assert _verdict(tmp, store, read) == routed, (
-                    label, name, _verdict(tmp, store, read))
 
 
 def test_an_unlisted_member_of_the_domain_is_rejected(tmp):

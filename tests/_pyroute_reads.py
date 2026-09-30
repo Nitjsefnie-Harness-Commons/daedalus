@@ -601,7 +601,19 @@ def _source_items(source, state):
 
     The retirement travels with the items because it is a fact about them:
     a destination built out of these values cannot claim at a retired key
-    that its own value there is current."""
+    that its own value there is current.
+
+    A source that spells EVERY one of its own keys is read from that
+    spelling, ahead of the container the model built for it. The two are
+    the same pairing, but only the spelling carries the key half: the
+    `zip` names it in the FIRST column, and a container of plain values is
+    one the display reader holds nothing at, so the modelled pair lost its
+    key and the value joined the unknown-key slot instead. A source that
+    spells only SOME of them still reads from the container, because the
+    half it spells is not the whole of what the store wrote."""
+    spelled = _spelled_pair_items(source, state)
+    if spelled is not None and spelled[1]:
+        return *spelled, frozenset()
     known = (_dict_value(source, state) if isinstance(source, ast.Dict)
              else _known_value(source, state))
     if isinstance(known, DeferredContainer):
@@ -613,7 +625,6 @@ def _source_items(source, state):
                 # A pair source is a sequence, so it retires nothing: the
                 # keys the destination ends up holding are named here.
                 return *paired, frozenset()
-    spelled = _spelled_pair_items(source, state)
     return None if spelled is None else (*spelled, frozenset())
 
 
