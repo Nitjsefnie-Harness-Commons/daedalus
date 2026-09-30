@@ -38,6 +38,7 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             resolve_sender_name, state_signature,
                             statement_cannot_raise)
 from _pyroute_match import walk_match
+from _pyroute_multiter import multi_iterable_elements
 from _pyroute_payload import dict_assignments as _dict_assignments
 from _pyroute_violations import call_violations
 from _pyroute_targets import (bind_with_target, materialized_order,
@@ -330,6 +331,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     current = check_expression(argument, current)
                 consumed_values = consumer_results(
                     consumer, node.args, current)
+                append_deferred(consumed_values, multi_iterable_elements(
+                    consumer, node, current, analyze_callable))
                 if consumer in _EAGER_ITERABLE_CALLS:
                     for argument in node.args:
                         ordered = materialized_order(
