@@ -186,6 +186,35 @@ def build(recorded):
 def go():
     return build([pop(['true'])])
 ''',
+    'a-match-capture-rebinds-the-name': '''def build(kid):
+    def run(timeout=None):
+        return kid.wait(timeout)
+
+    return run
+
+
+def go(holder):
+    kid = []
+    match holder:
+        case [kid]:
+            pass
+    return build(kid)(timeout=1)
+''',
+    'an-except-handler-rebinding-the-name': '''def build(kid):
+    def run(timeout=None):
+        return kid.wait(timeout)
+
+    return run
+
+
+def go(holder):
+    kid = []
+    try:
+        pass
+    except OSError as kid:
+        pass
+    return build(kid)(timeout=1)
+''',
     'a-receiver-that-is-not-a-parameter': '''def build():
     def run(args, *, timeout):
         return kids.wait(timeout)
@@ -316,6 +345,25 @@ def go(deadline):
 ''',
     'refuse': PREDICATES['an-argument-named-other-than-the-parameter'],
 }
+
+# The `**` the slot-scoped star check deliberately reads past. A `**` fills
+# NAMED parameters and moves no positional index, so this call's `recorded`
+# is the one it wrote; the coarser "is this call spread at all" reading
+# would refuse it. This is what makes the scoping a decision with a
+# control rather than a sentence in a docstring.
+DOUBLE_STAR = '''def build(recorded):
+    def run(args, *, timeout):
+        recorded.append((list(args), timeout))
+        return None
+
+    return run
+
+
+def go():
+    recorded = []
+    extra = {}
+    return build(recorded, **extra)
+'''
 
 # The false green, in the shape the arm would admit if it stopped asking
 # what the caller actually passed: a real child in a list the caller
