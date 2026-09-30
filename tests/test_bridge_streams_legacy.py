@@ -38,12 +38,7 @@ def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
 
 def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
     """Visible partial files survive, while sibling temp names wait for
-    rename.
-
-    The reader is driven, never waited for: every `prove_scan` below is a scan
-    the reader provably finished, so each non-deletion assertion is about what
-    the drain did and never about how long the host took to do it.
-    """
+    rename."""
     served = []
     with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         commands = Path(docroot) / 'commands'

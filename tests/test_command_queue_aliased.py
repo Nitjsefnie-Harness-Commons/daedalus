@@ -533,12 +533,7 @@ def test_sweep_leaves_an_aliased_legacy_pair_for_a_later_pass(tmp):
 
 
 def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
-    """One extension stream, two names for one object, zero commands out.
-
-    The reader is driven rather than waited for: the second `prove_scan`
-    frame is the end of the scan that carried the first, so both
-    non-deletion assertions are about what the drain did.
-    """
+    """One extension stream, two names for one object, zero commands out."""
     served = []
     with _util.bridge(tmp, output=served,
                       env=BRIDGE_ENV) as (base, docroot):
@@ -567,11 +562,7 @@ def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
 
 
 def test_a_stream_admitted_before_the_name_reads_nothing_outside(tmp):
-    """The containment an admission checked cannot vouch for a later alias.
-
-    Driven like its sibling above: no sleep stands in for the reader having
-    looked at the link.
-    """
+    """The containment an admission checked cannot vouch for a later alias."""
     served = []
     with _util.bridge(tmp, output=served,
                       env=BRIDGE_ENV) as (base, docroot):

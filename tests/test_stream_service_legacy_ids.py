@@ -2,12 +2,10 @@
 """The delivery id a delivered legacy command file carries.
 
 The drain removes a legacy file after writing its frame, and a removal that
-fails is swallowed: the file stays and the next scan delivers it again. That
-redelivery is the documented at-least-once outcome, and a queued command
-absorbs it because the queue stamped a `_did` the consumer deduplicates on. A
-legacy file is written by an external publisher and carries no such id, so
-the id is derived from the object the drain read: the same on the
-redelivery of one file, different for a second drop of the same command.
+fails is swallowed, so the next scan delivers it again — the documented
+at-least-once outcome. A queued command absorbs that redelivery because the
+queue stamped a `_did`; a legacy file is published externally and carries
+none, so the id is derived from the object the drain read.
 """
 import contextlib
 import os
@@ -25,8 +23,7 @@ def _refusing_unlink(name):
     """Make the removal of `name` fail, as a held-open file does on Windows.
 
     Nothing on POSIX refuses, so the refusal the drain has to survive is
-    supplied here rather than waited for. The unlink of every other name —
-    the suite's own temp files included — is left working.
+    supplied here rather than waited for.
     """
     real_unlink = pathlib.Path.unlink
     attempted = []
@@ -48,10 +45,10 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     """A failed removal redelivers, and the repeat carries the same id.
 
     The expected id is recomputed from the file's own stat rather than
-    written out here, so every component of it is load-bearing: only the
-    change time tells a fresh drop from an old one that landed on a
-    recycled inode, and an id the consumer has already recorded is one it
-    skips — a command that would silently never run.
+    written out, so every component of it is load-bearing: only the change
+    time separates a fresh drop from an old one that landed on a recycled
+    inode, and an id the consumer already holds is one it skips — a command
+    that would silently never run.
     """
     service = _load_service('stream_service_legacy_redelivery_id')
     legacy = Path(tmp) / 'tok_42.json'
@@ -71,8 +68,8 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     stamp = os.stat(legacy)
     assert dids[0] == (
         f'legacy-{stamp.st_dev}-{stamp.st_ino}-{stamp.st_ctime_ns}'), dids
-    # The consumer posts the `_did` back as a delivery id, where the bridge
-    # refuses a component it will not accept as a file name.
+    # The consumer posts the `_did` back as a delivery id, which the bridge
+    # refuses for a component it will not accept as a file name.
     assert not service.path_safety.unsafe_component(dids[0]), dids
     assert len(set(dids)) == 1, dids
 
@@ -81,7 +78,7 @@ def test_two_identical_legacy_drops_carry_two_delivery_ids(tmp):
     """The id names the object, not the command body.
 
     Two drops of one command are two commands; an id taken from the payload
-    would collapse them into one, and the second would never be delivered.
+    would collapse them, and the second would never be delivered.
     """
     service = _load_service('stream_service_legacy_distinct_ids')
     first = Path(tmp) / 'tok_42.json'
@@ -108,8 +105,7 @@ def test_an_id_the_drain_did_not_mint_is_kept_only_when_it_is_one(tmp):
     of another type is not: the consumer's dedup ledger is a set of strings
     and the result route drops anything else. Neither is the empty string:
     the extension's frame handler tests `_did` for truth before recording
-    it, so an empty one deduplicates nothing and is never posted back as a
-    delivery id. The drain replaces both with an id it can stand behind.
+    it, so an empty one deduplicates nothing and is never posted back.
     """
     service = _load_service('stream_service_legacy_own_id')
     kept = Path(tmp) / 'tok_42.json'
