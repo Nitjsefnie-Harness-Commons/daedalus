@@ -11,12 +11,14 @@ The liveness reading each one takes is a state rather than a sample, because
 `tests/_fake_gh.py` holds every call open: a watcher is inside a call whose
 answer has not been written, so it cannot have finished the poll, and while
 the hold stands it cannot make a second one, so two logged calls are two
-watchers. What the hold does NOT do is stop the aggregator from dying, and a
-watcher dies with it whatever the hold says - `gh_client._exit_at_eof` calls
+watchers.
+
+What the hold does NOT do is stop the aggregator from dying, and a watcher
+dies with it whatever the hold says - `gh_client._exit_at_eof` calls
 `os._exit(0)`, which ends a process from any thread. So the precondition is
-read off the aggregator itself, and a failure names the side that moved
-instead of reporting two dead pids. That was the signature of the one CI cell
-this branch was opened for.
+read off the aggregator, and a failure names the side that moved instead of
+reporting two dead pids. That was the signature of the one CI cell this
+branch was opened for.
 """
 import os
 import signal
@@ -90,11 +92,9 @@ def _still_watching(parent):
 
     This is a sample, and it has a gap of its own - the few instructions
     between the read and the signal. A death in that gap is a PASS, not a
-    red, which is the opposite of what an earlier version of this
-    docstring claimed and what the re-review measured: 30 false greens in
-    64 runs. `_ended_by_the_signal`, called after the wait, is what decides
-    it, because a return code is a terminal state rather than a reading
-    and has no gap of its own.
+    red: measured, 30 false greens in 64 runs. `_ended_by_the_signal`,
+    called after the wait, is what decides it, because a return code is a
+    terminal state rather than a reading and has no gap of its own.
     """
     assert parent.alive(), (
         f'the aggregator to still be watching when the test signals it '
@@ -105,16 +105,14 @@ def _expected_exit(name):
     """The returncode that means the test's own `name` ended the aggregator.
 
     `None` off POSIX, and the platform is asked BEFORE the constant is
-    named, because a call site that writes `-signal.SIGKILL` in an
-    argument raises `AttributeError` on Windows before any guard inside
-    the callee can act. Asking here means no call site can forget, and
-    adding one cannot spell a constant that does not exist there.
+    named: a call site writing `-signal.SIGKILL` in an argument raises
+    `AttributeError` on Windows before any guard inside the callee can
+    act.
 
-    `Popen.kill()` on Windows is `TerminateProcess`, which reports 1 - the
-    same code an aggregator exiting on its own reports - so the question is
-    not decidable there at all, and the graceful signal there is
-    `CTRL_BREAK_EVENT` rather than SIGINT. `None` says "not decidable"
-    once, and the check that consumes it does nothing.
+    The question is not decidable there in any case. `Popen.kill()` is
+    `TerminateProcess`, which reports 1 - the code an aggregator exiting
+    on its own reports - and the graceful signal is `CTRL_BREAK_EVENT`
+    rather than SIGINT.
     """
     if sys.platform.startswith('win'):
         return None
@@ -152,11 +150,10 @@ def _ended_by_the_signal(parent, expected):
 def _held_at_the_reading(fake, parent):
     """Both watchers named, both inside a held call, aggregator still up.
 
-    Returns the pids. Every wait here ends on something the process under
-    test DID, and the last one is a precondition rather than a reading: a
-    case that acts on an aggregator which has already gone proves nothing,
-    and `os._exit` takes both watchers with it, so it is checked and named
-    rather than inferred from the pids that follow.
+    Returns the pids. The last check is a precondition rather than a
+    reading: a case that acts on an aggregator which has already gone
+    proves nothing, and `os._exit` takes both watchers with it, so it is
+    checked and named rather than inferred from the pids that follow.
     """
     waits.await_lines(parent.err, _announces_pid, 2,
                       'both children to announce their pid')
@@ -180,13 +177,11 @@ def test_the_children_die_with_their_parent(tmp):
 
     `await_gone` returns only when no pid answers `_pid_alive`, and
     `_pid_alive` is not monotone - a pid that exits between its own two
-    checks, or a pid the runner has recycled in the meantime, can read
-    alive after it read dead. A second read of the same predicate
-    therefore adds a red and no information: a real survivor raises
-    inside `await_gone`, with a message that names the pids and the
-    parent's exit. A CI leg carried that removed assert's message and
-    nothing else, and could not be read because the pre-kill read
-    carried the same one.
+    checks, or one the runner has recycled meanwhile, can read alive after
+    it read dead. So a second read of it adds a red and no information: a
+    real survivor raises inside `await_gone`, which names the pids and the
+    parent's exit. The two reads also carried identical messages, so a leg
+    red there could not be read.
     """
     fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
     parent = _aggregator(tmp, fake)
@@ -202,6 +197,9 @@ def test_the_children_die_with_their_parent(tmp):
         waits.await_gone(pids, parent, f'children {pids} to die with the '
                          f'parent', _pid_alive)
     finally:
+        # Gate first: the aggregator is already dead, so `stop()` has
+        # nothing left to group-kill and the gate is the only release the
+        # fakes these watchers are blocked on will get.
         fake.open_gate()
         parent.stop()
 
@@ -226,6 +224,9 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         waits.await_gone(pids, parent, f'children {pids} to leave with a '
                          f'graceful exit', _pid_alive)
     finally:
+        # Gate first: the aggregator is already dead, so `stop()` has
+        # nothing left to group-kill and the gate is the only release the
+        # fakes these watchers are blocked on will get.
         fake.open_gate()
         parent.stop()
 
