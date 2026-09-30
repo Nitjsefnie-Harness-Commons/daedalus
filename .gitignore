@@ -652,6 +652,7 @@
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
 !/tests/test_harness_launch_bounds.py
+!/tests/test_helper_assertion_pins.py
 !/tests/test_helper_reimplementation.py
 !/tests/test_helper_reimplementation_js.py
 !/tests/test_helper_shadow_boundaries.py
