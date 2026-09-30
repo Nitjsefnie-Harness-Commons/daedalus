@@ -583,9 +583,8 @@ def test_the_extensions_own_legacy_file_the_parent_folds(tmp):
             command_ttl=100, frame_writer=frames.append)
 
         assert delivered == 1, delivered
-        # Every frame carries a stamped `_did`, and it is pinned where it is
-        # derived. Subtracting that one key keeps this on the fold check
-        # while still refusing a key added or misnamed beside it.
+        # Subtracting the drain's stamped `_did` keeps this on the fold; the
+        # whole remainder is compared, so a key beside it still fails.
         undid = [{k: v for k, v in f.items() if k != '_did'} for f in frames]
         assert undid == [{'id': 'tab', 'chromeTab': '42'}], undid
         assert extension.exists(), extension

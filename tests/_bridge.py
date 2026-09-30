@@ -205,12 +205,15 @@ def prove_scan(base, response, served, tag, token, tab=None):
     """Enqueue one command and read back the frame the reader delivered.
 
     `PUT /command` sets the wake event the stream's idle wait blocks on, so
-    the reader is driven rather than waited for. A frame proves the scan that
-    wrote it, and the stream writes every broadcast frame BEFORE it reaches
-    the legacy namespaces it also drains — so a second such frame is the end
-    of the scan that carried the first. That is what a non-deletion
-    assertion needs: evidence the reader looked, not a sleep standing in for
-    looking, which passes or fails on how loaded the host is.
+    the reader is driven rather than waited for. ONE frame proves only the
+    scan that wrote it, and `serve_stream` writes the broadcast frames
+    (`daedalus_bridge/stream_route.py:126`) before the legacy drains it also
+    runs, at `:129` and `:149` — so a caller's first frame arrives mid-scan.
+    TWO frames are the end of the scan that carried the first, which is what
+    a non-deletion assertion needs: evidence the reader looked, rather than a
+    sleep standing in for looking that passes or fails on host load. If
+    those drains are ever reordered ahead of the broadcast ones, this helper
+    takes one frame again and every call site loses a `prove_scan`.
     """
     payload = {'token': token, 'id': f'scan-{tag}', 'code': '1'}
     if tab is not None:

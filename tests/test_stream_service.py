@@ -17,12 +17,11 @@ from _service_loader import _load_service  # noqa: E402
 
 
 def _without_did(frames):
-    """The delivered frames with the one key the drain now adds removed.
+    """The delivered frames with the drain's stamped `_did` subtracted.
 
-    Every frame carries a stamped `_did`, and it is pinned where it is
-    derived. Subtracting that one key and comparing the whole remainder
-    keeps these assertions on the routing they are about while still
-    refusing a key added or misnamed beside it.
+    Comparing the whole remainder rather than a projection of two fields is
+    what refuses a key added or misnamed beside `_did`; the id itself is
+    pinned in `test_stream_service_legacy_ids`.
     """
     return [{k: v for k, v in frame.items() if k != '_did'}
             for frame in frames]
