@@ -80,6 +80,39 @@ def _aggregator(tmp, fake):
                    '--debounce', '1', '--max-hold', '5'], fake.env())
 
 
+def _group_of(parent):
+    """The process group's id, taken while the parent is still unreaped.
+
+    `os.getpgid` on a reaped pid fails, and the group is the only thing
+    that reaches the watchers' `gh` grandchildren - nothing else names
+    them. So the id is captured before anything reaps the parent and taken
+    in the teardown, after the case has had its chance to fail.
+    """
+    return os.getpgid(parent.proc.pid)
+
+
+def _take_the_group(group):
+    """Kill whatever is left of a process group, by its captured id.
+
+    `cleanup_process_tree` cannot be handed an id: it re-derives the group
+    from a process, and by teardown the process is reaped. The zero
+    signal first is what makes this safe - the group exists exactly while
+    one of its members does, so it says whether there is anything left to
+    kill without signalling a number the kernel may have handed on.
+
+    POSIX only, and stated rather than pretended: `os.killpg` does not
+    exist on Windows, where `cleanup_process_tree` reaches the tree with
+    `taskkill /T` against a pid this teardown no longer has either.
+    """
+    if group is None or sys.platform.startswith('win'):
+        return
+    try:
+        os.killpg(group, 0)
+        os.killpg(group, signal.SIGKILL)
+    except OSError:
+        pass
+
+
 def _still_watching(parent):
     """The aggregator up at the moment the test signals it.
 
@@ -185,27 +218,30 @@ def test_the_children_die_with_their_parent(tmp):
     """
     fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
     parent = _aggregator(tmp, fake)
+    group = None
     try:
         pids = _held_at_the_reading(fake, parent)
         assert all(_pid_alive(pid) for pid in pids), (
             f'both watchers alive at the liveness reading, each held '
             f'inside a call of its own: {pids}\n{parent.captured()}')
         _still_watching(parent)
+        group = _group_of(parent)
         parent.proc.kill()
-        # `stop`, not `wait`: the group has to be taken while the parent is
-        # still unreaped, because `os.getpgid` on a reaped pid fails and the
-        # watchers' `gh` grandchildren - which nothing else names - survive
-        # in a group nobody kills. Two per run, ppid 1, forever.
-        parent.stop()
+        parent.proc.wait(timeout=60)
         _ended_by_the_signal(parent, _expected_exit('SIGKILL'))
         waits.await_gone(pids, parent, f'children {pids} to die with the '
                          f'parent', _pid_alive)
     finally:
-        # The gate is the teardown for the graceful path, where no group
-        # kill is taken: the aggregator is reaped before the teardown it
-        # exists to exercise has run, and killing its group would skip it.
-        # The kill case takes that group in the body instead.
+        # Both, and only here. Nothing may sit between the signal and
+        # `await_gone`: a group kill taken in the body would kill the
+        # watchers outright and leave this case passing on the cleanup
+        # rather than on the aggregator's death closing their pipe. The
+        # group is captured before the reap and taken now, after the case
+        # has had its chance to fail; the gate is the teardown for the
+        # graceful path, whose aggregator reaps before the teardown it
+        # exists to exercise has run.
         fake.open_gate()
+        _take_the_group(group)
         parent.stop()
 
 
@@ -213,6 +249,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
     """The teardown path, which a hard kill never reaches."""
     fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
     parent = _aggregator(tmp, fake)
+    group = None
     try:
         pids = _held_at_the_reading(fake, parent)
         assert all(_pid_alive(pid) for pid in pids), (
@@ -229,11 +266,16 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         waits.await_gone(pids, parent, f'children {pids} to leave with a '
                          f'graceful exit', _pid_alive)
     finally:
-        # The gate is the teardown for the graceful path, where no group
-        # kill is taken: the aggregator is reaped before the teardown it
-        # exists to exercise has run, and killing its group would skip it.
-        # The kill case takes that group in the body instead.
+        # Both, and only here. Nothing may sit between the signal and
+        # `await_gone`: a group kill taken in the body would kill the
+        # watchers outright and leave this case passing on the cleanup
+        # rather than on the aggregator's death closing their pipe. The
+        # group is captured before the reap and taken now, after the case
+        # has had its chance to fail; the gate is the teardown for the
+        # graceful path, whose aggregator reaps before the teardown it
+        # exists to exercise has run.
         fake.open_gate()
+        _take_the_group(group)
         parent.stop()
 
 
