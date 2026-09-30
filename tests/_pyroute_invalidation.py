@@ -48,8 +48,8 @@ _NESTED_SCOPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
                   ast.ClassDef)
 # The statements that bind a name to a value expression the statement carries.
 # A `for` target, `with ... as`, `except ... as` and an import all bind names,
-# but none binds a generator expression node; a `for` that did would be a false
-# green, because the loop consumes its iterable in the statement that binds it.
+# but none binds a generator expression node. `ast.For` is absent because the
+# flow releases a `for` iterable anyway, and it is that release, not this set.
 _BINDING = (ast.Assign, ast.AnnAssign, ast.NamedExpr)
 _SEQUENCE_KINDS = ('list', 'tuple', 'set')
 # Only a kind whose instances take `x[k] = v` and `del x[k]`; any other kind
