@@ -152,22 +152,16 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
 
     The log entry is written BEFORE the hold, which is the whole point: a
     reader counting entries can see a call entered and still open, and that
-    is a fact about the process rather than about when anybody looked. The
-    hold has no bound in it, because a bound would make it a guess, and a
-    guess that expires is the sample it exists to replace - so the bound is
-    the one thing here that has to be asserted, and it is, by the pair of
-    readings below.
+    is a fact about the process rather than about when anybody looked.
     """
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2)': {'data': None}}, gate=True)
     # The call is made the way a WATCHER makes it, poll marker and all.
-    # Nothing the double can observe about a held call at the moment of
-    # the reading distinguishes it from one it answered at once - the
-    # record the watcher cases count is written by the same code that
-    # decides to wait, so a hold scoped away from the watcher's calls
-    # satisfies it. What does separate them is a control that makes the
-    # same kind of call and asserts the hold actually waited, and that is
-    # only this control if its call carries the marker the scoping would
-    # key on.
+    # Nothing the double can observe about a held call at the reading tells
+    # it from one answered at once - the record the watcher cases count is
+    # written by the same code that decides to wait. What does separate them
+    # is a control making the same KIND of call and asserting the hold
+    # waited, and that is only this control if its call carries the marker
+    # a scoping would key on.
     env = fake.env()
     env[_fake_gh.POLL_MARK] = '1'
     answer = subprocess.Popen(
@@ -177,19 +171,19 @@ def test_the_fake_holds_a_call_open_until_its_gate_opens(tmp):
         errors='replace', env=env)
     request_in = answer.stdin
     assert request_in is not None, 'the fake is launched with a stdin pipe'
-    # The same narrowing for the two reads below: they are pipes this call
-    # asked for, and `Popen` types every stream as optional.
+    # `Popen` types every stream as optional, so the two reads below need
+    # the same narrowing this one does.
     answer_out, answer_err = answer.stdout, answer.stderr
     assert answer_out is not None and answer_err is not None, (
         'the fake is launched with its output piped')
     try:
         request_in.write('{"query":"items(first: 2)"}')
         # The close is what tells the fake the request is over - it reads
-        # stdin to end of file - so it cannot be dropped. What cannot be
-        # handed to `communicate` afterwards: it flushes and closes
-        # `self.stdin` itself, and the guard around that catches
-        # BrokenPipeError only, so an already-closed handle raises
-        # ValueError on 3.11 and 3.12 and is tolerated only on 3.13.
+        # stdin to end of file - so it cannot be dropped, and cannot be
+        # followed by `communicate`, which flushes and closes `self.stdin`
+        # itself behind a guard that catches BrokenPipeError only. An
+        # already-closed handle raises ValueError on 3.11 and 3.12 and is
+        # tolerated only on 3.13.
         request_in.close()
         entered = _await_entered(fake, answer, 1)
         assert entered, fake.calls()
