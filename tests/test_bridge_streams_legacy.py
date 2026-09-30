@@ -114,7 +114,7 @@ def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
                 conn.close()
 
 
-def test_a_legacy_file_the_bridge_cannot_remove_is_delivered_once(tmp):
+def test_the_reader_steps_over_a_redelivered_legacy_command(tmp):
     """A redelivery is a repeat, and the reader steps over it.
 
     The drain is at-least-once and says so: a file it cannot remove stays,
