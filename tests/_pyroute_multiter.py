@@ -37,15 +37,21 @@ member added to one is read by the same two functions every other member of
 that kind is read by.
 
 Two spellings stand between an operand and the position it pairs at, and
-they are read differently because they decide different things. A starred
-positional operand is a count of streams AT THE PLACE THE SOURCE SPELLS IT:
-`f(a, *b, c)` reaches `f` as `(a, *b, c)`, so a star whose container the
-guard can read expands in place, between the operands spelled before it and
-the operands spelled after it. A star whose container it cannot read is a
-count it cannot name, and nothing at or after it can be placed -- the
-operands spelled after it sit at positions that count decides -- so the step
-is undecided at EVERY position and the element it yields is unprovable
-everywhere rather than at the one position the guard would have guessed.
+they decide different things. A starred positional operand is a count of
+streams AT THE PLACE THE SOURCE SPELLS IT -- `f(a, *b, c)` reaches `f` as
+`(a, *b, c)` -- so a star whose container the guard can read expands in
+place, and a star whose container it cannot read is a count it cannot name:
+nothing at or after it is placeable, so the step is undecided at EVERY
+position rather than at the one the guard would have guessed.
+
+What a star's container is SPELLED as decides nothing. A list, a tuple, a
+mapping, a generator expression, a comprehension and a name bound to any of
+them are all containers of iterables, and one that yields the same modelled
+value once per element of another is a container of that many iterables. A
+SET is declined whatever its length -- equal elements collapse and the
+runtime picks the order -- and so is a container whose length the guard
+cannot state, because a star over a container of unknown length is a count
+of streams at that position that nothing names.
 
 A `**` keyword unpacking passes KEYWORDS, so it never displaces a positional
 stream: the operands spelled beside it keep the positions the runtime gives
@@ -206,14 +212,12 @@ _CONTAINER_UNDECIDED = object()
 def _comprehension_count(node):
     """How many steps a comprehension's or generator expression's result
     holds, read from the producer the source spells, or None when that count
-    is not literal. `literal_iterable_cardinality` is the helper the guard
-    already reads a generator's count with, so the two agree by construction
-    rather than by a second rule.
-
-    A container reached through a NAME has no node to read a producer from,
-    and a comprehension RESULT is modelled as one spread item whose own
-    length is a placeholder. Both are counts the model cannot state, so both
-    are declined."""
+    is not literal -- `literal_iterable_cardinality` being the helper the
+    guard already reads a generator's count with, so the two agree by
+    construction rather than by a second rule. A container reached through a
+    NAME has no node to read a producer from, and a comprehension RESULT is
+    modelled as one spread item whose own length is a placeholder; both are
+    counts the guard cannot state, so both are declined."""
     if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
                              ast.DictComp)) or not node.generators:
         return None
@@ -221,16 +225,14 @@ def _comprehension_count(node):
 
 
 def _producer_stream(node, state):
-    """The stream a comprehension's or generator expression's PRODUCT is, or
-    None when the producer is not a container the model holds.
+    """The stream a comprehension's or generator expression's PRODUCT is,
+    or None when the producer is not a container the guard holds.
 
-    Every step of such an expression yields the same modelled value, so the
-    product is that value -- and the PRODUCER is where it is read from, not
-    from the `yielded` the model records for the expression. `yielded` is
-    empty until the clause has bound its target, and the call is read both
-    before and after that point, so a container read from it is decided on
-    one reading of the call and declined on the other; the producer is the
-    same literal display at every point the call is read.
+    Read from the PRODUCER, not from the `yielded` the guard records for the
+    expression: `yielded` is empty until the clause has bound its target, and
+    the call is read both before and after that point, so a container read
+    from it is decided on one reading of the call and declined on the other.
+    The producer is the same literal display at every point the call is read.
     """
     if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
                              ast.DictComp)) or not node.generators:
@@ -240,14 +242,12 @@ def _producer_stream(node, state):
 
 def _repeated_streams(count, value):
     """The streams a container that yields the SAME modelled value once per
-    element of another yields.
-
-    A value repeated N times IS a container of N iterables -- which is the
-    whole of what a star needs, and it is why a comprehension is not a
-    one-element container to a reader that has to know how many streams stand
-    at the star's position. A count the model cannot state leaves the
-    container declined: a star over a container of unknown length is a count
-    of streams at that position that nothing names."""
+    element of another yields. A value repeated N times IS a container of N
+    iterables, which is the whole of what a star needs and why a
+    comprehension is not a one-element container to a reader that has to know
+    how many streams stand at the star's position. A count the guard cannot
+    state leaves the container declined: a star over a container of unknown
+    length is a count of streams at that position that nothing names."""
     if not isinstance(count, int) or count < 0:
         return None
     stream = _container_stream(value)
@@ -255,11 +255,10 @@ def _repeated_streams(count, value):
 
 
 def _product_streams(node, state):
-    """The streams a generator expression's or comprehension's RESULT yields
-    as a container of iterables, or None when its length is not stated. A
-    set result is declined whatever its length: equal elements collapse and
-    the runtime picks the order, so a star over one is a count of streams
-    whose order nothing states."""
+    """The streams a generator expression's or comprehension's RESULT
+    yields as a container of iterables, or None when its length is not
+    stated. A set result is declined whatever its length: equal elements
+    collapse and the runtime picks the order."""
     if isinstance(node, (ast.SetComp, ast.Set)):
         return None
     produced = _producer_stream(node, state)
@@ -346,19 +345,16 @@ def _positional_streams(operands, state):
     `f(a, *b, c)` reaches `f` as `(a, *b, c)`: a starred operand expands IN
     PLACE, so the streams its container holds sit between the operands
     spelled before it and the operands spelled after it. Appending them at
-    the end models a different call, and it models it wrongly in the
-    direction that reads clean -- the routed value is placed at a position
-    the runtime never gives it, and the position the runtime does give it
-    holds something else. That is the same order `bind_call_arguments`
-    already reads a call's own operand list in.
+    the end models a different call, and wrongly in the direction that reads
+    clean -- the routed value is placed at a position the runtime never gives
+    it. That is the order `bind_call_arguments` already reads a call's own
+    operand list in.
 
     A star whose container the model cannot read stands for a count it
-    cannot name, and nothing at or after it can be placed: the operands
-    spelled after it sit at positions that count decides. There are only
+    cannot name, and nothing at or after it can be placed. There are only
     two things a model can do with a container it cannot read, and this is
-    the first -- decline to place anything, rather than invent a position
-    for a count it does not have. The caller answers it with the elements no
-    position of a step is decided in."""
+    the first: decline to place anything, rather than invent a position for
+    a count it does not have. The caller answers it."""
     streams = []
     for operand in operands:
         if not isinstance(operand, ast.Starred):
@@ -588,12 +584,11 @@ def multi_iterable_elements(consumer, node, states, analyze):
     A state that could not read a star's container does not decide the call
     on its own. The states are one expression read at more than one point,
     and the one that resolved the container's contents is strictly better
-    informed than the one that did not -- so a decline is kept only when NO
-    state could read it, and is answered then with the elements no position
-    of a step is decided in. Deciding per state instead lets an earlier,
-    emptier reading of the same container override a later complete one, and
-    the target then binds an undecided value where the model held a routed
-    one, which reads clean.
+    informed -- so a decline is kept only when NO state could read it, and
+    is answered then with the elements no position of a step is decided in.
+    Deciding per state instead lets an earlier, emptier reading override a
+    later complete one, and the target then binds an undecided value where
+    the model held a routed one.
     """
     declaration = _BY_NAME.get(consumer)
     if declaration is None:
