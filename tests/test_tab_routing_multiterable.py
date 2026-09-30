@@ -36,6 +36,7 @@ _SEND = 'send = ext_cmd\n'
 _DICT = 'd = {"k": relay()}'
 _LIST = 'l = [relay()]'
 _PLAIN = 'p = [relay()]\nq = [ordinary]'
+_PLAIN_SOURCE = 'def g(x): return x\nplain = [1, 2]'
 _SENDER = 'd = {"k": ext_cmd}'
 _CALL = 'lambda: send("_focus", "focus-tab", tab=args.chrome_tab)'
 _CALLS = f'l = [{_CALL}]'
@@ -47,6 +48,7 @@ _PLAIN_CALLS = f'p = [ordinary]\nq = [{_CALL}]'
 # which is the element the runtime hands back in those rows.
 _ROUTED_CALL = "v('focus', tab=1)"
 _PROJECTED_CALL = "f('focus', tab=1)"
+_TAB_ARG = "('focus', tab=1)"
 
 
 def _body(store, invoke):
@@ -302,6 +304,83 @@ def test_an_operand_the_model_cannot_read_still_pairs(tmp):
          'return [x for x in map(lambda g: g, args.values)]', (0, 0)),
         ('map-unread-next-to-routed', _DICT,
          'return [f() for f in map(lambda g: g, d.values())]', (1, 1)),
+    ]
+    _verdicts(tmp, cases)
+
+
+def test_a_starred_or_unpacked_operand_is_read_not_substituted(tmp):
+    """A star and a `**` decide how many streams a step pairs over, and the
+    arm READS them rather than substituting a token for the whole element.
+    Substitution is the fail-open the arm exists to remove: the runtime pairs
+    the container's ELEMENTS, and a token is not a tuple, so a destructuring
+    target paired nothing and the call through it read clean. Each undecided
+    row has a decided twin beside it, so the two cannot both pass by
+    accident."""
+    cases = [
+        ('zip-starred', _LIST,
+         'return [v() for _, v in zip(*[l, l])]', (1, 1)),
+        ('zip-decided-twin', _LIST,
+         'return [v() for _, v in zip(l, l)]', (1, 1)),
+        ('map-starred', _LIST,
+         'return [f() for f in map(lambda g: g, *[l])]', (1, 1)),
+        ('map-decided-twin', _LIST,
+         'return [f() for f in map(lambda g: g, l)]', (1, 1)),
+        ('enumerate-starred', _LIST,
+         'return [v() for _, v in enumerate(*[l])]', (1, 1)),
+        ('enumerate-decided-twin', _LIST,
+         'return [v() for _, v in enumerate(l)]', (1, 1)),
+        ('zip-kwargs-empty', _LIST + '\nkw = {}',
+         'return [v() for _, v in zip(l, l, **kw)]', (1, 1)),
+        # A `**` whose value is not a container of ITERABLES is the ordinary
+        # case -- `**{"strict": True}` passes a KEYWORD -- so the count is
+        # undecided rather than guessed, and the operand the call spelled
+        # plainly is still read.
+        ('zip-kwargs-keyword', _LIST + '\nkw = {"strict": True}',
+         'return [v() for _, v in zip(l, l, **kw)]', (1, 1)),
+    ]
+    _verdicts(tmp, cases)
+
+
+def test_a_generator_operand_the_model_cannot_read_says_so(tmp):
+    """A generator the model tracks but whose yielded value it does not hold
+    is a stream it cannot READ, and it carries the token the way any other
+    unreadable operand does. Reading it as an empty stream instead left no
+    token and no positions, which is the same fail-open at a second site.
+    The quiet row is the twin: the token is there, and nothing calls it."""
+    cases = [
+        ('genexp-unread-tab', '',
+         f'return [v{_TAB_ARG} for v, _ in zip((x for x in '
+         'globals().values()), [ordinary])]', (1, 1)),
+        ('genexp-unread-quiet', '',
+         'return [x for x, _ in zip((x for x in globals().values()),'
+         ' [ordinary])]', (0, 0)),
+        ('genexp-decided-tab', 'd = {"k": ext_cmd}',
+         f'return [v{_TAB_ARG} for v, _ in zip((x for x in [d["k"]]),'
+         ' [ordinary])]', (1, 1)),
+    ]
+    _verdicts(tmp, cases)
+
+
+def test_a_decidable_generator_expression_is_not_a_false_positive(tmp):
+    """The negative direction, and it is a control rather than a plant. A
+    generator expression the model CAN decide, consumed through one of the
+    three declarations, must read clean: the arm is fail-closed on an operand
+    it cannot decide, and that must not turn a generator the model reads into
+    an over-report the moment a new consumer is in front of it. This is the
+    cell that would make a precise flow path into an over-reporting
+    backstop, measured on our own arm rather than promised to the seat whose
+    flow the consumer set made hotter."""
+    cases = [
+        ('zip-genexp-plain', _PLAIN_SOURCE,
+         'return [v for _, v in zip((g(x) for x in plain),'
+         ' (g(y) for y in plain))]', (0, 0)),
+        ('enumerate-genexp-plain', _PLAIN_SOURCE,
+         'return [v for _, v in enumerate(g(x) for x in plain)]', (0, 0)),
+        ('map-genexp-plain', _PLAIN_SOURCE,
+         'return list(map(lambda g: g, (g(x) for x in plain)))', (0, 0)),
+        ('zip-genexp-routed-source', 'd = {"k": ext_cmd}\nplain = [d]',
+         'return [v for _, v in zip((x for x in plain),'
+         ' (y for y in plain))]', (0, 0)),
     ]
     _verdicts(tmp, cases)
 
