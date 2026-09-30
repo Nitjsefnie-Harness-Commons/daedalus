@@ -46,14 +46,20 @@ SCAN_SITE = 6
 
 # A bound writes its crediting record on stderr as it settles, so a child
 # running N of them writes N records and the newline ahead of the exit is
-# what orders the flush after the last one.
+# what orders the flush after the last one. The marker on stdout is what a
+# child that reached the end of this program writes, and a child that
+# crashed before reaching it leaves stdout empty whatever its stderr says
+# — so a stderr carrying no record cannot stand for a child that never
+# ran.
 _BOUND_DRIVER = """
 (async () => {
   const work = Promise.resolve('settled');
 %s
-  process.stderr.write('\\n', () => process.exit(0));
+  process.stderr.write('\\n', () => process.stdout.write(
+    '%s', () => process.exit(0)));
 })();
 """
+SETTLED = 'settled'
 
 # `suites` is absent from the first and present in the second, so the same
 # reader refuses one and answers the other.
@@ -126,7 +132,7 @@ def _bound_child(count, token):
         f"  await bounded(work, 'bound {token} {index}', 300);\n"
         for index in range(1, count + 1))
     return _dashnode.run_dashboard_node(
-        _node_harness(_BOUND_DRIVER % calls, bounded_steps=count))
+        _node_harness(_BOUND_DRIVER % (calls, SETTLED), bounded_steps=count))
 
 
 def _bound_label(token, index):
@@ -205,6 +211,7 @@ def test_a_child_that_wrote_one_crediting_record_is_read(_tmp):
     del _tmp
     token = uuid.uuid4().hex
     result = _bound_child(1, token)
+    assert result.stdout == SETTLED, result.stderr
     assert _bound_record(result)['label'] == _bound_label(token, 1), (
         result.stderr)
 
@@ -215,9 +222,15 @@ def test_the_bound_record_reader_refuses_a_child_that_wrote_none(_tmp):
     The naive implementation is `json.loads(records[0])` with no check,
     which answers an IndexError naming neither the child nor the stderr
     it was handed; this case refuses only the reported shape.
+
+    The settled marker is what makes the subject a child rather than a
+    stderr. A child that crashed before reaching it also leaves no
+    record, and reading that as a settled child would let this case pass
+    for evidence it never gathered.
     """
     del _tmp
     result = _bound_child(0, uuid.uuid4().hex)
+    assert result.stdout == SETTLED, result.stderr
     _assertion_raised(_bound_record, result, mentions='[]')
 
 
@@ -233,6 +246,7 @@ def test_the_bound_record_reader_refuses_a_child_that_wrote_two(_tmp):
     del _tmp
     token = uuid.uuid4().hex
     result = _bound_child(2, token)
+    assert result.stdout == SETTLED, result.stderr
     _assertion_raised(
         _bound_record, result, mentions=_bound_label(token, 2))
 
@@ -280,9 +294,12 @@ def test_the_refuses_helper_names_the_text_it_was_asked_for(tmp):
     message = _refuses(_job_needs, _NO_SUITES_JOB, 'suites')
     assert message.startswith('AssertionError: '), message
     assert "'suites'" in message, message
+    # The whole clause rather than the bare job name: a message that
+    # merely carried `'suites'` somewhere would satisfy the shorter one,
+    # and this asks the refusal to say the job does not exist.
     _assertion_raised(
         _refuses_asking_for, 'no text this refusal carries',
-        mentions="'suites'")
+        mentions="no 'suites' job")
 
 
 def test_the_refuses_helper_reports_a_call_that_accepted_the_defect(tmp):
