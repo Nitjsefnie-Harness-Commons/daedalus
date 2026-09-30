@@ -225,9 +225,14 @@ def stub_stream(frames):
     """
     pending = list(frames)
 
+    # Declared classes rather than instances of `type(name, (), {})`. The
+    # idiom produced objects whose type carries none of the attributes the
+    # reader walks — `response.fp.raw._sock` — so every assign and every
+    # read along that path was a type error, and papering over it would have
+    # left a stub that lies about its shape. These declare what they hold.
     class _Socket:
         def __init__(self):
-            self.timeout = None
+            self.timeout: float | None = None
 
         def settimeout(self, value):
             self.timeout = value
@@ -235,11 +240,17 @@ def stub_stream(frames):
         def gettimeout(self):
             return self.timeout
 
+    class _Raw:
+        def __init__(self):
+            self._sock = _Socket()
+
+    class _File:
+        def __init__(self):
+            self.raw = _Raw()
+
     class _Stub:
         def __init__(self):
-            self.fp = type('fp', (), {})()
-            self.fp.raw = type('raw', (), {})()
-            self.fp.raw._sock = _Socket()
+            self.fp = _File()
 
         def readline(self):
             if pending:
