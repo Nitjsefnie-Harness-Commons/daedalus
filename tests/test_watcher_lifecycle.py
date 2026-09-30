@@ -19,6 +19,12 @@ dies with it whatever the hold says - `gh_client._exit_at_eof` calls
 read off the aggregator, and a failure names the side that moved instead of
 reporting two dead pids. That was the signature of the one CI cell this
 branch was opened for.
+
+**On Windows the hold is not armed, and that changes what these cases
+prove.** `HOLD_CALLS` below says why. There the liveness reading is a
+sample again, as it was before this branch, and a failure reports itself
+rather than being impossible - which is the cost, and it is paid knowingly
+rather than discovered.
 """
 import os
 import signal
@@ -33,6 +39,24 @@ from _watcher_fixtures import BRANCH  # noqa: E402
 from _watcher_fixtures import PR  # noqa: E402
 from _watcher_fixtures import idle_answers  # noqa: E402
 import _processtree as _tree  # noqa: E402
+
+# Whether the fake holds each watcher's `gh` call open. POSIX only, and a
+# real limit rather than a taste.
+#
+# On Windows the parent-death route does not deliver while a watcher is
+# blocked inside a `gh` call (issue 1398), so holding one there leaves the
+# case waiting out its own backstop for watchers that are never going to
+# die. The graceful case passing on that platform is the tell: it ends the
+# watchers by name, and the end-of-file route is the one that does not
+# arrive. The held fakes are also orphans there, for want of a process
+# group to end (issue 1399), which is the other half of why.
+#
+# So off POSIX the case runs in the state `main` had it: the watchers
+# answer, sleep between polls, and the end-of-file route delivers - which
+# is the property the case is named for, and which a skipped case would
+# leave unverified on three legs. What that gives up is this branch's
+# strengthened precondition on those legs, and nothing else.
+HOLD_CALLS = not sys.platform.startswith('win')
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -165,9 +189,12 @@ def _held_at_the_reading(fake, parent):
     # with it, and "2 gh call(s)" alone would not say which side moved.
     waits.await_calls(fake, 2, parent,
                       'the aggregator to make 2 gh call(s)')
-    entered = fake.entered()
-    assert len(entered) == 2, (
-        f'both watchers to be held inside a call of their own: {entered}')
+    if fake.holding:
+        # Only a hold records entries, so this is a statement about the
+        # hold rather than about the case, and off POSIX there is none.
+        entered = fake.entered()
+        assert len(entered) == 2, (
+            f'both watchers to be held inside a call of their own: {entered}')
     assert parent.alive(), (
         f'the aggregator to still be watching:\n{parent.captured()}')
     return pids
@@ -184,7 +211,7 @@ def test_the_children_die_with_their_parent(tmp):
     parent's exit. The two reads also carried identical messages, so a leg
     red there could not be read.
     """
-    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
+    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=HOLD_CALLS)
     parent = _aggregator(tmp, fake)
     group = None
     try:
@@ -214,7 +241,7 @@ def test_the_children_die_with_their_parent(tmp):
 
 def test_a_graceful_exit_leaves_no_children_behind(tmp):
     """The teardown path, which a hard kill never reaches."""
-    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=True)
+    fake = _fake_gh.FakeGh(tmp, idle_answers(), gate=HOLD_CALLS)
     parent = _aggregator(tmp, fake)
     group = None
     try:
