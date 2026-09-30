@@ -94,10 +94,27 @@ ACTIONLINT_SHA256 = {
 # THE SAME BUILD. They are separate: the job's env is read by the workflow
 # lint suites, this module's constants are read by every job that installs.
 # Left disagreeing, the disagreement is a SKIP and not a failure — the
-# suites see an installed actionlint that is not the one the job pins, skip
-# every workflow-lint test, and the run still reports success having linted
-# nothing. That is this module's own failure mode one layer up: a tool the
-# suites skip on is a job that is green having verified nothing.
+# suites see an installed actionlint that is not the one the job pins, so
+# every test that would RUN a lint skips and the run still reports success
+# having linted nothing. (Two of thirty-three in test_ci_workflows: the ones
+# that reach the binary. The rest never touch it.) That is this module's own
+# failure mode one layer up: a tool the suites skip on is a job that is
+# green having verified nothing.
+#
+# TWO COPIES, NOT ONE, and why the second stays. `shellcheck_pin` below
+# reads its version out of requirements-test.txt precisely so it is written
+# down once, and `test_the_shellcheck_version_is_written_down_exactly_once`
+# forbids the second copy. This constant has the same shape and takes the
+# other answer: the installer could read the job's ACTIONLINT_VERSION out of
+# .github/workflows/tests.yml, and ROOT resolves to the head checkout on
+# every door, so the conversion is mechanically available. It is not done
+# here because the workflow-lint suites read that same job pin as the
+# ORACLE for whether their lint counts, and a pin whose source is the file
+# under test weakens that: an actionlint job that failed to parse would make
+# the installer and the suites agree on nothing rather than disagree
+# visibly. So the disagreement is kept reachable and pinned by a control
+# that fails, instead of made structurally impossible. Worth revisiting if
+# the pin ever moves somewhere both can read without parsing a workflow.
 #
 # When #654 merges and ships upstream, move this back to an upstream version,
 # the rhysd URL, and the checksum table above with it. The checksum file
