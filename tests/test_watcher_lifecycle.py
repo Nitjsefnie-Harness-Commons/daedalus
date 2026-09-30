@@ -192,14 +192,19 @@ def test_the_children_die_with_their_parent(tmp):
             f'inside a call of its own: {pids}\n{parent.captured()}')
         _still_watching(parent)
         parent.proc.kill()
-        parent.proc.wait(timeout=60)
+        # `stop`, not `wait`: the group has to be taken while the parent is
+        # still unreaped, because `os.getpgid` on a reaped pid fails and the
+        # watchers' `gh` grandchildren - which nothing else names - survive
+        # in a group nobody kills. Two per run, ppid 1, forever.
+        parent.stop()
         _ended_by_the_signal(parent, _expected_exit('SIGKILL'))
         waits.await_gone(pids, parent, f'children {pids} to die with the '
                          f'parent', _pid_alive)
     finally:
-        # Gate first: the aggregator is already dead, so `stop()` has
-        # nothing left to group-kill and the gate is the only release the
-        # fakes these watchers are blocked on will get.
+        # The gate is the teardown for the graceful path, where no group
+        # kill is taken: the aggregator is reaped before the teardown it
+        # exists to exercise has run, and killing its group would skip it.
+        # The kill case takes that group in the body instead.
         fake.open_gate()
         parent.stop()
 
@@ -224,9 +229,10 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         waits.await_gone(pids, parent, f'children {pids} to leave with a '
                          f'graceful exit', _pid_alive)
     finally:
-        # Gate first: the aggregator is already dead, so `stop()` has
-        # nothing left to group-kill and the gate is the only release the
-        # fakes these watchers are blocked on will get.
+        # The gate is the teardown for the graceful path, where no group
+        # kill is taken: the aggregator is reaped before the teardown it
+        # exists to exercise has run, and killing its group would skip it.
+        # The kill case takes that group in the body instead.
         fake.open_gate()
         parent.stop()
 
