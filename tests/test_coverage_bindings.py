@@ -6,9 +6,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _binding_assertions import (  # noqa: E402
     _assert_binding_pair, _scope_cases, _scope_violations)
-from _coverage_authority_scan import (  # noqa: E402
-    _AUTHORITY_FILE, _AUTHORITY_HALF, _AUTHORITY_REST, _STALE_UNIVERSAL,
-    phrase_holders)
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_mutation_specs import (  # noqa: E402
     _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _CHAIN_INVOKE,
@@ -16,7 +13,6 @@ from _coverage_mutation_specs import (  # noqa: E402
     _SCOPE_INVOKE as _SHARED_SCOPE_INVOKE, _SCOPE_MUTATIONS,
     _UNFOLLOWABLE_MUTATIONS)
 from _receiver_mutation_specs import _RECEIVER_MUTATIONS  # noqa: E402
-from _mutation_sweep import mutation_sweep  # noqa: E402
 
 
 _SCOPE_INVOKE = (
@@ -544,7 +540,35 @@ subprocess.run(['python3', 'child.py'])
 
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
+    from _mutation_sweep import mutation_sweep
+
     mutation_sweep(tmp, _mutation_specs())
+
+
+def test_a_mutation_sweep_child_imports_no_helper_no_row_reaches(tmp):
+    """What this module binds at import time is what the sweep costs.
+
+    `tests/_mutation_sweep.py` spawns one child per row and every child
+    imports this module before it runs the row, so a module-scope import
+    only a test body needs is paid once per row. `_util` is the tree's
+    shared test helper and the expensive one — it brings socket, inspect,
+    glob, shutil, tempfile and subprocess with it — and no row reaches it:
+    a row runs a guard control, not this suite's runner. `subprocess` is
+    named because a child that has it has the helper that brought it.
+    """
+    import subprocess
+
+    tests = Path(__file__).resolve().parent
+    child = subprocess.run(
+        [sys.executable, '-B', '-S', '-c',
+         f'import sys; sys.path.insert(0, {str(tests)!r});'
+         ' import test_coverage_bindings;'
+         " print(','.join(sys.modules))"],
+        cwd=tmp, capture_output=True, text=True, check=True)
+    loaded = child.stdout.split(',')
+    unneeded = [name for name in ('_util', 'socket', 'subprocess')
+                if name in loaded]
+    assert not unneeded, unneeded
 
 
 def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
@@ -581,6 +605,9 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
     declaration, in the module that declares it. The rows pinning that
     exemption live in tests/test_coverage_authority_scan.py.
     """
+    from _coverage_authority_scan import (
+        _AUTHORITY_FILE, _AUTHORITY_HALF, _AUTHORITY_REST, _STALE_UNIVERSAL,
+        phrase_holders)
     from _coverage_bindings import _carried_parts
 
     del tmp
