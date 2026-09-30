@@ -460,6 +460,84 @@ def test_a_star_the_model_cannot_read_leaves_no_position_decided(tmp):
     _verdicts(tmp, cases)
 
 
+def test_a_star_container_is_read_by_what_it_holds_not_by_its_kind(tmp):
+    """One character of container KIND separates a correct verdict from a
+    false green, and nothing in the arm's own vocabulary says it should.
+
+    A star unpacks a CONTAINER OF ITERABLES, so what the model needs is to
+    enumerate that container's elements and say which element is at which
+    position. A generator expression states both -- how many steps it
+    yields, and what each step yields -- so it IS a container of that many
+    iterables, and the arm reads a list display and a call without
+    difficulty while a generator expression fell through to the declined
+    path. The runtime reached the routed sender and the guard read clean.
+
+    A generator expression consumed DIRECTLY is read correctly and always
+    was, so this is not a generator the model cannot follow. It is a
+    generator in the position this arm adds, which is what makes it the
+    arm's own defect rather than a gap in the guard.
+
+    The three list-display twins are the control that keeps the fix honest:
+    the same operand list over a container the arm already read must not
+    change verdict, and the clean twin must stay clean, or a widening that
+    reads more containers has simply started reporting more."""
+    _CALL_ALL = 'a("focus", tab=1)'
+    _BARE = 'a()'
+    # Two spellings of the same routed operand, and both are here because
+    # neither alone tells reading from declining. A `tab`-carrying call
+    # through the uncertainty token is a finding, so a ROUTED element reads
+    # `(1, 1)` whether the container was read or declined -- those rows pin
+    # the sound direction and cannot see this defect. A routed lambda takes
+    # no arguments, so a BARE call is the only shape in which declining
+    # reads clean: those rows are the false greens, and the clean twin is
+    # the row that says reading did not cost precision.
+    _ROUTED = 'l = [relay()]'
+    _SENDER = 'l = [ext_cmd]'
+    cases = [
+        # The false-green class: a bare call through a position the model
+        # declined to place reads clean while the runtime called the
+        # sender. Four container spellings, one per consumer placement.
+        ('zip-star-container-genexp', _ROUTED,
+         f'return [{_BARE} for a, b in zip(*(x for x in [l, l]))]', (1, 1)),
+        ('zip-star-after-plain-genexp', _ROUTED,
+         f'return [{_BARE} for a, b in zip(l, *(x for x in [l]))]', (1, 1)),
+        ('map-star-container-genexp', _ROUTED,
+         f'return [{_BARE} for a in map(lambda g: g, *(x for x in [l]))]',
+         (1, 1)),
+        ('enumerate-star-container-genexp', _ROUTED,
+         f'return [{_BARE} for _, a in enumerate(*(x for x in [l]))]',
+         (1, 1)),
+        # The same operand lists over a container the arm ALREADY read. If
+        # these were to move, the fix changed a list display.
+        ('zip-list-container-bare', _ROUTED,
+         f'return [{_BARE} for a, b in zip(*[l, l])]', (1, 1)),
+        ('zip-list-after-plain-bare', _ROUTED,
+         f'return [{_BARE} for a, b in zip(l, *[l])]', (1, 1)),
+        ('map-list-container-bare', _ROUTED,
+         f'return [{_BARE} for a in map(lambda g: g, *[l])]', (1, 1)),
+        # The clean twin, and the only row here that separates reading from
+        # declining: a declined container puts the token at every position,
+        # so a `tab` through a clean element is reported and this goes red.
+        ('genexp-container-clean', 'def h(*a, **k): return 0\nq = [h]',
+         'return [a("focus", tab="1") for a, b in zip(*(x for x in [q, q]))]',
+         (0, 0)),
+        # The sound direction, over a `tab`-carrying target: a routed
+        # element read through a generator-expression container is a
+        # finding whether the container was read or declined, and these say
+        # so for all three consumers.
+        ('zip-star-container-genexp-tab', _SENDER,
+         f'return [{_CALL_ALL} for a, b in zip(*(x for x in [l, l]))]',
+         (1, 1)),
+        ('map-star-container-genexp-tab', _SENDER,
+         f'return [{_CALL_ALL} for a in map(lambda g: g, *(x for x in [l]))]',
+         (1, 1)),
+        ('enumerate-star-container-genexp-tab', _SENDER,
+         f'return [{_CALL_ALL} for _, a in enumerate(*(x for x in [l]))]',
+         (1, 1)),
+    ]
+    _verdicts(tmp, cases)
+
+
 def test_a_readable_star_expands_where_the_source_spells_it(tmp):
     """`f(a, *b, c)` reaches `f` as `(a, *b, c)`: a star expands IN PLACE, so
     the streams its container holds sit between the operands spelled before
