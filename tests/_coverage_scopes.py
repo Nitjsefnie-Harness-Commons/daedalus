@@ -9,6 +9,7 @@ import ast
 from functools import cached_property
 from pathlib import PurePosixPath, PureWindowsPath
 
+from _coverage_memo import _bound_census as memo_bound_names
 from _coverage_memo import nodes as memo_nodes
 
 
@@ -469,6 +470,10 @@ _TYPE_PARAMETERS = tuple(getattr(ast, name) for name in (
 
 
 def _bound_names(node):
+    return memo_bound_names(node, _bound_names_of)
+
+
+def _bound_names_of(node):
     if (isinstance(node, ast.Name)
             and isinstance(node.ctx, (ast.Store, ast.Del))):
         return {node.id}
