@@ -3,21 +3,19 @@
 Given one Python source, names every refusal limb its subprocess
 launches trip, so a caller can assert the launch carries no wall-clock
 bound, fails loudly, and is readable argv. The wall-clock-bound refusal
-names the argv head (git / non-git / unreadable) so a tree-wide caller
-can keep the rule to git launches.
+names the argv head, so a tree-wide caller can keep the rule to git
+launches.
 
 The wall-clock policy has two arms and both are decidable. A launch the
 analyser can place, with a head that reads as the constant `git`, is
 refused. Any OTHER call carrying a `timeout=` or a `**`-unpacked mapping
 is reported as an `unplaced` site at an unreadable head unless its
-receiver is PROVED a fixed, non-launch value — a bare name this module
-binds and the analyser read, or an attribute chain from a dotted stdlib
-import the module has not rebound. A receiver the analyser cannot
-prove is never passed over, so a bounded git launch reaches the tree
-only as a refusal, an allowance row, or the interpreter's own code.
+receiver is PROVED a fixed, non-launch value. A receiver the analyser
+cannot prove is never passed over, so a bounded git launch reaches the
+tree only as a refusal, an allowance row, or the interpreter's own code.
 Only the argv and head reading lives in `_argv_read.py` and what the
-standard library itself says in `_stdlib_read.py`, neither of which
-binds configuration of its own.
+standard library itself says in `_stdlib_read.py`, neither of which binds
+configuration of its own.
 """
 import ast
 
@@ -53,8 +51,7 @@ def _parameters(node):
 
 
 def launch_refusals(source, here, bound_sink=None, tree=None):
-    """Every refusal limb one Python source's launches trip, naming its
-    limb."""
+    """Every refusal limb one Python source's launches trip."""
     import builtins
     tree = ast.parse(source) if tree is None else tree
     # LOAD-BEARING: one materialised BFS, walked below by the passes in
@@ -287,8 +284,6 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
                 if isinstance(item.optional_vars, ast.Name):
                     bindings.append(
                         (item.optional_vars.id, item.context_expr))
-    # A parameter and a module-level import of the same name are different
-    # bindings, and only one of them is readable.
     function_scopes = {}
     parameter_names = {}
     scope_walk: list[tuple] = [(tree, None)]
@@ -312,18 +307,17 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
         binding_map[name] = value
     reader = ArgvReader(binding_map, ambiguous)
     # The chain limb below must not prove a name the module has rebound,
-    # so `rebound` is collected by the AST's own vocabulary for a
-    # binding rather than by a list of spellings: every `Store` target,
-    # every `ast.arg`, and every string the grammar keeps in a NAME
-    # FIELD of some node — a handler's name, a `def`, an import alias. A
-    # binding form the interpreter adds is then refused without anyone
-    # editing this; the cost is stated in `proved_fixed`. The
-    # `binding_map` seed is redundant today — every key in it is already
-    # a `Store` or an `ast.arg`, and dropping it moves no row — and
-    # protective tomorrow: it makes "rebound contains binding_map"
-    # structural rather than a coincidence of the present bindings table,
-    # the likeliest thing here to grow. Falsified by a `binding_map` key
-    # that is neither.
+    # so `rebound` is collected by the AST's own vocabulary for a binding
+    # rather than by a list of spellings: every `Store` target, every
+    # `ast.arg`, and every string the grammar keeps in a NAME FIELD of
+    # some node — a handler's name, a `def`, an import alias. A binding
+    # form the interpreter adds is then refused without anyone editing
+    # this; the cost is stated in `proved_fixed`. The `binding_map` seed
+    # is redundant today — every key in it is already a `Store` or an
+    # `ast.arg`, so dropping it moves no row — and protective tomorrow: it
+    # makes "rebound contains binding_map" structural rather than a
+    # coincidence of the table, the likeliest thing here to grow.
+    # Falsified by a key that is neither.
     rebound = set(binding_map) | {
         node.id for node in nodes
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
@@ -368,8 +362,7 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
                 and derives(node.value, bound):
             # A tuple or list target unpacks the value into names the
             # bindings table never records; an attribute or subscript target
-            # binds it to a place receiver resolution cannot read, which is
-            # not an unpacking.
+            # binds it somewhere receiver resolution cannot read.
             targets = node.targets if isinstance(node, ast.Assign) \
                 else [node.target]
             if any(isinstance(t, (ast.Tuple, ast.List))
@@ -494,30 +487,28 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
     def proved_fixed(receiver):
         """Is this receiver PROVED a fixed, non-launch value?
 
-        Proof is the whole standard and it is deliberately narrow. Each
-        thing it names is unreadable rather than unknown: a PARAMETER
-        (a different binding from a module import of the same name), an
-        attribute or subscript (`self.mod`, `ns[key]`), a name bound to
-        a call the IMPORT MACHINERY makes by any route, and a name bound
-        to `getattr`, which hands back whatever the module holds. An
-        attribute chain spelled from a dotted import of a stdlib root is
-        the interpreter's own code, and is the one shape proved without
-        being a bare name — unless the module binds that root again,
-        in any form at all, which is the same unreadable name. The cost
-        of reading that in full: a module that harmlessly rebinds a
-        stdlib root under one of the forms the table cannot read loses
-        this proof and is reported instead. That is the right trade for
-        a guard whose failure mode is a launch nobody looked at.
-
-        A name the module binds to some OTHER call is proved by it.
+        The standard is deliberately narrow: every thing it refuses is
+        unreadable rather than unknown — a PARAMETER, an attribute or
+        subscript (`self.mod`, `ns[key]`), a name bound to a call the
+        IMPORT MACHINERY makes by any route, a name bound to `getattr`,
+        which hands back whatever the module holds, and a call whose own
+        origin the analyser cannot name. An attribute chain spelled from a
+        dotted import of a stdlib root is the interpreter's own code, and is
+        the one shape proved without being a bare name — unless the module
+        binds that root again, in any form at all, which is the same
+        unreadable name. The cost of reading that in full: a module that
+        harmlessly rebinds a stdlib root under one of the forms the table
+        cannot read loses this proof and is reported instead, which is the
+        right trade for a guard whose failure mode is a launch nobody
+        looked at.
 
         The family that is NOT closed is the same shape stated without
         the spellings: a module reached through a name the analyser
-        cannot read the origin of — a user's own factory that returns
-        one, a module bound by an `except ... as` clause, an attribute
-        held on an object. Each is the machinery route one step further
-        from a name the bindings table holds, and the residual list
-        names the family rather than the members it has been seen in.
+        cannot read the origin of — a user's own factory that returns one,
+        a module bound by an `except ... as` clause, an attribute held on
+        an object. Each is the machinery route one step further from a
+        name the bindings table holds, and the residual list names the
+        family rather than the members it has been seen in.
         """
         # An attribute chain: a dotted stdlib root, unless the module has
         # since rebound that name, it is a parameter here, or it can launch.
@@ -547,9 +538,8 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
                 or receiver.id in subprocess_names
                 or receiver.id == 'subprocess'):
             return False
-        # A parameter is a DIFFERENT binding from a module-level import
-        # of the same name, in a different scope, and this one the analyser
-        # cannot read.
+        # A parameter is a DIFFERENT binding from a module-level import of
+        # the same name, and this one the analyser cannot read.
         if receiver.id in shadowed:
             return False
         held = binding_map.get(receiver.id)
@@ -574,13 +564,12 @@ def launch_refusals(source, here, bound_sink=None, tree=None):
         """Every bounded call whose receiver is not a PROVED fixed value.
 
         A call carrying a `timeout=` or a `**`-unpacked mapping is a
-        bounded call, whatever it calls and whatever the timeout reads.
-        That is the whole of the second arm, and a receiver
+        bounded call, whatever it calls and whatever the timeout reads; one
         `proved_fixed` declines is reported at `unreadable`, so the rule
         demands a refusal or an allowance row for it. A receiver reached
         through an import name held in a variable, through a class
-        attribute, or through a run-time namespace is three of those
-        refusals, and the three rows that hold them —
+        attribute, or through a run-time namespace is one of those, and the
+        three rows holding them —
         `machinery-reached-by-assignment-is-unproved`,
         `unproved-attribute-receiver-is-reported` and
         `a-bare-name-receiver-over-a-bound-name` — go red if any of the
@@ -687,12 +676,13 @@ def bound_sites(source, here, tree=None):
 
     `kind` is one of four: 'timeout' (a readable `timeout=` at a launch),
     'unpack' (a `**`-unpacked keyword mapping, which could hide a timeout),
-    'unplaced' (a bounded call this analyser refused to place, reported at an
-    unreadable head), and 'keyword' (an argument the `subprocess` does not
-    take). A caller consumes this instead of re-parsing the human-readable
-    refusal, so a message-format change cannot move a guard that keys on
-    the head — and the gate keys on `kind == 'unplaced'` in particular.
-    `tree` is an already-parsed `source`, for a caller that needs it anyway.
+    'unplaced' (a bounded call this analyser refused to place, reported at
+    an unreadable head), and 'keyword' (an argument the `subprocess` does
+    not take). A caller consumes this instead of re-parsing the
+    human-readable refusal, so a message-format change cannot move a guard
+    that keys on the head — and the gate keys on `kind == 'unplaced'` in
+    particular. `tree` is an already-parsed `source`, for a caller that
+    needs it anyway.
     """
     sink = []
     launch_refusals(source, here, bound_sink=sink, tree=tree)

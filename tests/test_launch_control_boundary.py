@@ -34,30 +34,20 @@ def _control_population():
 
 
 def _refused_lines(here, refusals):
-    """How many of this file's OWN refusals name each of its lines.
-
-    A count rather than a set, because the reach this control does NOT
-    have is a statement about sites named by SEVERAL refusals, and a set
-    has already thrown the multiplicity away.
-    """
-    lines = {}
+    """The line numbers this file's OWN refusals name, as a set."""
+    lines = set()
     for refusal in refusals:
         match = _NAMES_A_LINE.match(refusal)
         if match and match.group('path') == here:
-            line = int(match.group('line'))
-            lines[line] = lines.get(line, 0) + 1
+            lines.add(int(match.group('line')))
     return lines
 
 
 def _dropped_sites():
-    """`(reported, dropped, multiply-refused)` for the whole tree.
+    """`(reported, dropped)` for the whole tree.
 
-    `dropped` rows carry whether any refusal names them; the third value
-    counts how many of them TWO OR MORE do, which is the reach this
-    control does not have. Both are returned so a reader re-derives them
-    by calling this rather than trusting a number in a docstring.
-
-    The population and the rule are the control's own, both read from
+    `dropped` rows carry whether any refusal names them. The population
+    and the rule are the control's own, both read from
     `tests/_launch_keep.py`, so narrowing either moves this control's
     population with it instead of quietly beside it.
 
@@ -67,7 +57,6 @@ def _dropped_sites():
     """
     dropped = []
     reported = 0
-    multiply = 0
     for here, source in _control_population():
         sink = []
         refused = _refused_lines(here, launch_refusals(source, here, sink))
@@ -75,10 +64,8 @@ def _dropped_sites():
             reported += 1
             if control_keeps(head, kind):
                 continue
-            naming = refused.get(line, 0)
-            multiply += naming > 1
-            dropped.append((here, line, head, kind, bool(naming)))
-    return reported, dropped, multiply
+            dropped.append((here, line, head, kind, line in refused))
+    return reported, dropped
 
 
 def test_every_bounded_site_the_launch_control_drops_is_a_refusal(tmp):
@@ -88,17 +75,17 @@ def test_every_bounded_site_the_launch_control_drops_is_a_refusal(tmp):
     message, because a fix that repaired only the first would meet the
     rest by rerunning.
 
-    What this does NOT reach: on the tree this was last measured, 150 of
-    the 155 dropped sites were named by two or more refusals, so moving
-    one refusal class leaves it green. `_dropped_sites` returns both, so
-    re-measure by calling it rather than by editing these. The sink's own
-    contents are pinned by
+    What this does NOT reach: a site is covered by ONE refusal as fully as
+    by several, so a site named by two or more refusals still passes, and
+    moving one refusal class out from under it leaves this green. The
+    figures are `_dropped_sites`' to answer; call it rather than writing
+    one here. The sink's own contents are pinned by
     `test_the_sink_pins_the_unplaced_and_ambiguous_branches` in
     `test_repo_layout.py`; this control reaches the refusal text, not the
     sink.
     """
     del tmp
-    reported, dropped, _ = _dropped_sites()
+    reported, dropped = _dropped_sites()
     assert reported, (
         'the launch analyser reported no bounded site in the tracked tree, '
         'so the boundary below was not checked at all')
