@@ -36,12 +36,22 @@ of these kinds would carry is the name alone, and the battery in
 member added to one is read by the same two functions every other member of
 that kind is read by.
 
-Two spellings decide the arity of every step at runtime, and the guard
-cannot read either: a `**` keyword unpacking and a starred positional
-operand. `zip(*iterables)` pairs a count the guard cannot name -- the
-operand is a container OF iterables, and a container of iterables is not a
-stream -- so the element it yields is unprovable at every position rather
-than at the one position the guard would have guessed.
+Two spellings stand between an operand and the position it pairs at, and
+they are read differently because they decide different things. A starred
+positional operand is a count of streams AT THE PLACE THE SOURCE SPELLS IT:
+`f(a, *b, c)` reaches `f` as `(a, *b, c)`, so a star whose container the
+guard can read expands in place, between the operands spelled before it and
+the operands spelled after it. A star whose container it cannot read is a
+count it cannot name, and nothing at or after it can be placed -- the
+operands spelled after it sit at positions that count decides -- so the step
+is undecided at EVERY position and the element it yields is unprovable
+everywhere rather than at the one position the guard would have guessed.
+
+A `**` keyword unpacking passes KEYWORDS, so it never displaces a positional
+stream: the operands spelled beside it keep the positions the runtime gives
+them, and only the count is open. The count is undecided, so the token sits
+in the unknown-key slot alone and does not make the tuple claim a length the
+runtime does not pair over.
 
 The boundary is the module path, and it is stated rather than closed. The
 same three declarations are spelled again in `itertools` -- `chain`,
@@ -178,11 +188,11 @@ def _stream_element(stream):
                             if stream.unplaced is not None else ())))
 
 
-# One operand the guard cannot read, whatever the reason: a starred or a
-# `**`-unpacked value it holds nothing for, and an element of a container of
-# iterables that is not itself a readable iterable. It is the uncertainty
-# token at every position, because the pairing still pairs it.
-_UNREADABLE = _Stream({}, None, UNPROVABLE_SENDER)
+# The one stream a `**` the model could not read contributes. It does not
+# count toward the tuple's arity -- a `**` passes KEYWORDS, so the arity the
+# runtime pairs over is the arity the model can NAME -- and it contributes
+# its value to the unknown-key slot alone, so the token reaches every
+# position without the tuple claiming a length the runtime does not pair.
 _UNDECIDED = _Stream({}, None, UNPROVABLE_SENDER, optional=True)
 
 
@@ -207,21 +217,21 @@ def _container_streams(value):
     return None if any(stream is None for stream in streams) else streams
 
 
-def _unpacked_streams(node, state):
-    """The streams a star or a `**` unpacking contributes, and whether the
-    model could decide the count at all. It could when it can read the
-    unpacked value as a container: a starred operand's elements, or a `**`
-    mapping's values. It could NOT when that value is one the model holds
-    nothing for, and the arity is then undecided -- which is a statement
-    about how many streams a step pairs over, not about what any of them
-    holds, so the operand the call DID spell plainly is still read."""
+def _keyword_streams(node, state):
+    """The streams a `**` unpacking contributes, and whether the model could
+    decide the count at all. It could when it can read the unpacked value as
+    a container of iterables -- a mapping the model holds. It could NOT when
+    that value is one the model holds nothing for, and the count is then
+    undecided -- which is a statement about how many streams a step pairs
+    over, not about what any of them holds, so the operand the call spelled
+    plainly is still read.
+
+    A `**` is here and a starred positional operand is not, because they
+    decide different things. A `**` passes KEYWORDS, so it never displaces a
+    positional stream: the operands spelled beside it keep the positions the
+    runtime gives them, and only the count is open. A star is a count of
+    POSITIONAL streams standing at the place the source spells it."""
     extra = []
-    for argument in node.args:
-        if isinstance(argument, ast.Starred):
-            read = _container_streams(evaluated_value(argument.value, state))
-            if read is None:
-                return extra, False
-            extra.extend(read)
     for keyword in node.keywords:
         if keyword.arg is None:
             read = _container_streams(evaluated_value(keyword.value, state))
@@ -229,6 +239,39 @@ def _unpacked_streams(node, state):
                 return extra, False
             extra.extend(read)
     return extra, True
+
+
+def _positional_streams(operands, state):
+    """The streams the positional operands contribute, in the order the
+    runtime pairs them, or None when one of them is a star the model cannot
+    read.
+
+    `f(a, *b, c)` reaches `f` as `(a, *b, c)`: a starred operand expands IN
+    PLACE, so the streams its container holds sit between the operands
+    spelled before it and the operands spelled after it. Appending them at
+    the end models a different call, and it models it wrongly in the
+    direction that reads clean -- the routed value is placed at a position
+    the runtime never gives it, and the position the runtime does give it
+    holds something else. That is the same order `bind_call_arguments`
+    already reads a call's own operand list in.
+
+    A star whose container the model cannot read stands for a count it
+    cannot name, and nothing at or after it can be placed: the operands
+    spelled after it sit at positions that count decides. There are only
+    two things a model can do with a container it cannot read, and this is
+    the first -- decline to place anything, rather than invent a position
+    for a count it does not have. The caller answers it with the elements no
+    position of a step is decided in."""
+    streams = []
+    for operand in operands:
+        if not isinstance(operand, ast.Starred):
+            streams.append(_operand_stream(operand, state))
+            continue
+        read = _container_streams(evaluated_value(operand.value, state))
+        if read is None:
+            return None
+        streams.extend(read)
+    return streams
 
 
 def _paired_step(streams, index, arity):
@@ -251,13 +294,14 @@ def _paired_step(streams, index, arity):
     return DeferredContainer(items, arity, 'tuple')
 
 
-def _step_elements(streams, arity=None):
+def _step_elements(streams):
     """The container a consumer's elements hold: one tuple per step the
     model can name, or the join of them at every position where it cannot.
     A pairing over no operand reaches no step at all, which is a consumer
-    the runtime walks zero times rather than one holding nothing."""
-    arity = (sum(1 for stream in streams if not stream.optional)
-             if arity is None else arity)
+    the runtime walks zero times rather than one holding nothing. The arity
+    is the arity the model can NAME, which is what leaves a stream the model
+    could not decide on out of the count."""
+    arity = sum(1 for stream in streams if not stream.optional)
     lengths = [stream.length for stream in streams
                if not stream.optional]
     if all(isinstance(length, int) for length in lengths):
@@ -410,21 +454,27 @@ def _declaration_elements(declaration, node, state, analyze):
     operands = declaration.operands(node)
     if not operands:
         return None
-    # A starred operand is not a stream of its own: the call pairs the
-    # CONTAINER'S ELEMENTS, which is what `_unpacked_streams` reads. Leaving
-    # it in the operand list would pair the container and each of its
-    # elements, which is one stream too many and every one of them wrong.
-    streams = [_operand_stream(operand, state)
-               for operand in operands if not isinstance(operand, ast.Starred)]
-    extra, decided = _unpacked_streams(node, state)
+    streams = _positional_streams(operands, state)
+    if streams is None:
+        # A star the model could not read decides how many streams stand at
+        # the place the source spells it, and it is a count it cannot name.
+        # The step is then unplaceable at EVERY position -- the operands
+        # spelled after that star are at positions the count decides, and
+        # the tuple the model would otherwise build claims a length the
+        # runtime never pairs over, so a destructuring target reads a
+        # different number of names from it and the pair is refused
+        # outright. The elements with no position decided are the answer.
+        return _unreadable_elements()
+    extra, decided = _keyword_streams(node, state)
     if not streams and not extra:
         return None
     if decided:
         return declaration.value(node, state, [*streams, *extra], analyze)
-    # The count a star or a `**` decides is not one the model could read.
-    # The operand the call spelled PLAINLY still is, so it is still read and
-    # the undecided one sits beside it carrying the token -- a value the
-    # model holds and cannot place, at the position it cannot place it.
+    # The count a `**` decides is not one the model could read, and a `**`
+    # displaces nothing: the operand the call spelled PLAINLY still is, so it
+    # is still read and the undecided one sits beside it carrying the token
+    # -- a value the model holds and cannot place, at the position it cannot
+    # place it.
     return declaration.value(
         node, state, [*streams, *extra, _UNDECIDED], analyze)
 

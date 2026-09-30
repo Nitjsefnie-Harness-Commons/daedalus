@@ -36,7 +36,6 @@ _SEND = 'send = ext_cmd\n'
 _DICT = 'd = {"k": relay()}'
 _LIST = 'l = [relay()]'
 _PLAIN = 'p = [relay()]\nq = [ordinary]'
-_PLAIN_SOURCE = 'def g(x): return x\nplain = [1, 2]'
 _SENDER = 'd = {"k": ext_cmd}'
 _CALL = 'lambda: send("_focus", "focus-tab", tab=args.chrome_tab)'
 _CALLS = f'l = [{_CALL}]'
@@ -363,24 +362,141 @@ def test_a_generator_operand_the_model_cannot_read_says_so(tmp):
 
 def test_a_decidable_generator_expression_is_not_a_false_positive(tmp):
     """The negative direction, and it is a control rather than a plant. A
-    generator expression the model CAN decide, consumed through one of the
-    three declarations, must read clean: the arm is fail-closed on an operand
-    it cannot decide, and that must not turn a generator the model reads into
-    an over-report the moment a new consumer is in front of it. This is the
-    cell that would make a precise flow path into an over-reporting
-    backstop, measured on our own arm rather than promised to the seat whose
-    flow the consumer set made hotter."""
+    generator expression the model CAN decide states how many steps it
+    yields, and a stated zero is a pairing that reaches no step at all: a
+    routed value sitting in the operand BESIDE it is paired with nothing,
+    so the `tab` the target carries never reaches a sender. The arm is
+    fail-closed on an operand it cannot decide, and that must not turn a
+    generator the model reads into an over-report the moment a new consumer
+    is in front of it.
+
+    Every target here CALLS the element it reads, with a `tab`, because
+    that call is the only way a token in the position becomes a finding. A
+    row whose body never calls its element reads clean whatever the model
+    holds there, which is why two maximal fail-closed mutants -- every
+    generator undecided, and every decided pairing also carrying the token
+    -- left the four earlier spellings of this test at `(0, 0)` and
+    passing. The decision these rows pin is the COUNT, so each of them dies
+    the moment the count is thrown away, and the mutant table quotes it.
+
+    The value a decidable generator YIELDS is a separate question this test
+    does not claim: the model does not hold it, so a `tab` passed through
+    one already reads as a finding whatever the count is. Pinning that as
+    the contract would be asserting a defect, so the rows here are the ones
+    whose correct verdict is clean."""
+    _CALL = 'v("focus", tab="1")'
     cases = [
-        ('zip-genexp-plain', _PLAIN_SOURCE,
-         'return [v for _, v in zip((g(x) for x in plain),'
-         ' (g(y) for y in plain))]', (0, 0)),
-        ('enumerate-genexp-plain', _PLAIN_SOURCE,
-         'return [v for _, v in enumerate(g(x) for x in plain)]', (0, 0)),
-        ('map-genexp-plain', _PLAIN_SOURCE,
-         'return list(map(lambda g: g, (g(x) for x in plain)))', (0, 0)),
-        ('zip-genexp-routed-source', 'd = {"k": ext_cmd}\nplain = [d]',
-         'return [v for _, v in zip((x for x in plain),'
-         ' (y for y in plain))]', (0, 0)),
+        ('zip-genexp-decided-empty', '',
+         f'return [{_CALL} for _, v in zip((x for x in []), [ext_cmd])]',
+         (0, 0)),
+        ('enumerate-genexp-decided-empty', '',
+         f'return [{_CALL} for _, v in enumerate(x for x in [])]', (0, 0)),
+        ('map-genexp-decided-empty', '',
+         f'return [{_CALL} for v in map(lambda f: f, (x for x in []))]',
+         (0, 0)),
+        # The same decided count beside a mapping the model holds a routed
+        # value in. The routing is real and the pairing still reaches no
+        # step, so a reader that kept the count would report nothing; one
+        # that could not would report the routed value beside it.
+        ('zip-genexp-empty-beside-routed', 'd = {"k": ext_cmd}',
+         f'return [{_CALL} for _, v in zip((x for x in []), [d["k"]])]',
+         (0, 0)),
+    ]
+    _verdicts(tmp, cases)
+
+
+def test_a_star_the_model_cannot_read_leaves_no_position_decided(tmp):
+    """A starred operand is a count of streams, and a container the model
+    cannot read is a count it cannot name. Nothing at or after such a star
+    is placeable -- the operands spelled after it sit at positions that
+    count decides -- so the step is undecided at EVERY position and the
+    target reads the uncertainty token wherever it looks.
+
+    Reading it as one more stream at one more position is the fail-open in
+    its purest form: the tuple the model builds claims a length the runtime
+    never pairs over, a destructuring target reads a different number of
+    names from it, the pair is REFUSED, and the names are left bound to
+    nothing at all. The routed call then reads clean while the runtime
+    really reached the sender.
+
+    The first two rows are the two entry points of that one mechanism and
+    they are both here because removing the early return that stood between
+    them is only a real repair if a plant shows BOTH classes appear. The
+    third source is a generator expression, which the runtime also builds
+    extra streams from and which the model cannot read either."""
+    _CALL_ALL = 'a("focus", tab=1)'
+    _STORE = ('def pair(*items): return list(items)\n'
+              'O = [ext_cmd]\nP = [ordinary]')
+    cases = [
+        # The star stands BEFORE an operand the model did read, so that
+        # operand's own position is one the unreadable count decides.
+        ('zip-star-before-plain', _STORE,
+         f'return [{_CALL_ALL} for a, b, c in zip(*pair(O, O), P)]', (1, 1)),
+        # The star is the only operand, so there is no placed stream beside
+        # it: the early return that fired on an empty operand list is the
+        # only thing that stood between this row and a verdict.
+        ('zip-star-alone', _STORE,
+         f'return [{_CALL_ALL} for a, b in zip(*pair(O, O))]', (1, 1)),
+        ('map-star-before-plain', _STORE,
+         f'return [{_CALL_ALL} for a in '
+         'map(lambda a, b, c: a, *pair(O, O), P)]', (1, 1)),
+        ('map-star-alone', _STORE,
+         f'return [{_CALL_ALL} for a in map(lambda a, b: a, '
+         '*pair(O, O))]', (1, 1)),
+        # A generator expression is the third way the runtime builds the
+        # extra streams, and the model reads it no better than a call.
+        ('zip-genexp-star-alone', _STORE,
+         f'return [{_CALL_ALL} for a, b in zip(*(q for q in [O, O]))]',
+         (1, 1)),
+        ('map-genexp-star-before-plain', _STORE,
+         f'return [{_CALL_ALL} for a in '
+         'map(lambda a, b, c: a, *(q for q in [O, O]), P)]', (1, 1)),
+        # The decided twin beside the undecided rows, so the two cannot both
+        # pass by accident: a star over a container the model DOES read is
+        # placed, and this is where it is placed.
+        ('decided-twin', 'l = [relay()]',
+         'return [v() for _, v in zip(*[l, l])]', (1, 1)),
+    ]
+    _verdicts(tmp, cases)
+
+
+def test_a_readable_star_expands_where_the_source_spells_it(tmp):
+    """`f(a, *b, c)` reaches `f` as `(a, *b, c)`: a star expands IN PLACE, so
+    the streams its container holds sit between the operands spelled before
+    it and the operands spelled after it. A reconstruction that appends them
+    at the end models a different call, and it models it wrongly in the
+    direction that reads clean -- the routed value is placed at a position
+    the runtime never gives it, and the position the runtime does give it
+    holds something else.
+
+    The container here is a list display, so every row is one the model can
+    read: the count is stated and only the ORDER is the decision. That is
+    what separates it from the unreadable star beside it, which cannot state
+    a count at all. The quiet row is the twin that says the ordering does not
+    cost precision on a star whose streams are clean."""
+    _CALL_ALL = 'a("focus", tab=1)'
+    cases = [
+        # The leading star's streams come FIRST, so the routed value is at
+        # tuple position 0 -- which is where the runtime puts it and where
+        # the target reads.
+        ('zip-leading-star', 'O = [ext_cmd]\nP = [ordinary]',
+         f'return [{_CALL_ALL} for a, b, c in zip(*[O, O], P)]', (1, 1)),
+        # A projection reads the end it names, so a leading star is visible
+        # through the callable's FIRST parameter as well.
+        ('map-leading-star', 'O = [ext_cmd]\nP = [ordinary]',
+         f'return [{_CALL_ALL} for a in '
+         'map(lambda a, b, c: a, *[O, O], P)]', (1, 1)),
+        # A TRAILING star is where appending happens to agree with the
+        # runtime, so it is the row that keeps the two apart: the plain
+        # operand is at position 0 under both readings, and the runtime
+        # really does hand the target a clean value there.
+        ('zip-trailing-star', 'O = [ext_cmd]\nP = [ordinary]',
+         f'return [{_CALL_ALL} for a, b, c in zip(P, *[O, O])]', (0, 0)),
+        # The quiet twin: every stream clean, so the correct verdict is
+        # clean and an ordering that invented a routed position would turn
+        # this row red.
+        ('zip-leading-star-quiet', 'Q = [ordinary]\nP = [ordinary]',
+         f'return [{_CALL_ALL} for a, b, c in zip(*[Q, Q], P)]', (0, 0)),
     ]
     _verdicts(tmp, cases)
 
