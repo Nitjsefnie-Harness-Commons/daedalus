@@ -246,10 +246,10 @@ def go(items):
 }
 
 # The false green, in the shape the arm would admit if it stopped asking
-# whether the caller's container is a child. `drain` receives the child out
-# of a list the caller built, and the row the census must keep is the one
-# on `drain` -- `run_gate` beside it refuses for the launch it places, so
-# the two rows are read apart and only the second is the arm's.
+# what the caller actually passed. `drain` receives the child out of a
+# list the caller built, and the row the census must keep is the one on
+# `drain` -- `run_gate` beside it refuses for the launch it places, so the
+# two rows are read apart and only the second is the arm's.
 LIST_HANDED = '''import subprocess
 
 
