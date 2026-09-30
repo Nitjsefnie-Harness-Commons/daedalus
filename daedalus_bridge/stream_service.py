@@ -6,6 +6,7 @@ import threading
 import time
 
 from daedalus_bridge import command_queue
+from daedalus_bridge import legacy_ids
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import path_safety
 
@@ -350,63 +351,6 @@ def poll_legacy(cmd_dir, token):
         return 200, data
 
 
-# The generation each legacy name has reached. What a file carries is not a
-# generation — `command_queue._identity` says so, and a new file handed the
-# inode the vacated one had, with a change time that only moves when the clock
-# does, carries the same incarnation. This separates what that one value
-# cannot, and is bounded and forgotten like the refusal registry above.
-_legacy_generations = {}
-_LEGACY_GENERATION_LIMIT = 4096
-_legacy_generation_lock = threading.Lock()
-
-
-def legacy_generation(name):
-    """The generation `name` has reached; 0 until this drain vacates it."""
-    with _legacy_generation_lock:
-        return _legacy_generations.get(name, 0)
-
-
-def advance_legacy_generation(name):
-    """Record that this drain vacated `name`, so the next file is a new one.
-
-    The successful unlink in `drain_legacy_file` is the only event that says
-    so, and it keeps the two apart: a redelivery is the removal that FAILED,
-    which advances nothing and keeps the id.
-
-    Three ways the generation is not the one a consumer last saw, each
-    needing a recycled inode and a coarse clock agreeing in the same tick.
-    A publisher overwriting a name whose removal the drain could not perform:
-    the name was never vacated, so nothing advanced — the case
-    `on_name_vacated` leaves for the same reason it retires rather than
-    guesses. A restart: the table is this process's, and a fresh one starts
-    every name at 0, the id that name's first command carried. And the
-    eviction past the bound, which returns its name to 0 the same way.
-    """
-
-    with _legacy_generation_lock:
-        _legacy_generations[name] = _legacy_generations.get(name, 0) + 1
-        while len(_legacy_generations) > _LEGACY_GENERATION_LIMIT:
-            del _legacy_generations[next(iter(_legacy_generations))]
-
-
-def stamp_legacy_delivery_id(data, name, ident):
-    """Give a delivered legacy command the delivery id its redelivery needs.
-
-    A legacy file is published by an external writer and carries no `_did`, so
-    a removal that fails redelivers it with nothing to deduplicate on. The id
-    is the object incarnation — which holds across that redelivery — plus
-    the generation its name has reached. A publisher's own `_did` is kept
-    when it is a non-empty string: the extension's frame handler tests `_did`
-    for truth, so an empty one deduplicates nothing. The id is spelled with
-    characters the delivery-result path accepts, because the consumer posts
-    `_did` back as a delivery id.
-    """
-    if not isinstance(data.get('_did'), str) or not data['_did']:
-        data['_did'] = (
-            f'legacy-{ident[0]}-{ident[1]}-{ident[2]}'
-            f'-{legacy_generation(name)}')
-
-
 def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
                       secret=''):
     """Deliver one atomically published legacy command file.
@@ -450,7 +394,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
             return 0
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
-        stamp_legacy_delivery_id(data, path.name, ident)
+        legacy_ids.stamp(data, path.name, ident)
         frame_writer(data)  # BEFORE unlink
         # The claim excludes other consumers until this write and unlink
         # finish; a redelivery is deduplicated by the `_did` stamped above.
@@ -459,7 +403,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
         except OSError:
             pass
         else:
-            advance_legacy_generation(path.name)
+            legacy_ids.vacated(path.name)
         record_delivery()
         print(
             f'[STREAM] DELIVERED '

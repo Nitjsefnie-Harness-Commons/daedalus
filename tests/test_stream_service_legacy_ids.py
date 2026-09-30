@@ -47,8 +47,8 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     The id's shape and the values behind it are both pinned, because the
     first review round found a mutant that deleted a component and passed:
     every component has to be load-bearing, and the generation is the one
-    that stands still here — it advances only when the drain vacates a name,
-    which a failed removal is not.
+    that stands still here — it advances when the object at the name
+    changes or the drain vacates it, and a failed removal is neither.
     """
     service = _load_service('stream_service_legacy_redelivery_id')
     legacy = Path(tmp) / 'tok_42.json'
@@ -70,13 +70,13 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     # from a descriptor and a path lookup does not report the same one on
     # every interpreter — Windows 3.12 does not, and a control that needs a
     # platform to agree with itself is not pinning this. So the shape is
-    # checked first and on its own, where dropping a component or keeping
-    # only the change time is a change of arity and dies however the
-    # platform reads the file.
+    # checked first and on its own, where deleting a component or keeping
+    # only one of them is a change of arity and dies however the platform
+    # reads the file.
     parts = dids[0].split('-')
-    assert parts[0] == 'legacy' and len(parts) == 5, dids
+    assert parts[0] == 'legacy' and len(parts) == 4, dids
     assert all(part.isdigit() for part in parts[1:]), dids
-    assert parts[4] == '0', dids
+    assert parts[3] == '0', dids
     # The values, from the same mechanism the drain reads them by: its own
     # descriptor, not the name.
     handle = os.open(legacy, os.O_RDONLY)
@@ -84,9 +84,8 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
         by_descriptor = os.fstat(handle)
     finally:
         os.close(handle)
-    assert parts[1:4] == [
-        str(by_descriptor.st_dev), str(by_descriptor.st_ino),
-        str(by_descriptor.st_ctime_ns)], dids
+    assert parts[1:3] == [
+        str(by_descriptor.st_dev), str(by_descriptor.st_ino)], dids
     # The consumer posts the `_did` back as a delivery id, which the bridge
     # refuses for a component it will not accept as a file name.
     assert not service.path_safety.unsafe_component(dids[0]), dids
@@ -96,25 +95,20 @@ def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
 def test_a_failed_removal_holds_the_generation_a_name_reached(tmp):
     """A redelivery at an advanced name keeps its generation, not a fresh one.
 
-    At generation 0, "held" and "reset to 0" are one observation, so the
+    At the first generation, "held" and "reset" are one observation, so the
     control above cannot see a failed removal that resets. Here the name has
-    been vacated once already, and 0 is the value a consumer is most likely
-    still to hold there, because it is the first id the name ever carried.
-
-    The identity is deliberately not re-derived from the file: the drain
-    reads it from its own descriptor and this is a path lookup, and the two
-    do not report the same incarnation on every interpreter — re-deriving it
-    here is what `test_a_legacy_command_the_drain_cannot_remove_
-    redelivers_one_id` does, and that one is green on every leg. What this
-    control adds is the generation, and it reads that off the id itself.
+    already changed hands once, and its first generation is the value a
+    consumer is most likely still to hold there, because it is the first id
+    that object ever carried. A failure is the removal that did NOT happen,
+    so neither signal advances: the object at the name is unchanged, and
+    this drain never vacated it.
     """
     service = _load_service('stream_service_legacy_generation_held')
     legacy = Path(tmp) / 'tok.json'
     legacy.write_text('{"id":"first","code":"1"}', encoding='utf-8')
-
+    first = []
     assert service.drain_legacy_file(
-        legacy, None, command_ttl=100,
-        frame_writer=lambda frame: None) == 1
+        legacy, None, command_ttl=100, frame_writer=first.append) == 1
 
     legacy.write_text('{"id":"second","code":"1"}', encoding='utf-8')
     frames = []
@@ -127,11 +121,13 @@ def test_a_failed_removal_holds_the_generation_a_name_reached(tmp):
             frame_writer=frames.append) == 1
 
     dids = [frame.get('_did') for frame in frames]
-    # One object, one id; and not the one a name this drain never vacated
-    # would carry. Both are properties of the id the drain wrote, so neither
-    # reads the filesystem a second way.
+    # One object, one id; and not the one this name started from. Both are
+    # read off the id the drain wrote, so neither reads the filesystem a
+    # second way.
     assert len(set(dids)) == 1, dids
-    assert dids[0].rsplit('-', 1)[1] == '1', dids
+    held = dids[0].rsplit('-', 1)[1]
+    started = first[0].get('_did').rsplit('-', 1)[1]
+    assert held != started, (held, started)
 
 
 def test_sequential_drops_at_one_name_carry_distinct_ids(tmp):
