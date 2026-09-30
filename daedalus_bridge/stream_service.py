@@ -350,6 +350,22 @@ def poll_legacy(cmd_dir, token):
         return 200, data
 
 
+def stamp_legacy_delivery_id(data, ident):
+    """Give a delivered legacy command the delivery id its redelivery needs.
+
+    A legacy file is published by an external writer and carries no `_did`,
+    unlike a queued command, so after a removal that fails the redelivery
+    would reach the consumer with nothing to deduplicate on. The object
+    incarnation is the one identity that holds across the redelivery of a
+    single file and differs for a second drop of the same command. A
+    publisher that stamped its own id keeps it, and the id is spelled with
+    characters the delivery-result path accepts, because the consumer posts
+    the `_did` back as a delivery id.
+    """
+    if not isinstance(data.get('_did'), str) or not data['_did']:
+        data['_did'] = f'legacy-{ident[0]}-{ident[1]}-{ident[2]}'
+
+
 def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
                       secret=''):
     """Deliver one atomically published legacy command file.
@@ -358,8 +374,10 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
     non-atomic publisher. Leave it in place and retry on the next scan;
     deleting it would discard the writer's eventual complete command. The
     candidate is read through a descriptor checked against the name it was
-    found under, so an aliased name is never delivered. `secret` is the
-    credential the file's name is derived from, kept to its 8-character
+    found under, so an aliased name is never delivered. A frame carries the
+    delivery id `stamp_legacy_delivery_id` derives, so the at-least-once
+    redelivery of a file that would not unlink is deduplicable. `secret` is
+    the credential the file's name is derived from, kept to its 8-character
     prefix in the lines this drain prints.
     """
     # Keyed on the filename as found rather than on a resolved spelling of
@@ -393,9 +411,10 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
             return 0
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
+        stamp_legacy_delivery_id(data, ident)
         frame_writer(data)  # BEFORE unlink
         # The claim excludes other consumers until this write and unlink
-        # finish; a redelivery is deduplicated by the `_did` it carries.
+        # finish; a redelivery is deduplicated by the `_did` stamped above.
         try:
             path.unlink()
         except OSError:

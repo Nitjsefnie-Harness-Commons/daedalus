@@ -16,6 +16,16 @@ import _util  # noqa: E402
 from _service_loader import _load_service  # noqa: E402
 
 
+def _routed(frames):
+    """`(id, chromeTab)` per delivered frame.
+
+    The drain also stamps the delivery id on every frame it writes; the
+    routing assertions below are about which tab a file was addressed to,
+    and the stamped id is pinned where it is derived.
+    """
+    return [(frame['id'], frame.get('chromeTab')) for frame in frames]
+
+
 class _RecordingByteSink:
     def __init__(self, fail_at=None):
         self.data = b''
@@ -164,7 +174,7 @@ def test_legacy_extension_drain_uses_explicit_command_directory(tmp):
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered
-    assert frames == [{'id': 'legacy', 'chromeTab': '42'}], frames
+    assert _routed(frames) == [('legacy', '42')], _routed(frames)
     assert not legacy.exists(), legacy
 
 
@@ -205,7 +215,7 @@ def test_legacy_extension_drain_stops_after_stream_is_killed(tmp):
         command_ttl=100, frame_writer=capture)
 
     assert delivered == 1, delivered
-    assert frames == [{'id': 'first', 'chromeTab': '41'}], frames
+    assert _routed(frames) == [('first', '41')], _routed(frames)
     assert not first.exists(), first
     assert second.exists(), second
 
@@ -226,7 +236,7 @@ def test_legacy_extension_drain_skips_dashboard_name(tmp):
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered
-    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+    assert _routed(frames) == [('tab', '42')], _routed(frames)
     assert not tab.exists(), tab
     assert dashboard.exists(), dashboard
 
@@ -246,7 +256,7 @@ def test_legacy_extension_drain_skips_its_own_legacy_name(tmp):
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered
-    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+    assert _routed(frames) == [('tab', '42')], _routed(frames)
     assert not tab.exists(), tab
     assert extension.exists(), extension
 
@@ -607,9 +617,8 @@ def test_legacy_extension_drain_takes_a_folded_name_as_a_tab(tmp):
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 2, delivered
-    assert frames == [
-        {'id': 'tab', 'chromeTab': '42'},
-        {'id': 'extension', 'chromeTab': 'Extension'}], frames
+    assert _routed(frames) == [('tab', '42'), ('extension', 'Extension')], (
+        _routed(frames))
 
 
 def _symlinked_legacy_file(command_dir):
@@ -655,7 +664,7 @@ def test_legacy_drain_takes_a_symlinked_tab_file(tmp):
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered
-    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+    assert _routed(frames) == [('tab', '42')], _routed(frames)
 
 
 if __name__ == '__main__':

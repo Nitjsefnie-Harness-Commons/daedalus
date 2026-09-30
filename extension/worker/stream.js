@@ -31,8 +31,9 @@ function _streamCredential() {
 // (_did). At-least-once delivery can (rarely) redeliver a command whose
 // socket write succeeded but whose unlink failed; skipping the repeat
 // prevents double-exec of non-idempotent typed commands (open-tab, etc.).
-// Legacy frames without _did have no stable delivery identity and are not
-// deduplicated here.
+// Legacy frames carry the _did the bridge derived from the dropped file's
+// object incarnation: the same on the redelivery of one file, different for a
+// second drop of the same command, so both properties hold here too.
 // The ledger is PERSISTED, because an MV3 worker is stopped whenever it goes
 // idle and the redelivery this guards against is precisely a command that
 // outlived one worker: kept in memory alone, at-most-once meant at most once
