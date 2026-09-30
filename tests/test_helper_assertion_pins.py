@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """Every assertion a shared test helper makes is observed by a case here.
 
-The three shared fixture modules assert on their callers' behalf: the
-composition-scan refusal names the site and the reason, the crediting
-record reader wants exactly one record, the workflow rewriter wants a
-block the workflow really carries and a rewrite that really changed
-something, and the refusal reader wants a message carrying the text it
-was asked for and wants `call` to have refused at all. Every consumer
-passed each of those the values it wants, so deleting any of them left
-every consumer green and the check was made by nothing (issue #1349).
+The helpers imported below assert on their callers' behalf, and every
+consumer passed each assertion the values it wants — so deleting any of
+them left every consumer green and the check was made by nothing (issue
+#1349).
 
 One case per assertion, and each case states both directions of the one
 helper: the call that must not raise, and the call that must. The
@@ -16,10 +12,8 @@ negative alone would be satisfied by a helper that raised on everything
 and the positive alone by one that ignored the argument, so neither half
 discriminates without the other.
 
-The two helpers this suite declares are held to the same rule, which is
-what issue #1349 is about one level down: `_assertion_raised`'s own two
-statements are each observed by a case, and neither of its cases needs
-a real fixture to do it.
+`_assertion_raised` is held to the same rule, by two cases that need no
+real fixture.
 """
 import sys
 import uuid
@@ -34,7 +28,8 @@ from _node_harness_fixtures import (  # noqa: E402
 from _wfgraph import _job_needs, _tests_yml  # noqa: E402
 from _wffixtures import BLOCK_NEEDS, _refuses, _replaced  # noqa: E402
 
-# The composition the closure suite plants, refusing at `composition:6`.
+# The closure suite's own refusing composition: the leading newline puts
+# the call on line 6, which is the line SCAN_SITE counts.
 COMPUTED_IMPORT = (
     '\nimport importlib\n'
     '\n'
@@ -45,12 +40,8 @@ SCAN_REASON = 'cannot read statically'
 SCAN_SITE = 6
 
 # A bound writes its crediting record on stderr as it settles, so a child
-# running N of them writes N records and the newline ahead of the exit is
-# what orders the flush after the last one. The marker on stdout is what a
-# child that reached the end of this program writes, and a child that
-# crashed before reaching it leaves stdout empty whatever its stderr says
-# — so a stderr carrying no record cannot stand for a child that never
-# ran.
+# running N of them writes N records, and the newline ahead of the exit is
+# what orders the flush after the last one.
 _BOUND_DRIVER = """
 (async () => {
   const work = Promise.resolve('settled');
@@ -59,10 +50,18 @@ _BOUND_DRIVER = """
     '%s', () => process.exit(0)));
 })();
 """
+
+# What a child that reached the end of the driver writes on stdout, and
+# what the cases read before they trust a stderr. A child that crashed
+# before reaching the write leaves stdout empty however it failed, so a
+# stderr carrying no record cannot stand for a child that never ran. The
+# marker carries the settled-nothing case on its own and is a control in
+# the other two, where a crash is already caught by what the case
+# expects — so those two copies are there to be kept, not trimmed.
 SETTLED = 'settled'
 
-# `suites` is absent from the first and present in the second, so the same
-# reader refuses one and answers the other.
+# One pair the same reader answers differently: the first is refused, the
+# second answers.
 _NO_SUITES_JOB = (
     'jobs:\n  probe:\n    needs:\n    runs-on: ubuntu-latest\n')
 _SUITES_JOB = (
@@ -74,8 +73,7 @@ def _assertion_raised(call, *args, mentions=None):
     """Require `call(*args)` to raise an AssertionError naming `mentions`.
 
     An IndexError or a TypeError is not a report: the message is what a
-    reader of a failed run acts on, and each of these fixtures exists to
-    produce one about the input it was handed.
+    reader of a failed run acts on.
     """
     try:
         call(*args)
@@ -89,9 +87,9 @@ def _assertion_raised(call, *args, mentions=None):
 def _refuses_asking_for(text):
     """`_refuses` asked for `text`, as a call taking one argument.
 
-    The `contains` the case needs is a keyword, and a `**`-unpacked call
-    is the shape the bounded-launch control reads as a launch, so the
-    keyword is bound here instead of forwarded through the case.
+    The `contains` is a keyword, and a `**`-unpacked call is the shape
+    the bounded-launch control reads as a launch, so it is bound here
+    rather than forwarded through the case.
     """
     return _refuses(_job_needs, _NO_SUITES_JOB, 'suites', contains=text)
 
@@ -99,10 +97,9 @@ def _refuses_asking_for(text):
 def _raises_only(text):
     """A throwaway that raises an AssertionError carrying `text`.
 
-    The two cases below drive `_assertion_raised` against its own two
-    statements rather than against a real fixture, so each reads a
-    message this run chose and neither can pass because a scan or a
-    workflow happened to say something else.
+    The cases drive `_assertion_raised` at its own statements with these
+    rather than at a real fixture, so each reads a message this run
+    chose and no scan or workflow can supply it by accident.
     """
     def raising():
         raise AssertionError(text)
@@ -123,10 +120,9 @@ def _asks_for_a_phrase_no_message_carries():
 def _bound_child(count, token):
     """Run a real dashboard child settling `count` bounds.
 
-    Each bound is labelled with `token`, a value this run chose, so a
-    reader that answered a constant instead of the record the child
-    wrote cannot name it: the label the case asserts is not in any
-    earlier run's source.
+    Each bound settles under a label carrying `token`, a value this run
+    chose, so a reader answering a constant instead of the record the
+    child wrote cannot name it.
     """
     calls = ''.join(
         f"  await bounded(work, 'bound {token} {index}', 300);\n"
@@ -145,7 +141,7 @@ def test_the_assertion_check_refuses_a_message_naming_nothing(_tmp):
 
     The naive implementation is `_assertion_raised` with the `mentions`
     branch dropped, which answers a message naming nothing exactly as it
-    answers the one beside it; only this call separates them.
+    answers the one beside it.
     """
     del _tmp
     _assertion_raised(
@@ -204,8 +200,8 @@ def test_the_scan_refusal_helper_names_the_reason_it_was_given(_tmp):
 def test_a_child_that_wrote_one_crediting_record_is_read(_tmp):
     """The record carries the label this run chose for the bound.
 
-    The control the two refusals below are measured against, and the one
-    that cannot be a constant: the label is a token minted per run, so
+    The control the two refusals are measured against, and the one a
+    constant cannot satisfy: the label is a token minted per run, so
     `_bound_record` answering `{'label': 'bound 1'}` would not name it.
     """
     del _tmp
@@ -224,9 +220,7 @@ def test_the_bound_record_reader_refuses_a_child_that_wrote_none(_tmp):
     it was handed; this case refuses only the reported shape.
 
     The settled marker is what makes the subject a child rather than a
-    stderr. A child that crashed before reaching it also leaves no
-    record, and reading that as a settled child would let this case pass
-    for evidence it never gathered.
+    stderr, so a crash is refused rather than read as a child that ran.
     """
     del _tmp
     result = _bound_child(0, uuid.uuid4().hex)
@@ -240,8 +234,8 @@ def test_the_bound_record_reader_refuses_a_child_that_wrote_two(_tmp):
     The naive implementation is a check for at least one record: it
     refuses none of the two, and `records[0]` then reads the first
     silently, so a second settlement is spent and never reported. The
-    one-record control above is what tells `== 1` from `>= 1`, and the
-    token in the phrase is what tells two records from one.
+    one-record control is what tells `== 1` from `>= 1`, and the token
+    in the phrase is what tells two records from one.
     """
     del _tmp
     token = uuid.uuid4().hex
@@ -287,8 +281,7 @@ def test_the_refuses_helper_names_the_text_it_was_asked_for(tmp):
     """A `contains` the refusal does not carry is itself a refusal.
 
     The naive implementation is a helper that returned the message and
-    left the reader to check it, which passes the control on the first
-    lines and passes every case that only reads the return value.
+    left the reader to check it, which the control above already accepts.
     """
     del tmp
     message = _refuses(_job_needs, _NO_SUITES_JOB, 'suites')
