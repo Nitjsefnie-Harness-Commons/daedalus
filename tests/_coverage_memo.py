@@ -19,6 +19,17 @@ allowlist reconciliation at the end of a scan reads that list. Storing
 only the return value therefore drops every keep site a later scan would
 have declared, and the reconciliation then reports allowlisted sites as
 having no launch — so a hit replays the appends as well.
+
+`_bound_census` caches the other kind: one node's answer to a question that
+does not mention the file, the path or the analyser, so its key is the
+node alone. The aggregate shadow set, the per-scope shadow set and the
+binding destinations each ask every node that same question, and a node
+they do not share is not a node one of them has not already walked. The
+value is the set every caller read, so a caller that mutated it would
+change what the next one is served; that is why the stored answer is a
+frozenset. A caller that mutates a node BETWEEN two analyses — changing a
+Name's context, an alias's asname — is served the earlier answer, on the
+same grounds the kept node list is: the tree is read, not edited.
 """
 import ast
 import weakref
@@ -28,6 +39,10 @@ _ANALYSES = {}
 # leaves the root out because a value holding a strong reference to its
 # own weak key keeps that entry alive for the life of the process.
 _BELOW = weakref.WeakKeyDictionary()
+# The same, keyed on the node itself: a node is held by the tree that owns
+# it, so the same entry dies with the same tree and no analysis can pin a
+# tree it did not already hold.
+_BOUNDS = weakref.WeakKeyDictionary()
 
 
 def nodes(tree):
@@ -37,6 +52,20 @@ def nodes(tree):
         below = list(ast.walk(tree))[1:]
         _BELOW[tree] = below
     return [tree] + below
+
+
+def _bound_census(node, compute):
+    """`compute(node)`, computed once per node, as a frozenset.
+
+    A miss stores a frozenset rather than the set `compute` returned,
+    because every pass that reads a hit shares this one object and one of
+    them mutating it would change what the rest are served.
+    """
+    names = _BOUNDS.get(node)
+    if names is None:
+        names = frozenset(compute(node))
+        _BOUNDS[node] = names
+    return names
 
 
 def analysed(analyze, relative, source, keeps):

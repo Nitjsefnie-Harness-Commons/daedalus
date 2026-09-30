@@ -225,6 +225,62 @@ def test_module_products_are_shared_only_within_one_analysis(tmp):
         assert actual == count, (name, actual, count)
 
 
+def test_a_bound_name_is_computed_once_per_node_not_once_per_pass(tmp):
+    """The census is a per-node fact, so three passes read one copy of it.
+
+    The aggregate shadow set, the per-scope shadow set and the binding
+    destinations each walk every node, and each asked the same pure
+    question of it. Reading one materialised answer per node is what the
+    cache buys; a count above the node count is a pass recomputing.
+    """
+    del tmp
+    tree = ast.parse(_BOUND.format(note='memo bound names probe'))
+    # Distinct nodes, not the walk's length: the parser shares one `Load`
+    # singleton between every load context, so a walk reports it eight times.
+    walked = len({id(node) for node in _coverage_memo.nodes(tree)})
+    computed = []
+    # The delegate, not `_bound_names` itself: patching the entry point
+    # would replace the cache along with the question and could not see
+    # a hit.
+    delegate = ('_bound_names_of'
+                if hasattr(_coverage_scopes, '_bound_names_of')
+                else '_bound_names')
+    real = getattr(_coverage_scopes, delegate)
+
+    def counting(node):
+        computed.append(node)
+        return real(node)
+
+    setattr(_coverage_scopes, delegate, counting)
+    try:
+        _coverage_guard._ModuleFacts(tree)
+    finally:
+        setattr(_coverage_scopes, delegate, real)
+    assert len(computed) == walked, (len(computed), walked)
+
+
+def test_the_bound_name_cache_does_not_outlive_the_trees_it_walked(tmp):
+    """No cached node outlives its own tree.
+
+    The three context singletons the parser shares between every load,
+    store and delete are keys for the life of the process whatever a tree
+    does, and they hold nothing; every other key has to go with its tree.
+    """
+    del tmp
+
+    def analyse():
+        _coverage_guard._ModuleFacts(ast.parse(
+            _BOUND.format(note='memo bound weak key probe')))
+
+    analyse()
+    gc.collect()
+    # Process-global state: a later control here that parked a module tree
+    # at module scope would leave an entry and fail this spuriously.
+    held = [node for node in _coverage_memo._BOUNDS
+            if not isinstance(node, (ast.Load, ast.Store, ast.Del))]
+    assert not held, held
+
+
 def test_binding_consumers_do_not_mutate_shared_products(tmp):
     del tmp
     tree = ast.parse('def f():\n    global dict\n')
