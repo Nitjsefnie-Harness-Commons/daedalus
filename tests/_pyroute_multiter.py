@@ -33,9 +33,17 @@ each one is named here rather than spelled as a list of calls:
     (3.14 and later) is keyword-only. The projection is walked, so the sends
     inside it are the flow's own, and its return value is the element.
 
-The set is closed over CPython's builtin namespace and over the two keywords
-that change a step's arity or its indexing; the member a new builtin of one
-of these kinds would carry is the name alone, and the battery in
+The set is closed over the three DECLARATIONS, not over CPython's builtin
+namespace: a builtin belongs here when it pairs or maps POSITIONAL
+ITERABLES, and a member that does not is outside by that rule rather than by
+omission. `max` and `min` take several positional arguments and are outside
+it -- each is a VALUE the call compares, not an iterable it pairs
+positionally, and their `*args` collect values rather than expanding from a
+starred container of iterables -- and a `filter` is inside it on the same
+rule, since it takes `(callable, iterable)` and yields the operand element.
+The keywords are closed the same way, over the two that change a step's arity
+or its indexing; the member a new builtin of one of these kinds would carry
+is the name alone, and the battery in
 `test_tab_routing_multiterable.py` is generated from the declarations, so a
 member added to one is read by the same two functions every other member of
 that kind is read by.
