@@ -71,10 +71,15 @@ def _verdicts(tmp, cases):
 # so there is no runtime case to measure and no row is generated for it. The
 # grammar decides the enumeration on the interpreter the rows run on, rather
 # than a table of the version this suite was written on.
-_PROBE = {'zip': '()', 'enumerate': '([])', 'map': '(None, [])'}
+_PROBE = {'zip': '(), ()', 'enumerate': '()', 'map': 'lambda g: g, ()'}
 
 
 def _accepts(member, keyword):
+    """Whether this interpreter's own builtin takes that keyword, asked by
+    constructing the call rather than by a version table. `_PROBE` is the
+    operand list each declaration needs before the keyword, because `map`'s
+    callable is the first operand and a probe that omitted it would be asking
+    about a different call."""
     spelling = f'{member}({_PROBE[member]}, {keyword}=True)'
     try:
         # pylint: disable-next=eval-used
