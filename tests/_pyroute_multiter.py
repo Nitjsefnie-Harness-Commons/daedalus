@@ -46,11 +46,15 @@ than at the one position the guard would have guessed.
 The boundary is the module path, and it is stated rather than closed. The
 same three declarations are spelled again in `itertools` -- `chain`,
 `starmap`, `zip_longest`, `product`, `pairwise` and `tee` among them -- and
-this guard models none of them: it reads `ast.Name.id` and
-`ast.Attribute.attr`, never a `func.value`-rooted module path, and the only
-import it knows about is `__future__`. A `from itertools import chain` in a
-routed file is therefore silent here, exactly as it was before this module
-existed. What this arm closes is the bare-name route only.
+this guard models none of them. It knows an import only as a BINDING: the
+name it introduces is marked bound and carries no value, which is what keeps
+`zip` from being read as a name the file defined. It never records the module
+an import came from, and it reads `ast.Name.id` and `ast.Attribute.attr`,
+never a `func.value`-rooted module path, so `itertools.chain` is read as the
+attribute `chain` on a name the guard holds nothing for. A
+`from itertools import chain` in a routed file is therefore silent here,
+exactly as it was before this module existed. What this arm closes is the
+bare-name route only.
 """
 import ast
 from dataclasses import dataclass
