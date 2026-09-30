@@ -1561,6 +1561,7 @@
     "probe_comprehension": {"python": ["tests/_pyroute_targets.py"]},
     "program": {"python": ["tests/_jsroute_sweep.py"]},
     "promoting_handles": {"python": ["tests/_jsroute_net.py"]},
+    "prove_scan": {"python": ["tests/_bridge.py"]},
     "publication_contract": {"python": ["tests/_coverage_comment_publication.py"]},
     "published": {"python": ["tests/_watcher_fixtures.py"]},
     "published_matrix": {"python": ["tests/_timed_matrix.py"]},
