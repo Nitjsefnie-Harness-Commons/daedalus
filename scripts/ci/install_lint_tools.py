@@ -95,11 +95,13 @@ ACTIONLINT_SHA256 = {
 # lint suites, this module's constants are read by every job that installs.
 # Left disagreeing, the disagreement is a SKIP and not a failure — the
 # suites see an installed actionlint that is not the one the job pins, so
-# every test that would RUN a lint skips and the run still reports success
-# having linted nothing. (Two of thirty-three in test_ci_workflows: the ones
-# that reach the binary. The rest never touch it.) That is this module's own
-# failure mode one layer up: a tool the suites skip on is a job that is
-# green having verified nothing.
+# every test whose VERDICT that pin decides skips and the run still reports
+# success having linted nothing. (Two of thirty-three in test_ci_workflows.
+# Two counts VERDICTS, not launches: three tests reach the binary, and
+# test_a_lint_run_without_shellcheck_is_skipped runs a full lint without
+# reaching the version arm at all.) That is this module's own failure mode
+# one layer up: a tool the suites skip on is a job that is green having
+# verified nothing.
 #
 # TWO COPIES, NOT ONE, and why the second stays. `shellcheck_pin` below
 # reads its version out of requirements-test.txt precisely so it is written
