@@ -19,21 +19,39 @@ harness.py` site at line 131 needs and `origin/main` refuses, and it is
 the shape a test double's recorder is written in: the double is handed a
 list, and every module that hands it one can be read.
 
+The name the call-site reading looks up is the ARGUMENT's own `Name.id`.
+The double's parameter and the value passed into it are two different
+identifiers, and a caller's scope may well hold a local of the PARAMETER's
+name that has nothing to do with what it passes -- reading the parameter's
+name let such a local vouch for a real child.
+
 The failure direction is unchanged and is the whole of the discipline: this
 arm only ever turns a `return True` into a `return False`, and only on a
 proof a reader can state out loud. A receiver that is not a parameter, a
 parameter with no call site in this module, a call site written outside
-every function, an omitted argument, an argument the caller does not write
-as a container, a `Name` with a non-literal writing in the caller, and a
-container the caller built out of a launch are each a refusal, and each
-has a control of its own in `tests/test_launch_deadline_reach.py`.
+every function, a `*Starred` at or before the parameter's own index, an
+omitted argument, an argument the caller does not write as a container, a
+`Name` with a non-literal writing in the caller, and a container the caller
+built out of or filled from a launch are each a refusal, and each has a
+control of its own in `tests/test_launch_deadline_reach.py`. So is the
+case a positional parameter is filled BY KEYWORD: the slot reader answers
+a position and the argument reader does not look in `call.keywords` for
+one, so `build(recorded=recorded)` is refused whatever the call wrote. That
+is fail-closed and costs a real shape -- a double called entirely by
+keyword -- so it is named rather than left as an accident of two readers
+that each answer a different half of the question.
 
-A spread is not on that list because it is not a separate decision: a
-`*spread` in front of the argument is an `ast.Starred` where a container
-would be, and a `**` fills no positional slot, so both are refused by the
-two conditions that read the argument. A mutation table measured that --
-deleting an explicit spread check changed no verdict in any suite, which
-is what an unreachable arm looks like from the outside.
+A `*spread` in front of the parameter is its own decision, and it was
+deleted once and restored. A `Starred` occupies one index and expands to a
+runtime-many, so every index at or after it is unprovable. The check is
+scoped to the parameter's own slot rather than to the whole call: a `**`
+fills named parameters and moves no positional index, so
+`build(recorded, **extra)` is still the `recorded` the call wrote, while
+`build(*spread, [])` against a three-parameter signature is not the `[]`
+at index one. Measuring that on ONE-parameter signatures is what made the
+check look unreachable -- there the star lands ON the slot and the
+container condition refuses it for a different reason, so the table read
+"nothing went red" and the branch was removed on a sample.
 
 What the arm is NOT is complete, and the limit is a boundary rather than a
 gap in the rule: a call from a module the census does not read is not
@@ -142,6 +160,13 @@ def _owning_parameter(function, receiver, tree):
     function that declares it. `None` when the receiver is not a bare
     parameter name at all — a dotted `self.handles` is a container of the
     instance's own, which the literal table already answers.
+
+    The judged function's OWN parameters are a match this function can
+    find and the arm cannot use: a receiver the judged function takes
+    itself is in that function's `shadowed` set, so the gate in front of
+    the sink refuses the row whether or not the arm answers. The walk is
+    therefore worth making for the ENCLOSING functions, and the
+    first-iteration match is what `_shadowed_parameters` already covers.
     """
     if not receiver or '.' in receiver:
         return None
@@ -215,7 +240,7 @@ def _written_as_a_literal(scope, name):
     return verdicts.get(name, False)
 
 
-def _is_a_container(argument, scope, name):
+def _is_a_container(argument, scope):
     """Whether the argument written at a call site is a proven container.
 
     Two shapes and no more. The node is a container literal itself, or it
@@ -223,32 +248,60 @@ def _is_a_container(argument, scope, name):
     function is one. There is no third, and a `Name` written at module
     scope is refused before this is asked: the enclosing function is what
     the proof is read from, and a call outside every function has none.
+
+    The name read is the ARGUMENT's own `Name.id`, never the parameter's.
+    They are two different identifiers, and the caller's scope may well
+    carry a local of the PARAMETER's name that has nothing to do with the
+    value being passed: `def build(kid)` called `build(child)` from a
+    function holding `kid = []` reads as a proven container under the
+    parameter's name and is a real child under the argument's. That was
+    not a reading this module could have got right by accident either,
+    because every other row in the suite spells the two the same way --
+    which is exactly why
+    `test_an_argument_is_read_by_its_own_name_not_the_parameter_s` exists.
     """
     if isinstance(argument, _LITERALS):
         return True
     if not isinstance(argument, ast.Name):
         return False
-    return _written_as_a_literal(scope, name)
+    return _written_as_a_literal(scope, argument.id)
 
 
-def _holds_no_child(argument, call, scope, receivers, direct):
+def _holds_no_child(argument, call, scope, tree, receivers, direct):
     """Whether the value a call site passes is not a launched child.
 
-    Reused rather than re-derived: the flag `tests/_launch_path.py`
-    records beside every caller-supplied name is `_launch_bound_names`
-    over the caller's own body, and a container the caller built out of a
-    launch is exactly the false green this arm would otherwise admit. The
-    call itself is read too — `Popen(kids)` fills the parameter with a
-    child whatever the argument node is.
+    Two readings, and they share one derivation rather than each inventing
+    its own. A call INSIDE the argument is a launcher: `[Popen([...])]` is
+    a container literal that holds a child, and a container literal is the
+    one thing this arm would otherwise wave through. And a `Name` the
+    caller bound FROM a launch is a child, which is
+    `tests/_launch_path.py::_launch_bound_names` over the caller's own
+    body -- the derivation that module already records beside every
+    caller-supplied name, reused rather than re-derived. The call itself is
+    read too: `Popen(kids)` fills the parameter with a child whatever the
+    argument node is.
+
+    All three tests read the SAME alias set, and it is the caller's ALIASES
+    that make them agree. `pop = subprocess.Popen` then
+    `build([pop([...])])` is one launch under three spellings, and
+    `tests/_launch_path.py::_is_launch` counts a member bound to a name as
+    one of its four receiver spellings -- so an empty alias set here made
+    the direct spelling refuse and both aliased ones discharge, which is
+    the census disagreeing with itself about one call. The set is read over
+    the whole TREE, not the caller's body, because a member alias bound at
+    module scope is a module binding by nature: `_subprocess_receivers`
+    and `_from_import_launches` are both tree-wide for the same reason, and
+    a reader that read only the caller's body would catch the local
+    spelling and miss the module one.
     """
-    if any(path._is_launch(inner, receivers, direct, ())
+    aliases = path._member_aliases(tree, receivers, direct)
+    if any(path._is_launch(inner, receivers, direct, aliases)
            for inner in ast.walk(argument) if path._is_call(inner)):
         return False
-    if path._is_launch(call, receivers, direct, ()):
+    if path._is_launch(call, receivers, direct, aliases):
         return False
     if not isinstance(argument, ast.Name):
         return True
-    aliases = path._member_aliases(scope, receivers, direct)
     return argument.id not in path._launch_bound_names(
         scope, receivers, direct, aliases)
 
@@ -283,12 +336,26 @@ def _parameter_never_holds_a_child(function, receiver, tree, receivers,
             # this join does not, so reading the whole tree here is WIDER
             # than the table the arm sits behind rather than narrower.
             return False
+        if isinstance(slot, int) and any(
+                isinstance(inner, ast.Starred)
+                for inner in call.args[:slot + 1]):
+            # A `Starred` occupies ONE index and expands to a runtime-many,
+            # so every index at or after it is unprovable: `build(*spread,
+            # [])` puts a literal where `call.args[1]` says the argument
+            # is, while the body receives whatever the spread held. Scoped
+            # to the slot rather than to the whole call on purpose -- a
+            # `**` fills NAMED parameters and moves no positional index, so
+            # `build(recorded, **extra)` is still the `recorded` the call
+            # wrote. `_binding_names._spread_args` answers the coarser
+            # question (any spread at all) and this needs the sharper one.
+            return False
         argument = _argument_written_at(call, slot, name)
         if argument is None:
             return False
-        if not _is_a_container(argument, scope, name):
+        if not _is_a_container(argument, scope):
             return False
-        if not _holds_no_child(argument, call, scope, receivers, direct):
+        if not _holds_no_child(argument, call, scope, tree, receivers,
+                               direct):
             return False
     return True
 

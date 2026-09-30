@@ -154,19 +154,20 @@ assignment rather than a gap: one control, one owner, and a control in
   - a PARAMETER receiver discharged from its CALL SITES rather than from
     the tree's bindings: every call of the owning function in the same
     module, each required to fill the parameter with a container the
-    caller writes as a literal, and no argument permitted to be a launched
-    child. The class is a value handed in from OUTSIDE the tree, because a
-    call from a module the census does not read is not among the sites
-    consulted, and a site attributed by NAME rather than by resolution, so
-    a same-named method of another class is a second instance of it; the
-    instance is a test double handed a recorder list by a module no census
-    pass parses. The arm is not complete and is not claimed to be, and the
-    name is here so the gap is a statement rather than a surprise. The
-    controls beside it are in `tests/test_launch_deadline_reach.py` — the
-    cross-module one is
-    `test_a_receiver_with_no_call_site_in_the_module_is_still_refused` —
-    and the positive direction is the `test_real_browser_harness.py` site
-    read by `tests/test_launch_real_files.py`;
+    CALLER writes as a literal under the ARGUMENT's own name, and no
+    argument permitted to be a launched child under any of its three
+    spellings. Two shapes it does not read, both refusals: a positional
+    parameter filled BY KEYWORD, and a `**` filling a parameter the call
+    did not name, so `build(recorded, **extra)` discharges on the
+    `recorded` it did write. The class is a value handed in from OUTSIDE
+    the tree -- a call from a module the census does not read is not
+    among the sites consulted -- and a site attributed by NAME rather
+    than by resolution; the instance is a test double handed a recorder
+    list by a module no census pass parses. The arm is not complete and
+    is not claimed to be. Its controls are in
+    `tests/test_launch_deadline_reach.py`, and the positive direction is
+    the `test_real_browser_harness.py` site in
+    `tests/test_launch_real_files.py`;
   - FOUR classes of site the analyser REFUSES and the repo-layout gate does
     not act on, so they are reported and not policed. The gate's keep rule
     (`tests/test_repo_layout.py::_bound_sites`) admits a site only when the
