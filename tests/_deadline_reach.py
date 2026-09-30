@@ -41,17 +41,12 @@ is fail-closed and costs a real shape -- a double called entirely by
 keyword -- so it is named rather than left as an accident of two readers
 that each answer a different half of the question.
 
-A `*spread` in front of the parameter is its own decision, and it was
-deleted once and restored. A `Starred` occupies one index and expands to a
-runtime-many, so every index at or after it is unprovable. The check is
-scoped to the parameter's own slot rather than to the whole call: a `**`
-fills named parameters and moves no positional index, so
-`build(recorded, **extra)` is still the `recorded` the call wrote, while
-`build(*spread, [])` against a three-parameter signature is not the `[]`
-at index one. Measuring that on ONE-parameter signatures is what made the
-check look unreachable -- there the star lands ON the slot and the
-container condition refuses it for a different reason, so the table read
-"nothing went red" and the branch was removed on a sample.
+A `*spread` in front of the parameter is its own decision, and the check
+is scoped to the parameter's OWN INDEX rather than to the whole call -- a
+`**` moves no positional index, so `build(recorded, **extra)` is still
+the `recorded` the call wrote. The check was deleted once on a mutation
+that could not see it, because that measurement only ever used
+one-parameter signatures; the reason is at the check.
 
 What the arm is NOT is complete, and the limit is a boundary rather than a
 gap in the rule: a call from a module the census does not read is not
@@ -341,15 +336,10 @@ def _parameter_never_holds_a_child(function, receiver, tree, receivers,
         if isinstance(slot, int) and any(
                 isinstance(inner, ast.Starred)
                 for inner in call.args[:slot + 1]):
-            # A `Starred` occupies ONE index and expands to a runtime-many,
-            # so every index at or after it is unprovable: `build(*spread,
-            # [])` puts a literal where `call.args[1]` says the argument
-            # is, while the body receives whatever the spread held. Scoped
-            # to the slot rather than to the whole call on purpose -- a
-            # `**` fills NAMED parameters and moves no positional index, so
-            # `build(recorded, **extra)` is still the `recorded` the call
-            # wrote. `_binding_names._spread_args` answers the coarser
-            # question (any spread at all) and this needs the sharper one.
+            # A `Starred` takes ONE index and expands to a runtime-many,
+            # so `call.args[slot]` past one is not the argument the body
+            # receives. Scoped to the slot, not the call: `_spread_args`
+            # answers the coarser question and a `**` moves no index.
             return False
         argument = _argument_written_at(call, slot, name)
         if argument is None:
