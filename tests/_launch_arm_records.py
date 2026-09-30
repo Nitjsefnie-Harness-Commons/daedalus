@@ -247,6 +247,13 @@ ARM_NOTES = {
 # The step ceiling, not the row: the row enters this arm through a
 # KeyError on the ordinary path, and the guard is for the CYCLE, which
 # the step ceiling enters and the row does not.
+# The `while True:` payload is what makes the mutant that loop. Re-pointed
+# to 485 with the payload DROPPED it is still green here, but `cut_arm`
+# then walks the cut upward for a span that parses, and the span it finds
+# takes the `base, seen = ...` binding and the comment above the guard as
+# well -- so the arm stops being about the guard at all. With the payload
+# the mutant is one non-terminating loop, which is the step ceiling's own
+# shape, and `machinery_route`'s own comment above the guard calls it one.
     ''',
 }
 
