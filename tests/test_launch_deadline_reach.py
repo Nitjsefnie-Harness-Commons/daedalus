@@ -37,8 +37,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _deadline_plants import (LIST_HANDED, LIST_HANDED_RUNTIME,  # noqa: E402
-                              PREDICATES, RECORDER, RENAMED, SPELLINGS)
+from _deadline_plants import (DOUBLE_STAR, LIST_HANDED,  # noqa: E402
+                              LIST_HANDED_RUNTIME, PREDICATES, RECORDER,
+                              RENAMED, SPELLINGS)
 import _launch_census as census  # noqa: E402
 import _util  # noqa: E402
 
@@ -130,8 +131,10 @@ def test_a_real_child_handed_through_a_list_to_a_double_is_still_refused(
     parameter, the owner is called once, the call is inside a function, the
     slot is filled, and the argument IS a container literal -- so the only
     thing left holding the row is the "not a child" reading. An arm that
-    stopped asking that discharges this site, and the assertion below
-    changes; nothing else in the file does.
+    stopped asking that discharges this site and the assertion below
+    fails. It is NOT the only control that moves: the measured row for
+    that mutation lists five, and this sentence used to say otherwise on
+    the strength of a count nobody had run.
 
     The runtime leg is Python's, not the arm's: a real `Popen` in a real
     list, joined with a one-second deadline against a two-second child,
@@ -179,11 +182,18 @@ def test_a_spread_call_is_still_refused(tmp):
     fills no positional slot at all, so the omitted-argument condition
     refuses it.
 
-    The `**` half is also the reason the check is scoped to the slot and
-    is not `_binding_names._spread_args` verbatim: `build(recorded,
-    **extra)` is the `recorded` the call wrote, and it must keep
-    discharging, while `build(*spread, [])` against a three-parameter
-    signature is not the `[]` at index one. Both are pinned.
+    The `**` half is also why the check is scoped to the slot rather than
+    being `_binding_names._spread_args` verbatim: `build(recorded,
+    **extra)` is the `recorded` the call wrote and must keep discharging,
+    while `build(*spread, [])` against a three-parameter signature is not
+    the `[]` at index one.
+
+    Both halves now carry a row, which is the correction: this sentence
+    claimed it and the claim was false until the next wave measured it.
+    `test_a_star_before_a_later_slot_is_still_refused` and
+    `test_a_double_star_keeps_the_argument_the_call_actually_wrote` pin
+    the two directions, and widening the check to the coarse reading turns
+    the second one red with every other row still green.
     """
     del tmp
     for label in ('a-spread-positional', 'a-spread-keyword'):
@@ -325,6 +335,48 @@ def test_every_member_alias_spelling_of_a_launch_is_still_refused(tmp):
                   'a-launch-through-a-local-member-alias',
                   'a-launch-through-a-module-member-alias'):
         _assert_refuses(label)
+
+
+def test_a_match_capture_that_rebinds_the_name_is_still_refused(tmp):
+    """`case [kid]:` binds `kid` to the matched element.
+
+    A `MatchAs` carries its capture as a plain `str`, never an `ast.Name`,
+    so the reader's `Store` arm never sees it at all -- which is why the
+    two joins must SHARE the binder list rather than each keeping its own.
+    A copy that dropped the arm is not a narrower rule, it is a WEAKER
+    one: this row is refused on `origin/main` and this branch discharged
+    it until the shared arm set landed.
+    """
+    del tmp
+    _assert_refuses('a-match-capture-rebinds-the-name')
+
+
+def test_an_except_handler_that_rebinds_the_name_is_still_refused(tmp):
+    """`except OSError as kid:` binds `kid` to the exception, and neither
+    an exception nor whatever the handler matched is a container.
+
+    The same plain-`str` binder as the `match` capture, and the same
+    direction: a join without the arm turns a refusal on `origin/main`
+    into a discharge here.
+    """
+    del tmp
+    _assert_refuses('an-except-handler-rebinding-the-name')
+
+
+def test_a_double_star_keeps_the_argument_the_call_actually_wrote(tmp):
+    """The row that pins the star check's SCOPING, not its presence.
+
+    The check refuses a `Starred` at or before the parameter's index,
+    because a star takes one index and expands to a runtime-many. A `**`
+    does neither: it fills named parameters and moves no positional index,
+    so `build(recorded, **extra)` is the `recorded` the call wrote and
+    discharging it is correct. The coarser reading this repo's own
+    docstring rejects -- "is this call spread at all" -- would refuse it,
+    so this row goes red the moment the check is widened. That is what
+    makes the scoping a decision with a control rather than a claim.
+    """
+    del tmp
+    assert _census(DOUBLE_STAR) == [], _census(DOUBLE_STAR)
 
 
 def test_a_call_site_written_at_module_scope_is_still_refused(tmp):
