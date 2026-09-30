@@ -1868,6 +1868,7 @@
     "verify_clause_against_tree": {"python": ["tests/_timed_basis.py"]},
     "verify_recorded_count": {"python": ["tests/_timed_basis.py"]},
     "verify_unmeasured_list": {"python": ["tests/_timed_basis.py"]},
+    "veto_bindings": {"python": ["tests/_receiver_resolution.py"]},
     "waitFor": {"javascript": ["tests/_boundary_env.py", "tests/_hotfixharness.py", "tests/_overlap.py", "tests/_relayharness.py"]},
     "waitForResult": {"javascript": ["tests/_mainworldharness.py"]},
     "waitForResultConsume": {"javascript": ["tests/_overlap.py"]},
