@@ -39,10 +39,13 @@ WINDOWS_X64 = WINDOWS_HOST
 # under test asserts only that the code agrees with itself. The KEYS are
 # not spelled — `_key_for` asks, because a key is built and has moved.
 PINNED = (
-    (('Linux', 'x86_64'), 'actionlint_1.7.12_linux_amd64.tar.gz', False),
-    (('Darwin', 'x86_64'), 'actionlint_1.7.12_darwin_amd64.tar.gz', False),
-    (('Darwin', 'arm64'), 'actionlint_1.7.12_darwin_arm64.tar.gz', False),
-    (WINDOWS_HOST, 'actionlint_1.7.12_windows_amd64.zip', True),
+    (('Linux', 'x86_64'),
+     'actionlint_1.7.12-queue.1_linux_amd64.tar.gz', False),
+    (('Darwin', 'x86_64'),
+     'actionlint_1.7.12-queue.1_darwin_amd64.tar.gz', False),
+    (('Darwin', 'arm64'),
+     'actionlint_1.7.12-queue.1_darwin_arm64.tar.gz', False),
+    (WINDOWS_HOST, 'actionlint_1.7.12-queue.1_windows_amd64.zip', True),
 )
 EXECUTABLE = b'#!/not/really/an/executable\n'
 _ACTIONLINT = 'actionlint'
