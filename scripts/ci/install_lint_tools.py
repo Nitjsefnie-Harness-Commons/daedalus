@@ -90,8 +90,14 @@ ACTIONLINT_SHA256 = {
 # so the source delta is exactly that patch; the binaries are not
 # byte-identical to upstream's assets (built with a newer Go). Every door
 # that reaches the suites must get the SAME build, which is why the pin
-# lives here rather than in the job that lints: a `queue` workflow that
-# passed the actionlint job would be linted by a different binary here.
+# lives here rather than in the job that lints, because the two must NAME
+# THE SAME BUILD. They are separate: the job's env is read by the workflow
+# lint suites, this module's constants are read by every job that installs.
+# Left disagreeing, the disagreement is a SKIP and not a failure — the
+# suites see an installed actionlint that is not the one the job pins, skip
+# every workflow-lint test, and the run still reports success having linted
+# nothing. That is this module's own failure mode one layer up: a tool the
+# suites skip on is a job that is green having verified nothing.
 #
 # When #654 merges and ships upstream, move this back to an upstream version,
 # the rhysd URL, and the checksum table above with it. The checksum file
