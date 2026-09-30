@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Where the DEADLINE's own names are USED, by every position the grammar has.
 
-`deadline_reaches_a_child` discharges on two proofs, and the first was false:
+`deadline_reaches_a_child` discharges on three proofs, and the first
+was false:
 "the deadline reaches no call at all" was read off an empty sink set, and an
 empty sink set means only that the derive did not know the name the deadline
 had travelled in. A `timeout` parameter handed through a `for` target, a
