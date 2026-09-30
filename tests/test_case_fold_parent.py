@@ -583,11 +583,11 @@ def test_the_extensions_own_legacy_file_the_parent_folds(tmp):
             command_ttl=100, frame_writer=frames.append)
 
         assert delivered == 1, delivered
-        # The drain stamps a delivery id on the frame too; the fold check is
-        # about which file was addressed, and the id is pinned where it is
-        # derived.
-        routed = [(f['id'], f.get('chromeTab')) for f in frames]
-        assert routed == [('tab', '42')], routed
+        # Every frame carries a stamped `_did`, and it is pinned where it is
+        # derived. Subtracting that one key keeps this on the fold check
+        # while still refusing a key added or misnamed beside it.
+        undid = [{k: v for k, v in f.items() if k != '_did'} for f in frames]
+        assert undid == [{'id': 'tab', 'chromeTab': '42'}], undid
         assert extension.exists(), extension
         assert dashboard.exists(), dashboard
 
