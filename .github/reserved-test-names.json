@@ -833,6 +833,7 @@
     "_receiver_escapes": {"python": ["tests/_binding_names.py"]},
     "_receiver_value": {"python": ["tests/_pyroute_reads.py"]},
     "_record_binding": {"python": ["tests/_control_paths.py"]},
+    "_recorded": {"python": ["tests/_fake_gh.py"]},
     "_recording_run": {"python": ["tests/_classifier_calls.py"]},
     "_red_controls": {"python": ["tests/_retirement_sweep.py"]},
     "_reference_shape": {"python": ["tests/_command_type_readers.py"]},
