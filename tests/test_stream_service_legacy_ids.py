@@ -133,12 +133,11 @@ def test_a_failed_removal_holds_the_generation_a_name_reached(tmp):
 def test_a_publisher_replacing_an_unremovable_file_gets_another_id(tmp):
     """A different file at a name is a different command, vacate or not.
 
-    This is the case a vacate cannot report: the removal failed, so this
-    drain never emptied the name, and only the object standing at it says
-    anything changed. It cannot be a recycled inode either — a file that is
-    still there holds its own — so the generation is the only thing standing
-    between the two commands, and a reader that saw one id for both would
-    drop the second.
+    The removal failed, so this drain never emptied the name and its
+    generation does not advance. The two commands are told apart by the
+    inode alone, which is the argument for leaving the generation out of it:
+    a file that is still there holds its own, so a replacement cannot land
+    on it. This test is what says that is still true of the id as built.
     """
     service = _load_service('stream_service_legacy_replaced')
     legacy = Path(tmp) / 'tok.json'

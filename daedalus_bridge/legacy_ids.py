@@ -24,17 +24,18 @@ does (daedalus issue 1411), and it is a property of reading a file, not of
 the filesystem: the same two reads, microseconds apart, agree, which is why
 an in-process control cannot see it and an end-to-end one can.
 
-**What takes its place.** The generation, which this module keeps per name:
-how many times the object standing at that name has changed. It advances
-whenever either signal fires — the drain vacated the name by unlinking a file
-it had delivered, or a different object arrived under the name. Those two
-signals are what the generation has to distinguish, and between them they
-close both ways an object at a name can change identity: a name this drain
-emptied and whose inode was then recycled, and a name whose file it could not
-remove and whose publisher replaced in place — the second impossible to miss,
-since a file that is still there holds its inode and a replacement cannot have
-it. A redelivery fires neither signal, which is exactly what makes its id
-stable.
+**What takes its place.** The generation: how many times this drain has
+vacated that name. It has to cover the one way an object at a name can change
+while keeping the name's inode — this drain removing the file and the name
+later being filled by a file that got the inode back — and it covers it by
+counting its own removals. It needs no second signal for the other case: a
+publisher replacing a file whose removal failed is already a different inode,
+because a file that is still there holds its own and no replacement can have
+it. That was measured, not assumed — a generation that advanced only on an
+object change and not on a vacate passed every control there was, because
+the inode was already separating those drops on its own.
+
+A redelivery fires no signal at all, which is what makes its id stable.
 
 The generation lives in this process, so a restart and the eviction past the
 bound both return a name to its first value. That residual is unchanged by
@@ -42,10 +43,10 @@ this derivation and is disclosed in `stream_service`'s own docstring.
 """
 import threading
 
-# {name: ((st_dev, st_ino), generation)}. Bounded like the refusal registry
-# beside it in the stream service, and forgotten the same way: past the bound
-# a name starts again from its first value, which costs the same residual the
-# restart already costs.
+# {name: generation}, the number of times this drain has vacated that name.
+# Bounded like the refusal registry beside it in the stream service, and
+# forgotten the same way: past the bound a name starts again from its first
+# value, which costs the residual a restart already costs.
 _generations = {}
 _GENERATION_LIMIT = 4096
 _lock = threading.Lock()
@@ -70,32 +71,25 @@ def stamp(data, name, ident):
     if isinstance(data.get('_did'), str) and data['_did']:
         return
     device, inode = ident[0], ident[1]
-    data['_did'] = f'legacy-{device}-{inode}-{_generation(name, device, inode)}'
+    data['_did'] = f'legacy-{device}-{inode}-{_generation(name)}'
 
 
-def _generation(name, device, inode):
-    """The generation `name` has reached for the object standing at it."""
+def _generation(name):
+    """The generation `name` has reached."""
     with _lock:
-        recorded = _generations.get(name)
-        if recorded is not None and recorded[0] == (device, inode):
-            return recorded[1]
-        generation = 0 if recorded is None else recorded[1] + 1
-        _generations[name] = ((device, inode), generation)
-        _trim()
-        return generation
+        return _generations.get(name, 0)
 
 
 def vacated(name):
-    """Record that this drain removed the file at `name`, so the next file
-    there is a new command.
+    """Record that this drain removed the file at `name`.
 
-    The generation advances without recording which object is gone, so the
-    next object at the name advances again whether or not it landed on the
-    inode just freed.
+    The unlink is the one event that says the next file there is a new
+    command: it is the only way an object at a name can change while
+    keeping the name's inode, because a file that is still there holds its
+    own and no replacement can have it. So a publisher replacing a file
+    whose removal failed is already a different inode and needs nothing
+    from here, and a removal that did succeed is the case this covers.
     """
     with _lock:
-        recorded = _generations.get(name)
-        _generations[name] = (
-            recorded[0] if recorded is not None else (None, None),
-            (0 if recorded is None else recorded[1]) + 1)
+        _generations[name] = _generations.get(name, 0) + 1
         _trim()
