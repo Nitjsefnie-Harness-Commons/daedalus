@@ -59,7 +59,7 @@ def _census(source):
                   census._faults('planted.py', tree, forced))
 
 
-def _line_of(source, snippet):
+def _plant_line_of(source, snippet):
     """The line a snippet is written on, addressed by its own text.
 
     A line number moves with every unrelated edit to a plant, and a
@@ -142,7 +142,7 @@ def test_a_real_child_handed_through_a_list_to_a_double_is_still_refused(
     """
     del tmp
     assert _census(LIST_HANDED) == [(
-        _line_of(LIST_HANDED, 'def run('), 'timeout parameter')], _census(
+        _plant_line_of(LIST_HANDED, 'def run('), 'timeout parameter')], _census(
             LIST_HANDED)
     assert _runtime(LIST_HANDED_RUNTIME) == 'BOUNDED', _runtime(
         LIST_HANDED_RUNTIME)
@@ -273,7 +273,7 @@ def test_an_argument_is_read_by_its_own_name_not_the_parameter_s(tmp):
     """
     del tmp
     assert _census(RENAMED['discharge']) == [
-        (_line_of(RENAMED['discharge'], 'return build(captured)'),
+        (_plant_line_of(RENAMED['discharge'], 'return build(captured)'),
          'timeout= keyword')], _census(RENAMED['discharge'])
     _assert_refuses('an-argument-named-other-than-the-parameter')
 
