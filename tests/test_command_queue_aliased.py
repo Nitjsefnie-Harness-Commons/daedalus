@@ -19,8 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import (BRIDGE_ENV, TOK, framer, put_command,  # noqa: E402
-                     stream_response)
+from _bridge import (BRIDGE_ENV, TOK, framer, prove_scan,  # noqa: E402
+                     put_command, stream_response)
 from _command_candidates import (  # noqa: E402
     _hard_link, _load_queue, _symlink, _write_command)
 from _service_loader import _load_service  # noqa: E402
@@ -533,7 +533,12 @@ def test_sweep_leaves_an_aliased_legacy_pair_for_a_later_pass(tmp):
 
 
 def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
-    """One extension stream, two names for one object, zero commands out."""
+    """One extension stream, two names for one object, zero commands out.
+
+    The reader is driven rather than waited for: the second `prove_scan`
+    frame is the end of the scan that carried the first, so both
+    non-deletion assertions are about what the drain did.
+    """
     served = []
     with _util.bridge(tmp, output=served,
                       env=BRIDGE_ENV) as (base, docroot):
@@ -545,7 +550,8 @@ def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
         conn, response = stream_response(base, TOK, tab='extension')
         try:
             assert response.status == 200, response.status
-            time.sleep(1.25)
+            prove_scan(base, response, served, 'first', TOK)
+            prove_scan(base, response, served, 'second', TOK)
             assert first.exists() and second.exists(), (
                 'an aliased legacy name was consumed')
             status, _ = put_command(
@@ -561,7 +567,11 @@ def test_a_hard_linked_legacy_pair_is_delivered_zero_times(tmp):
 
 
 def test_a_stream_admitted_before_the_name_reads_nothing_outside(tmp):
-    """The containment an admission checked cannot vouch for a later alias."""
+    """The containment an admission checked cannot vouch for a later alias.
+
+    Driven like its sibling above: no sleep stands in for the reader having
+    looked at the link.
+    """
     served = []
     with _util.bridge(tmp, output=served,
                       env=BRIDGE_ENV) as (base, docroot):
@@ -572,7 +582,8 @@ def test_a_stream_admitted_before_the_name_reads_nothing_outside(tmp):
             assert response.status == 200, response.status
             link = Path(docroot) / 'commands' / f'{TOK}_dup.json'
             _symlink(link, outside)
-            time.sleep(1.25)
+            prove_scan(base, response, served, 'first', TOK, tab='dup')
+            prove_scan(base, response, served, 'second', TOK, tab='dup')
             assert link.is_symlink(), 'the refused alias was unlinked'
             assert json.loads(outside.read_text(encoding='utf-8')) == {
                 'id': 'outside-payload', 'code': '1'}

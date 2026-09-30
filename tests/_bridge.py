@@ -201,6 +201,27 @@ def framer(response, served):
     return frame
 
 
+def prove_scan(base, response, served, tag, token, tab=None):
+    """Enqueue one command and read back the frame the reader delivered.
+
+    `PUT /command` sets the wake event the stream's idle wait blocks on, so
+    the reader is driven rather than waited for. A frame proves the scan that
+    wrote it, and the stream writes every broadcast frame BEFORE it reaches
+    the legacy namespaces it also drains — so a second such frame is the end
+    of the scan that carried the first. That is what a non-deletion
+    assertion needs: evidence the reader looked, not a sleep standing in for
+    looking, which passes or fails on how loaded the host is.
+    """
+    payload = {'token': token, 'id': f'scan-{tag}', 'code': '1'}
+    if tab is not None:
+        payload['tab'] = tab
+    status, _ = put_command(base, payload)
+    assert status == 200, status
+    delivered = framer(response, served)(f'the {tag} scan command')
+    assert delivered.get('id') == f'scan-{tag}', delivered
+    return delivered
+
+
 def next_stream_data(response, timeout=10):
     """Read an open SSE response until the next data frame arrives.
 
