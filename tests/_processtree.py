@@ -18,12 +18,21 @@ import sys
 
 
 def process_group(process):
-    """The group id of a process, which must still be unreaped.
+    """The group id of a process, or None where there is no group.
 
     The lookup a caller cannot make later: a reaped pid has no entry, so
     a teardown that reaches this after the reap has nothing to derive a
     group from. Capture here, kill with `cleanup_process_group`.
+
+    `None` off POSIX, and the platform is asked BEFORE the name is
+    spelled: `os.getpgid` does not exist on Windows, and naming it in
+    the body of a function whose callers are not all guarded raises
+    `AttributeError` there rather than answering anything. A caller that
+    passes `None` on to `cleanup_process_group` gets a no-op that says
+    why, which is the honest outcome — there is nothing to name.
     """
+    if sys.platform == 'win32':
+        return None
     return os.getpgid(process.pid)
 
 
@@ -36,10 +45,17 @@ def cleanup_process_group(group, cleanup_timeout):
     zero signal first is what says whether there is anything left to kill
     without signalling a number the kernel may since have handed on.
 
-    POSIX only, and said rather than pretended: there is no group signal
-    on Windows, where a reaped pid leaves `taskkill` nothing to name
-    either, and the caller keeps whatever teardown it already had.
+    POSIX only, and said here rather than only in the sibling: there is no
+    process group on Windows at all, so a `None` from `process_group`
+    arrives here and is a no-op. A reaped pid also leaves `taskkill`
+    nothing to name, so the caller keeps whatever teardown it already had
+    — which means anything the group would have reached is left to the
+    caller on that platform, and that is worth knowing rather than
+    discovering.
     """
+    if group is None:
+        return ('no process group to kill: this platform has none, and a '
+                'reaped leader leaves a tree kill nothing to name')
     if sys.platform == 'win32':
         return 'process group signals do not exist on Windows'
     try:
