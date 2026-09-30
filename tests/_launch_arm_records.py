@@ -118,48 +118,48 @@ MARKER_NON_MEMBERS = (
     # the tree.
     ('_stdlib_read.py', 45, 'CONTROLLED',
      'foreign-keyword-on-a-launch'),
-    ('_launch_audit.py', 77, 'INERT',
+    ('_launch_audit.py', 83, 'INERT',
      "normalize returning its own argument; callers only test it"),
-    ('_launch_audit.py', 86, 'INERT',
+    ('_launch_audit.py', 92, 'INERT',
      "callee_of's `or None`; deleting its last statement returns "
      'the same value'),
-    ('_launch_audit.py', 193, 'MERGED',
-     'the ast.Import chain head; every member is listed, at :195 '
-     'imp.subprocess-alias, :200 imp.machinery, :202 imp.dotted and '
-     ':206 imp.plain'),
-    ('_launch_audit.py', 228, 'CONTROLLED',
+    ('_launch_audit.py', 200, 'MERGED',
+     'the ast.Import chain head; every member is listed, at :205 '
+     'imp.subprocess-alias, :210 imp.machinery, :212 imp.dotted and '
+     ':216 imp.plain'),
+    ('_launch_audit.py', 237, 'CONTROLLED',
      'a-from-import-of-an-excluded-root-member-is-refused'),
-    ('_launch_audit.py', 207, 'MERGED',
-     'the ast.ImportFrom chain head; every member is listed, at :208 '
-     'imp.from-subprocess, :216 imp.from-partial and :219 '
+    ('_launch_audit.py', 217, 'MERGED',
+     'the ast.ImportFrom chain head; every member is listed, at :218 '
+     'imp.from-subprocess, :226 imp.from-partial and :229 '
      'imp.from-import-module, and its else branch is inside its span'),
-    ('_launch_audit.py', 290, 'CONTROLLED',
+    ('_launch_audit.py', 295, 'CONTROLLED',
      'parameter-shadows-a-module-import-is-unproved'),
-    ('_launch_audit.py', 293, 'CONTROLLED',
+    ('_launch_audit.py', 298, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
-    ('_launch_audit.py', 336, 'CONTROLLED',
+    ('_launch_audit.py', 340, 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
-    ('_launch_audit.py', 395, 'CONTROLLED',
+    ('_launch_audit.py', 399, 'CONTROLLED',
      'call-func-receiver-is-unresolved'),
-    ('_launch_audit.py', 404, 'MERGED',
-     'the head of a one-member chain; :406 ch.machinery-member is its '
+    ('_launch_audit.py', 408, 'MERGED',
+     'the head of a one-member chain; :410 ch.machinery-member is its '
      'only member and is listed'),
-    ('_launch_audit.py', 592, 'INERT',
+    ('_launch_audit.py', 596, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 611, 'CONTROLLED',
+    ('_launch_audit.py', 615, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 678, 'CONTROLLED',
+    ('_launch_audit.py', 682, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 695, 'CONTROLLED',
+    ('_launch_audit.py', 699, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     # The chain limb stays in the analyser and is recorded here rather
     # than in the enumeration for the reason above; the root predicate
     # it reads moved to `_stdlib_read.py` with the rest of the standard
     # library the analyser reads, and its clauses are named beside it.
-    ('_launch_audit.py', 523, 'CONTROLLED',
+    ('_launch_audit.py', 527, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 525, 'CONTROLLED',
+    ('_launch_audit.py', 529, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_stdlib_read.py', 56, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
@@ -201,7 +201,7 @@ MARKER_NON_MEMBERS = (
 # all ten and re-derives this set.
 NON_MEMBER_CRASH_HELD = frozenset({
     '_argv_read.py:153', '_launch_audit.py:52', '_stdlib_read.py:45',
-    '_launch_audit.py:395',
+    '_launch_audit.py:399',
 })
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The

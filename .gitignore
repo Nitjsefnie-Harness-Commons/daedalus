@@ -669,6 +669,7 @@
 !/tests/test_jsread_mask.py
 !/tests/test_launch_arm_cuts.py
 !/tests/test_launch_arms.py
+!/tests/test_launch_audit_bounded_spelling.py
 !/tests/test_launch_census_adds.py
 !/tests/test_launch_census_boundaries.py
 !/tests/test_launch_census_receivers.py
