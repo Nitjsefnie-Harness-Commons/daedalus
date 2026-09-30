@@ -353,9 +353,8 @@ def poll_legacy(cmd_dir, token):
 # The generation each legacy name has reached. What a file carries is not a
 # generation — `command_queue._identity` says so, and a new file handed the
 # inode the vacated one had, with a change time that only moves when the clock
-# does, carries the same incarnation, so an id from the incarnation alone is
-# one the consumer's ledger already holds. This separates what that one value
-# cannot. Bounded like the refusal registry above, for the same reason.
+# does, carries the same incarnation. This separates what that one value
+# cannot, and is bounded and forgotten like the refusal registry above.
 _legacy_generations = {}
 _LEGACY_GENERATION_LIMIT = 4096
 _legacy_generation_lock = threading.Lock()
@@ -371,11 +370,19 @@ def advance_legacy_generation(name):
     """Record that this drain vacated `name`, so the next file is a new one.
 
     The successful unlink in `drain_legacy_file` is the only event that says
-    so, and it is what keeps the two apart: a redelivery is the removal that
-    FAILED, which advances nothing and keeps the id. A publisher overwriting a
-    name whose removal failed is the case left, for the reason
-    `on_name_vacated` retires a name rather than guess at it.
+    so, and it keeps the two apart: a redelivery is the removal that FAILED,
+    which advances nothing and keeps the id.
+
+    Three ways the generation is not the one a consumer last saw, each
+    needing a recycled inode and a coarse clock agreeing in the same tick.
+    A publisher overwriting a name whose removal the drain could not perform:
+    the name was never vacated, so nothing advanced — the case
+    `on_name_vacated` leaves for the same reason it retires rather than
+    guesses. A restart: the table is this process's, and a fresh one starts
+    every name at 0, the id that name's first command carried. And the
+    eviction past the bound, which returns its name to 0 the same way.
     """
+
     with _legacy_generation_lock:
         _legacy_generations[name] = _legacy_generations.get(name, 0) + 1
         while len(_legacy_generations) > _LEGACY_GENERATION_LIMIT:
@@ -385,15 +392,14 @@ def advance_legacy_generation(name):
 def stamp_legacy_delivery_id(data, name, ident):
     """Give a delivered legacy command the delivery id its redelivery needs.
 
-    A legacy file is published by an external writer and carries no `_did`,
-    so a removal that fails redelivers it with nothing to deduplicate on. The
-    id is the object incarnation — which holds across that redelivery — plus
-    the generation its name has reached, which a later file there does not
-    share once this drain has vacated the name. A publisher's own `_did` is
-    kept when it is a non-empty string: the extension's frame handler tests
-    `_did` for truth, so an empty one deduplicates nothing. The id is spelled
-    with characters the delivery-result path accepts, because the consumer
-    posts the `_did` back as a delivery id.
+    A legacy file is published by an external writer and carries no `_did`, so
+    a removal that fails redelivers it with nothing to deduplicate on. The id
+    is the object incarnation — which holds across that redelivery — plus
+    the generation its name has reached. A publisher's own `_did` is kept
+    when it is a non-empty string: the extension's frame handler tests `_did`
+    for truth, so an empty one deduplicates nothing. The id is spelled with
+    characters the delivery-result path accepts, because the consumer posts
+    `_did` back as a delivery id.
     """
     if not isinstance(data.get('_did'), str) or not data['_did']:
         data['_did'] = (
@@ -409,11 +415,9 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
     non-atomic publisher. Leave it in place and retry on the next scan;
     deleting it would discard the writer's eventual complete command. The
     candidate is read through a descriptor checked against the name it was
-    found under, so an aliased name is never delivered. A frame carries a
-    delivery id, so the at-least-once redelivery of a file that would not
-    unlink is deduplicable. `secret` is the credential the file's name is
-    derived from, kept to its 8-character prefix in the lines this drain
-    prints.
+    found under, so an aliased name is never delivered. `secret` is the
+    credential the file's name is derived from, kept to its 8-character
+    prefix in the lines this drain prints.
     """
     # Keyed on the filename as found rather than on a resolved spelling of
     # it, for the reason `drain_queue` gives.
@@ -455,8 +459,6 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
         except OSError:
             pass
         else:
-            # The name is free now, so the next file published under it is a
-            # new command and not this one again.
             advance_legacy_generation(path.name)
         record_delivery()
         print(
