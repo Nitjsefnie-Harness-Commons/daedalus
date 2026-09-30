@@ -529,6 +529,7 @@
 !/tests/test_ci_pip_cache.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_thresholds.py
+!/tests/test_ci_tool_declarations.py
 !/tests/test_ci_wait.py
 !/tests/test_ci_wait_gate.py
 !/tests/test_ci_wait_published.py

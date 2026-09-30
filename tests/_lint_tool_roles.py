@@ -11,9 +11,11 @@ spelling of the guard that makes it — `x is None`, `not x` and
 reads two of them finds every suite written by the author of the third
 invisible.
 
-Split out of `tests/test_ci_lint_tools.py`, which owns the controls, so
-the recognisers and the workflow walk beside them can each be read on
-their own. Nothing here reads a workflow or a control name; everything
+Split out of `tests/test_ci_lint_tools.py`, which owns the controls for
+the installer's half of the lint-tool set, so the recognisers and the
+workflow walk beside them can each be read on their own. The other half's
+controls are in `tests/test_ci_tool_declarations.py` and read this module
+too. Nothing here reads a workflow or a control name; everything
 here answers one question about one tree.
 """
 import ast

@@ -3,8 +3,10 @@
 Shared, because `run_tests.py` gives every suite its own process: a
 control that imported a sibling suite for this would re-execute that
 suite's whole body and read a private copy, which is the defect
-`tests/test_suite_import_boundaries.py` names. Two controls read it from
-here, so they cannot disagree about which jobs run suites.
+`tests/test_suite_import_boundaries.py` names. Every control that reads a
+door set reads it from here, across both files that own one —
+`tests/test_ci_lint_tools.py` and `tests/test_ci_tool_declarations.py` —
+so they cannot disagree about which jobs run suites.
 
 `SUITE_RUNNERS` recognises the sanctioned runners by a substring of each
 step's `run:` text, and the complement — every other route into the suite
@@ -25,8 +27,9 @@ fingerprint this module exists to refuse. And a step running a tracked
 file the walk cannot read — a shell wrapper — reaches nothing here, which
 would drop its job out of the door set in silence. That second one is
 surfaced rather than fixed: `_unclassifiable_steps` names every step in it,
-`tests/test_ci_lint_tools.py` holds that set to files no interpreter can
-execute, and the walk still reads no shell. What that refusal is about is
+`tests/test_ci_tool_declarations.py` holds that set to files no
+interpreter can execute, and the walk still reads no shell. What that
+refusal is about is
 `_PATH_EXTENSIONS` and not every language there is: a tracked file whose
 extension the pattern does not resolve is not a step the walk can see at
 all, so nothing downstream of here answers for it.
@@ -340,6 +343,17 @@ def _unclassifiable_steps():
                     if not _readable(path):
                         found.append((source.name, job, index, path))
     return found
+
+
+def _runner_doors():
+    """Every job that FINDS its suites, and so can be reached by a new one.
+
+    The `runner` half of `_door_jobs`, as a name rather than a filter each
+    caller writes: a job that discovers the suite tree is a job a suite
+    added tomorrow walks through, and that obligation is asked of the same
+    set in both control files, so the set is derived once here.
+    """
+    return [door for door in _door_jobs() if door[3] == RUNNER]
 
 
 def _door_jobs():
