@@ -151,26 +151,22 @@ assignment rather than a gap: one control, one owner, and a control in
     Two more read it over the three SHIPPED files rather than over
     planted ones, in `tests/test_launch_real_files.py`, and the third
     there closes the set of rows those files carry;
-  - a receiver that is a PARAMETER, which the table above discharges from
-    the tree's own BINDINGS and the arm beside it discharges from its CALL
-    SITES: every call of the owning function in the same module, each
-    required unspread, each required to fill the parameter with a
-    container the caller writes as a literal, and no argument permitted to
-    be a launched child. The class is a value handed in from OUTSIDE the
-    tree, because a call from a module the census does not read is not
-    among the sites consulted; the instance is a test double handed a
-    recorder list by a module no census pass parses. The arm is not
-    complete and is not claimed to be: a site discharged from the call
-    sites in one module while its real caller lives in another is a
-    discharge a reader cannot audit, and the name is here so the gap is
-    a statement rather than a surprise. A call site is matched to its
-    owner by NAME, bare or as an attribute, so a same-named method of
-    another class is the second instance of the first's class: a site
-    this reader cannot attribute. The control beside this is
-    `test_a_receiver_the_call_sites_cannot_resolve_is_still_refused` in
-    `tests/test_launch_deadline_reach.py`, and the positive direction it
-    has to hold is the `tests/test_real_browser_harness.py` site read by
-    `tests/test_launch_real_files.py`;
+  - a PARAMETER receiver discharged from its CALL SITES rather than from
+    the tree's bindings: every call of the owning function in the same
+    module, each required to fill the parameter with a container the
+    caller writes as a literal, and no argument permitted to be a launched
+    child. The class is a value handed in from OUTSIDE the tree, because a
+    call from a module the census does not read is not among the sites
+    consulted, and a site attributed by NAME rather than by resolution, so
+    a same-named method of another class is a second instance of it; the
+    instance is a test double handed a recorder list by a module no census
+    pass parses. The arm is not complete and is not claimed to be, and the
+    name is here so the gap is a statement rather than a surprise. The
+    controls beside it are in `tests/test_launch_deadline_reach.py` — the
+    cross-module one is
+    `test_a_receiver_with_no_call_site_in_the_module_is_still_refused` —
+    and the positive direction is the `test_real_browser_harness.py` site
+    read by `tests/test_launch_real_files.py`;
   - FOUR classes of site the analyser REFUSES and the repo-layout gate does
     not act on, so they are reported and not policed. The gate's keep rule
     (`tests/test_repo_layout.py::_bound_sites`) admits a site only when the
