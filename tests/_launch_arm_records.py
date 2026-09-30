@@ -105,7 +105,7 @@ SECONDARY_CONTROLLED = {
 # `tests/test_launch_arms.py` re-derives it and refuses a non-member
 # this tuple does not name.
 MARKER_NON_MEMBERS = (
-    ('_launch_audit.py', 52, 'CONTROLLED',
+    ('_launch_audit.py', 50, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
     # The keyword set, not a launch. The sweep can only DELETE this
     # clause, and deleting it crashes every row, so it cannot tell one
@@ -118,48 +118,48 @@ MARKER_NON_MEMBERS = (
     # the tree.
     ('_stdlib_read.py', 45, 'CONTROLLED',
      'foreign-keyword-on-a-launch'),
-    ('_launch_audit.py', 83, 'INERT',
+    ('_launch_audit.py', 80, 'INERT',
      "normalize returning its own argument; callers only test it"),
-    ('_launch_audit.py', 92, 'INERT',
+    ('_launch_audit.py', 89, 'INERT',
      "callee_of's `or None`; deleting its last statement returns "
      'the same value'),
-    ('_launch_audit.py', 200, 'MERGED',
-     'the ast.Import chain head; every member is listed, at :205 '
-     'imp.subprocess-alias, :210 imp.machinery, :212 imp.dotted and '
-     ':216 imp.plain'),
-    ('_launch_audit.py', 237, 'CONTROLLED',
+    ('_launch_audit.py', 197, 'MERGED',
+     'the ast.Import chain head; every member is listed, at :202 '
+     'imp.subprocess-alias, :207 imp.machinery, :209 imp.dotted and '
+     ':213 imp.plain'),
+    ('_launch_audit.py', 234, 'CONTROLLED',
      'a-from-import-of-an-excluded-root-member-is-refused'),
-    ('_launch_audit.py', 217, 'MERGED',
-     'the ast.ImportFrom chain head; every member is listed, at :218 '
-     'imp.from-subprocess, :226 imp.from-partial and :229 '
+    ('_launch_audit.py', 214, 'MERGED',
+     'the ast.ImportFrom chain head; every member is listed, at :215 '
+     'imp.from-subprocess, :223 imp.from-partial and :226 '
      'imp.from-import-module, and its else branch is inside its span'),
-    ('_launch_audit.py', 295, 'CONTROLLED',
+    ('_launch_audit.py', 290, 'CONTROLLED',
      'parameter-shadows-a-module-import-is-unproved'),
-    ('_launch_audit.py', 298, 'CONTROLLED',
+    ('_launch_audit.py', 293, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
-    ('_launch_audit.py', 340, 'CONTROLLED',
+    ('_launch_audit.py', 334, 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
-    ('_launch_audit.py', 399, 'CONTROLLED',
+    ('_launch_audit.py', 392, 'CONTROLLED',
      'call-func-receiver-is-unresolved'),
-    ('_launch_audit.py', 408, 'MERGED',
-     'the head of a one-member chain; :410 ch.machinery-member is its '
+    ('_launch_audit.py', 401, 'MERGED',
+     'the head of a one-member chain; :403 ch.machinery-member is its '
      'only member and is listed'),
-    ('_launch_audit.py', 596, 'INERT',
+    ('_launch_audit.py', 585, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 615, 'CONTROLLED',
+    ('_launch_audit.py', 604, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 682, 'CONTROLLED',
+    ('_launch_audit.py', 671, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 699, 'CONTROLLED',
+    ('_launch_audit.py', 689, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     # The chain limb stays in the analyser and is recorded here rather
     # than in the enumeration for the reason above; the root predicate
     # it reads moved to `_stdlib_read.py` with the rest of the standard
     # library the analyser reads, and its clauses are named beside it.
-    ('_launch_audit.py', 527, 'CONTROLLED',
+    ('_launch_audit.py', 518, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 529, 'CONTROLLED',
+    ('_launch_audit.py', 520, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_stdlib_read.py', 56, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
@@ -200,8 +200,8 @@ MARKER_NON_MEMBERS = (
 # crash-held at one clause and value-held at another. The suite sweeps
 # all ten and re-derives this set.
 NON_MEMBER_CRASH_HELD = frozenset({
-    '_argv_read.py:153', '_launch_audit.py:52', '_stdlib_read.py:45',
-    '_launch_audit.py:399',
+    '_argv_read.py:153', '_launch_audit.py:50', '_stdlib_read.py:45',
+    '_launch_audit.py:392',
 })
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
