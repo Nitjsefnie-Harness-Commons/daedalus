@@ -25,11 +25,15 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     job = jobs['claim']
     assert 'permissions' not in job, (
         'claim job must inherit workflow permissions without an override')
-    # Two claims racing must both be answered, so the group never cancels.
-    concurrency = decoded.get('concurrency')
-    assert isinstance(concurrency, dict), 'claim must declare concurrency'
-    assert concurrency.get('cancel-in-progress') == 'false', (
-        'claim concurrency must not cancel an in-progress run')
+    # Two claims racing must both be answered, so the group serializes them
+    # per issue, cancels neither the run in progress nor the one waiting
+    # behind it, and drops nothing.
+    assert decoded.get('concurrency') == {
+        'group': 'claim-${{ github.event.issue.number }}',
+        'cancel-in-progress': 'false',
+        'queue': 'max',
+    }, ('claim concurrency must serialize per issue, never cancel a run, and '
+        'queue a pending one instead of replacing it')
     condition = job.get('if')
     assert isinstance(condition, str), 'claim must declare an if scalar'
     expected_condition = (
