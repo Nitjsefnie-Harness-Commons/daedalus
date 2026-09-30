@@ -351,42 +351,33 @@ def poll_legacy(cmd_dir, token):
 
 
 # The generation each legacy name has reached. What a file carries is not a
-# generation: `command_queue._identity` says so, and a new file handed the
-# inode the vacated one had — with a change time that only moves when the
-# clock does — carries the same incarnation, so an id derived from it alone
-# is one the consumer's ledger already holds and a second command
-# published at that name is skipped as a duplicate. The generation
-# separates the two cases the incarnation cannot. A publisher that stamped
-# its own id keeps it when it is a non-empty string: the extension's frame
-# handler tests `_did` for truth before recording it, so an empty one
-# deduplicates nothing.
+# generation — `command_queue._identity` says so, and a new file handed the
+# inode the vacated one had, with a change time that only moves when the clock
+# does, carries the same incarnation, so an id from the incarnation alone is
+# one the consumer's ledger already holds. This separates what that one value
+# cannot. Bounded like the refusal registry above, for the same reason.
 _legacy_generations = {}
 _LEGACY_GENERATION_LIMIT = 4096
 _legacy_generation_lock = threading.Lock()
 
 
 def legacy_generation(name):
-    """The generation one legacy name has reached; 0 until this drain vacates
-    it."""
+    """The generation `name` has reached; 0 until this drain vacates it."""
     with _legacy_generation_lock:
         return _legacy_generations.get(name, 0)
 
 
 def advance_legacy_generation(name):
-    """Record that this drain vacated `name`, so the next file there is new.
+    """Record that this drain vacated `name`, so the next file is a new one.
 
-    The successful unlink below is the only event that says so, and it is
-    what keeps the two apart: a redelivery is the removal that FAILED, which
-    advances nothing and so redelivers under the id it was given. A
-    publisher that overwrites a name whose removal failed is the case left,
-    for the same reason `on_name_vacated` is a retire rather than a guess.
+    The successful unlink in `drain_legacy_file` is the only event that says
+    so, and it is what keeps the two apart: a redelivery is the removal that
+    FAILED, which advances nothing and keeps the id. A publisher overwriting a
+    name whose removal failed is the case left, for the reason
+    `on_name_vacated` retires a name rather than guess at it.
     """
     with _legacy_generation_lock:
         _legacy_generations[name] = _legacy_generations.get(name, 0) + 1
-        # Bounded like the refusal registry above, with the same trade: past
-        # the bound the oldest name is forgotten, and only a delivery there
-        # after the eviction can collide, which needs a recycled inode and a
-        # coarse clock agreeing in the same tick.
         while len(_legacy_generations) > _LEGACY_GENERATION_LIMIT:
             del _legacy_generations[next(iter(_legacy_generations))]
 
@@ -395,13 +386,14 @@ def stamp_legacy_delivery_id(data, name, ident):
     """Give a delivered legacy command the delivery id its redelivery needs.
 
     A legacy file is published by an external writer and carries no `_did`,
-    unlike a queued command, so a removal that fails redelivers it with
-    nothing for the consumer to deduplicate on. The id is the object
-    incarnation — which holds across that redelivery — plus the generation
-    the name has reached, which a later file there does not share once this
-    drain has vacated the name. It is spelled with characters the
-    delivery-result path accepts, because the consumer posts the `_did` back
-    as a delivery id.
+    so a removal that fails redelivers it with nothing to deduplicate on. The
+    id is the object incarnation — which holds across that redelivery — plus
+    the generation its name has reached, which a later file there does not
+    share once this drain has vacated the name. A publisher's own `_did` is
+    kept when it is a non-empty string: the extension's frame handler tests
+    `_did` for truth, so an empty one deduplicates nothing. The id is spelled
+    with characters the delivery-result path accepts, because the consumer
+    posts the `_did` back as a delivery id.
     """
     if not isinstance(data.get('_did'), str) or not data['_did']:
         data['_did'] = (

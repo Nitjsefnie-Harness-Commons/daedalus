@@ -213,11 +213,11 @@ def prove_scan(base, response, served, tag, token, tab=None):
     stream orders its tab queue at `:134` the same way — so the first frame
     arrives mid-scan. TWO frames are its end, which is what a non-deletion
     assertion needs: evidence the reader looked, rather than a sleep
-    standing in for looking that passes or fails on host load. That order
-    is pinned, by the emission sequence
-    `test_stream_route.py::test_the_extension_stream_delivers_every_queue_it_owns`
-    asserts; if it ever changes, this helper takes one frame again and every
-    call site loses a `prove_scan`.
+    standing in for looking that passes or fails on host load. That order is
+    pinned, by the emission sequence `test_stream_route`'s
+    `test_the_extension_stream_delivers_every_queue_it_owns` asserts; if it
+    ever changes, this helper takes one frame again and every call site
+    loses a `prove_scan`.
     """
     payload = {'token': token, 'id': f'scan-{tag}', 'code': '1'}
     if tab is not None:
