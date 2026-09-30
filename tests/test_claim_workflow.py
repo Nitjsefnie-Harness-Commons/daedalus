@@ -25,9 +25,8 @@ def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
     job = jobs['claim']
     assert 'permissions' not in job, (
         'claim job must inherit workflow permissions without an override')
-    # Two claims racing must both be answered, so the group serializes them
-    # per issue, cancels neither the run in progress nor the one waiting
-    # behind it, and drops nothing.
+    assert isinstance(decoded.get('concurrency'), dict), (
+        'claim concurrency must be a mapping')
     assert decoded.get('concurrency') == {
         'group': 'claim-${{ github.event.issue.number }}',
         'cancel-in-progress': 'false',
