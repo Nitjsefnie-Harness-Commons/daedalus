@@ -163,7 +163,10 @@ assignment rather than a gap: one control, one owner, and a control in
     complete and is not claimed to be: a site discharged from the call
     sites in one module while its real caller lives in another is a
     discharge a reader cannot audit, and the name is here so the gap is
-    a statement rather than a surprise. The control beside this is
+    a statement rather than a surprise. A call site is matched to its
+    owner by NAME, bare or as an attribute, so a same-named method of
+    another class is the second instance of the first's class: a site
+    this reader cannot attribute. The control beside this is
     `test_a_receiver_the_call_sites_cannot_resolve_is_still_refused` in
     `tests/test_launch_deadline_reach.py`, and the positive direction it
     has to hold is the `tests/test_real_browser_harness.py` site read by
