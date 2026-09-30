@@ -362,7 +362,7 @@ _UNDECIDED = {
 }
 
 
-def test_every_undecided_member_is_pinned_at_the_verdict_it_actually_gives(tmp):
+def test_every_undecided_member_is_pinned_at_its_real_verdict(tmp):
     """The members the resolved guard cannot decide, pinned where they are.
 
     Each is named in `_UNDECIDED` with the cost it actually costs, and the
