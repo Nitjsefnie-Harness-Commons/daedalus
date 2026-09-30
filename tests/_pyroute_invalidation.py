@@ -23,9 +23,8 @@ from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
                              DeferredMethod, _known_value, merge_yielded,
                              sync_cells)
 
-# The names a container surface carries that only read: the non-assigning
-# operators and their reflected forms, the read protocol, and the named
-# readers. Everything else in that surface mutates in place.
+# The names a container surface carries that only read. Everything else in
+# that surface mutates in place.
 _READERS = frozenset({
     '__add__', '__and__', '__class_getitem__', '__contains__', '__doc__',
     '__eq__', '__ge__', '__getattribute__', '__getitem__', '__gt__',
@@ -53,19 +52,17 @@ _NESTED_SCOPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
 # green, because the loop consumes its iterable in the statement that binds it.
 _BINDING = (ast.Assign, ast.AnnAssign, ast.NamedExpr)
 _SEQUENCE_KINDS = ('list', 'tuple', 'set')
-# The sequence kinds whose instances take `x[k] = v` or `del x[k]`; any
-# other kind refuses both, so nothing is written and nothing is removed and
-# every recorded position still holds what it held. The mirror of
+# Only a kind whose instances take `x[k] = v` and `del x[k]`; any other kind
+# refuses both, so nothing is written and nothing is removed and every
+# recorded position still holds what it held. The mirror of
 # `_ASSIGNS_BY_INDEX` in `_pyroute_stores` for the two signs a subscript
-# target carries, narrowed to the sequence arm: a mapping's subscript
-# delete is followed precisely and never reaches this rule. `tuple` and
-# `set` take neither sign, and a set is not addressable by position at
-# all. An augmented assignment is not a subscript sign and keeps the wider
-# set, so this constant is applied only where the target is a subscript.
+# target carries, narrowed to the sequence arm: a mapping's subscript delete
+# is followed precisely and never reaches this rule. An augmented assignment
+# is not a subscript sign and keeps the wider set, so this constant is
+# applied only where the target is a subscript.
 _ITEM_WRITABLE_SEQUENCES = ('list',)
-# The container types the surface was taken from. A call through one of these
-# names is the type, not an instance of it, so its first argument is the
-# receiver the bound form writes as `func.value`.
+# A call through one of these names is the type, not an instance of it, so its
+# first argument is the receiver the bound form writes as `func.value`.
 _CONTAINER_TYPES = frozenset({'dict', 'list', 'set'})
 
 
@@ -77,10 +74,10 @@ def _own_nodes(statement, held):
     A generator expression is the second such form, for its element: Python
     evaluates nothing after the outermost iterable until the generator is
     advanced. Every `comprehension` is walked whole, so that outermost
-    iterable -- evaluated when the generator is built -- and the filters, the
-    clause targets and the clauses after the first stay in scope. The element
+    iterable and the lazy control forms beside it stay in scope. The element
     is walked only where the model cannot show it is unreachable, which is
-    `held`: False, or an expression the rule was handed whole."""
+    `held`: False, or an expression the rule was handed whole. The hold is
+    released by `_read_generators` and, for a `for` iterable, by the flow."""
     pending = [(statement, held)]
     while pending:
         node, held = pending.pop()
@@ -106,12 +103,10 @@ def _containers(value):
 
 
 def _mutated(call, state):
-    """The tracked containers a call may mutate in place.
-
-    The operation is a method invoked on a container, so the spelling decides
-    only where the container is named: as the receiver of a bound call, as the
-    first argument of an unbound one, behind another call, or in a name the
-    model bound the method to.
+    """The operation is a method invoked on a container, so the spelling
+    decides only where the container is named: as the receiver of a bound
+    call, as the first argument of an unbound one, behind another call, or in
+    a name the model bound the method to.
     """
     func = call.func
     if isinstance(func, ast.Attribute):
@@ -123,8 +118,8 @@ def _mutated(call, state):
 
 def _dunder_form(name):
     """`operator`'s spelling of a container method without the underscores --
-    `setitem` for `__setitem__` -- or None when the name is not one. This is
-    the same surface read a second way, not a list of what `operator` exports.
+    `setitem` for `__setitem__`. This is the same surface read a second way,
+    not a list of what `operator` exports.
     """
     for spelling in (f'__{name}__', f'__{name}', f'{name}__'):
         if spelling in CONTAINER_MUTATORS:
@@ -143,8 +138,6 @@ def _unbound_callee(receiver, state):
 
 
 def _bound_mutation(call, func, state):
-    """A method called on the container it names, or on the one its first
-    argument names when the callee is the container type."""
     if func.attr in CONTAINER_MUTATORS:
         unbound = _unbound_callee(func.value, state)
     elif _dunder_form(func.attr) is None:
@@ -177,14 +170,14 @@ def _indirect_mutation(call, func, state):
 
 def _held_mutation(func, state):
     """A method the model bound to a name: the binding records the container
-    the call through that name mutates."""
+    it mutates."""
     value = _known_value(func, state)
     return (value.owner,) if isinstance(value, DeferredMethod) else ()
 
 
 def _store_targets(statement):
-    """The targets a statement stores into or deletes. A tuple target nests,
-    and `x[0:1], y = v` parses as one tuple target rather than two."""
+    """A tuple target nests, and `x[0:1], y = v` parses as one tuple target
+    rather than two."""
     if isinstance(statement, (ast.Assign, ast.Delete)):
         return list(_flatten_targets(statement.targets))
     if isinstance(statement, (ast.AnnAssign, ast.AugAssign)):
@@ -201,11 +194,9 @@ def _flatten_targets(targets):
 
 
 def _stored(statement, state):
-    """The sequences a store or delete moves, which the model cannot follow.
-
-    A store at one position writes no position the model recorded and adds no
-    length, so it leaves every recorded position where it was -- whether the
-    index is literal or computed, the computed one landing in the unknown
+    """A store at one position writes no position the model recorded and adds
+    no length, so it leaves every recorded position where it was -- whether
+    the index is literal or computed, the computed one landing in the unknown
     slot. Everything else moves what the container holds at those positions:
     a delete of any index, a slice store, and an augmented assignment. The
     store path claims the one augmented form it applies itself, so a mapping
@@ -281,9 +272,8 @@ def _invalidate(state, container, operands=()):
     `star_display` is deliberately left at its default: the join above has
     already made the shifted-position rule a no-op on this container, so
     setting it would say nothing the value does not. A plant that sets it
-    anyway is caught -- by `test_tab_routing`, by this branch's own suite,
-    and by `test_tab_routing_sequence_reads` -- so the field is pinned, not
-    merely inert.
+    anyway is caught by `test_tab_routing` and
+    `test_tab_routing_sequence_reads`, so the field is pinned, not inert.
     """
     names = {name for name, value in state.callables.items()
              if isinstance(value, DeferredContainer)
@@ -322,9 +312,8 @@ def _read_generators(nodes, state):
     A name that resolves to one is a read, and a read is not an advance, so
     the release is the fail-closed direction: it reports a generator the flow
     merely passed on. It is also the only signal a consumer the model does
-    not follow -- `zip`, `enumerate`, a `deque` popped by hand -- leaves
-    behind, because that consumer advances the generator without the flow
-    ever seeing it.
+    not follow -- `zip`, `enumerate`, a `deque` popped by hand -- leaves,
+    because that consumer advances the generator without the flow seeing it.
 
     An expression handed to the rule whole is held instead, and the flow
     releases exactly one of those: a `for` iterable, which it consumes in the
@@ -341,10 +330,7 @@ def _read_generators(nodes, state):
 
 
 def invalidate_unmodelled(statement, state, claimed=()):
-    """Drop the facts of every tracked container this statement mutates in
-    place by a path the model does not follow.
-
-    `claimed` names the calls and statements a precise handler already
+    """`claimed` names the calls and statements a precise handler already
     applied, so a mutation the model followed keeps its exact result. Every
     other mutation fails closed: the container's recorded values join the
     unknown slot and its count becomes unknown, so a later read answers with
