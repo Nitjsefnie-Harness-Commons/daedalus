@@ -734,7 +734,24 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.13"]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # A hang backstop, sized from the measurement rather than tuned to pass,
+    # and this is the number a future reader will otherwise "correct".
+    # On main this cell took 29.4, 23.9, 29.4 and 28.5 minutes over its last
+    # four completed runs — 98% of a 30-minute budget before this change
+    # existed. On this branch the windows-latest cell ran 23:53 to 00:23 and
+    # was KILLED at 30 having reported no failed step, which is what
+    # `timeout-minutes` produces and not what a failure produces. The cause
+    # is that #1307's workflow-lint tests now RUN on Windows instead of
+    # skipping there: this branch installs actionlint and shellcheck on
+    # every door, so the suite spends real time linting twelve workflows on
+    # a cell that previously skipped it. The budget grew because the job now
+    # does more work, not because the work got slower.
+    #
+    # 45 leaves headroom over both observations without pretending to know
+    # the true duration: the four main runs are all under 30, this branch's
+    # exceeded it, and nothing here measures a completed run of the new
+    # shape. A per-SUITE bound is a different mechanism and PR 1368 owns it.
+    timeout-minutes: 45
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
