@@ -1824,6 +1824,7 @@
     "stream_response": {"python": ["tests/_bridge.py"]},
     "streamingResponse": {"javascript": ["tests/_boundary_env.py"]},
     "stub_path": {"python": ["tests/_speedharness.py"]},
+    "stub_stream": {"python": ["tests/_bridge.py"]},
     "suite": {"python": ["tests/_watcher_fixtures.py"]},
     "suite_file": {"python": ["tests/_timed_basis.py"]},
     "suites_skip_violation": {"python": ["tests/_wfskip_cases.py"]},
