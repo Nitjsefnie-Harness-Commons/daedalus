@@ -8,9 +8,8 @@ different reason. It lives beside the store that maintains the table for
 exactly that reason, and out of the flow module, which was a line from
 its ceiling.
 
-`_bind_literals` writes that table for both models rather than each keeping
-a copy: two writers of one table is how they came to disagree about the
-same program.
+`_bind_literals` writes that table for both models, so they cannot disagree
+about the same program.
 """
 import ast
 
@@ -24,11 +23,8 @@ def _bind_literals(node, literals):
     """Record the literal each name this store binds is bound to.
 
     Every binding form the language has, not the ones a first writer
-    enumerated. A form left out resolves no key at all, so a payload whose
-    key rides a name that form binds reaches the sender carrying a real
-    `tab` while the reader resolves nothing. A name no literal can be
-    pinned to is forgotten, which is what an unreadable key position
-    already gets.
+    enumerated: a form left out resolves no key, so a payload whose key
+    rides a name that form binds reaches the sender carrying a real `tab`.
     """
 
     def record(name, literal):
@@ -60,9 +56,8 @@ def _bind_literals(node, literals):
         """What each name an unpack target binds is bound to.
 
         A `*` part takes the elements no other part takes, and the list it
-        becomes is a value no key position can name. Parts and elements
-        that do not line up raise before any name is bound, so they bind
-        nothing at all.
+        becomes names no key. Parts that do not line up with their value
+        raise before any name is bound, so they bind nothing at all.
         """
         if isinstance(target, ast.Starred):
             yield (target.value.id, _UNSAFE_LITERAL)
@@ -99,12 +94,10 @@ def _bind_literals(node, literals):
                 record(name, literal)
 
     def bind_loop_target(loop):
-        """A loop target takes every element of what it iterates in turn.
-
-        So a name it binds carries the one literal they all agree on. A
-        union of several that do not agree is a key no position can name,
-        and an iterable the fold will not produce names nothing at all.
-        """
+        """A loop target takes every element of what it iterates in turn,
+        so a name it binds carries the one literal they all agree on. A
+        union of several that do not is a key no position can name, and an
+        iterable the fold will not produce names nothing at all."""
         value = value_of(loop.iter)
         if isinstance(value, (tuple, list, set)) and value:
             first = next(iter(value))
@@ -116,7 +109,12 @@ def _bind_literals(node, literals):
             record(name, bound.get(name, _UNSAFE_LITERAL))
 
     def own_nodes(statement):
-        """A statement's own nodes, stopping where the scope changes."""
+        """A statement's own nodes, stopping where the scope changes.
+
+        A comprehension is the version-dependent stop: its condition has
+        always bound here and its element only since 3.12, so it is not
+        walked and the shape is read on no supported version.
+        """
         yield statement
         for child in ast.iter_child_nodes(statement):
             if not isinstance(child, (
@@ -142,8 +140,8 @@ def _bind_literals(node, literals):
 
 def dict_assignments(scope):
     """Map local names to string keys, retaining provable mutations."""
-    # Local because nothing in the `_pyroute_state` import cone may import
-    # this module back: that would close a cycle on the store below.
+    # Local because nothing in `_pyroute_state`'s import cone may import
+    # this module back; that would close a cycle on the store below.
     from _pyroute_state import apply_dict_statement, scope_nodes
 
     dicts = {}

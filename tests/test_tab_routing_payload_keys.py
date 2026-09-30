@@ -112,10 +112,9 @@ _ROWS = [
     ('ctor', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
      + '    k = "tab"\n    cmd = dict([(k, 5)])\n'
        '    return ext_cmd("PUT", "/command", **cmd)\n'),
-    # The binding forms a name-to-literal table that enumerated only `=`
-    # leaves out. Every one of them reaches the sender carrying a `tab`,
-    # and every one of them is a name a key position is free to spell, so
-    # a table carrying none of them reads a real violation clean.
+    # The binding forms a table enumerating only `=` leaves out. Each
+    # reaches the sender carrying a `tab` as a name a key position may
+    # spell, so a table carrying none of them reads a violation clean.
     ('walrus-binding-then-name-key', 1, {'tab': 5}, _CALL, _inside(
         '(w := "tab")', 'k = w', 'cmd = {k: 5}')),
     ('walrus-binding-then-subscript', 1, {'tab': 5}, _CALL, _inside(
@@ -130,10 +129,9 @@ _ROWS = [
      + '    for j in ("tab",):\n        cmd = {j: 5}\n' + _SPREAD),
     ('for-target-over-name', 1, {'tab': 5}, _CALL, _inside(
         'keys = ("tab",)', 'for j in keys: cmd = {j: 5}')),
-    # The same three forms binding a name to another key, and a later
-    # binding taking the later value: a writer that recorded the walrus, the
-    # unpack or the loop target and then let an ordinary `=` or a second
-    # turn of the loop stand would over-report all of these.
+    # The same three forms binding another key, and a later binding taking
+    # the later value: a writer that recorded the form and then let an `=`
+    # or a second turn of the loop stand would over-report all of these.
     ('walrus-binds-other', 0, {'id': 5}, _CALL, _inside(
         '(w := "id")', 'k = w', 'cmd = {k: 5}')),
     ('tuple-unpack-other', 0, {'id': 5}, _CALL, _inside(
@@ -146,11 +144,9 @@ _ROWS = [
         'j, = ("tab",)', 'j = "id"', 'cmd = {j: 5}')),
     ('rebound-after-loop', 0, {'id': 5}, _CALL, _inside(
         'for j in ("tab",): pass', 'j = "id"', 'cmd = {j: 5}')),
-    # A loop target takes every element in turn, so it carries the union.
-    # Two elements that are not the same name no position can spell, and
-    # the runtime here agrees; two that are the same do spell a key, and a
-    # writer that refused every union would miss it. A target whose parts
-    # do not line up with its value raises before it binds anything.
+    # A loop target carries the union of its iterable, so two elements
+    # that differ name no key and two that agree do. Parts that do not
+    # line up with their value raise before the target binds anything.
     ('loop-union', 0, {'id': 5}, _CALL, _inside(
         'for j in ("tab", "id"): cmd = {j: 5}')),
     ('loop-union-agrees', 1, {'tab': 5}, _CALL, _inside(
