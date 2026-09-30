@@ -350,22 +350,63 @@ def poll_legacy(cmd_dir, token):
         return 200, data
 
 
-def stamp_legacy_delivery_id(data, ident):
+# The generation each legacy name has reached. What a file carries is not a
+# generation: `command_queue._identity` says so, and a new file handed the
+# inode the vacated one had — with a change time that only moves when the
+# clock does — carries the same incarnation, so an id derived from it alone
+# is one the consumer's ledger already holds and a second command
+# published at that name is skipped as a duplicate. The generation
+# separates the two cases the incarnation cannot. A publisher that stamped
+# its own id keeps it when it is a non-empty string: the extension's frame
+# handler tests `_did` for truth before recording it, so an empty one
+# deduplicates nothing.
+_legacy_generations = {}
+_LEGACY_GENERATION_LIMIT = 4096
+_legacy_generation_lock = threading.Lock()
+
+
+def legacy_generation(name):
+    """The generation one legacy name has reached; 0 until this drain vacates
+    it."""
+    with _legacy_generation_lock:
+        return _legacy_generations.get(name, 0)
+
+
+def advance_legacy_generation(name):
+    """Record that this drain vacated `name`, so the next file there is new.
+
+    The successful unlink below is the only event that says so, and it is
+    what keeps the two apart: a redelivery is the removal that FAILED, which
+    advances nothing and so redelivers under the id it was given. A
+    publisher that overwrites a name whose removal failed is the case left,
+    for the same reason `on_name_vacated` is a retire rather than a guess.
+    """
+    with _legacy_generation_lock:
+        _legacy_generations[name] = _legacy_generations.get(name, 0) + 1
+        # Bounded like the refusal registry above, with the same trade: past
+        # the bound the oldest name is forgotten, and only a delivery there
+        # after the eviction can collide, which needs a recycled inode and a
+        # coarse clock agreeing in the same tick.
+        while len(_legacy_generations) > _LEGACY_GENERATION_LIMIT:
+            del _legacy_generations[next(iter(_legacy_generations))]
+
+
+def stamp_legacy_delivery_id(data, name, ident):
     """Give a delivered legacy command the delivery id its redelivery needs.
 
     A legacy file is published by an external writer and carries no `_did`,
     unlike a queued command, so a removal that fails redelivers it with
-    nothing for the consumer to deduplicate on. The object incarnation is
-    the one identity that holds across that redelivery and differs for a
-    second drop of the same command. A publisher that stamped its own id
-    keeps it when it is a non-empty string — the extension's frame handler
-    tests `_did` for truth before recording it, so an empty one deduplicates
-    nothing — and a stamped id is spelled with characters the
+    nothing for the consumer to deduplicate on. The id is the object
+    incarnation — which holds across that redelivery — plus the generation
+    the name has reached, which a later file there does not share once this
+    drain has vacated the name. It is spelled with characters the
     delivery-result path accepts, because the consumer posts the `_did` back
     as a delivery id.
     """
     if not isinstance(data.get('_did'), str) or not data['_did']:
-        data['_did'] = f'legacy-{ident[0]}-{ident[1]}-{ident[2]}'
+        data['_did'] = (
+            f'legacy-{ident[0]}-{ident[1]}-{ident[2]}'
+            f'-{legacy_generation(name)}')
 
 
 def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
@@ -413,7 +454,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
             return 0
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
-        stamp_legacy_delivery_id(data, ident)
+        stamp_legacy_delivery_id(data, path.name, ident)
         frame_writer(data)  # BEFORE unlink
         # The claim excludes other consumers until this write and unlink
         # finish; a redelivery is deduplicated by the `_did` stamped above.
@@ -421,6 +462,10 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
             path.unlink()
         except OSError:
             pass
+        else:
+            # The name is free now, so the next file published under it is a
+            # new command and not this one again.
+            advance_legacy_generation(path.name)
         record_delivery()
         print(
             f'[STREAM] DELIVERED '

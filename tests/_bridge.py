@@ -206,14 +206,18 @@ def prove_scan(base, response, served, tag, token, tab=None):
 
     `PUT /command` sets the wake event the stream's idle wait blocks on, so
     the reader is driven rather than waited for. ONE frame proves only the
-    scan that wrote it, and `serve_stream` writes the broadcast frames
-    (`daedalus_bridge/stream_route.py:126`) before the legacy drains it also
-    runs, at `:129` and `:149` — so a caller's first frame arrives mid-scan.
-    TWO frames are the end of the scan that carried the first, which is what
-    a non-deletion assertion needs: evidence the reader looked, rather than a
-    sleep standing in for looking that passes or fails on host load. If
-    those drains are ever reordered ahead of the broadcast ones, this helper
-    takes one frame again and every call site loses a `prove_scan`.
+    scan that wrote it: `serve_stream` writes a queue frame before it runs
+    the legacy drains — the extension branch's own legacy file at
+    `stream_route.py:102`, then the broadcast queue at `:125`, then the
+    per-tab and broadcast legacy drains at `:129` and `:149`; a specific-tab
+    stream orders its tab queue at `:134` the same way — so the first frame
+    arrives mid-scan. TWO frames are its end, which is what a non-deletion
+    assertion needs: evidence the reader looked, rather than a sleep
+    standing in for looking that passes or fails on host load. That order
+    is pinned, by the emission sequence
+    `test_stream_route.py::test_the_extension_stream_delivers_every_queue_it_owns`
+    asserts; if it ever changes, this helper takes one frame again and every
+    call site loses a `prove_scan`.
     """
     payload = {'token': token, 'id': f'scan-{tag}', 'code': '1'}
     if tab is not None:
