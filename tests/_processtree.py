@@ -17,6 +17,46 @@ import subprocess
 import sys
 
 
+def process_group(process):
+    """The group id of a process, which must still be unreaped.
+
+    The lookup a caller cannot make later: a reaped pid has no entry, so
+    a teardown that reaches this after the reap has nothing to derive a
+    group from. Capture here, kill with `cleanup_process_group`.
+    """
+    return os.getpgid(process.pid)
+
+
+def cleanup_process_group(group, cleanup_timeout):
+    """Kill a process group by an id, and report what the kill did.
+
+    The sibling of `cleanup_process_tree` for the case that function
+    cannot serve: a caller holding a group it captured before reaping its
+    leader. A group exists exactly while one of its members does, so the
+    zero signal first is what says whether there is anything left to kill
+    without signalling a number the kernel may since have handed on.
+
+    POSIX only, and said rather than pretended: there is no group signal
+    on Windows, where a reaped pid leaves `taskkill` nothing to name
+    either, and the caller keeps whatever teardown it already had.
+    """
+    if sys.platform == 'win32':
+        return 'process group signals do not exist on Windows'
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return 'process group was already gone before cleanup'
+    except OSError as error:
+        return f'process-group lookup failed: {error}'
+    try:
+        os.killpg(group, signal.SIGKILL)
+    except ProcessLookupError:
+        return f'process group {group} was already gone'
+    except OSError as error:
+        return f'process-group kill failed: {error}'
+    return f'process group {group} killed'
+
+
 def cleanup_process_tree(process, cleanup_timeout):
     """Kill `process`'s tree, reap it, and return what each step did.
 
