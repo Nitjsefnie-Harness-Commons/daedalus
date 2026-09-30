@@ -255,6 +255,18 @@ def go():
     kid = []
     return build(kid)(timeout=1)
 ''',
+    'a-from-import-rebinding-the-name': '''def build(kid):
+    def run(timeout=None):
+        return kid.wait(timeout)
+
+    return run
+
+
+def go():
+    from json import kid
+    kid = []
+    return build(kid)(timeout=1)
+''',
     'a-receiver-that-is-not-a-parameter': '''def build():
     def run(args, *, timeout):
         return kids.wait(timeout)

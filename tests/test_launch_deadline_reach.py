@@ -404,6 +404,20 @@ def test_an_import_that_rebinds_the_name_is_still_refused(tmp):
     _assert_refuses('an-import-rebinding-the-name')
 
 
+def test_a_from_import_that_rebinds_the_name_is_still_refused(tmp):
+    """`from json import kid` binds `kid` to a name, not a container.
+
+    The twin of the bare-import row, and it exists because the mutation
+    table removed BOTH import arms in one plant and so could not tell
+    them apart: a pair that dies together is a pair with one row between
+    them. Removing `ImportFrom` alone must red this row and leave the
+    bare-import row green, or the two arms are one arm with two spellings
+    and the table should say so instead.
+    """
+    del tmp
+    _assert_refuses('a-from-import-rebinding-the-name')
+
+
 def test_a_nested_def_that_rebinds_the_name_is_still_refused(tmp):
     """`def kid(): ...` inside the caller binds `kid` to a function.
 
