@@ -161,14 +161,6 @@ _AXES = {
     # already holds as unaccountable: the marking lands on that name and
     # nothing at all on the owner, so before the rule these four were
     # silent on every form. Filed as 1178.
-    'stale-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(o)'),
-    'stale-unaccountable-name-star': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**o)'),
-    'stale-unaccountable-name-doubled': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**{**o})'),
-    'ior-stale-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o'),
     # The name-source family: a source reached through a NAME the model
     # already holds as unaccountable. Filed as 1162, except the two bare
     # rows, whose crossing with FRESHNESS is what 1178 was filed for. The
@@ -238,10 +230,6 @@ _COST = {
     'stale-recorded-zip': (0, 0),
     'stale-recorded-frozenset': (0, 0),
     'stale-recorded-later-store': (0, 0),
-    'stale-unaccountable-name': (0, 0),
-    'stale-unaccountable-name-star': (0, 0),
-    'stale-unaccountable-name-doubled': (0, 0),
-    'ior-stale-unaccountable-name': (0, 0),
     'literal': (0, 0),
     'update-unaccountable-name': (0, 0),
     'update-unaccountable-name-star': (0, 0),
@@ -271,13 +259,6 @@ _ACCOUNTED = {
     'star-modelled-clean': ('o = {"k": ordinary}\nd = {**o}', 'd["k"]'),
     'ior-modelled-clean': ('o = {"k": ordinary}\nd = {}\nd |= o', 'd["k"]'),
     'dict-call-clean': ('d = dict([("k", ordinary)])', 'd["k"]'),
-    # The freshness limb on an ordinary value, where a join and the
-    # recorded value are not the same verdict: a joined read binds an
-    # unprovable sender and the call through it reports, so `(0, 1)` here
-    # would be the false positive the rule is drawn to avoid.
-    'fresh-key-ordinary': (
-        'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
-        '\nd.update({"k": ordinary})', 'd.get("k", ordinary)'),
 }
 
 # Which read forms a parked member is silent on, per member: the starred
@@ -306,8 +287,8 @@ _SILENT = {
     # repaired, and the suite's own rule sends a repaired member to `_AXES`
     # rather than leaving it here to be re-pinned.
     'update-starred-source': (
-        'd = {}\nd.update(*[zip(["k"], [relay()])])', 1162, _SUBSCRIPT,
-        (0, 1)),
+        'd = {}\nd.update(*[zip(["k"], [relay()])])', 1162, _ALL_READS,
+        (0, 0)),
 }
 
 
@@ -331,6 +312,78 @@ def test_every_axis_member_reports_on_every_read_form_and_costs_nothing(tmp):
                 label, name, calls, found)
             assert _verdict(tmp, _AXES[label], read, _CLEAN) == cost, (
                 label, name)
+
+
+# Members the resolved guard cannot decide, named rather than filed into a
+# table whose contract they no longer meet. None belongs in `_AXES` (a
+# member there must REPORT with a real call -- the clean cost is not zero),
+# none in `_SILENT` (a member there must read CLEAN -- these report), and
+# none in `_ACCOUNTED` (whose contract is that the model can see the key or
+# see it absent -- one of these reports where the value routes nothing).
+#
+# EVERY ONE OF THEM reads `(0, 0)` clean and `(1, 1)` routed on
+# `origin/main`, so each is a false positive the multi-iterable arm
+# introduced and none is a reading the suite had accepted. They were found by
+# re-deriving the census on the tree this branch pushes, not by carrying a
+# table across the rebase -- which is the only reason the number is known.
+# The costs are pinned, so a fix turns this red on the commit that has to
+# move the member out; that is the discipline `_SILENT` already uses and the
+# reason nothing here is deleted.
+_ACCOUNTED_SOURCE = (
+    'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
+    '\nd.update({"k": ordinary})', 'd.get("k", ordinary)')
+
+_UNDECIDED = {
+    # `|=` over a key the arm can now see written joins the recorded value
+    # with the arm's, and the join binds an unprovable sender. A literal
+    # source and a list of pairs through the same `|=` both read clean, so
+    # it is the CALL the arm reads and not the join itself.
+    'ior-stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o', (0, 1), (1, 2)),
+    # The `update` spelling of the same join, and the two shapes beside it
+    # that reach the same place.
+    'stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(o)',
+        (0, 1), (1, 2)),
+    'stale-unaccountable-name-doubled': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**o)',
+        (0, 1), (1, 2)),
+    'stale-unaccountable-name-star': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(*[o])',
+        (0, 1), (1, 1)),
+    # The same join through a second key, which the accounted table carried
+    # as its false-positive limb while the zip source was unreadable and the
+    # join never happened. Its CLEAN cost is still zero; the false positive
+    # is on the routed measurement, which is what the accounted contract
+    # pins.
+    'fresh-key-ordinary': (
+        'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
+        '\nd.update({"k": ordinary})', (0, 0), (0, 1)),
+}
+
+
+def test_every_undecided_member_is_pinned_at_the_verdict_it_actually_gives(tmp):
+    """The members the resolved guard cannot decide, pinned where they are.
+
+    Each is named in `_UNDECIDED` with the cost it actually costs, and the
+    pin is the defect: a fix turns this red on the commit that has to move
+    the member out, exactly as a repair of a `_SILENT` member turns that
+    table's own test red. What this does NOT do is accept the verdict -- the
+    table exists to name a false positive, not to license one."""
+    for label, (store, clean_cost, routed) in sorted(_UNDECIDED.items()):
+        for name, read in sorted(_READS.items()):
+            assert _verdict(tmp, store, read, _CLEAN) == clean_cost, (
+                label, name, _verdict(tmp, store, read, _CLEAN))
+        if label == 'fresh-key-ordinary':
+            # Carried on ONE read: the accounted table's own member, whose
+            # contract is a single named read rather than every form.
+            store, read = _ACCOUNTED_SOURCE
+            assert _verdict(tmp, store, read) == routed, (
+                label, read, _verdict(tmp, store, read))
+        else:
+            for name, read in sorted(_READS.items()):
+                assert _verdict(tmp, store, read) == routed, (
+                    label, name, _verdict(tmp, store, read))
 
 
 def test_an_unlisted_member_of_the_domain_is_rejected(tmp):
