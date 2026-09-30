@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Every assertion a shared test helper makes is observed by a case here.
 
-The helpers imported below assert on their callers' behalf, and every
-consumer passed each assertion the values it wants — so deleting any of
-them left every consumer green and the check was made by nothing (issue
-#1349).
+`_assert_scan_refusal`, `_bound_record`, `_refuses` and `_replaced`
+assert on their callers' behalf, and every consumer passed each
+assertion the values it wants — so deleting any of them left every
+consumer green and the check was made by nothing (issue #1349).
 
 One case per assertion, and each case states both directions of the one
 helper: the call that must not raise, and the call that must. The
@@ -52,12 +52,12 @@ _BOUND_DRIVER = """
 """
 
 # What a child that reached the end of the driver writes on stdout, and
-# what the cases read before they trust a stderr. A child that crashed
-# before reaching the write leaves stdout empty however it failed, so a
-# stderr carrying no record cannot stand for a child that never ran. The
-# marker carries the settled-nothing case on its own and is a control in
-# the other two, where a crash is already caught by what the case
-# expects — so those two copies are there to be kept, not trimmed.
+# what the cases read before they trust a stderr. The comparison is for
+# equality, not truthiness: any other stdout is a child that did not run
+# this driver to its end, and a truthiness test would accept all of them.
+# The marker carries the settled-nothing case on its own and is a control
+# in the other two, where a crash is already caught by what the case
+# expects, so those two copies are there to be kept, not trimmed.
 SETTLED = 'settled'
 
 # One pair the same reader answers differently: the first is refused, the
