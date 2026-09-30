@@ -80,19 +80,6 @@ NO_MUTATION = {
         'WHAT WOULD REFUTE IT: any path that delivers a dict operand to '
         '_apply_set_store; the control drives exactly that and the model '
         'answers with None'),
-    '_pyroute_reads._readback_popitem': (
-        "the carry IS container_copy's default here too, for the same "
-        "reason, and it is unobservable because the projection either "
-        "joins every value into the unknown-key slot, which every read "
-        "consults anyway, or deletes a key and leaves the retirement "
-        "naming a key the container no longer holds -- a conservative "
-        "over-join at an absent key, which a read of that key joins "
-        "rather than answering from a value. "
-        'CONTROLLING CONTROL: '
-        'test_a_popitem_projection_reads_both_ways. '
-        'WHAT WOULD REFUTE IT: a read at a retired key whose verdict '
-        'differs because of the over-join; the control checks both '
-        'branches'),
 }
 
 # Every `tests/` module the universe derivation does NOT put in, and why.
@@ -104,6 +91,26 @@ MODULE_EXCLUSIONS = {
 
 # The suites a revert has to turn red in, and the test whose name must
 # appear among the failures.
+# What the branch's own verdicts were at the head this block was written
+# for. The sweep prints these in its header beside its own result, because
+# a reader who runs this module to see whether a control bites is exactly
+# the reader who needs to know what the numbers were: they are recorded in
+# the tree rather than only in a report, and CI certifies the head.
+ACCEPTANCE = {
+    'A - the three stale-recorded rows (#1154), 3 reads':
+        'routed (1, 1), clean (0, 0) on all nine cells',
+    'B - the four name-source rows (#1178), 3 reads':
+        'routed (1, 1), clean (0, 0) on all twelve cells',
+    'C - every _AXES row': 'routed (1, 1), clean (0, 0)',
+    'C - every _ACCOUNTED row': '(0, 0) on both prefixes',
+    "C - _SILENT": "one member, #1162's update-starred-source subscript",
+    'D - the scaling budget': 'narrow=33 wide=53 budget=66',
+    'E - a key written after the store retired it':
+        'resolves to the recorded value, no new join',
+    'F - the false-green census':
+        '1 cell, byte-identical to base b39f850e',
+}
+
 _SUITE_TIMEOUT = 900
 CONTROL_SUITES = ('tests/test_tab_routing_dict_retirement.py',
                   'tests/test_tab_routing_dict_keyset.py',
@@ -175,6 +182,16 @@ REVERTS = {
     # the two forms. A revert must be the defect the site guards.
     '_pyroute_storage.retired_into': (
         '    return retired & set(items)', '    return retired'),
+    # This was a NO_MUTATION decision -- "the carry is container_copy's
+    # default and no control observes it" -- until the control written to
+    # observe it contradicted the claim: it asserts the marker survives the
+    # projection, so a `frozenset()` here DOES kill it. A site a control can
+    # see is a site the sweep can test, so it moved from the decided set to
+    # here rather than having its reason narrowed until it was true.
+    '_pyroute_reads._readback_popitem': (
+        '    replace_deferred_storage(state, owner, container_copy(owner, items))',
+        '    replace_deferred_storage(state, owner, container_copy(\n'
+        '        owner, items, False, frozenset()))'),
     '_pyroute_storage.stale_after_store': (
         "    if unreadable:\n"
         "        return (owner.stale | (set(owner.items) - {DYNAMIC_KEY})) \\"
@@ -443,6 +460,8 @@ def revert_sites():
     if missing:
         raise SystemExit(f'no revert written for: {sorted(missing)}')
     survivors, unmutated = [], []
+    for question, answer in ACCEPTANCE.items():
+        print(f'  {question[:44]:46s} {answer}')
     print(f'{"site":46s} {"controls that die":44s} survivors')
     for stale in HERE.glob('__pycache__'):
         for cached in stale.glob('*.pyc'):
@@ -453,7 +472,7 @@ def revert_sites():
         original = path.read_text(encoding='utf-8')
         if site in NO_MUTATION:
             unmutated.append(site)
-            print(f'{site:46s} NO MUTATION: {NO_MUTATION[site][:52]}')
+            print(f'{site:46s} NOT TESTED: {NO_MUTATION[site][:46]}')
             continue
         old, new = REVERTS[site]
         if old not in original:
