@@ -2,18 +2,17 @@
 """A multi-iterable builtin consumer pairs what it walks, or reads clean.
 
 `zip`, `enumerate` and `map` reach a routed value through a pairing rather
-than through one operand. Before the arm, the operand funnel reduced each of
-them to the merge of what the expression yields, a merge is not a tuple, a
+than through one operand. Before the arm the operand funnel reduced each to
+the merge of what the expression yields, a merge is not a tuple, a
 destructuring target read nothing, and the value behind it stayed invisible.
 
 Every verdict here is `_tracked_focus_verdict`'s `(runtime_calls,
 guard_violations)` on the real `do_focus_tab`, so the guard and the runtime
-are both measured and no row is a verdict about an internal helper. Two
-operands are used for every consumer: a mapping read-back (`d.values()`,
-whose container the guard already models) and a plain list (`l`, whose
-positions are statically known) -- the second rules out the materializer
-reading, because a list leaves nothing about order or occupancy
-unresolvable and the only thing missing there is the PAIRING.
+are both measured. Two operands are used for every consumer: a mapping
+read-back (`d.values()`) and a plain list (`l`, whose positions are
+statically known) -- the second rules out the materializer reading, because
+a list leaves nothing about order or occupancy unresolvable and the only
+thing missing there is the PAIRING.
 """
 import sys
 from pathlib import Path
@@ -75,11 +74,19 @@ _PROBE = {'zip': '(), ()', 'enumerate': '()', 'map': 'lambda g: g, ()'}
 
 def _accepts(member, keyword):
     """Whether this interpreter's own builtin takes that keyword, asked by
-    constructing the call rather than by a version table. `_PROBE` is the
-    operand list each declaration needs before the keyword, because `map`'s
-    callable is the first operand and a probe that omitted it would be asking
-    about a different call."""
-    spelling = f'{member}({_PROBE[member]}, {keyword}=True)'
+    constructing the call rather than by a version table. `_PROBE` is keyed
+    by MEMBER, not by kind, because it is that member's own signature that
+    decides how many operands stand before the keyword -- `map`'s callable
+    is the first operand, and a probe omitting it would ask about a
+    different call. A member with no probe is named rather than a bare
+    `KeyError`."""
+    operands = _PROBE.get(member)
+    if operands is None:
+        raise AssertionError(
+            f'no probe for builtin {member!r}; _PROBE is keyed by member '
+            'because it is the signature of that member itself, and the '
+            f'known probes are {sorted(_PROBE)}')
+    spelling = f'{member}({operands}, {keyword}=True)'
     try:
         # pylint: disable-next=eval-used
         eval(spelling)
@@ -88,45 +95,56 @@ def _accepts(member, keyword):
     return True
 
 
-def _streams(declaration, container):
-    """The operands a declaration pairs over one container shape. A pairing
-    takes two streams so that a routed value lands in a position the target
-    reads; an indexed pairing iterates one and reads a base beside it, and a
-    projection pairs that one with the callable it projects through."""
-    if container == 'dict':
-        return _DICT, ('d, d.values()' if declaration is POSITIONAL_PAIRING
-                       else 'd.values()')
-    return _LIST, ('l, l' if declaration is POSITIONAL_PAIRING else 'l')
+# One row shape per KIND, keyed on the kind the declaration carries as data.
+# A fourth kind with no entry here is refused by name, rather than falling
+# into the `else` of the two this knows and building a source shaped like the
+# wrong one -- which is what an identity dispatch on the declaration does.
+# Each entry is (stores for mapping and list, the operand spelling for each,
+# the target template); a projection yields its callable's RESULT and the
+# other two yield an operand element, and an indexed pairing's step is an
+# (index, value) pair, so only the projection reads one name.
+# The kinds a row shape exists for, and the kinds the two decisions below
+# are ABOUT -- a pairing takes two streams, an indexed pairing one plus a
+# base, a projection pairs that one with a callable. Read off the kind the
+# declaration carries as data, not off an identity comparison: a fourth kind
+# then refuses by name here rather than falling into the `else` of the two
+# this knows and building a source shaped like the wrong one.
+_KINDS = ('pairing', 'indexed', 'projection')
+_CONTAINERS = ('dict', 'list')
 
 
 def _call_shape(declaration, member, container, keyword):
     """The call as the source spells it over one operand shape, and the
     store that builds the operand. A projection's callable is the identity,
-    so the row pairs the arm and not the callable -- the row that pins the
-    difference between the projection and the operand element is its own."""
-    store, streams = _streams(declaration, container)
-    spell = (f'{member}(lambda g: g, {streams}'
-             if declaration is PROJECTION else f'{member}({streams}')
+    so the row pairs the arm and not the callable."""
+    if declaration.shape not in _KINDS:
+        raise AssertionError(
+            f'kind {declaration.shape!r} has no row shape; known kinds are '
+            f'{sorted(_KINDS)}, so a member of a new kind is not covered')
+    shape = declaration.shape
+    pair, project = shape == 'pairing', shape == 'projection'
+    mapping = container == 'dict'
+    store, read = (_DICT, 'd.values()') if mapping else (_LIST, 'l')
+    if pair:
+        read = 'd, d.values()' if mapping else 'l, l'
+    spell = f'{member}({read}'
+    if project:
+        spell = f'{member}(lambda g: g, {read}'
     if keyword:
         spell += f', {keyword}=True'
-    spell += ')'
-    if declaration is PROJECTION:
-        return store, f'return [f() for f in {spell}]'
-    return store, f'return [v() for _, v in {spell}]'
+    target = 'return [f() for f in ' if project else 'return [v() for _, v in '
+    return store, f'{target}{spell})]'
 
 
 def _grammar_battery():
-    """Every (declaration, member, operand, keyword) the enumeration admits
-    on the interpreter this runs on, enumerated from the declarations
-    themselves rather than from a list of names written out here. What a
-    declaration reads is its own, so a member added to a kind is read by the
-    same two functions and covered by the same rows; the count this returns
-    is what the run measured, and the coverage assertion in the test is what
-    says a member cannot be added without being run."""
+    """Every (declaration, member, container, keyword) the enumeration admits
+    on this interpreter, from the declarations rather than a list of names.
+    What a declaration reads is its own, so a member added to a kind is read
+    and covered by the same two functions."""
     return [(declaration, member, container, keyword)
             for declaration in MULTI_ITERABLE_DECLARATIONS
             for member in sorted(declaration.members)
-            for container in ('dict', 'list')
+            for container in _CONTAINERS
             for keyword in ('', *sorted(
                 word for word in declaration.keywords
                 if _accepts(member, word)))]
@@ -134,21 +152,20 @@ def _grammar_battery():
 
 def test_every_enumerated_consumer_is_covered(tmp):
     """The battery, run as one set. Every row puts a routed value in a
-    position its consumer pairs and calls it, so every one of them makes its
-    call at runtime. The count is derived from the declarations and the
-    running builtin, and the coverage assertion is what makes it a claim
-    about every member rather than about the ones the repro used."""
+    position its consumer pairs and calls it, so every one makes its call at
+    runtime. The count is derived from the declarations and the running
+    builtin, so the assertion is about every member rather than the ones a
+    repro used."""
     battery = _grammar_battery()
     cases = []
     for declaration, member, container, keyword in battery:
         store, invoke = _call_shape(declaration, member, container, keyword)
         cases.append((f'{member}-{container}-{keyword or "plain"}',
                       _body(store, invoke), (1, 1)))
-    assert {(declaration, member) for declaration, member, _, _
-            in battery} == {(declaration, member)
-                            for declaration in MULTI_ITERABLE_DECLARATIONS
-                            for member in declaration.members}
     covered = {(declaration, member) for declaration, member, _, _ in battery}
+    assert covered == {(declaration, member)
+                       for declaration in MULTI_ITERABLE_DECLARATIONS
+                       for member in declaration.members}
     print(f'\n  multi-iterable battery: {len(cases)} rows over '
           f'{len(covered)} enumerated consumers on '
           f'{sys.version_info.major}.{sys.version_info.minor}')
@@ -191,11 +208,10 @@ def test_the_two_operands_pin_the_pairing_and_not_the_container(tmp):
 def test_the_projection_is_the_result_not_the_operand_element(tmp):
     """`map` yields what its callable returns, not the operand element. The
     identity projection hands the element on, so the routed call happens; a
-    projection that returns something else leaves the element clean even
-    though the operand carried the routed value, and that row is the one
-    that fails if the arm read the operand element through the projection.
-    A projection the model cannot resolve is a value it cannot place, which
-    fails closed rather than reading as the element it cannot see."""
+    projection returning something else leaves the element clean even though
+    the operand carried the routed value, and that row fails if the arm read
+    the operand element through the projection. A projection the model cannot
+    resolve is a value it cannot place, which fails closed."""
     cases = [
         ('identity', _DICT, 'return [f() for f in map(lambda g: g, '
          'd.values())]', (1, 1)),
@@ -219,10 +235,15 @@ def test_the_keywords_the_enumeration_admits(tmp):
     """`zip`'s `strict` and `enumerate`'s `start` are spellings of what the
     declaration decides, and a reader that took every positional operand as
     an iterable would read `enumerate`'s base as a second stream -- so the
-    `start` rows carry the routed value in exactly one operand and would
-    read two streams if the base were one. A keyword the running builtin
-    refuses is skipped rather than spelled: the call raises before the guard
-    reaches a verdict, so there is nothing to measure on that interpreter."""
+    `start` rows carry the routed value in exactly one operand.
+
+    What these rows pin is the BEHAVIOUR, not the truncation producing it.
+    Making `_indexed_operands` return every positional operand leaves this
+    suite green, because `_indexed_value` reads only `streams[0]` and the
+    extra stream is discarded: the truncation is dead code and the rows would
+    not notice it going. A keyword the running builtin refuses is skipped
+    rather than spelled: the call raises before the guard reaches a verdict.
+"""
     cases = [
         ('zip-strict', _LIST,
          'return [v() for _, v in zip(l, l, strict=True)]', (1, 1)),
@@ -247,13 +268,13 @@ def test_the_keywords_the_enumeration_admits(tmp):
 
 
 def test_an_undecided_arity_fails_closed(tmp):
-    """A `**` keyword unpacking and a starred positional operand each decide
-    how many streams a step pairs over, and the guard can read neither. The
-    element is then undecided at EVERY position rather than at the one it
-    would have guessed, so a target that carries `tab` through it is
-    reported -- the token reaches the caller as an unprovable callee, which
-    is what `call_violations` reads it as. The last row is the same pair
-    with a decided arity, so the two cannot both pass by accident."""
+    """A `**` the guard cannot read leaves the count undecided, and the token
+    reaches the caller as an unprovable callee, which is what
+    `call_violations` reads it as -- so a target carrying a `tab` through it
+    is reported. A starred positional operand whose container the guard CAN
+    read is decided and placed, and the arm's own tests cover that; these
+    rows are the `**` half, and the last is the same pair with a decided
+    arity, so the two cannot both pass by accident."""
     cases = [
         ('zip-starred-operand', _SENDER,
          f'return [{_ROUTED_CALL} for _, v in zip(*[d, d.values()])]', (1, 1)),
@@ -273,10 +294,9 @@ def test_an_undecided_arity_fails_closed(tmp):
 def test_an_operand_the_model_cannot_read_still_pairs(tmp):
     """A value the model HOLDS but cannot PAIR must never read clean. An
     operand it holds no container for is not an empty stream: the consumer
-    still pairs it, so the tuple still reaches the target, and the position
-    the model cannot read carries the uncertainty token. The routed operand
-    beside it is what the target reads, and the row where the TARGET is the
-    undecided position is the one that says the token reached it."""
+    still pairs it, so the tuple reaches the target and the unread position
+    carries the token. The row where the TARGET is that undecided position
+    is the one that says the token reached the caller."""
     cases = [
         ('zip-unread-next-to-routed', _DICT,
          'return [v() for _, v in zip(args.values, d.values())]', (1, 1)),
@@ -309,10 +329,9 @@ def test_a_starred_or_unpacked_operand_is_read_not_substituted(tmp):
     """A star and a `**` decide how many streams a step pairs over, and the
     arm READS them rather than substituting a token for the whole element.
     Substitution is the fail-open the arm exists to remove: the runtime pairs
-    the container's ELEMENTS, and a token is not a tuple, so a destructuring
+    the container's ELEMENTS, a token is not a tuple, so a destructuring
     target paired nothing and the call through it read clean. Each undecided
-    row has a decided twin beside it, so the two cannot both pass by
-    accident."""
+    row has a decided twin beside it."""
     cases = [
         ('zip-starred', _LIST,
          'return [v() for _, v in zip(*[l, l])]', (1, 1)),
@@ -340,10 +359,10 @@ def test_a_starred_or_unpacked_operand_is_read_not_substituted(tmp):
 
 def test_a_generator_operand_the_model_cannot_read_says_so(tmp):
     """A generator the model tracks but whose yielded value it does not hold
-    is a stream it cannot READ, and it carries the token the way any other
+    is a stream it cannot READ, and carries the token the way any other
     unreadable operand does. Reading it as an empty stream instead left no
-    token and no positions, which is the same fail-open at a second site.
-    The quiet row is the twin: the token is there, and nothing calls it."""
+    token and no positions: the same fail-open at a second site. The quiet
+    row is the twin, where the token is there and nothing calls it."""
     cases = [
         ('genexp-unread-tab', '',
          f'return [v{_TAB_ARG} for v, _ in zip((x for x in '
@@ -361,20 +380,22 @@ def test_a_generator_operand_the_model_cannot_read_says_so(tmp):
 def test_a_decidable_generator_expression_is_not_a_false_positive(tmp):
     """The negative direction. A generator expression the model CAN decide
     states how many steps it yields, and a stated zero is a pairing that
-    reaches no step at all: a routed value in the operand BESIDE it is
-    paired with nothing, so the `tab` the target carries reaches no sender.
+    reaches no step: a routed value in the operand BESIDE it is paired with
+    nothing, so the `tab` the target carries reaches no sender.
 
     Every target CALLS the element it reads, because that call is the only
     way a token in the position becomes a finding. The four earlier
-    spellings of this test never called it, which is why two maximal
-    fail-closed mutants left them at `(0, 0)` and passing. The decision
-    pinned here is the COUNT, so each row dies the moment the count is
-    thrown away; mutant M5 quotes it.
+    spellings never called it, which is why two fail-closed mutants left
+    them at `(0, 0)` and passing.
 
-    What a decidable generator YIELDS is a separate question this test does
-    not claim: the model does not hold it, so a `tab` through one reads as a
-    finding whatever the count is, and pinning that would be asserting a
-    defect. These rows are the ones whose correct verdict is clean."""
+    The decision pinned is `generator.remaining`, the count
+    `_operand_stream` reads off a tracked generator -- NOT
+    `_comprehension_count`, which a mutation can throw away entirely and
+    leave all four rows green; forcing a tracked generator's declared length
+    to 1 is what kills all four. What a decidable generator YIELDS is a
+    separate question this test does not claim: the model does not hold it,
+    so a `tab` through one reads as a finding whatever the count is, and
+    pinning that would assert a defect."""
     _CALL = 'v("focus", tab="1")'
     cases = [
         ('zip-genexp-decided-empty', '',
@@ -397,20 +418,18 @@ def test_a_decidable_generator_expression_is_not_a_false_positive(tmp):
 
 def test_a_star_the_model_cannot_read_leaves_no_position_decided(tmp):
     """A starred operand is a count of streams, and a container the model
-    cannot read is a count it cannot name. Nothing at or after such a star
-    is placeable, so the step is undecided at EVERY position and the target
-    reads the uncertainty token wherever it looks.
+    cannot read is a count it cannot name. Nothing at or after such a star is
+    placeable, so the step is undecided at EVERY position.
 
     Reading it as one more stream is the fail-open in its purest form: the
-    tuple the model builds claims a length the runtime never pairs over, a
-    destructuring target reads a different number of names from it, the
-    pair is REFUSED, and the names are left bound to nothing at all. The
-    routed call then reads clean while the runtime really reached the
-    sender.
+    tuple claims a length the runtime never pairs over, a destructuring
+    target reads a different number of names from it, the pair is REFUSED,
+    and the names are left bound to nothing. The routed call then reads
+    clean while the runtime really reached the sender.
 
-    The first two rows are that mechanism's two entry points, and both are
-    here because removing the early return that stood between them is only
-    a real repair if a plant shows BOTH classes appear; mutant M6 does."""
+    The first two rows are that mechanism's two entry points, both here
+    because removing the early return between them is only a real repair if
+    a plant shows BOTH classes appear; mutant M6 does."""
     _CALL_ALL = 'a("focus", tab=1)'
     _STORE = ('def pair(*items): return list(items)\n'
               'O = [ext_cmd]\nP = [ordinary]')
@@ -438,8 +457,6 @@ def test_a_star_the_model_cannot_read_leaves_no_position_decided(tmp):
         ('map-genexp-star-before-plain', _STORE,
          f'return [{_CALL_ALL} for a in '
          'map(lambda a, b, c: a, *(q for q in [O, O]), P)]', (1, 1)),
-        # The decided twin beside the undecided rows, so the two cannot both
-        # pass by accident.
         ('decided-twin', 'l = [relay()]',
          'return [v() for _, v in zip(*[l, l])]', (1, 1)),
     ]
@@ -454,34 +471,28 @@ def test_a_star_container_is_read_by_what_it_holds_not_by_its_kind(tmp):
     enumerate that container's elements and say which is at which position.
     A generator expression states both -- how many steps it yields, and what
     each yields -- so it IS a container of that many iterables, and the arm
-    read a list display and a call while it fell through to the declined
-    path. The runtime reached the routed sender and the guard read clean.
+    read a list display while it fell through to the declined path.
 
     A generator expression consumed DIRECTLY is read correctly and always
-    was, so this is not a generator the model cannot follow. It is a
-    generator in the position THIS ARM ADDS, which is what makes it the
-    arm's own defect: on the base, where the arm does not exist, the same
-    call reads `(1, 1)`.
+    was, so this is one in the position THIS ARM ADDS: on the base, where
+    the arm does not exist, the same call reads `(1, 1)`.
 
     The list-display twins keep the fix honest: the same operand list over a
     container the arm already read must not change verdict, and the clean
-    twin must stay clean, or a widening that reads more containers has
-    simply started reporting more."""
+    twin must stay clean."""
     _CALL_ALL = 'a("focus", tab=1)'
     _BARE = 'a()'
     # Two spellings of the same routed operand, and both are here because
-    # neither alone tells reading from declining. A `tab` through the
-    # uncertainty token is a finding, so a ROUTED element reads `(1, 1)`
-    # whether the container was read or declined: those rows pin the sound
-    # direction and cannot see this defect. A routed lambda takes no
-    # arguments, so a BARE call is the only shape in which declining reads
-    # clean -- those are the false greens.
+    # neither alone tells reading from declining. A `tab` through the token
+    # is a finding, so a ROUTED element reads `(1, 1)` whether the container
+    # was read or declined: those rows pin the sound direction and cannot
+    # see this defect. A routed lambda takes no arguments, so a BARE call is
+    # the only shape in which declining reads clean -- those are the false
+    # greens.
     _ROUTED = 'l = [relay()]'
     _SENDER = 'l = [ext_cmd]'
     cases = [
-        # The false-green class, one row per consumer placement: a bare call
-        # through a position the model declined to place reads clean while
-        # the runtime called the sender.
+        # The false-green class, one row per consumer placement.
         ('zip-star-container-genexp', _ROUTED,
          f'return [{_BARE} for a, b in zip(*(x for x in [l, l]))]', (1, 1)),
         ('zip-star-after-plain-genexp', _ROUTED,
@@ -492,24 +503,20 @@ def test_a_star_container_is_read_by_what_it_holds_not_by_its_kind(tmp):
         ('enumerate-star-container-genexp', _ROUTED,
          f'return [{_BARE} for _, a in enumerate(*(x for x in [l]))]',
          (1, 1)),
-        # The same operand lists over a container the arm ALREADY read. If
-        # these were to move, the fix changed a list display.
         ('zip-list-container-bare', _ROUTED,
          f'return [{_BARE} for a, b in zip(*[l, l])]', (1, 1)),
         ('zip-list-after-plain-bare', _ROUTED,
          f'return [{_BARE} for a, b in zip(l, *[l])]', (1, 1)),
         ('map-list-container-bare', _ROUTED,
          f'return [{_BARE} for a in map(lambda g: g, *[l])]', (1, 1)),
-        # The clean twin, and the only row here that separates reading from
+        # The clean twin, and the only row separating reading from
         # declining: a declined container puts the token at every position,
-        # so a `tab` through a clean element is reported and this goes red.
+        # so this goes red under one.
         ('genexp-container-clean', 'def h(*a, **k): return 0\nq = [h]',
          'return [a("focus", tab="1") for a, b in zip(*(x for x in [q, q]))]',
          (0, 0)),
-        # The sound direction, over a `tab`-carrying target: a routed
-        # element read through a generator-expression container is a
-        # finding whether the container was read or declined, and these say
-        # so for all three consumers.
+        # The sound direction: a routed element through a generator-
+        # expression container is a finding either way, for all three.
         ('zip-star-container-genexp-tab', _SENDER,
          f'return [{_CALL_ALL} for a, b in zip(*(x for x in [l, l]))]',
          (1, 1)),
@@ -531,30 +538,27 @@ def test_a_readable_star_expands_where_the_source_spells_it(tmp):
     routed value is placed at a position the runtime never gives it.
 
     The container here is a list display, so every row states its count and
-    only the ORDER is the decision. That is what separates it from the
-    unreadable star beside it, which cannot state a count at all. The quiet
-    row is the twin that says the ordering costs no precision."""
+    only the ORDER is the decision -- which separates it from the unreadable
+    star beside it, that cannot state a count at all. The quiet row is the
+    twin saying the ordering costs no precision."""
     _CALL_ALL = 'a("focus", tab=1)'
     cases = [
-        # The leading star's streams come FIRST, so the routed value is at
-        # tuple position 0 -- which is where the runtime puts it and where
-        # the target reads.
+        # A leading star's streams come FIRST, so the routed value is at
+        # tuple position 0, which is where the runtime puts it.
         ('zip-leading-star', 'O = [ext_cmd]\nP = [ordinary]',
          f'return [{_CALL_ALL} for a, b, c in zip(*[O, O], P)]', (1, 1)),
         # A projection reads the end it names, so a leading star is visible
-        # through the callable's FIRST parameter as well.
+        # through the callable's FIRST parameter too.
         ('map-leading-star', 'O = [ext_cmd]\nP = [ordinary]',
          f'return [{_CALL_ALL} for a in '
          'map(lambda a, b, c: a, *[O, O], P)]', (1, 1)),
-        # A TRAILING star is where appending happens to agree with the
-        # runtime, so it is the row that keeps the two apart: the plain
-        # operand is at position 0 under both readings, and the runtime
-        # really does hand the target a clean value there.
+        # A TRAILING star is where appending agrees with the runtime, so
+        # this row keeps the two apart: the plain operand is at position 0
+        # under both readings, and the runtime hands the target a clean one.
         ('zip-trailing-star', 'O = [ext_cmd]\nP = [ordinary]',
          f'return [{_CALL_ALL} for a, b, c in zip(P, *[O, O])]', (0, 0)),
-        # The quiet twin: every stream clean, so the correct verdict is
-        # clean and an ordering that invented a routed position would turn
-        # this row red.
+        # The quiet twin: an ordering that invented a routed position would
+        # turn this row red.
         ('zip-leading-star-quiet', 'Q = [ordinary]\nP = [ordinary]',
          f'return [{_CALL_ALL} for a, b, c in zip(*[Q, Q], P)]', (0, 0)),
     ]
@@ -563,11 +567,10 @@ def test_a_readable_star_expands_where_the_source_spells_it(tmp):
 
 def test_a_position_the_runtime_cannot_reach_stays_clean(tmp):
     """The twin of every routing row. The deferred value is held and paired
-    in each of the first three -- the target binds it and the guard knows
-    what it is -- and the runtime calls none of them, so the guard reports
-    none. The arm decides what a position HOLDS; whether it is reached is
-    the caller's, and a guard that read the holding as the reaching would
-    fail every one of these."""
+    in each of the first three and the runtime calls none of them, so the
+    guard reports none. The arm decides what a position HOLDS; whether it is
+    reached is the caller's, and a guard reading the holding as the
+    reaching would fail every one of these."""
     cases = [
         ('zip-not-called', _LIST, 'for _, v in zip(l, l):\n    ordinary()',
          (0, 0)),
@@ -588,12 +591,11 @@ def test_a_position_the_runtime_cannot_reach_stays_clean(tmp):
 
 def test_a_shadowed_builtin_is_not_the_builtin(tmp):
     """The shadow decides the pairing at runtime, not the spelling that
-    matched. Each of the first three is a false-positive pin: the shadow's
-    own element is clean, and a reader that took the name for the builtin
-    would pair the operand through it and report a send the runtime never
-    made. Each of the last three pins the correct contract for a shadow
-    whose element IS routed, which the guard reaches by walking the shadow
-    rather than by recognising a name."""
+    matched. The first three are false-positive pins: the shadow's own
+    element is clean, and a reader that took the name for the builtin would
+    pair through it and report a send the runtime never made. The last three
+    pin the correct contract for a shadow whose element IS routed, which the
+    guard reaches by walking the shadow rather than by recognising a name."""
     cases = [
         ('zip-shadow-swapped', 'zip = lambda a, b: [(b[0], a[0])]\n'
          + _PLAIN_CALLS, 'return [v() for _, v in zip(p, q)]', (0, 0)),
@@ -620,15 +622,14 @@ def test_the_module_path_boundary_is_stated_and_measured(tmp):
     three declarations THROUGH a module is paired -- `builtins.zip` is not
     `zip`, and `itertools.chain` is not a pairing either.
 
-    Every row here is a false green the docstring discloses, and every one
-    of them is a row a mutant that CLOSES the boundary turns red: the lead's
-    mutant, which teaches the arm the `builtins.` path for all three, takes
-    `builtins.map` from 0 to 1 and nothing here noticed. `builtins.map`,
-    `builtins.zip` and `builtins.enumerate` are here for that reason and for
-    no other one -- an `itertools`-only control never reaches the arm at all,
-    because the pre-existing import rule already pins those. The last row is
-    the other direction: the bare name IS closed, so a narrowing that made a
-    bare name unreadable fails here too."""
+    Every row here is a false green the docstring discloses, and each is a
+    row a mutant that CLOSES the boundary turns red: one teaching the arm
+    the `builtins.` path takes `builtins.map` from 0 to 1 and nothing else
+    here noticed, so those three are here for that reason alone -- an
+    `itertools`-only control never reaches the arm, the pre-existing import
+    rule already pins those. The last row is the other direction: the bare
+    name IS closed, so a narrowing that made a bare name unreadable fails
+    here too."""
     cases = [
         ('builtins-map', 'import builtins\n' + _LIST,
          'return [f() for f in builtins.map(lambda g: g, l)]', (1, 0)),
@@ -674,8 +675,20 @@ def test_the_declarations_name_what_they_decide(_tmp):
     assert POSITIONAL_PAIRING.keywords == {'strict'}
     assert INDEXED_PAIRING.keywords == {'start'}
     assert PROJECTION.keywords == {'strict'}
-    assert set(MULTI_ITERABLE_DECLARATIONS) == {
-        POSITIONAL_PAIRING, INDEXED_PAIRING, PROJECTION}
+    # A bare set equality here says only that some set differs, and a set is
+    # the one thing that cannot name what is missing from it. Name the kinds
+    # instead, so a fourth kind reads as a kind with no row shape rather
+    # than as a battery that quietly stopped covering something.
+    uncovered = [declaration.decides for declaration
+                 in MULTI_ITERABLE_DECLARATIONS
+                 if declaration.shape not in _KINDS]
+    assert not uncovered, (
+        f'declaration kinds with no row shape: {uncovered}; add the kind to '
+        f'_KINDS, whose kinds are {sorted(_KINDS)}')
+    assert len(MULTI_ITERABLE_DECLARATIONS) == len(_KINDS), (
+        f'{len(MULTI_ITERABLE_DECLARATIONS)} declarations over '
+        f'{len(_KINDS)} kinds: a kind with no declaration, or a declaration '
+        'with no kind')
 
 
 def main():

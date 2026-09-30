@@ -18,10 +18,14 @@ each one is named here rather than spelled as a list of calls:
     a caller-supplied start. `enumerate` is the only builtin of this kind,
     and it is why a keyword is in this set at all: its `start` is
     positional-or-keyword, so a reader that took every positional operand as
-    an iterable would read the index base as a second stream. The index half
-    is an integer at runtime, so it carries no sender; the base is read
-    anyway, because a base the model holds a routed value in reaches the
-    tuple the same way an operand does.
+    an iterable would read the index base as a second stream. What is true
+    here is narrower than that sentence used to claim: the interpreter
+    refuses a base that is not an integer, so EVERY spelling that would
+    separate the two readings -- `enumerate(l, ext_cmd)` and the rest -- is
+    a call Python raises rather than one it pairs. The truncation in
+    `_indexed_operands` is therefore real but unexercised, and the suite pins
+    the BEHAVIOUR (a routed value in the base is not read as a stream) rather
+    than the truncation.
 
   PROJECTION projects each step's tuple through a callable and yields the
     RESULT, not the operand element. `map` is the only builtin of this kind;
@@ -53,11 +57,26 @@ runtime picks the order -- and so is a container whose length the guard
 cannot state, because a star over a container of unknown length is a count
 of streams at that position that nothing names.
 
+THE SET DECLINE IS UNPINNED, and it cannot be pinned rather than merely not
+pinned yet: a set's elements must be hashable, and no hashable thing a set
+can hold is both iterable and a routed deferred value, so every set-shaped
+source is a call the runtime refuses and no row has a runtime call to
+measure. Declining is the sound choice and nothing here proves it.
+
 A `**` keyword unpacking passes KEYWORDS, so it never displaces a positional
 stream: the operands spelled beside it keep the positions the runtime gives
 them, and only the count is open. The count is undecided, so the token sits
 in the unknown-key slot alone and does not make the tuple claim a length the
 runtime does not pair over.
+
+ONE KNOWN OVER-REPORT, disclosed rather than fixed. A `**` is read as a
+source of positional streams, and for all three declarations the runtime
+REFUSES a `**` naming a stream: `zip(l, l, **{"a": l})` and its `enumerate`
+and `map` equivalents all raise `TypeError`, so the guard reports on calls
+Python would have rejected. A `**` that is empty or that names a real
+keyword is read correctly and the runtime really pairs those. No row can
+witness the over-report, because there is no runtime call to measure, so the
+disclosure is the whole of the fix available here.
 
 The boundary is the module path, and it is stated rather than closed. The
 same three declarations are spelled again in `itertools` -- `chain`,
@@ -108,12 +127,19 @@ class _Declaration:
     """One builtin declaration, by what it decides. `members` is the closed
     set of builtin names carrying it, and `operands` and `value` are what
     the declaration decides about a call, so a member added to a kind is
-    read by the same two functions every other member of that kind is."""
+    read by the same two functions every other member of that kind is.
+
+    `shape` is the KIND, carried as data rather than as an identity a reader
+    dispatches on: a caller that has to ask "is this the projection?" by
+    comparing an object against a name reads a fourth kind as the `else`
+    branch of the two it knows, and builds a source shaped like the wrong
+    one. A kind with no shape is a kind the caller has to be told about."""
     decides: str
     members: frozenset
     keywords: frozenset
     operands: object
     value: object
+    shape: str
 
 
 def _routed_item(value):
@@ -196,17 +222,26 @@ def _stream_element(stream):
                             if stream.unplaced is not None else ())))
 
 
-# The one stream a `**` the model could not read contributes. It does not
-# count toward the tuple's arity -- a `**` passes KEYWORDS, so the arity the
-# runtime pairs over is the arity the model can NAME -- and it contributes
-# its value to the unknown-key slot alone, so the token reaches every
-# position without the tuple claiming a length the runtime does not pair.
+# The one stream a `**` the model could not read contributes. It is
+# `optional`, which is what keeps it out of the arity, and its value goes to
+# the unknown-key slot alone, so the token reaches every position without the
+# tuple claiming a length the runtime does not pair over. The module
+# docstring says why a `**` leaves the count open and displaces nothing.
 _UNDECIDED = _Stream({}, None, UNPROVABLE_SENDER, optional=True)
 
 # What one state answers when a star's container it could not read. The
 # caller keeps it only when NO state could read the container, because a
 # state that resolved one is better informed rather than differently so.
 _CONTAINER_UNDECIDED = object()
+
+
+def _is_producer(node):
+    """Whether a node is a comprehension or a generator expression, and so
+    has a PRODUCER whose elements its result is read over. One predicate for
+    the three readers below, so their agreement about which nodes carry a
+    producer is structural rather than three copies that happen to match."""
+    return isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
+                             ast.DictComp)) and bool(node.generators)
 
 
 def _comprehension_count(node):
@@ -218,8 +253,7 @@ def _comprehension_count(node):
     NAME has no node to read a producer from, and a comprehension RESULT is
     modelled as one spread item whose own length is a placeholder; both are
     counts the guard cannot state, so both are declined."""
-    if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
-                             ast.DictComp)) or not node.generators:
+    if not _is_producer(node):
         return None
     return literal_iterable_cardinality(node.generators[0].iter)
 
@@ -234,8 +268,7 @@ def _producer_stream(node, state):
     from it is decided on one reading of the call and declined on the other.
     The producer is the same literal display at every point the call is read.
     """
-    if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp,
-                             ast.DictComp)) or not node.generators:
+    if not _is_producer(node):
         return None
     return _container_stream(evaluated_value(node.generators[0].iter, state))
 
@@ -311,7 +344,7 @@ def _container_streams(value, node=None, state=None):
     return None if any(stream is None for stream in streams) else streams
 
 
-def _keyword_streams(node, state):
+def _keyword_unpacking_streams(node, state):
     """The streams a `**` unpacking contributes, and whether the model could
     decide the count at all. It could when it can read the unpacked value as
     a container of iterables -- a mapping the model holds. It could NOT when
@@ -427,11 +460,11 @@ def _element(value):
     return DeferredContainer({0: value, DYNAMIC_KEY: value}, None, 'list')
 
 
-# pylint: disable-next=unused-argument
 def _positional_value(node, state, streams, analyze):
-    """The elements a positional pairing yields. The arity is left to
-    `_step_elements`, which is what knows a stream the model could not
-    decide on does not count toward it."""
+    """The elements a positional pairing yields. The other three parameters
+    are what the declaration table's uniform `value` signature carries; a
+    pairing over positional operands decides on the streams alone."""
+    del node, state, analyze          # named by the table, unused here
     return _step_elements(streams)
 
 
@@ -524,15 +557,15 @@ def _projection_result(candidate, node, streams, state, analyze):
 POSITIONAL_PAIRING = _Declaration(
     'pairs N positional iterables into one N-tuple per step',
     frozenset({'zip'}), frozenset({'strict'}),
-    lambda node: list(node.args), _positional_value)
+    lambda node: list(node.args), _positional_value, 'pairing')
 INDEXED_PAIRING = _Declaration(
     'yields an index/value pair whose index counts from a start',
     frozenset({'enumerate'}), frozenset({'start'}),
-    _indexed_operands, _indexed_value)
+    _indexed_operands, _indexed_value, 'indexed')
 PROJECTION = _Declaration(
     'projects each step through a callable and yields the result',
     frozenset({'map'}), frozenset({'strict'}),
-    _projected_operands, _projected_value)
+    _projected_operands, _projected_value, 'projection')
 
 MULTI_ITERABLE_DECLARATIONS = (POSITIONAL_PAIRING, INDEXED_PAIRING, PROJECTION)
 _BY_NAME = {name: declaration
@@ -541,6 +574,24 @@ _BY_NAME = {name: declaration
 
 
 def _declaration_elements(declaration, node, state, analyze):
+    """The elements one state says a multi-iterable consumer yields.
+
+    A keyword the declaration does not name, or an operand list it empties,
+    is not this arm's business and answers None. Otherwise the operand list
+    is read in three steps whose ORDER is the whole decision: the plainly
+    spelled operands and the stars among them, in source order; then the `**`
+    unpacking, which displaces nothing; then the two ways the count can stay
+    open.
+
+    The first is a STAR whose container the guard could not read, which
+    returns `_CONTAINER_UNDECIDED` rather than a value: whether any state
+    could read it is a question about the whole state set, and answering it
+    for one state lets an earlier emptier reading override a later complete
+    one. The second is the `**` count, which stays OPEN while the operands
+    spelled plainly keep the positions the runtime gives them -- so the token
+    is appended as a stream that does not count toward the arity, and lands
+    in the unknown-key slot rather than at a position of its own.
+    """
     if any(keyword.arg is not None
            and keyword.arg not in declaration.keywords
            for keyword in node.keywords):
@@ -560,7 +611,7 @@ def _declaration_elements(declaration, node, state, analyze):
         # outright. The caller answers it, because whether ANY state could
         # read the container is not a question one state can answer.
         return _CONTAINER_UNDECIDED
-    extra, decided = _keyword_streams(node, state)
+    extra, decided = _keyword_unpacking_streams(node, state)
     if not streams and not extra:
         return None
     if decided:
