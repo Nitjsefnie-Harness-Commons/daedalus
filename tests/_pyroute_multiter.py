@@ -74,8 +74,8 @@ from _pyroute_keys import literal_iterable_cardinality
 from _pyroute_state import UNPROVABLE_SENDER, evaluated_value
 from _pyroute_values import (
     DYNAMIC_KEY, DeferredAlternatives, DeferredContainer, DeferredGenerator,
-    callable_candidates, expression_callables, generator_for, is_deferred_value,
-    merge_yielded, sender_value)
+    callable_candidates, expression_callables, generator_for,
+    is_deferred_value, merge_yielded, sender_value)
 
 
 @dataclass(frozen=True)
@@ -329,8 +329,9 @@ def _keyword_streams(node, state):
     extra = []
     for keyword in node.keywords:
         if keyword.arg is None:
-            read = _container_streams(evaluated_value(keyword.value, state),
-                                    keyword.value, state)
+            read = _container_streams(
+                evaluated_value(keyword.value, state), keyword.value,
+                state)
             if read is None:
                 return extra, False
             extra.extend(read)
@@ -363,8 +364,8 @@ def _positional_streams(operands, state):
         if not isinstance(operand, ast.Starred):
             streams.append(_operand_stream(operand, state))
             continue
-        read = _container_streams(evaluated_value(operand.value, state),
-                                operand.value, state)
+        read = _container_streams(
+            evaluated_value(operand.value, state), operand.value, state)
         if read is None:
             return None
         streams.extend(read)
