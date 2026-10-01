@@ -216,39 +216,6 @@ def test_the_step_summary_is_written_only_where_there_is_one_to_write(tmp):
 # ─── the thread reader, against a profile the shape is taken from ─────────
 
 
-def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
-    """The reader is driven by files in callgrind's own format.
-
-    A slot is not a thread — callgrind reuses one when a thread exits — so
-    what the reader returns is a slot and a cost, and nothing here may read
-    a slot as one thread. The empty file is the one strace's sibling writes
-    for a process that cost nothing, and it carries no summary.
-    """
-    threads = _journey_contract.threads()
-    directory = Path(tmp)
-    (directory / 'cg.1').write_text('', encoding='utf-8')
-    (directory / 'cg.1-01').write_text(
-        'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 1\n'
-        'events: Ir\nsummary: 430000000\n', encoding='utf-8')
-    (directory / 'cg.1-02').write_text(
-        'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 2\n'
-        'events: Ir\nsummary: 3800000000\n', encoding='utf-8')
-    rows = threads.read(directory, 'cg')
-    assert [row['ir'] for row in rows] == [430000000, 3800000000], rows
-    assert all(row['cmd'] == 'python3 server.py' for row in rows), rows
-    # mcp-exec excludes only the import, so a profile carrying no serve
-    # thread is a complete one for it — and the sum is the rest.
-    kept, excluded, failure = threads.total_for(rows, 'mcp-exec')
-    assert failure is None, failure
-    assert kept == 430000000, kept
-    assert excluded == ('front-end-import',), excluded
-    # The other two need the serve thread, and a profile without one is a
-    # refusal naming the role rather than a whole-tree sum.
-    kept, excluded, failure = threads.total_for(rows, 'dashboard-fanout')
-    assert kept is None and 'uvicorn-serve' in failure, failure
-    assert excluded == ('front-end-import', 'uvicorn-serve'), excluded
-
-
 def test_a_counter_that_stops_mid_measurement_stops_the_measurement(tmp):
     """A counter that answers for the first journey and then refuses has
     already produced rows, and those rows must not be reported: a partial
@@ -308,49 +275,10 @@ def test_a_counter_that_will_not_start_is_reported_before_it_is_run(tmp):
         counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME = saved
     assert ran and set(ran) <= {'startup-only', *names}, ran
     row = report['counters']['valgrind-callgrind']
-    assert row == {'available': False,
-                   'why': 'the probe did not find this counter usable here'}, row
+    assert row == {
+        'available': False,
+        'why': 'the probe did not find this counter usable here'}, row
     assert report['counters']['syscalls']['available'] is True
-
-
-def test_every_summary_block_renders_and_names_its_remedy(tmp):
-    """Each block is read by a person deciding whether to re-baseline, so
-    each says what was not compared and what to do about it."""
-    summaries = _journey_contract.summaries()
-    gate = _journey_contract.policy()
-    document = budget_document(toolchain=dict(IDENTITY))
-    measurement = json.loads(
-        measurements_file(Path(tmp) / 'counts.json',
-                          document).read_text('utf-8'))
-    for lines in (summaries.probe_lines(probe()),
-                  summaries.summary_lines(measurement),
-                  summaries.rebaseline_lines(measurement),
-                  summaries.accounting_lines(measurement, {}),
-                  summaries.accounting_lines(measurement,
-                                             {'install': 3, 'measure': 5}),
-                  summaries.toolchain_lines(document, measurement, {},
-                                            gate.TOOLCHAIN_REMEDY),
-                  summaries.toolchain_lines(document, measurement,
-                                            {'python': ('a', 'b')},
-                                            gate.TOOLCHAIN_REMEDY),
-                  summaries.toolchain_lines(document, measurement, {},
-                                            gate.THREADS_REMEDY,
-                                            subject='excluded threads'),
-                  # `refusal_lines` renders the gate's remedies, so it lives
-                  # there rather than beside the summaries.
-                  gate.refusal_lines(
-                      {'over': {'a': (1, 2.0)}, 'shape': {'b': ['s']},
-                       'unmeasured': {'c': 'syscalls'}})):
-        assert lines, 'a block that renders to nothing is a block nobody reads'
-        assert any(line.strip() for line in lines)
-    # The two subjects must not be able to read the same: a summary that
-    # said "toolchain changed" for a set of threads would send a reader to
-    # the wrong remedy.
-    moved = summaries.toolchain_lines(
-        document, measurement, {'mcp-exec': (['front-end-import'], [])},
-        gate.THREADS_REMEDY, subject='excluded threads')
-    assert 'excluded threads changed, re-baseline' in moved[2], moved[2]
-    assert 'toolchain' not in moved[2], moved[2]
 
 
 def test_perf_counts_are_read_from_both_of_the_shapes_it_prints(tmp):

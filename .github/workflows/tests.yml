@@ -1290,7 +1290,7 @@ jobs:
       # once, and is not what every run should pay for — three is how each
       # baseline's tolerance has been measured, on the per-journey number,
       # and it goes back to one as soon as that recording is made.
-      JOURNEY_ROUNDS: "3"
+      JOURNEY_ROUNDS: "1"
 
     steps:
       # actions/checkout v7.0.1
