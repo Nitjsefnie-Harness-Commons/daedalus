@@ -74,7 +74,7 @@ def node_types(*declined):
     and a grammar that adds a form is a type this does not name, so it
     takes the chain exactly as it did before.
     """
-    types, pending = {ast.AST}, []
+    types, pending = {ast.AST}, [ast.AST]
     while pending:
         for subclass in pending.pop().__subclasses__():
             if subclass not in types:

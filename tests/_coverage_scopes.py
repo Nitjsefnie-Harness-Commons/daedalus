@@ -188,8 +188,9 @@ def _rebound_by_import(name, rebound):
     return name in rebound or _ALL_NAMES in rebound
 
 
-# The node types the retirement walk below has a reading for; every other
-# type reaches no arm of it.
+# The node types no reading of the retirement walk below can match:
+# `memo_node_types` takes the four that have one and answers their
+# complement, so a type that reaches no arm costs one lookup.
 _UNOWNED_NODES = memo_node_types(
     ast.Attribute, ast.Subscript, ast.Name, ast.Call)
 
@@ -361,11 +362,12 @@ def _containing_binding_scope(scope, parents):
     return scope
 
 
-# The node types `visit` below has an arm of its own for; every other type
-# falls through all of them to the same child walk, so it is answered by
-# one lookup. `type_scopes=False` declines the TypeAlias arm and a type
-# alias then takes the child walk too, which is why the type is declined
-# whether or not that arm is live.
+# The node types NO arm of `visit` below can match, so every one of them
+# falls through the whole chain to the same child walk;
+# `memo_node_types` takes the arms and answers their complement, so a
+# fall-through costs one lookup. `type_scopes=False` declines the
+# TypeAlias arm and a type alias then takes the child walk too, which
+# is why that type is declined whether or not the arm is live.
 _PLAIN_VISITS = memo_node_types(
     ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
     ast.NamedExpr, *_COMPREHENSION_SCOPES, getattr(ast, 'TypeAlias', None))
@@ -515,10 +517,11 @@ def _bound_names(node):
     return memo_bound_names(node, _bound_names_of)
 
 
-# The node types the census below has an arm for; every other type binds
-# no name, so it is answered by one lookup rather than the seven isinstance
-# tests the arms between them need. `Name` is declined although its arm is
-# open, because a name in a load context binds nothing either.
+# The node types no arm of the census below can match, so every one of
+# them binds no name; `memo_node_types` takes the arms and answers their
+# complement, so that costs one lookup rather than the seven `isinstance`
+# tests the arms between them need. `Name` is declined even though its
+# arm is open, because a name in a load context binds nothing either.
 _UNBOUND_NAME_NODES = memo_node_types(
     ast.Name, ast.arg, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
     ast.ExceptHandler, ast.MatchAs, ast.MatchStar, ast.MatchMapping,

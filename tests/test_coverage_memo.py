@@ -242,21 +242,58 @@ def test_a_bound_name_is_computed_once_per_node_not_once_per_pass(tmp):
     # The delegate, not `_bound_names` itself: patching the entry point
     # would replace the cache along with the question and could not see
     # a hit.
-    delegate = ('_bound_names_of'
-                if hasattr(_coverage_scopes, '_bound_names_of')
-                else '_bound_names')
-    real = getattr(_coverage_scopes, delegate)
+    real = _coverage_scopes._bound_names_of
 
     def counting(node):
         computed.append(node)
         return real(node)
 
-    setattr(_coverage_scopes, delegate, counting)
+    _coverage_scopes._bound_names_of = counting
     try:
         _coverage_guard._ModuleFacts(tree)
     finally:
-        setattr(_coverage_scopes, delegate, real)
+        _coverage_scopes._bound_names_of = real
     assert len(computed) == walked, (len(computed), walked)
+
+
+def test_the_census_answers_with_the_names_a_node_binds(tmp):
+    """A census is an answer, not a count.
+
+    Counting how often the compute ran is satisfied by a census that runs
+    it once per node and returns the right NUMBER of wrong names, and by
+    one that returns none at all. The guard reads this for the names
+    themselves, so this asks for them, on nodes it constructs.
+    """
+    del tmp
+    module = ast.parse(
+        'import helpers as other\n'
+        'CONSTANT = 1\n'
+        'def go(launcher, *args, **options):\n'
+        '    return launcher\n')
+    imported, assignment, definition = module.body
+    assert isinstance(imported, ast.Import), imported
+    assert isinstance(assignment, ast.Assign), assignment
+    assert isinstance(definition, ast.FunctionDef), definition
+    returned = definition.body[0]
+    assert isinstance(returned, ast.Return), returned
+    arguments = definition.args
+    answers = {}
+    for label, node, want in (
+            ('store name', assignment.targets[0], {'CONSTANT'}),
+            ('load name', returned.value, set()),
+            ('constant', assignment.value, set()),
+            ('assign', assignment, set()),
+            ('definition', definition, {'go'}),
+            ('argument', arguments.args[0], {'launcher'}),
+            ('vararg', arguments.vararg, {'args'}),
+            ('kwarg', arguments.kwarg, {'options'}),
+            ('import', imported, {'other'}),
+            ('alias', imported.names[0], set()),
+    ):
+        answers[label] = (_coverage_scopes._bound_names(node), want)
+    wrong = {label: got for label, (got, want) in answers.items()
+             if got != frozenset(want)}
+    assert not wrong, wrong
 
 
 def test_the_bound_name_census_is_released_as_each_analysis_ends(tmp):
