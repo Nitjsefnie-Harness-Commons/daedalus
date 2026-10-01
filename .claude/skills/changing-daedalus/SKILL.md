@@ -345,122 +345,11 @@ draft head is that working, not damage.
 
 ## Watching a pull request
 
-This skill ships the tooling: `watch_all.py`, beside this file, with
-`ci_watch.py` and `pr_comment_watch.py` as its children.
-
-```
-python3 -u .claude/skills/changing-daedalus/watch_all.py <pr-number> <branch>
-```
-
-**Arm that one aggregator, never a backgrounded shell loop and never the two
-children separately.** Pushing early only buys something if the verdict is
-read, and the feedback arrives while you are working on something else. A
-shell `while true` poll never exits, so it never delivers anything.
-
-**Run it with `--once` before arming it, every time, and trial it against an
-open pull request with a live matrix.** A zero from a broken command and a
-zero from an empty surface are the same zero. A merged pull request is the
-trap that looks like the obvious target: its comment surface answers normally
-while the CI child dies with `Branch not found (HTTP 404)`, because the branch
-was deleted at merge - and that half-failure reads as a successful trial of
-both. An earlier hand-written watcher here used `gh api --slurp`, which this
-`gh` build does not support; every fetch failed to stderr, where a watcher
-keeps it silent, and it would have sat quiet forever.
-
-What the aggregator does, and why each part is load-bearing:
-
-- **It batches** until neither child has emitted for a minute. A twelve-cell
-  matrix finishing over two minutes is one thing happening, not twelve, and a
-  watcher turns every line into its own interruption. `ci_watch.py` runs with
-  `--debounce 0` underneath so the batching happens once rather than twice.
-- **A success-only batch is held longer**, because a filling matrix goes quiet
-  between cells and every partial tally is superseded by the next. A batch
-  holding nothing but settled, actionless conclusions waits until something
-  worth reading lands or until every workflow run on that head has
-  concluded. An
-  unanswerable workflow-runs query keeps it holding rather than flushing: a
-  failed query must never look like a settled matrix.
-- **The hold is bounded** by `--max-hold` (default 600s). A push supersedes the
-  SHA a batch names, and that SHA's runs may then never all reach `completed` -
-  so without the cap a batch held across a force-push waits forever on a matrix
-  nobody will finish, which is silence indistinguishable from a clean run. A
-  cap rather than head-movement detection, because it also covers a deleted
-  branch and a query that starts failing permanently. A batch the cap
-  releases is announced as partial in the emission itself: a line naming the
-  SHA and that runs on it are still open or unknown follows the tally.
-- **It condenses**, because a watcher truncates a long event and a settled
-  matrix runs past 70 lines - which is how a failure hides. Every non-success
-  conclusion is named in full with its URL, successes and superseded runs
-  collapse to a tally, comment bodies clip. Nothing is lost: each batch is
-  appended untruncated to a log the emission names, and that log is keyed per
-  pull request and branch rather than one fixed filename, so concurrent runs
-  cannot interleave inside a single batch.
-
-Both children read everything they watch in ONE `gh api graphql` query per
-poll - the comment watcher's state, reviews, inline comments and conversation
-in one; the CI watcher's head ref and its check runs in one - with
-`Cache-Control: no-cache` and every connection followed to its last page.
-An unchanged pull request therefore costs two requests a poll rather than
-six, and the account's primary limit survives several watchers at once. They
-never consult read/unread state, announce items that already existed when
-armed, keep stderr off the event channel, and escalate consecutive poll
-failures to it - because a watcher that has gone blind must not look like a
-quiet pull request. CI announces success and failure alike, and re-resolves
-the branch head every poll since a push moves it.
-
-**A rate-limit refusal is a wait, not a failure.** An answer IS a refusal
-when it DID NOT DELIVER - `gh` exited 0, and the body is a JSON object
-with a non-null `data` - and carries evidence; or when it delivered and
-its own `errors[]` entry is the report. Evidence is a `Retry-After`; an
-`X-RateLimit-Reset` beside a spent `X-Ratelimit-Remaining`; a reset on a
-403 or 429; a GraphQL `errors[]` entry naming a rate limit in its `type`
-or its `code`; the answer's own text; or what `gh` wrote to stderr. It is
-NEVER the status and NEVER the exit code alone: a throttled query answers
-**200** and exits **1**, so a reader that waits on either of those never
-reaches the evidence.
-
-Which carrier is read is decided by who owns the words. An `errors[]`
-entry's `type` and `code` are the server's own labels, which no caller
-can write into, so that carrier is read on a delivered answer too - and
-that is what catches a rate limit nested under a partial `data`, which
-`data is not null` would otherwise read as a success. The header, the
-body's text and the complaint are read only on an answer that did NOT
-deliver, because a caller's own field, or a coincidence, spells the same
-two words: before that gate existed a 200 that SUCCEEDED, with a `gh`
-warning merely mentioning a limit, was answered with a flat minute's
-pause. The body's text is further scoped to a status the API throttles
-with at all, so a 404 whose message happens to mention a limit is a
-failure and not a wait.
-
-Each watcher then says once where it is waiting - the instant the API
-reported, or a minute when it reported none - and resumes there rather
-than retrying every interval, which is what used to keep the limit at
-zero after it was reached. A 403 with no rate-limit evidence is an
-ordinary failure and is never a pause.
-
-**The children cannot outlive the aggregator.** `watch_all.py` gives each
-child the read end of a pipe and keeps the only write end itself: this
-process dying is end of file, and the child exits on it. That is the whole
-guarantee, on every platform - a parent pid is re-parented on POSIX and is
-the historical creator on Windows, so a pid check protects a child on one
-platform and not the other, and a kill runs no `finally`, so the teardown
-only makes a graceful exit immediate. A restart of the aggregator can
-therefore never leave the old pair polling beside the new one.
-
-**The hold reads the gating workflow, through the same predicate
-`ci_wait.py` refuses with** (`ci_gate.py`, imported by both - one
-mechanism, not one name over two). A pull-request head that conflicts with
-its base dispatches no `pull_request` workflow, so the `tests` matrix is
-never created while `gate freshness` and CodeQL run and conclude; the hold
-used to release that batch, reading exactly like a settled green matrix
-with the gating matrix silently absent from the tally (issue #1223). It now
-treats an absent gating workflow as its own answer - keep holding, and if
-`--max-hold` releases the batch anyway, name the workflow that is missing
-rather than "unknown", which is the shape #839 was filed about. A *red*
-`tests` run is present, and settles the matrix as a completed failure
-always did. The hold asks about the WORKFLOW only, and the published
-check-run beside it is `ci_wait.py`'s own question - the reasoning is
-recorded under that tool's exit codes below, so it is stated once.
+A watcher used to be shipped here: `watch_all.py`, with `ci_watch.py` and
+`pr_comment_watch.py` as its children. None of the three is repository content
+any more - a checkout carries no copy - and the prose describing how the
+aggregator batched, held and condensed its children's output is cut with it.
+What follows is the tooling that is still shipped.
 
 Waiting on one commit's CI is `ci_wait.py`, beside this file:
 
@@ -532,15 +421,8 @@ direction rule that says which of them an invocation is held to** - the
 required-workflow set, the published-check set, and the note a refusal
 carries all live beside each other so they cannot drift apart, and
 `ci_wait.py` reaches each through that module rather than keeping a copy.
-`watch_all.py`'s hold deliberately does NOT take this read, and the
-judgement is worth stating rather than leaving silent: its CI child
-(`ci_watch.py`) reads the head's `statusCheckRollup` contexts, which ARE
-check runs, so it already announces a red published verdict as a
-non-success conclusion under the batch's own name; and the publisher writes
-onto open pull-request heads only, which are the only heads that watcher
-runs against, so once the publisher's own run has concluded the verdict is
-either there or never coming. The predicate is shared anyway so a second
-reader has one place to reach for.
+The predicate is shared anyway so a second reader has one place to reach
+for.
 
 `--required NAME` states a workflow gate, and it does not reach the
 published one: `gate freshness` is a name THIS repository's publisher
@@ -598,10 +480,9 @@ the failure it discarded is a green nobody can audit, and an intermittent
 failure on the very merge ref that cleared it is exactly the thing a caller
 reading only the exit code cannot see.
 
-Unlike `ci_watch.py` it
-PINS the SHA it is given instead of re-resolving the branch head each poll:
-a push landing mid-wait must not turn the answer into one about a commit the
-caller never asked about. Zero runs on the SHA is waiting, not success. Run
+It PINS the SHA it is given instead of re-resolving the branch head each
+poll: a push landing mid-wait must not turn the answer into one about a commit
+the caller never asked about. Zero runs on the SHA is waiting, not success. Run
 `--once` before a long wait - it prints `state: incomplete` for a head whose
 gate is not dispatched yet, and still exits 0, because a trial call is not a
 verdict.

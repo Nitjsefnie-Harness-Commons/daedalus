@@ -2,26 +2,25 @@
 
 Two waiters read the same run list and have to answer the same question of
 it: was the workflow that gates the merge dispatched on this commit at all?
-`ci_wait.py` refuses with exit 4 when it was not (issue #1217), and
-`watch_all.py` keeps its hold rather than releasing a batch whose gating
+`ci_wait.py` refuses with exit 4 when it was not (issue #1217), and a
+watcher once kept its hold rather than releasing a batch whose gating
 matrix was never created (issue #1223). Two copies of the expectation would
 be two mechanisms wearing one name, so the expectation, the predicate, the
 set the predicate is asked of and the answer an absent gate gets live here.
-Each caller reaches what it uses through this module, and neither reaches
-all four: `ci_wait` binds the expectation and the filter and calls the
-predicate, the hold calls the predicate and names the answer.
+Each caller reaches what it uses through this module, and `ci_wait` binds
+the expectation and the filter and calls the predicate.
 
-They are meant to AGREE, and until issue #1262 they did not: `ci_wait` asked
-the question of the set the newest-run-per-workflow filter left, and
-`watch_all` asked it of the set it was handed. The two readings coincide only
-while every run of a workflow carries the same `name`, which the producer
-guarantees today and a `name:` edit in the workflow's own YAML ends. The
-filter therefore lives here and `missing_required` applies it itself, so a
-caller passing the raw list and a caller passing the filtered list get one
-answer; the reading that survives is the one issue #1249 established for
-conclusions - a superseded run's name does not satisfy the gate on its own.
-The nearest precedent is #1223, where the hold read a settled green matrix
-with the gating workflow silently absent.
+They are meant to AGREE, and until issue #1262 they did not: one asked the
+question of the set the newest-run-per-workflow filter left, and one of the
+set it was handed. The two readings coincide only while every run of a
+workflow carries the same `name`, which the producer guarantees today and a
+`name:` edit in the workflow's own YAML ends. The filter therefore lives
+here and `missing_required` applies it itself, so a caller passing the raw
+list and a caller passing the filtered list get one answer; the reading
+that survives is the one issue #1249 established for conclusions - a
+superseded run's name does not satisfy the gate on its own. The nearest
+precedent is #1223, where a hold read a settled green matrix with the gating
+workflow silently absent.
 
 It is a module of its own for a third reason: the callers sit near the
 500-line production ceiling the size policy enforces, and an expectation
@@ -33,10 +32,10 @@ different workflows, and treating either as the gate would reinstate the
 false green this exists to remove. A conclusion is irrelevant to the
 predicate: both callers judge conclusions against rules of their own, and a
 required workflow that is present and red is a failure, not an absence.
-Those rules are the two callers' alone, and they do not agree. Both ask the
+Those rules are the callers' alone, and they do not agree. Both ask the
 gate question of the set below; the wait judges the conclusion question over
-that set, while the hold judges it over the raw runs - which is what
-`watch_all.py`'s own docstring says is deliberately not shared.
+that set, while the hold judged it over the raw runs - deliberately not
+shared.
 
 A PUBLISHED CHECK-RUN is a gate that is not a workflow run, and this
 repository has one. The `gate freshness` workflow's own run concludes
@@ -59,14 +58,8 @@ this repository's gates and is only GUESSING about another's, so a named
 gate may only make it STRICTER here and only REPLACE the set there, and a
 name it invented is required nowhere at all.
 
-`watch_all.py`'s hold deliberately does NOT take this read, and the
-judgement belongs here rather than in the silence: the watcher's CI child
-reads the head's `statusCheckRollup` contexts, which ARE check runs, so it
-already announces a red published verdict as a non-success conclusion under
-the batch's own name; and the publisher writes onto open pull-request heads
-only, which are the only heads that watcher runs against, so once the
-publisher's own run has concluded the verdict is there or never coming. The
-predicate is shared anyway so a second reader finds one definition.
+The predicate is shared rather than copied, so a second reader finds one
+definition.
 """
 
 from datetime import datetime, timezone
@@ -247,10 +240,12 @@ class GateAbsent:
     falling back on "unknown" - the shape issue #839 was filed about.
 
     What constructs it, exactly: `missing_required` above answers with the
-    missing NAMES, and `watch_all._settled` turns those names into this
-    value. Nothing here raises it, and `ci_wait.py` never names it. One
-    caller builds it and the other recognises it by `isinstance` - so it is
-    named here and imported, not re-declared beside its recogniser.
+    missing NAMES, and a caller turned those names into this value. No
+    caller in this tree does so any more, and nothing here raises it, so
+    the class is carried with no builder; `ci_wait.py` never names it.
+    Removing it is a code change and this branch changes comments and
+    docstrings here only, so the honest state is recorded rather than
+    fixed.
     """
 
     def __init__(self, missing):
