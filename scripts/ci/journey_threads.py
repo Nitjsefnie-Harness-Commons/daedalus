@@ -48,6 +48,13 @@ REQUEST = 'request'
 MAIN = 'main'
 ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 
+# The bands as data, because they are part of what a recorded count MEANS and
+# not only how this run reads a profile: a run that moves one of them changes
+# which thread a count excluded, so the artefact records them and a run
+# whose bands differ from the recorded ones compares nothing. MAIN is absent
+# because it is read from a thread's POSITION, not from a size.
+BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
+
 # What each journey stops counting, per journey, and why. The two non-MCP
 # journeys exercise the bridge's HTTP surface and nothing of the front end's
 # event loop, so the loop's idle tick is not their work. `mcp-exec` calls
@@ -79,13 +86,17 @@ def read(directory, prefix):
         thread = THREAD.search(text)
         pid = PID.search(text)
         cmd = CMD.search(text)
-        if pid is None or cmd is None:
-            missing = 'pid' if pid is None else 'cmd'
+        # All three or none. A `thread:` that reads as absent must not fall
+        # back to 1: 1 is MAIN, and MAIN is never excluded, so a defaulted
+        # thread is a thread this gate would keep without ever having said so.
+        if pid is None or cmd is None or thread is None:
+            missing = ('pid' if pid is None else
+                       'cmd' if cmd is None else 'thread')
             return rows, (
                 f'{path.name} carries a summary but no {missing}: line, so '
                 'this profile is not one this gate can read')
         rows.append({'pid': int(pid.group(1)),
-                     'thread': int(thread.group(1)) if thread else 1,
+                     'thread': int(thread.group(1)),
                      'ir': int(found.group(1)),
                      'cmd': cmd.group(1).strip()})
     return rows, None

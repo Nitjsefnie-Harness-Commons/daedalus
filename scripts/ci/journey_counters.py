@@ -27,7 +27,6 @@ import statistics
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 # The thread module sits beside this one and is imported by its own
@@ -65,7 +64,6 @@ GATE_CANDIDATES = ('perf-instructions', 'valgrind-callgrind')
 STARTUP_NAME = 'startup-only'
 
 _PARANOID = '/proc/sys/kernel/perf_event_paranoid'
-_CALLGRIND_TOTAL = re.compile(r'^(?:summary|totals):\s+(\d+)\s*$', re.M)
 # perf's machine rendering under `-x,`, and the default rendering the probe
 # reads. Both are produced, so both are read.
 _PERF_COUNT = re.compile(r'^(\d+),[^,]*,instructions')
@@ -156,12 +154,9 @@ def facts():
         'perf_event_paranoid': _paranoid(),
         'perf_path': shutil.which('perf'),
         'valgrind_path': shutil.which('valgrind'),
-        'callgrind_control_path': shutil.which('callgrind_control'),
         'strace_path': shutil.which('strace'),
     }
     if found['perf_path']:
-        _code, out, err = _run([found['perf_path'], '--version'])
-        found['perf_version'] = (out + err).strip() or None
         code, _out, err = _run([found['perf_path'], 'stat', '-e',
                                 'instructions:u', '--', 'true'])
         found['perf_stat'] = {
@@ -177,14 +172,6 @@ def facts():
         found['valgrind_version'] = out.strip() or None
     else:
         found['valgrind_version'] = None
-    if found['callgrind_control_path']:
-        code, out, err = _run(
-            [found['callgrind_control_path'], '--version'])
-        found['callgrind_control_version'] = (out + err).strip() or None
-        found['callgrind_control_usable'] = code == 0
-    else:
-        found['callgrind_control_version'] = None
-        found['callgrind_control_usable'] = False
     if found['strace_path']:
         code, _out, _err = _run([found['strace_path'], '-c', '-f', '-o',
                                  os.devnull, 'true'])
@@ -315,7 +302,14 @@ def _perf(name, root, workdir):
     code, _out, err = _run(argv)
     if code != 0:
         return None, {'returncode': code, 'stderr': err.strip()[-400:]}
-    return _perf_instruction_count(err), None
+    counted = _perf_instruction_count(err)
+    # A None with no reason is the one shape that used to reach `_row` and
+    # raise `TypeError` on `None - None`, which is an abort rather than the
+    # unavailability this module promises every counter reports as.
+    if counted is None:
+        return None, {'returncode': code,
+                      'stderr': 'perf printed no instruction count'}
+    return counted, None
 
 
 def _syscalls(name, root, workdir):
@@ -329,7 +323,11 @@ def _syscalls(name, root, workdir):
         text = summary.read_text(encoding='utf-8', errors='replace')
     except OSError as failure:
         return None, {'returncode': code, 'stderr': str(failure)}
-    return _strace_call_total(text), None
+    total = _strace_call_total(text)
+    if total is None:
+        return None, {'returncode': code,
+                      'stderr': 'strace wrote no summary to read a total from'}
+    return total, None
 
 
 # `childed` is whether the counter counts a separate process at all. Only a
@@ -369,15 +367,11 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
             # per journey would buy nothing.
             startup, why = run(STARTUP_NAME, root, workdir)
             rows = {}
-            seconds = {}
             if why is None:
                 for name in names:
                     counted = []
                     for _round in range(rounds):
-                        started = time.monotonic()
                         value, why = run(name, root, workdir)
-                        seconds[name] = seconds.get(name, 0.0) + (
-                            time.monotonic() - started)
                         if why is not None:
                             break
                         counted.append(value)
@@ -393,13 +387,12 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 'gated': counter in GATE_CANDIDATES,
                 'startup_only': startup if childed else None,
                 'journeys': {
-                    name: _row(rows[name], startup if childed else 0,
-                               round(seconds.get(name, 0.0), 1))
+                    name: _row(rows[name], startup if childed else 0)
                     for name in names}}
     return report
 
 
-def _row(raw_values, startup, seconds=None):
+def _row(raw_values, startup):
     """One journey's row: the raw total, the startup-net one, the spread.
 
     Both numbers are reported because only one of them is the budget: a
@@ -407,9 +400,6 @@ def _row(raw_values, startup, seconds=None):
     startup-only child already accounts for, and a ratchet on that number
     would go red on a dependency bump rather than on a change to the work.
 
-    `seconds` is accounting, never a gate. It is read off this run's own
-    clock so the cost of the measurement is a measured number rather than
-    anyone's recollection of it.
     """
     net = [value - startup for value in raw_values]
     return {'raw': raw_values,
@@ -417,8 +407,7 @@ def _row(raw_values, startup, seconds=None):
             'min': min(net) if net else None,
             'max': max(net) if net else None,
             'median': statistics.median(net) if net else None,
-            'spread': max(net) - min(net) if net else None,
-            'seconds': seconds}
+            'spread': max(net) - min(net) if net else None}
 
 
 def counts_of(report, counter):

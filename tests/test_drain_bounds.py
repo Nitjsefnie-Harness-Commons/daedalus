@@ -254,12 +254,11 @@ def drain(process):
 def test_the_real_cross_scope_shape_is_the_shared_kill_and_reap(tmp):
     """The kill-and-report sequence is one helper, and both callers use it.
 
-    The shape used to live in `_speedharness.py` and is now the shared
-    `tests/_processtree.py`, because the Node gate's launcher needs the same
-    thing and a second copy of it is the defect issue #1094 records. So
-    this reads the shape at its new home, asserts both callers call the one
-    helper rather than re-implementing it, and keeps the bounded reap and
-    the clean analysis it asserted before the move.
+    The shape lives in the shared `tests/_processtree.py`, because the Node
+    gate's launcher needs the same thing and a second copy of it is the
+    defect issue #1094 records. So this reads the shape at its home, asserts
+    both callers call the one helper rather than re-implementing it, and
+    keeps the bounded reap and the clean analysis.
 
     The kill itself sits in `kill_process_tree`, which takes a pid, because
     `tests/_outer_bound.py` ends a child it never launched and cannot reap
