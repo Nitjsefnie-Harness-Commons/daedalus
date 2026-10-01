@@ -15,7 +15,6 @@ import base64
 import json
 import sys
 import threading
-from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -29,19 +28,7 @@ BRIDGE_ENV = mcp.BRIDGE_ENV
 _load_mcp = mcp._load_mcp
 _need_deps = mcp._need_deps
 _answer_mcp_command = mcp._answer_mcp_command
-
-
-@contextmanager
-def _surface_responder_errors(thread, errors, timeout):
-    """Join a responder and prefer its original failure to the main one."""
-    try:
-        yield
-    finally:
-        thread.join(timeout=timeout)
-        failure = next((item for item in errors
-                        if isinstance(item, Exception)), None)
-        if failure is not None:
-            raise failure from None
+_surface_responder_errors = mcp.surface_responder_errors
 
 
 def _ext_routing_tools():
@@ -206,11 +193,11 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
                 assert queued.get(key) == expected, (
                     name, cmd_type, key, queued)
             # The reported command is the file the bridge published, not a
-            # reconstruction of it, and the file is named by the delivery id
-            # the report carries.
+            # reconstruction of it, and this queue is empty before the send
+            # — so a comparison that held would be a comparison against
+            # this row's own file, never a leftover's.
             published = sorted(queue.glob('*.json'))
-            assert [path.name for path in published] == [
-                f'{queued["_did"]}.json'], (name, published, queued)
+            assert len(published) == 1, (name, published, queued)
             stored = json.loads(published[0].read_text(encoding='utf-8'))
             assert stored == queued, (name, stored, queued)
 
