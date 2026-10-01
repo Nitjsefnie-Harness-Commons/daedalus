@@ -126,6 +126,8 @@ _ROWS = [
         'keys = ("tab",)', 'j, = keys', 'cmd = {j: 5}')),
     ('for-target-dictkey', 1, {'tab': 5}, _CALL, _inside(
         'for j in ("tab",): cmd = {j: 5}')),
+    ('loop-target-length-unchanged', 1, {'tab': 5}, _CALL, _inside(
+        'a = [0, 0]', 'for a[1], b in ((0, "tab"),):', '    cmd = {b: 5}')),
     ('for-target-block', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
      + '    for j in ("tab",):\n        cmd = {j: 5}\n' + _SPREAD),
     ('for-target-over-name', 1, {'tab': 5}, _CALL, _inside(
@@ -272,6 +274,45 @@ _ROWS = [
         'a = 5', 'for a[0], b in ((0, "tab"),):', '    cmd = {b: 5}')),
     # A folded literal has no `__aiter__`, so an `async for` over one
     # raises before the sender and binds nothing.
+    # What varies between bind and store is the base's LENGTH, and these
+    # are that class: every one of them shortens or empties a list the table
+    # still holds at its old size, so the index the proof checked is gone by
+    # the time the store runs. `loop-target-length-unchanged` is the other
+    # side of the same question — nothing varies, so the report stands.
+    ('mutate-del-subscript', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0, 0]', 'del a[0]', 'a[1], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('mutate-pop', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0, 0]', 'a.pop()', 'a[1], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('mutate-clear', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0, 0]', 'a.clear()', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('mutate-slice-assign', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0, 0]', 'a[0:2] = []', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('mutate-walrus-pop', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0, 0]', '(c := a.pop())', 'a[1], b = (1, "tab")',
+        'cmd = {b: 5}')),
+    ('mutate-loop-target', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0, 0]', 'a.pop()', 'for a[1], b in ((0, "tab"),):',
+        '    cmd = {b: 5}')),
+    # A store the model cannot prove ends the whole destructuring, so the
+    # names the parts BEFORE it are unbound too: the statement raises before
+    # it binds any of them.
+    ('store-part-after-name', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0]', 'x, a[5] = ("tab", 1)', 'cmd = {x: 5}')),
+    ('store-part-attr-after-name', 0, 'raises AttributeError', _CALL, _inside(
+        'a = 5', 'x, a.foo = ("tab", 1)', 'cmd = {x: 5}')),
+    # An index that folds but is not an integer, and one that folds to a
+    # bool, both refuse the store.
+    ('unpack-subscript-float-index', 0, _RAISES, _CALL, _inside(
+        'a = [0]', 'a[1.0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-subscript-bool-index', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0]', 'a[True], b = (1, "tab")', 'cmd = {b: 5}')),
+    # A dict accepts any hashable key, so a store through one is provable
+    # whether or not the key is already there, and a `*` part proves its own
+    # subscript the same way a plain one does.
+    ('unpack-subscript-dict-base', 1, {'tab': 5}, _CALL, _inside(
+        'a = {1: 2}', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-star-subscript-bound', 1, {'tab': 5}, _CALL, _inside(
+        'a = [[0], 0]', '*a[0], b = (1, "tab")', 'cmd = {b: 5}')),
     ('async-literal-iter', 0, _RAISES, _ASYNC_CALL, 'import asyncio\n'
      'async def f(args):\n' + _SENDER
      + '    async for j in ("tab",):\n        cmd = {j: 5}\n' + _SPREAD),
@@ -397,6 +438,13 @@ def test_a_delete_drops_the_literal_the_other_writer_drops(tmp):
                for label, (source, _) in forms.items()}
     assert spelled == {label: expected
                        for label, (_, expected) in forms.items()}, spelled
+    # Pointed at the AsyncDef rather than the Module, whose children
+    # `scope_nodes` never reaches: an `async for` over a folded literal has
+    # no `__aiter__`, so the loop body binds nothing and `cmd` has no key.
+    node = ast.parse('async def f():\n    cmd = {}\n'
+                     '    async for j in ("tab",):\n'
+                     '        cmd = {j: 5}\n').body[0]
+    assert dict_assignments(node).get('cmd') == {}
 
 
 def main():

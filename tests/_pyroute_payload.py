@@ -10,11 +10,12 @@ its ceiling.
 
 `_bind_literals` writes that table for both models, so the two read one
 program the same way. A name a form outside `_STORES` binds resolves to no
-key, and so does one a form it models without proving it; every arm below is
-pinned by a row that fails if the arm stops doing what it says.
+key, and so does one a form it models without proving it.
 """
 import ast
+from collections.abc import Hashable
 
+from _pyroute_invalidation import CONTAINER_MUTATORS
 from _pyroute_keys import _UNSAFE_LITERAL, _literal_value
 from _pyroute_state import apply_dict_statement, scope_nodes
 
@@ -76,14 +77,16 @@ def _bind_literals(node, literals):
     def proven_store(part):
         """Whether a store part provably succeeds, so the walk may pass it.
 
-        Proof is `name[index]` on a folded list at an in-range index, and each
-        clause has its own row: `unpack-subscript-int-base` and
-        `unpack-subscript-empty-tuple` for a base that is not a list,
-        `unpack-subscript-out-of-range` for the index,
-        `unpack-subscript-no-fold-index` for one that does not fold,
-        `unpack-attribute-part` for anything but a subscript. A base absent
-        here is unproven rather than unbound, since a name bound to anything
-        else never reaches this table.
+        Proof is `name[index]`, and what each kind of base makes of it has a
+        row: `unpack-subscript-int-base` and `unpack-subscript-empty-tuple`
+        for a base that is neither a list nor a dict,
+        `unpack-subscript-out-of-range` and `unpack-subscript-empty-list` for
+        an index a list refuses, `unpack-subscript-float-index` for one that
+        is not an integer, `unpack-subscript-bool-index` for one that is a
+        bool, and `unpack-attribute-part` for anything but a subscript. A
+        dict takes any hashable key, which `unpack-subscript-dict-base`
+        reports on; a base absent here is unproven rather than unbound,
+        because a name bound to anything else never reaches this table.
 
         An unproven part ends the walk, which costs a key the program may
         still spell: a fail-open, and what this guard already answers for a
@@ -96,47 +99,88 @@ def _bind_literals(node, literals):
         if not isinstance(base, ast.Name) \
                 or not isinstance(index, ast.Constant):
             return False
+        held = literals.get(base.id)
+        if isinstance(held, dict):
+            # A dict takes any hashable key, present or not.
+            return isinstance(index.value, Hashable)
         if not isinstance(index.value, int) or isinstance(index.value, bool):
             return False
-        held = literals.get(base.id)
-        return isinstance(held, list) and -len(held) <= index.value < len(held)
+        return isinstance(held, list) and 0 <= index.value < len(held)
 
     def unpacked(target, value):
-        """What each name an unpack target binds is bound to.
+        """What each name an unpack target binds is bound to, or None.
+
+        None is a target holding a store part the model cannot prove, and the
+        whole destructuring binds nothing: the statement raises on that store
+        before it binds any of its names, so a name a part before it took was
+        never bound either. That is what `store-part-after-name` and
+        `store-part-attr-after-name` hold clean.
 
         Each part takes one element, in the order the parts stand, so a part
         that is not a name takes none: a `*` part becomes a list, which no key
-        position names — `unpack-star-binds-list` — and a store part is
+        position names (`unpack-star-binds-list`), and a store part is
         evaluated where it stands. Only `proven_store` carries the walk past
-        one, so `unpack-subscript-base-bound` is the one subscript row that
-        reports; the parts before an unproven one keep what they took, which
-        `unpack-subscript-out-of-range` shows by reading clean.
+        one, and the two subscript rows that report,
+        `unpack-subscript-base-bound` and `unpack-subscript-midway-bound`, are
+        the ones whose store it carries.
         """
         if isinstance(target, ast.Name):
-            yield (target.id, value)
-            return
+            return [(target.id, value)]
         if not isinstance(target, (ast.Tuple, ast.List)) \
                 or not isinstance(value, (tuple, list)):
-            return
+            return []
+        bound = []
         for part, element in parts_of(target, value):
             if isinstance(part, ast.Name):
-                yield (part.id, element)
+                bound.append((part.id, element))
             elif isinstance(part, (ast.Tuple, ast.List)):
-                yield from unpacked(part, element)
+                nested = unpacked(part, element)
+                if nested is None:
+                    return None
+                bound.extend(nested)
             elif isinstance(part, ast.Starred):
                 if isinstance(part.value, ast.Name):
-                    yield (part.value.id, _UNSAFE_LITERAL)
-                else:
-                    return
+                    bound.append((part.value.id, _UNSAFE_LITERAL))
+                elif not proven_store(part.value):
+                    return None
             elif not proven_store(part):
-                return
+                return None
+        return bound
+
+    def drop_mutated_base(node):
+        """Forget the name a statement mutates a subscript of.
+
+        A folded list is a belief about a length, and `del a[0]`, `a.pop()`,
+        `a.clear()` and a slice assignment each change it. The table cannot
+        see the new length, so it forgets the name rather than vouch for an
+        index against a list that is no longer there — which is what the six
+        `mutate-` rows hold clean, and what `loop-target-length-unchanged`
+        shows the other side of.
+        """
+        for target in (node.targets if isinstance(node, (ast.Assign,
+                                                         ast.Delete))
+                       else [node.target] if isinstance(node, (ast.AnnAssign,
+                                                               ast.AugAssign))
+                       else []):
+            if isinstance(target, ast.Subscript) and isinstance(
+                    target.value, ast.Name):
+                literals.pop(target.value.id, None)
+        if isinstance(node, ast.Expr):
+            call = (node.value.value if isinstance(node.value, ast.NamedExpr)
+                    else node.value)
+            callee = call.func if isinstance(call, ast.Call) else None
+            if (isinstance(callee, ast.Attribute) and callee.attr
+                    in CONTAINER_MUTATORS
+                    and isinstance(callee.value, ast.Name)):
+                literals.pop(callee.value.id, None)
 
     def bind_targets(targets, value):
         for target in targets:
             if isinstance(target, ast.Name):
                 record(target.id, value)
                 continue
-            for name, literal in unpacked(target, value):
+            bound = unpacked(target, value)
+            for name, literal in bound or ():
                 record(name, literal)
 
     def bind_loop_target(loop):
@@ -168,7 +212,7 @@ def _bind_literals(node, literals):
             record(target.id, first if all(i == first for i in value)
                    else _UNSAFE_LITERAL)
             return
-        rounds = [dict(unpacked(target, item)) for item in value]
+        rounds = [dict(unpacked(target, item) or {}) for item in value]
         for name in target_names(target):
             taken = [round_.get(name, _UNSAFE_LITERAL) for round_ in rounds]
             record(name, taken[0] if all(item == taken[0]
@@ -209,6 +253,7 @@ def _bind_literals(node, literals):
                     and isinstance(child.target, ast.Name)):
                 record(child.target.id, _literal_value(child.value))
 
+    drop_mutated_base(node)
     if isinstance(node, (ast.Assign, ast.AnnAssign)):
         bind_targets(node.targets if isinstance(node, ast.Assign)
                      else [node.target], value_of(node.value))
