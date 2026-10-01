@@ -38,6 +38,7 @@ is read now: `_door_jobs` globs `*.yml` and `*.yaml`, so no workflow is
 one this file does not look at, and the bound on what the walk can see is
 stated in `tests/_suite_jobs.py` where it lives.
 """
+import email.message
 import hashlib
 import os
 import re
@@ -465,8 +466,14 @@ def _installer_and_transfer(outcomes):
 
 
 def _http_error(code, phrase):
+    """A status answer as urllib raises one.
+
+    The headers are an empty `email.message.Message` because that is what
+    `HTTPError` declares, not a dict that happens to be accepted.
+    """
     return urllib.error.HTTPError(
-        'https://example.invalid/asset', code, phrase, {}, None)
+        'https://example.invalid/asset', code, phrase, email.message.Message(),
+        None)
 
 
 def test_a_transient_transfer_failure_is_retried_and_the_next_attempt_serves(
@@ -536,12 +543,12 @@ def test_a_digest_mismatch_is_refused_on_the_transfer_it_fetched(tmp):
         raised = None
         try:
             installer.install_actionlint()
-        except BaseException as why:  # noqa: BLE001 - the refusal is the test
+        except SystemExit as why:
             raised = why
-    assert isinstance(raised, SystemExit), (
-        f'installing an asset whose digest is not the pinned one ended as '
-        f'{type(raised).__name__}: {raised}; the refusal is a SystemExit, '
-        'which is what keeps it out of the retried set')
+    assert raised is not None, (
+        'installing an asset whose digest is not the pinned one installed it; '
+        'the refusal is a SystemExit, which is what keeps it out of the '
+        'retried set')
     assert len(transfer.calls) == 1, (
         f'a refused digest was asked for {len(transfer.calls)} times; it is '
         'a verdict on the bytes served, and asking again serves the same ones')
@@ -564,11 +571,10 @@ def test_an_oversize_payload_is_refused_after_one_call(tmp):
         raised = None
         try:
             installer._fetch(installer._asset_name()[0])
-        except BaseException as why:  # noqa: BLE001 - the refusal is the test
+        except SystemExit as why:
             raised = why
-    assert isinstance(raised, SystemExit), (
-        f'a payload one byte over MAX_TRANSFER ended as '
-        f'{type(raised).__name__}: {raised}')
+    assert raised is not None, (
+        'a payload one byte over MAX_TRANSFER installed without a refusal')
     assert len(transfer.calls) == 1, (
         f'the oversize payload was asked for {len(transfer.calls)} times; a '
         'verdict on the bytes served is not a transfer worth asking again')
@@ -590,10 +596,11 @@ def test_a_4xx_is_asked_once_and_propagates(tmp):
         raised = None
         try:
             installer._fetch(name)
-        except BaseException as why:  # noqa: BLE001 - the exit is the subject
+        except urllib.error.HTTPError as why:
             raised = why
-    assert isinstance(raised, urllib.error.HTTPError), (
-        f'a 404 ended as {type(raised).__name__}: {raised}')
+    assert raised is not None, (
+        'a 404 was not raised as an HTTPError, so the status answer is not '
+        'what came out of the transfer')
     assert raised.code == 404, raised.code
     assert len(transfer.calls) == 1, (
         f'a 404 was asked for {len(transfer.calls)} times; the asset is not '
