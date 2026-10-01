@@ -256,7 +256,8 @@ def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
     record = found[0].groupdict()
     assert record['name'] == 'test_staller.py', record
     assert record['bound'] == str(float(_OVERRUN_BOUND_S)), record
-    assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
+    assert 'test_staller.py' in _failed_suites(result.stdout), (
+        result.stdout, result.stderr)
     assert '=== test_passer.py ===' in result.stdout, result.stdout
 
 

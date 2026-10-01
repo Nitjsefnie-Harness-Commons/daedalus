@@ -166,9 +166,9 @@ def main() -> int:
                 f'{suite.name} ({summary["skipped"]} skipped'
                 + (f', needs {summary["requires"]}'
                    if summary["requires"] else '') + ')')
-    print()
+    print(flush=True)
     if failed:
-        print("FAILED: " + ", ".join(failed))
+        print("FAILED: " + ", ".join(failed), flush=True)
         return 1
     counts = f"{len(suites)} suites, {passed} passed, {skipped} skipped"
     if unrun:
