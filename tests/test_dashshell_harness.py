@@ -235,6 +235,27 @@ report({ seen, observed: io.observed.length, unmodelled,
 """
 
 
+# One element a scenario placed and one it did not: the first answers,
+# the second refuses with its own id. The refusal has to name the
+# element, because an unnamed one leaves the scenario author with
+# nothing to place.
+_LAYOUT = r"""
+(async () => {
+const placed = new El('section');
+placed.id = 'placed';
+placed.rect = { top: 12 };
+const bare = new El('section');
+bare.id = 'bare';
+const read = placed.getBoundingClientRect();
+let refusal = null;
+try {
+  bare.getBoundingClientRect();
+} catch (error) { refusal = error.message; }
+report({ read, refusal });
+})().catch(leave);
+"""
+
+
 _LIVE_TREE = r"""
 (async () => {
 const util = await bounded(load('sections/_util.js'), 'util import',
@@ -547,6 +568,19 @@ def test_the_observer_refuses_an_unmodelled_member(_tmp):
     assert report['unmodelled'] is not None, report
     assert 'not modelled: unobserveAll' in report['unmodelled'], report
     assert report['margin'] == '-80px 0px -60% 0px', report
+
+
+def test_an_unplaced_element_refuses_its_layout_by_name(_tmp):
+    """`El.getBoundingClientRect` answering a zero rect for an element
+    nobody placed would make every selection over geometry agree with
+    anything, and no suite would say so: the scenario that reads
+    geometry places its own elements first, so a zero never surfaces.
+    The refusal names the element, and the placed element still answers
+    -- a double that refused everything would satisfy this too."""
+    report = run_scenario(_LAYOUT)
+    assert report['read'] == {'top': 12}, report
+    assert report['refusal'] is not None, report
+    assert 'does not model layout on: bare' in report['refusal'], report
 
 
 def test_queries_walk_the_live_tree(_tmp):
