@@ -6,8 +6,8 @@ refusal assertion is what `test_helper_assertion_pins.py` drives it with:
 that suite pins every assertion a shared helper makes on its callers'
 behalf, so the case there needs a real composition the scan refuses for a
 real reason, not a stub of the call. The tree writer it shares carries
-that case and the closure limits in `test_mcp_guard_floor.py`, so a change
-to how a fixture is built cannot reach one and miss the other.
+that case and the closure limits in `test_mcp_tools.py`, so a change to how
+a fixture is built cannot reach one and miss the other.
 
 The refusal assertion is named for the assertion it makes rather than for
 what it generically is, because other test modules already bind that
