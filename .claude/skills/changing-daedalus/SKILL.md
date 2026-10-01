@@ -93,9 +93,11 @@ reveals neither.
 **Restore the way `plant.py` does, never with the VCS.** Run
 `python3 .claude/skills/changing-daedalus/plant.py save FILE` before you
 revert the fix and `plant.py restore FILE` after. The restore republishes
-the stored bytes in one atomic step and exits nonzero on a store it cannot read
-or a target it cannot write, so its exit status answers the question you
-would otherwise have to remember to ask. It also names the state the stored
+the stored bytes in one atomic step and exits nonzero on a store it cannot
+read, a target it cannot write, a recorded mode it could not apply, or an entry
+it could not remove - so a nonzero exit says the restore is not fully complete,
+not that the file was left unrestored: the bytes are already published before
+the last two of those can fail. It also names the state the stored
 copy was captured in - `clean`, `dirty` or `unknown` - and whether the file
 already held exactly those bytes, changed them, or could not be compared because
 it could not be read, so the check that the restore did something is the tool's
