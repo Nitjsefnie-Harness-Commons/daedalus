@@ -22,7 +22,14 @@
 # really did move past the commit this run measured, the next push retries and
 # there is nothing wrong here; if it did not, the push failed for some other
 # reason — a revoked key, a ruleset refusal, a hook — and the job says so.
-set -u
+set -euo pipefail
+# `errexit` is not this script's own choice and not optional. The inline
+# `run:` block this replaced ran under Actions' default `bash -e`, so a
+# failing `git add`, `git commit` or `git fetch` aborted the step red. Only
+# `git push` is handled below, so without it every other failure is
+# swallowed: a fetch that cannot read main compares an empty FETCH_HEAD
+# against HEAD^, concludes that main had moved, and exits 0 on a required
+# context.
 
 path=${1:?usage: ratchet_push.sh <path> <commit message>}
 message=${2:?usage: ratchet_push.sh <path> <commit message>}

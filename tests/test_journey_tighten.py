@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -197,9 +198,11 @@ def test_the_tighten_guard_refuses_each_of_its_limbs_in_turn(tmp):
     _, tighten = _tighten_step()
     guard = tighten['if']
     # The context is built from the step ids the guard itself names, so this
-    # control and the one below read one source of truth: a guard repointed
-    # at another real step is answered here rather than dying as a missing
-    # context path.
+    # control and the one below read one source of truth rather than one
+    # inventing a second copy of the id. WHICH step that is must be pinned
+    # too, and `test_the_tighten_guard_reads_the_step_that_failed_on_a_rise`
+    # does that: a context derived from the guard is only as honest as the
+    # guard, and deriving it is not a reason to stop checking it.
     steps = {name: {'conclusion': 'success'}
              for name in _guard_step_names(guard)}
     green = {'github': {'event_name': 'push', 'ref': 'refs/heads/main'},
@@ -230,28 +233,37 @@ def test_the_tighten_guard_refuses_each_of_its_limbs_in_turn(tmp):
             f'{guard}')
 
 
-def test_the_tighten_guard_reads_a_step_the_job_actually_declares(tmp):
-    """`steps.check.conclusion` must name a real step, or the guard is a
-    lookup that always resolves empty.
+def test_the_tighten_guard_reads_the_step_that_failed_on_a_rise(tmp):
+    """WHICH step the guard names, not merely that what it names exists.
 
-    A guard naming an id no step declares is not a weakened guard, it is a
-    step that never runs on any push — the feature is dead and nothing says
-    so, because the guard itself still reads correctly.
+    Two failures here look the same to every other control. A guard naming
+    an id no step declares resolves to empty and the step never runs at all.
+    A guard naming a step that DOES run but does not fail on a rise — the
+    one that counts instructions, say — resolves fine, passes on a run that
+    found a regression, and commits a tightened budget over it. That is the
+    defect the guard exists to prevent, so the id is pinned to the step that
+    runs the budget check, and that step's own name is pinned to the one
+    that says so.
     """
     del tmp
     job, tighten = _tighten_step()
     declared = {step['id']: step for step in job['steps'] if step.get('id')}
-    # Every step the guard reads, read back off the guard rather than off a
-    # literal list beside it: a step id added there tomorrow is covered
-    # today.
     named = set(_guard_step_names(tighten['if']))
     assert named, f'the guard reads no step at all: {tighten["if"]}'
     assert not sorted(named - set(declared)), (
         f'the guard reads steps the job does not declare, so it resolves to '
         f'empty and the step never runs: {sorted(named - set(declared))} vs '
         f'{sorted(declared)}')
+    assert named == {'check'}, (
+        'the tighten guard does not read the outcome of the step that checks '
+        'the journeys against the budget, so it runs whatever those journeys '
+        f'did: it reads {sorted(named)} against {sorted(declared)}')
     assert declared['check']['name'] == (
         'Check the journeys against the budget'), declared['check']
+    assert '--measurements' in declared['check']['run'] and (
+        '--tighten' not in declared['check']['run']), (
+        'the step the guard waits on no longer runs the budget check itself, '
+        f'so waiting on it means nothing: {declared["check"]["run"]}')
 
 
 def test_every_step_the_job_reads_is_a_step_the_job_declares(tmp):
@@ -325,7 +337,17 @@ def test_a_journey_recorded_at_null_still_renders_a_row(tmp):
 PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.sh'
 
 
-def _push_repo(base):
+def _summary_text(summary):
+    """What the step summary says, or '' when nothing wrote one.
+
+    An absent summary is not an error here: several correct paths write
+    nothing, and "no Main moved line" is exactly what those paths should
+    leave behind.
+    """
+    return summary.read_text(encoding='utf-8') if summary.exists() else ''
+
+
+def _push_repo(base, remote_at=None):
     """A working checkout with one commit, and a bare repo standing in for
     github.
 
@@ -333,6 +355,11 @@ def _push_repo(base):
     `url.<base>.insteadOf` maps it onto the bare repo. Nothing else is
     stubbed: `push` and `fetch` are the real git against a real repository,
     and the script's reads of HEAD^ and FETCH_HEAD are the repository's.
+
+    `remote_at` points the mapping somewhere else — at a path that is not a
+    repository, which is what an unreachable host looks like to git. Both the
+    push and the fetch then fail against a remote that cannot answer, which
+    is the transient failure the recovery branch must not read as movement.
     """
     work, bare = Path(base) / 'work', Path(base) / 'bare.git'
     bare.mkdir(parents=True)
@@ -347,23 +374,37 @@ def _push_repo(base):
     _git(work, 'add', 'ratcheted.json')
     _git(work, 'commit', '--quiet', '-m', 'base')
     _git(work, 'push', '--quiet', 'origin', 'main')
+    if remote_at:
+        # Re-point AFTER the setup push, so the checkout has a real history
+        # on the bare repo and only the script's own push and fetch find a
+        # remote that cannot answer.
+        _git(work, 'config', f'url.{remote_at}.insteadOf',
+             'git@github.com:o/r.git')
+        _git(work, 'config', '--unset', f'url.{bare}.insteadOf')
     return work, bare
 
 
-def _drive_push(work, refuse):
+def _drive_push(work, refuse, change=True):
     """Run the real script over the prepared checkout.
 
     `refuse` installs a pre-receive hook that rejects everything, which is
     what a revoked key or a ruleset refusal looks like from the pushing side:
     the push fails and main does not move. Without it the push is real, and
     whether it is rejected is then decided by whether main has moved.
+
+    `change` is what gets committed. Leaving it False stages nothing, so
+    `git commit` has nothing to commit and fails — the route where the
+    recorded file was already committed by an earlier step.
     """
     if refuse:
         hook = work.parent / 'bare.git' / 'hooks' / 'pre-receive'
         hook.write_text('#!/bin/sh\nexit 1\n', encoding='utf-8')
         hook.chmod(0o755)
-    (work / 'ratcheted.json').write_text('{"n": 1}\n', encoding='utf-8')
-    _git(work, 'commit', '--quiet', '-am', 'tightened')
+    # The change is left UNCOMMITTED: staging and committing it is the
+    # script's own work, and pre-committing here would leave the script
+    # with nothing to commit on every leg.
+    if change:
+        (work / 'ratcheted.json').write_text('{"n": 1}\n', encoding='utf-8')
     env = dict(os.environ,
                HOME=str(work.parent / 'home'),
                REPO='o/r',
@@ -419,17 +460,82 @@ def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
         f'the outcome the discrimination exists to avoid: '
         f'{outcome.stdout}{outcome.stderr}')
     assert 'stood still' not in outcome.stderr, outcome.stderr
-    assert 'Main moved while this run measured' in summary.read_text(
-        encoding='utf-8'), summary.read_text(encoding='utf-8')
+    assert 'Main moved while this run measured' in _summary_text(
+        summary), _summary_text(summary)
+
+
+def test_a_push_that_succeeds_says_nothing_about_main_moving(tmp):
+    """The third branch of the script: the one where the push works.
+
+    Without an early exit a successful push falls through to the recovery
+    path, the comparison there is false, and every run that pushed
+    successfully writes "Main moved while this run measured" into its
+    summary. The refusal legs cannot see it, because they never get that
+    far.
+    """
+    base = Path(tmp) / 'success'
+    work, _bare = _push_repo(base)
+    outcome, summary = _drive_push(work, refuse=False)
+    assert outcome.returncode == 0, outcome.stderr
+    said = _summary_text(summary)
+    assert 'Main moved' not in said, (
+        'a push that succeeded reported that main had moved under the run: '
+        f'{said}')
+    assert 'stood still' not in outcome.stderr, outcome.stderr
+
+
+def test_a_failed_fetch_aborts_rather_than_claiming_main_moved(tmp):
+    """A fetch that cannot read main is a failure, not evidence of movement.
+
+    This is the route the inline block this script replaced handled by
+    aborting red under the shell Actions runs a `run:` step with. Without
+    that, an unreadable `FETCH_HEAD` compares unequal to `HEAD^`, the
+    comparison is false, and the script concludes — in the summary, with
+    exit 0 — that main moved. On a required context that is a false green
+    dressed as the exact reassurance the discrimination exists to give.
+    """
+    base = Path(tmp) / 'unreadable-main'
+    # The remote cannot answer at all, so both the push and the fetch fail.
+    work, _bare = _push_repo(base, remote_at=str(base / 'no-such-remote'))
+    outcome, summary = _drive_push(work, refuse=False)
+    assert outcome.returncode != 0, (
+        'a fetch that could not read main still reported success, so a '
+        'transient network failure reads as main having moved: '
+        f'{outcome.stdout}{outcome.stderr}{_summary_text(summary)}')
+    assert 'Main moved' not in _summary_text(summary), (
+        'a fetch that could not read main was reported as main having moved: '
+        f'{_summary_text(summary)}')
+
+
+def test_a_commit_with_nothing_to_commit_aborts(tmp):
+    """A push recording nothing is a failure, not a green.
+
+    `git add` matches nothing when the file a previous step already
+    committed, or when it was renamed away. `git commit` then fails, and a
+    script that carries on pushes a no-op fast-forward and reports success
+    having written no ratchet commit at all.
+    """
+    base = Path(tmp) / 'nothing-to-commit'
+    work, bare = _push_repo(base)
+    before = subprocess.run(['git', '-C', str(bare), 'rev-parse', 'main'],
+                            capture_output=True, text=True, check=True)
+    outcome, summary = _drive_push(work, refuse=False, change=False)
+    assert outcome.returncode != 0, (
+        'a commit with nothing to commit reported success, so the job went '
+        f'green having recorded nothing: {outcome.stdout}{outcome.stderr}')
+    after = subprocess.run(['git', '-C', str(bare), 'rev-parse', 'main'],
+                           capture_output=True, text=True, check=True)
+    assert after.stdout == before.stdout, (
+        'the remote took a commit from a run that had nothing to record')
 
 
 def test_both_jobs_call_the_one_push_implementation(tmp):
     """One script, called with each job's own file and message.
 
     The drift this retires was two copies of a write credential. There is
-    now one, and the walk below reads every step in the two jobs that hold
-    the key rather than naming either, so a third holder is caught if it
-    lands where these two live.
+    now one. The walk names the two jobs that hold the key, so a third
+    holder elsewhere in the file is not covered by it — that is the limit of
+    this control, stated rather than implied.
     """
     del tmp
     source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -448,10 +554,10 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
                 f'the {step.get("name")!r} step holds the deploy key and does '
                 f'not call the shared script, so a second copy of the push '
                 f'is back: {body}')
-            assert body.split('ratchet_push.sh', 1)[1].strip().count(
-                "'") >= 2, (
+            call = body.split('ratchet_push.sh', 1)[1].strip()
+            assert len(shlex.split(call.replace('\n', ' '))) >= 2, (
                 'the push script takes the committed path and the commit '
-                f'message; the call does not supply both: {body}')
+                f'message; the call supplies fewer than two arguments: {body}')
             seen[name] = body
     assert sorted(seen) == ['coverage', 'journey-budget'], sorted(seen)
 
