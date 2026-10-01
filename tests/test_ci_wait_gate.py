@@ -12,8 +12,9 @@ is within forty lines of its 700-line ceiling, and scripts/ci/
 size_baseline.py's own remedy for a file over it is to relocate the code
 into a new module. The verdict cases that already existed stay there: this
 is the state they had to be able to reach. The head-pull-request controls
-went further out, to tests/test_gh_head_prs.py, when this file reached the
-ceiling itself; the same remedy, applied the second time.
+were relocated out of this file by the same remedy when it reached the
+ceiling, and the suite they went to is gone from the tree; the controls
+they carried live here now.
 """
 import contextlib
 import io

@@ -1,7 +1,7 @@
 """An executable double for `gh`, and the environment that puts it on PATH.
 
-The watchers shell out to `gh`, so a `gh` earlier on PATH is a complete seam:
-every watcher suite drives real watcher processes with no network in the loop.
+Its consumers shell out to `gh`, so a `gh` earlier on PATH is a complete
+seam: they drive real `gh` processes with no network in the loop.
 Each call is answered from a JSON fixture file and appended to a call log,
 which is what makes the request budget measurable - the log, not a claim, is
 the number.

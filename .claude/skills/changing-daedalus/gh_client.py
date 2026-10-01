@@ -27,8 +27,8 @@ truncated silently; one per job here. This file is AT the 500 ceiling,
 room made by cutting prose, which cannot be repeated. SEAM: transport,
 then the CI read (`checkSuites`, `ci_state` - the block branches keep
 changing), then process lifetime; moving the middle to a `gh_ci.py`
-lands the file near 400, NOT now: `test_watcher_budget.py`'s `_base_script`
-extracts ONE file per tree.
+lands the file near 400, NOT now: the tree harness measures these
+launchers by extracting ONE file per tree, so a split is measured twice.
 
 `DAEDALUS_GH` overrides the executable, which is how the suites put a fake
 `gh` in front of a watcher where a bare `gh` name does not resolve.

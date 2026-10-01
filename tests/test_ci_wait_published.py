@@ -640,9 +640,8 @@ def test_a_suite_carrying_no_check_runs_reads_as_none(tmp):
 
 
 def test_workflow_runs_is_the_first_answer_and_not_a_second_query(tmp):
-    """`watch_all.py` reads only the runs, and it must not pay for the
-    checks it does not ask about: the same answer, off the same one
-    request."""
+    """A reader that asks only for the runs must not pay for the checks it
+    does not ask about: the same answer, off the same one request."""
     client = _client()
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page(
         [suite(1, name='tests'), _verdict_suite()])})
