@@ -427,7 +427,6 @@
 !/tests/_owned_writes.py
 !/tests/_package_layout.py
 !/tests/_pip_cache.py
-!/tests/_plant_fixture.py
 !/tests/_processtree.py
 !/tests/_pyroute.py
 !/tests/_pyroute_containers.py
