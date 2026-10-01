@@ -25,7 +25,14 @@ def register(mcp, bridge):
         return body
 
     async def _send_eval(cmd_id: str, code: str, tab_id: str, wait: bool,
-                         timeout: float) -> dict | None:
+                         timeout: float) -> dict:
+        """Send an eval, answering its result when waited and the command the
+        bridge enqueued when not.
+
+        The no-wait branch does not validate `timeout`, poll or flatten a
+        result: there is none to read, and the command is what a caller that
+        has to answer it needs.
+        """
         if not cmd_id:
             raise ValueError('cmd_id is required')
         if not code:
@@ -37,7 +44,7 @@ def register(mcp, bridge):
             payload['tab'] = tab_id
         sent = await bridge.put('/command', payload)
         if not wait:
-            return None
+            return {'command': sent.get('command')}
         body = await bridge.poll_result(
             tab_id, timeout, expect_id=cmd_id,
             expect_delivery=sent.get('did'))
@@ -105,41 +112,50 @@ def register(mcp, bridge):
                 'world': res.get('world', '')}
 
     @mcp.tool()
-    async def navigate(url: str, tab_id: str = '') -> None:
+    async def navigate(url: str, tab_id: str = '') -> dict:
         """Set `location.href = url` in `tab_id` (via eval, does not wait for
-        result)."""
+        result). Returns the command the bridge enqueued."""
         code = f'location.href = {json.dumps(url)}'
-        await _send_eval('_nav', code, tab_id, wait=False, timeout=0)
+        return await _send_eval(
+            '_nav', code, tab_id, wait=False, timeout=0)
 
     @mcp.tool()
-    async def reload(tab_id: str = '', broadcast: bool = False) -> None:
+    async def reload(tab_id: str = '', broadcast: bool = False) -> dict:
         """Call `location.reload()` in `tab_id`, or with no tab in the
-    browser's active tab."""
+    browser's active tab. Returns the command the bridge enqueued."""
         target = '' if broadcast else tab_id
-        await _send_eval(
+        return await _send_eval(
             '_reload', 'location.reload()', target, wait=False, timeout=0)
 
     @mcp.tool()
-    async def title(tab_id: str = '') -> dict:
-        """Return `document.title` for `tab_id`."""
+    async def title(tab_id: str = '', wait: bool = True) -> dict:
+        """Return `document.title` for `tab_id`. `wait=False` returns the
+        command the bridge enqueued instead."""
         res = await _send_eval(
-            '_title', 'document.title', tab_id, wait=True, timeout=10)
+            '_title', 'document.title', tab_id, wait=wait, timeout=10)
+        if not wait:
+            return res
         assert res is not None
         return res
 
     @mcp.tool()
-    async def url(tab_id: str = '') -> dict:
-        """Return `location.href` for `tab_id`."""
+    async def url(tab_id: str = '', wait: bool = True) -> dict:
+        """Return `location.href` for `tab_id`. `wait=False` returns the
+        command the bridge enqueued instead."""
         res = await _send_eval(
-            '_url', 'location.href', tab_id, wait=True, timeout=10)
+            '_url', 'location.href', tab_id, wait=wait, timeout=10)
+        if not wait:
+            return res
         assert res is not None
         return res
 
     @mcp.tool()
-    async def ext_self_reload() -> dict:
+    async def ext_self_reload(wait: bool = True) -> dict:
         """Reload the Chrome extension from disk via
-        chrome.runtime.reload()."""
-        return await bridge.ext_cmd('_ext_reload', 'ext-reload')
+        chrome.runtime.reload(). `wait=False` returns the command the bridge
+        enqueued instead."""
+        return await bridge.ext_cmd(
+            '_ext_reload', 'ext-reload', wait=wait)
 
     return {
         'exec': exec,

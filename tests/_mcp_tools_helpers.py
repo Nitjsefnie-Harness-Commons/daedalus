@@ -106,6 +106,8 @@ class BridgeProbe:
 
     async def ext_cmd(self, *args, **kwargs):
         self.record('ext_cmd', args=args, kwargs=kwargs)
+        if kwargs.get('wait') is False:
+            return {'command': self._enqueued(args, kwargs)}
         if len(args) > 1 and args[1] == 'screenshot':
             return self.ext_bodies.get('screenshot', {
                 'path': f'{self.marker}/shot.png',
@@ -113,9 +115,18 @@ class BridgeProbe:
             })
         return {'bridge': self.marker}
 
+    def _enqueued(self, args, kwargs):
+        """The command a bridge would have published, `_did` and all."""
+        cmd_id, cmd_type = args[0], args[1]
+        fields = {key: value for key, value in kwargs.items()
+                  if key not in ('timeout', 'include_roundtrip', 'wait')}
+        return {'id': cmd_id, 'type': cmd_type, **fields,
+                '_did': self.marker}
+
     async def put(self, path, payload):
         self.record('put', path=path, payload=payload)
-        return {'did': self.marker}
+        return {'did': self.marker,
+                'command': {**payload, '_did': self.marker}}
 
     async def poll_result(self, *args, **kwargs):
         self.record('poll_result', args=args, kwargs=kwargs)

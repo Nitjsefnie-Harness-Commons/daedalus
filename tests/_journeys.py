@@ -20,6 +20,7 @@ timestamps, uuids and the temp path a bridge was spawned under are excluded
 by hand here, at the one place the shapes are known.
 """
 import argparse
+import asyncio
 import hashlib
 import json
 import sys
@@ -150,22 +151,30 @@ def _load_front_end(base):
 
 
 def mcp_exec(base, docroot):
-    """One MCP tool call, answered by this thread as the extension would."""
+    """One MCP tool call, answered by this thread as the extension would.
+
+    The send is unwaited, so the helper holds the command's bytes and answers
+    it without polling the queue; the result is then read back through the
+    `result` tool, which is the read an unwaited send leaves behind. The
+    helper is what sets the token on this thread, so the read inherits it.
+    """
     mod = _load_front_end(base)
-    answered, queued = _mcp_load._answer_mcp_command(
+    sent, queued = _mcp_load._answer_mcp_command(
         base, docroot, mod,
-        lambda: mod.exec(tab_id=MCP_TAB, cmd_id=MCP_COMMAND_ID, code=MCP_CODE),
+        lambda: mod.exec(tab_id=MCP_TAB, cmd_id=MCP_COMMAND_ID,
+                         code=MCP_CODE, wait=False),
         MCP_RESULT, tab=MCP_TAB)
-    assert answered is not None, answered
-    assert answered.get('value') == MCP_RESULT, answered
-    assert answered.get('error') is None, answered
+    assert sent == {'command': queued}, sent
     assert queued.get('code') == MCP_CODE, queued
+    read = asyncio.run(mod.result(tab_id=MCP_TAB))
+    assert read.get('value') == MCP_RESULT, read
+    assert read.get('error') is None, read
     return {
         'journey': 'mcp-exec',
         'queued': {'id': queued.get('id'), 'code': queued.get('code')},
-        'tool': {'id': answered.get('id'), 'tabId': answered.get('tabId'),
-                 'value': answered.get('value'),
-                 'error': answered.get('error')},
+        'tool': {'id': read.get('id'), 'tabId': read.get('tabId'),
+                 'value': read.get('value'),
+                 'error': read.get('error')},
     }
 
 
