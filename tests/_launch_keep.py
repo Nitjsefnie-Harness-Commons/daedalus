@@ -1,11 +1,12 @@
 """What the bounded-launch control reads, and which sites of that it keeps.
 
-Both decisions below belong to `tests/test_repo_layout.py`'s control, which
-is the one consumer left: it walks the whole tracked tree on the first and
-keeps or drops each site on the second, so the two are written once here
-and read from here. A second copy would narrow that control's population
-with nothing to report it, and the hole would be silent in the shrinking
-direction.
+Both decisions below have two consumers, so each is written once here and
+read from here by both. `tests/test_repo_layout.py` walks the whole tracked
+tree on the first and keeps or drops each site on the second, so a copy
+there would narrow that control's population with nothing to report it.
+`tests/test_harness_launch_bounds.py` reads the first on two planted
+fixtures it cannot express as a tree walk. Either way the hole would be
+silent in the shrinking direction.
 
 The figures the two rules were tuned against — 139 dropped sites narrowed to
 55, then 70 — were measured before #1408 and none has been re-measured
