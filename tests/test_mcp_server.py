@@ -522,14 +522,27 @@ def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
+        # The typed path routes through `ext_cmd`, which validates on the
+        # same terms; a guard that fires on one and not the other admits a
+        # command the caller was told nothing about.
+
+        def evaled(timeout):
+            return mod.exec(cmd_id='_timeout', code='1', timeout=timeout)
+
+        def captured(timeout):
+            return mod.screenshot(timeout=timeout)
+
+        sends = [('exec', evaled), ('screenshot', captured)]
         for timeout in (0, -1.0, float('nan'), float('inf')):
-            try:
-                asyncio.run(getattr(mod, 'exec')(
-                    cmd_id='_timeout', code='1', timeout=timeout))
-            except ValueError as error:
-                assert 'finite positive' in str(error), (timeout, error)
-            else:
-                raise AssertionError(f'timeout {timeout!r} was accepted')
+            for name, send in sends:
+                try:
+                    asyncio.run(send(timeout))
+                except ValueError as error:
+                    assert 'finite positive' in str(error), (
+                        name, timeout, error)
+                else:
+                    raise AssertionError(
+                        f'{name}: timeout {timeout!r} was accepted')
         for name in (f'{TOK}_extension', TOK):
             qdir = Path(docroot) / 'commands' / name
             queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
