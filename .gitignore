@@ -247,6 +247,7 @@
 !/scripts/ci/js_module_coverage.py
 !/scripts/ci/line_lengths.py
 !/scripts/ci/ratchet.py
+!/scripts/ci/ratchet_push.sh
 !/scripts/ci/reserved_names.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/suite_bound.py
