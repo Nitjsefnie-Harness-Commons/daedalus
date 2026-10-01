@@ -75,7 +75,6 @@
 !/.github/dependabot.yml
 !/.github/journey-budget.json
 !/.github/reserved-test-names.json
-!/.github/suite-timings.json
 
 # ─── .github/ISSUE_TEMPLATE ───
 !/.github/
@@ -95,7 +94,6 @@
 !/.github/workflows/scorecard.yml
 !/.github/workflows/secrets.yml
 !/.github/workflows/tests.yml
-!/.github/workflows/timed-timings.yml
 !/.github/workflows/version.yml
 
 # ─── daedalus_bridge ───
@@ -233,11 +231,9 @@
 # ─── scripts/ci ───
 !/scripts/
 !/scripts/ci/
-!/scripts/ci/accepted_speed_changes.json
 !/scripts/ci/aggregate_gate.py
 !/scripts/ci/cache_action_releases.py
 !/scripts/ci/classify_changes.py
-!/scripts/ci/compare_durations.py
 !/scripts/ci/coverage_combine.py
 !/scripts/ci/coverage_suites.py
 !/scripts/ci/diff_coverage.py
@@ -250,26 +246,17 @@
 !/scripts/ci/js_lines.py
 !/scripts/ci/js_module_coverage.py
 !/scripts/ci/line_lengths.py
-!/scripts/ci/plan_timed_matrix.py
 !/scripts/ci/ratchet.py
-!/scripts/ci/reference_workload.py
-!/scripts/ci/refresh_timings.py
 !/scripts/ci/reserved_names.py
 !/scripts/ci/size_baseline.py
-!/scripts/ci/speed_summary.py
 !/scripts/ci/suite_bound.py
 !/scripts/ci/thresholds.py
-!/scripts/ci/time_tests.py
-!/scripts/ci/timings_bounds.py
-!/scripts/ci/timings_coverage.py
-!/scripts/ci/timings_runs.py
 !/scripts/ci/type_error_baseline.py
 !/scripts/ci/workflow_yaml.py
 !/scripts/ci/workflow_yaml_scan.py
 !/scripts/ci/yamlanchor.py
 !/scripts/ci/yamlblock.py
 !/scripts/ci/yamlscalar.py
-!/scripts/ci/zeroed_suites.py
 
 # ─── tests ───
 !/tests/
@@ -292,7 +279,6 @@
 !/tests/_child_boot_env.py
 !/tests/_ci_imports.py
 !/tests/_ci_publisher.py
-!/tests/_ci_time_instrument.py
 !/tests/_ci_wait_fixtures.py
 !/tests/_classifier_calls.py
 !/tests/_cli_arg_audit_conditions.py
@@ -344,7 +330,6 @@
 !/tests/_diff_coverage_fixtures.py
 !/tests/_drain.py
 !/tests/_drain_scan.py
-!/tests/_durations_compare.py
 !/tests/_evalpages.py
 !/tests/_fake_gh.py
 !/tests/_fanout.py
@@ -467,8 +452,6 @@
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
 !/tests/_teardown.py
-!/tests/_timed_basis.py
-!/tests/_timed_matrix.py
 !/tests/_token_mask.py
 !/tests/_token_policy.py
 !/tests/_token_policy_cases.py
@@ -569,7 +552,6 @@
 !/tests/test_command_queue_candidates.py
 !/tests/test_command_queue_ordering.py
 !/tests/test_command_queue_unit.py
-!/tests/test_commit_step_seam.py
 !/tests/test_config_boot_generation.py
 !/tests/test_control_writes.py
 !/tests/test_coverage_authority_scan.py
@@ -703,7 +685,6 @@
 !/tests/test_parent_watch.py
 !/tests/test_path_containment.py
 !/tests/test_path_safety.py
-!/tests/test_planner_determinism.py
 !/tests/test_plant_report.py
 !/tests/test_plant_restore.py
 !/tests/test_platform_apis.py
@@ -744,13 +725,7 @@
 !/tests/test_segment_write_retry.py
 !/tests/test_shared_helper_calls.py
 !/tests/test_source_anchors.py
-!/tests/test_speed_acceptance.py
-!/tests/test_speed_gate.py
 !/tests/test_speed_gate_jobs.py
-!/tests/test_speed_gate_options.py
-!/tests/test_speed_measurement.py
-!/tests/test_speed_summary.py
-!/tests/test_speed_verdicts.py
 !/tests/test_speedharness.py
 !/tests/test_starvation_bounds.py
 !/tests/test_static_guard_regressions.py
@@ -769,16 +744,6 @@
 !/tests/test_tab_registry.py
 !/tests/test_tab_routing.py
 !/tests/test_teardown_retry.py
-!/tests/test_time_tests.py
-!/tests/test_timed_basis_feed.py
-!/tests/test_timed_coverage.py
-!/tests/test_timed_coverage_bounds.py
-!/tests/test_timed_coverage_shapes.py
-!/tests/test_timed_matrix_shape.py
-!/tests/test_timed_planner.py
-!/tests/test_timed_refresh.py
-!/tests/test_timed_workflow.py
-!/tests/test_timing_selection.py
 !/tests/test_type_errors.py
 !/tests/test_unresolved_routes.py
 !/tests/test_upload_races.py
