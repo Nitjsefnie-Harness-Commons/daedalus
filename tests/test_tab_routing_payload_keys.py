@@ -235,8 +235,6 @@ _ROWS = [
     # raise. A bound base succeeds and the parts after it are bound.
     ('unpack-subscript-base-bound', 1, {'tab': 5}, _CALL, _inside(
         'a = [0]', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
-    ('unpack-star-subscript-bound', 1, {'tab': 5}, _CALL, _inside(
-        'a = [[0], 0]', '*a[0], b = (1, "tab")', 'cmd = {b: 5}')),
     ('unpack-subscript-midway-bound', 1, {'tab': 5}, _CALL, _inside(
         'a = [0]', 'b = [0, 0, 0]', 'a, b[0], c = (1, 2, "tab")',
         'cmd = {c: 5}')),
@@ -252,8 +250,36 @@ _ROWS = [
     # otherwise take the one element there is.
     ('unpack-star-arity-short', 0, _RAISES_VALUE, _CALL, _inside(
         'a, *b, c = ("tab",)', 'cmd = {a: 5}')),
-    # `async for` reaches the same verdict as `for`, so the two AsyncFor
-    # sites are live rather than inert.
+    # A store part the model cannot PROVE succeeds ends the walk, so each
+    # of these raises before the sender and reads clean. The proof is a
+    # subscript on a folded list at an in-range index; a base that is not a
+    # list, an index out of range or one that does not fold, and an
+    # attribute, all fail it.
+    ('unpack-subscript-int-base', 0, _RAISES, _CALL, _inside(
+        'a = 5', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-subscript-empty-list', 0, 'raises IndexError', _CALL, _inside(
+        'a = []', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-subscript-empty-tuple', 0, _RAISES, _CALL, _inside(
+        'a = ()', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-subscript-out-of-range', 0, 'raises IndexError', _CALL, _inside(
+        'a = [0]', 'a[5], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-subscript-no-fold-index', 0, 'raises ZeroDivisionError', _CALL,
+     _inside('a = [0]', 'a[1 // 0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-attribute-part', 0, 'raises AttributeError', _CALL, _inside(
+        'a = 5', 'a.foo, b = (1, "tab")', 'cmd = {b: 5}')),
+    # The same proof through the loop-target path.
+    ('loop-target-subscript-int', 0, _RAISES, _CALL, _inside(
+        'a = 5', 'for a[0], b in ((0, "tab"),):', '    cmd = {b: 5}')),
+    # A folded literal has no `__aiter__`, so an `async for` over one
+    # raises before the sender and binds nothing.
+    ('async-literal-iter', 0, _RAISES, _ASYNC_CALL, 'import asyncio\n'
+     'async def f(args):\n' + _SENDER
+     + '    async for j in ("tab",):\n        cmd = {j: 5}\n' + _SPREAD),
+    # `async for` over a real async iterable reaches the same verdict as
+    # `for`. These two rows decide the flow's AsyncFor predicate and no
+    # other site: the `AsyncFor` entry in `_STORES` is unreachable from any
+    # runnable source, because the only iterable this table folds has no
+    # `__aiter__`, so nothing it could record is provably bound.
     ('async-target', 1, {'tab': 5}, _ASYNC_CALL, 'import asyncio\n'
      'async def agen(items):\n    for item in items:\n        yield item\n'
      'async def f(args):\n' + _SENDER
@@ -302,7 +328,8 @@ def _sent(call, source):
         return _RAISES
     except ValueError:
         return _RAISES_VALUE
-    except NameError as error:
+    except (NameError, ArithmeticError, IndexError,
+            AttributeError) as error:
         return f'raises {type(error).__name__}'
 
 

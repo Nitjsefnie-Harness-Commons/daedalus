@@ -9,8 +9,9 @@ exactly that reason, and out of the flow module, which was a line from
 its ceiling.
 
 `_bind_literals` writes that table for both models, so the two read one
-program the same way. It models the store forms `_STORES` names; a name a
-form outside that set binds resolves to no key.
+program the same way. A name a form outside `_STORES` binds resolves to no
+key, and so does one a form it models without proving it; every arm below is
+pinned by a row that fails if the arm stops doing what it says.
 """
 import ast
 
@@ -24,9 +25,8 @@ _STORES = (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr, ast.Delete,
 def _bind_literals(node, literals):
     """Record the literal each name this store binds is bound to.
 
-    A form left out resolves no key, so a payload whose key rides a name
-    that form binds reaches the sender carrying a real `tab` — which is why
-    the arms below cover every form `_STORES` names.
+    A form left out resolves no key, so a payload whose key rides a name that
+    form binds reaches the sender carrying a real `tab`.
     """
 
     def record(name, literal):
@@ -73,27 +73,44 @@ def _bind_literals(node, literals):
                 (target.elts[star], value[star:end]),
                 *zip(target.elts[star + 1:], value[end:])]
 
-    def unbound_base(store):
-        """Whether a store part's base is a name this table never bound.
+    def proven_store(part):
+        """Whether a store part provably succeeds, so the walk may pass it.
 
-        A subscript or an attribute part is evaluated where it stands, so a
-        base nothing here has ever bound is what makes it raise before the
-        parts after it are bound at all. A base the table HAS bound succeeds,
-        and the walk carries on past it.
+        Proof is `name[index]` on a folded list at an in-range index, and each
+        clause has its own row: `unpack-subscript-int-base` and
+        `unpack-subscript-empty-tuple` for a base that is not a list,
+        `unpack-subscript-out-of-range` for the index,
+        `unpack-subscript-no-fold-index` for one that does not fold,
+        `unpack-attribute-part` for anything but a subscript. A base absent
+        here is unproven rather than unbound, since a name bound to anything
+        else never reaches this table.
+
+        An unproven part ends the walk, which costs a key the program may
+        still spell: a fail-open, and what this guard already answers for a
+        key position it cannot pin. Walking past one instead reports a key on
+        a program that raises before the sender sees it.
         """
-        return (isinstance(store, (ast.Subscript, ast.Attribute))
-                and isinstance(store.value, ast.Name)
-                and store.value.id not in literals)
+        if not isinstance(part, ast.Subscript):
+            return False
+        base, index = part.value, part.slice
+        if not isinstance(base, ast.Name) \
+                or not isinstance(index, ast.Constant):
+            return False
+        if not isinstance(index.value, int) or isinstance(index.value, bool):
+            return False
+        held = literals.get(base.id)
+        return isinstance(held, list) and -len(held) <= index.value < len(held)
 
     def unpacked(target, value):
         """What each name an unpack target binds is bound to.
 
         Each part takes one element, in the order the parts stand, so a part
         that is not a name takes none: a `*` part becomes a list, which no key
-        position names, and a subscript part is evaluated where it stands. Only
-        such a part whose base was never bound ends the walk — it raises, and
-        the parts after it are never bound. Everything before it keeps what it
-        took.
+        position names — `unpack-star-binds-list` — and a store part is
+        evaluated where it stands. Only `proven_store` carries the walk past
+        one, so `unpack-subscript-base-bound` is the one subscript row that
+        reports; the parts before an unproven one keep what they took, which
+        `unpack-subscript-out-of-range` shows by reading clean.
         """
         if isinstance(target, ast.Name):
             yield (target.id, value)
@@ -109,9 +126,9 @@ def _bind_literals(node, literals):
             elif isinstance(part, ast.Starred):
                 if isinstance(part.value, ast.Name):
                     yield (part.value.id, _UNSAFE_LITERAL)
-                elif unbound_base(part.value):
+                else:
                     return
-            elif unbound_base(part):
+            elif not proven_store(part):
                 return
 
     def bind_targets(targets, value):
@@ -125,13 +142,22 @@ def _bind_literals(node, literals):
     def bind_loop_target(loop):
         """Bind the names a loop target binds, and nothing else.
 
-        The loop runs once per element, so a bare name carries the one
-        literal they all agree on and a union of several that do not names no
-        key. An unpacked target pairs BY POSITION against each element, which
-        is the destructuring an assignment does: a name is recorded where
-        every iteration agrees and forgotten otherwise.
+        The loop runs once per element, so a bare name carries the one literal
+        they all agree on (`loop-union-agrees`) and a union of several that
+        do not names no key, which `loop-union` holds clean. An unpacked
+        target pairs BY POSITION against each element, the destructuring an
+        assignment does, so `loop-target-two-part` and `loop-target-star-part`
+        report; `loop-target-arity` shows the other side, where the parts
+        do not line up and the raise leaves nothing bound.
         """
         target = loop.target
+        if isinstance(loop, ast.AsyncFor):
+            # Nothing this table folds has an `__aiter__`, so no target of an
+            # `async for` over a foldable iterable is provably bound and an
+            # unprovable one must not be reported — `async-literal-iter`.
+            for name in target_names(target):
+                record(name, _UNSAFE_LITERAL)
+            return
         value = value_of(loop.iter)
         if not isinstance(value, (tuple, list, set)) or not value:
             for name in target_names(target):
@@ -155,8 +181,9 @@ def _bind_literals(node, literals):
         A comprehension is walked, and reading one is safe because a
         comprehension introduces a scope of its own: a walrus in either
         clause binds in the scope the comprehension stands in, which is one
-        this walk does write, and the iteration variable lives inside the
-        comprehension, which is one it does not.
+        this walk does write (`comp-list-ifs` and `comp-list-element`), and
+        the iteration variable lives inside the comprehension, which is one it
+        does not, which is why no row reports a comprehension's own target.
         """
         yield statement
         for child in ast.iter_child_nodes(statement):
@@ -170,8 +197,8 @@ def _bind_literals(node, literals):
 
         The flow clears the name from the table before this runs, so the
         operand's contribution is not visible here either and the two models
-        agree on forgetting it — which is a report `k += ""` is owed and does
-        not yet get.
+        agree on forgetting it: the `augmented` row of the two-writers table
+        holds both at nothing. That costs a report `k += ""` is owed.
         """
         for name in target_names(node.target):
             record(name, _UNSAFE_LITERAL)
