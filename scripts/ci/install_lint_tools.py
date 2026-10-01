@@ -36,6 +36,7 @@ LINT_TOOLS_ENV. A control reads that variable back and requires each tool
 to resolve; a broken install is a failure there, never a skip.
 """
 import hashlib
+import http.client
 import io
 import os
 import platform
@@ -131,20 +132,19 @@ ARCHITECTURES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64',
 DOWNLOAD_TIMEOUT = 30
 # A connect or a read that fails is the network reaching the asset and not a
 # defect in the asset: the same URL serves the same pinned bytes on the next
-# attempt. So the transfer is retried, and only on the failures that a retry
-# can change — the two verdicts on what was served, an over-limit payload and
-# a digest mismatch, are not retried, and neither is raised as one of these.
-# No sleep and no backoff between attempts; the per-attempt socket timeout is
-# already the delay.
+# attempt. Nothing a retry cannot change is retried — a status answer, the
+# size refusal below, the digest mismatch — and there is no sleep between
+# attempts.
 DOWNLOAD_ATTEMPTS = 3
-# The wall clock the attempts share. DOWNLOAD_TIMEOUT bounds one socket
-# operation and not a transfer, so attempts alone would let an asset that is
-# slow rather than gone hold the step three times over.
-DOWNLOAD_BUDGET = 60
-# What a retry can change. socket.timeout is a TimeoutError, and both are an
-# OSError; all three are named so the set reads as what it accepts rather than
-# as what one of them happens to subclass.
-TRANSIENT_ERRORS = (urllib.error.URLError, TimeoutError, OSError)
+# The wall clock the attempts share, four times the per-socket bound above so
+# that three attempts each costing one still fit inside it. It bounds the
+# socket operations and nothing else: `read()` carries no timeout, and
+# MAX_TRANSFER bounds what is read rather than how long the read takes.
+DOWNLOAD_BUDGET = 4 * DOWNLOAD_TIMEOUT
+# What a retry can change. A body cut short mid-transfer raises
+# IncompleteRead, an HTTPException and not an OSError, so the commonest
+# failure after a connect succeeds needs naming beside the socket ones.
+TRANSIENT_ERRORS = (OSError, http.client.HTTPException)
 # A whole-process bound, because pip owns the wheel transfer below, so
 # the per-socket one above does not apply to it.
 WHEEL_TIMEOUT = 300
@@ -189,10 +189,16 @@ def _fetch(name):
     url = f'{RELEASE}/v{ACTIONLINT_VERSION}/{name}'
     deadline = time.monotonic() + DOWNLOAD_BUDGET
     for attempt in range(DOWNLOAD_ATTEMPTS):
+        budget = deadline - time.monotonic()
         try:
             with urllib.request.urlopen(
-                    url, timeout=DOWNLOAD_TIMEOUT) as response:
-                payload = response.read(MAX_TRANSFER + 1)
+                    url,
+                    timeout=max(1, min(DOWNLOAD_TIMEOUT, budget))) as source:
+                payload = source.read(MAX_TRANSFER + 1)
+        except urllib.error.HTTPError:
+            # A status answer whatever its status, and asked again it will
+            # answer the same: the asset is not there, or is not this one.
+            raise
         except TRANSIENT_ERRORS:
             if (attempt + 1 == DOWNLOAD_ATTEMPTS
                     or time.monotonic() >= deadline):
