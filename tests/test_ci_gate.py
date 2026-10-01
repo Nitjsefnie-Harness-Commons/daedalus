@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The gating-workflow predicate both waiters read, on its own.
+"""The gating-workflow predicate `ci_wait.py` reads, on its own.
 
-`ci_wait.py` refuses with exit 4 on a run set with no gating workflow and
-`watch_all.py` keeps its hold on one; both ask ci_gate, so the controls that
-hold the predicate in place live beside the predicate rather than in either
-caller. A caller can only be as right as the thing it asks, and both of them
-would be wrong together if this were a copy.
+`ci_wait.py` refuses with exit 4 on a run set with no gating workflow, and
+it asks ci_gate rather than deciding, so the controls that hold the predicate
+in place live beside the predicate rather than in the caller. A caller can
+only be as right as the thing it asks, and it would be wrong if this were a
+copy.
 """
 import ast
 import contextlib
@@ -292,13 +292,17 @@ def test_each_caller_reaches_the_predicate_through_ci_gate(tmp):
     A source-level control cannot see an absence: deleting the predicate's
     use from a caller removes a definition rather than adding one, and
     spells no names. Planting a recorder on the module's `ci_gate` and
-    requiring both callers to go through it catches that, and catches a
-    caller's own copy for the same reason - neither of them would call it.
+    requiring the caller to go through it catches that, and catches a
+    caller's own copy for the same reason - it would not call it.
+
+    `ci_wait.py` is the only caller this repository ships: the watcher's
+    hold that read the predicate beside it is gone from the tree, so the
+    property pinned here is the one that survives rather than the one it
+    replaced.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
     wait = _util.load(skill / 'ci_wait.py', 'ci_wait_reaches_gate')
-    hold = _util.load(skill / 'watch_all.py', 'watch_all_reaches_gate')
 
     def _asked_and_answered(caller, call):
         """(did it call the predicate, what did it answer) for one caller."""
@@ -324,10 +328,6 @@ def test_each_caller_reaches_the_predicate_through_ci_gate(tmp):
         wait, lambda m: m.verdict([_gate_run('tests')], [_published_check()]))
     assert asked, 'ci_wait never asked ci_gate'
     assert answer == ('acceptable', []), answer
-    asked, answer = _asked_and_answered(
-        hold, lambda m: m._settled([_gate_run('tests')]))
-    assert asked, 'watch_all never asked ci_gate'
-    assert answer is True, answer
 
 
 def _refusing_wait(caller, runs):
@@ -377,7 +377,6 @@ def test_every_reader_answers_over_the_judged_set(tmp):
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
     mod = _util.load(skill / 'ci_gate.py', 'ci_gate_one_judged_set')
     wait = _util.load(skill / 'ci_wait.py', 'ci_wait_one_judged_set')
-    hold = _util.load(skill / 'watch_all.py', 'watch_all_one_judged_set')
     runs = [
         _run(1, 'failure', '2026-09-20T10:00:00Z', name='tests'),
         _run(2, 'success', '2026-09-20T10:05:00Z', name='gate freshness'),
@@ -395,9 +394,6 @@ def test_every_reader_answers_over_the_judged_set(tmp):
     # where a head missing BOTH is the subject.
     assert wait._missing(runs, [], required_checks=frozenset()) == [
         'no tests run']
-    absent = hold._settled(runs)
-    assert isinstance(absent, hold.ci_gate.GateAbsent), absent
-    assert absent.missing == ('tests',), absent
     # And the refusal built from that answer names the gate, rather than
     # printing a doubled space where the name belongs (issue #839).
     code, printed = _refusing_wait(wait, runs)
@@ -468,25 +464,27 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
             f'ci_wait binds its own {name}; the filter must be ci_gate\'s')
 
 
-def test_both_waiters_read_this_one_predicate(tmp):
+def test_the_waiter_reads_this_one_predicate(tmp):
     """Kept, and no longer the control that carries the weight.
 
-    These assertions hold for any two modules that import the name, so
-    they cannot see a caller that grew a copy or stopped calling the
-    predicate - the controls above are the ones that do. What is left
-    here is the weaker property, still worth pinning: both callers reach
-    the same module object rather than each resolving `ci_gate` somewhere
-    of its own.
+    These assertions hold for any module that imports the name, so they
+    cannot see a caller that grew a copy or stopped calling the predicate
+    - the controls above are the ones that do. What is left here is the
+    weaker property, still worth pinning: the caller reaches the same
+    module object rather than resolving `ci_gate` somewhere of its own.
+
+    It was written for two callers; the second is gone from the tree, and
+    a control that asserted a second one would now be asserting the
+    absence of the thing it was written to check.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
     mod = _ci_gate()
     wait = _util.load(skill / 'ci_wait.py', 'ci_wait_gate_owner')
-    hold = _util.load(skill / 'watch_all.py', 'watch_all_gate_owner')
-    assert wait.ci_gate is hold.ci_gate
-    assert wait.ci_gate.missing_required is hold.ci_gate.missing_required
+    assert wait.ci_gate is sys.modules['ci_gate']
+    assert wait.ci_gate.missing_required is sys.modules[
+        'ci_gate'].missing_required
     assert wait.REQUIRED_WORKFLOWS == mod.REQUIRED_WORKFLOWS
-    assert hold.ci_gate.REQUIRED_WORKFLOWS == mod.REQUIRED_WORKFLOWS
     assert wait.ci_gate.REQUIRED_WORKFLOWS == mod.REQUIRED_WORKFLOWS
 
 
