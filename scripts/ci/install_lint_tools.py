@@ -135,10 +135,10 @@ DOWNLOAD_TIMEOUT = 30
 # verdict is never retried — the size refusal, the digest mismatch — and
 # what else is not worth a second ask is decided in `_worth_asking_again`.
 DOWNLOAD_ATTEMPTS = 3
-# The bound, and it is the attempt count: an attempt is a redirect hop times
-# an address, each of which is one socket timeout, and the release URL 302s
-# to a host with four addresses, so the worst case is 3 x 2 x 4 x 30 s. The
-# job's own `timeout-minutes` is what bounds the step above that.
+# The bound, and it is the attempt count: an attempt costs one timeout per
+# address each host in the redirect chain resolves to, summed over the hosts
+# rather than multiplied across them. Today's counts are a DNS answer and
+# change; the job's own `timeout-minutes` is the ceiling above this.
 # What `timeout` does not bound is in `_fetch`'s docstring.
 # What a retry can change. A body cut short mid-transfer raises
 # IncompleteRead, an HTTPException and not an OSError.
