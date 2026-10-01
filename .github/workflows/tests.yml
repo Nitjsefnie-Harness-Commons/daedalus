@@ -540,7 +540,6 @@ jobs:
           fi
           ./actionlint -color "${workflows[@]}"
 
-
       - name: zizmor
         # Runs even when actionlint is red, so one push reports both gates —
         # the same shape the pylint and pycodestyle jobs use. Not when the
@@ -1348,8 +1347,14 @@ jobs:
       # The budget must follow a journey down on its own, or it sits at old
       # high counts until somebody remembers to lower them and a later
       # regression up to those counts passes. Down only: a run with a rise
-      # refuses rather than writing, and the check above must have concluded
-      # success, so the run that found a regression writes nothing.
+      # writes nothing, and the check above must have concluded success, so
+      # the run that found a regression writes nothing.
+      #
+      # A run where NO COUNT WAS COMPARED writes nothing too, and succeeds:
+      # a recorded gate that moved — most often the runner image — means no
+      # journey was checked, not that one regressed. Both say so in the step
+      # summary, so a green run with no commit is that case rather than a
+      # green that recorded something. Re-recording is `rebaseline`.
       - name: Follow the journeys that got cheaper
         id: tighten
         if: ${{ !cancelled() && steps.check.conclusion == 'success'
