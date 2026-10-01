@@ -498,29 +498,29 @@ def test_a_typed_send_that_does_not_wait_reports_its_command(_tmp):
 
 
 def test_a_waited_send_still_answers_its_result(_tmp):
-    """The load-bearing compatibility property: `wait=True` is unchanged.
+    """The load-bearing compatibility property, on the eval path.
 
     A no-wait branch that leaked into the waited path would drop the poll
     and answer the command instead of the result, so the waited call is
-    pinned against the same probe the no-wait cases use.
+    pinned against the same probe the no-wait cases use. `_send_eval` is
+    real code under this probe; the TYPED path is not — `ext_cmd` is
+    replaced wholesale, so a case written here cannot see it and the typed
+    waited return is pinned in `tests/test_mcp_transport_guards.py`
+    against the real method instead.
     """
     composition = _load_composition(_mcp_tool_commands.MARKER)
     marker = _mcp_tool_commands.MARKER
 
     evaluated = asyncio.run(composition.mcp.registered['exec'](
         cmd_id='cmd', code='1 + 1'))
-    evaluated_calls = list(composition.bridge.calls)
-    typed = asyncio.run(composition.mcp.registered['focus_tab'](
-        chrome_tab=7))
 
     assert evaluated == {'error': None, 'world': marker,
                          'value': marker}, evaluated
-    assert evaluated_calls == [
+    assert composition.bridge.calls == [
         ('checked_timeout', {'timeout': 15.0}),
         _mcp_tool_commands._put('/command',
                                 {'id': 'cmd', 'code': '1 + 1'}),
-        _mcp_tool_commands._poll('', 15.0, 'cmd')], evaluated_calls
-    assert typed == {'bridge': marker}, typed
+        _mcp_tool_commands._poll('', 15.0, 'cmd')]
 
 
 def test_ping_raises_the_bridge_error(_tmp):
