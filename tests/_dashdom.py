@@ -87,6 +87,9 @@ class El {
     this.focused = false;
     this.selected = false;
     this._value = '';
+    // The scaffold holds no layout. A scenario says where its elements
+    // are before anything measures them; `null` is "not said", not zero.
+    this.rect = null;
     this.classList = classListFor(this);
   }
   get id() { return this.attrs.id === undefined ? '' : this.attrs.id; }
@@ -107,6 +110,16 @@ class El {
   set textContent(v) {
     this.text = '';
     this.children = v === '' ? [] : [textNode(v)];
+  }
+  // An unmodelled layout refuses by name; a zero rect would let a
+  // selection over geometry pass unnoticed, which is the view this
+  // scaffold exists to make assertable.
+  getBoundingClientRect() {
+    if (!this.rect) {
+      throw new Error('dashboard shell does not model layout on: '
+        + (this.id || this.tag));
+    }
+    return this.rect;
   }
   all() {
     const out = [];

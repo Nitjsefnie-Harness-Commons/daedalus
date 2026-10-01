@@ -104,6 +104,14 @@ for (const id of ['s00', 's01', 's02']) {
 }
 """
 
+# The scaffold holds no layout, so a scenario places what it measures:
+# `getBoundingClientRect` refuses an element nobody placed.
+_PLACE = r"""
+const place = (id, top) => {
+  document.querySelector('#' + id).rect = { top };
+};
+"""
+
 _READ_CELL = (
     "const cell = (selector) => "
     "document.querySelector(selector).textContent;\n"
@@ -444,13 +452,15 @@ def test_the_observer_activates_the_intersecting_link_nearest_the_top(_tmp):
     never reads the margin -- and it is filed as its own issue.
     Fixing it turns the assertion red: that is it reporting that it
     moved."""
-    report = _run(_RAIL + _IMPORT + _FIRE + r"""
+    report = _run(_RAIL + _PLACE + _IMPORT + _FIRE + r"""
 const links = Array.from(document.querySelectorAll('.rail-list a'));
 const active = () => links.map((a) => a.classList.contains('active'));
 const io = drive.observers()[0];
 const start = active();
 links[0].click();
 const afterClick = active();
+place('s00', 200);
+place('s01', 30);
 io.fire([
   { isIntersecting: true, boundingClientRect: { top: 200 },
     target: document.querySelector('#s00') },
@@ -507,7 +517,7 @@ def test_the_rail_follows_the_whole_band_and_not_only_the_new_entries(_tmp):
 
     `s01` is the negative control the batch cannot invent -- it is
     genuinely out of the band in both deliveries and must stay dark."""
-    report = _run(_RAIL + _IMPORT + _FIRE + r"""
+    report = _run(_RAIL + _PLACE + _IMPORT + _FIRE + r"""
 const links = Array.from(document.querySelectorAll('.rail-list a'));
 const active = () => links.map((a) => a.classList.contains('active'));
 const io = drive.observers()[0];
@@ -515,9 +525,17 @@ const entry = (id, top, on) => ({
   isIntersecting: on, boundingClientRect: { top },
   target: document.querySelector('#' + id),
 });
+place('s00', 20);
+place('s01', 900);
+place('s02', 1400);
 io.fire([entry('s00', 20, true), entry('s01', 900, false),
   entry('s02', 1400, false)]);
 const before = active();
+// The scroll moves the layout and delivers only the section that
+// entered the band. `s00` is a full-height section, so its own top has
+// left the band while the section still intersects it.
+place('s00', -200);
+place('s02', 30);
 io.fire([entry('s02', 30, true)]);
 report({ before, after: active(),
   band: Array.from(io.intersecting, (el) => el.id) });
