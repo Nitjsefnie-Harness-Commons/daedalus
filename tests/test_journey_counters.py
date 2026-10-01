@@ -323,6 +323,36 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
     assert 'toolchain' not in moved[2], moved[2]
 
 
+def test_the_verdict_table_pins_every_row_it_renders(tmp):
+    """One row per recorded journey, each carrying its own numbers.
+
+    The block loop above proves the table RENDERS; this proves each cell says
+    what the gate decided. A row whose verdict read "within budget" over a
+    count above its budget is the one contradiction a maintainer cannot act
+    on, and nothing else in the tree notices it — the counts are right in the
+    log and the artifact on disk is right too.
+    """
+    del tmp
+    summaries = _journey_contract.summaries()
+    names = journeys().NAMES
+    # Recorded at 1000 with a 10% tolerance, so every budget is 1100.
+    document = budget_document()
+    counts = {names[0]: 1200, names[1]: 900}
+    found = {'over': {names[0]: (1200, 1100.0)},
+             'unmeasured': {names[2]: 'perf-instructions'}}
+    rows = {line.split('|')[1].strip(): line
+            for line in summaries.verdict_lines(document, counts, found)
+            if line.startswith('|') and not line.startswith('|---')}
+    assert sorted(rows) == sorted([*names, 'journey']), sorted(rows)
+    assert rows[names[0]] == (
+        f'| {names[0]} | 1200 | 1100 | +100 | OVER BUDGET |'), rows[names[0]]
+    assert rows[names[1]] == (
+        f'| {names[1]} | 900 | 1100 | -200 | within budget |'), rows[names[1]]
+    assert rows[names[2]] == (
+        f'| {names[2]} | not measured | 1100 | — | no count for '
+        '`perf-instructions` |'), rows[names[2]]
+
+
 def test_a_perf_run_that_printed_no_count_says_so(tmp):
     """perf exits 0 whether or not it counted, so its exit status is not
     evidence — which makes a None count with no reason the shape that has to
