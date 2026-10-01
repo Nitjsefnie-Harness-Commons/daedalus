@@ -158,7 +158,7 @@ WIN32 = sys.platform == 'win32'
 
 
 class _TickMiddleware:
-    """Runs the front end's per-request tick ahead of every HTTP request.
+    """The per-request tick, ahead of every HTTP request.
 
     It has to stay inside the auth middleware: a request refused on its
     Bearer token must not pay for a Date header nobody will read.
@@ -178,24 +178,28 @@ def _idle_server_class():
     """uvicorn.Server whose serve loop arms no timer while nothing is asked.
 
     The stock loop wakes every 0.1 s for the life of the process and calls
-    on_tick on each wake. Nothing in daedalus_mcp arms that timer — it is
-    uvicorn's own cadence — and it measured at ~3M instructions a second on
-    an idle bridge (issue 1444). Here the loop waits on an Event that only
-    a request or a shutdown wakes, so the event loop stays in its poll.
+    on_tick on each wake: ~3M instructions a second on an idle bridge, for
+    nothing (issue 1444). Nothing in daedalus_mcp arms that timer — it is
+    uvicorn's own cadence. This loop waits on an Event that only a request
+    or a shutdown wakes.
 
     The subclass is built here rather than at module scope because the
     suites drive `_serve` with a fake `uvicorn` in sys.modules, and a class
     defined at import time would bind the real one before they can.
 
-    Four uvicorn names are relied on, and three of them fail differently.
-    `main_loop` and `startup` are overridden, so a rename is an
-    AttributeError at startup. `on_tick` is called as well, but it is not a
-    documented extension point, so its rename is an AttributeError on the
-    first request. `should_exit` is the dangerous one: this subclass turns
-    the public attribute into a property, and if uvicorn ever made it a
-    method then `if not self.should_exit` in Server._serve would read a
-    bound method as truthy and leave the main loop at once — a bridge that
-    answers nothing and says nothing.
+    Four uvicorn names are relied on and each fails its own way.
+    `main_loop` and `startup` are OVERRIDDEN, and an override cannot raise
+    on a rename of the name it overrides: uvicorn dispatches through `self`,
+    so the rename makes ours dead code and its own method runs. A renamed
+    `main_loop` is this issue back — the 0.1 s poll, with no error and no
+    traceback. A renamed `startup` skips refresh_default_headers, and
+    ServerState.default_headers starts empty, so every request uvicorn
+    refuses below ASGI ships with no Date and no server header.
+    `on_tick` we CALL rather than override, so its rename is an
+    AttributeError on the first request — the good case. `should_exit` is
+    the one this subclass turns from an attribute into a property: were it
+    ever a method, `if not self.should_exit` in Server._serve would read a
+    bound method as truthy and leave the main loop at once.
     """
     import uvicorn
 
@@ -218,30 +222,25 @@ def _idle_server_class():
             self._wake.set()
 
         async def main_loop(self):
-            # No timeout, deliberately: any timer here is the cost again.
-            # The clear drops the set() the constructor's assignment left.
+            # No timeout: a timer here is the cost again. The clear drops
+            # what the constructor's assignment set.
             self._wake.clear()
             await self._wake.wait()
 
         async def startup(self, sockets=None):
             await super().startup(sockets=sockets)
-            # A request uvicorn refuses below ASGI — a malformed request
-            # line it answers itself — never reaches the middleware, so the
-            # headers it answers with are populated here.
+            # A request uvicorn refuses below ASGI never reaches the
+            # middleware, so the headers it answers with are set up here.
             self.refresh_default_headers()
 
         def refresh_default_headers(self):
-            """Rebuild `default_headers` as uvicorn's once-a-second tick.
+            """Rebuild `default_headers` the way uvicorn's own tick does.
 
-            Written out rather than driven through on_tick, which refreshes
-            only on a counter divisible by ten and this must hold for
-            every request.
-
-            Assigned through a slice on purpose. The HTTP protocols capture
+            Assigned through a slice because the HTTP protocols capture
             `server_state.default_headers` at RequestReceived — before any
-            of this runs — and concatenate the object they captured when the
-            response starts, so rebinding it would leave every in-flight
-            cycle answering with the previous refresh's date.
+            of this runs — and concatenate the object they captured when
+            the response starts. Rebinding it would leave every in-flight
+            cycle on the previous refresh's date.
             """
             if self.config.date_header:
                 date_header = [
@@ -254,18 +253,25 @@ def _idle_server_class():
         async def request_tick(self):
             """The work uvicorn's on_tick did ten times a second.
 
-            The counter advances once per request, so the once-per-ten
-            branch inside on_tick — and with it max-requests,
-            callback_notify and the exit decision — still happens, now on
-            the cadence the bridge is actually asked for. It is not wrapped
-            the way uvicorn wraps it: that keeps an int small while ticking
-            ten times a second forever, and a per-request counter reaches
-            that bound after days of continuous traffic.
+            The counter advances once per request, so on_tick's
+            once-per-ten branch — and with it max-requests,
+            callback_notify and the exit decision — still happens, on the
+            cadence the bridge is asked for. It is not wrapped the way
+            uvicorn wraps it: that keeps an int small while ticking ten
+            times a second forever, and a per-request counter reaches that
+            bound after days of continuous traffic.
             """
-            self.refresh_default_headers()
             self._counter += 1
+            pinned = self.server_state.default_headers
+            self.refresh_default_headers()
             if await self.on_tick(self._counter):
                 self.should_exit = True
+            # on_tick rebinds that attribute on every tenth tick, which
+            # orphans the list the in-flight cycles hold. Put the contents
+            # back into it and bind that again.
+            if self.server_state.default_headers is not pinned:
+                pinned[:] = self.server_state.default_headers
+                self.server_state.default_headers = pinned
 
     return IdleServer
 
@@ -318,8 +324,7 @@ def _serve():
         bound_port = sock.getsockname()[1]
         _bound.set()
         print(f'[MCP] streamable-http on 127.0.0.1:{bound_port}', flush=True)
-        # One statement: the middleware can only find the server once it is
-        # published, and nothing runs before `run` hands the socket over.
+        # The middleware reads the server from here: publish it before `run`.
         holder['server'] = server = _idle_server_class()(config)
         server.run(sockets=[sock])
     except Exception as e:
