@@ -522,13 +522,11 @@ const entry = (id, top, on) => ({
   isIntersecting: on, boundingClientRect: { top },
   target: document.querySelector('#' + id),
 });
-// Each entry's rect is the layout at the frame that created it, and
-// matches the placement below it. By the second delivery the carried
-// rects order `s02` above `s00` and the live layout orders them the
-// other way -- that disagreement is the whole of the control.
+// Each entry's rect is where the target stood at the frame that
+// created it. By the second delivery the carried rects order `s02`
+// above `s00` and the live layout orders them the other way -- that
+// disagreement is the whole of the control.
 place('s00', 500);
-place('s01', 900);
-place('s02', 1400);
 io.fire([entry('s00', 500, true), entry('s01', 900, false),
   entry('s02', 1400, false)]);
 const before = active();
@@ -538,12 +536,22 @@ const before = active();
 place('s00', -200);
 place('s02', 30);
 io.fire([entry('s02', 30, true)]);
-report({ before, after: active(),
-  band: Array.from(io.intersecting, (el) => el.id) });
+const after = active();
+const band = Array.from(io.intersecting, (el) => el.id);
+// The next scroll carries `s00` out of the band and `s01` into it in
+// one frame, so one delivery carries both entries: the removal limb is
+// the non-intersecting one, and `s01` lands below the section being
+// read.
+place('s01', 60);
+io.fire([entry('s01', 60, true), entry('s00', -200, false)]);
+report({ before, after, band, left: active(),
+  bandLeft: Array.from(io.intersecting, (el) => el.id) });
 """)
     assert report['before'] == [True, False, False], report
     assert report['after'] == [True, False, False], report
     assert report['band'] == ['s00', 's02'], report
+    assert report['left'] == [False, False, True], report
+    assert report['bandLeft'] == ['s02', 's01'], report
 
 
 def test_the_bus_reaches_every_listener_and_contains_a_throwing_one(_tmp):
