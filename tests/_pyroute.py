@@ -118,8 +118,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         cached = _CALL_CACHE.setdefault((key, active_callables),
                                         (deferred, {}))[1]
         outputs, returned = [], []
-        body = ([deferred.scope.body] if isinstance(
-            deferred.scope, ast.Lambda) else deferred.scope.body)
+        scope = deferred.scope
+        body = [scope.body] if isinstance(scope, ast.Lambda) else scope.body
         rebound = rebound_names(deferred.scope)
         for caller in callers:
             entry_keep = keep | deferred.state.dict_origins.keys()
@@ -540,11 +540,14 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 zero_pairs = []
             target_names = (bound_names(statement.target)
                             if iterating else set())
+            # An empty iterable runs no iteration, so its body never runs.
             iteration_pairs = incoming
             post_body = []
             break_pairs = []
             previous = frozenset()
-            for _ in range(4):
+            # A provably empty iterable runs no iteration, so its body
+            # neither binds a name nor contributes an effect.
+            for _ in range(0 if header_nonempty is False else 4):
                 entry = [_copy_state_pair(pair) for pair in iteration_pairs]
                 clear_names(entry, target_names)
                 if iterating:
@@ -557,10 +560,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 record_exit(flow_exits, 'terminal', exits['terminal'])
                 break_pairs.extend(exits['break'])
                 next_pairs = dedupe_states([*fallthrough, *exits['continue']])
-                post_body = dedupe_states(
-                    [*post_body, *next_pairs])
-                iteration_pairs = dedupe_states(
-                    [*incoming, *post_body])
+                post_body = dedupe_states([*post_body, *next_pairs])
+                iteration_pairs = dedupe_states([*incoming, *post_body])
                 signatures = frozenset(
                     state_signature(pair) for pair in iteration_pairs)
                 if signatures == previous: break
@@ -652,8 +653,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         targets = (statement.targets if isinstance(statement, ast.Assign)
                    else [statement.target]
                    if isinstance(statement, ast.AnnAssign) else ())
-        if any(isinstance(target, (ast.Tuple, ast.List))
-               for target in targets):
+        if any(isinstance(t, (ast.Tuple, ast.List)) for t in targets):
             pairs, _ = consume_iterable(statement.value, pairs, exhaust=True)
         for state in pairs:
             apply_state_dict_statement(statement, state)

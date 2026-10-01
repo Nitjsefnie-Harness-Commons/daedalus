@@ -8,8 +8,9 @@ different reason. It lives beside the store that maintains the table for
 exactly that reason, and out of the flow module, which was a line from
 its ceiling.
 
-`_bind_literals` writes that table for both models, so they cannot disagree
-about the same program.
+`_bind_literals` writes that table for both models, so the two read one
+program the same way. It models the store forms `_STORES` names; a name a
+form outside that set binds resolves to no key.
 """
 import ast
 
@@ -23,9 +24,12 @@ _STORES = (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr, ast.Delete,
 def _bind_literals(node, literals):
     """Record the literal each name this store binds is bound to.
 
-    Every binding form the language has, not the ones a first writer
-    enumerated: a form left out resolves no key, so a payload whose key
-    rides a name that form binds reaches the sender carrying a real `tab`.
+    A form left out resolves no key, so a payload whose key rides a name
+    that form binds reaches the sender carrying a real `tab` — which is why
+    the arms below cover every form `_STORES` names rather than the ones a
+    first writer enumerated. The forms they do not name are listed in the
+    module docstring's terms: a name bound outside this function resolves
+    to no key, and the reader is right to stay silent about it.
     """
 
     def record(name, literal):
@@ -53,40 +57,51 @@ def _bind_literals(node, literals):
         elif isinstance(target, ast.Starred):
             yield from target_names(target.value)
 
+    def parts_of(target, value):
+        """Pair an unpack target's parts with the elements each takes, or [].
+
+        `[]` is a target and a value whose shapes do not line up, which is a
+        program that raises before any name is bound.
+        """
+        stars = [index for index, part in enumerate(target.elts)
+                 if isinstance(part, ast.Starred)]
+        if not stars:
+            return (list(zip(target.elts, value))
+                    if len(target.elts) == len(value) else [])
+        if len(stars) != 1 or len(value) < len(target.elts) - 1:
+            return []
+        star = stars[0]
+        end = len(value) - (len(target.elts) - star - 1)
+        return [*zip(target.elts[:star], value[:star]),
+                (target.elts[star], value[star:end]),
+                *zip(target.elts[star + 1:], value[end:])]
+
     def unpacked(target, value):
         """What each name an unpack target binds is bound to.
 
-        A `*` part takes the elements no other part takes, and the list it
-        becomes names no key. Parts that do not line up with their value
-        raise before any name is bound, so they bind nothing at all. A `*`
-        part may itself be a subscript (`*a[0], b = x`), which binds no name.
+        Each part takes one element, in the order the parts stand, so a part
+        that is not a name takes none and ENDS the walk: a `*` part becomes a
+        list, which no key position names, and a subscript part is evaluated
+        where it stands and may raise before the parts after it are bound at
+        all. The parts before it keep what they took.
         """
-        if isinstance(target, ast.Starred):
-            if isinstance(target.value, ast.Name):
-                yield (target.value.id, _UNSAFE_LITERAL)
-            return
         if isinstance(target, ast.Name):
-            yield (target.id, value[0] if isinstance(value, (tuple, list))
-                   and len(value) == 1 else value)
+            yield (target.id, value)
             return
         if not isinstance(target, (ast.Tuple, ast.List)) \
                 or not isinstance(value, (tuple, list)):
             return
-        stars = [index for index, part in enumerate(target.elts)
-                 if isinstance(part, ast.Starred)]
-        if not stars:
-            parts = (list(zip(target.elts, value))
-                     if len(target.elts) == len(value) else [])
-        elif len(stars) != 1 or len(value) < len(target.elts) - 1:
-            parts = []
-        else:
-            star = stars[0]
-            end = len(value) - (len(target.elts) - star - 1)
-            parts = [*zip(target.elts[:star], value[:star]),
-                     (target.elts[star], value[star:end]),
-                     *zip(target.elts[star + 1:], value[end:])]
-        for part, element in parts:
-            yield from unpacked(part, element)
+        for part, element in parts_of(target, value):
+            if isinstance(part, ast.Name):
+                yield (part.id, element)
+            elif isinstance(part, (ast.Tuple, ast.List)):
+                yield from unpacked(part, element)
+            elif isinstance(part, ast.Starred):
+                if not isinstance(part.value, ast.Name):
+                    return
+                yield (part.value.id, _UNSAFE_LITERAL)
+            else:
+                return
 
     def bind_targets(targets, value):
         for target in targets:
@@ -97,28 +112,39 @@ def _bind_literals(node, literals):
                 record(name, literal)
 
     def bind_loop_target(loop):
-        """A loop target takes every element of what it iterates in turn,
-        so a name it binds carries the one literal they all agree on. A
-        union of several that do not is a key no position can name, and an
-        iterable the fold will not produce names nothing at all."""
+        """Bind the names a loop target binds, and nothing else.
+
+        A loop target takes every element of what it iterates in turn, so a
+        name it binds carries the one literal they all agree on; a union of
+        several that do not is a key no position can name. An unpacked
+        target is paired by position, and only where the shape lines up — a
+        loop over an iterable the fold will not produce binds nothing, and a
+        target of more than one part binds its names only when every part
+        takes its own element.
+        """
         value = value_of(loop.iter)
         if isinstance(value, (tuple, list, set)) and value:
             first = next(iter(value))
             elements = (first,) if all(i == first for i in value) else ()
         else:
             elements = ()
-        bound = dict(unpacked(loop.target, elements)) if elements else {}
-        for name in target_names(loop.target):
+        target = loop.target
+        if not elements:
+            bound = {}
+        elif isinstance(target, ast.Name):
+            bound = {target.id: elements[0]}
+        else:
+            bound = dict(unpacked(target, elements))
+        for name in target_names(target):
             record(name, bound.get(name, _UNSAFE_LITERAL))
 
     def own_nodes(statement):
         """A statement's own nodes, stopping at a nested scope.
 
-        A comprehension is walked: a walrus in either of its clauses binds
-        in the scope the comprehension stands in, on every supported
-        version, and the iteration variable it keeps to itself is a
-        SyntaxError as a walrus target — so nothing inside one binds
-        anywhere this walk does not already write.
+        A comprehension is walked, because a walrus in either of its clauses
+        binds in the scope the comprehension stands in and not in one the
+        walk writes; its iteration variable, the one name a comprehension
+        keeps to itself, is never a walrus target.
         """
         yield statement
         for child in ast.iter_child_nodes(statement):
@@ -127,19 +153,31 @@ def _bind_literals(node, literals):
                     ast.Lambda)):
                 yield from own_nodes(child)
 
+    def bind_walrus(nodes):
+        for child in nodes:
+            if (isinstance(child, ast.NamedExpr)
+                    and isinstance(child.target, ast.Name)):
+                record(child.target.id, _literal_value(child.value))
+
     if isinstance(node, (ast.Assign, ast.AnnAssign)):
         bind_targets(node.targets if isinstance(node, ast.Assign)
                      else [node.target], value_of(node.value))
+    elif isinstance(node, ast.AugAssign):
+        # `k += x` rebinds `k` to a value neither side folds to alone.
+        for name in target_names(node.target):
+            literals.pop(name, None)
     elif isinstance(node, ast.Delete):
         for target in node.targets:
             for name in target_names(target):
                 literals.pop(name, None)
     elif isinstance(node, (ast.For, ast.AsyncFor)):
+        # The target and the header only: the body and the `else` arm are
+        # walked as the statements they are, in the order they run, so a
+        # walrus in either binds when it runs and not before.
         bind_loop_target(node)
-    for child in own_nodes(node):
-        if (isinstance(child, ast.NamedExpr)
-                and isinstance(child.target, ast.Name)):
-            record(child.target.id, _literal_value(child.value))
+        bind_walrus(own_nodes(node.iter))
+        return
+    bind_walrus(own_nodes(node))
 
 
 def dict_assignments(scope):

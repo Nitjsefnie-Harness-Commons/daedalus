@@ -60,9 +60,8 @@ _ROWS = [
     ('inline-at-call', 1, {'tab': 5}, _CALL, 'def f(args):\n' + _SENDER
      + '    k = "tab"\n'
        "    return ext_cmd('PUT', '/command', **{k: 5})\n"),
-    # A walrus in KEY position is inside this reader's domain, unlike the
-    # walrus BINDING rows in `_CROSS_SCOPE`, and carries a real `tab` at
-    # runtime - as the name it binds.
+    # A walrus in KEY position folds inside this reader, whether or not the
+    # table carries the name it binds, and carries a real `tab` at runtime.
     ('walrus-key', 1, {'tab': 5}, _CALL, _inside('cmd = {(k := "tab"): 5}')),
     ('literal', 1, {'tab': 5}, _CALL, _inside("cmd = {'tab': 5}")),
     # Removal, in seven spellings of one behaviour: `del`, `pop` and
@@ -158,8 +157,8 @@ _ROWS = [
     # must end the statement holding nothing rather than what it held
     # before. The prior binding is what makes that observable: a writer that
     # dropped the arm would leave the name on its old literal. A
-    # destructured target with too few elements raises before it binds any
-    # of them, which is the arity guard's other shape.
+    # destructured target whose parts outnumber its value raises before it
+    # binds any of them, so its names end unbound.
     ('unpack-star-binds-list', 0, _RAISES, _CALL, _inside(
         'b = "tab"', 'a, *b = ("z", "tab")', 'cmd = {b: 5}')),
     ('unpack-sequence-arity', 0, _RAISES_VALUE, _CALL, _inside(
@@ -195,6 +194,31 @@ _ROWS = [
         '{k: 1 for _ in [1] if (k := "tab")}', 'cmd = {k: 5}')),
     ('comp-gen-ifs', 1, {'tab': 5}, _CALL, _inside(
         'list(k for _ in [1] if (k := "tab"))', 'cmd = {k: 5}')),
+    # An unpack pairs each part with one element, so a part that is not a
+    # plain name has no element to take: nested one-element sequences are a
+    # list the key position cannot name, and a subscript part may raise
+    # before the parts after it are bound. All four raise, so all four read
+    # clean.
+    ('unpack-nested-element', 0, _RAISES, _CALL, _inside(
+        'j, = [("tab",)]', 'cmd = {j: 5}')),
+    ('unpack-star-subscript-part', 0, 'raises NameError', _CALL, _inside(
+        '*a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-star-subscript-midway', 0, 'raises NameError', _CALL, _inside(
+        'a, *b[0], c = (1, 2, 3)', 'cmd = {c: 5}')),
+    # A loop binds its target and nothing else from its own shape: the body
+    # and the `else` arm are walked as statements of their own, and a walrus
+    # hoisted out of them binds a name the loop never bound.
+    ('empty-loop-body-unreached', 0, 'raises UnboundLocalError', _CALL,
+     _inside('for j in (): (k := "tab")', 'cmd = {k: 5}')),
+    ('loop-else-binds-after-the-body', 0, {'id': 5}, _CALL, _inside(
+        'for k in ("id",): cmd = {k: 5}', 'else: (k := "tab")')),
+    # A walrus's own value is what it binds, so the name it leaves behind
+    # carries it; and a `del` through a tuple target forgets every name in
+    # it, or the key would survive a deletion the program performs.
+    ('walrus-value-binds-its-name', 1, {'tab': 5}, _CALL, _inside(
+        'k = (j := "tab")', 'cmd = {k: 5}')),
+    ('del-tuple-target', 0, 'raises UnboundLocalError', _CALL, _inside(
+        'k = "tab"', 'a = 1', 'del (a, k)', 'cmd = {k: 5}')),
 ]
 
 # Three boundaries this change does not cross. Every row below carries a
@@ -234,6 +258,8 @@ def _sent(call, source):
         return _RAISES
     except ValueError:
         return _RAISES_VALUE
+    except NameError as error:
+        return f'raises {type(error).__name__}'
 
 
 def _verdict(tmp, label, source):
@@ -285,15 +311,19 @@ def test_a_delete_drops_the_literal_the_other_writer_drops(tmp):
     assert 'tab' in found['cmd']
     assert found['other'] == {}
     forms = {
-        'walrus': '(w := "tab")\nk = w\ncmd = {k: 5}\n',
-        'unpack': 'j, = ("tab",)\ncmd = {j: 5}\n',
-        'loop': 'for j in ("tab",):\n    cmd = {j: 5}\n',
-        'loop-over-name': 'keys = ("tab",)\nfor j in keys:\n'
-                          '    cmd = {j: 5}\n',
+        'walrus': ('(w := "tab")\nk = w\ncmd = {k: 5}\n', ['tab']),
+        'unpack': ('j, = ("tab",)\ncmd = {j: 5}\n', ['tab']),
+        'loop': ('for j in ("tab",):\n    cmd = {j: 5}\n', ['tab']),
+        'loop-over-name': ('keys = ("tab",)\nfor j in keys:\n'
+                           '    cmd = {j: 5}\n', ['tab']),
+        'augmented': ('k = "tab"\nk += "x"\ncmd = {k: 5}\n', []),
+        'order-key-then-walrus': ('k = "id"\ncmd = {k: (k := "tab")}\n',
+                                  ['id']),
     }
     spelled = {label: sorted(dict_assignments(ast.parse(source))['cmd'])
-               for label, source in forms.items()}
-    assert spelled == {label: ['tab'] for label in forms}, spelled
+               for label, (source, _) in forms.items()}
+    assert spelled == {label: expected
+                       for label, (_, expected) in forms.items()}, spelled
 
 
 def main():
