@@ -55,13 +55,10 @@
 !/.claude/skills/changing-daedalus/SKILL.md
 !/.claude/skills/changing-daedalus/ci_gate.py
 !/.claude/skills/changing-daedalus/ci_wait.py
-!/.claude/skills/changing-daedalus/ci_watch.py
 !/.claude/skills/changing-daedalus/gh_client.py
 !/.claude/skills/changing-daedalus/gh_head_prs.py
 !/.claude/skills/changing-daedalus/gh_rate_limit.py
 !/.claude/skills/changing-daedalus/plant.py
-!/.claude/skills/changing-daedalus/pr_comment_watch.py
-!/.claude/skills/changing-daedalus/watch_all.py
 
 # ─── .githooks ───
 !/.githooks/
@@ -431,8 +428,6 @@
 !/tests/_version_contract_dashboard_duplicates.py
 !/tests/_version_contract_scanners.py
 !/tests/_watcher_fixtures.py
-!/tests/_watcher_once.py
-!/tests/_watcher_waits.py
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
 !/tests/_wffixtures.py
@@ -581,17 +576,11 @@
 !/tests/test_extension_boundary.py
 !/tests/test_extension_manifest.py
 !/tests/test_extension_policy.py
-!/tests/test_fake_gh.py
 !/tests/test_fetch_timings_count.py
 !/tests/test_file_sizes.py
 !/tests/test_gate_extensions.py
 !/tests/test_gate_freshness.py
 !/tests/test_gate_freshness_run.py
-!/tests/test_gh_body_shapes.py
-!/tests/test_gh_client.py
-!/tests/test_gh_head_prs.py
-!/tests/test_gh_matcher.py
-!/tests/test_gh_refusal.py
 !/tests/test_ghexpr.py
 !/tests/test_gitignore_control.py
 !/tests/test_gitignore_generator.py
@@ -656,7 +645,6 @@
 !/tests/test_plant_report.py
 !/tests/test_plant_restore.py
 !/tests/test_platform_apis.py
-!/tests/test_pr_gate.py
 !/tests/test_pyright_scope.py
 !/tests/test_queued_command.py
 !/tests/test_real_browser_boundary.py
@@ -725,14 +713,6 @@
 !/tests/test_version_empty_values.py
 !/tests/test_version_set_atomic.py
 !/tests/test_vm_file_load_guard.py
-!/tests/test_watch_all.py
-!/tests/test_watcher_budget.py
-!/tests/test_watcher_budget_base.py
-!/tests/test_watcher_escalation.py
-!/tests/test_watcher_lifecycle.py
-!/tests/test_watcher_loop_budget.py
-!/tests/test_watcher_poll_index.py
-!/tests/test_watcher_waits.py
 !/tests/test_wf_suite_boundaries.py
 !/tests/test_wfcheckout.py
 !/tests/test_wfjobs.py
