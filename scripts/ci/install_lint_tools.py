@@ -46,7 +46,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -136,11 +135,11 @@ DOWNLOAD_TIMEOUT = 30
 # verdict is never retried — the size refusal, the digest mismatch — and
 # what else is not worth a second ask is decided in `_worth_asking_again`.
 DOWNLOAD_ATTEMPTS = 3
-# Four times the per-socket bound above: three attempts of one socket
-# operation each, a timed-out connect on a host resolving to one address,
-# and not a promise of three full ones. What this does not bound is in
-# `_fetch`'s docstring, which is the sentence to read.
-DOWNLOAD_BUDGET = 4 * DOWNLOAD_TIMEOUT
+# The bound, and it is the attempt count: an attempt is a redirect hop times
+# an address, each of which is one socket timeout, and the release URL 302s
+# to a host with four addresses, so the worst case is 3 x 2 x 4 x 30 s. The
+# job's own `timeout-minutes` is what bounds the step above that.
+# What `timeout` does not bound is in `_fetch`'s docstring.
 # What a retry can change. A body cut short mid-transfer raises
 # IncompleteRead, an HTTPException and not an OSError.
 TRANSIENT_ERRORS = (OSError, http.client.HTTPException)
@@ -177,13 +176,13 @@ def _asset_name():
 def _worth_asking_again(why):
     """Whether a second ask could answer differently: a status of 500 or
     above is the server failing rather than answering, and a certificate
-    that does not verify is the same failure in the handshake, which reaches
-    here as a URLError's `reason`. There is no wait between attempts to turn
-    an answer into a different one.
+    that does not verify is the same failure in the handshake. It arrives
+    wrapped on the h.request() path and bare on the getresponse() and read()
+    path, which is why the test below falls back rather than reaching for
+    `reason` directly.
     """
-    # This test reads the HTTPError, whose `reason` is its status message
-    # and not an exception; the one below reads `reason`. Swapped, the
-    # second hands this one a string, and a 404 is asked again.
+    # Unwrapping an HTTPError rebinds `why` to its status message, a string,
+    # and this test then declines nothing — a 404 is asked again.
     if isinstance(why, urllib.error.HTTPError):
         return why.code >= 500
     unwrapped = getattr(why, 'reason', why)
@@ -202,18 +201,14 @@ def _fetch(name):
     and `urlopen` is what a reader of a dead install step still gets.
     """
     url = f'{RELEASE}/v{ACTIONLINT_VERSION}/{name}'
-    deadline = time.monotonic() + DOWNLOAD_BUDGET
     for attempt in range(DOWNLOAD_ATTEMPTS):
-        budget = deadline - time.monotonic()
         try:
             with urllib.request.urlopen(
-                    url,
-                    timeout=max(1, min(DOWNLOAD_TIMEOUT, budget))) as source:
+                    url, timeout=DOWNLOAD_TIMEOUT) as source:
                 payload = source.read(MAX_TRANSFER + 1)
         except TRANSIENT_ERRORS as why:
-            exhausted = (attempt + 1 == DOWNLOAD_ATTEMPTS
-                         or time.monotonic() >= deadline)
-            if exhausted or not _worth_asking_again(why):
+            if (attempt + 1 == DOWNLOAD_ATTEMPTS
+                    or not _worth_asking_again(why)):
                 raise
             continue
         if len(payload) > MAX_TRANSFER:
