@@ -131,7 +131,7 @@ def test_added_lines_split_only_on_git_newlines(tmp):
 def test_configured_omissions_do_not_demand_coverage(tmp):
     del tmp
     added = {
-        '.claude/skills/changing-daedalus/watch_all.py': {1},
+        '.claude/skills/changing-daedalus/plant.py': {1},
         '.venv/lib/helper.py': {1},
         'build/lib/helper.py': {1},
         'dist/helper.py': {1},
