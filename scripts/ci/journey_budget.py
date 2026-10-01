@@ -59,7 +59,14 @@ SHAPE_REMEDY = (
     'rendering is in the journeys module; a field that legitimately varies '
     'between runs belongs in its exclusion list, and anything else is a '
     'shape change.')
-REMEDY_FOR = {'over': OVER_REMEDY, 'shape': SHAPE_REMEDY}
+UNMEASURED_REMEDY = (
+    'The budget names a counter this runner produced no count in, so no '
+    'journey was compared and a green here would be a run that measured '
+    'nothing. The probe step says what this runner allows: `instructions:u` '
+    'needs less kernel access than an unqualified event, and callgrind is '
+    'the fallback when perf is refused.')
+REMEDY_FOR = {'over': OVER_REMEDY, 'shape': SHAPE_REMEDY,
+              'unmeasured': UNMEASURED_REMEDY}
 
 
 def journey_names():
@@ -159,21 +166,29 @@ def violations(counts, shapes, document, names):
     rendered. A journey the artefact does not record is not here:
     `unrecorded` reports it and the check passes, which is what an artefact
     before its first recording looks like.
+
+    `unmeasured` is the false green this whole design exists against: a
+    runner that cannot produce the counter the budget names would otherwise
+    report every journey within budget having measured none of them.
     """
     over = {}
     shape = {}
+    unmeasured = {}
     for name in names:
         seen = sorted(set(shapes.get(name) or ()))
         if len(seen) > 1:
             shape[name] = seen
             continue
-        measured = counts.get(name)
         limit = budget_of(document, name)
-        if measured is None or limit is None:
+        if limit is None:
+            continue
+        measured = counts.get(name)
+        if measured is None:
+            unmeasured[name] = document['counter']
             continue
         if measured > limit:
             over[name] = (measured, limit)
-    return {'over': over, 'shape': shape}
+    return {'over': over, 'shape': shape, 'unmeasured': unmeasured}
 
 
 def tightened(counts, document, names):
@@ -234,6 +249,9 @@ def refusal_lines(found):
         lines.append(f'| {name} | {measured} | {limit:.0f} |')
     for name, seen in sorted(found['shape'].items()):
         lines.append(f'| {name} | shape mismatch: {", ".join(seen)} | — |')
+    for name, counter in sorted(found['unmeasured'].items()):
+        lines.append(f'| {name} | not measured: `{counter}` gave no count '
+                     f'on this runner | — |')
     lines.append('')
     for kind, detail in found.items():
         if detail:
