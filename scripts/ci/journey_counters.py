@@ -332,7 +332,7 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                         value, why = run(name, root, workdir)
                         if why is not None:
                             break
-                        counted.append(value - startup if childed else value)
+                        counted.append(value)
                     if why is not None:
                         break
                     rows[name] = counted
@@ -344,16 +344,26 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 'available': True,
                 'gated': counter in GATE_CANDIDATES,
                 'startup_only': startup if childed else None,
-                'journeys': {name: _row(rows[name]) for name in names}}
+                'journeys': {name: _row(rows[name], startup if childed
+                                         else 0) for name in names}}
     return report
 
 
-def _row(values):
-    return {'raw': values[0] if values else None,
-            'min': min(values) if values else None,
-            'max': max(values) if values else None,
-            'median': statistics.median(values) if values else None,
-            'spread': max(values) - min(values) if values else None}
+def _row(raw_values, startup):
+    """One journey's row: the raw total, the startup-net one, the spread.
+
+    Both numbers are reported because only one of them is the budget: a
+    journey's own total carries the interpreter start and the imports the
+    startup-only child already accounts for, and a ratchet on that number
+    would go red on a dependency bump rather than on a change to the work.
+    """
+    net = [value - startup for value in raw_values]
+    return {'raw': raw_values,
+            'net': net,
+            'min': min(net) if net else None,
+            'max': max(net) if net else None,
+            'median': statistics.median(net) if net else None,
+            'spread': max(net) - min(net) if net else None}
 
 
 def counts_of(report, counter):
