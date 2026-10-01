@@ -524,73 +524,6 @@ def test_a_recorded_exclusion_survives_a_render_and_reload(tmp):
     assert b'"excluded_threads"' not in policy.render(budget_document())
 
 
-def test_an_artefact_that_cannot_be_read_says_which_way_it_failed(tmp):
-    """Three failures with three sentences, because a reader has to know
-    whether the file is missing, malformed or the wrong shape."""
-    policy = _journey_contract.policy()
-    for path, fragment in (
-            (Path(tmp) / 'absent.json', 'cannot read'),
-            (Path(tmp) / 'broken.json', 'invalid journey budget JSON')):
-        if fragment.startswith('invalid'):
-            path.write_text('{not json', encoding='utf-8')
-        try:
-            policy.load(path)
-        except ValueError as error:
-            assert fragment in str(error), error
-            continue
-        raise AssertionError(f'load accepted {path.name}')
-
-    def over(field, value):
-        document = budget_document()
-        document[field] = value
-        return document
-
-    name = journeys().NAMES[0]
-    for document, fragment in (
-            ('not an object', 'must be an object'),
-            (over('toolchain', []), 'toolchain must be an object'),
-            (over('toolchain', {'': 'x'}), 'unknown toolchain field'),
-            (over('toolchain', {'python': '  '}), 'non-empty string or null'),
-            (over('excluded_threads', 'none'),
-             'excluded_threads must be an object'),
-            (over('excluded_threads', {'no-such-journey':
-                                       ['front-end-import']}),
-             'names a journey with no count'),
-            (over('excluded_threads', {name: 'front-end-import'}),
-             'excluded_threads names no thread'),
-            (over('excluded_threads', {name: ['front-end-import',
-                                              'front-end-import']}),
-             'repeats a role'),
-            (over('excluded_threads', {name: ['no-such-role']}),
-             'unknown excluded thread role'),
-            # The bands and the shas each refuse in their own words, and the
-            # exact fragment is the assertion: a plausible simplification of
-            # either — a band of any size, a sha of any shape — has to die
-            # here rather than pass and be caught by a later run.
-            (over('thread_bands', 'big'), 'thread_bands must be an object'),
-            (over('thread_bands', {'no-such-band': 1}),
-             'unknown thread band'),
-            (over('thread_bands', {'front-end-import': 0}),
-             'a thread band must be a positive integer'),
-            (over('shas', 'one'), 'shas must be an object'),
-            (over('shas', {'no-such-journey': 'a' * 64}),
-             'shas names a journey with no count'),
-            (over('shas', {name: 'abc'}), '64 lowercase hex characters'),
-            (over('shas', {name: '  '}),
-             'a recorded sha is a non-empty string'),
-            # A PADDED sha is the one this table could have missed: the
-            # length check strips and the hex check did not, so it validated
-            # and then read as a change rather than a format refusal.
-            (over('shas', {name: f'  {"a" * 64}  '}),
-             '64 lowercase hex characters')):
-        try:
-            policy._validated(document)
-        except ValueError as error:
-            assert fragment in str(error), (fragment, error)
-            continue
-        raise AssertionError(f'the schema accepted {document!r}')
-
-
 def test_a_journey_that_renders_differently_is_not_compared(tmp):
     """A recorded count describes the journey that rendered when it was
     recorded, so a different rendering refuses rather than reading as a
@@ -599,6 +532,11 @@ def test_a_journey_that_renders_differently_is_not_compared(tmp):
     Two ways to differ: one journey's sha moved, and one journey's sha is
     not in the measurement at all. Both are a difference from the recorded
     one, and the never-recorded case is that gate's own test below.
+
+    The ROUNDS disagreeing is a third case and it is a different one, so it
+    is not here: it is `test_rounds_that_disagree`, which asserts on
+    `sha_diff` directly, because a measurement whose rounds disagree is not
+    a measurement to compare counts from at all.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -678,6 +616,77 @@ def test_the_bands_a_count_measured_under_are_recorded(tmp):
     assert 'thread bands changed' in said, said
     assert ('front-end-import: recorded 100000000, measured 1000000000'
             in said), said
+
+
+def test_the_re_baseline_block_carries_what_a_paste_needs(tmp):
+    """The block a reader pastes, read back and handed to the validator.
+
+    Two claims, and they are the direction a wrong block fails in. It must
+    carry every field the schema requires and nothing it refuses — so the
+    field list is walked, not trusted. And it must carry NO recorded count
+    and a NON-NULL tolerance: old counts riding inside the thing that
+    replaces them can leave a budget ABOVE the new counts, and then a
+    regression passes. That is the false-green direction, which is the only
+    direction this control is for; a wrong remedy STRING is the over-refusal
+    side of the same line and is disclosed in the PR body instead.
+    """
+    del tmp
+    summaries = _journey_contract.summaries()
+    document = recorded_document()
+    lines = summaries.rebaseline_lines(
+        _journey_contract.fixture_report(), document)
+    fenced = [index for index, line in enumerate(lines) if line == '```json']
+    assert fenced, 'the block is not machine-readable: no fenced JSON'
+    start = fenced[0] + 1
+    block = json.loads('\n'.join(lines[start:lines.index('```', start)]))
+
+    policy = _journey_contract.policy()
+    artifact = _journey_contract.artifact()
+    assert set(artifact.FIELDS) <= set(block), (
+        'a re-baseline pasted from this block would refuse: missing '
+        f'{sorted(set(artifact.FIELDS) - set(block))}')
+    assert set(block) - set(artifact.FIELDS) == set(), (
+        'the block a reader pastes carries keys the artefact refuses: '
+        f'{sorted(set(block) - set(artifact.FIELDS))}')
+    assert policy._validated(block) is not None, (
+        'the block the validator refuses: '
+        + str(policy._validated(block)))
+    names = journeys().NAMES
+    for name in names:
+        assert len(block['shas'][name]) == 64, (name, block['shas'][name])
+        assert block['thread_bands'], name
+        assert block['excluded_threads'][name], name
+        assert block['journeys'][name] is not None, name
+    assert block['tolerance_pct'] == document['tolerance_pct'], (
+        'a null tolerance lands with no headroom: the budget becomes the '
+        'recorded count itself')
+    for name in names:
+        assert block['journeys'][name] != document['journeys'][name], (
+            f'the block carries the count it replaces: {name}')
+
+
+def test_every_shape_the_schema_refuses_is_still_refused(tmp):
+    """The table is shared, so one suite reads it and every row must die.
+
+    Each row names the exact refusal, which is what makes a plausible
+    simplification of the validator — a band of any size, a sha of any
+    shape — fail here rather than in a later run.
+    """
+    policy = _journey_contract.policy()
+    for document, fragment in _journey_contract.artifact_shapes():
+        try:
+            policy._validated(document)
+        except ValueError as error:
+            assert fragment in str(error), (fragment, error)
+            continue
+        raise AssertionError(f'the schema accepted {document!r}')
+    for path, fragment in _journey_contract.unreadable_artifacts(tmp):
+        try:
+            policy.load(path)
+        except ValueError as error:
+            assert fragment in str(error), (path, error)
+            continue
+        raise AssertionError(f'load accepted {path.name}')
 
 
 def main():
