@@ -56,13 +56,12 @@ ROUNDS_DEFAULT = journey_counters.ROUNDS_DEFAULT
 # denominated in a quantity the gate does not defend.
 COUNTERS = journey_artifact.COUNTERS
 
-# The document shape lives in its own module, off this one's ceiling. The
-# names below are this module's OWN bindings rather than re-exports: every
-# suite that needs one loads that module directly, and a name this file
-# forwards is a name this file can drift from.
+# The document shape lives in its own module, off this one's ceiling, and
+# the names below are this file's own bindings of it: the suites read the
+# document through THIS module, so one name here is one name for one
+# function, and a suite that wants the shape itself loads that module.
 load = journey_artifact.load
 render = journey_artifact.render
-recorded_toolchain = journey_artifact.recorded_toolchain
 exclusion_diff = journey_artifact.exclusion_diff
 map_diff = journey_artifact.map_diff
 sha_diff = journey_artifact.sha_diff
@@ -456,12 +455,14 @@ def _recorded_outcome(args, document, report, changed, gate):
 
 
 def _report_state(document, names, counter, report):
-    """Everything a check knows but is not refusing on, said out loud.
+    """The two artefact states a check reports without refusing on them.
 
-    Every state that can stop a comparison is a refusal, and each of those
-    is raised before this runs: a measurement that could not be taken, and a
-    recorded value that was never written down. So this is a report, and it
-    has nothing to return.
+    A null `counter` and a null `tolerance_pct` both reach here, and the
+    run's exit then comes from the counts rather than from here: a null
+    counter leaves nothing measured, and a null tolerance leaves a budget
+    equal to the recorded count, so a movement in either direction shows in
+    the counts instead. Both were driven on the CLI, which is what refuted
+    the claim this replaces.
     """
     if counter is None:
         print('the journey budget names no counter yet, so no count is '
