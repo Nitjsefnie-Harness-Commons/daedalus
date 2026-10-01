@@ -37,15 +37,11 @@ EFFECTIVE CALLEE receives the call's RESULT — the declared call-result
 limit below, not a delivery — and the callee is resolved by the VALUE it
 produces, so a builtin in a DATA position of it (an argument, a lookup key)
 stays a delivery. Three shapes it cannot follow are ACCEPTED as declared
-limits, each pinned by the case named beside it. A value reached through a
-call's result, and a tracked module or the operation handed as a call
-ARGUMENT (`use(sys)`), in
-`test_the_operation_delivered_as_a_call_argument_is_the_declared_limit`
-and `test_the_registry_module_delivered_as_a_call_argument_is_the_limit`.
-A value COMPUTED at runtime — an interpolated f-string, a subscript that
-selects one (`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`), a starred argument
-— in `test_the_fold_limit_facets_are_accepted`. Any accepted shape leaves
-the closure quietly short.
+limits. A value reached through a call's result. A tracked module or the
+operation handed as a call ARGUMENT (`use(sys)`). A value COMPUTED at
+runtime — an interpolated f-string, a subscript that selects one
+(`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`), a starred argument. Any
+accepted shape leaves the closure quietly short.
 """
 import ast
 from pathlib import Path
