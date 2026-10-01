@@ -10,7 +10,8 @@ workflow never started" when `tests` simply is not that repository's gate.
 A suite of its own because `tests/test_ci_wait_gate.py` is within forty
 lines of its own 700-line ceiling, and relocating is the remedy
 `scripts/ci/size_baseline.py` prints for a file over it - the same remedy
-that put the head-pull-request controls in `tests/test_gh_head_prs.py`.
+that moved the head-pull-request controls out of that suite, whose own
+destination has since been deleted.
 The run builder and the clock come from `_ci_wait_fixtures`, which is
 where a helper shared by more than two suites belongs.
 """
