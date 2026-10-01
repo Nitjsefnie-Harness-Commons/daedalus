@@ -104,15 +104,18 @@ def register(mcp, bridge):
         return _flatten_eval(body) or {}
 
     @mcp.tool()
-    async def ping(tab_id: str = '') -> dict:
+    async def ping(tab_id: str = '', wait: bool = True) -> dict:
         """Round-trip a `document.title` eval to `tab_id` (or, with no tab,
-    the browser's active tab)."""
+    the browser's active tab). `wait=False` sends it and returns the command
+    the bridge enqueued, measuring nothing."""
         import time
         t0 = time.time()
         payload: dict = {'id': '_ping', 'code': 'document.title'}
         if tab_id:
             payload['tab'] = tab_id
         sent = await bridge.put('/command', payload)
+        if not wait:
+            return {'command': sent.get('command')}
         res = await bridge.poll_result(
             tab_id, 10.0, expect_id='_ping',
             expect_delivery=sent.get('did'))

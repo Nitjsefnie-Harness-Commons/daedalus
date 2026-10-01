@@ -146,6 +146,8 @@ TOOL_COMMANDS = {
          [_put('/command', {'id': '_ping', 'code': 'document.title',
                             'tab': 'tab'}),
           _poll('tab', 10.0, '_ping')]),
+        ({'wait': False},
+         [_put('/command', {'id': '_ping', 'code': 'document.title'})]),
     ],
     'navigate': [
         ({}, [_put('/command',
