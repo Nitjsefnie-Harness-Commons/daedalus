@@ -26,152 +26,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ratchet_fixture import _git  # noqa: E402
+from _plant_fixture import (  # noqa: E402
+    PLANT, _COMMITTED, _FIXED, _PLANTED, _as_nobody, _hand_to_nobody, _out,
+    _only_entry, _open_the_entry, _plant, _reported_state, _repo, _say,
+    _unreadable_as_bytes)
 
-ROOT = _util.ROOT
-PLANT = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'plant.py'
-SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
-
-_COMMITTED = b'VALUE = 1\n'
-_FIXED = b'VALUE = 2  # the uncommitted fix, never staged\n'
-_PLANTED = b'raise RuntimeError("the defect the guard exists to catch")\n'
-
-
-def _out(result):
-    return result.stdout.decode('utf-8', 'replace')
-
-
-def _plant(*args):
-    return subprocess.run([sys.executable, str(PLANT), *args],
-                          capture_output=True, text=True, timeout=60,
-                          env=_util.child_coverage('scrub'))
-
-
-def _repo(tmp, name='plantrepo'):
-    """A committed repository holding one committed target file."""
-    if shutil.which('git') is None:
-        _util.skip('git is not on PATH')
-    repo = Path(tmp) / name
-    repo.mkdir(parents=True)
-    target = repo / 'target.py'
-    target.write_bytes(_COMMITTED)
-    _git(repo, '-c', 'init.defaultBranch=main', 'init', '-q')
-    _git(repo, 'config', 'user.email', 'tests@example.invalid')
-    _git(repo, 'config', 'user.name', 'Tests')
-    _git(repo, 'add', 'target.py')
-    _git(repo, 'commit', '-qm', 'base')
-    return target
-
-
-def _say(result):
-    return result.stdout + result.stderr
-
-
-def _reported_state(output):
-    """The state word the helper reported, not a word in its paths: the
-    suite names each temp dir after its test function, so the path a test
-    about a dirty target prints is full of that word anyway."""
-    return output.rsplit(': ', 1)[-1].split(' against')[0].strip()
-
-
-_NOT_HEADS = "the published bytes are the worktree's, not what HEAD holds"
-
-_CHANGE_CLAUSES = {
-    'the file did not already hold these bytes': 'changed',
-    'the file already held these bytes': 'unchanged',
-    'the comparison with the file could not be made': 'uncompared',
-}
-
-
-def _restore_clauses(output):
-    """The restore report split into the clauses the helper labels.
-
-    Same reason as `_reported_state`: a substring pin over the whole
-    line is satisfied by the suite's own temp paths, which carry each
-    test's name and so carry whatever word that test is about.
-    """
-    line = output.strip().splitlines()[-1]
-    assert line.startswith('restored '), line
-    return line.split('; ')
-
-
-def _state_in(clauses):
-    found = [c for c in clauses if c.endswith(' against HEAD')]
-    assert len(found) == 1, clauses
-    return found[0].split(' ', 1)[1].split(' against')[0]
-
-
-def _change_in(clauses):
-    found = [c for c in clauses if c in _CHANGE_CLAUSES]
-    assert len(found) == 1, clauses
-    return _CHANGE_CLAUSES[found[0]]
-
-
-def _entry_fields(output):
-    """The labelled fields `_entry_detail` printed, parsed by label."""
-    detail = output.strip().splitlines()[-1].rsplit(' (', 1)[-1]
-    return [item.split(' ', 1) for item in detail.rstrip(')').split(', ')]
-
-
-def _only_entry(store):
-    entries = [item for item in Path(store).iterdir() if item.is_dir()]
-    assert len(entries) == 1, entries
-    return entries[0]
-
-
-def _unreadable_as_bytes(entry):
-    """Make a stored copy unreadable as bytes, on every platform.
-
-    A directory where a file is expected refuses the open everywhere -
-    IsADirectoryError on POSIX, PermissionError on Windows - so the class
-    is the platform's and only OSError may be relied on. It is a claim
-    about the OPEN, so it holds where the open is reached: the advice
-    path has no presence guard, the restore path does.
-    """
-
-    payload = entry / 'bytes'
-    payload.unlink()
-    payload.mkdir()
-
-
-def _drop_to_nobody():
-    os.setgroups([])
-    os.setgid(65534)
-    os.setuid(65534)
-
-
-def _as_nobody(command):
-    """Run `command` unprivileged, so the file mode bits bite - root
-    bypasses them, which is why this route was enforced nowhere on a root
-    runner. An arrangement that cannot drop privileges skips with the
-    reason rather than erroring: a control that manufactures a red on
-    correct code is the same defect as one that passes on broken code.
-    """
-    try:
-        return subprocess.run(command, capture_output=True, text=True,
-                              timeout=60, preexec_fn=_drop_to_nobody,
-                              env=_util.child_coverage('scrub'))
-    except (OSError, subprocess.SubprocessError) as why:
-        _util.skip(f'the privilege drop is unavailable here: {why!r}')
-
-
-def _hand_to_nobody(path):
-    # 0o700: the chown makes the child the OWNER, so owner bits are all
-    # it needs and group and other are nobody.
-    os.chown(path, 65534, 65534)
-    os.chmod(path, 0o700)
-
-
-def _open_the_entry(store, target):
-    """Hand the child every path it walks to publish: a suite's temporary
-    root is 0700, and without the traverse bit the child reads a refusal
-    where the route should have run."""
-    entry = _only_entry(store)
-    for directory in (target.parent, store, entry):
-        for ancestor in (directory, *directory.parents):
-            os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
-    for owned in (target.parent.parent, target.parent, store, entry,
-                  *entry.iterdir()):
-        _hand_to_nobody(owned)
+SKILL_SOURCE = (_util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
+                / 'SKILL.md')
 
 
 def test_restore_returns_the_uncommitted_work_and_the_planted_bytes_are_gone(
@@ -598,6 +459,39 @@ def test_the_refusal_recommends_clear_when_the_copy_is_unreadable(tmp):
     advice = _say(again).split('; ', 1)[-1]
     assert f'plant.py clear {target}' in advice, advice
     assert 'plant.py restore' not in advice, advice
+    # WHICH advice, not just that both branches name `clear`: a store
+    # that cannot open its own bytes is not evidence that the file
+    # moved on, and the "it has changed" wording claims exactly that.
+    assert 'has changed since that copy was taken' not in advice, advice
+    assert 'neither that copy nor the file could be read' in advice, advice
+
+
+def test_an_unreadable_target_is_also_refused_as_an_unknown_comparison(tmp):
+    # The other side of the same pair: the copy reads, the file does not,
+    # so the comparison never happened either.
+    if os.name != 'posix':
+        _util.skip('POSIX mode bits are what refuse the read')
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+    target.write_bytes(_FIXED)
+    _open_the_entry(store, target)
+    try:
+        _hand_to_nobody(target)
+    except OSError as why:
+        _util.skip(f'cannot hand the target to a plain user: {why!r}')
+    target.chmod(0o200)
+    try:
+        refused = _as_nobody(
+            [sys.executable, str(PLANT), 'save', str(target),
+             '--store', str(store)])
+    finally:
+        target.chmod(0o600)
+    assert refused.returncode != 0, _say(refused)
+    advice = _say(refused).split('; ', 1)[-1]
+    assert 'has changed since that copy was taken' not in advice, advice
+    assert 'neither that copy nor the file could be read' in advice, advice
 
 
 def test_a_write_that_dies_partway_leaves_the_target_untouched(tmp):
@@ -645,158 +539,6 @@ def test_save_reports_unknown_outside_a_git_work_tree(tmp):
     other = _plant('save', str(outside), '--store', str(store))
     assert other.returncode == 0, _say(other)
     assert _reported_state(other.stdout) == 'unknown', _say(other)
-
-
-def test_a_dirty_snapshot_is_restored_with_the_state_it_was_taken_in(tmp):
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    saved = _plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
-    assert _reported_state(saved.stdout) == 'dirty', _say(saved)
-    target.write_bytes(_PLANTED)
-
-    restored = _plant('restore', str(target), '--store', str(store))
-    assert restored.returncode == 0, _say(restored)
-    clauses = _restore_clauses(restored.stdout)
-    assert _state_in(clauses) == 'dirty', clauses
-    assert _NOT_HEADS in clauses, clauses
-    assert _change_in(clauses) == 'changed', clauses
-    assert target.read_bytes() == _FIXED
-
-
-def test_a_clean_snapshot_is_not_reported_as_the_worktrees(tmp):
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    saved = _plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
-    assert _reported_state(saved.stdout) == 'clean', _say(saved)
-    target.write_bytes(_PLANTED)
-
-    restored = _plant('restore', str(target), '--store', str(store))
-    assert restored.returncode == 0, _say(restored)
-    clauses = _restore_clauses(restored.stdout)
-    assert _state_in(clauses) == 'clean', clauses
-    assert _NOT_HEADS not in clauses, clauses
-    assert _change_in(clauses) == 'changed', clauses
-
-
-def test_a_restore_over_identical_bytes_says_it_held_them_already(tmp):
-    # The recovery the recorded recurrence reaches for: re-save a path
-    # that still carries the plant, then restore it. Nothing changes,
-    # and the report has to say so - a count cannot.
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_PLANTED)
-    saved = _plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
-    assert _reported_state(saved.stdout) == 'dirty', _say(saved)
-
-    restored = _plant('restore', str(target), '--store', str(store))
-    assert restored.returncode == 0, _say(restored)
-    clauses = _restore_clauses(restored.stdout)
-    assert _change_in(clauses) == 'unchanged', clauses
-    assert _state_in(clauses) == 'dirty', clauses
-    assert target.read_bytes() == _PLANTED
-
-
-def test_an_entry_saved_before_the_state_field_restores_as_unknown(tmp):
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    assert _plant('save', str(target), '--store',
-                  str(store)).returncode == 0
-    # Absent either way: the entry shape a save from before this
-    # field existed has, and one whose save never wrote it.
-    (_only_entry(store) / 'head-state').unlink(missing_ok=True)
-    target.write_bytes(_PLANTED)
-
-    restored = _plant('restore', str(target), '--store', str(store))
-    assert restored.returncode == 0, _say(restored)
-    clauses = _restore_clauses(restored.stdout)
-    assert _state_in(clauses) == 'unknown', clauses
-    assert _change_in(clauses) == 'changed', clauses
-    assert target.read_bytes() == _FIXED
-
-
-def _restore_over_a_target_nothing_can_read(plant, target, store):
-    """Restore a target whose bytes cannot be read, and hand back the
-    result. The arrangement is a real write-only mode, not a mock:
-    `os.replace` needs the directory, which the child owns, so the
-    publish lands while the read before it cannot. Root bypasses mode
-    bits, so there the child runs as a plain user it does not own.
-    """
-    if os.name != 'posix':
-        _util.skip('POSIX mode bits are what refuse the read')
-    if hasattr(os, 'geteuid') and os.geteuid() == 0:
-        try:
-            _open_the_entry(store, target)
-            _hand_to_nobody(target)
-        except OSError as why:
-            _util.skip(f'cannot hand the tree to a plain user: {why!r}')
-        target.chmod(0o200)
-        return _as_nobody([sys.executable, str(plant), 'restore',
-                           str(target), '--store', str(store)])
-    target.chmod(0o200)
-    return _plant('restore', str(target), '--store', str(store))
-
-
-def test_a_target_nothing_can_read_is_reported_as_uncompared(tmp):
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    assert _plant('save', str(target), '--store',
-                  str(store)).returncode == 0
-    target.write_bytes(_PLANTED)
-
-    restored = _restore_over_a_target_nothing_can_read(PLANT, target, store)
-    assert restored.returncode == 0, _say(restored)
-    clauses = _restore_clauses(restored.stdout)
-    assert _change_in(clauses) == 'uncompared', clauses
-    target.chmod(0o600)
-    assert target.read_bytes() == _FIXED
-
-
-def test_the_save_line_carries_no_clause_of_its_own(tmp):
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    saved = _plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
-    # Everything new belongs to the restore: a clause here would sit on
-    # a line `tests/test_plant_restore.py` parses positionally.
-    assert '; ' not in saved.stdout.strip(), saved.stdout
-
-
-def test_clear_names_the_state_its_entry_recorded(tmp):
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    assert _plant('save', str(target), '--store',
-                  str(store)).returncode == 0
-
-    cleared = _plant('clear', str(target), '--store', str(store))
-    assert cleared.returncode == 0, _say(cleared)
-    # Parsed by label: the store path carries this test's own name.
-    fields = _entry_fields(cleared.stdout)
-    assert ['captured', 'dirty'] in fields, _say(cleared)
-
-
-def test_clear_of_an_entry_without_the_field_still_names_its_others(tmp):
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    assert _plant('save', str(target), '--store',
-                  str(store)).returncode == 0
-    # Absent either way: the entry shape a save from before this
-    # field existed has, and one whose save never wrote it.
-    (_only_entry(store) / 'head-state').unlink(missing_ok=True)
-
-    cleared = _plant('clear', str(target), '--store', str(store))
-    assert cleared.returncode == 0, _say(cleared)
-    labels = [label for label, _ in _entry_fields(cleared.stdout)]
-    assert labels == ['path', 'saved'], labels
-
 
 _PARAGRAPH_ANCHORS = ('have not watched fail', 'plant the defect',
                       'Restore the way')

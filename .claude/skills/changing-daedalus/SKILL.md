@@ -97,8 +97,9 @@ the stored bytes in one atomic step and exits nonzero on a store it cannot read
 or a target it cannot write, so its exit status answers the question you
 would otherwise have to remember to ask. It also names the state the stored
 copy was captured in - `clean`, `dirty` or `unknown` - and whether the file
-already held exactly those bytes, so the check that the restore did something
-is the tool's own output rather than a byte count a reader has to interpret.
+already held exactly those bytes, changed them, or could not be compared because
+it could not be read, so the check that the restore did something is the tool's
+own output rather than a byte count a reader has to interpret.
 A `save` that finds an entry from
 an earlier plant refuses rather than overwriting it, and when the file has
 moved on since that copy it names `plant.py clear FILE` rather than a restore,

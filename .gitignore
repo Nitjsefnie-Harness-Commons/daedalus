@@ -427,6 +427,7 @@
 !/tests/_owned_writes.py
 !/tests/_package_layout.py
 !/tests/_pip_cache.py
+!/tests/_plant_fixture.py
 !/tests/_processtree.py
 !/tests/_pyroute.py
 !/tests/_pyroute_containers.py
@@ -732,6 +733,7 @@
 !/tests/test_path_containment.py
 !/tests/test_path_safety.py
 !/tests/test_planner_determinism.py
+!/tests/test_plant_report.py
 !/tests/test_plant_restore.py
 !/tests/test_platform_apis.py
 !/tests/test_pr_gate.py
