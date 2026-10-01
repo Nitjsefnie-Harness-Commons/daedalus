@@ -200,9 +200,13 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
     del tmp
     workflows = ROOT / '.github' / 'workflows'
     threshold = '.github/ci-thresholds.json'
-    timings = '.github/suite-timings.json'
+    budget = '.github/journey-budget.json'
     source = 'server.py'
-    for name in ('tests.yml', 'codeql.yml'):
+    # The data file each workflow's own gates own: `tests.yml` measures the
+    # journeys the budget records and `codeql.yml` scans no Python a
+    # budget commit changed, so only the first ignores it.
+    ignored_by = {'tests.yml': budget, 'codeql.yml': None}
+    for name, data_file in ignored_by.items():
         path = workflows / name
         assert _workflow_runs_for_paths(path, 'push', [threshold]) is False
         assert _workflow_runs_for_paths(path, 'push', [threshold, source])
@@ -216,13 +220,16 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
             triggers['push'], name).get('paths-ignore', []), triggers['push']
         assert not _workflow_path_filters(triggers['pull_request'], name)
 
-        # The behaviour, not just the spelling: a run of the refresh's own
-        # data file must not wake the expensive gates, while a run that
-        # carries it beside a real source change must. A pull request is
-        # unfiltered, so the data file alone reaches these jobs there.
-        assert _workflow_runs_for_paths(path, 'push', [timings]) is False
-        assert _workflow_runs_for_paths(path, 'push', [timings, source])
-        assert _workflow_runs_for_paths(path, 'pull_request', [timings])
+        # The behaviour, not just the spelling: a run of a data file alone
+        # must not wake the expensive gates, while a run that carries it
+        # beside a real source change must. A pull request is unfiltered,
+        # so the data file alone reaches these jobs there.
+        for target in (threshold, data_file):
+            if target is None:
+                continue
+            assert _workflow_runs_for_paths(path, 'push', [target]) is False
+            assert _workflow_runs_for_paths(path, 'push', [target, source])
+            assert _workflow_runs_for_paths(path, 'pull_request', [target])
 
     audit = workflows / 'audit.yml'
     assert _workflow_runs_for_paths(audit, 'push', [threshold])
