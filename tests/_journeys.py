@@ -165,16 +165,28 @@ def dashboard_fanout(base, docroot):
     })
     assert status == 200, (status, body)
 
+    # BOTH events are published BEFORE the subscription opens, and that
+    # ordering is the determinism, not a convenience. The bridge's stream
+    # loop delivers whatever is queued on its first pass and otherwise idles
+    # on a wall-clock tick, so a stream held open across a client round-trip
+    # performs a number of idle passes that depends on how long the machine
+    # took — the same code and the same events counting different
+    # instructions, which is not a count a ratchet can compare. Publishing
+    # first means the drain has something on its first pass and the loop
+    # never idles. It is also the more honest journey: an event published
+    # with no window attached is retained for the next one, which is the
+    # fan-out property itself rather than a race against a live reader.
+    status, body = _util.post_json(base + '/register', {
+        'token': DASHBOARD_TOKEN,
+        'tabId': DASHBOARD_TAB,
+        'url': DASHBOARD_URL,
+        'title': DASHBOARD_TITLE,
+    })
+    assert status == 200, (status, body)
+
     connection, response = _bridge.stream_response(
         base, DASHBOARD_TOKEN, _fanout.DASHBOARD)
     try:
-        status, body = _util.post_json(base + '/register', {
-            'token': DASHBOARD_TOKEN,
-            'tabId': DASHBOARD_TAB,
-            'url': DASHBOARD_URL,
-            'title': DASHBOARD_TITLE,
-        })
-        assert status == 200, (status, body)
         frame = _read_until(response, 'tab-updated')
     finally:
         response.close()
