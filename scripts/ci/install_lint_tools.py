@@ -136,15 +136,13 @@ DOWNLOAD_TIMEOUT = 30
 # verdict is never retried — the size refusal, the digest mismatch — and
 # what else is not worth a second ask is decided in `_worth_asking_again`.
 DOWNLOAD_ATTEMPTS = 3
-# The wall clock the attempts share, four times the per-socket bound above:
-# three attempts of one socket operation each, a timed-out connect on a host
-# resolving to one address, and not a promise of three full ones. An attempt
-# is a sequence of them — connect, then status line — so a read that dribbles
-# is not bounded here; MAX_TRANSFER bounds the bytes served.
+# Four times the per-socket bound above: three attempts of one socket
+# operation each, a timed-out connect on a host resolving to one address,
+# and not a promise of three full ones. What this does not bound is in
+# `_fetch`'s docstring, which is the sentence to read.
 DOWNLOAD_BUDGET = 4 * DOWNLOAD_TIMEOUT
 # What a retry can change. A body cut short mid-transfer raises
-# IncompleteRead, an HTTPException and not an OSError, so a truncated body
-# needs naming beside the socket failures.
+# IncompleteRead, an HTTPException and not an OSError.
 TRANSIENT_ERRORS = (OSError, http.client.HTTPException)
 # A whole-process bound, because pip owns the wheel transfer below, so
 # the per-socket one above does not apply to it.
@@ -179,12 +177,17 @@ def _asset_name():
 def _worth_asking_again(why):
     """Whether a second ask could answer differently: a status of 500 or
     above is the server failing rather than answering, and a certificate
-    that does not verify is the same failure in the handshake. There is no
-    wait between attempts to turn an answer into a different one.
+    that does not verify is the same failure in the handshake, which reaches
+    here wrapped in a URLError. There is no wait between attempts to turn an
+    answer into a different one.
     """
+    # This test reads the HTTPError, whose `reason` is its status message
+    # and not an exception; the one below reads `reason`. Swapped, the
+    # second hands this one a string, and a 404 is asked again.
     if isinstance(why, urllib.error.HTTPError):
         return why.code >= 500
-    return not isinstance(why, ssl.SSLCertVerificationError)
+    unwrapped = getattr(why, 'reason', why)
+    return not isinstance(unwrapped, ssl.SSLCertVerificationError)
 
 
 def _fetch(name):
