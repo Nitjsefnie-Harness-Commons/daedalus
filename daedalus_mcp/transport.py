@@ -248,18 +248,30 @@ class BridgeSession:
 
     async def ext_cmd(self, cmd_id: str, cmd_type: str,
                       timeout: float = 10.0,
-                      include_roundtrip: bool = False, **fields) -> Any:
+                      include_roundtrip: bool = False, wait: bool = True,
+                      **fields) -> Any:
         """Send a typed extension command (tab=extension) and return
         result.result.
 
         The server computes `roundtrip_ms` (enqueue -> result arrival) as a
         sibling of `result` in the body, so returning result.result alone drops
         it. include_roundtrip merges it back in, for tools where how long the
-        extension took is part of the answer."""
-        self.checked_timeout(timeout)
+        extension took is part of the answer.
+
+        `wait=False` sends the command and returns
+        `{'command': <the command the bridge enqueued>}` instead. It does not
+        validate `timeout`, poll, raise the bridge error or graft
+        `roundtrip_ms`: there is no result to read, so none of those apply,
+        and a caller that must answer the command has the bytes in hand
+        without reading the queue back for them.
+        """
+        if wait:
+            self.checked_timeout(timeout)
         payload = {
             'id': cmd_id, 'type': cmd_type, 'tab': 'extension', **fields}
         sent = await self.put('/command', payload)
+        if not wait:
+            return {'command': sent.get('command')}
         res = await self.poll_result(
             'extension', timeout, expect_id=cmd_id,
             expect_delivery=sent.get('did'))

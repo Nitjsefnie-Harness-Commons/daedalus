@@ -24,12 +24,19 @@ def _eval(tmp, name):
     mcp._need_deps()
     with _util.bridge(tmp, env=mcp.BRIDGE_ENV) as (base, root):
         mod = mcp._load_mcp(base)
-        arguments = {'tab_id': 'page'}
+        arguments = {'tab_id': 'page', 'wait': False}
         if name in ('exec', 'put'):
             arguments.update(cmd_id='example', code='42')
-        value, _ = mcp._answer_mcp_command(
+        sent, _queued = mcp._answer_mcp_command(
             base, root, mod, lambda: getattr(mod, name)(**arguments),
             {'token': 'application-value', 'answer': 42}, tab='page')
+        # The reported command is a client's own output, so the credential
+        # that authorised the send is not in it.
+        _no_token(sent, mcp.TOK)
+        assert 'token' not in sent['command'], sent
+        # The envelope is read back through the result tool, which is where
+        # an unwaited send leaves it.
+        value = asyncio.run(mod.result(tab_id='page'))
         _no_token(value, mcp.TOK)
         assert 'token' not in value, value
         assert value['value'] == {'token': 'application-value', 'answer': 42}
@@ -141,9 +148,13 @@ def _screenshot(tmp, include_image):
     with _util.bridge(tmp, env=mcp.BRIDGE_ENV) as (base, root):
         mod = mcp._load_mcp(base)
         uploaded, data = _upload(base, mcp.TOK)
-        value, _ = mcp._answer_mcp_command(
-            base, root, mod,
-            lambda: mod.screenshot(include_image=include_image), uploaded)
+        # The send is unwaited, so the helper holds its bytes and answers it.
+        # The waited call that follows is byte-identical, so it coalesces
+        # onto the live delivery and is satisfied by the answer just posted.
+        sent, _queued = mcp._answer_mcp_command(
+            base, root, mod, lambda: mod.screenshot(wait=False), uploaded)
+        _no_token(sent, mcp.TOK)
+        value = asyncio.run(mod.screenshot(include_image=include_image))
         meta = value[0] if include_image else value
         _no_token(meta, mcp.TOK)
         assert meta == {'path': 'shot&café/image.png', 'size': len(data)}

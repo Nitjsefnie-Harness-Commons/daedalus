@@ -6,14 +6,16 @@ def register(mcp, bridge):
     async def store_hotfix(fix_id: str, code: str,
                            permanent: bool | None = None,
                            match: str | None = None,
-                           clear_scope: bool = False) -> dict:
+                           clear_scope: bool = False,
+                           wait: bool = True) -> dict:
         """Store inline JS as a persistent hotfix. `permanent=True` marks the
     fix as surviving extension version bumps, `False` clears that mark, and
     None (the default) keeps the flag a fix of this id already has stored.
     `match` is a Chrome match pattern; None (the default) keeps the scope the
     fix already has, and a fix stored without one runs wherever it is asked
     for. `clear_scope=True` removes the scope instead, leaving the code and
-    the flag alone; it cannot be combined with `match`."""
+    the flag alone; it cannot be combined with `match`.
+    `wait=False` returns the command the bridge enqueued."""
         if not code:
             raise ValueError('code required')
         if clear_scope and match is not None:
@@ -32,35 +34,43 @@ def register(mcp, bridge):
         # success.
         if match is not None:
             fields['match'] = match
-        return await bridge.ext_cmd('_store_hf', 'store-hotfix', **fields)
-
-    @mcp.tool()
-    async def clear_hotfix(fix_id: str) -> dict:
-        """Remove a specific hotfix by id."""
         return await bridge.ext_cmd(
-            '_clear_hf', 'clear-hotfix', fixId=fix_id)
+            '_store_hf', 'store-hotfix', wait=wait, **fields)
 
     @mcp.tool()
-    async def clear_hotfixes(include_permanent: bool = False) -> dict:
+    async def clear_hotfix(fix_id: str, wait: bool = True) -> dict:
+        """Remove a specific hotfix by id. `wait=False` returns the
+        command the bridge enqueued."""
+        return await bridge.ext_cmd(
+            '_clear_hf', 'clear-hotfix', wait=wait, fixId=fix_id)
+
+    @mcp.tool()
+    async def clear_hotfixes(include_permanent: bool = False,
+                             wait: bool = True) -> dict:
         """Remove stored hotfixes. By default, permanent fixes are preserved;
-        set `include_permanent=True` to nuke everything."""
+        set `include_permanent=True` to nuke everything. `wait=False`
+        returns the command the bridge enqueued."""
         return await bridge.ext_cmd(
-            '_clear_all_hf', 'clear-all-hotfixes',
+            '_clear_all_hf', 'clear-all-hotfixes', wait=wait,
             includePermanent=include_permanent)
 
     @mcp.tool()
-    async def list_hotfixes() -> dict:
+    async def list_hotfixes(wait: bool = True) -> dict:
         """List stored hotfixes. Returns
         {version, fixes:[{id,ts,code,permanent,match},...]} — `match` is the
-        fix's site scope, and a fix stored without one has no `match`."""
-        return await bridge.ext_cmd('_list_hf', 'list-hotfixes')
+        fix's site scope, and a fix stored without one has no `match`.
+        `wait=False` returns the command the bridge enqueued."""
+        return await bridge.ext_cmd(
+            '_list_hf', 'list-hotfixes', wait=wait)
 
     @mcp.tool()
-    async def set_permanent(fix_id: str, permanent: bool) -> dict:
+    async def set_permanent(fix_id: str, permanent: bool,
+                            wait: bool = True) -> dict:
         """Toggle the permanent flag on an existing hotfix. Permanent fixes
-        survive extension version bumps. Returns {id, permanent, found}."""
+        survive extension version bumps. Returns {id, permanent, found}.
+        `wait=False` returns the command the bridge enqueued."""
         return await bridge.ext_cmd(
-            '_set_perm', 'set-permanent', fixId=fix_id,
+            '_set_perm', 'set-permanent', wait=wait, fixId=fix_id,
             permanent=permanent)
 
     return {

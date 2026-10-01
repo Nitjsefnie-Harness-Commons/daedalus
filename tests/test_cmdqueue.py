@@ -249,19 +249,13 @@ def test_the_cli_answer_helper_survives_a_transient_queue_read_refusal(tmp):
     assert queued['type'] == 'reload', queued
 
 
-def test_the_mcp_answer_helper_survives_a_transient_queue_read_refusal(tmp):
-    test_mcp_server._need_deps()
-    bridge_env = {'DAEDALUS_TOKEN': test_mcp_server.TOK, 'TOKEN': '',
-                  'DAEDALUS_MCP_PORT': '0'}
-    with _util.bridge(tmp, env=bridge_env) as (base, docroot):
-        mod = test_mcp_server._load_mcp(base)
-        queue = (Path(docroot) / 'commands'
-                 / f'{test_mcp_server.TOK}_extension')
-        with _refuse_first_queue_read(queue):
-            with _bounded_polls(_poll_budget(1)):
-                _value, queued = test_mcp_server._answer_mcp_command(
-                    base, docroot, mod, mod.ext_reload, {})
-    assert queued['type'] == 'reload', queued
+# The MCP twin of the CLI refusal test above is gone, and deliberately:
+# _answer_mcp_command no longer reads the command-queue directory at all —
+# the bridge reports the command it enqueued, so the helper has the bytes
+# with no poll to refuse. Retargeting it would make it a copy of its CLI
+# twin rather than a check of anything. The reader it used to exercise,
+# _cmdqueue._poll_queue_reads, is still covered by the CLI case here and by
+# the ~20 other callers test_cmdqueue_bounds.py pins.
 
 
 def test_a_refused_leftover_coalesces_the_identical_cli_retry(tmp):

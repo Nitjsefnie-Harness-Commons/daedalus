@@ -9,13 +9,16 @@ def register(mcp, bridge):
     @mcp.tool()
     async def screenshot(cmd_id: str = '_ss', chrome_tab: int | None = None,
                          format: str = 'png', quality: int | None = None,
-                         include_image: bool = False, timeout: float = 15.0):
+                         include_image: bool = False, timeout: float = 15.0,
+                         wait: bool = True) -> dict | list:
         """Capture a screenshot via extension.
 
     Default: returns {path, size}, relative to the token's upload directory.
     Fetch that path via /upload with the token in the Authorization header.
     `include_image=True`: also returns the image bytes inline as an MCP Image
     so the caller can Read it directly without another round-trip.
+    `wait=False` returns the command the bridge enqueued, and takes no
+    capture to describe.
     """
         fields: dict = {}
         if format:
@@ -39,7 +42,9 @@ def register(mcp, bridge):
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
         result_blob = await bridge.ext_cmd(
-            cmd_id, 'screenshot', timeout=timeout, **fields)
+            cmd_id, 'screenshot', timeout=timeout, wait=wait, **fields)
+        if not wait:
+            return result_blob
         path = result_blob.get('path', '')
         meta = {'path': relative_upload_path(path),
                 'size': result_blob.get('size', 0)}
@@ -88,24 +93,31 @@ def register(mcp, bridge):
         return data
 
     @mcp.tool()
-    async def allow_segment_origin(origin: str) -> dict:
+    async def allow_segment_origin(origin: str,
+                                   wait: bool = True) -> dict:
         """Allow `origin` to mint segment jobs. Returns {origin, origins,
-    added}; origins is the sorted allowlist after the change."""
+    added}; origins is the sorted allowlist after the change. `wait=False`
+    returns the command the bridge enqueued."""
         return await bridge.ext_cmd(
-            '_allow_seg_origin', 'allow-segment-origin', origin=origin)
+            '_allow_seg_origin', 'allow-segment-origin', wait=wait,
+            origin=origin)
 
     @mcp.tool()
-    async def revoke_segment_origin(origin: str) -> dict:
+    async def revoke_segment_origin(origin: str,
+                                    wait: bool = True) -> dict:
         """Remove `origin` from the segment-mint allowlist. Returns {origin,
-    origins, found}."""
+    origins, found}. `wait=False` returns the command the bridge
+    enqueued."""
         return await bridge.ext_cmd(
-            '_revoke_seg_origin', 'revoke-segment-origin', origin=origin)
+            '_revoke_seg_origin', 'revoke-segment-origin', wait=wait,
+            origin=origin)
 
     @mcp.tool()
-    async def list_segment_origins() -> dict:
-        """List origins allowed to mint segment jobs. Returns {origins}."""
+    async def list_segment_origins(wait: bool = True) -> dict:
+        """List origins allowed to mint segment jobs. Returns {origins}.
+        `wait=False` returns the command the bridge enqueued."""
         return await bridge.ext_cmd(
-            '_list_seg_origins', 'list-segment-origins')
+            '_list_seg_origins', 'list-segment-origins', wait=wait)
 
     @mcp.tool()
     async def uploads(upload_id: str = '', limit: int | None = None,

@@ -17,13 +17,10 @@ import importlib.util
 import io
 import json
 import os
-import threading
 import time
-from pathlib import Path
 
 import _daedalus_env
 import _util
-from _cmdqueue import clear_command_queue, wait_for_command
 
 # find_spec asks whether the dependency is installed without importing it: an
 # import kept only for its truthiness reads as dead code to every linter.
@@ -199,40 +196,25 @@ def _mcp_tool_text(reply):
 def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     """Run one MCP tool that sends a command, and answer what it sends.
 
-    The tool awaits a result that only an extension would post, and there is
-    none here, so the answer comes from this thread once the command lands in
-    the queue. Returns (what the tool returned, the payload the bridge got).
+    `call` is invoked with `wait=False`, so the bridge hands back the command
+    it enqueued and this thread holds its bytes without reading the queue
+    directory for them — nothing blocks, so there is no worker and no poll.
+    Returns (what the tool returned, the payload the bridge got).
+
+    `docroot` is unused now that the queue is not read; it stays in the
+    signature so a call site that passes the fixture unchanged keeps working.
     """
-    qdir = Path(docroot) / 'commands' / f'{TOK}_{tab}'
-    ignored_names = clear_command_queue(qdir)
-    box = {}
-
-    def run():
-        # The token is a ContextVar, and a thread starts with a fresh context:
-        # setting it on the caller's thread leaves the tool answering "no token
-        # in context". BearerAuth sets it per request for the same reason.
-        mod._token.set(TOK)
-        try:
-            box['value'] = asyncio.run(call())
-        except Exception as exc:  # pylint: disable=broad-except
-            box['error'] = exc
-
-    worker = threading.Thread(target=run)
-    worker.start()
-    try:
-        queued = wait_for_command(qdir, 20, producer_alive=worker.is_alive,
-                                  ignored_names=ignored_names)
-        if queued is None:
-            worker.join(timeout=5)
-            if 'error' in box:
-                raise box['error']
-            raise AssertionError('the tool enqueued no command')
-        status, _ = _util.post_json(base + '/result', {
-            'token': TOK, 'tabId': tab, 'id': queued['id'], 'result': result,
-            'error': None, 'ts': 1, '_did': queued['_did']})
-        assert status == 200, status
-    finally:
-        worker.join(timeout=60)
-    if 'error' in box:
-        raise box['error']
-    return box.get('value'), queued
+    del docroot
+    # The token is a ContextVar, and a tool call reaches the bridge through
+    # it: this is what BearerAuth does per request.
+    mod._token.set(TOK)
+    value = asyncio.run(call())
+    queued = value.get('command') if isinstance(value, dict) else None
+    if not queued:
+        raise AssertionError(
+            f'the tool reported no command: {value!r}')
+    status, _ = _util.post_json(base + '/result', {
+        'token': TOK, 'tabId': tab, 'id': queued['id'], 'result': result,
+        'error': None, 'ts': 1, '_did': queued['_did']})
+    assert status == 200, status
+    return value, queued

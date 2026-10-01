@@ -8,9 +8,10 @@ NET_CAPTURE_MAX = 20000
 def register(mcp, bridge):
     @mcp.tool()
     async def net_capture(chrome_tab: int | None = None,
-                          max_requests: int = 1000) -> dict:
+                          max_requests: int = 1000,
+                          wait: bool = True) -> dict:
         """Start CDP network capture on a tab. Returns {tabId, already?,
-        buffered?}."""
+        buffered?}, or the command the bridge enqueued with `wait=False`."""
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
@@ -32,27 +33,32 @@ def register(mcp, bridge):
                 f'{NET_CAPTURE_MAX}; got {max_requests}')
         fields['maxRequests'] = int(max_requests)
         return await bridge.ext_cmd(
-            '_net_cap', 'net-capture', timeout=15, **fields)
+            '_net_cap', 'net-capture', timeout=15, wait=wait, **fields)
 
     @mcp.tool()
     async def net_capture_stop(chrome_tab: int | None = None,
-                               bodies: bool = False) -> dict:
+                               bodies: bool = False,
+                               wait: bool = True) -> dict:
         """Stop capture and return buffered requests. `bodies=True` fetches
-        response bodies."""
+        response bodies. `wait=False` returns the command the bridge
+        enqueued."""
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
         if bodies:
             fields['bodies'] = True
         return await bridge.ext_cmd(
-            '_net_stop', 'net-capture-stop', timeout=30, **fields)
+            '_net_stop', 'net-capture-stop', timeout=30, wait=wait,
+            **fields)
 
     @mcp.tool()
     async def net_capture_get(chrome_tab: int | None = None,
                               url_filter: str = '',
-                              bodies: bool = False) -> dict:
+                              bodies: bool = False,
+                              wait: bool = True) -> dict:
         """Return current capture buffer (does not stop). Optional regex
-        `url_filter` on URL or type."""
+        `url_filter` on URL or type. `wait=False` returns the command the
+        bridge enqueued."""
         fields: dict = {}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
@@ -61,12 +67,13 @@ def register(mcp, bridge):
         if bodies:
             fields['bodies'] = True
         return await bridge.ext_cmd(
-            '_net_get', 'net-capture-get', timeout=30, **fields)
+            '_net_get', 'net-capture-get', timeout=30, wait=wait, **fields)
 
     @mcp.tool()
     async def cdp(method: str, params: dict | None = None,
                   chrome_tab: int | None = None,
-                  keep_session: bool = False) -> dict:
+                  keep_session: bool = False,
+                  wait: bool = True) -> dict:
         """Send a raw CDP command. Example: method='Page.captureScreenshot'.
 
     Pass keep_session=True to keep the chrome.debugger session attached after
@@ -74,23 +81,27 @@ def register(mcp, bridge):
     (Profiler.enable → Profiler.start → … → Profiler.stop, HeapProfiler,
     Tracing).
     The next call without keep_session=True detaches.
+    `wait=False` returns the command the bridge enqueued.
     """
         fields: dict = {'method': method, 'params': params or {}}
         if chrome_tab is not None:
             fields['tabId'] = int(chrome_tab)
         if keep_session:
             fields['keep_session'] = True
-        return await bridge.ext_cmd('_cdp', 'cdp', timeout=30, **fields)
+        return await bridge.ext_cmd(
+            '_cdp', 'cdp', timeout=30, wait=wait, **fields)
 
     @mcp.tool()
-    async def fetch_timings(reset: bool = False) -> dict:
+    async def fetch_timings(reset: bool = False,
+                            wait: bool = True) -> dict:
         """Fetch the background fetch-relay timing ring buffer. `reset=True`
-        clears it after."""
+        clears it after. `wait=False` returns the command the bridge
+        enqueued."""
         fields: dict = {}
         if reset:
             fields['reset'] = True
         return await bridge.ext_cmd(
-            '_fetch_timings', 'fetch-timings', **fields)
+            '_fetch_timings', 'fetch-timings', wait=wait, **fields)
 
     return {
         'net_capture': net_capture,
