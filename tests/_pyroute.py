@@ -540,7 +540,6 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 zero_pairs = []
             target_names = (bound_names(statement.target)
                             if iterating else set())
-            # An empty iterable runs no iteration, so its body never runs.
             iteration_pairs = incoming
             post_body = []
             break_pairs = []

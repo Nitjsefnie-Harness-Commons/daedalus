@@ -73,14 +73,27 @@ def _bind_literals(node, literals):
                 (target.elts[star], value[star:end]),
                 *zip(target.elts[star + 1:], value[end:])]
 
+    def unbound_base(store):
+        """Whether a store part's base is a name this table never bound.
+
+        A subscript or an attribute part is evaluated where it stands, so a
+        base nothing here has ever bound is what makes it raise before the
+        parts after it are bound at all. A base the table HAS bound succeeds,
+        and the walk carries on past it.
+        """
+        return (isinstance(store, (ast.Subscript, ast.Attribute))
+                and isinstance(store.value, ast.Name)
+                and store.value.id not in literals)
+
     def unpacked(target, value):
         """What each name an unpack target binds is bound to.
 
         Each part takes one element, in the order the parts stand, so a part
-        that is not a name takes none and ENDS the walk: a `*` part becomes a
-        list, which no key position names, and a subscript part is evaluated
-        where it stands and may raise before the parts after it are bound at
-        all. The parts before it keep what they took.
+        that is not a name takes none: a `*` part becomes a list, which no key
+        position names, and a subscript part is evaluated where it stands. Only
+        such a part whose base was never bound ends the walk — it raises, and
+        the parts after it are never bound. Everything before it keeps what it
+        took.
         """
         if isinstance(target, ast.Name):
             yield (target.id, value)
@@ -94,10 +107,11 @@ def _bind_literals(node, literals):
             elif isinstance(part, (ast.Tuple, ast.List)):
                 yield from unpacked(part, element)
             elif isinstance(part, ast.Starred):
-                if not isinstance(part.value, ast.Name):
+                if isinstance(part.value, ast.Name):
+                    yield (part.value.id, _UNSAFE_LITERAL)
+                elif unbound_base(part.value):
                     return
-                yield (part.value.id, _UNSAFE_LITERAL)
-            else:
+            elif unbound_base(part):
                 return
 
     def bind_targets(targets, value):
@@ -111,36 +125,38 @@ def _bind_literals(node, literals):
     def bind_loop_target(loop):
         """Bind the names a loop target binds, and nothing else.
 
-        A loop target takes every element of what it iterates in turn, so a
-        name it binds carries the one literal they all agree on; a union of
-        several that do not names no key. An unpacked target is paired by
-        position and only where the shape lines up, so a loop over an
-        iterable the fold will not produce binds nothing, and so does a
-        target of more than one part.
+        The loop runs once per element, so a bare name carries the one
+        literal they all agree on and a union of several that do not names no
+        key. An unpacked target pairs BY POSITION against each element, which
+        is the destructuring an assignment does: a name is recorded where
+        every iteration agrees and forgotten otherwise.
         """
-        value = value_of(loop.iter)
-        if isinstance(value, (tuple, list, set)) and value:
-            first = next(iter(value))
-            elements = (first,) if all(i == first for i in value) else ()
-        else:
-            elements = ()
         target = loop.target
-        if not elements:
-            bound = {}
-        elif isinstance(target, ast.Name):
-            bound = {target.id: elements[0]}
-        else:
-            bound = dict(unpacked(target, elements))
+        value = value_of(loop.iter)
+        if not isinstance(value, (tuple, list, set)) or not value:
+            for name in target_names(target):
+                record(name, _UNSAFE_LITERAL)
+            return
+        if isinstance(target, ast.Name):
+            first = next(iter(value))
+            record(target.id, first if all(i == first for i in value)
+                   else _UNSAFE_LITERAL)
+            return
+        rounds = [dict(unpacked(target, item)) for item in value]
         for name in target_names(target):
-            record(name, bound.get(name, _UNSAFE_LITERAL))
+            taken = [round_.get(name, _UNSAFE_LITERAL) for round_ in rounds]
+            record(name, taken[0] if all(item == taken[0]
+                                         for item in taken)
+                   else _UNSAFE_LITERAL)
 
     def own_nodes(statement):
         """A statement's own nodes, stopping at a nested scope.
 
-        A comprehension is walked, because a walrus in either of its clauses
-        binds in the scope the comprehension stands in and not in one the
-        walk writes; its iteration variable, the one name a comprehension
-        keeps to itself, is never a walrus target.
+        A comprehension is walked, and reading one is safe because a
+        comprehension introduces a scope of its own: a walrus in either
+        clause binds in the scope the comprehension stands in, which is one
+        this walk does write, and the iteration variable lives inside the
+        comprehension, which is one it does not.
         """
         yield statement
         for child in ast.iter_child_nodes(statement):
@@ -148,6 +164,17 @@ def _bind_literals(node, literals):
                     ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
                     ast.Lambda)):
                 yield from own_nodes(child)
+
+    def bind_augmented(node):
+        """`k += x` rebinds `k` to a value neither side folds to alone.
+
+        The flow clears the name from the table before this runs, so the
+        operand's contribution is not visible here either and the two models
+        agree on forgetting it — which is a report `k += ""` is owed and does
+        not yet get.
+        """
+        for name in target_names(node.target):
+            record(name, _UNSAFE_LITERAL)
 
     def bind_walrus(nodes):
         for child in nodes:
@@ -159,9 +186,7 @@ def _bind_literals(node, literals):
         bind_targets(node.targets if isinstance(node, ast.Assign)
                      else [node.target], value_of(node.value))
     elif isinstance(node, ast.AugAssign):
-        # `k += x` rebinds `k` to a value neither side folds to alone.
-        for name in target_names(node.target):
-            literals.pop(name, None)
+        bind_augmented(node)
     elif isinstance(node, ast.Delete):
         for target in node.targets:
             for name in target_names(target):

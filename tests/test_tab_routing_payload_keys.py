@@ -30,6 +30,7 @@ from _pyroute import dict_assignments, py_tab_routing_violations  # noqa: E402
 _SENDER = "    def ext_cmd(*a, **k): return k\n"
 _SPREAD = "    return ext_cmd('PUT', '/command', **cmd)\n"
 _CALL = 'f(ARGS)'
+_ASYNC_CALL = 'asyncio.run(f(ARGS))'
 _RAISES = 'raises TypeError'
 _RAISES_VALUE = 'raises ValueError'
 
@@ -195,10 +196,10 @@ _ROWS = [
     ('comp-gen-ifs', 1, {'tab': 5}, _CALL, _inside(
         'list(k for _ in [1] if (k := "tab"))', 'cmd = {k: 5}')),
     # An unpack pairs each part with one element, so a part that is not a
-    # plain name has no element to take: nested one-element sequences are a
-    # list the key position cannot name, and a subscript part may raise
-    # before the parts after it are bound. All four raise, so all four read
-    # clean.
+    # plain name has no element to take. A nested sequence is the whole
+    # tuple, which is a legal key the runtime then refuses at the `**`, and a
+    # subscript part with an unbound base raises before the parts after it
+    # are bound. All three raise, so all three read clean.
     ('unpack-nested-element', 0, _RAISES, _CALL, _inside(
         'j, = [("tab",)]', 'cmd = {j: 5}')),
     ('unpack-star-subscript-part', 0, 'raises NameError', _CALL, _inside(
@@ -216,6 +217,52 @@ _ROWS = [
     # carries it.
     ('walrus-value-binds-its-name', 1, {'tab': 5}, _CALL, _inside(
         'k = (j := "tab")', 'cmd = {k: 5}')),
+    # An unpacked loop target takes one element per part, so it pairs by
+    # position against what the loop yields; parts that do not line up
+    # raise before any name is bound.
+    ('loop-target-two-part', 1, {'tab': 5}, _CALL, _inside(
+        'for a, b in (("x", "tab"),): cmd = {b: 5}')),
+    ('loop-target-first-part-key', 1, {'tab': 5}, _CALL, _inside(
+        'for j, m in (("tab", "x"),): cmd = {j: 5}')),
+    ('loop-target-three-part', 1, {'tab': 5}, _CALL, _inside(
+        'for a, b, c in ((1, "x", "tab"),): cmd = {c: 5}')),
+    ('loop-target-star-part', 1, {'tab': 5}, _CALL, _inside(
+        'for *a, b in ((1, "tab"),): cmd = {b: 5}')),
+    ('loop-target-arity', 0, _RAISES_VALUE, _CALL, _inside(
+        'for a, b in (("x",),): cmd = {a: 5}')),
+    # A subscript part runs where it stands, so it stops the walk only when
+    # its base is a name the table has never bound — which is what makes it
+    # raise. A bound base succeeds and the parts after it are bound.
+    ('unpack-subscript-base-bound', 1, {'tab': 5}, _CALL, _inside(
+        'a = [0]', 'a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-star-subscript-bound', 1, {'tab': 5}, _CALL, _inside(
+        'a = [[0], 0]', '*a[0], b = (1, "tab")', 'cmd = {b: 5}')),
+    ('unpack-subscript-midway-bound', 1, {'tab': 5}, _CALL, _inside(
+        'a = [0]', 'b = [0, 0, 0]', 'a, b[0], c = (1, 2, "tab")',
+        'cmd = {c: 5}')),
+    # An augment rebinds its target, so the name ends the statement unbound
+    # and the key it spelled resolves to nothing. `k += ""` would fold, and
+    # is not modelled; the flow clears the name before this writer runs.
+    ('augmented-nonstring', 0, _RAISES, _CALL, _inside(
+        'k = "tab"', 'k += 1', 'cmd = {k: 5}')),
+    ('augmented-multiply', 0, _RAISES, _CALL, _inside(
+        'k = "tab"', 'k *= "1"', 'cmd = {k: 5}')),
+    # A starred target with fewer elements than its parts need raises
+    # before it binds any of them, so no name keeps a literal — `a` would
+    # otherwise take the one element there is.
+    ('unpack-star-arity-short', 0, _RAISES_VALUE, _CALL, _inside(
+        'a, *b, c = ("tab",)', 'cmd = {a: 5}')),
+    # `async for` reaches the same verdict as `for`, so the two AsyncFor
+    # sites are live rather than inert.
+    ('async-target', 1, {'tab': 5}, _ASYNC_CALL, 'import asyncio\n'
+     'async def agen(items):\n    for item in items:\n        yield item\n'
+     'async def f(args):\n' + _SENDER
+     + '    async for j in agen(["tab"]):\n        cmd = {j: 5}\n' + _SPREAD),
+    ('async-target-two-part', 1, {'tab': 5}, _ASYNC_CALL, 'import asyncio\n'
+     'async def agen(items):\n    for item in items:\n        yield item\n'
+     'async def f(args):\n' + _SENDER
+     + '    async for a, b in agen([("x", "tab")]):\n'
+       '        cmd = {b: 5}\n' + _SPREAD),
 ]
 
 # Three boundaries this change does not cross. Every row below carries a
