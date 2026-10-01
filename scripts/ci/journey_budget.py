@@ -24,18 +24,17 @@ counts of a journey whose shape moved do not describe the recorded journey.
 Counting them is `journey_counters.py`, which owns what this runner allows.
 """
 import argparse
-import importlib
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-if __package__:
-    # pylint: disable-next-line=relative-beyond-top-level,no-name-in-module
-    from . import journey_counters
-else:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    journey_counters = importlib.import_module('journey_counters')
+# The counter module sits beside this one and is imported by its own name,
+# which is what a run from the repository root, a run from anywhere else and
+# `python3 -m scripts.ci.journey_budget` all do. A relative import would
+# only work for the last of the three.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT = ROOT / '.github' / 'journey-budget.json'
