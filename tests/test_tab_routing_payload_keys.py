@@ -31,6 +31,7 @@ _SENDER = "    def ext_cmd(*a, **k): return k\n"
 _SPREAD = "    return ext_cmd('PUT', '/command', **cmd)\n"
 _CALL = 'f(ARGS)'
 _RAISES = 'raises TypeError'
+_RAISES_VALUE = 'raises ValueError'
 
 
 def _inside(*lines, tail=_SPREAD):
@@ -153,6 +154,45 @@ _ROWS = [
         'for j in ("tab", "tab"): cmd = {j: 5}')),
     ('unpack-mismatch', 0, _RAISES, _CALL, _inside(
         'j, k = 5', 'cmd = {j: 5}')),
+    # A `*` part binds a LIST, which no key position can name, so the name
+    # must end the statement holding nothing rather than the one element
+    # the remainder happens to have. A destructured target with too few
+    # elements raises before it binds any of them.
+    ('unpack-star-binds-list', 0, _RAISES, _CALL, _inside(
+        'a, *b = ("z", "tab")', 'cmd = {b: 5}')),
+    ('unpack-sequence-arity', 0, _RAISES_VALUE, _CALL, _inside(
+        'j, k = ("tab",)', 'cmd = {j: 5}')),
+    # One statement that binds a name and reads it: the walrus sits in a
+    # VALUE position, so the key is read from the table as the statement
+    # began and `tab` reaches the sender as a value. A writer that runs
+    # before the statement's own keys are resolved sees the table as the
+    # statement ends, and reports a key the program never spells.
+    ('order-key-then-walrus', 0, {'id': 'tab'}, _CALL, _inside(
+        'k = "id"', 'cmd = {k: (k := "tab")}')),
+    ('order-update-then-walrus', 0, {'id': 'tab'}, _CALL, _inside(
+        'k = "id"', 'cmd = {}', 'cmd.update({k: (k := "tab")})')),
+    # A walrus in a comprehension binds in the scope the comprehension
+    # stands in, on every supported version and in either clause, so the
+    # table carries it and the key it names resolves. All four forms
+    # positively; both clauses in both directions, in list and dict.
+    ('comp-list-element', 1, {'tab': 5}, _CALL, _inside(
+        '[(k := "tab") for _ in [1]]', 'cmd = {k: 5}')),
+    ('comp-list-element-other', 0, {'id': 5}, _CALL, _inside(
+        '[(k := "id") for _ in [1]]', 'cmd = {k: 5}')),
+    ('comp-dict-element', 1, {'tab': 5}, _CALL, _inside(
+        '{(k := "tab"): 1 for _ in [1]}', 'cmd = {k: 5}')),
+    ('comp-dict-element-other', 0, {'id': 5}, _CALL, _inside(
+        '{(k := "id"): 1 for _ in [1]}', 'cmd = {k: 5}')),
+    ('comp-list-ifs', 1, {'tab': 5}, _CALL, _inside(
+        '[k for _ in [1] if (k := "tab")]', 'cmd = {k: 5}')),
+    ('comp-list-ifs-other', 0, {'id': 5}, _CALL, _inside(
+        '[k for _ in [1] if (k := "id")]', 'cmd = {k: 5}')),
+    ('comp-set-ifs', 1, {'tab': 5}, _CALL, _inside(
+        '{k for _ in [1] if (k := "tab")}', 'cmd = {k: 5}')),
+    ('comp-dict-ifs', 1, {'tab': 5}, _CALL, _inside(
+        '{k: 1 for _ in [1] if (k := "tab")}', 'cmd = {k: 5}')),
+    ('comp-gen-ifs', 1, {'tab': 5}, _CALL, _inside(
+        'list(k for _ in [1] if (k := "tab"))', 'cmd = {k: 5}')),
 ]
 
 # Three boundaries this change does not cross. Every row below carries a
@@ -190,6 +230,8 @@ def _sent(call, source):
         return eval(call, dict(scope, ARGS=_Args()))
     except TypeError:
         return _RAISES
+    except ValueError:
+        return _RAISES_VALUE
 
 
 def _verdict(tmp, label, source):

@@ -14,6 +14,7 @@ about the same program.
 import ast
 
 from _pyroute_keys import _UNSAFE_LITERAL, _literal_value
+from _pyroute_state import apply_dict_statement, scope_nodes
 
 _STORES = (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr, ast.Delete,
            ast.For, ast.AsyncFor)
@@ -57,10 +58,12 @@ def _bind_literals(node, literals):
 
         A `*` part takes the elements no other part takes, and the list it
         becomes names no key. Parts that do not line up with their value
-        raise before any name is bound, so they bind nothing at all.
+        raise before any name is bound, so they bind nothing at all. A `*`
+        part may itself be a subscript (`*a[0], b = x`), which binds no name.
         """
         if isinstance(target, ast.Starred):
-            yield (target.value.id, _UNSAFE_LITERAL)
+            if isinstance(target.value, ast.Name):
+                yield (target.value.id, _UNSAFE_LITERAL)
             return
         if isinstance(target, ast.Name):
             yield (target.id, value[0] if isinstance(value, (tuple, list))
@@ -80,7 +83,7 @@ def _bind_literals(node, literals):
             star = stars[0]
             end = len(value) - (len(target.elts) - star - 1)
             parts = [*zip(target.elts[:star], value[:star]),
-                     (target.elts[star].value, value[star:end]),
+                     (target.elts[star], value[star:end]),
                      *zip(target.elts[star + 1:], value[end:])]
         for part, element in parts:
             yield from unpacked(part, element)
@@ -109,18 +112,19 @@ def _bind_literals(node, literals):
             record(name, bound.get(name, _UNSAFE_LITERAL))
 
     def own_nodes(statement):
-        """A statement's own nodes, stopping where the scope changes.
+        """A statement's own nodes, stopping at a nested scope.
 
-        A comprehension is the version-dependent stop: its condition has
-        always bound here and its element only since 3.12, so it is not
-        walked and the shape is read on no supported version.
+        A comprehension is walked: a walrus in either of its clauses binds
+        in the scope the comprehension stands in, on every supported
+        version, and the iteration variable it keeps to itself is a
+        SyntaxError as a walrus target — so nothing inside one binds
+        anywhere this walk does not already write.
         """
         yield statement
         for child in ast.iter_child_nodes(statement):
             if not isinstance(child, (
                     ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
-                    ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
-                    ast.GeneratorExp)):
+                    ast.Lambda)):
                 yield from own_nodes(child)
 
     if isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -140,10 +144,6 @@ def _bind_literals(node, literals):
 
 def dict_assignments(scope):
     """Map local names to string keys, retaining provable mutations."""
-    # Local because nothing in `_pyroute_state`'s import cone may import
-    # this module back; that would close a cycle on the store below.
-    from _pyroute_state import apply_dict_statement, scope_nodes
-
     dicts = {}
     literals = {}
     nodes = [node for node in scope_nodes(scope) if isinstance(node, _STORES)]

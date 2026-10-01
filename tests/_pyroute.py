@@ -40,7 +40,7 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
 from _pyroute_match import walk_match
 from _pyroute_multiter import multi_iterable_elements
 from _pyroute_payload import (_bind_literals,
-                               dict_assignments as _dict_assignments)
+                              dict_assignments as _dict_assignments)
 from _pyroute_violations import call_violations
 from _pyroute_targets import (bind_with_target, materialized_order,
                               probe_comprehension)
@@ -656,10 +656,10 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                for target in targets):
             pairs, _ = consume_iterable(statement.value, pairs, exhaust=True)
         for state in pairs:
-            _bind_literals(statement, state.literals)
             apply_state_dict_statement(statement, state)
             apply_alias_statement(statement, state)
             store_deferred_value(statement, state)
+            _bind_literals(statement, state.literals)
         if isinstance(statement, (ast.Return, ast.expr)):
             record_returns(flow_exits, pairs, statement)
         if isinstance(statement, (ast.Return, ast.Raise)):
