@@ -21,7 +21,15 @@ every journey renders what it observed and the harness records the sha256 of
 that rendering. Rounds of one measurement must agree on it, and a
 disagreement is a refusal naming both shas rather than a re-baseline: the
 counts of a journey whose shape moved do not describe the recorded journey.
-Counting them is `journey_counters.py`, which owns what this runner allows.
+
+NOR IS IT COMPARABLE ACROSS A TOOLCHAIN. A deterministic counter is
+deterministic only for a fixed binary, and the interpreter's patch build,
+libc and valgrind all move without a change to this repository. So
+`toolchain` records the identity of everything a count depends on and no
+code change controls, and a check on a different toolchain reports that
+fact and compares nothing rather than calling it a regression. A
+re-baseline is a reviewed commit: nothing here writes the artefact, and
+the harness prints the block one is pasted from.
 """
 import argparse
 import json
@@ -35,6 +43,7 @@ from pathlib import Path
 # only work for the last of the three.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
+import journey_report  # noqa: E402  pylint: disable=wrong-import-position
 
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT = ROOT / '.github' / 'journey-budget.json'
@@ -64,6 +73,12 @@ UNMEASURED_REMEDY = (
     'nothing. The probe step says what this runner allows: `instructions:u` '
     'needs less kernel access than an unqualified event, and callgrind is '
     'the fallback when perf is refused.')
+TOOLCHAIN_REMEDY = (
+    'A recorded count is only comparable against a measurement taken on the '
+    'toolchain it was recorded on. Re-baseline from a measured run: the '
+    're-baseline block in the step summary carries the counts, their '
+    'spread, and the identity they were taken on, and nothing in CI writes '
+    'the artefact.')
 REMEDY_FOR = {'over': OVER_REMEDY, 'shape': SHAPE_REMEDY,
               'unmeasured': UNMEASURED_REMEDY}
 
@@ -79,7 +94,8 @@ def _validated(value):
     if not isinstance(value, dict):
         raise ValueError('the journey budget must be an object')
     unknown = sorted(set(value) - {'schema_version', 'counter',
-                                   'tolerance_pct', 'journeys'})
+                                   'tolerance_pct', 'toolchain',
+                                   'journeys'})
     if unknown:
         raise ValueError(f'unknown field: {unknown[0]}')
     if value.get('schema_version') != _SCHEMA_VERSION:
@@ -94,6 +110,15 @@ def _validated(value):
                                   or tolerance < 0):
         raise ValueError('tolerance_pct must be a nonnegative number: '
                          f'{tolerance}')
+    toolchain = value.get('toolchain')
+    if toolchain is not None and not isinstance(toolchain, dict):
+        raise ValueError('toolchain must be an object')
+    for field, seen in (toolchain or {}).items():
+        if field not in journey_counters.TOOLCHAIN_FIELDS:
+            raise ValueError(f'unknown toolchain field: {field}')
+        if seen is not None and not isinstance(seen, str):
+            raise ValueError(
+                f'a toolchain identity is a string or null: {field}')
     journeys = value.get('journeys')
     if not isinstance(journeys, dict):
         raise ValueError('journeys must be an object')
@@ -127,15 +152,47 @@ def render(document):
     body = ',\n'.join(
         f'    {json.dumps(name)}: {json.dumps(document["journeys"][name])}'
         for name in sorted(document['journeys']))
+    identity = recorded_toolchain(document) or {}
+    toolchain = ',\n'.join(
+        f'    {json.dumps(field)}: {json.dumps(identity.get(field))}'
+        for field in journey_counters.TOOLCHAIN_FIELDS)
     return ('{\n'
             f'  "schema_version": {document["schema_version"]},\n'
             f'  "counter": {json.dumps(document.get("counter"))},\n'
             f'  "tolerance_pct": {json.dumps(document.get("tolerance_pct"))},'
             '\n'
+            '  "toolchain": {\n'
+            f'{toolchain}\n'
+            '  },\n'
             '  "journeys": {\n'
             f'{body}\n'
             '  }\n'
             '}\n').encode('utf-8')
+
+
+def recorded_toolchain(document):
+    """The recorded identity, or None while no field of it is recorded.
+
+    Every field null is the state before the first baseline, and it is
+    reported rather than compared: there is nothing yet to say the
+    toolchain still matches.
+    """
+    recorded = document.get('toolchain') or {}
+    return recorded if any(recorded.values()) else None
+
+
+def toolchain_diff(recorded, measured):
+    """Every identity field the recorded and measured toolchains differ on.
+
+    A field one side did not record differs too: `null` against a real
+    value is a toolchain this repository has never measured, and comparing
+    counts across it would compare two different questions.
+    """
+    recorded = recorded or {}
+    measured = measured or {}
+    return {field: (recorded.get(field), measured.get(field))
+            for field in journey_counters.TOOLCHAIN_FIELDS
+            if recorded.get(field) != measured.get(field)}
 
 
 def budget_of(document, name):
@@ -210,43 +267,6 @@ def tightened(counts, document, names):
     return updated if updated != document['journeys'] else None
 
 
-# ─── the probe, as a step summary ──────────────────────────────────────────
-
-def probe_lines(found):
-    """The probe as a step summary, mirroring the JSON it printed.
-
-    The booleans are lowercased so a value a reader copies out of the
-    summary is the value the JSON carries, not Python's spelling of it.
-    """
-    stat = found.get('perf_stat')
-    lines = ['### Journey counter probe', '',
-             'What this runner actually allows, measured rather than assumed.',
-             '',
-             f"- python: `{found['python'].splitlines()[0]}`",
-             f"- perf_event_paranoid: `{found['perf_event_paranoid']}`",
-             f"- perf on PATH: `{found['perf_path']}`"]
-    if stat is None:
-        lines.append('- `perf stat -e instructions:u -- true`: not run, perf '
-                     'is not on PATH')
-    else:
-        lines.append(f"- `perf stat -e {stat['event']} -- true`: returncode "
-                     f"`{stat['returncode']}`, counts: "
-                     f"`{str(stat['counts']).lower()}`")
-        if stat['stderr']:
-            lines += ['', '```', stat['stderr'], '```']
-    lines += [f"- valgrind on PATH: `{found['valgrind_path']}`",
-              f"- valgrind --version: `{found['valgrind_version']}`",
-              f"- callgrind_control on PATH: "
-              f"`{found['callgrind_control_path']}`",
-              f"- callgrind_control --version: "
-              f"`{found['callgrind_control_version']}`",
-              f"- callgrind_control usable: "
-              f"`{str(found['callgrind_control_usable']).lower()}`",
-              f"- strace on PATH: `{found['strace_path']}`",
-              f"- counter selected here: `{found['selected']}`", '']
-    return lines
-
-
 def refusal_lines(found):
     lines = ['### Journey budget', '',
              '| journey | measured | budget |', '|---|---|---|']
@@ -297,6 +317,9 @@ def _parser():
     check.add_argument('--tighten', action='store_true',
                        help='follow journeys down instead of reporting')
     check.add_argument('--artifact', type=Path, default=ARTIFACT)
+    check.add_argument('--seconds', type=Path,
+                       help='a JSON file of what this job cost, measured '
+                            'by the workflow steps around this one')
     check.add_argument('--summary', action='store_true')
     return parser
 
@@ -320,7 +343,8 @@ def main(argv=None):
             found = journey_counters.facts()
             print(json.dumps(found, indent=2, sort_keys=True))
             if args.summary:
-                journey_counters.write_summary(probe_lines(found))
+                journey_counters.write_summary(
+                    journey_report.probe_lines(found))
             return 0
 
         if args.command == 'measure':
@@ -331,13 +355,26 @@ def main(argv=None):
                 Path(args.out).write_text(payload, encoding='utf-8')
             if args.summary:
                 journey_counters.write_summary(
-                    journey_counters.summary_lines(report))
+                    journey_report.summary_lines(report))
+                journey_counters.write_summary(
+                    journey_report.rebaseline_lines(report))
             return 0
 
         document = load(args.artifact)
         names = journey_names()
         counter = document.get('counter')
         report = _measurements(args)
+
+        if args.seconds and Path(args.seconds).is_file():
+            journey_counters.write_summary(
+                journey_report.accounting_lines(report, json.loads(
+                    Path(args.seconds).read_text(encoding='utf-8'))))
+
+        changed = toolchain_diff(recorded_toolchain(document),
+                                 report.get('toolchain'))
+        if changed:
+            return _toolchain_outcome(args, document, report, changed)
+
         counts = (journey_counters.counts_of(report, counter)
                   if counter else {})
         found = violations(counts, report.get('shas') or {}, document, names)
@@ -376,6 +413,33 @@ def main(argv=None):
         return 1
 
 
+def _toolchain_outcome(args, document, report, changed):
+    """A toolchain difference, which is not a regression and not a pass.
+
+    Success, because the tree did not regress — but the summary says in
+    those words that no count was compared, so a green here can never be
+    read as a journey having been measured and found within budget. A
+    tighten refuses instead: a count taken on a toolchain the recorded
+    baseline was not measured on is not a cheaper journey, and writing it
+    would corrupt the baseline this whole check exists to keep honest.
+    """
+    if args.tighten:
+        print('toolchain changed, re-baseline: a count measured on a '
+              'different toolchain is not a cheaper journey',
+              file=sys.stderr)
+        print(TOOLCHAIN_REMEDY, file=sys.stderr)
+        return 1
+    if args.summary:
+        journey_counters.write_summary(journey_report.toolchain_lines(
+            document, report, changed, TOOLCHAIN_REMEDY))
+    print('toolchain changed, re-baseline')
+    for field, (was, now) in sorted(changed.items()):
+        print(f'  {field}: recorded {was!r}, measured {now!r}')
+    print('no count was compared, and this step succeeds because the tree '
+          'did not regress rather than because anything was within budget')
+    return 0
+
+
 def _report_state(document, names, counter, report):
     """Everything a check knows but is not refusing on, said out loud.
 
@@ -387,6 +451,9 @@ def _report_state(document, names, counter, report):
         print(f'shape: {report["shape_failure"]}', file=sys.stderr)
         print(SHAPE_REMEDY, file=sys.stderr)
         return True
+    if recorded_toolchain(document) is None:
+        print('the journey budget records no toolchain yet, so this run has '
+              'no recorded identity to be compared against')
     if counter is None:
         print('the journey budget names no counter yet, so no count is '
               'compared')

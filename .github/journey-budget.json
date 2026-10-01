@@ -2,6 +2,11 @@
   "schema_version": 1,
   "counter": null,
   "tolerance_pct": null,
+  "toolchain": {
+    "python": null,
+    "valgrind_version": null,
+    "runner_image": null
+  },
   "journeys": {
     "command-round-trip": null,
     "dashboard-fanout": null,

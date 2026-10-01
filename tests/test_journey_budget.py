@@ -115,6 +115,128 @@ def test_the_artefact_schema_is_closed(tmp):
         raise AssertionError(f'the schema accepted {sorted(over)}')
 
 
+# ─── the toolchain a count is only comparable on ───────────────────────────
+
+IDENTITY = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
+            'valgrind_version': 'valgrind-3.24.0',
+            'runner_image': 'ubuntu24 20260801.1.0'}
+
+
+def _measurements_file(path, document, **over):
+    """A measurements file whose report carries the document's identity."""
+    names = _journeys().NAMES
+    report = {'rounds': 1, 'python': sys.version, 'shas': {},
+              'toolchain': dict(over.get('toolchain', IDENTITY)),
+              'counters': {'perf-instructions': {
+                  'available': True, 'startup_only': 0,
+                  'journeys': {name: {'min': 5000, 'max': 5000,
+                                      'median': 5000, 'spread': 0,
+                                      'raw': 5000}
+                               for name in names}}}}
+    Path(path).write_text(json.dumps(report), encoding='utf-8')
+    return path
+
+
+def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
+    """The identity is recorded, and it is empty until a run records it."""
+    del tmp
+    policy = _policy()
+    document = policy.load(ARTIFACT)
+    recorded = document['toolchain']
+    assert sorted(recorded) == sorted(policy.journey_counters
+                                      .TOOLCHAIN_FIELDS), recorded
+    assert not any(recorded.values()), (
+        'an identity was recorded here; it must come from a measured CI '
+        f'run in a reviewed commit, not from this tree: {recorded}')
+    for over in ({'toolchain': []}, {'toolchain': {'cpython': '3.13'}},
+                 {'toolchain': {'python': 31315}}):
+        bad = _budget_document()
+        bad.update(over)
+        try:
+            policy._validated(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'the schema accepted {over}')
+
+
+def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
+    """A moved toolchain is not a moved count, and never a silent pass.
+
+    Callgrind's count is deterministic only for a fixed binary, so a
+    runner image that ships a different CPython patch build moves every
+    number with no change to this repository. Refusing that as a
+    regression would be a false red with nothing to fix; passing it
+    without saying so would be a green that measured nothing.
+    """
+    policy = _policy()
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(_budget_document(
+        toolchain=dict(IDENTITY))))
+    measurements = _measurements_file(
+        Path(tmp) / 'counts.json', None,
+        toolchain=dict(IDENTITY, valgrind_version='valgrind-3.25.0'))
+    # stdout, not stderr: this is a report, not a refusal. The two are
+    # separated deliberately — a reader must be able to tell an outcome
+    # that succeeded from one that failed without reading an exit code.
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    assert code == 0, spoken.getvalue()
+    said = spoken.getvalue()
+    assert 'toolchain changed, re-baseline' in said, said
+    assert 'no count was compared' in said, said
+    assert 'valgrind-3.24.0' in said and 'valgrind-3.25.0' in said, said
+    # The table the summary carries, which is what says no count was
+    # compared: the journey's own recorded and measured numbers, neither
+    # of which was compared against the other.
+    report_module = _util.load(ROOT / 'scripts' / 'ci' / 'journey_report.py',
+                               'journey_report_contract')
+    summary = report_module.toolchain_lines(
+        policy.load(artifact), json.loads(measurements.read_text()),
+        {'valgrind_version': ('valgrind-3.24.0', 'valgrind-3.25.0')},
+        policy.TOOLCHAIN_REMEDY)
+    joined = '\n'.join(summary)
+    assert '**toolchain changed, re-baseline.**' in joined, joined
+    assert 'No count was compared.' in joined, joined
+    assert 'What would have been compared:' in joined, joined
+    assert policy.TOOLCHAIN_REMEDY in joined, joined
+
+
+def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
+    """The outcome is the toolchain's, and it does not swallow the gate."""
+    policy = _policy()
+    names = _journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(_budget_document(
+        toolchain=dict(IDENTITY))))
+    measurements = _measurements_file(Path(tmp) / 'counts.json', None)
+    spoken = io.StringIO()
+    with contextlib.redirect_stderr(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    assert code == 1, 'a count over budget passed on a matching toolchain'
+    assert policy.OVER_REMEDY in spoken.getvalue(), spoken.getvalue()
+    assert policy.toolchain_diff(IDENTITY, IDENTITY) == {}
+
+
+def test_no_workflow_step_writes_the_artefact(tmp):
+    """A re-baseline is a reviewed commit, so nothing in CI may write it."""
+    del tmp
+    artefact = '.github/journey-budget.json'
+    workflows = ROOT / '.github' / 'workflows'
+    named = []
+    for path in sorted(workflows.glob('*.y*ml')):
+        for number, line in enumerate(path.read_text(
+                encoding='utf-8').splitlines(), 1):
+            if artefact in line:
+                named.append((path.name, number, line.strip()))
+    assert all(line.strip() == f"- '{artefact}'"
+               for _name, _number, line in named), (
+        'a workflow names the artefact outside a paths-ignore entry, so a '
+        f'step reads or writes it: {named}')
+
+
 # ─── which way a recorded number may move ──────────────────────────────────
 
 def test_tightened_follows_a_cheaper_journey_down(tmp):
