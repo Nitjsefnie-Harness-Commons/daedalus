@@ -103,22 +103,26 @@ function wireRailHighlight() {
     for (const { a } of sections) a.classList.toggle('active', a.getAttribute('href') === '#' + id);
   };
 
-  // The observer delivers only the entries whose state changed, so what
-  // is in the band has to be carried across callbacks: a section that
-  // scrolled in arrives alone, with the section above it -- still in the
-  // band, unchanged since the last delivery -- absent from the batch.
-  const inBand = new Map();
+  // The observer delivers only the entries whose state changed, so the
+  // set of sections in the band has to be carried across callbacks; its
+  // geometry is not. An entry's rect is the one from the frame that
+  // created it, and a section re-entering through the band's TOP edge
+  // records that edge minus its own HEIGHT -- a number about how tall it
+  // is, not where it sits -- so a sort over carried numbers orders the
+  // band by height instead of by position.
+  const inBand = new Set();
 
   const io = new IntersectionObserver((entries) => {
-    // Pick the entry nearest the top of the viewport that's intersecting.
+    // Pick the section nearest the top of the viewport that's intersecting.
     for (const entry of entries) {
-      if (entry.isIntersecting) inBand.set(entry.target, entry);
+      if (entry.isIntersecting) inBand.add(entry.target);
       else inBand.delete(entry.target);
     }
-    const visible = Array.from(inBand.values());
+    const visible = Array.from(inBand);
     if (visible.length === 0) return;
-    visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-    activate(visible[0].target.id);
+    visible.sort((a, b) => a.getBoundingClientRect().top
+      - b.getBoundingClientRect().top);
+    activate(visible[0].id);
   }, { rootMargin: '-80px 0px -60% 0px', threshold: 0 });
 
   for (const { el } of sections) io.observe(el);
