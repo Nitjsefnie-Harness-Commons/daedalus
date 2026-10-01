@@ -303,9 +303,9 @@ def _perf(name, root, workdir):
     if code != 0:
         return None, {'returncode': code, 'stderr': err.strip()[-400:]}
     counted = _perf_instruction_count(err)
-    # A None with no reason is the one shape that used to reach `_row` and
-    # raise `TypeError` on `None - None`, which is an abort rather than the
-    # unavailability this module promises every counter reports as.
+    # A None with no reason would reach `_row` and raise `TypeError` on
+    # `None - None`, which is an abort rather than the unavailability this
+    # module promises every counter reports as.
     if counted is None:
         return None, {'returncode': code,
                       'stderr': 'perf printed no instruction count'}

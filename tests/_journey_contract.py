@@ -128,13 +128,13 @@ def fixture_shas():
 
 
 def recorded_document(**over):
-    """A budget whose four recorded maps all MATCH a fixture measurement.
+    """A budget whose recorded maps all MATCH a fixture measurement.
 
-    A check that compares anything needs all four recorded, because an
-    un-recorded one is a refusal — which is the point of recording them. So
-    the document a comparison hands the gate is built here rather than
-    spelled out per test, or a test that means to exercise the budget would
-    silently be exercising the refusal.
+    A check that compares anything needs every gate's recorded value
+    present, because an un-recorded one is a refusal. So the document a
+    comparison hands the gate is built here rather than spelled out per
+    test, or a test that means to exercise the budget would silently be
+    exercising the refusal.
     """
     policy = threads()
     document = budget_document(
@@ -168,8 +168,8 @@ def _report_file(tmp, toolchain_over, maps):
     """A measurements file whose report carries `maps` over a valid identity.
 
     The first argument overrides the identity so a test can hand the gate a
-    measurement taken somewhere else; the second is the four recorded maps
-    the report should carry, verbatim.
+    measurement taken somewhere else; the second is the recorded maps the
+    report should carry, verbatim.
     """
     report = {'rounds': 1, 'python': sys.version, 'counters': {}}
     report.update(maps)
@@ -204,6 +204,14 @@ def fixture_report():
                              for name in names}}}}
 
 
+def never_recorded_gates():
+    """Each recorded field, and the subject its refusal is printed under."""
+    return (('toolchain', 'toolchain'),
+            ('excluded_threads', 'excluded threads'),
+            ('thread_bands', 'thread bands'),
+            ('shas', 'journey shas'))
+
+
 def probe():
     return {'python': '3.13.0 (main)', 'perf_event_paranoid': 4,
             'perf_path': '/usr/bin/perf',
@@ -227,12 +235,11 @@ def counter_facts():
 def planting(module, **attributes):
     """Set a loaded module's attributes for a block, and put them back.
 
-    `setattr` rather than `module.name = ...`, because the module came out
-    of `_util.load` and a type checker knows nothing about its attributes:
-    the assignment is exactly the shape it cannot see, and a reader of the
-    test is no better off. This is the planting idiom `tests/_cli_dispatch`
-    already uses, and the restore matters as much as the set — a module
-    object outlives the test that loaded it.
+    `setattr` rather than `module.name = ...`: the module came out of
+    `_util.load`, so a type checker knows nothing about its attributes and
+    the assignment is the one shape it cannot see. The restore matters as
+    much as the set, because the module object outlives the test that loaded
+    it.
     """
     missing = object()
     saved = {name: getattr(module, name, missing)
@@ -252,11 +259,11 @@ def planting(module, **attributes):
 def artifact_shapes():
     """Every artefact shape that must be refused, and the words it says.
 
-    A table rather than a test body: two suites read it, both are at their
-    ceilings, and one owner for the rows is one thing to keep true. Each
-    entry is `(document, fragment)`, and the fragment is the exact refusal —
-    naming it is what makes a plausible simplification of the validator die
-    here instead of in a later run.
+    A table rather than a test body, and beside the suites rather than in
+    one: the rows are one thing with one owner, and the suite that reads
+    them is at its size ceiling. Each entry is `(document, fragment)`, and
+    the fragment is the exact refusal — naming it is what makes a plausible
+    simplification of the validator die here instead of in a later run.
     """
     name = journeys().NAMES[0]
 
