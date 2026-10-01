@@ -196,8 +196,8 @@ def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _budget_document(journeys={names[0]: 1000, names[1]: None,
-                                   names[2]: None})
+    document = _budget_document(journeys={
+        names[0]: 1000, names[1]: None, names[2]: None})
     measured = {names[0]: 1000, names[1]: 10 ** 9, names[2]: 10 ** 9}
     found = policy.violations(measured,
                               {name: ['a' * 64] for name in names},

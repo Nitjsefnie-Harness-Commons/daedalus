@@ -1283,6 +1283,11 @@ jobs:
     # Generous for the worst case the probe finds: three journeys under
     # callgrind, each spawning a real bridge, is minutes rather than seconds.
     timeout-minutes: 45
+    env:
+      # How many rounds the measurement takes. Three is a MEASUREMENT, not
+      # the steady state: it is what the tolerance is derived from, and once
+      # that spread is recorded this returns to the committed default of one.
+      JOURNEY_ROUNDS: "3"
 
     steps:
       # actions/checkout v7.0.1
@@ -1307,23 +1312,40 @@ jobs:
           python -m pip install -r requirements-test.txt
           python -m pip install -r requirements-dev.txt
 
-      # What this runner actually allows, decided by measurement. Which
-      # counter is legal is a property of the kernel the job lands on, so it
-      # is asked here rather than assumed in the script below.
+      # perf is NOT installable here and must not be asked for again.
+      # `perf_event_paranoid` is 4 on the hosted image, so `perf stat` is
+      # refused without CAP_PERFMON, CAP_SYS_PTRACE or CAP_SYS_ADMIN — none
+      # of which a hosted runner grants, and none of which apt can supply.
+      # callgrind is userspace, so the same runner CAN count instructions
+      # once valgrind is on it. That is the fallback this installs, and it
+      # is why the counter is found by measurement below rather than named
+      # here: a runner where the install silently failed must still report
+      # what it found, not what this step intended.
+      - name: Install valgrind, which supplies the instruction counter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      # What this runner actually allows, decided by measurement, and asked
+      # AFTER the install above so the answer is about this runner as it will
+      # measure. A counter it reports as unavailable is a counter the check
+      # refuses to compare, not one it reads as "nothing over budget".
       - name: Probe the counters
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 scripts/ci/journey_budget.py probe --summary
 
-      # One round. These counts are deterministic, so a discarded warm-up
-      # round buys nothing here.
+      # The rounds are the job's `JOURNEY_ROUNDS`, and the committed default
+      # is one: these counts are deterministic, so a discarded warm-up round
+      # buys nothing. More than one round is for deriving the tolerance from
+      # a spread, once.
       - name: Measure the journeys
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py measure --root . \
-            --out "$COUNTS"
+            --rounds "${JOURNEY_ROUNDS:-1}" --out "$COUNTS"
 
       - name: Check the journeys against the budget
         env:
