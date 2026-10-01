@@ -202,9 +202,15 @@ def clear(path, store):
     if not os.path.isdir(entry):
         return _refuse(f'no stored copy of {path} under {store}; there is '
                        'nothing to clear')
-    print(f'discarding the stored copy of {path} at {entry}'
-          f'{_entry_detail(entry)}')
-    return _remove_entry(entry)
+    # Read before the removal, which takes the entry with it: printed
+    # afterwards so a refusal is not preceded by a line announcing a
+    # discard that did not happen.
+    detail = _entry_detail(entry)
+    removed = _remove_entry(entry)
+    if removed:
+        return removed
+    print(f'discarding the stored copy of {path} at {entry}{detail}')
+    return 0
 
 
 def save(path, store):
@@ -257,7 +263,10 @@ def restore(path, store):
         return _refuse(f'cannot restore {path}: {why}; the stored copy is '
                        f'still at {entry}')
     # Past here the bytes are published, so no refusal may read as a
-    # restore that did not happen.
+    # restore that did not happen. This chmod arm has no in-suite
+    # control: the target is the inode this process just created, so
+    # chmod refuses only on EROFS, an immutable attribute or a Windows
+    # sharing violation, none of which a suite can arrange portably.
     try:
         os.chmod(path, mode)
     except OSError as why:
