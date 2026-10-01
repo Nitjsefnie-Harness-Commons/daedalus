@@ -275,7 +275,7 @@ _READER_ENTRY_POINTS = frozenset({
     'wait_for_command', 'wait_for_commands',
     'queued_command', 'queued_commands',
     '_wait_for_client_commands',
-    '_answer_one_ext_command', '_answer_mcp_command',
+    '_answer_one_ext_command',
 })
 
 
