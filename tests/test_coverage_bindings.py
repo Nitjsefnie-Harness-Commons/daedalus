@@ -7,12 +7,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _binding_assertions import (  # noqa: E402
     _assert_binding_pair, _scope_cases, _scope_violations)
 from _coverage_guard import _synthetic_violations  # noqa: E402
-from _coverage_mutation_specs import (  # noqa: E402
-    _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _CHAIN_INVOKE,
-    _DEST_MUTATIONS, _INLINE_INVOKE,
-    _SCOPE_INVOKE as _SHARED_SCOPE_INVOKE, _SCOPE_MUTATIONS,
-    _UNFOLLOWABLE_MUTATIONS)
-from _receiver_mutation_specs import _RECEIVER_MUTATIONS  # noqa: E402
 
 
 _SCOPE_INVOKE = (
@@ -39,7 +33,20 @@ _TARGET_INVOKE = (
 
 
 def _mutation_specs():
-    """This suite's own rows, then the tables the other suites grew."""
+    """This suite's own rows, then the tables the other suites grew.
+
+    The tables are read here rather than at module scope because a sweep
+    child imports this module and never reaches this function: it runs one
+    row, and a row names its target in a string. See
+    `test_a_mutation_sweep_child_imports_no_helper_no_row_reaches`.
+    """
+    from _coverage_mutation_specs import (
+        _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _CHAIN_INVOKE,
+        _DEST_MUTATIONS, _INLINE_INVOKE,
+        _SCOPE_INVOKE as _SHARED_SCOPE_INVOKE, _SCOPE_MUTATIONS,
+        _UNFOLLOWABLE_MUTATIONS)
+    from _receiver_mutation_specs import _RECEIVER_MUTATIONS
+
     assign = (
         "        if (len(node.targets) == 1 and "
         "isinstance(node.targets[0], ast.Name)\n"
