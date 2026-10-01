@@ -272,9 +272,9 @@ def _invalidate(state, container, operands=()):
 
     `star_display` is deliberately left at its default: the join above has
     already made the shifted-position rule a no-op on this container, so
-    setting it would say nothing the value does not. A plant that sets it
-    anyway is caught by `test_tab_routing`, so the field is pinned, not
-    inert.
+    setting it would say nothing the value does not. Nothing in this tree
+    plants it any other way — the default is what every caller reads, and
+    the reason it is safe is the join above, not a control.
     """
     names = {name for name, value in state.callables.items()
              if isinstance(value, DeferredContainer)

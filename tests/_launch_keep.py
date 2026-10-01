@@ -1,20 +1,18 @@
 """What the bounded-launch control reads, and which sites of that it keeps.
 
-Both decisions below belong to `tests/test_repo_layout.py`'s control and to
-`tests/test_launch_control_boundary.py`, which holds the sites the first
-one drops to being refused rather than merely unpolled. So each is written
-once here and read from here by both consumers: a copy in the second
-narrows that control's population with nothing to report it, a plant
-measured how far, and the hole is silent in the shrinking direction.
-Widening the keep rule — adding `non-git` to its heads — took the boundary
-control from 139 dropped sites to 55 with the whole tree green. Narrowing
-the prefilter the same way, with `and 'git' in source`, took it to 70.
+Both decisions below belong to `tests/test_repo_layout.py`'s control, which
+is the one consumer left: it walks the whole tracked tree on the first and
+keeps or drops each site on the second, so the two are written once here
+and read from here. A second copy would narrow that control's population
+with nothing to report it, and the hole would be silent in the shrinking
+direction.
 
-Those figures were measured before #1408 and none has been re-measured
+The figures the two rules were tuned against — 139 dropped sites narrowed to
+55, then 70 — were measured before #1408 and none has been re-measured
 since; the prefilter they were taken against is not in this file, so none
-is reproducible by making that one edit. What the rule below yields on the
-current tree comes from `tests/test_launch_control_boundary.py`'s
-`_dropped_sites` — call it rather than writing a figure here.
+is reproducible by making that one edit. What the rules below yield on the
+current tree is what `tests/test_repo_layout.py` computes as it runs, so
+read the answer there rather than from a number written here.
 """
 
 
@@ -35,7 +33,7 @@ def in_launch_population(name, source):
     stdlib does not take, so `timout=30` is a site, and PEP 3131 normalises
     a fullwidth `timeout` to the ASCII spelling in `ast.keyword.arg` from a
     file whose own text never spells it. Both fixtures are in
-    `tests/test_launch_audit_bounded_spelling.py`, and the cost of the walk
+    `tests/test_harness_launch_bounds.py`, and the cost of the walk
     over the whole tree is paid in the analyser.
 
     `source` is still the second argument because both consumers already

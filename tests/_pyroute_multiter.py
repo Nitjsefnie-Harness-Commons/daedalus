@@ -43,8 +43,10 @@ starred container of iterables -- and a `filter` is inside it on the same
 rule, since it takes `(callable, iterable)` and yields the operand element.
 The keywords are closed the same way, over the two that change a step's arity
 or its indexing; the member a new builtin of one of these kinds would carry
-is the name alone, so a member added to one declaration is read by the same
-two functions every other member of that kind is read by.
+is the name alone, and the dispatch table below is built from the
+declarations rather than written beside them, so a member added to one is
+read by the same two functions every other member of that kind is read by
+with no suite enumerating the set.
 
 Two spellings stand between an operand and the position it pairs at, and
 they decide different things. A starred positional operand is a count of

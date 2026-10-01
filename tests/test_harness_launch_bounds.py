@@ -12,6 +12,13 @@ reads as no bound at all.
 because the analyser's `unplaced` arm already reports it at the head the
 gate keeps. That is why this plant is here and not in the table: without
 it, deleting the arm leaves every other control green.
+
+The fullwidth `timeout` below is the third route, and the only one a row
+cannot express: `tests/_launch_keep.py::in_launch_population` reads the
+whole tracked Python tree and no source text, and PEP 3131 delivers a
+normalised identifier to the analyser as ASCII from a file that never
+spells it — so a source-text spelling test is defeated by the identifier
+table alone, with no author doing anything.
 """
 import sys
 from pathlib import Path
@@ -19,8 +26,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_audit import bound_sites  # noqa: E402
+from _launch_keep import in_launch_population  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 import _util  # noqa: E402
+
+# Spelled as escapes so this file stays ASCII.
+FULLWIDTH_TIMEOUT = '\uff54\uff49\uff4d\uff45\uff4f\uff55\uff54'
+FULLWIDTH_BOUND = (
+    'import subprocess\n'
+    '\n'
+    '\n'
+    'def probe():\n'
+    f'    subprocess.run(["git", "status"], {FULLWIDTH_TIMEOUT}=30)\n')
 
 
 def test_the_launch_call_routes_the_audit_owns_are_refused_and_pinned(tmp):
@@ -72,6 +89,31 @@ def test_the_launch_call_routes_the_audit_owns_are_refused_and_pinned(tmp):
                   'a-clean-launch-emits-nothing'):
         assert label in sunk, (label, sorted(sunk))
     assert 'foreign-keyword-on-a-launch' in refused, sorted(refused)
+
+
+def test_a_normalised_identifier_bound_is_still_read(tmp):
+    """The same hole reached through the grammar, with no typo at all.
+
+    CPython normalises identifiers per PEP 3131, so a fullwidth `timeout`
+    arrives as ASCII `timeout` in `ast.keyword.arg` while the file's own
+    text spells no ASCII `timeout`. A source-text spelling test is defeated
+    by the identifier table alone, with no author doing anything — and
+    `in_launch_population` reads the tree rather than the text precisely so
+    that this file stays inside the population.
+    """
+    del tmp
+    assert 'timeout' not in FULLWIDTH_BOUND, (
+        'the fixture spells ASCII "timeout", so it cannot tell a rule that '
+        'reads the source text from one that reads the parse')
+    assert bound_sites(FULLWIDTH_BOUND, 'probe.py') == [
+        (5, 'git', 'timeout')], (
+        'the analyser no longer normalises the fullwidth keyword, so the '
+        'fixture pins nothing about the parse it was written for')
+    assert in_launch_population('probe.py', FULLWIDTH_BOUND), (
+        'a file whose only bounded launch is written in normalised '
+        "identifiers fell out of the launch control's population: PEP 3131 "
+        'delivers `timeout` to the analyser from a source that never '
+        'spells it')
 
 
 def main():

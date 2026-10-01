@@ -150,6 +150,7 @@
     "test_gm_segment_job.py": 0.1371,
     "test_gm_storage.py": 6.9291,
     "test_gm_transfers.py": 0.1073,
+    "test_harness_launch_bounds.py": 4.4711,
     "test_helper_reimplementation.py": 8.1148,
     "test_helper_reimplementation_js.py": 3.6414,
     "test_helper_shadow_boundaries.py": 0.382,
