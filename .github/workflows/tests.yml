@@ -1292,7 +1292,7 @@ jobs:
       # It is three here because the runner image moved under the recorded
       # identity, so the counts must be re-measured before that baseline can
       # be re-recorded, and it goes back to one as soon as it is.
-      JOURNEY_ROUNDS: "3"
+      JOURNEY_ROUNDS: "1"
 
     steps:
       # actions/checkout v7.0.1
