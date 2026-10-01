@@ -213,12 +213,9 @@ _ROWS = [
     ('loop-else-binds-after-the-body', 0, {'id': 5}, _CALL, _inside(
         'for k in ("id",): cmd = {k: 5}', 'else: (k := "tab")')),
     # A walrus's own value is what it binds, so the name it leaves behind
-    # carries it; and a `del` through a tuple target forgets every name in
-    # it, or the key would survive a deletion the program performs.
+    # carries it.
     ('walrus-value-binds-its-name', 1, {'tab': 5}, _CALL, _inside(
         'k = (j := "tab")', 'cmd = {k: 5}')),
-    ('del-tuple-target', 0, 'raises UnboundLocalError', _CALL, _inside(
-        'k = "tab"', 'a = 1', 'del (a, k)', 'cmd = {k: 5}')),
 ]
 
 # Three boundaries this change does not cross. Every row below carries a
@@ -317,6 +314,8 @@ def test_a_delete_drops_the_literal_the_other_writer_drops(tmp):
         'loop-over-name': ('keys = ("tab",)\nfor j in keys:\n'
                            '    cmd = {j: 5}\n', ['tab']),
         'augmented': ('k = "tab"\nk += "x"\ncmd = {k: 5}\n', []),
+        'del-tuple-target': ('k = "tab"\na = 1\ndel (a, k)\n'
+                             'cmd = {k: 5}\n', []),
         'order-key-then-walrus': ('k = "id"\ncmd = {k: (k := "tab")}\n',
                                   ['id']),
     }
