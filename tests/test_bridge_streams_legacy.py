@@ -12,15 +12,6 @@ from _bridge import (  # noqa: E402
     framer, next_stream_data, prove_scan, put_command, stub_stream,
     stream_response)
 
-# What the bridge prints for a delivery of the command this test drops.
-# Matched on the command's own id and nothing else: the delivered line also
-# carries the redacted file name, and its ellipsis is written as UTF-8 by the
-# child and decoded by this process through the locale encoding, so a literal
-# ellipsis in the pattern matches on the platforms where both sides are UTF-8
-# and silently matches nothing on the ones where they are not.
-_DELIVERED_KEPT = ' id=kept'
-
-
 # The fault a redelivery needs: the drain removes a command file it has
 # delivered, and a removal that fails is swallowed — the file stays and the
 # next scan delivers it again. Injected into the bridge child rather than
@@ -194,14 +185,26 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
 
     The fault makes the removal fail, so the drain redelivers on every scan
     — that is the at-least-once outcome, and it is certain here rather than
-    a thing that depends on which hosts take an unlink. What this test does
-    NOT claim is that the redelivery carries the id the first copy carried:
-    Linux and all four Windows interpreters hand back one id for one file,
-    and macOS does not, because the identity the id is built from moves over
-    time there (#1411). The reader's rule is pinned on every platform by the
-    two controls above, and the stability of the id over a short interval is
-    pinned by `test_stream_service_legacy_ids`, which drains one object twice
-    and is green on every leg.
+    a thing that depends on which hosts take an unlink.
+
+    The redelivery is asserted as its place on the wire rather than as a
+    count read at a moment. One scan of the extension stream drains the
+    broadcast queue and then the broadcast legacy file, so the frame
+    carrying the last command enqueued is followed by that same scan's copy
+    of the stuck file, however many scans have run by the time it is read.
+    A count was what this test used to assert, and it read correct code as
+    a defect on a loaded cell: one repeat had landed when the count was
+    taken.
+
+    What this test does NOT claim is that the redelivery carries the id the
+    first copy carried: Linux and all four Windows interpreters hand back
+    one id for one file, and macOS does not, because the identity the id is
+    built from moves over time there (#1411). So the repeat is read raw,
+    past `frame_reader`'s ledger, which would skip it on two of the three
+    platforms. The reader's rule is pinned on every platform by the two
+    controls above, and the stability of the id over a short interval is
+    pinned by `test_stream_service_legacy_ids`, which drains one object
+    twice and is green on every leg.
     """
     env = _refuses_legacy_unlink(tmp)
     served = []
@@ -215,24 +218,19 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
             legacy.write_text('{"id":"kept","code":"1"}', encoding='utf-8')
             delivered = read('the legacy command')
             assert delivered.get('id') == 'kept', delivered
-            assert legacy.exists(), 'the fault did not take effect'
             status, _ = put_command(
-                base, {'token': TOK, 'id': 'after', 'code': '2'})
+                base, {'token': TOK, 'id': 'last', 'code': '2'})
             assert status == 200, status
-            # Two commands after the repeats, so the read is not satisfied by
-            # a single stray redelivery whichever id the repeat carried.
-            status, _ = put_command(
-                base, {'token': TOK, 'id': 'last', 'code': '3'})
-            assert status == 200, status
-            assert read('a command after the repeats').get('_did'), (
-                'the reader returned nothing after the repeats')
+            raw = framer(response, served)
+            while True:
+                wanted = raw('the last command enqueued')
+                if wanted.get('id') == 'last':
+                    break
+            again = raw('the redelivery after the last command')
+            assert again.get('id') == 'kept', (
+                'the scan that delivered the last command did not redeliver '
+                f'the file it could not remove: {again}')
             assert legacy.exists(), 'the file was removed after all'
-            # The drain is still delivering it: two redeliveries, which only
-            # a file left in place can produce.
-            redeliveries = sum(
-                1 for line in served
-                if _DELIVERED_KEPT in line)
-            assert redeliveries >= 2, ''.join(served[-400:])
         finally:
             response.close()
             conn.close()
