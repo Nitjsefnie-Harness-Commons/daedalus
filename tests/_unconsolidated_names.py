@@ -102,9 +102,6 @@ UNCONSOLIDATED_NAMES = {
         'the list it was handed, where the binding-assertions owner renders '
         'expected strings for a synthetic source off a fixed marker list, so '
         'neither body would answer for the other',
-    ('tests/_jsroute_sweep.py', '_indent'):
-        'the sweep helper indents a block of generated JavaScript while the '
-        'two yaml readers measure one line, so three unrelated meanings',
     ('tests/_mcp_code_eval.py', '_scan'):
         'one scans a module text and the other evaluates an expression '
         'against a binding set, so they share no argument',
@@ -189,9 +186,6 @@ UNCONSOLIDATED_NAMES = {
         'this writes one probe into the tree the control owns and reads the '
         'verdict, where the owner reverts one converted site in a scratch '
         'tree and reports where it drains',
-    ('tests/test_dashboard_fanout.py', '_order'):
-        'this returns the real daedalus_bridge.queue_order the loaded '
-        'command_queue mints with, where the owner builds a JS case tuple',
     ('tests/test_dashboard_harness.py', '_harness_failure'):
         'this drives the shipped retry entry with bounded steps, where the '
         'owner reads a relay harness failure under a plan',
@@ -216,9 +210,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_line_lengths.py', '_lines'):
         'this joins texts and encodes them as the byte-length source, where '
         'the owner splits a workflow keeping line endings',
-    ('tests/test_mcp_live_tools.py', '_row'):
-        'this builds one tool row from a command type, its fields and a '
-        'builder, where the owner builds a getter-argument case',
     ('tests/test_mcp_hotfix_scope.py', '_load_composition'):
         'this patches MCPServer and BridgeSession the way the owner does but '
         'names its own _ToolRegistry and _BridgeProbe classes and its own '
@@ -270,18 +261,6 @@ UNCONSOLIDATED_NAMES = {
         '(lineno, leaf, spelling) hits, where the drain owner scans a module '
         'text for unbounded drains and the code-eval owner walks an '
         'expression value; three different arguments',
-    ('tests/test_tab_routing_js_heads.py', '_literal'):
-        'this builds a method entry plus a plain sibling, where the owner '
-        'builds a getter-returning object',
-    ('tests/test_tab_routing_positions.py', '_literal'):
-        'this builds one member-access position case from a named shape, '
-        'where the owner builds a getter-returning object',
-    ('tests/test_tab_routing_positions.py', '_run'):
-        'this runs one masked source through the position verdict, where the '
-        'shared _run boots a node scenario',
-    ('tests/test_tab_routing_unprovable.py', '_scan'):
-        'this writes one synthetic module and asks the route scanner, where '
-        'the owner scans a module text with a memo',
     ('tests/test_timed_planner.py', '_run'):
         'this runs the planner main with stdout captured, where the shared '
         '_run boots a node scenario',
