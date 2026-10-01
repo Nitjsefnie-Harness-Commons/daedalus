@@ -139,9 +139,19 @@ def _run_sandbox(root, timeout_env, outer_timeout=120):
         inherited = env.get('PYTHONPATH')
         env['PYTHONPATH'] = os.pathsep.join(
             [str(root)] + ([inherited] if inherited else []))
+    # A generated `sitecustomize.py` is scaffolding, not repository source,
+    # and the coverage configuration measures the synthetic tree and then
+    # attributes what it measured to repository paths -- so a child that
+    # imports one hands `coverage report` a measured file with no source,
+    # and the gate refuses it. Scrubbing the collector from exactly these
+    # children is what stops the RECORDING, on every platform, rather than
+    # excluding a path shape that only reads differently per platform. The
+    # cost is that these controls stop contributing to the total; the
+    # lines they drive are measured by every other control in this file.
+    mode = 'scrub' if (root / 'sitecustomize.py').exists() else 'keep'
     return subprocess.run(
         [sys.executable, str(root / 'run_tests.py')],
-        cwd=str(root), env=_util.child_coverage('keep', env, cwd=root),
+        cwd=str(root), env=_util.child_coverage(mode, env, cwd=root),
         capture_output=True, text=True, timeout=outer_timeout)
 
 

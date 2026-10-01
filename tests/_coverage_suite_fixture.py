@@ -289,9 +289,20 @@ def coverage_tree(
     if sitecustomize:
         (root / 'sitecustomize.py').write_text(
             sitecustomize, encoding='utf-8')
+    # A generated `sitecustomize.py` is scaffolding, not repository source:
+    # the coverage configuration measures the synthetic tree and attributes
+    # what it measured to repository paths, so a child that imports one
+    # hands `coverage report` a measured file with no source and the gate
+    # refuses it. Scrubbing the collector from exactly these children stops
+    # the RECORDING, on every platform -- an exclusion would only hide a
+    # path shape that reads differently per platform. It also lowers the
+    # declaration for the `unlaunchable` and `cpu_count` sites, which this
+    # branch did not write; the lines they drive stay measured by the
+    # children that have no sitecustomize.
+    mode = 'scrub' if (root / 'sitecustomize.py').exists() else 'keep'
     result = subprocess.run(
         [sys.executable, 'scripts/ci/coverage_suites.py', *args],
-        cwd=str(root), env=_util.child_coverage('keep', env, cwd=root),
+        cwd=str(root), env=_util.child_coverage(mode, env, cwd=root),
         input='runner-only input\n', capture_output=True, text=True,
         timeout=outer_timeout)
     records = root / 'coverage-invocations'
