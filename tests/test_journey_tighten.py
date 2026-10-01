@@ -554,10 +554,14 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
                 f'the {step.get("name")!r} step holds the deploy key and does '
                 f'not call the shared script, so a second copy of the push '
                 f'is back: {body}')
-            call = body.split('ratchet_push.sh', 1)[1].strip()
-            assert len(shlex.split(call.replace('\n', ' '))) >= 2, (
-                'the push script takes the committed path and the commit '
-                f'message; the call supplies fewer than two arguments: {body}')
+            # The line continuations go first: left in, `shlex` counts each
+            # trailing backslash as an argument of its own and a one-argument
+            # call parses as two.
+            call = body.replace('\\\n', ' ')
+            assert len(shlex.split(
+                call.split('ratchet_push.sh', 1)[1])) == 2, (
+                'the push script takes exactly the committed path and the '
+                f'commit message; the call does not supply both: {body}')
             seen[name] = body
     assert sorted(seen) == ['coverage', 'journey-budget'], sorted(seen)
 
