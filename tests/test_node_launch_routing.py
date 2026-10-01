@@ -56,7 +56,8 @@ def test_a_call_site_bound_is_derived_and_not_written(tmp):
             ({key: value for key, value in composed.items()
              if not key.endswith('_SAMPLES_S')},
              'the recorded table is gone')):
-        assert not bounds.is_composed(broken, 'GM_CHILD', SITE_HANG_MULTIPLE), why
+        assert not bounds.is_composed(
+            broken, 'GM_CHILD', SITE_HANG_MULTIPLE), why
 
 
 def test_a_module_cannot_rebind_the_shared_hang_multiple(tmp):
