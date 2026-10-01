@@ -10,6 +10,7 @@ pin over a whole line is satisfied by the path.
 """
 import os
 import shutil
+import stat
 import sys
 from pathlib import Path
 
@@ -257,10 +258,11 @@ def _assert_the_removal_is_refused(entry, as_nobody):
     assert entry.is_dir(), 'the probe took the entry with it'
 
 
-def _restore_over_an_entry_nothing_can_remove(target, store):
+def _unremovable_entry(target, store):
     """A real unwritable entry directory, not a mock: `bytes` and `mode`
     still open, so the publish and the chmod both land, and only the
-    removal that follows them is refused.
+    removal that follows them is refused. Returns whether the helper has
+    to run as a plain user, so both commands take the same route.
     """
     if os.name != 'posix':
         _util.skip('POSIX mode bits are what refuse the removal')
@@ -272,20 +274,26 @@ def _restore_over_an_entry_nothing_can_remove(target, store):
             _util.skip(f'cannot hand the tree to a plain user: {why!r}')
     entry = _only_entry(store)
     # Read and traverse but not write: every unlink inside it is refused,
-    # and none of the reads the restore makes before them.
+    # and none of the reads the commands make before them.
     entry.chmod(0o500)
     _assert_the_removal_is_refused(entry, dropped)
-    if dropped:
-        return _as_nobody([sys.executable, str(PLANT), 'restore',
+    return dropped
+
+
+def _plant(action, target, store, as_nobody):
+    if as_nobody:
+        return _as_nobody([sys.executable, str(PLANT), action,
                            str(target), '--store', str(store)])
-    return _run_plant('restore', str(target), '--store', str(store))
+    return _run_plant(action, str(target), '--store', str(store))
 
 
 def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
         tmp):
     target, store = _saved_then_planted(tmp)
+    entry = _only_entry(store)
+    dropped = _unremovable_entry(target, store)
 
-    restored = _restore_over_an_entry_nothing_can_remove(target, store)
+    restored = _plant('restore', target, store, dropped)
     # The publish landed before the removal was reached, so a nonzero exit
     # here is the refusal, and it has to be the one line the helper's
     # other failures print rather than a traceback over the whole call
@@ -295,14 +303,43 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
     assert 'Traceback' not in said, said
     assert len(restored.stderr.strip().splitlines()) == 1, said
     refusal = restored.stderr.strip()
-    entry = _only_entry(store)
+    # Which of the two post-publish refusals fired. The chmod one leaves
+    # the mode unapplied and says so; this one leaves the entry behind,
+    # and a line that cannot tell them apart is not one a reader can act
+    # on.
+    assert 'could not be removed' in refusal, refusal
     # Say the restore happened, and that the entry is still there: a
     # refusal that reads as a save to redo sends the operator back into a
     # store that already holds the copy.
     assert f'{target} was restored' in refusal, refusal
     assert 'still there' in refusal, refusal
     assert str(entry) in refusal, refusal
+    # `_open_the_entry` left the target at 0700, so this is the recorded
+    # mode and not the one it already had: the chmod landed, and the
+    # restore is complete apart from the entry still being on disk.
+    assert stat.S_IMODE(target.stat().st_mode) == int(
+        (entry / 'mode').read_text().strip(), 8), 'the chmod landed'
     assert target.read_bytes() == _FIXED
+
+    # The other command, against the same entry that survived the first.
+    # `clear` reaches the same removal, so this is what makes one shared
+    # guard a tested property rather than a claim - and it is why the
+    # refusal above can be said to cover issue 1434 as well.
+    cleared = _plant('clear', target, store, dropped)
+    assert cleared.returncode != 0, _say(cleared)
+    said = _say(cleared)
+    assert 'Traceback' not in said, said
+    assert len(cleared.stderr.strip().splitlines()) == 1, said
+    # Nothing announced a discard that did not happen: the line the
+    # refusal used to arrive behind.
+    assert cleared.stdout == '', said
+    refusal = cleared.stderr.strip()
+    assert 'could not be removed' in refusal, refusal
+    # `clear` published nothing, so its line must not say it restored.
+    assert f'{target} was restored' not in refusal, refusal
+    assert 'still there' in refusal, refusal
+    assert str(entry) in refusal, refusal
+    assert entry.is_dir()
 
 
 def test_the_save_line_is_exactly_the_shape_the_suite_parses(tmp):
