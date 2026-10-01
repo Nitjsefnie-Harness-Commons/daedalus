@@ -26,10 +26,7 @@ def _bind_literals(node, literals):
 
     A form left out resolves no key, so a payload whose key rides a name
     that form binds reaches the sender carrying a real `tab` — which is why
-    the arms below cover every form `_STORES` names rather than the ones a
-    first writer enumerated. The forms they do not name are listed in the
-    module docstring's terms: a name bound outside this function resolves
-    to no key, and the reader is right to stay silent about it.
+    the arms below cover every form `_STORES` names.
     """
 
     def record(name, literal):
@@ -116,11 +113,10 @@ def _bind_literals(node, literals):
 
         A loop target takes every element of what it iterates in turn, so a
         name it binds carries the one literal they all agree on; a union of
-        several that do not is a key no position can name. An unpacked
-        target is paired by position, and only where the shape lines up — a
-        loop over an iterable the fold will not produce binds nothing, and a
-        target of more than one part binds its names only when every part
-        takes its own element.
+        several that do not names no key. An unpacked target is paired by
+        position and only where the shape lines up, so a loop over an
+        iterable the fold will not produce binds nothing, and so does a
+        target of more than one part.
         """
         value = value_of(loop.iter)
         if isinstance(value, (tuple, list, set)) and value:
