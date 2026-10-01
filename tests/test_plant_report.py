@@ -236,7 +236,7 @@ def test_a_target_nothing_can_read_is_reported_as_uncompared(tmp):
 def _assert_the_removal_is_refused(entry, as_nobody):
     """Prove the arrangement before the helper runs, so a green run proves
     something. Root cannot be refused by mode bits, so there the probe is
-    the same plain user the restore will be - and the entry must survive
+    the same plain user the helper will be - and the entry must survive
     it, or the refusal the helper meets is a different one."""
     if not as_nobody:
         refused = False
@@ -261,8 +261,7 @@ def _assert_the_removal_is_refused(entry, as_nobody):
 def _unremovable_entry(target, store):
     """A real unwritable entry directory, not a mock: `bytes` and `mode`
     still open, so the publish and the chmod both land, and only the
-    removal that follows them is refused. Returns whether the helper has
-    to run as a plain user, so both commands take the same route.
+    removal that follows them is refused.
     """
     if os.name != 'posix':
         _util.skip('POSIX mode bits are what refuse the removal')
@@ -273,8 +272,6 @@ def _unremovable_entry(target, store):
         except OSError as why:
             _util.skip(f'cannot hand the tree to a plain user: {why!r}')
     entry = _only_entry(store)
-    # Read and traverse but not write: every unlink inside it is refused,
-    # and none of the reads the commands make before them.
     entry.chmod(0o500)
     _assert_the_removal_is_refused(entry, dropped)
     return dropped
@@ -309,9 +306,8 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
     # and a line that cannot tell them apart is not one a reader can act
     # on.
     assert 'could not be removed' in refusal, refusal
-    # Say the restore happened, and that the entry is still there: a
-    # refusal that reads as a save to redo sends the operator back into a
-    # store that already holds the copy.
+    # A refusal that reads as a save to redo sends the operator back into
+    # a store that already holds the copy.
     assert f'{target} was restored' in refusal, refusal
     assert 'still there' in refusal, refusal
     # Our own sentence, not a path substring: the OS error's rendering
@@ -328,7 +324,6 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
         (entry / 'mode').read_text().strip(), 8), 'the recorded mode'
     assert target.read_bytes() == _FIXED
 
-    # The other command, against the same entry that survived the first.
     # `clear` reaches the same removal, so this is what makes one shared
     # guard a tested property rather than a claim - and it is why the
     # refusal above can be said to cover issue 1434 as well.
@@ -337,8 +332,7 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
     said = _say(cleared)
     assert 'Traceback' not in said, said
     assert len(cleared.stderr.strip().splitlines()) == 1, said
-    # Nothing announced a discard that did not happen: the line the
-    # refusal used to arrive behind, through either command.
+    # Nothing announced a discard that did not happen.
     assert cleared.stdout == '', said
     refusal = cleared.stderr.strip()
     assert 'could not be removed' in refusal, refusal
