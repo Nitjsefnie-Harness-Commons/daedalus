@@ -321,7 +321,7 @@ def test_only_the_main_tighten_may_write_the_artefact(tmp):
     # step belongs to the block before it, and naming the script in
     # prose would read as a second caller.
     commit = [block for block in steps
-              if 'bash scripts/ci/ratchet_push.sh' in block]
+              if 'python3 scripts/ci/ratchet_push.py' in block]
     assert len(commit) == 1, f'expected one commit step, found {len(commit)}'
     assert artefact in commit[0], (
         f'the commit step does not commit the artefact: {commit[0]}')

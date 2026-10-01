@@ -444,10 +444,10 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     # and what the commit says it did. The push itself — the deploy key, the
     # pinned host key, HEAD:main, and telling a refusal from a concurrent
     # push — lives in that script and is controlled by executing it.
-    assert 'scripts/ci/ratchet_push.sh' in commit['run'], commit['run']
+    assert 'scripts/ci/ratchet_push.py' in commit['run'], commit['run']
     assert '.github/ci-thresholds.json' in commit['run'], commit['run']
     assert "'ci: update CI ratchets'" in commit['run'], commit['run']
-    push = (ROOT / 'scripts' / 'ci' / 'ratchet_push.sh').read_text(
+    push = (ROOT / 'scripts' / 'ci' / 'ratchet_push.py').read_text(
         encoding='utf-8')
     assert 'HEAD:main' in push
     assert 'GIT_SSH_COMMAND' in push

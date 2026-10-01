@@ -27,7 +27,6 @@ from _ratchet_fixture import _git  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _journey_contract import (  # noqa: E402
     ROOT,
-    budget_document,
     journeys,
     recorded_document,
     recorded_maps,
@@ -334,7 +333,7 @@ def test_a_journey_recorded_at_null_still_renders_a_row(tmp):
     assert row[0].endswith('| not recorded yet |'), row[0]
 
 
-PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.sh'
+PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.py'
 
 
 def _summary_text(summary):
@@ -412,7 +411,7 @@ def _drive_push(work, refuse, change=True):
     summary = work.parent / 'summary.md'
     env['GITHUB_STEP_SUMMARY'] = str(summary)
     return subprocess.run(
-        ['bash', str(PUSH), 'ratcheted.json',
+        [sys.executable, str(PUSH), 'ratcheted.json',
          'ci: tighten the journey budget'],
         cwd=str(work), capture_output=True, text=True, env=env), summary
 
@@ -476,7 +475,9 @@ def test_a_push_that_succeeds_says_nothing_about_main_moving(tmp):
     base = Path(tmp) / 'success'
     work, _bare = _push_repo(base)
     outcome, summary = _drive_push(work, refuse=False)
-    assert outcome.returncode == 0, outcome.stderr
+    assert outcome.returncode == 0, (
+        'a push that succeeded was reported as a failure, so every ordinary '
+        f'run reddens a required context: {outcome.stderr}')
     said = _summary_text(summary)
     assert 'Main moved' not in said, (
         'a push that succeeded reported that main had moved under the run: '
@@ -527,6 +528,12 @@ def test_a_commit_with_nothing_to_commit_aborts(tmp):
                            capture_output=True, text=True, check=True)
     assert after.stdout == before.stdout, (
         'the remote took a commit from a run that had nothing to record')
+    # Aborting is the claim; saying main had moved is the shape of the same
+    # mistake this control exists to catch, on the route where the push
+    # itself succeeds and the recovery branch is what would run.
+    assert 'Main moved' not in _summary_text(summary), (
+        'a run with nothing to commit reported that main had moved: '
+        f'{_summary_text(summary)}')
 
 
 def test_both_jobs_call_the_one_push_implementation(tmp):
@@ -550,7 +557,7 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
             # body is the script call.
             if 'RATCHET_SSH_KEY' not in str(step):
                 continue
-            assert 'ratchet_push.sh' in body, (
+            assert 'ratchet_push.py' in body, (
                 f'the {step.get("name")!r} step holds the deploy key and does '
                 f'not call the shared script, so a second copy of the push '
                 f'is back: {body}')
@@ -559,7 +566,7 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
             # call parses as two.
             call = body.replace('\\\n', ' ')
             assert len(shlex.split(
-                call.split('ratchet_push.sh', 1)[1])) == 2, (
+                call.split('ratchet_push.py', 1)[1])) == 2, (
                 'the push script takes exactly the committed path and the '
                 f'commit message; the call does not supply both: {body}')
             seen[name] = body
