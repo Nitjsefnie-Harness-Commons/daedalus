@@ -45,10 +45,9 @@ def _which_with(node):
 # than an oversight: each program is a literal inside the test function, so
 # the only lever that could wedge the child is the `node` executable itself,
 # and a `#!` stand-in is not runnable on the Windows legs. What holds their
-# figures instead is the per-stem rule in `tests/test_node_launch_routing.py`,
-# which names the module and the stem whose deadline is not composed. The
-# walk itself derives the site POPULATION, and its allowance is per-module,
-# so it does not read a bound added inside a module it already excuses.
+# figures instead is that each is `round()`ed from the recorded table
+# below and the shared `SITE_HANG_MULTIPLE` in
+# `tests/_node_launch_routing.py`, rather than typed at the call site.
 REPO_PROBE_SAMPLES_S = (0.635, 0.326, 0.309, 0.312,
                         3.633, 4.081, 1.533, 0.238)
 REPO_PROBE_SLOWEST_S = max(REPO_PROBE_SAMPLES_S)

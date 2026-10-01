@@ -33,9 +33,8 @@ from pathlib import Path
 
 from _launch_audit import bound_sites
 
-# A healthy analysis of either step-counted probe is 2,811 line events
-# for `launcher-factory` in `tests/test_launch_arms.py` and 2,953 for
-# `cyclic-base` in `tests/test_repo_layout.py`, and that figure is
+# A healthy analysis of the step-counted probe is 2,953 line events
+# for `cyclic-base` in `tests/test_repo_layout.py`, and that figure is
 # DETERMINISTIC: the count is steps, not a duration, so a loaded machine
 # or a slow runner cannot change it and a correct tree cannot fail here.
 # This ceiling is a SAMPLE margin over those measurements, not a derived
