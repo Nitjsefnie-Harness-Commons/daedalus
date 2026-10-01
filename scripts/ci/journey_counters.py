@@ -181,7 +181,11 @@ def facts():
 
 
 def _selected(found):
-    """The counter this runner's gate will use, and why that one."""
+    """The counter this runner's gate will use: the first usable candidate.
+
+    `None` when the probe found none, and the job still passes in that state
+    — the baseline is recorded against a counter, not against a hope.
+    """
     for counter in GATE_CANDIDATES:
         if _usable(counter, found):
             return counter
@@ -305,10 +309,6 @@ COUNTERS_BY_NAME = {
 }
 
 
-def available(counter, found):
-    return _usable(counter, found)
-
-
 def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
     """Measure every journey under every counter it can count here."""
     found = facts() if found is None else found
@@ -322,7 +322,7 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
     with tempfile.TemporaryDirectory(prefix='journeybudget_') as workdir:
         for counter in COUNTERS:
             run, childed = COUNTERS_BY_NAME[counter]
-            if not available(counter, found):
+            if not _usable(counter, found):
                 report['counters'][counter] = {
                     'available': False,
                     'why': 'the probe did not find this counter usable here'}
