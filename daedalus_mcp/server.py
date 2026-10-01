@@ -186,6 +186,16 @@ def _idle_server_class():
     The subclass is built here rather than at module scope because the
     suites drive `_serve` with a fake `uvicorn` in sys.modules, and a class
     defined at import time would bind the real one before they can.
+
+    Four uvicorn names are relied on, and three of them fail differently.
+    `main_loop` and `startup` are overridden, so a rename is an
+    AttributeError at startup. `on_tick` is called as well, but it is not a
+    documented extension point, so its rename is an AttributeError on the
+    first request. `should_exit` is the dangerous one: this subclass turns
+    the public attribute into a property, and if uvicorn ever made it a
+    method then `if not self.should_exit` in Server._serve would read a
+    bound method as truthy and leave the main loop at once — a bridge that
+    answers nothing and says nothing.
     """
     import uvicorn
 
@@ -226,25 +236,34 @@ def _idle_server_class():
             Written out rather than driven through on_tick, which refreshes
             only on a counter divisible by ten and this must hold for
             every request.
+
+            Assigned through a slice on purpose. The HTTP protocols capture
+            `server_state.default_headers` at RequestReceived — before any
+            of this runs — and concatenate the object they captured when the
+            response starts, so rebinding it would leave every in-flight
+            cycle answering with the previous refresh's date.
             """
             if self.config.date_header:
                 date_header = [
                     (b'date', formatdate(time.time(), usegmt=True).encode())]
             else:
                 date_header = []
-            self.server_state.default_headers = (
+            self.server_state.default_headers[:] = (
                 date_header + self.config.encoded_headers)
 
         async def request_tick(self):
             """The work uvicorn's on_tick did ten times a second.
 
-            Its counter advances once per request, so max-requests,
-            callback_notify and the exit decision all still happen — now on
-            the cadence the bridge is actually asked for.
+            The counter advances once per request, so the once-per-ten
+            branch inside on_tick — and with it max-requests,
+            callback_notify and the exit decision — still happens, now on
+            the cadence the bridge is actually asked for. It is not wrapped
+            the way uvicorn wraps it: that keeps an int small while ticking
+            ten times a second forever, and a per-request counter reaches
+            that bound after days of continuous traffic.
             """
             self.refresh_default_headers()
             self._counter += 1
-            self._counter %= 864000
             if await self.on_tick(self._counter):
                 self.should_exit = True
 
@@ -299,8 +318,9 @@ def _serve():
         bound_port = sock.getsockname()[1]
         _bound.set()
         print(f'[MCP] streamable-http on 127.0.0.1:{bound_port}', flush=True)
-        server = _idle_server_class()(config)
-        holder['server'] = server
+        # One statement: the middleware can only find the server once it is
+        # published, and nothing runs before `run` hands the socket over.
+        holder['server'] = server = _idle_server_class()(config)
         server.run(sockets=[sock])
     except Exception as e:
         startup_error = f'[MCP] serve crashed: {log_safe(e)}'
