@@ -86,24 +86,21 @@ def _as_nobody(command):
         _util.skip(f'the privilege drop is unavailable here: {why!r}')
 
 
-def _hand_to_nobody(path):
-    # 0o700: the chown makes the child the OWNER, so owner bits are all
-    # it needs and group and other are nobody.
-    os.chown(path, 65534, 65534)
-    os.chmod(path, 0o700)
-
-
 def _open_the_entry(store, target):
-    """Hand the child every path it walks to publish: a suite's temporary
-    root is 0700, and without the traverse bit the child reads a refusal
-    where the route should have run."""
+    """Hand the child every path it walks to publish, the target
+    included: a suite's temporary root is 0700, and without
+    the traverse bit the child reads a refusal where the route
+    should have run. 0o700 makes the child the OWNER, so owner
+    bits are all it needs."""
     entry = _only_entry(store)
     for directory in (target.parent, store, entry):
         for ancestor in (directory, *directory.parents):
             os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
     for owned in (target.parent.parent, target.parent, store, entry,
-                  *entry.iterdir()):
-        _hand_to_nobody(owned)
+                  *entry.iterdir(), target):
+        os.chown(owned, 65534, 65534)
+        os.chmod(owned, 0o700)
+
 
 _NOT_HEADS = "the published bytes are the worktree's, not what HEAD holds"
 
@@ -142,8 +139,8 @@ def _entry_fields(output):
 def _write_state(store, value):
     """Put `value` where a save put its own: the field is a file, and a
     hand-edited one is a shape a store can genuinely hold."""
-    (_only_entry(store) / 'head-state').write_text(f'{value}\n',
-                                                  encoding='utf-8')
+    (_only_entry(store) / 'head-state').write_text(
+        f'{value}\n', encoding='utf-8')
 
 
 def _drop_the_state_field(store):
@@ -296,7 +293,6 @@ def _restore_over_a_target_nothing_can_read(target, store):
     if dropped:
         try:
             _open_the_entry(store, target)
-            _hand_to_nobody(target)
         except OSError as why:
             _util.skip(f'cannot hand the tree to a plain user: {why!r}')
     target.chmod(0o200)
