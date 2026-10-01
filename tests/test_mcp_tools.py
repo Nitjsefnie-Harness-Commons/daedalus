@@ -497,6 +497,28 @@ def test_a_typed_send_that_does_not_wait_reports_its_command(_tmp):
         _mcp_tool_commands._ext('_focus', 'focus-tab', tabId=7, wait=False)]
 
 
+def test_a_ping_that_does_not_wait_reports_its_command(_tmp):
+    """The eval answer shape, on `ping`'s own put-and-poll.
+
+    `exec` reaches its command through `_send_eval` and the typed tools
+    through `ext_cmd`, so a hand-reconstructed command on either is caught.
+    `ping` owns neither: it puts and polls inline, and wave 1 gave it `wait`
+    on its own. A reconstruction there survives every other case in the tree,
+    so the shape is pinned here too.
+    """
+    composition = _load_composition(_mcp_tool_commands.MARKER)
+    marker = _mcp_tool_commands.MARKER
+
+    answer = asyncio.run(composition.mcp.registered['ping'](wait=False))
+
+    assert answer == {
+        'command': {'id': '_ping', 'code': 'document.title',
+                    '_did': marker}}, answer
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._put('/command', {'id': '_ping',
+                                             'code': 'document.title'})]
+
+
 def test_a_waited_send_still_answers_its_result(_tmp):
     """The load-bearing compatibility property, on the eval path.
 
@@ -505,7 +527,7 @@ def test_a_waited_send_still_answers_its_result(_tmp):
     pinned against the same probe the no-wait cases use. `_send_eval` is
     real code under this probe; the TYPED path is not — `ext_cmd` is
     replaced wholesale, so a case written here cannot see it and the typed
-    waited return is pinned in `tests/test_mcp_transport_guards.py`
+    waited return is pinned in `tests/test_mcp_transport.py`
     against the real method instead.
     """
     composition = _load_composition(_mcp_tool_commands.MARKER)

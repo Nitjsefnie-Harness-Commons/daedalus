@@ -51,6 +51,7 @@ _mcp_request = _mcp_load._mcp_request
 _mcp_payload = _mcp_load._mcp_payload
 _open_mcp_session = _mcp_load._open_mcp_session
 _call_mcp_tool = _mcp_load._call_mcp_tool
+_surface_responder_errors = _mcp_load.surface_responder_errors
 _mcp_tool_text = _mcp_load._mcp_tool_text
 
 
@@ -97,21 +98,6 @@ def _bridge_with_live_mcp(tmp, env):
         port = _await_mcp_line(output, child[0])
         _wait_for_mcp(port)
         yield base, port
-
-
-@contextlib.contextmanager
-def _surface_responder_errors(thread, errors, timeout, stop=None):
-    """Join a responder and prefer its original failure to the main one."""
-    try:
-        yield
-    finally:
-        if stop is not None:
-            stop.set()
-        thread.join(timeout=timeout)
-        failure = next((item for item in errors
-                        if isinstance(item, Exception)), None)
-        if failure is not None:
-            raise failure from None
 
 
 def test_the_dependency_check_is_one_shared_definition(tmp):
