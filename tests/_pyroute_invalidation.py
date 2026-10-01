@@ -273,8 +273,10 @@ def _invalidate(state, container, operands=()):
     `star_display` is deliberately left at its default: the join above has
     already made the shifted-position rule a no-op on this container, so
     setting it would say nothing the value does not. Nothing in this tree
-    plants it any other way — the default is what every caller reads, and
-    the reason it is safe is the join above, not a control.
+    plants it any other way — the replacement built below takes the
+    default, and the reason that is safe is the join above, not a control.
+    `tests/_pyroute_reads.py` does set it, to `index is None`, for a
+    subscript read; that is a different container and not this one.
     """
     names = {name for name, value in state.callables.items()
              if isinstance(value, DeferredContainer)

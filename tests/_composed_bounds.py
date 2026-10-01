@@ -276,6 +276,49 @@ def planted_module_copy(root, module_name, plant):
     (root / module_name).write_text(f'{source}\n\n{plant}\n', encoding='utf-8')
 
 
+SHARED_LAUNCHER = '_noderun.py'
+
+
+def module_level_constants(path):
+    """`name -> source` for one module's top-level assignments."""
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    return {target.id: ast.unparse(node.value)
+            for node in tree.body if isinstance(node, ast.Assign)
+            for target in node.targets if isinstance(target, ast.Name)}
+
+
+def derived_population(tests_dir=None):
+    """The composed-bound sites the TREE carries, derived rather than listed.
+
+    Two readings, both off the tree, so a table that drifts from what the
+    modules hold is visible to a control rather than only to a reader:
+
+    - every module-level `*_DEADLINE_S` outside the shared launcher, paired
+      with the stem it derives from. The shared launcher is excluded because
+      its two are composed inside it, which is the whole point of the other
+      eight keeping their bounds at their own call sites instead;
+    - every module-level `*_SAMPLES_S` together with whether some
+      `*_SLOWEST_S` in the same module reads it. A table nothing composes
+      from is a figure no deadline was built out of.
+    """
+    root = _TESTS_DIR if tests_dir is None else tests_dir
+    sites = set()
+    tables = set()
+    unconsumed = []
+    for path in sorted(root.glob('*.py')):
+        constants = module_level_constants(path)
+        slowest = {name: source for name, source in constants.items()
+                   if name.endswith('_SLOWEST_S')}
+        for name, source in constants.items():
+            if name.endswith('_DEADLINE_S') and path.name != SHARED_LAUNCHER:
+                sites.add((path.name, name[:-len('_DEADLINE_S')]))
+            elif name.endswith('_SAMPLES_S'):
+                tables.add((path.name, name))
+                if not any(name in read for read in slowest.values()):
+                    unconsumed.append(f'{path.name}:{name}')
+    return sites, tables, unconsumed
+
+
 def composed_population(root, module_name, plant):
     """Every composed-bound module, copied under `root`, one of them planted.
 
