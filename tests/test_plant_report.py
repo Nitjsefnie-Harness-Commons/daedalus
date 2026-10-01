@@ -9,6 +9,7 @@ this suite names each temp dir after its test function, so a substring
 pin over a whole line is satisfied by the path.
 """
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -228,6 +229,79 @@ def test_a_target_nothing_can_read_is_reported_as_uncompared(tmp):
     clauses = _restore_clauses(restored.stdout)
     assert _change_in(clauses) == 'uncompared', clauses
     target.chmod(0o600)
+    assert target.read_bytes() == _FIXED
+
+
+def _assert_the_removal_is_refused(entry, as_nobody):
+    """Prove the arrangement before the helper runs, so a green run proves
+    something. Root cannot be refused by mode bits, so there the probe is
+    the same plain user the restore will be - and the entry must survive
+    it, or the refusal the helper meets is a different one."""
+    if not as_nobody:
+        refused = False
+        try:
+            shutil.rmtree(entry)
+        except PermissionError:
+            refused = True
+        assert refused, 'the entry was still removable; nothing was proved'
+        assert entry.is_dir(), 'the probe took the entry with it'
+        return
+    probe = ('import shutil, sys\n'
+             'try:\n'
+             '    shutil.rmtree(sys.argv[1])\n'
+             'except PermissionError:\n'
+             '    sys.exit(7)\n'
+             'sys.exit(0)\n')
+    out = _as_nobody([sys.executable, '-c', probe, str(entry)])
+    assert out.returncode == 7, (out.returncode, _say(out))
+    assert entry.is_dir(), 'the probe took the entry with it'
+
+
+def _restore_over_an_entry_nothing_can_remove(target, store):
+    """A real unwritable entry directory, not a mock: `bytes` and `mode`
+    still open, so the publish and the chmod both land, and only the
+    removal that follows them is refused.
+    """
+    if os.name != 'posix':
+        _util.skip('POSIX mode bits are what refuse the removal')
+    dropped = hasattr(os, 'geteuid') and os.geteuid() == 0
+    if dropped:
+        try:
+            _open_the_entry(store, target)
+        except OSError as why:
+            _util.skip(f'cannot hand the tree to a plain user: {why!r}')
+    entry = _only_entry(store)
+    # Read and traverse but not write: every unlink inside it is refused,
+    # and none of the reads the restore makes before them.
+    entry.chmod(0o500)
+    _assert_the_removal_is_refused(entry, dropped)
+    if dropped:
+        return _as_nobody([sys.executable, str(PLANT), 'restore',
+                           str(target), '--store', str(store)])
+    return _run_plant('restore', str(target), '--store', str(store))
+
+
+def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
+        tmp):
+    target, store = _saved_then_planted(tmp)
+
+    restored = _restore_over_an_entry_nothing_can_remove(target, store)
+    # The publish landed before the removal was reached, so a nonzero exit
+    # here is the refusal, and it has to be the one line the helper's
+    # other failures print rather than a traceback over the whole call
+    # chain.
+    assert restored.returncode != 0, _say(restored)
+    said = _say(restored)
+    assert 'Traceback' not in said, said
+    assert len(restored.stderr.strip().splitlines()) == 1, said
+    refusal = restored.stderr.strip()
+    entry = _only_entry(store)
+    # Say the restore happened, and that the entry is still there: a
+    # refusal that reads as a save to redo sends the operator back into a
+    # store that already holds the copy.
+    assert f'{target} was restored' in refusal, refusal
+    assert 'still there' in refusal, refusal
+    assert str(entry) in refusal, refusal
     assert target.read_bytes() == _FIXED
 
 
