@@ -639,6 +639,47 @@ def test_an_unwaited_extension_command_reports_its_command_and_nothing_else(
     assert len(sent) == 1, sent
 
 
+def test_a_waited_extension_command_answers_its_result_unchanged(tmp):
+    """The waited return, against the real `ext_cmd`.
+
+    The probe the pinned table drives replaces this method wholesale, so a
+    case written there cannot see a change to it. This is the control that
+    can: the polled body is handed back as `result.result`, `roundtrip_ms` is
+    grafted only when asked for, and the bridge's error still raises.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    polls = []
+
+    async def put(_path, _payload):
+        return {'did': 'delivery'}
+
+    async def poll_result(tab, timeout, **_kwargs):
+        polls.append((tab, timeout))
+        return {'error': None, 'result': {'path': '_ss/shot.png', 'size': 3},
+                'roundtrip_ms': 41}
+
+    session.put = put
+    session.poll_result = poll_result
+
+    plain = _capture(session.ext_cmd('_ss', 'screenshot'))
+    assert plain == {'path': '_ss/shot.png', 'size': 3}, plain
+
+    grafted = _capture(session.ext_cmd(
+        '_ss', 'screenshot', include_roundtrip=True))
+    assert grafted == {
+        'path': '_ss/shot.png', 'size': 3, 'roundtrip_ms': 41}, grafted
+    assert polls == [('extension', 10.0), ('extension', 10.0)], polls
+
+    # A body with no `result` at all is the empty default, not a raise.
+    async def no_result(*_args, **_kwargs):
+        return {'error': None}
+
+    session.poll_result = no_result
+    assert _capture(session.ext_cmd('_ss', 'screenshot')) == {}
+
+
 def _shielded_environment():
     return mock.patch.dict('os.environ', {}, clear=False)
 
