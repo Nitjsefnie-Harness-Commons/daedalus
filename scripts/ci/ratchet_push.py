@@ -42,7 +42,7 @@ HOST_KEY = ('github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6'
 AUTHOR = 'github-actions[bot]'
 EMAIL = '41898282+github-actions[bot]@users.noreply.github.com'
 SUMMARY_NAME = 'GITHUB_STEP_SUMMARY'
-MOVED = ('Main moved while this run measured; the next push retries instead.')
+MOVED = 'Main moved while this run measured; the next push retries instead.'
 
 
 def _git(*argv):
