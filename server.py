@@ -416,7 +416,12 @@ class Handler(RequestMixin):
         print(
             f'[PUT-CMD] {target} id={log_safe(cmd_id)} did={did}',
             flush=True)
-        answer = {'ok': True, 'target': target, 'did': did}
+        # The very dict _publish wrote under this `did`, so a caller that
+        # must answer what it sent holds the bytes without reading the
+        # queue back; a coalesced answer names the live file, whose name
+        # IS that `did`.
+        answer = {'ok': True, 'target': target, 'did': did,
+                  'command': {**cmd, '_did': did}}
         if duplicate:
             answer['duplicate'] = True
         return self._json(200, answer)

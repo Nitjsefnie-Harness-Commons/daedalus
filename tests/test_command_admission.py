@@ -30,8 +30,13 @@ def test_a_retried_put_answers_the_original_delivery_as_duplicate(tmp):
         published = sorted(
             (Path(docroot) / 'commands' / TOK).glob('*.json'))
         assert len(published) == 1, published
-        assert json.loads(published[0].read_text(encoding='utf-8')) == {
-            'id': 'same-id', 'code': '1', '_did': first['did']}
+        stored = json.loads(published[0].read_text(encoding='utf-8'))
+        assert stored == {'id': 'same-id', 'code': '1', '_did': first['did']}
+        # The answer names what was enqueued, so a caller that has to answer
+        # the command never reads the queue for it. The coalesced answer
+        # names the live file too, since its `did` IS that file's name.
+        assert first['command'] == stored, (first, stored)
+        assert second['command'] == stored, (second, stored)
 
 
 def test_a_put_with_the_same_id_but_a_new_payload_enqueues_fresh(tmp):
@@ -51,6 +56,9 @@ def test_a_put_with_the_same_id_but_a_new_payload_enqueues_fresh(tmp):
         payloads = [json.loads(path.read_text(encoding='utf-8'))
                     for path in published]
         assert [p['code'] for p in payloads] == ['1', '2'], payloads
+        # Each answer names its own delivery rather than a shared one.
+        assert [answer['command'] for answer in (first, second)] == payloads, (
+            first, second, payloads)
 
 
 if __name__ == '__main__':
