@@ -148,10 +148,19 @@ def _run_sandbox(root, timeout_env, outer_timeout=120):
     # excluding a path shape that only reads differently per platform. The
     # cost is that these controls stop contributing to the total; the
     # lines they drive are measured by every other control in this file.
-    mode = 'scrub' if (root / 'sitecustomize.py').exists() else 'keep'
+    # See `tests/_coverage_suite_fixture.py::coverage_tree` for why these
+    # two launches are separate rather than one launch with a chosen mode:
+    # the guard reads the mode as a LITERAL at the `env=` keyword, and a
+    # name bound to a `child_coverage(mode, ...)` is `invalid` — which also
+    # deletes the keep site this function is allowlisted for.
+    if (root / 'sitecustomize.py').exists():
+        return subprocess.run(
+            [sys.executable, str(root / 'run_tests.py')], cwd=str(root),
+            env=_util.child_coverage('scrub', env, cwd=root),
+            capture_output=True, text=True, timeout=outer_timeout)
     return subprocess.run(
-        [sys.executable, str(root / 'run_tests.py')],
-        cwd=str(root), env=_util.child_coverage(mode, env, cwd=root),
+        [sys.executable, str(root / 'run_tests.py')], cwd=str(root),
+        env=_util.child_coverage('keep', env, cwd=root),
         capture_output=True, text=True, timeout=outer_timeout)
 
 
