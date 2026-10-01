@@ -27,11 +27,3 @@ def runtime_and_guard(source, path):
     assert ran.returncode == 0, (ran.returncode, ran.stdout, ran.stderr)
     guard = bool(js_tab_routing_violations(path, path.name))
     return ran.stdout == '1', guard
-
-
-def paired(cases):
-    """The (label, runtime, guard) each row claims. Over-reporting is
-    allowed, so a scalar claims both."""
-    return [(label, *(value if isinstance(value, tuple)
-                      else (value, value)))
-            for label, _, value in cases]
