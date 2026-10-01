@@ -598,6 +598,47 @@ def test_extension_command_surfaces_result_error(tmp):
     assert result == expected, (result, expected)
 
 
+def test_an_unwaited_extension_command_reports_its_command_and_nothing_else(
+        tmp):
+    """Both limbs of the one guard, against the real `ext_cmd`.
+
+    `checked_timeout` refuses a timeout that cannot wait BEFORE the command
+    is submitted, because a caller told nothing ran retries a side effect
+    the browser has already been handed. A no-wait send has no wait to
+    bound, so the refusal must not reach it — and the probe the pinned
+    table drives is a double that never calls the real method, which is why
+    this case lives here instead.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    sent = []
+
+    async def put(_path, payload):
+        sent.append(payload)
+        return {'did': 'delivery', 'command': {**payload, '_did': 'delivery'}}
+
+    async def poll_result(*_args, **_kwargs):
+        raise AssertionError('an unwaited send must not poll')
+
+    session.put = put
+    session.poll_result = poll_result
+
+    result = _capture(session.ext_cmd(
+        '_ss', 'screenshot', timeout=-1, wait=False))
+    expected = {'command': {'id': '_ss', 'type': 'screenshot',
+                            'tab': 'extension', '_did': 'delivery'}}
+    assert result == expected, (result, expected)
+    assert len(sent) == 1, sent
+
+    # The waited limb still refuses, and refuses before the PUT.
+    refused = _capture(session.ext_cmd('_ss', 'screenshot', timeout=-1))
+    assert refused == (
+        "raised ValueError: timeout must be a finite positive number of "
+        "seconds; got -1"), refused
+    assert len(sent) == 1, sent
+
+
 def _shielded_environment():
     return mock.patch.dict('os.environ', {}, clear=False)
 
