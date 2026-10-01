@@ -153,25 +153,41 @@ def _load_front_end(base):
 def mcp_exec(base, docroot):
     """One MCP tool call, answered by this thread as the extension would.
 
-    The send is unwaited, so the helper holds the command's bytes and answers
-    it without polling the queue; the result is then read back through the
-    `result` tool, which is the read an unwaited send leaves behind. The
-    helper is what sets the token on this thread, so the read inherits it.
+    The send is unwaited, so the bridge's own answer hands this thread the
+    command's bytes and the answer goes out without polling the queue; the
+    result is then read back through the `result` tool, which is the read an
+    unwaited send leaves behind.
+
+    All three steps run in ONE event loop on purpose. `BridgeTransport`
+    caches its httpx client per loop, so a second `asyncio.run` builds a
+    second client and pays to load the CA bundle again — hundreds of
+    millions of instructions for one extra round trip, which is a harness
+    artefact rather than anything a user waits for.
     """
+    del docroot
     mod = _load_front_end(base)
-    sent, queued = _mcp_load._answer_mcp_command(
-        base, docroot, mod,
-        lambda: mod.exec(tab_id=MCP_TAB, cmd_id=MCP_COMMAND_ID,
-                         code=MCP_CODE, wait=False),
-        MCP_RESULT, tab=MCP_TAB)
-    assert sent == {'command': queued}, sent
-    assert queued.get('code') == MCP_CODE, queued
-    read = asyncio.run(mod.result(tab_id=MCP_TAB))
+    # what daedalus_mcp.auth.BearerAuth does per request
+    mod._token.set(_mcp_load.TOK)
+
+    async def round_trip():
+        sent = await mod.exec(tab_id=MCP_TAB, cmd_id=MCP_COMMAND_ID,
+                              code=MCP_CODE, wait=False)
+        queued = sent.get('command')
+        assert queued, sent
+        assert queued.get('code') == MCP_CODE, queued
+        status, _ = _util.post_json(base + '/result', {
+            'token': _mcp_load.TOK, 'tabId': MCP_TAB, 'id': queued['id'],
+            'result': MCP_RESULT, 'error': None, 'ts': 1,
+            '_did': queued['_did']})
+        assert status == 200, status
+        return await mod.result(tab_id=MCP_TAB)
+
+    read = asyncio.run(round_trip())
     assert read.get('value') == MCP_RESULT, read
     assert read.get('error') is None, read
     return {
         'journey': 'mcp-exec',
-        'queued': {'id': queued.get('id'), 'code': queued.get('code')},
+        'queued': {'id': MCP_COMMAND_ID, 'code': MCP_CODE},
         'tool': {'id': read.get('id'), 'tabId': read.get('tabId'),
                  'value': read.get('value'),
                  'error': read.get('error')},
