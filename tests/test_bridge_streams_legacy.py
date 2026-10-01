@@ -199,20 +199,20 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
     What this pins is that a scan which delivers a command also delivers
     the file, and that the two land next to each other.
 
-    The two readers here are not interchangeable. `frame_reader` is the one
-    that steps over the repeats, and the read below is the only place in
-    the tree where it is exercised end to end on a repeat the real bridge
-    produced — the controls above cover its rule over synthetic frames
-    only. It cannot be used to see the redelivery itself, because it drops
-    a frame whose `_did` it has already seen, which on Linux and Windows is
-    what a repeat of one file carries. So the assertion reads raw.
-
-    What this test does NOT claim is that the redelivery carries the id the
-    first copy carried: Linux and all four Windows interpreters hand back
-    one id for one file, and macOS does not, because the identity the id is
-    built from moves over time there (#1411). The stability of the id over
-    a short interval is pinned by `test_stream_service_legacy_ids`, which
-    drains one object twice and is green on every leg.
+    The two readers here are not interchangeable. The redelivery is read
+    raw, and has to be: the id is keyed on the object's device and inode
+    plus a generation that advances only when a removal SUCCEEDED, so the
+    fault this test plants leaves that generation where it was and the
+    repeat arrives under the same `_did` on every platform. `frame_reader`
+    skips a frame whose `_did` it has already seen, so it skips that repeat
+    everywhere and cannot be the instrument here — while the read through
+    it above stays the only place in the tree where it is exercised end to
+    end on a repeat the real bridge produced, the controls above covering
+    its rule over synthetic frames only. The id's shape and its stability
+    across a failed removal are pinned by `test_stream_service_legacy_ids`;
+    the residual, that a restart or eviction past the 4096-name bound
+    returns a name to its first value, is disclosed in `stream_service`'s
+    own docstring.
     """
     env = _refuses_legacy_unlink(tmp)
     served = []
@@ -238,15 +238,14 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
                 'the reader returned nothing after the repeats')
             raw = framer(response, served)
             # A liveness escape on the hunt below, not a bound the assertion
-            # is timed against. The command is already enqueued and the
-            # stream is already hot, so a healthy run takes it on the next
-            # scan; the budget is the one `frame_reader` gives the same hunt
-            # in this file, taken because it is generous rather than fitted
-            # to this test. It exists because the wire is never silent here:
-            # a broadcast drain that stopped would leave the stuck file
-            # redelivering forever and the loop would spin with nothing to
-            # raise, which is the regression the reader's own budget was
-            # written for and the one this loop lost.
+            # is timed against. `next_stream_data` bounds silence, not
+            # elapsed time, and the wire is never silent here — the stuck
+            # file redelivers on every scan — so a hunt that never found its
+            # command would spin rather than raise. The budget is the one
+            # `frame_reader` gives the same hunt in this file, for being
+            # generous rather than fitted to this test. On today's bridge
+            # the read above is what bounds a stopped drain, because the
+            # repeat's `_did` is stable; this fires if that id starts moving.
             give_up_at = time.monotonic() + _REDELIVERY_BUDGET_SECONDS
             skipped = 0
             while True:
