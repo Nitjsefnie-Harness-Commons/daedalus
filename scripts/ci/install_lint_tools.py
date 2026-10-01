@@ -44,6 +44,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -127,6 +129,22 @@ RELEASE = 'https://github.com/Nitjsefnie-OSC/actionlint/releases/download'
 ARCHITECTURES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64',
                  'arm64': 'arm64'}
 DOWNLOAD_TIMEOUT = 30
+# A connect or a read that fails is the network reaching the asset and not a
+# defect in the asset: the same URL serves the same pinned bytes on the next
+# attempt. So the transfer is retried, and only on the failures that a retry
+# can change — the two verdicts on what was served, an over-limit payload and
+# a digest mismatch, are not retried, and neither is raised as one of these.
+# No sleep and no backoff between attempts; the per-attempt socket timeout is
+# already the delay.
+DOWNLOAD_ATTEMPTS = 3
+# The wall clock the attempts share. DOWNLOAD_TIMEOUT bounds one socket
+# operation and not a transfer, so attempts alone would let an asset that is
+# slow rather than gone hold the step three times over.
+DOWNLOAD_BUDGET = 60
+# What a retry can change. socket.timeout is a TimeoutError, and both are an
+# OSError; all three are named so the set reads as what it accepts rather than
+# as what one of them happens to subclass.
+TRANSIENT_ERRORS = (urllib.error.URLError, TimeoutError, OSError)
 # A whole-process bound, because pip owns the wheel transfer below, so
 # the per-socket one above does not apply to it.
 WHEEL_TIMEOUT = 300
@@ -163,13 +181,27 @@ def _fetch(name):
     `timeout` bounds one socket operation, not the transfer, so a mirror
     dribbling a byte a minute can hold the step for the whole download;
     MAX_TRANSFER is the bound that is real.
+
+    The attempt is repeated while it fails transiently, and the last failure
+    propagates as it does without the retry, so the traceback naming `_fetch`
+    and `urlopen` is what a reader of a dead install step still gets.
     """
     url = f'{RELEASE}/v{ACTIONLINT_VERSION}/{name}'
-    with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
-        payload = response.read(MAX_TRANSFER + 1)
-    if len(payload) > MAX_TRANSFER:
-        raise SystemExit(f'{url} served more than {MAX_TRANSFER} bytes')
-    return payload
+    deadline = time.monotonic() + DOWNLOAD_BUDGET
+    for attempt in range(DOWNLOAD_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(
+                    url, timeout=DOWNLOAD_TIMEOUT) as response:
+                payload = response.read(MAX_TRANSFER + 1)
+        except TRANSIENT_ERRORS:
+            if (attempt + 1 == DOWNLOAD_ATTEMPTS
+                    or time.monotonic() >= deadline):
+                raise
+            continue
+        if len(payload) > MAX_TRANSFER:
+            raise SystemExit(
+                f'{url} served more than {MAX_TRANSFER} bytes')
+        return payload
 
 
 def _verify(payload, key):
