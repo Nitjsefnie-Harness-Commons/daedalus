@@ -1435,6 +1435,7 @@
     "navigate": {"javascript": ["tests/_hotfixharness.py"]},
     "navigateAt": {"javascript": ["tests/_hotfixharness.py"]},
     "nested_code_objects": {"python": ["tests/_mcp_guard_floor.py"]},
+    "never_recorded_gates": {"python": ["tests/_journey_contract.py"]},
     "newObserver": {"javascript": ["tests/_dashdom.py"]},
     "newReaderScript": {"javascript": ["tests/_dashshell.py"]},
     "new_deferred_callable": {"python": ["tests/_pyroute_values.py"]},

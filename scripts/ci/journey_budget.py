@@ -5,7 +5,7 @@ The mutable policy state is `.github/journey-budget.json`: which counter the
 budget is denominated in, how far over it a journey may run, and one
 recorded count per journey. It is its own file rather than a member of
 `.github/ci-thresholds.json` because that document has a closed schema, and
-a new baseline family belongs to a shared owner this change does not edit.
+a new baseline family belongs to a shared owner this file does not edit.
 Nothing here raises a recorded number and nothing adds an entry:
 `--tighten` only follows a journey down, and only drops one the journey set
 no longer has.
@@ -458,10 +458,10 @@ def _recorded_outcome(args, document, report, changed, gate):
 def _report_state(document, names, counter, report):
     """Everything a check knows but is not refusing on, said out loud.
 
-    Nothing here can return True: a measurement that could not be taken is
-    refused before this is called, and a value that was never recorded is one
-    of the four gates' own refusals. So this is a report, and the state it
-    most used to describe is not reachable through this entry point.
+    Every state that can stop a comparison is a refusal, and each of those
+    is raised before this runs: a measurement that could not be taken, and a
+    recorded value that was never written down. So this is a report, and it
+    has nothing to return.
     """
     if counter is None:
         print('the journey budget names no counter yet, so no count is '

@@ -112,10 +112,9 @@ def rebaseline_lines(report, document=None):
         block['journeys'][name] = row.get('median')
         seen = (report.get('shas') or {}).get(name) or []
         block['shas'][name] = sorted(set(seen))[0] if seen else None
-    # `spread` is the one key that is not a schema field, and it is printed
-    # BESIDE the artefact JSON rather than inside it: a block a reader pastes
-    # must validate, and the counts it is replacing had no business riding
-    # inside the thing that replaces them.
+    # `spread` is not a schema field and is printed BESIDE the artefact JSON
+    # rather than inside it: a block a reader pastes has to validate, and the
+    # counts it replaces do not belong inside the thing replacing them.
     spread = {name: (journeys.get(name) or {}).get('spread')
               for name in journey_counters.journey_names()}
     return ['### Re-baseline block', '',
