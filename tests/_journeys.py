@@ -24,6 +24,7 @@ import hashlib
 import json
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -116,9 +117,41 @@ def command_round_trip(base, docroot):
     }
 
 
+def _load_front_end(base):
+    """The MCP front end, loaded on a thread of its own and waited for.
+
+    The bridge excludes its copy of the front end by WAITING for it — the
+    `mcp-bootstrap` thread finishes before the journey's first request — and
+    the client's copy is excluded the other way round, by having already
+    paid it. Neither excludes the CALL: the `exec` round trip below is the
+    work, and it runs on this thread either way.
+
+    The load has to be off the main thread for it to be excludable at all.
+    A main thread is read as the main thread whatever its size, so an import
+    on one is the journey's own work by every rule the profiler's thread
+    bands apply. Loading it here and waiting is the whole of the asymmetry,
+    and it is harness-side: the module the tool call reaches is the same one
+    either way.
+    """
+    box = {}
+
+    def load():
+        try:
+            box['mod'] = _mcp_load._load_mcp(base)
+        except Exception as exc:  # pylint: disable=broad-except
+            box['error'] = exc
+
+    worker = threading.Thread(target=load, name='journey-front-end')
+    worker.start()
+    worker.join()
+    if 'error' in box:
+        raise box['error']
+    return box['mod']
+
+
 def mcp_exec(base, docroot):
     """One MCP tool call, answered by this thread as the extension would."""
-    mod = _mcp_load._load_mcp(base)
+    mod = _load_front_end(base)
     answered, queued = _mcp_load._answer_mcp_command(
         base, docroot, mod,
         lambda: mod.exec(tab_id=MCP_TAB, cmd_id=MCP_COMMAND_ID, code=MCP_CODE),

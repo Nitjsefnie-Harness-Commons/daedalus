@@ -239,9 +239,11 @@
 !/scripts/ci/diff_coverage.py
 !/scripts/ci/gate_freshness.py
 !/scripts/ci/install_lint_tools.py
+!/scripts/ci/journey_artifact.py
 !/scripts/ci/journey_budget.py
 !/scripts/ci/journey_counters.py
 !/scripts/ci/journey_report.py
+!/scripts/ci/journey_threads.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
 !/scripts/ci/js_module_coverage.py

@@ -33,6 +33,12 @@ def _policy():
     return _util.load(POLICY_SOURCE, 'journey_budget_contract')
 
 
+def _threads():
+    """The thread classifier, loaded the way the policy module loads it."""
+    source = ROOT / 'scripts' / 'ci' / 'journey_threads.py'
+    return _util.load(source, 'journey_threads_contract')
+
+
 def _journeys():
     sys.path.insert(0, str(ROOT / 'tests'))
     try:
@@ -131,6 +137,121 @@ def test_the_artefact_is_its_own_file_and_a_tracked_one(tmp):
     assert not [key for key in shared if 'journey' in key], (
         'a journey baseline reached the closed thresholds document, whose '
         'normalise() refuses any field it does not own')
+
+
+def test_the_artefact_records_the_threads_each_journey_excludes(tmp):
+    """A count that drops a background thread means something the count
+    alone cannot say, so the roles are recorded beside it.
+
+    The shape is a per-journey map of role names, and every wrong shape is
+    refused rather than coerced: a journey excluded nothing, a role the
+    profiler never produces, and a repeated role are three different ways
+    for the field to say something the measurement did not do.
+    """
+    del tmp
+    policy = _policy()
+    document = _budget_document()
+    good = {'command-round-trip': ['front-end-import', 'uvicorn-serve'],
+            'dashboard-fanout': ['front-end-import', 'uvicorn-serve'],
+            'mcp-exec': ['front-end-import']}
+    document['excluded_threads'] = good
+    assert policy._validated(document) is document
+    for bad in ([], 'front-end-import', {'mcp-exec': []},
+                {'mcp-exec': ['no-such-thread']},
+                {'mcp-exec': ['front-end-import', 'front-end-import']},
+                {'no-such-journey': ['front-end-import']}):
+        document = _budget_document()
+        document['excluded_threads'] = bad
+        try:
+            policy._validated(document)
+        except ValueError:
+            continue
+        raise AssertionError(f'the schema accepted excluded_threads {bad!r}')
+
+
+def test_a_count_measured_over_different_threads_is_not_compared(tmp):
+    """The same rule as a toolchain that moved, for the same reason.
+
+    Two counts that differ only in which threads were dropped out are two
+    quantities; comparing them would measure the difference between them
+    rather than the code.
+    """
+    del tmp
+    policy = _policy()
+    applied = {'command-round-trip': ['front-end-import', 'uvicorn-serve'],
+               'dashboard-fanout': ['front-end-import', 'uvicorn-serve'],
+               'mcp-exec': ['front-end-import']}
+    assert policy.exclusion_diff(applied, applied) == {}
+    assert policy.exclusion_diff(applied, None) != {}
+    # Order is not meaning: the same roles in another order are the same gate.
+    reversed_roles = {name: list(reversed(roles))
+                      for name, roles in applied.items()}
+    assert policy.exclusion_diff(applied, reversed_roles) == {}
+    moved = dict(applied, **{'mcp-exec': ['front-end-import',
+                                          'uvicorn-serve']})
+    differs = policy.exclusion_diff(applied, moved)
+    assert set(differs) == {'mcp-exec'}, differs
+    assert differs['mcp-exec'][0] == ['front-end-import']
+
+
+def test_a_thread_the_profile_does_not_have_is_a_refusal(tmp):
+    """A missing background thread is a failure, never a silent whole-tree sum.
+
+    The failure this guards is the one the whole change exists to end: a
+    profile the classifier could not read, summed as though every thread in
+    it counted, and reported as a number nobody can read back.
+    """
+    del tmp
+    threads = _threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+             'cmd': 'python3 server.py'}]
+    kept, excluded, failure = threads.total_for(rows, 'dashboard-fanout')
+    assert failure is not None and 'excludes' in failure, failure
+    assert kept is None, kept
+    assert excluded == ('front-end-import', 'uvicorn-serve'), excluded
+    rows.append({'pid': 1, 'thread': 3, 'ir': 90_000_000,
+                 'cmd': 'python3 server.py'})
+    kept, excluded, failure = threads.total_for(rows, 'dashboard-fanout')
+    assert failure is None, failure
+    # Only the main thread is left: the serve thread is one of the two this
+    # journey excludes, and the import is the other.
+    assert kept == 430_000_000, kept
+
+
+def test_a_thread_below_every_band_is_a_refusal_naming_it(tmp):
+    del tmp
+    threads = _threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 3, 'ir': 90_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 4, 'ir': 400,
+             'cmd': 'python3 server.py'}]
+    kept, _excluded, failure = threads.total_for(rows, 'dashboard-fanout')
+    assert failure is not None, 'a profile this shape must not be summed'
+    assert '400' in failure and 'thread 4' in failure, failure
+    assert kept is None
+
+
+def test_two_threads_in_one_band_cannot_be_told_apart(tmp):
+    del tmp
+    threads = _threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 3, 'ir': 90_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 4, 'ir': 95_000_000,
+             'cmd': 'python3 server.py'}]
+    kept, _excluded, failure = threads.total_for(rows, 'dashboard-fanout')
+    assert failure is not None, 'two threads in the serve band are ambiguous'
+    assert 'uvicorn-serve' in failure, failure
+    assert kept is None
 
 
 def test_the_artefact_schema_is_closed(tmp):

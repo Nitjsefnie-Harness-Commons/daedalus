@@ -30,6 +30,12 @@ import tempfile
 import time
 from pathlib import Path
 
+# The thread module sits beside this one and is imported by its own
+# name, so a run from the repository root and a run from anywhere
+# else both resolve it.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
+
 ROOT = Path(__file__).resolve().parents[2]
 JOURNEYS = ROOT / 'tests' / '_journeys.py'
 
@@ -278,28 +284,6 @@ def shapes(names, root, rounds):
 
 # ─── the counters ──────────────────────────────────────────────────────────
 
-def _callgrind_total(directory, prefix):
-    """The `Ir` total over every process callgrind traced.
-
-    `--trace-children=yes` on its own is a trap: with a fixed
-    `--callgrind-out-file` every traced process is instrumented but only the
-    parent's file is written, so the bridge's work — the work this ratchet
-    exists to measure — silently goes missing and the total describes the
-    test client instead. The `%p` in the name below is what makes each
-    process write its own file; this sums the family.
-    """
-    total = 0
-    seen = False
-    for path in sorted(Path(directory).glob(prefix + '.*')):
-        found = _CALLGRIND_TOTAL.findall(
-            path.read_text(encoding='utf-8', errors='replace'))
-        if not found:
-            continue
-        total += int(found[-1])
-        seen = True
-    return total if seen else None
-
-
 def _callgrind(name, root, workdir):
     prefix = f'callgrind.{name}'
     # Every round writes into the same workdir under the same prefix, so the
@@ -310,13 +294,18 @@ def _callgrind(name, root, workdir):
     for stale in Path(workdir).glob(prefix + '.*'):
         stale.unlink()
     argv = [shutil.which('valgrind'), '--tool=callgrind',
-            '--trace-children=yes',
+            '--trace-children=yes', '--separate-threads=yes',
             f'--callgrind-out-file={Path(workdir) / (prefix + ".%p")}'
             ] + child_argv(name, root)
     code, _out, err = _run(argv)
     if code != 0:
         return None, {'returncode': code, 'stderr': err.strip()[-400:]}
-    return _callgrind_total(workdir, prefix), None
+    rows = journey_threads.read(Path(workdir), prefix)
+    kept, _excluded, why = journey_threads.total_for(rows, name)
+    # A classification failure is a sentence rather than the dict a failed
+    # child carries: there is no returncode to report, and the sentence is
+    # what a reader has to act on.
+    return kept, why
 
 
 def _perf(name, root, workdir):
@@ -360,6 +349,9 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
     report = {'rounds': rounds, 'python': sys.version, 'shas': shas or {},
               'toolchain': toolchain(found),
               'selected_counter': _selected(found),
+              'excluded_threads': {
+                  name: list(journey_threads.excluded_for(name))
+                  for name in names},
               'shape_failure': failure, 'counters': {}}
     if failure is not None:
         return report
