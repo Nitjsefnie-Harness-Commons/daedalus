@@ -29,8 +29,6 @@
 
 # ─── root ───
 !/.gitignore
-!/.gitignore
-!/.gitignore
 !/.gitleaks.toml
 !/.pylintrc
 !/AGENTS.md
