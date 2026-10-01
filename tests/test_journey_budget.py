@@ -1,86 +1,37 @@
 #!/usr/bin/env python3
-"""Contracts for the journey-cost ratchet and the artefact it owns.
-
-Nothing here asserts a wall-clock margin or a timing bound. What a ratchet
-owns is the POLICY — what is recorded, which way a recorded number may move,
-and what a refusal says — and that policy is what is decided here. A count is
-a number this repository must not write down, because the runner it was
-measured on is not the runner the next run lands on.
-"""
-import contextlib
+"""Contracts for the journey-cost ratchet's POLICY: what is recorded,
+which way a recorded number may move, and what a refusal says.
+Nothing here asserts a wall-clock margin or a timing bound, because
+a count is a number this repository must not write down: the runner
+it was measured on is not the runner the next run lands on."""
 import io
-import json
+import contextlib
 import subprocess
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
-
-ROOT = _util.ROOT
-POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'journey_budget.py'
-ARTIFACT = ROOT / '.github' / 'journey-budget.json'
-
-# Fields a rendered journey must never carry, whatever the round: each is
-# minted per run or per store, and a rendering holding one has no stable sha.
-# The command id and the `ts` the journey posts itself are fixed inputs, so
-# they are absent here and pinned by value in the test that reads them back.
-PER_RUN = ('did', '_did', 'deliveryId', 'resultGeneration', 'roundtrip_ms',
-           'age')
-
-
-def _policy():
-    return _util.load(POLICY_SOURCE, 'journey_budget_contract')
-
-
-def _threads():
-    """The thread classifier, loaded the way the policy module loads it."""
-    source = ROOT / 'scripts' / 'ci' / 'journey_threads.py'
-    return _util.load(source, 'journey_threads_contract')
-
-
-def _journeys():
-    sys.path.insert(0, str(ROOT / 'tests'))
-    try:
-        import _journeys
-    finally:
-        sys.path.pop(0)
-    return _journeys
-
-
-def _budget_document(**overrides):
-    document = {
-        'schema_version': 1,
-        'counter': 'perf-instructions',
-        'tolerance_pct': 10,
-        'journeys': {name: 1000 for name in _journeys().NAMES},
-    }
-    document.update(overrides)
-    return document
-
-
-# ─── the artefact ──────────────────────────────────────────────────────────
-
-def _line_endings(data):
-    """`data` with CRLF folded to LF, so a checkout's endings are not content.
-
-    The repository has no `.gitattributes`, so a Windows runner's
-    `core.autocrlf` hands this file over with CRLF while `render()` writes
-    LF, and a raw comparison would fail on the line endings alone. Folding
-    them leaves the invariant the test is for: the artefact's CONTENT is
-    what `render()` writes for it. A hand-edited or out-of-date file still
-    fails, because its content differs and its endings are not the thing
-    being compared.
-    """
-    return data.replace(b'\r\n', b'\n')
+import _journey_contract  # noqa: E402
+from _journey_contract import (  # noqa: E402
+    ARTIFACT,
+    IDENTITY,
+    PER_RUN,
+    ROOT,
+    _util,
+    budget_document,
+    journeys,
+    line_endings,
+    measurements_file,
+)
 
 
 def test_the_committed_artefact_is_the_canonical_rendering(tmp):
     del tmp
-    policy = _policy()
+    policy = _journey_contract.policy()
     document = policy.load(ARTIFACT)
     canonical = policy.render(document)
-    committed = _line_endings(ARTIFACT.read_bytes())
+    committed = line_endings(ARTIFACT.read_bytes())
     assert canonical == committed, (
         'the committed artefact is not what render() writes for it, so the '
         'file is hand-edited or out of date')
@@ -88,16 +39,16 @@ def test_the_committed_artefact_is_the_canonical_rendering(tmp):
     # CRLF checkout of the same content passes, and an edit to a count does
     # not. Without both, "compare the folded bytes" could be satisfied by
     # folding everything until nothing differed.
-    assert _line_endings(canonical.replace(b'\n', b'\r\n')) == canonical
-    assert _line_endings(committed.replace(b'"mcp-exec"', b'"mcp-exec "')) \
+    assert line_endings(canonical.replace(b'\n', b'\r\n')) == canonical
+    assert line_endings(committed.replace(b'"mcp-exec"', b'"mcp-exec "')) \
         != canonical
 
 
 def test_the_artefact_names_exactly_the_journeys_that_exist(tmp):
     del tmp
-    policy = _policy()
+    policy = _journey_contract.policy()
     document = policy.load(ARTIFACT)
-    names = _journeys().NAMES
+    names = journeys().NAMES
     assert sorted(document['journeys']) == sorted(names), (
         'the budget and the journey set disagree: '
         f'{sorted(document["journeys"])} against {sorted(names)}')
@@ -123,7 +74,7 @@ def test_the_artefact_names_exactly_the_journeys_that_exist(tmp):
 
 def test_the_artefact_is_its_own_file_and_a_tracked_one(tmp):
     del tmp
-    policy = _policy()
+    policy = _journey_contract.policy()
     assert policy.ARTIFACT == ARTIFACT, policy.ARTIFACT
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '--error-unmatch',
@@ -149,8 +100,8 @@ def test_the_artefact_records_the_threads_each_journey_excludes(tmp):
     for the field to say something the measurement did not do.
     """
     del tmp
-    policy = _policy()
-    document = _budget_document()
+    policy = _journey_contract.policy()
+    document = budget_document()
     good = {'command-round-trip': ['front-end-import', 'uvicorn-serve'],
             'dashboard-fanout': ['front-end-import', 'uvicorn-serve'],
             'mcp-exec': ['front-end-import']}
@@ -160,7 +111,7 @@ def test_the_artefact_records_the_threads_each_journey_excludes(tmp):
                 {'mcp-exec': ['no-such-thread']},
                 {'mcp-exec': ['front-end-import', 'front-end-import']},
                 {'no-such-journey': ['front-end-import']}):
-        document = _budget_document()
+        document = budget_document()
         document['excluded_threads'] = bad
         try:
             policy._validated(document)
@@ -177,7 +128,7 @@ def test_a_count_measured_over_different_threads_is_not_compared(tmp):
     rather than the code.
     """
     del tmp
-    policy = _policy()
+    policy = _journey_contract.policy()
     applied = {'command-round-trip': ['front-end-import', 'uvicorn-serve'],
                'dashboard-fanout': ['front-end-import', 'uvicorn-serve'],
                'mcp-exec': ['front-end-import']}
@@ -194,69 +145,9 @@ def test_a_count_measured_over_different_threads_is_not_compared(tmp):
     assert differs['mcp-exec'][0] == ['front-end-import']
 
 
-def test_a_thread_the_profile_does_not_have_is_a_refusal(tmp):
-    """A missing background thread is a failure, never a silent whole-tree sum.
-
-    The failure this guards is the one the whole change exists to end: a
-    profile the classifier could not read, summed as though every thread in
-    it counted, and reported as a number nobody can read back.
-    """
-    del tmp
-    threads = _threads()
-    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'}]
-    kept, excluded, failure = threads.total_for(rows, 'dashboard-fanout')
-    assert failure is not None and 'excludes' in failure, failure
-    assert kept is None, kept
-    assert excluded == ('front-end-import', 'uvicorn-serve'), excluded
-    rows.append({'pid': 1, 'thread': 3, 'ir': 90_000_000,
-                 'cmd': 'python3 server.py'})
-    kept, excluded, failure = threads.total_for(rows, 'dashboard-fanout')
-    assert failure is None, failure
-    # Only the main thread is left: the serve thread is one of the two this
-    # journey excludes, and the import is the other.
-    assert kept == 430_000_000, kept
-
-
-def test_a_thread_below_every_band_is_a_refusal_naming_it(tmp):
-    del tmp
-    threads = _threads()
-    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 3, 'ir': 90_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 4, 'ir': 400,
-             'cmd': 'python3 server.py'}]
-    kept, _excluded, failure = threads.total_for(rows, 'dashboard-fanout')
-    assert failure is not None, 'a profile this shape must not be summed'
-    assert '400' in failure and 'thread 4' in failure, failure
-    assert kept is None
-
-
-def test_two_threads_in_one_band_cannot_be_told_apart(tmp):
-    del tmp
-    threads = _threads()
-    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 3, 'ir': 90_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 4, 'ir': 95_000_000,
-             'cmd': 'python3 server.py'}]
-    kept, _excluded, failure = threads.total_for(rows, 'dashboard-fanout')
-    assert failure is not None, 'two threads in the serve band are ambiguous'
-    assert 'uvicorn-serve' in failure, failure
-    assert kept is None
-
-
 def test_the_artefact_schema_is_closed(tmp):
     del tmp
-    policy = _policy()
+    policy = _journey_contract.policy()
     # 'wall-clock' is a quantity the ratchet does not defend at all, and
     # 'syscalls' is one the counters module measures and never gates on. A
     # recorded count denominated in either would be a number nothing holds.
@@ -266,7 +157,7 @@ def test_the_artefact_schema_is_closed(tmp):
                  {'schema_version': 2},
                  {'journeys': {'command-round-trip': -5}},
                  {'journeys': {'command-round-trip': 'many'}}):
-        document = _budget_document()
+        document = budget_document()
         document.update(over)
         try:
             policy._validated(document)
@@ -282,21 +173,6 @@ IDENTITY = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
             'runner_image': 'ubuntu24 20260801.1.0'}
 
 
-def _measurements_file(path, document, **over):
-    """A measurements file whose report carries the document's identity."""
-    names = _journeys().NAMES
-    report = {'rounds': 1, 'python': sys.version, 'shas': {},
-              'toolchain': dict(over.get('toolchain', IDENTITY)),
-              'counters': {'perf-instructions': {
-                  'available': True, 'startup_only': 0,
-                  'journeys': {name: {'min': 5000, 'max': 5000,
-                                      'median': 5000, 'spread': 0,
-                                      'raw': 5000}
-                               for name in names}}}}
-    Path(path).write_text(json.dumps(report), encoding='utf-8')
-    return path
-
-
 def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
     """The identity is present, complete, and exactly the three things.
 
@@ -306,7 +182,7 @@ def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
     exactly what a count depends on and no code change controls.
     """
     del tmp
-    policy = _policy()
+    policy = _journey_contract.policy()
     document = policy.load(ARTIFACT)
     recorded = document['toolchain']
     assert sorted(recorded) == sorted(policy.journey_counters
@@ -328,7 +204,7 @@ def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
                  {'toolchain': {'python': 31315}},
                  {'toolchain': {'python': '', 'valgrind_version': 'v',
                                 'runner_image': 'i'}}):
-        bad = _budget_document()
+        bad = budget_document()
         bad.update(over)
         try:
             policy._validated(bad)
@@ -346,11 +222,11 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
     regression would be a false red with nothing to fix; passing it
     without saying so would be a green that measured nothing.
     """
-    policy = _policy()
+    policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(_budget_document(
+    artifact.write_bytes(policy.render(budget_document(
         toolchain=dict(IDENTITY))))
-    measurements = _measurements_file(
+    measurements = measurements_file(
         Path(tmp) / 'counts.json', None,
         toolchain=dict(IDENTITY, valgrind_version='valgrind-3.25.0'))
     # stdout, not stderr: this is a report, not a refusal. The two are
@@ -383,11 +259,11 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
 
 def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
     """The outcome is the toolchain's, and it does not swallow the gate."""
-    policy = _policy()
+    policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(_budget_document(
+    artifact.write_bytes(policy.render(budget_document(
         toolchain=dict(IDENTITY))))
-    measurements = _measurements_file(Path(tmp) / 'counts.json', None)
+    measurements = measurements_file(Path(tmp) / 'counts.json', None)
     spoken = io.StringIO()
     with contextlib.redirect_stderr(spoken):
         code = policy.main(['check', '--artifact', str(artifact),
@@ -416,11 +292,12 @@ def test_no_workflow_step_writes_the_artefact(tmp):
 
 # ─── which way a recorded number may move ──────────────────────────────────
 
+
 def test_tightened_follows_a_cheaper_journey_down(tmp):
     del tmp
-    policy = _policy()
-    names = _journeys().NAMES
-    document = _budget_document()
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document()
     counts = {name: 900 for name in names}
     assert policy.tightened(counts, document, names) == {
         name: 900 for name in names}
@@ -428,9 +305,9 @@ def test_tightened_follows_a_cheaper_journey_down(tmp):
 
 def test_tightening_never_raises_and_never_adds_a_journey(tmp):
     del tmp
-    policy = _policy()
-    names = _journeys().NAMES
-    document = _budget_document()
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document()
     assert policy.tightened(
         {name: 1000 for name in names}, document, names) is None
     assert policy.tightened(
@@ -442,9 +319,9 @@ def test_tightening_never_raises_and_never_adds_a_journey(tmp):
 
 def test_tightening_drops_a_journey_the_set_no_longer_has(tmp):
     del tmp
-    policy = _policy()
-    names = _journeys().NAMES
-    document = _budget_document()
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document()
     document['journeys']['a-journey-nobody-runs'] = 5000
     assert policy.tightened(
         {name: 1000 for name in names}, document, names) == {
@@ -452,10 +329,10 @@ def test_tightening_drops_a_journey_the_set_no_longer_has(tmp):
 
 
 def test_the_tighten_command_is_the_one_the_implementation_uses(tmp):
-    policy = _policy()
-    names = _journeys().NAMES
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    payload = json.dumps(_budget_document()).encode('utf-8')
+    payload = json.dumps(budget_document()).encode('utf-8')
     artifact.write_bytes(payload)
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
@@ -474,11 +351,12 @@ def test_the_tighten_command_is_the_one_the_implementation_uses(tmp):
 
 # ─── what a refusal says ───────────────────────────────────────────────────
 
+
 def test_a_count_over_budget_is_a_violation_carrying_its_remedy(tmp):
     del tmp
-    policy = _policy()
-    names = _journeys().NAMES
-    document = _budget_document()
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document()
     counts = {name: 1000 for name in names}
     shapes = {name: ['a' * 64] for name in names}
     assert not any(policy.violations(
@@ -493,9 +371,9 @@ def test_a_count_over_budget_is_a_violation_carrying_its_remedy(tmp):
 
 def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
     del tmp
-    policy = _policy()
-    names = _journeys().NAMES
-    document = _budget_document(journeys={
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document(journeys={
         names[0]: 1000, names[1]: None, names[2]: None})
     measured = {names[0]: 1000, names[1]: 10 ** 9, names[2]: 10 ** 9}
     found = policy.violations(measured,
@@ -515,9 +393,9 @@ def test_a_counter_this_runner_refuses_is_a_violation_not_a_pass(tmp):
     report a pass on a journey it never ran.
     """
     del tmp
-    policy = _policy()
-    names = _journeys().NAMES
-    document = _budget_document()
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document()
     shapes = {name: ['a' * 64] for name in names}
     assert not any(policy.violations(
         {name: 1 for name in names}, shapes, document, names).values())
@@ -532,9 +410,9 @@ def test_a_counter_this_runner_refuses_is_a_violation_not_a_pass(tmp):
 
 def test_a_sha_mismatch_is_a_violation_naming_both_shas(tmp):
     del tmp
-    policy = _policy()
-    names = _journeys().NAMES
-    document = _budget_document()
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document()
     first, second = 'a' * 64, 'b' * 64
     shapes = {name: [first] for name in names}
     shapes[names[0]] = [first, second]
@@ -548,10 +426,10 @@ def test_a_sha_mismatch_is_a_violation_naming_both_shas(tmp):
 
 
 def test_the_check_command_refuses_with_the_remedy_it_promises(tmp):
-    policy = _policy()
-    names = _journeys().NAMES
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(_budget_document()))
+    artifact.write_bytes(policy.render(budget_document()))
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
         'rounds': 1, 'python': sys.version, 'shas': {},
@@ -574,10 +452,10 @@ def test_the_check_command_refuses_with_the_remedy_it_promises(tmp):
 
 
 def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
-    policy = _policy()
-    names = _journeys().NAMES
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(_budget_document()))
+    artifact.write_bytes(policy.render(budget_document()))
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
         'rounds': 1, 'python': sys.version, 'shas': {},
@@ -598,8 +476,9 @@ def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
 
 # ─── the shape the sha is taken over ───────────────────────────────────────
 
+
 def test_a_rendered_journey_carries_no_per_run_field(tmp):
-    journeys = _journeys()
+    journeys = _journey_contract.journeys()
     rendering = journeys.rendering_of('command-round-trip')
     keys = set(rendering) | set(rendering['frame']) | set(rendering['result'])
     leaked = sorted(keys & set(PER_RUN))
@@ -609,6 +488,72 @@ def test_a_rendered_journey_carries_no_per_run_field(tmp):
     assert rendering['frame']['id'] == journeys.COMMAND_ID, rendering
     assert rendering['result']['result'] == journeys.COMMAND_RESULT, (
         rendering)
+
+
+def test_a_recorded_exclusion_survives_a_render_and_reload(tmp):
+    """The block is written, read back and compared against itself, so a
+    recorded set of threads cannot drift from what render() emits."""
+    policy = _journey_contract.policy()
+    document = budget_document()
+    document['excluded_threads'] = {
+        'command-round-trip': ['front-end-import', 'uvicorn-serve'],
+        'dashboard-fanout': ['front-end-import', 'uvicorn-serve'],
+        'mcp-exec': ['front-end-import']}
+    rendered = policy.render(document)
+    target = Path(tmp) / 'journey-budget.json'
+    target.write_bytes(rendered)
+    assert policy.render(policy.load(target)) == rendered
+    assert b'"excluded_threads"' in rendered
+    # Absent stays absent, so an artefact recorded before the field existed
+    # is still its own canonical rendering.
+    assert b'"excluded_threads"' not in policy.render(budget_document())
+
+
+def test_an_artefact_that_cannot_be_read_says_which_way_it_failed(tmp):
+    """Three failures with three sentences, because a reader has to know
+    whether the file is missing, malformed or the wrong shape."""
+    policy = _journey_contract.policy()
+    for path, fragment in (
+            (Path(tmp) / 'absent.json', 'cannot read'),
+            (Path(tmp) / 'broken.json', 'invalid journey budget JSON')):
+        if fragment.startswith('invalid'):
+            path.write_text('{not json', encoding='utf-8')
+        try:
+            policy.load(path)
+        except ValueError as error:
+            assert fragment in str(error), error
+            continue
+        raise AssertionError(f'load accepted {path.name}')
+
+    def over(field, value):
+        document = budget_document()
+        document[field] = value
+        return document
+
+    name = journeys().NAMES[0]
+    for document, fragment in (
+            ('not an object', 'must be an object'),
+            (over('toolchain', []), 'toolchain must be an object'),
+            (over('toolchain', {'': 'x'}), 'unknown toolchain field'),
+            (over('toolchain', {'python': '  '}), 'non-empty string or null'),
+            (over('excluded_threads', 'none'),
+             'excluded_threads must be an object'),
+            (over('excluded_threads', {'no-such-journey':
+                                       ['front-end-import']}),
+             'names a journey with no count'),
+            (over('excluded_threads', {name: 'front-end-import'}),
+             'excluded_threads names no thread'),
+            (over('excluded_threads', {name: ['front-end-import',
+                                              'front-end-import']}),
+             'repeats a role'),
+            (over('excluded_threads', {name: ['no-such-role']}),
+             'unknown excluded thread role')):
+        try:
+            policy._validated(document)
+        except ValueError as error:
+            assert fragment in str(error), (fragment, error)
+            continue
+        raise AssertionError(f'the schema accepted {document!r}')
 
 
 def main():
