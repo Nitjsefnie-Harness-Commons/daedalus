@@ -10,7 +10,7 @@ def register(mcp, bridge):
     async def screenshot(cmd_id: str = '_ss', chrome_tab: int | None = None,
                          format: str = 'png', quality: int | None = None,
                          include_image: bool = False, timeout: float = 15.0,
-                         wait: bool = True) -> dict | list:
+                         wait: bool = True):
         """Capture a screenshot via extension.
 
     Default: returns {path, size}, relative to the token's upload directory.
@@ -19,6 +19,11 @@ def register(mcp, bridge):
     so the caller can Read it directly without another round-trip.
     `wait=False` returns the command the bridge enqueued, and takes no
     capture to describe.
+
+    Deliberately UNANNOTATED: a return annotation makes FastMCP publish an
+    output schema and run the answer through `dump_python(..., mode='json')`,
+    and an MCP Image has no JSON form, so `include_image=True` would raise
+    `UnexpectedToolError` for every caller.
     """
         fields: dict = {}
         if format:
