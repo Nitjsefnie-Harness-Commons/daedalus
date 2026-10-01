@@ -27,6 +27,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,6 +68,11 @@ _STRACE_TOTAL = re.compile(r'^\s*\S+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+total\s*$',
                            re.M)
 
 MARKER = '##JOURNEY## '
+
+# What a recorded count depends on that no change to this repository
+# controls. A count is only comparable against a measurement taken on the
+# same three, so they are recorded beside the counts rather than assumed.
+TOOLCHAIN_FIELDS = ('python', 'valgrind_version', 'runner_image')
 
 
 def journey_names():
@@ -181,6 +187,32 @@ def facts():
         found['strace_usable'] = False
     found['selected'] = _selected(found)
     return found
+
+
+def _runner_image():
+    """The runner image as one readable string, or None off a runner.
+
+    GitHub sets `ImageOS` and `ImageVersion` in every step's environment.
+    Off a runner neither is set, and a recorded identity naming one
+    developer's machine is an identity no CI run could reproduce.
+    """
+    named = [part for part in (os.environ.get('ImageOS'),
+                               os.environ.get('ImageVersion')) if part]
+    return ' '.join(named) or None
+
+
+def toolchain(found):
+    """The identity of the toolchain this run's counts were taken on.
+
+    Callgrind's `Ir` is deterministic only for a fixed binary: the counts
+    move when the runner image changes CPython's patch build, or libc, or
+    valgrind itself, with no change to this repository. That is why the
+    full interpreter line is recorded rather than `3.13` — the patch build
+    and the compiler are exactly what move.
+    """
+    return {'python': found['python'].splitlines()[0],
+            'valgrind_version': found['valgrind_version'],
+            'runner_image': _runner_image()}
 
 
 def _selected(found):
@@ -326,6 +358,7 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
     names = journey_names()
     shas, failure = shapes(names, root, rounds)
     report = {'rounds': rounds, 'python': sys.version, 'shas': shas or {},
+              'toolchain': toolchain(found),
               'selected_counter': _selected(found),
               'shape_failure': failure, 'counters': {}}
     if failure is not None:
@@ -344,11 +377,15 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
             # per journey would buy nothing.
             startup, why = run(STARTUP_NAME, root, workdir)
             rows = {}
+            seconds = {}
             if why is None:
                 for name in names:
                     counted = []
                     for _round in range(rounds):
+                        started = time.monotonic()
                         value, why = run(name, root, workdir)
+                        seconds[name] = seconds.get(name, 0.0) + (
+                            time.monotonic() - started)
                         if why is not None:
                             break
                         counted.append(value)
@@ -364,18 +401,23 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 'gated': counter in GATE_CANDIDATES,
                 'startup_only': startup if childed else None,
                 'journeys': {
-                    name: _row(rows[name], startup if childed else 0)
+                    name: _row(rows[name], startup if childed else 0,
+                               round(seconds.get(name, 0.0), 1))
                     for name in names}}
     return report
 
 
-def _row(raw_values, startup):
+def _row(raw_values, startup, seconds=None):
     """One journey's row: the raw total, the startup-net one, the spread.
 
     Both numbers are reported because only one of them is the budget: a
     journey's own total carries the interpreter start and the imports the
     startup-only child already accounts for, and a ratchet on that number
     would go red on a dependency bump rather than on a change to the work.
+
+    `seconds` is accounting, never a gate. It is read off this run's own
+    clock so the cost of the measurement is a measured number rather than
+    anyone's recollection of it.
     """
     net = [value - startup for value in raw_values]
     return {'raw': raw_values,
@@ -383,7 +425,8 @@ def _row(raw_values, startup):
             'min': min(net) if net else None,
             'max': max(net) if net else None,
             'median': statistics.median(net) if net else None,
-            'spread': max(net) - min(net) if net else None}
+            'spread': max(net) - min(net) if net else None,
+            'seconds': seconds}
 
 
 def counts_of(report, counter):
@@ -391,34 +434,6 @@ def counts_of(report, counter):
     entry = report['counters'].get(counter) or {}
     journeys = entry.get('journeys') or {}
     return {name: row.get('median') for name, row in journeys.items()}
-
-
-def summary_lines(report):
-    """The measurement table, as markdown for a step summary."""
-    lines = ['### Journey counts', '',
-             f"Counter selected here: `{report.get('selected_counter')}`.",
-             '',
-             '| counter | gated | journey | min | median | max | spread '
-             '| sha |', '|---|---|---|---|---|---|---|---|']
-    shas = report.get('shas') or {}
-    for counter in COUNTERS:
-        entry = report['counters'].get(counter) or {}
-        if not entry.get('available'):
-            lines.append(f"| {counter} | — | — | — | — | — | — | not "
-                         f"usable here: {entry.get('why')} |")
-            continue
-        gated = 'yes' if entry.get('gated') else 'no'
-        for name in journey_names():
-            row = (entry.get('journeys') or {}).get(name)
-            if row is None:
-                continue
-            seen = sorted(set(shas.get(name) or ()))
-            sha = seen[0][:12] if len(seen) == 1 else 'MISMATCH'
-            lines.append(
-                f"| {counter} | {gated} | {name} | {row['min']} | "
-                f"{row['median']} | {row['max']} | {row['spread']} | "
-                f"{sha} |")
-    return lines
 
 
 def write_summary(lines):

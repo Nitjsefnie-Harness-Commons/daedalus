@@ -1322,9 +1322,15 @@ jobs:
       # here: a runner where the install silently failed must still report
       # what it found, not what this step intended.
       - name: Install valgrind, which supplies the instruction counter
+        env:
+          COST: ${{ runner.temp }}/journey-seconds.json
         run: |
+          start=$SECONDS
           sudo apt-get update
           sudo apt-get install -y valgrind
+          kib=$(dpkg-query -Wf '${Installed-Size}' valgrind)
+          printf '{"install": %s, "installed_kib": %s}\n' \
+            "$((SECONDS - start))" "$kib" >> "$COST"
 
       # What this runner actually allows, decided by measurement, and asked
       # AFTER the install above so the answer is about this runner as it will
@@ -1339,21 +1345,31 @@ jobs:
       # is one: these counts are deterministic, so a discarded warm-up round
       # buys nothing. More than one round is for deriving the tolerance from
       # a spread, once.
+      # `--summary` prints the measurement and the block a re-baseline is
+      # pasted from, so what lands in a reviewed commit is this run's own
+      # numbers rather than a reader's transcription of them.
       - name: Measure the journeys
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           COUNTS: ${{ runner.temp }}/journey-counts.json
+          COST: ${{ runner.temp }}/journey-seconds.json
         run: |
+          start=$SECONDS
           python3 scripts/ci/journey_budget.py measure --root . \
-            --rounds "${JOURNEY_ROUNDS:-1}" --out "$COUNTS"
+            --rounds "${JOURNEY_ROUNDS:-1}" --out "$COUNTS" --summary
+          printf '{"measure": %s}\n' "$((SECONDS - start))" >> "$COST"
 
+      # The cost is printed whatever the verdict, so a reader of the run
+      # sees what the measurement cost on the runner that produced it. No
+      # step here writes the artefact: a re-baseline is a reviewed commit.
       - name: Check the journeys against the budget
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           COUNTS: ${{ runner.temp }}/journey-counts.json
+          COST: ${{ runner.temp }}/journey-seconds.json
         run: |
           python3 scripts/ci/journey_budget.py check --root . \
-            --measurements "$COUNTS" --summary
+            --measurements "$COUNTS" --seconds "$COST" --summary
 
   aggregate:
     name: Aggregate workflow checks

@@ -245,6 +245,7 @@
 !/scripts/ci/install_lint_tools.py
 !/scripts/ci/journey_budget.py
 !/scripts/ci/journey_counters.py
+!/scripts/ci/journey_report.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
 !/scripts/ci/js_module_coverage.py
