@@ -7,9 +7,9 @@ optional s/m/h/d suffix), a bare ``wait``, or ``timeout <duration>
 sleep <duration>`` — behind blank lines, comments, trailing comments and
 set-option preambles. Issue 461 closed the waiting-job shape; this pin keeps
 it closed by test. The polling half (waiting on check runs instead of the
-``needs:`` dependency) is pinned by the check-runs ban in
-test_the_speed_gate_depends_on_the_exact_aggregate_job. Out of scope, by
-design: poll loops, unrecognized commands, and jobs with no ``run:`` steps.
+``needs:`` dependency) is out of scope here and held by the aggregate
+gate's own coverage control. Out of scope, by design: poll loops,
+unrecognized commands, and jobs with no ``run:`` steps.
 """
 import re
 import sys
