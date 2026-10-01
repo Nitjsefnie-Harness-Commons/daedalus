@@ -317,10 +317,10 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     CodeQL's untrusted-checkout query (code-scanning alert #82) reads an
     actions/checkout step as pulling a pull request's untrusted head when
     its `ref:` comes from a `steps.*` output whose name contains `head`,
-    `branch`, `ref`, `sha` or `commit`. The speed measurement's baseline
-    checkout pulls the pull request's merge base or a release tag — trusted
-    code — so the output carrying it is named `point`; naming it `ref` was
-    what drew the alert. This pins the name class, so a rename back goes red
+    `branch`, `ref`, `sha` or `commit`. A checkout that pulls the pull
+    request's merge base or a release tag is fetching trusted code, so the
+    output carrying that ref is named `point`; naming it `ref` was what
+    drew the alert. This pins the name class, so a rename back goes red
     here rather than in the next default-branch analysis.
 
     The pin is a conservative superset of the analyser heuristic's checked

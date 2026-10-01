@@ -18,7 +18,7 @@ matrix finishing over a couple of minutes is one thing happening, not nine,
 and Monitor turns each line into its own interruption. The window opens on
 the first held conclusion and closes a minute later - a batching window,
 not a true debounce, which would restart on every arrival and hold a steady
-trickle indefinitely. `coverage`, `diff-coverage` and `speed` skip the window
+trickle indefinitely. `coverage` and `diff-coverage` skip the window
 entirely: the slow jobs everything waits on arrive alone rather than in a
 burst, so batching them only delays the line that says the wait is over, and
 the blind-watcher escalation is immediate for the same reason.
@@ -77,8 +77,7 @@ CI_QUERY = f'''query WatchChecks($owner: String!, $name: String!,
 
 def is_immediate(name):
     """Whether this check bypasses the batching window."""
-    lowered = (name or '').lower()
-    return lowered == 'speed' or 'coverage' in lowered
+    return 'coverage' in (name or '').lower()
 
 
 def head_and_checks(repo, branch, seen=None):
@@ -139,7 +138,7 @@ def main():
     parser.add_argument('--interval', type=int, default=DEFAULT_INTERVAL)
     parser.add_argument('--debounce', type=int, default=DEBOUNCE_SECONDS,
                         help='seconds to batch conclusions before emitting; '
-                             'coverage and speed always emit at once')
+                             'coverage always emits at once')
     parser.add_argument('--once', action='store_true',
                         help='one trial cycle to stderr, then exit')
     args = parser.parse_args()

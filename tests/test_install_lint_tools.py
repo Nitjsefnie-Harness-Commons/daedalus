@@ -645,7 +645,7 @@ def test_a_wheel_that_carries_the_wrong_binary_is_refused(tmp):
 def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
     """The whole point, on a PATH that has neither binary on it.
 
-        `timed` used to pass because the ubuntu-latest image carries a
+        One job used to pass because the ubuntu-latest image carries a
         shellcheck at a version no pin names, and "does it resolve" cannot
         tell that from an install. This runs the real entry point and then
         looks at WHERE the binary it found lives."""

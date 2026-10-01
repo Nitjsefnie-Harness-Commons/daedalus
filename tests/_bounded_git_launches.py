@@ -352,13 +352,6 @@ BOUNDED_GIT_LAUNCHES = {
      'path_failure()', 4):
          'the refusing receiver closing the pair, so the two halves are'
          'read beside each other rather than alone',
-    ('tests/test_commit_step_seam.py', '_raised_or_gave', 'callable_()', 1):
-         'the seam\'s reporter: it runs the one callable a pin handed'
-         ' it, the mode measurement or a commit replay or a raise, and'
-         ' gives back the value or the exception so a pin can read what'
-         ' the call did without a bare raise escaping; all three are'
-         ' written in this file or in the suite calling it, and'
-         ' `_util.runner` holds the suite\'s own deadline above them',
     ('tests/test_dashboard_gate.py',
      'test_gate_is_released_by_the_os_when_the_holder_is_killed',
      'holder.wait(timeout)', 1):
@@ -458,11 +451,6 @@ BOUNDED_GIT_LAUNCHES = {
      'future.result(timeout)', 1):
          'a future this test\'s own thread pool submitted; the 10s bounds'
          'the assertion, and the suite bounds the process above it',
-    ('tests/test_speed_gate.py',
-     'test_a_malformed_payload_sha_fails_before_any_api_call',
-     '_find_baseline(EVENT)', 1):
-         'the speed gate\'s baseline step against a stubbed `gh`; the'
-         'environment mapping is the test\'s, and the stub records calls',
     ('tests/test_suite_runner.py',
      'test_output_close_failure_reaps_the_spawned_suite',
      'spawned[0].wait(timeout)', 1):

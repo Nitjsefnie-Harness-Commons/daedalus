@@ -33,11 +33,10 @@ ROOT = Path(__file__).resolve().parents[2]
 JOURNEYS = ROOT / 'tests' / '_journeys.py'
 
 # One round, not three. These counts are deterministic — the same tree
-# executes the same instructions — and the paired statistic over a discarded
-# warm-up round that the suite-timing path uses buys nothing here, which is
-# why `speed` measured a wall clock and this does not. A run-to-run spread is
-# still reported: `--rounds 3` measures it, and the tolerance is derived from
-# that spread once, by hand.
+# executes the same instructions — so a paired statistic over a discarded
+# warm-up round buys nothing here. A run-to-run spread is still reported:
+# `--rounds 3` measures it, and the tolerance is derived from that spread
+# once, by hand.
 ROUNDS_DEFAULT = 1
 
 # Preference order, and the order the probe reports in. `instructions:u`
