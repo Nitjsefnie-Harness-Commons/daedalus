@@ -1041,6 +1041,57 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
         assert image.data == b'this-invocation', image.data
 
 
+def test_an_image_returning_tool_reaches_the_caller_through_the_manager(tmp):
+    """The conversion boundary a return annotation crosses.
+
+    A tool with a return annotation gets an output schema, and the server
+    then runs its answer through `dump_python(..., mode='json')`. `Image` has
+    no JSON form, so annotating an image-returning tool's return turns every
+    such call into `UnexpectedToolError` — while the bare function the rest of
+    this file drives still returns `[meta, Image]` and reads green. Only the
+    manager's own path is the one an MCP client takes.
+    """
+    _need_deps()
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        mod = _load_mcp(base)
+        mod._token.set(TOK)
+        qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+        failure = []
+
+        def extension_simulator():
+            try:
+                command = queued_command(qdir, 'the screenshot command')
+                payload = b'this-invocation'
+                status, body = _util.post_json(base + '/upload', {
+                    'token': TOK, 'id': '_ss', 'filename': 'shot.png',
+                    'data': base64.b64encode(payload).decode()})
+                if status != 200:
+                    failure.append(('upload', status, body))
+                status, body = _util.post_json(base + '/result', {
+                    'token': TOK, 'tabId': 'extension', 'id': command['id'],
+                    'result': {'path': f'{TOK}/_ss/shot.png',
+                               'size': len(payload)},
+                    'error': None, 'ts': 1, '_did': command['_did']})
+                if status != 200:
+                    failure.append((status, body))
+            except Exception as exc:  # test-thread diagnosis, surfaced below
+                failure.append(exc)
+
+        responder = threading.Thread(target=extension_simulator)
+        responder.start()
+        with _surface_responder_errors(responder, failure, 30):
+            answer = asyncio.run(mod.mcp.call_tool(
+                'screenshot', {'include_image': True, 'timeout': 25}))
+
+        schemas = {tool.name: tool.output_schema
+                   for tool in asyncio.run(mod.mcp.list_tools())}
+        # Unannotated is what keeps the schema off, and the schema is what
+        # puts the conversion in the caller's way.
+        assert schemas['screenshot'] is None, schemas['screenshot']
+        assert [item.type for item in answer.content] == ['text', 'image'], (
+            answer.content)
+
+
 def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):
     """Credentials are decided before the body is parsed, and it is capped.
 
