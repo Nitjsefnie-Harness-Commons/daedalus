@@ -116,9 +116,12 @@ def _validated(value):
     for field, seen in (toolchain or {}).items():
         if field not in journey_counters.TOOLCHAIN_FIELDS:
             raise ValueError(f'unknown toolchain field: {field}')
-        if seen is not None and not isinstance(seen, str):
-            raise ValueError(
-                f'a toolchain identity is a string or null: {field}')
+        # A blank identity compares unequal to every measured value, so a
+        # toolchain that moved on it would read as a match.
+        if seen is not None and (not isinstance(seen, str)
+                                 or not seen.strip()):
+            raise ValueError('a toolchain identity is a non-empty string or '
+                             f'null: {field}')
     journeys = value.get('journeys')
     if not isinstance(journeys, dict):
         raise ValueError('journeys must be an object')
