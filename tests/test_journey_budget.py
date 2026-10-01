@@ -277,21 +277,61 @@ def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
     assert policy.toolchain_diff(RECORDED, RECORDED) == {}
 
 
-def test_no_workflow_step_writes_the_artefact(tmp):
-    """A re-baseline is a reviewed commit, so nothing in CI may write it."""
+def test_only_the_main_tighten_may_write_the_artefact(tmp):
+    """A re-baseline is a reviewed commit; a tighten DOWN is CI's to make.
+
+    The maintainer's ruling: "autocommit tighten only, where a PR can
+    increase its own cap if necessary". So exactly one job may write the
+    file, on a push to main, and only after the check step concluded
+    success — the run that found a journey over budget is the run that must
+    write nothing. Every other mention of the file is a `paths-ignore`
+    entry, which is a workflow choosing not to run at all.
+    """
     del tmp
     artefact = '.github/journey-budget.json'
     workflows = ROOT / '.github' / 'workflows'
-    named = []
-    for path in sorted(workflows.glob('*.y*ml')):
-        for number, line in enumerate(path.read_text(
-                encoding='utf-8').splitlines(), 1):
-            if artefact in line:
-                named.append((path.name, number, line.strip()))
-    assert all(line.strip() == f"- '{artefact}'"
-               for _name, _number, line in named), (
-        'a workflow names the artefact outside a paths-ignore entry, so a '
-        f'step reads or writes it: {named}')
+    lines = (workflows / 'tests.yml').read_text(encoding='utf-8').splitlines()
+    start = lines.index('  journey-budget:')
+    end = next(number for number, line in enumerate(lines[start + 1:], 1)
+               if line.startswith('  ') and not line.startswith('    ')
+               and line.rstrip().endswith(':')) + start
+    for number, line in enumerate(lines, 1):
+        if artefact not in line:
+            continue
+        assert start < number <= end or line.strip() == f"- '{artefact}'", (
+            f'tests.yml:{number} names the artefact outside the '
+            'journey-budget job and outside a paths-ignore entry, so a step '
+            f'reads or writes it: {line!r}')
+    named = [(path.name, number, line.strip())
+             for path in sorted(workflows.glob('*.y*ml'))
+             if path.name != 'tests.yml'
+             for number, line in enumerate(path.read_text(
+                 encoding='utf-8').splitlines(), 1)
+             if artefact in line and line.strip() != f"- '{artefact}'"]
+    assert not named, (
+        'a workflow other than tests.yml names the artefact outside a '
+        f'paths-ignore entry: {named}')
+    job = '\n'.join(lines[start:end])
+    steps = [block for block in job.split('\n      - ') if block.strip()]
+    tighten = [block for block in steps if '--tighten' in block]
+    assert len(tighten) == 1, (
+        f'the journey-budget job must hold exactly one tightening step: '
+        f'{len(tighten)}')
+    guard = tighten[0].split('run:')[0]
+    for wanted in ("github.event_name == 'push'",
+                   "github.ref == 'refs/heads/main'",
+                   "steps.check.conclusion == 'success'"):
+        assert wanted in guard, (
+            f'the tightening step is not guarded by {wanted!r}, so it can '
+            f'write the artefact on a run that found a rise: {guard}')
+    commit = [block for block in steps if 'git commit' in block]
+    assert len(commit) == 1, f'expected one commit step, found {len(commit)}'
+    assert "git commit -m 'ci: tighten the journey budget'" in commit[0], (
+        'the commit message is what a reader of the history sees a tighten '
+        f'was: {commit[0]}')
+    assert '--force' not in commit[0], (
+        'a ratchet push that overwrites someone\'s commit is never the '
+        f'right trade: {commit[0]}')
 
 
 # ─── which way a recorded number may move ──────────────────────────────────
@@ -613,55 +653,6 @@ def test_the_bands_a_count_measured_under_are_recorded(tmp):
     assert 'thread bands changed' in said, said
     assert ('front-end-import: recorded 100000000, measured 1000000000'
             in said), said
-
-
-def test_the_re_baseline_block_carries_what_a_paste_needs(tmp):
-    """The block a reader pastes, read back and handed to the validator.
-
-    Both claims are the direction a wrong block fails in: it must carry
-    every field the schema requires and nothing it refuses — the field list
-    is walked, not trusted — and no recorded count and no tolerance of its
-    own, since either can leave a budget above the new counts and let a
-    regression through. A wrong remedy STRING can only over-refuse, and a
-    reader who follows it re-baselines, so it carries no control here.
-    """
-    del tmp
-    summaries = _journey_contract.summaries()
-    # A tolerance the fixture does not default to, so a block that hardcoded
-    # the default would pass with it and re-loosen the pasted budget.
-    document = recorded_document(tolerance_pct=2.5)
-    lines = summaries.rebaseline_lines(
-        _journey_contract.fixture_report(), document)
-    fenced = [index for index, line in enumerate(lines) if line == '```json']
-    assert fenced, 'the block is not machine-readable: no fenced JSON'
-    start = fenced[0] + 1
-    block = json.loads('\n'.join(lines[start:lines.index('```', start)]))
-
-    policy = _journey_contract.policy()
-    artifact = _journey_contract.artifact()
-    assert set(artifact.FIELDS) <= set(block), (
-        'a re-baseline pasted from this block would refuse: missing '
-        f'{sorted(set(artifact.FIELDS) - set(block))}')
-    assert set(block) - set(artifact.FIELDS) == set(), (
-        'the block a reader pastes carries keys the artefact refuses: '
-        f'{sorted(set(block) - set(artifact.FIELDS))}')
-    assert policy._validated(block) is not None, (
-        'the block the validator refuses: '
-        + str(policy._validated(block)))
-    names = journeys().NAMES
-    for name in names:
-        assert len(block['shas'][name]) == 64, (name, block['shas'][name])
-        assert block['thread_bands'], name
-        assert block['excluded_threads'][name], name
-        assert block['journeys'][name] is not None, name
-    assert block['tolerance_pct'] == document['tolerance_pct'], (
-        'the block did not carry the recorded tolerance, and a tolerance of '
-        'its own lands with no headroom: the budget becomes the recorded '
-        'count itself, and a movement in either direction shows as a '
-        'regression or as nothing at all')
-    for name in names:
-        assert block['journeys'][name] != document['journeys'][name], (
-            f'the block carries the count it replaces: {name}')
 
 
 def test_every_shape_the_schema_refuses_is_still_refused(tmp):

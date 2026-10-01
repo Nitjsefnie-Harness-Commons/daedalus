@@ -223,6 +223,21 @@ def render(document):
             '}\n').encode('utf-8')
 
 
+def budget_of(document, name):
+    """The count `name` may reach: its record plus the tolerance.
+
+    Lives here rather than beside the policy because the summary renders the
+    same number the gate compares against, and two copies of that
+    arithmetic would drift into a table disagreeing with the verdict above
+    it.
+    """
+    recorded = document['journeys'].get(name)
+    if recorded is None:
+        return None
+    tolerance = document.get('tolerance_pct') or 0.0
+    return recorded * (1 + tolerance / 100.0)
+
+
 def recorded_toolchain(document):
     """The recorded identity, or None while no field of it is recorded.
 
