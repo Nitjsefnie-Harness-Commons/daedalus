@@ -169,9 +169,10 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
             'import _command_candidates as _load_queue',
             '_load_queue = 1'), '_load_queue'),
         # An import binds the LOCAL name it brings in, so rebinding the
-        # pre-as name is clean — this is the live tests/_queueread.py and
-        # tests/_pyroute.py shape. The genuinely imported local name
-        # (_poll_queue_reads) rebound here must still be reported.
+        # pre-as name is clean — the shape is `from M import name as
+        # local`, where only `local` can shadow. The genuinely imported
+        # local name (_poll_queue_reads) rebound here must still be
+        # reported.
         ('test_alias_clean.py',
          alias + 'POLL_DELAY = _SHARED_POLL_DELAY\n', None),
         ('test_alias_rebind.py',
