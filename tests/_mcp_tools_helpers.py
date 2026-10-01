@@ -67,6 +67,7 @@ class BridgeProbe:
         self.get_bodies = {'/upload': []}
         self.http_bodies = {'/segment-job': (200, {'sig': self.marker})}
         self.ext_bodies = {}
+        self.put_bodies = {}
         self.poll_body = None
 
     def record(self, surface, **details):
@@ -125,6 +126,8 @@ class BridgeProbe:
 
     async def put(self, path, payload):
         self.record('put', path=path, payload=payload)
+        if path in self.put_bodies:
+            return self.put_bodies[path]
         return {'did': self.marker,
                 'command': {**payload, '_did': self.marker}}
 

@@ -508,12 +508,21 @@ def test_a_ping_that_does_not_wait_reports_its_command(_tmp):
     """
     composition = _load_composition(_mcp_tool_commands.MARKER)
     marker = _mcp_tool_commands.MARKER
+    # The bridge answers with the QUEUE FILE's content, which is the
+    # submitted body without the routing `tab` and with the bridge's own
+    # stamp. A tool that rebuilt the command from what it sent would have
+    # to invent both, so this answer is the one shape a reconstruction
+    # cannot produce.
+    composition.bridge.put_bodies['/command'] = {
+        'ok': True, 'did': 'stamp', 'command': {
+            'id': '_ping', 'code': 'document.title', '_did': 'stamp',
+            'queuedBy': 'bridge'}}
 
     answer = asyncio.run(composition.mcp.registered['ping'](wait=False))
 
-    assert answer == {
-        'command': {'id': '_ping', 'code': 'document.title',
-                    '_did': marker}}, answer
+    assert answer == {'command': {
+        'id': '_ping', 'code': 'document.title', '_did': 'stamp',
+        'queuedBy': 'bridge'}}, answer
     assert composition.bridge.calls == [
         _mcp_tool_commands._put('/command', {'id': '_ping',
                                              'code': 'document.title'})]
