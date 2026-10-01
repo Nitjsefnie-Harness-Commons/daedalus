@@ -21,6 +21,7 @@ import traceback
 import typing
 from pathlib import Path
 
+import _mcp_ready
 from _completion import run_to_completion
 # A re-export, not a use: the suites read the log-rendering contract table at
 # the `_util.log_safe_cases()` spelling, while the table is a `log_safe`
@@ -35,10 +36,6 @@ ROOT = Path(__file__).resolve().parents[1]
 # first bridge start pays its cold import costs alongside the other firsts.
 COLD_START_TIMEOUT = 60
 WARM_START_TIMEOUT = 20
-# The MCP front end's import is deliberately not part of readiness, and a
-# caller waiting for it waits for seconds natively and minutes under an
-# instruction counter, so the bound is its own and not the startup one.
-MCP_READY_TIMEOUT = 900
 DRAIN_JOIN_TIMEOUT = 1
 _bridge_started = False
 
@@ -402,63 +399,6 @@ def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
         time.sleep(0.05)
 
 
-MCP_BOUND = re.compile(r'\[MCP\] streamable-http on ')
-MCP_FAILED = re.compile(r'MCP bootstrap failed, so /mcp is not served'
-                        r'|\[MCP\] serve crashed')
-
-
-def mcp_state(lines):
-    """`up`, `down`, or None while the front end is still starting.
-
-    The bridge's own announcement is the signal, not a poll of `/health`.
-    `mcp_bootstrap.start` imports the front end on a daemon thread and holds
-    readiness for nothing, so the front end prints its bound line itself
-    (`daedalus_mcp/server.py`) and `mcp_bootstrap` prints the failure itself.
-    Reading those lines costs no request at all, where polling `/health` for
-    the same state would cost one connection — and one `ThreadingHTTPServer`
-    thread — per poll, which is a count that grows with however long the
-    import took. That is the wall-clock term this wait exists to remove, so it
-    must not carry one of its own.
-    """
-    for line in list(lines):
-        if MCP_BOUND.search(line):
-            return 'up'
-        if MCP_FAILED.search(line):
-            return 'down'
-    return None
-
-
-def await_mcp_ready(proc, drained, timeout=MCP_READY_TIMEOUT):
-    """Block until the MCP front end has settled, and return which way it went.
-
-    A caller counting the bridge's instructions needs this: the import is
-    billions of instructions and it runs beside the work being measured, so a
-    count taken across it carries whichever slice of the import happened to
-    run alongside. That slice is a function of how fast the machine was, not
-    of the tree, so it is variance no tolerance should be widened to cover.
-    """
-    started = time.time()
-    deadline = started + timeout
-    seen = 0
-    while True:
-        pending = drained[seen:]
-        seen += len(pending)
-        state = mcp_state(pending)
-        if state is not None:
-            return state
-        if proc.poll() is not None:
-            raise RuntimeError(
-                'bridge exited while its MCP front end was still starting: '
-                + _startup_observations(
-                    proc, drained, time.time() - started))
-        if time.time() > deadline:
-            raise RuntimeError(
-                f'bridge did not settle its MCP front end in {timeout}s: '
-                + _startup_observations(
-                    proc, drained, time.time() - started))
-        time.sleep(0.05)
-
-
 @contextlib.contextmanager
 def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
     """Run the real server.py against a throwaway docroot.
@@ -483,9 +423,8 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
     child dying is the only thing such a wait can give up on.
 
     `await_mcp` waits for the optional MCP front end to settle before
-    yielding. It is off by default because most suites are not measuring the
-    bridge and would pay the import on every one of their bridges; a caller
-    counting the bridge's work turns it on, and `await_mcp_ready` says why.
+    yielding. Off by default, because most suites are not measuring the
+    bridge; `_mcp_ready` says what the wait is for.
     """
     global _bridge_started
     import urllib.error
@@ -535,7 +474,8 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
                             time.time() - started)) from exc
                 time.sleep(0.05)
         if await_mcp:
-            await_mcp_ready(proc, drained)
+            _mcp_ready.await_mcp_ready(proc, drained,
+                                       _startup_observations)
         _bridge_started = True
         yield base, docroot
     finally:
