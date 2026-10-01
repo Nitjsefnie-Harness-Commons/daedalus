@@ -160,10 +160,15 @@ def facts():
     if found['valgrind_path']:
         _code, out, _err = _run([found['valgrind_path'], '--version'])
         found['valgrind_version'] = out.strip() or None
-        found['callgrind_control_usable'] = bool(
-            _code == 0 and out.strip())
     else:
         found['valgrind_version'] = None
+    if found['callgrind_control_path']:
+        code, out, err = _run(
+            [found['callgrind_control_path'], '--version'])
+        found['callgrind_control_version'] = (out + err).strip() or None
+        found['callgrind_control_usable'] = code == 0
+    else:
+        found['callgrind_control_version'] = None
         found['callgrind_control_usable'] = False
     if found['strace_path']:
         code, _out, _err = _run([found['strace_path'], '-c', '-f', '-o',
@@ -237,13 +242,16 @@ def shapes(names, root, rounds):
 def _callgrind_total(directory, prefix):
     """The `Ir` total over every process callgrind traced.
 
-    `--trace-children=yes` writes one file per traced process, and the work
-    this ratchet measures happens in a child, so the total is the sum over
-    the family rather than the parent's own line.
+    `--trace-children=yes` on its own is a trap: with a fixed
+    `--callgrind-out-file` every traced process is instrumented but only the
+    parent's file is written, so the bridge's work — the work this ratchet
+    exists to measure — silently goes missing and the total describes the
+    test client instead. The `%p` in the name below is what makes each
+    process write its own file; this sums the family.
     """
     total = 0
     seen = False
-    for path in sorted(Path(directory).glob(prefix + '*')):
+    for path in sorted(Path(directory).glob(prefix + '.*')):
         found = _CALLGRIND_TOTAL.findall(
             path.read_text(encoding='utf-8', errors='replace'))
         if not found:
@@ -254,7 +262,7 @@ def _callgrind_total(directory, prefix):
 
 
 def _callgrind(name, root, workdir):
-    prefix = str(Path(workdir) / f'callgrind.{name}')
+    prefix = str(Path(workdir) / f'callgrind.{name}.%p')
     argv = [shutil.which('valgrind'), '--tool=callgrind',
             '--trace-children=yes', f'--callgrind-out-file={prefix}'
             ] + child_argv(name, root)

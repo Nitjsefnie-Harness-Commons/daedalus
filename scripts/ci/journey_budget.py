@@ -218,6 +218,8 @@ def probe_lines(found):
               f"- valgrind --version: `{found['valgrind_version']}`",
               f"- callgrind_control on PATH: "
               f"`{found['callgrind_control_path']}`",
+              f"- callgrind_control --version: "
+              f"`{found['callgrind_control_version']}`",
               f"- callgrind_control usable: "
               f"`{found['callgrind_control_usable']}`",
               f"- strace on PATH: `{found['strace_path']}`",
