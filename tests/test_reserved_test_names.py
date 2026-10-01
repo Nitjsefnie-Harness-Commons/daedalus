@@ -135,12 +135,12 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     module remains a shared helper, the union therefore adds nothing
     HERE.
 
-    `len(residue_sites())` is 196, not 192, and both are worth knowing. The
-    residue tables are keyed `(path, name)`, and three modules declare a
-    reserved JavaScript name more than once, so the list carries four rows
-    the set does not: `tests/_gm_harness.py::makeStorage` twice,
-    `tests/test_gm_transfers.py::flushMessages` three times and
-    `tests/test_tab_routing_js_operations.py::run` twice. The equality is
+    `len(residue_sites())` is not that set's size, and both are worth
+    knowing. The
+    residue tables are keyed `(path, name)`, and two modules declare a
+    reserved JavaScript name more than once, so the list carries three rows
+    the set does not: `tests/_gm_harness.py::makeStorage` twice and
+    `tests/test_gm_transfers.py::flushMessages` three times. The equality is
     about the set, because that is what the tables key on; the count is
     about the list, because that is what a refusal prints.
 

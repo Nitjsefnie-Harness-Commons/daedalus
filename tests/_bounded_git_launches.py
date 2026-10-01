@@ -180,10 +180,6 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/_dashsection.py', '_run', 'scenario(answers, plan, setup)', 1):
          'the dashboard-section harness running one scenario body with the'
          'test\'s answers and plan; it renders, it does not launch',
-    ('tests/_launch_plants.py', '_plant_verdicts', 'plant()', 1):
-         'the Popen is inside a module TEMPLATE, a string that becomes'
-         ' real code only when a suite execs it, so the enclosing suite'
-         ' is the bound; the analyser reads the text and sees a launch',
     ('tests/_drain.py', 'kill_and_drain', 'process.communicate(timeout)', 1):
          'a drain of an already-killed process: it can only return',
     ('tests/_drain.py', 'kill_and_drain', 'process.wait(timeout)', 1):
@@ -191,10 +187,6 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/_gc_handshake.py', 'call', 'real_call()', 1):
          'the captured operation the generated wrapper reaches after its'
          'refusal check; the wrapper is a fixture for a filesystem call',
-    ('tests/_jsroute_sweep.py', 'render', 'r.tmpl.format(**fields).split()',
-     1):
-         'a grammar template rendered and split into lines; the mapping is'
-         'the point\'s fields and the result is source text',
     ('tests/_mcp_load.py', '_start_mcp_in_process', 'mod._bound.wait(timeout)',
      1):
          'a threading event the in-process server sets once it is'
