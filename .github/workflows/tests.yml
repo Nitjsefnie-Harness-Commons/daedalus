@@ -1332,6 +1332,8 @@ jobs:
       # AFTER the install above so the answer is about this runner as it will
       # measure. A counter it reports as unavailable is a counter the check
       # refuses to compare, not one it reads as "nothing over budget".
+      # `--summary` writes that block ONLY where no counter is usable, so a
+      # healthy runner prints an empty summary here by design.
       - name: Probe the counters
         env:
           PYTHONDONTWRITEBYTECODE: "1"

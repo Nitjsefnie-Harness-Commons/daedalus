@@ -70,13 +70,12 @@ def verdict_lines(document, counts, found):
              '| journey | count | budget | delta | verdict |',
              '|---|---|---|---|---|']
     for name in sorted(document['journeys']):
+        # Never None: the loop iterates this same mapping, so a name it
+        # yields is one `budget_of` can price.
         limit = journey_artifact.budget_of(document, name)
-        budget = f'{limit:.0f}' if limit is not None else '—'
+        budget = f'{limit:.0f}'
         measured = counts.get(name)
-        if limit is None:
-            verdict = 'not recorded yet'
-            measured = None
-        elif name in unmeasured:
+        if name in unmeasured:
             verdict = f'no count for `{unmeasured[name]}`'
             measured = None
         elif name in over:

@@ -76,13 +76,22 @@ sha_diff = journey_artifact.sha_diff
 # pylint: disable-next=protected-access
 _validated = journey_artifact._validated  # noqa: SLF001
 
+# The command, not a pointer at where it is printed: these remedies are read
+# on stderr, where a `check` run without `--summary` has printed nothing at
+# all. Named here in full, so the sentence is true wherever it is read.
+REBASELINE_COMMAND = (
+    '`python3 scripts/ci/journey_budget.py rebaseline --measurements '
+    '<counts.json>` writes the whole artefact from one measurement: the '
+    'counts, their shas, the toolchain, the threads excluded and the bands '
+    'applied all from that same run, with the recorded tolerance left where '
+    'you put it.')
 OVER_REMEDY = (
     'A journey over its budget is a regression in what a user waits for: '
     'the recorded count is never raised by hand, and no entry is ever added '
     'by hand. Find what the journey now does that it did not, and make it '
-    'not do it; if the journey genuinely costs more now, the one command in '
-    'the step summary writes this run\'s own measurement over the file, and '
-    'the commit it leaves is yours to review.')
+    'not do it; if the journey genuinely costs more now, the measurement '
+    'this run took is uploaded as the `journey-counts` artifact and '
+    + REBASELINE_COMMAND + ' The commit it leaves is yours to review.')
 SHAPE_REMEDY = (
     'Rounds of one measurement disagreed about what the journey looks like, '
     'so their counts are not comparable and none of them is a baseline. The '
@@ -95,11 +104,6 @@ UNMEASURED_REMEDY = (
     'nothing. The probe step says what this runner allows: `instructions:u` '
     'needs less kernel access than an unqualified event, and callgrind is '
     'the fallback when perf is refused.')
-REBASELINE_COMMAND = (
-    '`journey_budget.py rebaseline --measurements <file>`, which writes the '
-    'whole artefact from one measurement: the counts, their shas, the '
-    'toolchain, the threads excluded and the bands applied all from that '
-    'same run, with the recorded tolerance left where you put it.')
 TOOLCHAIN_REMEDY = (
     'A recorded count is only comparable against a measurement taken on the '
     'toolchain it was recorded on. Re-baseline from a measured run: '
@@ -333,14 +337,20 @@ def main(argv=None):
                       'recording it', file=sys.stderr)
                 print(OVER_REMEDY, file=sys.stderr)
                 return 1
+            recorded = document['journeys']
             updated = tightened(counts, document, names)
             if updated is None:
                 print('no journey measured below its recorded count')
                 return 0
+            # Counted against the mapping as it was, before the rebind on the
+            # next line: `document['journeys']` IS `updated` from there on,
+            # so comparing the two afterwards compares a mapping with itself
+            # and reports nothing lowered however much was.
+            dropped = sum(1 for name, value in updated.items()
+                          if recorded.get(name) is not None
+                          and value < recorded[name])
             document['journeys'] = updated
             Path(args.artifact).write_bytes(render(document))
-            dropped = sum(1 for name, value in updated.items()
-                          if value < document['journeys'][name])
             print('tightened the journey budget')
             journey_counters.write_summary([
                 f'This run tightened the journey budget on {dropped} '
