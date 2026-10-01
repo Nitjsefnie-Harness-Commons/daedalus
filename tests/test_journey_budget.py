@@ -73,18 +73,23 @@ def test_the_artefact_names_exactly_the_journeys_that_exist(tmp):
         'the budget and the journey set disagree: '
         f'{sorted(document["journeys"])} against {sorted(names)}')
     assert policy.stale(document, names) == []
-    # A baseline exists, so a journey left unrecorded is a journey the gate
-    # silently never compares — the `unmeasured` false green, reached by
-    # omission rather than by a runner that could not count.
-    assert policy.unrecorded(document, names) == [], (
-        'a baseline is recorded and these journeys carry no count in it, so '
-        f'the gate never compares them: {policy.unrecorded(document, names)}')
-    unmeasured = [name for name in names
-                  if not isinstance(document['journeys'][name], int)
-                  or isinstance(document['journeys'][name], bool)
-                  or document['journeys'][name] <= 0]
-    assert not unmeasured, (
-        f'a recorded count is not a positive integer: {unmeasured}')
+    # The budget is recorded whole or not at all. A journey left carrying
+    # no count beside others that carry one is the `unmeasured` false green
+    # reached by omission rather than by a runner that could not count: the
+    # gate compares the recorded ones and says nothing about the rest.
+    missing = policy.unrecorded(document, names)
+    if missing:
+        assert len(missing) == len(names), (
+            f'the budget is half recorded — {len(names) - len(missing)} of '
+            f'{len(names)} journeys carry a count and these carry none, so '
+            f'the gate never compares them: {missing}')
+    else:
+        unmeasured = [name for name in names
+                      if not isinstance(document['journeys'][name], int)
+                      or isinstance(document['journeys'][name], bool)
+                      or document['journeys'][name] <= 0]
+        assert not unmeasured, (
+            f'a recorded count is not a positive integer: {unmeasured}')
 
 
 def test_the_artefact_is_its_own_file_and_a_tracked_one(tmp):
@@ -162,10 +167,19 @@ def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
     recorded = document['toolchain']
     assert sorted(recorded) == sorted(policy.journey_counters
                                       .TOOLCHAIN_FIELDS), recorded
-    for field, seen in sorted(recorded.items()):
-        assert isinstance(seen, str) and seen.strip(), (
-            f'the recorded {field} is not a non-empty string, so a toolchain '
-            f'that moved on it would read as a match: {seen!r}')
+    present = {field: seen for field, seen in recorded.items() if seen}
+    if present:
+        # Recorded whole or not at all: a field left null beside fields
+        # that are recorded compares unequal to every measured value, so a
+        # toolchain that moved on it would read as a match.
+        assert sorted(present) == sorted(recorded), (
+            'the identity is half recorded, and a null field beside recorded '
+            'ones reads as a match on every value: '
+            f'{sorted(set(recorded) - set(present))}')
+        for field, seen in sorted(present.items()):
+            assert isinstance(seen, str) and seen.strip(), (
+                f'the recorded {field} is not a non-empty string, so a '
+                f'toolchain that moved on it would read as a match: {seen!r}')
     for over in ({'toolchain': []}, {'toolchain': {'cpython': '3.13'}},
                  {'toolchain': {'python': 31315}},
                  {'toolchain': {'python': '', 'valgrind_version': 'v',
