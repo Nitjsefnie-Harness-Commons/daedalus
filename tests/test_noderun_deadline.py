@@ -52,7 +52,7 @@ OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 # 90s at the GM one, about a tenth each of the 900s `run_tests.py` allows a
 # suite — on every leg of the twelve-cell matrix
 # (`scripts/ci/classify_changes.py`'s `FULL_MATRIX`, four of them
-# `windows-latest`) and on the `speed` suite.
+# `windows-latest`).
 # Each child writes a line and then holds the event loop open forever, so
 # the deadline's one job is to clear node's own startup. The figures are
 # arithmetic and the AST control pins the chain; the FIRING does not depend

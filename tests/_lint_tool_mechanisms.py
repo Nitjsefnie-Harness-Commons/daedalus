@@ -34,9 +34,9 @@ ROOT = _util.ROOT
 #
 # The path, NOT the command that runs it. A job's install step is correct
 # because it runs the installer, and `suites`, `coverage-matrix` and
-# `publish` reach the installer through a root checkout while `timed` checks
-# its two trees out into subdirectories and reaches it as
-# `head/scripts/ci/install_lint_tools.py`. A constant holding the whole
+# `publish` reach it through a root checkout. A job that checks its trees
+# out into subdirectories reaches the same file as
+# `head/scripts/ci/install_lint_tools.py`, and a constant holding the whole
 # invocation pinned that second spelling, so the correct path turned the
 # control red with a message arguing for the revert — this branch's own
 # lesson arriving for the third time, after the tool set and the door set.
@@ -54,9 +54,9 @@ ROOT = _util.ROOT
 #   own directory layout is not a step that runs the installer, and this
 #   substring is green on it. That error runs the OTHER way — toward a
 #   green control over a broken job — and it is not hypothetical: this
-#   branch shipped exactly that, when `timed` named a root-relative script
-#   in a job that checks its trees out into subdirectories, and the
-#   control stayed green through two review rounds on the strength of this
+#   branch shipped exactly that, when a job named a root-relative script
+#   and checked its trees out into subdirectories, and the control stayed
+#   green through two review rounds on the strength of this
 #   assertion. N1 fixed the instance; nothing in the tree catches the
 #   class, and no spelling of this assertion can, because the information
 #   that is missing is whether the file exists from where the step runs.

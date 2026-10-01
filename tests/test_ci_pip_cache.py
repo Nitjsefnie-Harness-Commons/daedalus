@@ -45,9 +45,8 @@ def _named_step_index(steps, name):
 def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
     """`cache: pip` saves in a post-job step that runs after untrusted code.
 
-    That post step is the cache-poisoning shape issue #166 took out of the
-    speed cells: a pull_request run would write what a later main run
-    restores.
+    That post step is the cache-poisoning shape issue #166 recorded: a
+    pull_request run would write what a later main run restores.
     """
     del tmp
     workflow = _tests_yml()

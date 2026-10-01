@@ -22,7 +22,7 @@ neutral, cancelled) is held past the debounce window too: a filling matrix
 goes quiet between cells and every partial tally is superseded by the next.
 Such a batch is released when something worth reading arrives - which makes
 it no longer quiet, so the ordinary debounce applies - or when every workflow
-run on that head has concluded, `speed` included. The runs are read in one
+run on that head has concluded. The runs are read in one
 query through the commit's check suites - `repository.object(oid: <sha>)`
 and the workflow run each suite belongs to - never through the check-runs
 list: that list is appended to while a matrix fills, so "every check run has
