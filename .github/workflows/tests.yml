@@ -1286,10 +1286,11 @@ jobs:
     env:
       # How many rounds the measurement takes. One is the steady state:
       # these counts are deterministic, so a discarded warm-up round buys
-      # nothing. Raise it only to derive a tolerance from a spread, once —
-      # that is what the three rounds on the first measured run were for,
-      # and it is not what every run should pay for.
-      JOURNEY_ROUNDS: "1"
+      # nothing. A higher value exists to derive a tolerance from a spread,
+      # once, and is not what every run should pay for — it is three here so
+      # this run measures a spread to record a tolerance from, and it goes
+      # back to one as soon as that recording is made.
+      JOURNEY_ROUNDS: "3"
 
     steps:
       # actions/checkout v7.0.1
