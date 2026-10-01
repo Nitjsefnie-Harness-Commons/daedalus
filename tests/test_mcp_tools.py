@@ -463,6 +463,66 @@ def test_result_reports_an_absent_result_without_a_value(_tmp):
     assert composition.bridge.calls == [_mcp_tool_commands._get('/result')]
 
 
+def test_a_send_that_does_not_wait_reports_its_command(_tmp):
+    """`wait=False` answers with the payload the bridge enqueued.
+
+    A caller that has to answer what it sent cannot read the queue for the
+    bytes, so the send itself names them: the id, the type and the fields,
+    with the delivery id a waited retry would match against.
+    """
+    composition = _load_composition(_mcp_tool_commands.MARKER)
+    marker = _mcp_tool_commands.MARKER
+
+    answer = asyncio.run(composition.mcp.registered['exec'](
+        cmd_id='cmd', code='1 + 1', wait=False))
+
+    assert answer == {
+        'command': {'id': 'cmd', 'code': '1 + 1', '_did': marker}}, answer
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._put('/command', {'id': 'cmd', 'code': '1 + 1'})]
+
+
+def test_a_typed_send_that_does_not_wait_reports_its_command(_tmp):
+    """The same contract on the typed path, which routes to the extension."""
+    composition = _load_composition(_mcp_tool_commands.MARKER)
+    marker = _mcp_tool_commands.MARKER
+
+    answer = asyncio.run(composition.mcp.registered['focus_tab'](
+        chrome_tab=7, wait=False))
+
+    assert answer == {'command': {
+        'id': '_focus', 'type': 'focus-tab', 'tabId': 7,
+        '_did': marker}}, answer
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._ext('_focus', 'focus-tab', tabId=7, wait=False)]
+
+
+def test_a_waited_send_still_answers_its_result(_tmp):
+    """The load-bearing compatibility property: `wait=True` is unchanged.
+
+    A no-wait branch that leaked into the waited path would drop the poll
+    and answer the command instead of the result, so the waited call is
+    pinned against the same probe the no-wait cases use.
+    """
+    composition = _load_composition(_mcp_tool_commands.MARKER)
+    marker = _mcp_tool_commands.MARKER
+
+    evaluated = asyncio.run(composition.mcp.registered['exec'](
+        cmd_id='cmd', code='1 + 1'))
+    evaluated_calls = list(composition.bridge.calls)
+    typed = asyncio.run(composition.mcp.registered['focus_tab'](
+        chrome_tab=7))
+
+    assert evaluated == {'error': None, 'world': marker,
+                         'value': marker}, evaluated
+    assert evaluated_calls == [
+        ('checked_timeout', {'timeout': 15.0}),
+        _mcp_tool_commands._put('/command',
+                                {'id': 'cmd', 'code': '1 + 1'}),
+        _mcp_tool_commands._poll('', 15.0, 'cmd')], evaluated_calls
+    assert typed == {'bridge': marker}, typed
+
+
 def test_ping_raises_the_bridge_error(_tmp):
     composition = _load_composition('ping-error')
     composition.bridge.poll_body = {'error': 'tab gone'}

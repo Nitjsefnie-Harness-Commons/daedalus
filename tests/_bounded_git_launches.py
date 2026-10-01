@@ -35,25 +35,28 @@ BOUNDED_GIT_LAUNCHES = {
          'a path builder over `urllib.parse.urlencode`; the timeout'
          'belongs to the poll loop that calls it, and no process is behind'
          'it',
-    ('daedalus_mcp/tools_cookies.py', 'clear_cookies', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_cookies.py', 'clear_cookies', 'bridge.ext_cmd(wait)',
+     1):
          'the clear-cookies tool; the mapping is empty here and the'
          'tool\'s own deadline is the only bound',
-    ('daedalus_mcp/tools_cookies.py', 'get_cookies', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_cookies.py', 'get_cookies', 'bridge.ext_cmd(wait)',
+     1):
          'the cookie-listing tool; the mapping is its domain and URL'
          'filter, and the deadline is the tool\'s',
-    ('daedalus_mcp/tools_cookies.py', 'set_cookie', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_cookies.py', 'set_cookie', 'bridge.ext_cmd(wait)', 1):
          'the set-cookie tool; the mapping is the cookie, and nothing it'
          'names starts a process',
-    ('daedalus_mcp/tools_css.py', 'block_requests', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_css.py', 'block_requests', 'bridge.ext_cmd(wait)', 1):
          'the block-requests tool; the mapping is the pattern list the'
          'extension matches on',
-    ('daedalus_mcp/tools_css.py', 'inject_css', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_css.py', 'inject_css', 'bridge.ext_cmd(wait)', 1):
          'the inject-css tool; the stylesheet rides in the mapping and is'
          'applied by the extension, not by a process here',
-    ('daedalus_mcp/tools_css.py', 'remove_css', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_css.py', 'remove_css', 'bridge.ext_cmd(wait)', 1):
          'the remove-css tool, the counterpart of the inject row; the'
          'mapping names the rule to drop',
-    ('daedalus_mcp/tools_css.py', 'unblock_requests', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_css.py', 'unblock_requests', 'bridge.ext_cmd(wait)',
+     1):
          'the unblock-requests tool; the mapping names the pattern to'
          'release, and the deadline is the tool\'s',
     ('daedalus_mcp/tools_eval.py', 'navigate', '_send_eval(timeout, wait)', 1):
@@ -71,11 +74,12 @@ BOUNDED_GIT_LAUNCHES = {
     ('daedalus_mcp/tools_eval.py', 'url', '_send_eval(timeout, wait)', 1):
          'reading `location.href` from a tab; the same 10s round trip, and'
          'nothing here can wedge a git command',
-    ('daedalus_mcp/tools_hotfixes.py', 'store_hotfix', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_hotfixes.py', 'store_hotfix', 'bridge.ext_cmd(wait)',
+     1):
          'the store-hotfix tool; the source and its scope ride in the'
          'mapping, and the extension is what evaluates them',
-    ('daedalus_mcp/tools_media.py', 'screenshot', 'bridge.ext_cmd(timeout)',
-     1):
+    ('daedalus_mcp/tools_media.py', 'screenshot',
+     'bridge.ext_cmd(timeout, wait)', 1):
          'asking the extension for a capture; the timeout is the'
          'capture\'s own deadline, and the call returns the payload',
     ('daedalus_mcp/tools_media.py', 'screenshot', 'bridge.get_raw()', 1):
@@ -84,39 +88,41 @@ BOUNDED_GIT_LAUNCHES = {
     ('daedalus_mcp/tools_media.py', 'uploads', 'bridge.get()', 1):
          'listing stored uploads; the params are the page selector the'
          'listing route takes',
-    ('daedalus_mcp/tools_network.py', 'cdp', 'bridge.ext_cmd(timeout)', 1):
+    ('daedalus_mcp/tools_network.py', 'cdp', 'bridge.ext_cmd(timeout, wait)',
+     1):
          'issuing a CDP command through the extension; a 30s round trip,'
          'and the debugger attach is the extension\'s own',
-    ('daedalus_mcp/tools_network.py', 'fetch_timings', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_network.py', 'fetch_timings', 'bridge.ext_cmd(wait)',
+     1):
          'the fetch-timings tool; the mapping is its selector and names no'
          'deadline, so `ext_cmd`\'s own 10s default bounds the wait',
-    ('daedalus_mcp/tools_network.py', 'net_capture', 'bridge.ext_cmd(timeout)',
-     1):
+    ('daedalus_mcp/tools_network.py', 'net_capture',
+     'bridge.ext_cmd(timeout, wait)', 1):
          'starting a capture in the service worker; a 15s round trip, and'
          'the buffer it fills lives in the worker',
     ('daedalus_mcp/tools_network.py', 'net_capture_get',
-     'bridge.ext_cmd(timeout)', 1):
+     'bridge.ext_cmd(timeout, wait)', 1):
          'reading the capture buffer back; a 30s round trip over the'
          'extension, bounded by the tool itself',
     ('daedalus_mcp/tools_network.py', 'net_capture_stop',
-     'bridge.ext_cmd(timeout)', 1):
+     'bridge.ext_cmd(timeout, wait)', 1):
          'stopping that capture; a 30s round trip, and the stop is what'
          'releases the buffer rather than a child process',
-    ('daedalus_mcp/tools_tabs.py', 'close_tab', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_tabs.py', 'close_tab', 'bridge.ext_cmd(wait)', 1):
          'the close-tab tool; the mapping names the tab and the tool\'s'
          'deadline bounds the round trip',
-    ('daedalus_mcp/tools_tabs.py', 'ext_navigate', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_tabs.py', 'ext_navigate', 'bridge.ext_cmd(wait)', 1):
          'a typed navigate command; the URL rides in the mapping and the'
          'extension performs it',
-    ('daedalus_mcp/tools_tabs.py', 'ext_reload', 'bridge.ext_cmd()', 1):
+    ('daedalus_mcp/tools_tabs.py', 'ext_reload', 'bridge.ext_cmd(wait)', 1):
          'a typed reload command; the mapping names the tab and nothing'
          'here waits on a process',
     ('daedalus_mcp/tools_tabs.py', 'open_tab',
-     'bridge.ext_cmd(include_roundtrip)', 1):
+     'bridge.ext_cmd(include_roundtrip, wait)', 1):
          'opening one tab and reporting how long the round trip took; the'
          'flag is a measurement, not a wait',
     ('daedalus_mcp/tools_tabs.py', 'open_tabs',
-     'bridge.ext_cmd(include_roundtrip, timeout)', 1):
+     'bridge.ext_cmd(include_roundtrip, timeout, wait)', 1):
          'opening every URL in order and waiting for each; a 30s round'
          'trip per tab, and a wedged tab fails the call rather than a'
          'process',
@@ -192,68 +198,92 @@ BOUNDED_GIT_LAUNCHES = {
          'a threading event the in-process server sets once it is'
          'listening; 50ms is a startup poll, not a process wait',
     ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(active, include_roundtrip, pinned, timeout, urls)', 1):
-         'the same fixture with the background and pinned flags added; the'
-         'builder is what the recorder is compared against',
-    ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(bodies, filter, tabId, timeout)', 1):
-         'the read fixture with a filter and bodies, so the tool has to'
-         'pass the selector through unchanged',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(bodies, tabId, timeout)',
-     1):
-         'the stop fixture asking for bodies as well; a flag, not a bound,'
-         'and the recorder compares the whole mapping',
-    ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(format, quality, tabId, timeout)', 1):
-         'the screenshot fixture at a mid quality, so the tool must pass'
-         'it through rather than drop or clamp it',
-    ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(format, quality, tabId, timeout)', 2):
-         'the same fixture at the floor quality; one row per boundary'
-         'value, and each is a dict the recorder reads',
-    ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(format, quality, tabId, timeout)', 3):
-         'the same fixture at the ceiling quality, closing the triple the'
-         'quality bounds are read from',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(format, timeout)', 1):
-         'the screenshot fixture naming only a format; the builder'
-         'launches nothing and the timeout is the capture field',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(format, timeout)', 2):
-         'the format-only fixture at a second call site, so both'
-         'screenshots the tool can send are spelled out',
-    ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(include_roundtrip, timeout, urls)', 1):
+     '_ext(include_roundtrip, timeout, urls, wait)', 1):
          'a fixture naming the ext_cmd the open-tabs tool should send; the'
          'timeout and the flag are the fields under test',
     ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(keep_session, method, params, tabId, timeout)', 1):
-         'the cdp fixture asking for a kept session; the flag decides'
-         'whether the attachment survives, and this row is the dict',
+     '_ext(active, include_roundtrip, pinned, timeout, urls, wait)', 1):
+         'the same fixture with the background and pinned flags added; the'
+         'builder is what the recorder is compared against',
     ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(maxRequests, tabId, timeout)', 1):
-         'the same capture fixture aimed at one tab; the maxRequests floor'
-         'the tool refuses is what the row reads',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(maxRequests, timeout)',
-     1):
+     '_ext(include_roundtrip, timeout, urls, wait)', 2):
+         'the open-tabs fixture sent unwaited; the same field names at a'
+         'second call site, and the ordinal keeps the two apart',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(format, timeout, wait)', 1):
+         'the screenshot fixture naming only a format; the builder'
+         'launches nothing and the timeout is the capture field',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(format, quality, tabId, timeout, wait)', 1):
+         'the screenshot fixture at a mid quality, so the tool must pass'
+         'it through rather than drop or clamp it',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(format, quality, tabId, timeout, wait)', 2):
+         'the same fixture at the floor quality; one row per boundary'
+         'value, and each is a dict the recorder reads',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(format, quality, tabId, timeout, wait)', 3):
+         'the same fixture at the ceiling quality, closing the triple the'
+         'quality bounds are read from',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout, wait)', 1):
+         'the bare screenshot fixture; only the id, the type and the'
+         'timeout are named',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(format, timeout, wait)',
+     2):
+         'the format-only fixture at a second call site, so both'
+         'screenshots the tool can send are spelled out',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(format, timeout, wait)',
+     3):
+         'the screenshot fixture sent unwaited; a third spelling of the'
+         'same field names, kept apart by its ordinal',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(maxRequests, timeout, wait)', 1):
          'the net-capture fixture at the default request ceiling; the'
          'field is the bound the tool advertises',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(maxRequests, timeout)',
-     2):
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(maxRequests, tabId, timeout, wait)', 1):
+         'the same capture fixture aimed at one tab; the maxRequests floor'
+         'the tool refuses is what the row reads',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(maxRequests, timeout, wait)', 2):
          'the capture fixture at the ceiling, closing the pair the'
          'maxRequests bounds are read from',
     ('tests/_mcp_tool_commands.py', '<module>',
-     '_ext(method, params, timeout)', 1):
-         'the cdp fixture naming a method and its params; the timeout is'
-         'the round trip, and the attach is the extension\'s',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout)', 1):
-         'the bare screenshot fixture; only the id, the type and the'
-         'timeout are named',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout)', 2):
+     '_ext(maxRequests, timeout, wait)', 3):
+         'the capture fixture sent unwaited; a third call site sharing the'
+         'ceiling fixture\'s field names',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout, wait)', 2):
          'the net-capture-stop fixture; the only field is the deadline the'
          'tool applies to the stop',
-    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout)', 3):
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(bodies, tabId, timeout, wait)', 1):
+         'the stop fixture asking for bodies as well; a flag, not a bound,'
+         'and the recorder compares the whole mapping',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout, wait)', 3):
+         'the stop fixture sent unwaited; the deadline again, at a third'
+         'site under this spelling',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout, wait)', 4):
          'the net-capture-get fixture; the deadline is the read the tool'
          'waits for and nothing here launches',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(bodies, filter, tabId, timeout, wait)', 1):
+         'the read fixture with a filter and bodies, so the tool has to'
+         'pass the selector through unchanged',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout, wait)', 5):
+         'the read fixture sent unwaited; the fifth site this deadline'
+         'spelling names, and the ordinal is what tells them apart',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(method, params, timeout, wait)', 1):
+         'the cdp fixture naming a method and its params; the timeout is'
+         'the round trip, and the attach is the extension\'s',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(keep_session, method, params, tabId, timeout, wait)', 1):
+         'the cdp fixture asking for a kept session; the flag decides'
+         'whether the attachment survives, and this row is the dict',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(method, params, timeout, wait)', 2):
+         'the cdp fixture sent unwaited; the method and params again at a'
+         'second site under this spelling',
     ('tests/_mcp_tools_helpers.py', 'checked_timeout', 'self.record(timeout)',
      1):
          'the probe recording that the transport was asked for a client;'
