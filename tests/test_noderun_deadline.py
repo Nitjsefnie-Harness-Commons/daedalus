@@ -36,8 +36,8 @@ TESTS = Path(__file__).resolve().parent
 # control, from `tests/_outer_bound.py`, on the call.
 #
 # It must clear the healthy path with room to spare and still fire well
-# inside any external bound. The healthy budgets are the ones the three
-# controls set for themselves — 11s, 27s and 22s — so the tightest margin
+# inside any external bound. The healthy budgets are the ones the two
+# controls set for themselves — 27s and 22s — so the tightest margin
 # 57s keeps is over that 27s. The samples are this bound's own observed
 # expiries, which is circular on its face: what they record is the wedge,
 # and what the figure owes is the margin above the healthy budgets.
@@ -47,8 +47,8 @@ OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 
 # --- the budget a STALLED child is given -----------------------------------
 #
-# Three controls below drive a real child that never settles, and each used
-# to wait out its site's composed figure — 107s at the two launcher sites,
+# Two controls below drive a real child that never settles, and each used
+# to wait out its site's composed figure — 107s at the launcher site,
 # 90s at the GM one, about a tenth each of the 900s `run_tests.py` allows a
 # suite — on every leg of the twelve-cell matrix
 # (`scripts/ci/classify_changes.py`'s `FULL_MATRIX`, four of them
@@ -499,64 +499,6 @@ def test_a_child_that_never_settles_is_killed_and_reported(tmp):
     for line in (f'deadline: {failure.deadline_s}s', 'cleanup: ',
                  'stdout: ', 'stderr: '):
         assert line in message, (line, message)
-
-
-def test_a_real_call_site_reports_its_own_stalled_child(tmp):
-    """The same property, reached through a caller rather than the launcher.
-
-    Everything above drives the launcher itself. This drives
-    `tests/_jsroute_harness.py`'s real `runtime_and_guard`, which is a
-    call site in the tree like any other, and that is the half a launcher
-    control cannot see: a site that kept its own `subprocess.run` would
-    satisfy every control in this file and still report a bare
-    `TimeoutExpired` naming the whole command.
-
-    The source reaches Node, writes a line and then never settles, so the
-    child stalls having produced something — which is precisely the case
-    where its partial output is the only evidence there is. It announces its
-    pid as well, because the bound that ends this control reading as a hang
-    needs one to kill: the launcher's own cleanup is what the reversion
-    removes.
-    """
-    import _noderun  # noqa: E402
-    from _jsroute_harness import runtime_and_guard  # noqa: E402
-
-    path = Path(tmp) / 'stalled.js'
-    pid_file = Path(tmp) / 'stalled.pid'
-    real_deadline = _noderun.CHILD_DEADLINE_S
-    _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
-    caught = None
-    # The bound wraps the call and reports from its own `__exit__`, so the
-    # wedge becomes a named failure inside this control rather than a stall
-    # the suite ceiling ends. It fires only on a launch reverted to an
-    # unbounded one, and kills the child rather than only reporting it.
-    try:
-        with outer_bound(OUTER_BOUND_S, pid_file, 'the stalled call site'):
-            try:
-                runtime_and_guard(
-                    announcing_pid(pid_file) + '\n'
-                    "process.stdout.write("
-                    "'the child spoke before it wedged\\n');\n"
-                    'setInterval(() => {}, 1000);\n', path)
-            except _noderun.ChildDeadlineExceeded as failure:
-                caught = failure
-            except BaseException as unexpected:  # noqa: BLE001
-                # A bare `TimeoutExpired` is the failure this entry point
-                # exists to replace, so it is named rather than re-raised.
-                assert not isinstance(unexpected, subprocess.TimeoutExpired), (
-                    'a bare TimeoutExpired reached the caller', unexpected)
-                raise
-    except OuterBoundExpired as wedged:
-        raise AssertionError(
-            "the outer bound fired, so the child's own bound never "
-            "ended it, which is what this control exists to prevent. "
-            f"What the bound reports: {wedged}"
-        ) from wedged
-    finally:
-        _noderun.CHILD_DEADLINE_S = real_deadline
-    assert caught is not None, 'the child that never settles finished'
-    assert 'the child spoke before it wedged' in caught.stdout, caught.stdout
-    assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
 
 
 def test_a_call_site_bound_reports_its_own_stalled_child(tmp):

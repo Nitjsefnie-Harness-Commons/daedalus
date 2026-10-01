@@ -51,9 +51,6 @@ UNCONSOLIDATED_NAMES = {
         'this spawns the real CLI as a subprocess under a supplied env and '
         'timeout, where the other dispatches argv in process and asserts the '
         'plan was consumed',
-    ('tests/_command_type_readers.py', '_literal_value'):
-        'one reads a text literal and the other an evaluated expression node, '
-        'so the argument types are not interchangeable',
     ('tests/_command_type_readers.py', '_parents'):
         'the scope map is built over memoised nodes only, so it is not the '
         'plain walk the command readers want',
@@ -108,15 +105,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/_mcp_import_closure.py', '_refuse'):
         'each refuses with its own message shape: a where and what pair '
         'against a path, root, node and detail',
-    ('tests/_pyroute_keys.py', '_literal_value'):
-        'one reads a text literal and the other an evaluated expression node, '
-        'so the argument types are not interchangeable',
-    ('tests/_pyroute_live.py', '_argument_value'):
-        'one reads a call-site entry and the other an expression with a '
-        'caller and a sender resolver',
-    ('tests/_pyroute_values.py', '_argument_value'):
-        'one reads a call-site entry and the other an expression with a '
-        'caller and a sender resolver',
     ('tests/_realbrowser_fixture_controls.py', '_browser_version'):
         'this asserts the exact subprocess call the control makes - the argv, '
         'capture_output, text and a 15s timeout - and answers a canned '
@@ -298,9 +286,6 @@ UNCONSOLIDATED_NAMES = {
         'this one differs from the other four _ext sites (digest '
         '04c21b05e5), and the owner builds the answer tuple for the whole '
         'tool surface',
-    ('tests/test_cli_content_hotfixes.py', '_stored'):
-        'this is the stored-hotfix record this suite reads back, where '
-        'the owner store key is the one the route answers with',
     ('tests/test_dashboard_app_shell.py', '_run'):
         'this runs one dashboard scenario in this suite own shell, where '
         'the owner runs the recorded boundary harness a plan names',
