@@ -55,9 +55,10 @@ GRAPHQL_MARK = 'graphql'
 
 # The name a watcher publishes its poll index under, which its `gh` children
 # inherit. Recorded beside every request so a poll is a group in the log
-# rather than a width inferred from the requests. A watcher that publishes
-# none - a base commit's - logs `None`, and its whole log is one poll
-# because the process ran exactly one and exited.
+# rather than a width inferred from the requests. Nothing TRACKED publishes
+# it, so a tracked caller logs `None` on every call; the watcher this
+# repository no longer ships still sets it, and the field is kept so that
+# watcher keeps logging its polls.
 POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
 # A path whose existence releases the calls this fake is holding. Set only
