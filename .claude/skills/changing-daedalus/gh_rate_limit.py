@@ -53,8 +53,8 @@ What the tree holds is one capture, from 2026-09-29, and it is the OTHER
 shape: `{"errors":[{"type":"RATE_LIMIT", ...}]}` with no `data` member.
 Nothing establishes that GitHub's throttler never produces the partial
 one - the GraphQL specification permits a partial answer beside a
-non-null `errors[]`, and a `gh` double emits it in a single fixture - so
-this reader does not rely on its not arriving.
+non-null `errors[]`, and a `gh` double could emit it - nothing in this
+tree does - so this reader does not rely on its not arriving.
 
 A 403 carrying none of that is a permission refusal and stays a
 failure: a pause must never be the answer to a question about authority.

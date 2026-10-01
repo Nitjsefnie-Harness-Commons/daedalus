@@ -74,8 +74,8 @@ green.
 Two distinctions the loops got wrong are deliberate. Zero runs on the SHA is
 a waiting state, never success, and an exit 2 says which wait it was: no run
 ever appeared, named runs were still open, or the bound fell inside a
-rate-limit pause. The SHA is PINNED, unlike the sibling watcher re-resolving
-the head each poll, so a push landing mid-wait cannot turn the answer into
+rate-limit pause. The SHA is PINNED rather than re-resolved from the branch
+head on each poll, so a push landing mid-wait cannot turn the answer into
 one about a commit nobody asked about.
 
 A rate-limit refusal is the one exception to the exit-3 rule: a refusal is a
