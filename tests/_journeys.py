@@ -227,7 +227,7 @@ def sha256_of(rendering):
     return hashlib.sha256(canonical(rendering)).hexdigest()
 
 
-def _record(name, rendering):
+def _print_record(name, rendering):
     print(RECORD_MARKER + json.dumps(
         {'journey': name, 'sha256': sha256_of(rendering),
          'rendering': rendering}, sort_keys=True, ensure_ascii=False),
@@ -251,7 +251,7 @@ def main(argv=None):
     if args.journey not in JOURNEYS:
         print(f'no journey named {args.journey!r}', file=sys.stderr)
         return 2
-    _record(args.journey, rendering_of(args.journey))
+    _print_record(args.journey, rendering_of(args.journey))
     return 0
 
 
