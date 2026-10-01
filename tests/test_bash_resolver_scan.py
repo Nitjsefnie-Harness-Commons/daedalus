@@ -468,14 +468,17 @@ def test_a_shell_spelled_away_from_the_raw_text_is_judged(tmp):
 
 
 def test_a_shell_named_without_a_launch_import_stays_clean(tmp):
-    """Stage 1 skips a module that cannot reach a launch, verdict intact."""
+    """A shell name alone is not a launch, wherever the name is written.
+
+    Both are judged on their facts, never skipped: the second spells
+    `subprocess` only in a docstring and a comment, and a filter keyed on
+    that substring would drop the first outright.
+    """
     del tmp
     assert _judged("""import shutil
 resolved = shutil.which('bash')
 assert resolved and len(resolved) > 1, resolved
-""") == ([], False)
-    # The name in prose is the name in the text, so this one is judged on its
-    # facts: only an absence of the substring licenses the skip.
+""") == ([], True)
     assert _judged('''"""This module imports subprocess if it ever launches."""
 import shutil
 # import subprocess
@@ -483,8 +486,26 @@ shell_name = 'bash'
 ''') == ([], True)
 
 
+def test_a_normalised_import_spelling_is_still_judged(tmp):
+    """NFKC makes one identifier spellable two ways, so the text is not it.
+
+    `ast.Import` reports the normalised name, so this module really does
+    import `subprocess` while its source spells no ASCII `subprocess` at
+    all. A filter keyed on the substring skips it, and the bypass inside it
+    goes unreported.
+    """
+    del tmp
+    source = ('import ｓｕｂｐｒｏｃｅｓｓ\n'
+              "ｓｕｂｐｒｏｃｅｓｓ.run(['bash', '-c', 'true'], cwd=tmp)\n")
+    assert 'subprocess' not in source and '\\' not in source
+    violations, judged = _judged(source)
+    assert judged, 'a normalised import spelling was skipped unjudged'
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:2:' in violations[0], violations
+
+
 def test_a_launch_naming_no_shell_stays_clean(tmp):
-    """Stage 2 skips a module with no shell-named constant, verdict intact."""
+    """A tree with no shell-named constant is skipped, verdict intact."""
     del tmp
     violations, judged = _judged("""import subprocess
 import sys
@@ -492,23 +513,6 @@ subprocess.run([sys.executable, 'child.py'], cwd=tmp)
 """)
     assert violations == [], violations
     assert not judged, 'facts built for a module that names no shell'
-
-
-def test_a_continued_import_spelling_is_still_judged(tmp):
-    """A backslash can split the name, so the source cannot be searched."""
-    del tmp
-    violations, judged = _judged(r'''import \
-subprocess
-subprocess.run(['bash', '-c', 'true'], cwd=tmp)
-''')
-    assert judged, 'a continued import was skipped unjudged'
-    assert len(violations) == 1, violations
-    assert 'tests/synthetic.py:3:' in violations[0], violations
-    assert _judged(r'''import \
-subprocess
-resolved = shutil.which('bash')
-assert resolved
-''') == ([], True)
 
 
 def test_each_real_site_is_caught_when_it_bypasses(tmp):
