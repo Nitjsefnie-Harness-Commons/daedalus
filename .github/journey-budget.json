@@ -7,9 +7,14 @@
     "valgrind_version": "valgrind-3.22.0",
     "runner_image": "ubuntu24 20260920.314.1"
   },
+  "excluded_threads": {
+    "command-round-trip": ["front-end-import", "uvicorn-serve"],
+    "dashboard-fanout": ["front-end-import", "uvicorn-serve"],
+    "mcp-exec": ["front-end-import"]
+  },
   "journeys": {
-    "command-round-trip": 4820480612,
-    "dashboard-fanout": 4816201514,
-    "mcp-exec": 8782800394
+    "command-round-trip": 778774441,
+    "dashboard-fanout": 774391201,
+    "mcp-exec": 1016780100
   }
 }
