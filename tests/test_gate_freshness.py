@@ -48,7 +48,9 @@ def test_the_set_is_exactly_the_documented_patterns(tmp):
     del tmp
     m = _mod()
     assert tuple(m.GATE_PATTERNS) == (
-        '.github/workflows/**', 'scripts/ci/**', 'scripts/check_versions.py',
+        '.github/workflows/**', '.github/ci-thresholds.json',
+        '.github/journey-budget.json',
+        'scripts/ci/**', 'scripts/check_versions.py',
         '.gitleaks.toml', 'pyrightconfig.json', 'pyrightconfig.tests.json',
         '.pylintrc', 'setup.cfg', 'eslint.config.js', 'pyproject.toml',
         'run_tests.py', 'requirements-dev.txt', 'requirements-test.txt')
@@ -77,20 +79,23 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
         assert not m.is_gate_defining(path), path
 
 
-def test_the_carried_by_the_branch_exclusion_is_declared_and_small(tmp):
-    """The carried-by-the-branch exclusion is exactly its declared entries.
+def test_no_file_is_carried_by_the_branch_outside_the_gate_set(tmp):
+    """The exclusion is gone, so nothing may be exempt from the gate set.
 
-    Every carried file must itself NOT be gate-defining: the exclusion only
-    earns its keep for files that genuinely are not gates, so a carried file
-    that became a real gate would be silently hidden by it."""
+    What it used to assert is now the opposite, and both halves still have
+    to hold. Every file a tighten can move is gate-defining — a coverage
+    ratchet raises a floor and a journey tighten lowers a count, each on a
+    tree a stale head never saw — and there is no tuple left for one to hide
+    behind.
+    """
     del tmp
     m = _mod()
-    assert m.CARRIED_BY_THE_BRANCH == ('.github/ci-thresholds.json',)
-    for carried in m.CARRIED_BY_THE_BRANCH:
-        assert not m.is_gate_defining(carried), carried
-        assert carried not in m.GATE_PATTERNS, carried
-    doc = m.__doc__ or ''
-    assert 'carries itself' in doc or 'carry' in doc
+    assert not hasattr(m, 'CARRIED_BY_THE_BRANCH'), (
+        'the carried-by-the-branch exclusion is back: a baseline a ratchet '
+        'can move is exactly what a stale head must be refused for')
+    for moved in ('.github/ci-thresholds.json', '.github/journey-budget.json'):
+        assert m.is_gate_defining(moved), moved
+        assert moved in m.GATE_PATTERNS, moved
 
 
 def test_the_docstring_justifies_every_pattern(tmp):
@@ -157,14 +162,13 @@ def _workflow_gate_files(directory, base=ROOT, tracked=None):
 
 def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
     """Every TRACKED file a workflow invokes or passes to a tool must be
-    gate-defining, unless declared carried-by-the-branch, so a gate file added
-    later fails here rather than going silently unlisted."""
+    gate-defining, so a gate file added later fails here rather than going
+    silently unlisted. Nothing is exempt: the set is the whole derivation."""
     del tmp
     m = _mod()
     used = _workflow_gate_files(ROOT / '.github' / 'workflows')
     assert used, 'the workflows name no gate file'
-    unaccounted = used - set(m.CARRIED_BY_THE_BRANCH)
-    for path in sorted(unaccounted):
+    for path in sorted(used):
         assert m.is_gate_defining(path), path
 
 
@@ -197,8 +201,7 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
     used = _workflow_gate_files(
         workflows, base=base, tracked={'scripts/scan_secrets_extra.py'})
     assert 'scripts/scan_secrets_extra.py' in used
-    unaccounted = used - set(m.CARRIED_BY_THE_BRANCH)
-    not_gate = [p for p in unaccounted if not m.is_gate_defining(p)]
+    not_gate = [p for p in used if not m.is_gate_defining(p)]
     assert not_gate == ['scripts/scan_secrets_extra.py'], not_gate
 
 

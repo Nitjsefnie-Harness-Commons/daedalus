@@ -1341,25 +1341,106 @@ jobs:
       # is one: these counts are deterministic, so a discarded warm-up round
       # buys nothing. More than one round is for deriving the tolerance from
       # a spread, once.
-      # `--summary` prints the measurement and the block a re-baseline is
-      # pasted from, so what lands in a reviewed commit is this run's own
-      # numbers rather than a reader's transcription of them.
       - name: Measure the journeys
+        id: measure
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py measure --root . \
-            --rounds "${JOURNEY_ROUNDS:-1}" --out "$COUNTS" --summary
+            --rounds "${JOURNEY_ROUNDS:-1}" --out "$COUNTS"
 
-      # No step here writes the artefact: a re-baseline is a reviewed commit.
+      # A re-baseline raises a recorded count, so it stays a reviewed commit.
+      # What the refusal below prints is one command over THIS run's own
+      # measurement, which is what travels with the run: a pasted block was
+      # a reader copying numbers out of a table, and the copy is what went
+      # wrong.
+      - name: Upload the measured counts
+        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: journey-counts
+          path: ${{ runner.temp }}/journey-counts.json
+          if-no-files-found: error
+
+      # The one verdict: over budget is a regression, and nothing below this
+      # step runs when it is one.
       - name: Check the journeys against the budget
+        id: check
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py check --root . \
             --measurements "$COUNTS" --summary
+
+      # The budget must follow a journey down on its own, or it sits at old
+      # high counts until somebody remembers to lower them and a later
+      # regression up to those counts passes. Down only: a run with a rise
+      # refuses rather than writing, and the check above must have concluded
+      # success, so the run that found a regression writes nothing.
+      - name: Follow the journeys that got cheaper
+        id: tighten
+        if: ${{ !cancelled() && steps.check.conclusion == 'success'
+                && github.event_name == 'push'
+                && github.ref == 'refs/heads/main' }}
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          COUNTS: ${{ runner.temp }}/journey-counts.json
+        run: |
+          python3 scripts/ci/journey_budget.py check --root . \
+            --measurements "$COUNTS" --tighten
+          if git diff --quiet -- .github/journey-budget.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The credential handling below is the coverage job's `Commit the
+      # raise` step, deliberately repeated rather than shared: that step is
+      # a required context and has run on every push to main, and a
+      # composite action would put the one step holding a write credential
+      # behind a second mechanism for no gain in review.
+      - name: Commit the tighten
+        if: ${{ !cancelled() && steps.tighten.outputs.changed == 'true'
+                && env.RATCHET_SSH_KEY != '' }}
+        env:
+          RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$RATCHET_SSH_KEY" > ~/.ssh/ratchet
+          chmod 600 ~/.ssh/ratchet
+          # Pinned, not scanned: ssh-keyscan would trust whatever answers, and
+          # this is the one step in the workflow holding a write credential.
+          # The value is github.com's published ed25519 host key (GET /meta).
+          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/journey-budget.json
+          # No co-author trailer: no model authored this commit.
+          git commit -m 'ci: tighten the journey budget'
+          # HEAD:main, never a force: overwriting someone's commit to record
+          # an instruction count is never the right trade.
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts'
+          if git push "git@github.com:${REPO}.git" HEAD:main; then
+            exit 0
+          fi
+          # A rejected push is usually main moving while this ran, and failing
+          # the job for that would turn a red for an ordinary concurrent push.
+          # Distinguish it rather than swallowing it: if the remote really did
+          # move past the commit this run measured, the next push tightens
+          # instead and there is nothing wrong here. If it did not, the push
+          # failed for some other reason and this job should say so.
+          git fetch --quiet "git@github.com:${REPO}.git" main
+          if [ "$(git rev-parse HEAD^)" = "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "the tighten push was rejected while main stood still" >&2
+            exit 1
+          fi
+          echo 'Main moved while this run measured; the next push tightens instead.' \
+            >> "$GITHUB_STEP_SUMMARY"
 
   aggregate:
     name: Aggregate workflow checks

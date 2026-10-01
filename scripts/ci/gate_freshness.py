@@ -25,12 +25,22 @@ the tree is what a branch carries, so a branch runs the tests it brings.
   requirements-dev.txt      the tools the gates install and run
   requirements-test.txt     the tools the gates install and run
 
-A file the branch carries itself is NOT here; see CARRIED_BY_THE_BRANCH below.
+  .github/ci-thresholds.json  and
+  .github/journey-budget.json  the recorded counts two gates compare against.
+                               Not configurations: each is COMPUTED BY a gate
+                               and committed to main by it, and a ratchet move
+                               LOWERS one. A head predating such a commit was
+                               checked against the OLD, higher numbers, so its
+                               code can cost more within them and merge green,
+                               turning main's post-merge gate red. So there is
+                               no carried-by-the-branch exclusion, and the
+                               premise behind one was false of both. Every open
+                               head is RED until it rebases and is re-measured.
+
 The set is derived only as far as a workflow NAMES a file: the suite reads
 every `.github/workflows/*.yml` and requires every tracked file a workflow
-invokes by path or passes to a tool to be listed here (or declared
-carried-by-the-branch), so a gate file added later fails the suite. The REACH
-LIMIT is real and stated:
+invokes by path or passes to a tool to be listed here, so a gate file added
+later fails the suite. The REACH LIMIT is real and stated:
 `pyrightconfig.json`, `pyrightconfig.tests.json`, `setup.cfg`,
 `eslint.config.js` and `pyproject.toml` are read by tool DISCOVERY (a bare
 `pyright` / `eslint` /
@@ -78,6 +88,8 @@ BASE_BRANCH = 'main'
 # head.
 GATE_PATTERNS = (
     '.github/workflows/**',
+    '.github/ci-thresholds.json',
+    '.github/journey-budget.json',
     'scripts/ci/**',
     'scripts/check_versions.py',
     '.gitleaks.toml',
@@ -91,12 +103,6 @@ GATE_PATTERNS = (
     'requirements-dev.txt',
     'requirements-test.txt',
 )
-
-# And every baseline move is permissive (--tighten only lowers; a
-# coverage-floor raise moves the floor up), so a stale branch's baseline can
-# never turn main red by merging. The derivation guard subtracts exactly this
-# tuple: a new such file must be added here with its own reason.
-CARRIED_BY_THE_BRANCH = ('.github/ci-thresholds.json',)
 
 _HEX40 = frozenset('0123456789abcdef')
 

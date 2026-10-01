@@ -8,12 +8,14 @@ recorded count per journey. It is its own file rather than a member of
 a new baseline family belongs to a shared owner this file does not edit.
 Nothing here raises a recorded number and nothing adds an entry:
 `--tighten` only follows a journey down, and only drops one the journey set
-no longer has.
+no longer has. A run that found a journey over budget tightens nothing at
+all, so the one thing CI can do to the file is make it smaller.
 
   python3 scripts/ci/journey_budget.py probe
   python3 scripts/ci/journey_budget.py measure --rounds 1 --out counts.json
   python3 scripts/ci/journey_budget.py check --measurements counts.json
   python3 scripts/ci/journey_budget.py check --measurements c.json --tighten
+  python3 scripts/ci/journey_budget.py rebaseline --measurements counts.json
 
 A COUNT IS NOT COMPARABLE UNLESS THE JOURNEY STILL IS THE SAME JOURNEY, so
 every journey renders what it observed and the harness records the sha256 of
@@ -26,9 +28,13 @@ deterministic only for a fixed binary, and the interpreter's patch build,
 libc and valgrind all move without a change to this repository. So
 `toolchain` records the identity of everything a count depends on and no
 code change controls, and a check on a different toolchain reports that
-fact and compares nothing rather than calling it a regression. A
-re-baseline is a reviewed commit: nothing here writes the artefact, and
-the harness prints the block one is pasted from.
+fact and compares nothing rather than calling it a regression.
+
+A re-baseline RAISES a recorded count, so it stays a reviewed commit and
+nothing here writes the artefact on a check. `rebaseline` is the one
+command that does, over a measurement file a person runs deliberately: it
+carries the whole document from that one measurement, so what lands is the
+run's own numbers rather than a transcription of a table.
 """
 import argparse
 import json
@@ -43,6 +49,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
+import journey_rebaseline  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 import journey_report  # noqa: E402  pylint: disable=wrong-import-position
 
@@ -62,6 +69,7 @@ COUNTERS = journey_artifact.COUNTERS
 # function, and a suite that wants the shape itself loads that module.
 load = journey_artifact.load
 render = journey_artifact.render
+budget_of = journey_artifact.budget_of
 exclusion_diff = journey_artifact.exclusion_diff
 map_diff = journey_artifact.map_diff
 sha_diff = journey_artifact.sha_diff
@@ -72,7 +80,9 @@ OVER_REMEDY = (
     'A journey over its budget is a regression in what a user waits for: '
     'the recorded count is never raised by hand, and no entry is ever added '
     'by hand. Find what the journey now does that it did not, and make it '
-    'not do it.')
+    'not do it; if the journey genuinely costs more now, the one command in '
+    'the step summary writes this run\'s own measurement over the file, and '
+    'the commit it leaves is yours to review.')
 SHAPE_REMEDY = (
     'Rounds of one measurement disagreed about what the journey looks like, '
     'so their counts are not comparable and none of them is a baseline. The '
@@ -85,30 +95,33 @@ UNMEASURED_REMEDY = (
     'nothing. The probe step says what this runner allows: `instructions:u` '
     'needs less kernel access than an unqualified event, and callgrind is '
     'the fallback when perf is refused.')
+REBASELINE_COMMAND = (
+    '`journey_budget.py rebaseline --measurements <file>`, which writes the '
+    'whole artefact from one measurement: the counts, their shas, the '
+    'toolchain, the threads excluded and the bands applied all from that '
+    'same run, with the recorded tolerance left where you put it.')
 TOOLCHAIN_REMEDY = (
     'A recorded count is only comparable against a measurement taken on the '
-    'toolchain it was recorded on. Re-baseline from a measured run: the '
-    're-baseline block in the step summary carries the counts, their '
-    'spread, and the identity they were taken on, and nothing in CI writes '
-    'the artefact.')
+    'toolchain it was recorded on. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
 SHA_REMEDY = (
     'A recorded count describes the journey that rendered when it was '
     'recorded, so a journey that renders differently cannot be compared '
-    'against it. Re-baseline from a measured run: the re-baseline block in '
-    'the step summary carries the shas this run measured beside the counts, '
-    'and nothing in CI writes the artefact.')
+    'against it. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
 BANDS_REMEDY = (
     'The `Ir` band thresholds decide which thread a count excluded, so a '
     'run whose bands differ from the recorded ones is measuring a different '
-    'quantity whatever it reads. Re-baseline from a measured run: the '
-    're-baseline block in the step summary carries the bands this run '
-    'applied, and nothing in CI writes the artefact.')
+    'quantity whatever it reads. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
 THREADS_REMEDY = (
     'A recorded count is only comparable against a measurement that '
-    'excluded the same threads. Re-baseline from a measured run: the '
-    're-baseline block in the step summary carries the counts, their '
-    'spread, the threads this run excluded, and the identity they were '
-    'taken on, and nothing in CI writes the artefact.')
+    'excluded the same threads. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
 REMEDY_FOR = {'over': OVER_REMEDY, 'unmeasured': UNMEASURED_REMEDY}
 
 
@@ -131,15 +144,6 @@ def toolchain_diff(recorded, measured):
     return {field: (recorded.get(field), measured.get(field))
             for field in journey_counters.TOOLCHAIN_FIELDS
             if recorded.get(field) != measured.get(field)}
-
-
-def budget_of(document, name):
-    """The count `name` may reach: its record plus the tolerance."""
-    recorded = document['journeys'].get(name)
-    if recorded is None:
-        return None
-    tolerance = document.get('tolerance_pct') or 0.0
-    return recorded * (1 + tolerance / 100.0)
 
 
 def unrecorded(document, names):
@@ -190,7 +194,9 @@ def tightened(counts, document, names):
 
     Only ever downward: a journey that measured cheaper is recorded at what
     it cost, and one whose journey name is gone is dropped rather than kept
-    as a rule nothing enforces.
+    as a rule nothing enforces. The caller refuses a measurement with a
+    rise in it, but the property is here rather than only there — this is
+    what a second caller reaches without that guard in front of it.
     """
     updated = dict(document['journeys'])
     for name, recorded in document['journeys'].items():
@@ -203,21 +209,6 @@ def tightened(counts, document, names):
         if measured < recorded:
             updated[name] = measured
     return updated if updated != document['journeys'] else None
-
-
-def refusal_lines(found):
-    lines = ['### Journey budget', '',
-             '| journey | measured | budget |', '|---|---|---|']
-    for name, (measured, limit) in sorted(found['over'].items()):
-        lines.append(f'| {name} | {measured} | {limit:.0f} |')
-    for name, counter in sorted(found['unmeasured'].items()):
-        lines.append(f'| {name} | not measured: `{counter}` gave no count '
-                     f'on this runner | — |')
-    lines.append('')
-    for kind, detail in found.items():
-        if detail:
-            lines.append(REMEDY_FOR[kind])
-    return lines
 
 
 # ─── the command line ──────────────────────────────────────────────────────
@@ -240,11 +231,6 @@ def _parser():
     count.add_argument('--rounds', type=int, default=ROUNDS_DEFAULT)
     count.add_argument('--out', type=Path,
                        help='write the measurements JSON here')
-    count.add_argument('--artifact', type=Path, default=ARTIFACT,
-                       help='the recorded budget, read only to carry its '
-                            'tolerance into the re-baseline block')
-    count.add_argument('--summary', action='store_true',
-                       help='also write the table to the step summary')
 
     check = sub.add_parser(
         'check', help='compare against the recorded counts')
@@ -257,6 +243,13 @@ def _parser():
                        help='follow journeys down instead of reporting')
     check.add_argument('--artifact', type=Path, default=ARTIFACT)
     check.add_argument('--summary', action='store_true')
+
+    rebase = sub.add_parser(
+        'rebaseline', help='write the artefact from one measurement')
+    rebase.add_argument('--measurements', type=Path, required=True,
+                        help='a measure --out file, read and not measured '
+                             'here')
+    rebase.add_argument('--artifact', type=Path, default=ARTIFACT)
     return parser
 
 
@@ -278,7 +271,11 @@ def main(argv=None):
         if args.command == 'probe':
             found = journey_counters.facts()
             print(json.dumps(found, indent=2, sort_keys=True))
-            if args.summary:
+            # The block is the diagnosis of a runner that can count
+            # NOTHING, so it is written only there: on a runner with a
+            # usable counter it would be a page of detail about an
+            # environment that turned out to be fine.
+            if args.summary and found.get('selected') is None:
                 journey_counters.write_summary(
                     journey_report.probe_lines(found))
             return 0
@@ -289,19 +286,11 @@ def main(argv=None):
             print(payload)
             if args.out:
                 Path(args.out).write_text(payload, encoding='utf-8')
-            if args.summary:
-                journey_counters.write_summary(
-                    journey_report.summary_lines(report))
-                # The recorded artefact, when there is one: a re-baseline
-                # KEEPS the tolerance, and a block that emitted `null` for
-                # it would paste an artefact whose budget is the recorded
-                # count itself — any increase a red, any decrease invisible.
-                carried = None
-                if Path(args.artifact).is_file():
-                    carried = load(args.artifact)
-                journey_counters.write_summary(
-                    journey_report.rebaseline_lines(report, carried))
             return 0
+
+        if args.command == 'rebaseline':
+            return journey_rebaseline.run(
+                args.measurements, args.artifact, remedy=SHAPE_REMEDY)
 
         document = load(args.artifact)
         names = journey_names()
@@ -337,22 +326,38 @@ def main(argv=None):
             # check: a count taken from a journey that no longer renders the
             # same way is not a cheaper journey, it is a different one.
             _report_state(document, names, counter, report)
+            if found['over']:
+                print('a journey is over its budget, so nothing is tightened: '
+                      'lowering the journeys that fell would land a smaller '
+                      'budget with the rise still in the tree and nothing '
+                      'recording it', file=sys.stderr)
+                print(OVER_REMEDY, file=sys.stderr)
+                return 1
             updated = tightened(counts, document, names)
             if updated is None:
                 print('no journey measured below its recorded count')
                 return 0
             document['journeys'] = updated
             Path(args.artifact).write_bytes(render(document))
+            dropped = sum(1 for name, value in updated.items()
+                          if value < document['journeys'][name])
             print('tightened the journey budget')
+            journey_counters.write_summary([
+                f'This run tightened the journey budget on {dropped} '
+                f'{"journey" if dropped == 1 else "journeys"}; nothing here '
+                'raised a recorded count.'])
             return 0
 
         _report_state(document, names, counter, report)
+        if args.summary:
+            journey_counters.write_summary(
+                journey_report.verdict_lines(document, counts, found))
         if not any(found.values()):
             print(f'{len(names)} journeys measured against '
                   f'{counter or "no counter"}; none over budget')
             return 0
-        if args.summary:
-            journey_counters.write_summary(refusal_lines(found))
+        if found['over'] and args.summary:
+            journey_counters.write_summary(journey_report.rebaseline_lines())
         for kind, detail in found.items():
             if detail:
                 print(f'{kind}: {detail}', file=sys.stderr)

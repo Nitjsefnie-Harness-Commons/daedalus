@@ -5,14 +5,15 @@ grown past the production size ceiling and this is the responsibility
 neither of them owns: `journey_counters.py` counts and
 `journey_budget.py` decides, and what a run SAYS about either is a third
 thing. Each function here takes data and returns lines; writing them is
-the callers' business, and the gate over them is none — none of these
-numbers is asserted anywhere.
+the callers' business.
 
-The re-baseline block is machine-readable on purpose. A re-baseline is a
-reviewed commit, so what lands in it has to be this run's own numbers
-rather than a reader's transcription of a table.
+Nothing here writes the artefact, and nothing here prints it either. A
+re-baseline used to be pasted out of a block of JSON, which made the
+numbers a person reviewed a transcription of a table rather than the run's
+own measurement. It is now one command, over the measurement the job
+uploaded, so the reading survives and the copying does not.
 """
-import json
+import os
 import sys
 from pathlib import Path
 
@@ -22,7 +23,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
-import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def probe_lines(found):
@@ -54,90 +54,64 @@ def probe_lines(found):
     return lines
 
 
-def summary_lines(report):
-    """The measurement table, as markdown for a step summary."""
-    lines = ['### Journey counts', '',
-             f"Counter selected here: `{report.get('selected_counter')}`.",
-             '',
-             '| counter | gated | journey | min | median | max | spread '
-             '| sha |', '|---|---|---|---|---|---|---|---|']
-    shas = report.get('shas') or {}
-    for counter in journey_counters.COUNTERS:
-        entry = report['counters'].get(counter) or {}
-        if not entry.get('available'):
-            lines.append(f"| {counter} | — | — | — | — | — | — | not "
-                         f"usable here: {entry.get('why')} |")
+def verdict_lines(document, counts, found):
+    """One row per recorded journey, on a pass and on a fail alike.
+
+    The same table either way is the point: a reader deciding whether a red
+    is a regression needs the recorded number and this run's number on one
+    line, and a reader deciding whether a green can be trusted needs the
+    same line — so a run whose verdict changed does not also change what
+    there is to read. The budget is the gate's own arithmetic, not a
+    second copy of it.
+    """
+    over = found['over']
+    unmeasured = found['unmeasured']
+    lines = ['### Journey budget', '',
+             '| journey | count | budget | delta | verdict |',
+             '|---|---|---|---|---|']
+    for name in sorted(document['journeys']):
+        limit = journey_artifact.budget_of(document, name)
+        budget = f'{limit:.0f}' if limit is not None else '—'
+        measured = counts.get(name)
+        if limit is None:
+            verdict = 'not recorded yet'
+            measured = None
+        elif name in unmeasured:
+            verdict = f'no count for `{unmeasured[name]}`'
+            measured = None
+        elif name in over:
+            verdict = 'OVER BUDGET'
+        else:
+            verdict = 'within budget'
+        if measured is None:
+            lines.append(f'| {name} | not measured | {budget} | — | '
+                         f'{verdict} |')
             continue
-        gated = 'yes' if entry.get('gated') else 'no'
-        for name in journey_counters.journey_names():
-            row = (entry.get('journeys') or {}).get(name)
-            if row is None:
-                continue
-            seen = sorted(set(shas.get(name) or ()))
-            sha = seen[0][:12] if len(seen) == 1 else 'MISMATCH'
-            lines.append(
-                f"| {counter} | {gated} | {name} | {row['min']} | "
-                f"{row['median']} | {row['max']} | {row['spread']} | "
-                f"{sha} |")
+        delta = measured - limit
+        sign = '+' if delta > 0 else ''
+        lines.append(f'| {name} | {measured} | {budget} | {sign}{delta:.0f} '
+                     f'| {verdict} |')
     return lines
 
 
-def rebaseline_lines(report, document=None):
-    """The block a re-baseline is pasted from, as this run measured it.
+def rebaseline_lines(run_id=None):
+    """The one line a rise is answered with, runnable as printed.
 
-    Machine-readable and unambiguous on purpose: the re-baseline is a
-    reviewed commit, so what lands in it has to be the numbers this run
-    measured rather than a reader's transcription of a table above.
-    Nothing in CI writes the artefact — that is what makes a re-baseline
-    a decision rather than a side effect.
+    The run id is the workflow's own substitution, so the line a reader
+    copies is the line that works: `gh run download` fetches the
+    measurement this job measured, and the command writes the artefact from
+    it — this run's counts, shas, toolchain, exclusions and bands
+    together, with the recorded tolerance left where a person put it.
     """
-    selected = report.get('selected_counter')
-    entry = (report.get('counters') or {}).get(selected) or {}
-    journeys = entry.get('journeys') or {}
-    # The field list is the SCHEMA'S, not a literal beside it: a re-baseline
-    # that omitted a field would paste an artefact the validator accepts and
-    # the next run refuses, with a remedy pointing at this very block. So
-    # the block is built by walking the same set the validator walks, and
-    # cannot fall behind a field added there.
-    measured = {'schema_version': journey_artifact.SCHEMA_VERSION,
-                'counter': selected,
-                'tolerance_pct': (document or {}).get('tolerance_pct'),
-                'toolchain': report.get('toolchain') or {},
-                'excluded_threads': report.get('excluded_threads') or {},
-                'thread_bands': dict(journey_threads.BANDS),
-                'journeys': {}, 'shas': {}}
-    block = {field: measured[field] for field in journey_artifact.FIELDS}
-    for name in journey_counters.journey_names():
-        row = journeys.get(name) or {}
-        block['journeys'][name] = row.get('median')
-        seen = (report.get('shas') or {}).get(name) or []
-        block['shas'][name] = sorted(set(seen))[0] if seen else None
-    # `spread` is not a schema field and is printed BESIDE the artefact JSON
-    # rather than inside it: a block a reader pastes has to validate, and the
-    # counts it replaces do not belong inside the thing replacing them.
-    spread = {name: (journeys.get(name) or {}).get('spread')
-              for name in journey_counters.journey_names()}
-    return ['### Re-baseline block', '',
-            'What a re-baseline is pasted from, as this run measured it. '
-            'Nothing in CI writes `.github/journey-budget.json`; the '
-            're-baseline is a reviewed commit carrying these numbers, '
-            'their spread, the toolchain and the threads they were taken '
-            'on, and the journeys\' shas and the bands this run applied — '
-            'every field the artefact needs to be valid on its own.', '',
-            '### The artefact, as this run measured it', '',
-            'Paste this into `.github/journey-budget.json`. It carries every '
-            'field the schema requires, and the tolerance it carries is the '
-            'one already recorded — a re-baseline changes the counts, not '
-            'the bound. Nothing in CI writes the artefact; the re-baseline '
-            'is a reviewed commit.', '',
-            '```json',
-            json.dumps(block, indent=2, sort_keys=True),
-            '```', '',
-            '### The spread this run measured', '',
-            'Not part of the artefact: it is what a tolerance is derived '
-            'from, and the tolerance above is the one already recorded.', '',
-            '```json',
-            json.dumps(spread, indent=2, sort_keys=True),
+    run = run_id or os.environ.get('GITHUB_RUN_ID') or '<run-id>'
+    return ['A journey is over its budget, so raising the recorded counts is '
+            'a decision this repository does not make for you. This run\'s '
+            'own measurement is uploaded as `journey-counts`; run this in a '
+            'checkout and review the diff it leaves.', '',
+            '```bash',
+            f'gh run download {run} -n journey-counts -D journey-rebaseline '
+            '&& python3 scripts/ci/journey_budget.py rebaseline '
+            '--measurements journey-rebaseline/journey-counts.json',
             '```', '']
 
 
