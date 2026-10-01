@@ -318,10 +318,25 @@ def _parser():
                        help='follow journeys down instead of reporting')
     check.add_argument('--artifact', type=Path, default=ARTIFACT)
     check.add_argument('--seconds', type=Path,
-                       help='a JSON file of what this job cost, measured '
-                            'by the workflow steps around this one')
+                       help='what this job cost, one JSON object per line, '
+                            'each appended by the workflow step that '
+                            'measured it')
     check.add_argument('--summary', action='store_true')
     return parser
+
+
+def _cost(path):
+    """What the workflow's own steps recorded, read as JSON lines.
+
+    One object per line because the steps that measure are not one step:
+    the valgrind install and the measurement each append what they timed,
+    and neither of them knows the other's keys.
+    """
+    cost = {}
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
+        if line.strip():
+            cost.update(json.loads(line))
+    return cost
 
 
 def _measurements(args):
@@ -366,9 +381,8 @@ def main(argv=None):
         report = _measurements(args)
 
         if args.seconds and Path(args.seconds).is_file():
-            journey_counters.write_summary(
-                journey_report.accounting_lines(report, json.loads(
-                    Path(args.seconds).read_text(encoding='utf-8'))))
+            journey_counters.write_summary(journey_report.accounting_lines(
+                report, _cost(args.seconds)))
 
         # Three states, not two. No identity recorded yet is not a change:
         # there is nothing to have changed from, and saying so is what tells
