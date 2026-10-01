@@ -155,22 +155,6 @@ def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
         assert 'coverage==' not in job, f'{name} duplicated the version pin'
 
 
-def test_the_speed_venvs_install_the_test_requirements(tmp):
-    """The timed cells' virtualenvs can run every suite the cell selects.
-
-    The coverage suites import `coverage`, which only requirements-test.txt
-    carries, and a venv built without it empties those suites rather than
-    failing them -- the shape the comparator's zero-suite guard exists for.
-    """
-    del tmp
-    workflow = _tests_yml()
-    _, marker, after = workflow.partition(
-        '- name: Build one virtualenv per side\n')
-    assert marker, 'the venv step is not named the way this test finds it'
-    step, _, _ = after.partition('- name:')
-    assert '-r "./${side}/requirements-test.txt"' in step, step
-
-
 def test_permission_whitespace_mutation_is_refused(tmp):
     del tmp
     workflow = _tests_yml()
@@ -210,46 +194,6 @@ def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
             '      pull-requests: write\n', 1)
         assert mutated != workflow, field
         _assert_permissions_mutation_refused(mutated)
-
-
-def test_a_step_that_pushes_to_main_is_gated_by_the_steps_before_it(
-        tmp):
-    """A status function in `if:` suppresses GitHub's implicit success().
-
-    `timed-timings.yml` runs the planner's and the refresher's suites in
-    a step named "Verify the change", and its own comment says why:
-    "a commit to main that no gate would have admitted is the one
-    outcome this workflow must not produce". The commit step's
-    condition named `!cancelled()`, which is a status function, and
-    GitHub applies `success()` to a step only when its condition names
-    no status function of its own -- so the guard was decoration. The
-    step it gates has since gained a suite of its own, and a red one
-    there would not have stopped the push.
-
-    The condition is therefore about the step and nothing else: the
-    download produced runs, the key is present, and every step above
-    succeeded. Nothing is lost by dropping `!cancelled()` -- a
-    cancelled job should not push a file its own measurement never
-    finished writing.
-    """
-    source = ROOT / '.github' / 'workflows' / 'timed-timings.yml'
-    section = '\n'.join(_job_section(
-        source.read_text(encoding='utf-8'), 'refresh'))
-    _seen, verify, after = section.partition('- name: Verify the change\n')
-    assert verify, 'the workflow has no "Verify the change" step'
-    _seen, commit, rest = after.partition('- name: Commit the refresh\n')
-    assert commit, 'the workflow has no "Commit the refresh" step'
-    found = re.search(r'^\s+if:\s*\$\{\{(.*?)\}\}', rest,
-                      re.S | re.M)
-    assert found, rest
-    condition = found.group(1)
-    for status in ('cancelled()', 'failure()', 'always()', 'success()'):
-        assert status not in condition, (status, condition)
-    assert "steps.download.outputs.count != '0'" in condition, condition
-    assert 'RATCHET_SSH_KEY' in condition, condition
-    # The gate this branch added runs in the step before the commit.
-    verify_block = after[:after.index('- name: Commit the refresh\n')]
-    assert 'test_timed_coverage.py' in verify_block, verify_block
 
 
 def test_permission_values_and_unknown_keys_fail_closed(tmp):
@@ -443,8 +387,8 @@ def test_a_release_waits_for_the_gates_on_its_own_commit(tmp):
     """Publication reads the other gates instead of racing them.
 
     v0.19.0 went public two seconds before `tests` concluded and nine minutes
-    before `speed` did: the tag started every workflow independently and the
-    release never looked at any of them.
+    before the slowest gate beside it: the tag started every workflow
+    independently and the release never looked at any of them.
 
     The property that makes the wait a gate rather than a pause is that ZERO
     runs is a failure. "Nothing is pending" is true of a commit whose gates

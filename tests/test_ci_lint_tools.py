@@ -73,10 +73,7 @@ LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 # reach is decided by a composite action or a container entry point has no
 # source in this repository to read. That bound is the walk's, stated here
 # where the table meets it.
-SUITE_DOORS = {
-    ('timed-timings.yml', 'refresh'):
-        'five suites are run by path rather than through a runner',
-}
+SUITE_DOORS: dict[tuple[str, str], str] = {}
 
 
 def test_every_spelling_of_an_absence_guard_is_read_as_one_operation(tmp):
@@ -274,8 +271,8 @@ def test_every_tool_the_installer_recorded_resolves_on_path(tmp):
 
     Gated on the variable the installer writes, so this reaches the `suites`,
     `coverage-matrix` and `publish` jobs in `tests.yml` and `release.yml`,
-    and the `timed` job in `tests.yml`, and nowhere else: those four are
-    the jobs whose steps run `python scripts/ci/install_lint_tools.py`.
+    and nowhere else: those three are the jobs whose steps run
+    `python scripts/ci/install_lint_tools.py`.
     Off a CI leg the installer has not run and there is no subject to
     check. A leg where it DID run and the binary is still missing fails
     below rather than skipping — the whole defect is a check that reported
