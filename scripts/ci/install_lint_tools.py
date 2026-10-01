@@ -178,8 +178,8 @@ def _worth_asking_again(why):
     """Whether a second ask could answer differently: a status of 500 or
     above is the server failing rather than answering, and a certificate
     that does not verify is the same failure in the handshake, which reaches
-    here wrapped in a URLError. There is no wait between attempts to turn an
-    answer into a different one.
+    here as a URLError's `reason`. There is no wait between attempts to turn
+    an answer into a different one.
     """
     # This test reads the HTTPError, whose `reason` is its status message
     # and not an exception; the one below reads `reason`. Swapped, the
