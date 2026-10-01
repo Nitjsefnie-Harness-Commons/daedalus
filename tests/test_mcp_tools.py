@@ -699,9 +699,8 @@ def test_a_program_handed_to_a_code_evaluating_builtin_is_refused(_tmp):
     silent.
     """
     for name in ('eval', 'exec', 'compile'):
-        _assert_scan_refusal(
-            _tmp, f'\n\ndef load(name):\n    return {name}("importlib")(name)\n',
-            4, 'code-evaluating')
+        program = f'\n\ndef load(x):\n    return {name}("importlib")(x)\n'
+        _assert_scan_refusal(_tmp, program, 4, 'code-evaluating')
     _composition_names(_tmp, {
         'composition.py': '\neval_tools = {"exec": print}\n'
                           'exec = eval_tools["exec"]\n'
