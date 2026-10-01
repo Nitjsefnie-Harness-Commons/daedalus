@@ -351,10 +351,11 @@ _MEASUREMENT_JOB, _ = _matrix_job_running(
 # `plan-matrix` is a gate like every other job here: a planner that cannot
 # plan turns this aggregate red, and `timed` — which names the aggregate and
 # the planner in `needs:` — is skipped rather than measuring a silently
-# shrunk matrix.
+# shrunk matrix. `journey-budget` joins them for the same reason: it is a
+# gate, and a gate the aggregate does not name gates nothing.
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
                   'actionlint', 'suites', 'wheel', 'coverage-matrix',
-                  'coverage', 'plan-matrix')
+                  'coverage', 'journey-budget', 'plan-matrix')
 CONDITION_CONTEXTS = (
     ({'success': True, 'failure': False, 'cancelled': False}, True),
     ({'success': False, 'failure': False, 'cancelled': False}, True),
