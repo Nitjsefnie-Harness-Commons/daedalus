@@ -172,15 +172,15 @@ def main() -> int:
         return 1
     counts = f"{len(suites)} suites, {passed} passed, {skipped} skipped"
     if unrun:
-        print("NOT RUN HERE: " + ", ".join(unrun))
+        print("NOT RUN HERE: " + ", ".join(unrun), flush=True)
     if empty:
         # Every test in these suites skipped, so nothing about them was
         # verified. Reporting that as a pass is the one thing the aggregate
         # line must never do: it is what a reader and CI both key on.
-        print("NO COVERAGE: " + ", ".join(empty))
-        print(f"OVERALL: INCOMPLETE ({counts})")
+        print("NO COVERAGE: " + ", ".join(empty), flush=True)
+        print(f"OVERALL: INCOMPLETE ({counts})", flush=True)
         return 1
-    print(f"OVERALL: PASS ({counts})")
+    print(f"OVERALL: PASS ({counts})", flush=True)
     return 0
 
 
