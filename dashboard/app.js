@@ -105,11 +105,10 @@ function wireRailHighlight() {
 
   // The observer delivers only the entries whose state changed, so the
   // set of sections in the band has to be carried across callbacks; its
-  // geometry is not. An entry's rect is the one from the frame that
-  // created it, and a section re-entering through the band's TOP edge
-  // records that edge minus its own HEIGHT -- a number about how tall it
-  // is, not where it sits -- so a sort over carried numbers orders the
-  // band by height instead of by position.
+  // geometry is not. An entry's rect is where the target stood at the
+  // frame that created it, and a section that entered the band long ago
+  // has not been mentioned since -- so two carried rects order the band
+  // by when each was last mentioned, not by where it sits now.
   const inBand = new Set();
 
   const io = new IntersectionObserver((entries) => {
