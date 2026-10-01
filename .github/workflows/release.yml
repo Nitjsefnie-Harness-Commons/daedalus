@@ -98,8 +98,8 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         # v0.19.0 went public two seconds before `tests` concluded and nine
-        # minutes before `speed` did, because a tag started every workflow
-        # independently and this one never read the others.
+        # minutes before the slowest gate beside it, because a tag started
+        # every workflow independently and this one never read the others.
         #
         # Every `push:` trigger is filtered to `branches: [main]`, so a tag
         # push now starts this workflow alone — the other gates ran when the
