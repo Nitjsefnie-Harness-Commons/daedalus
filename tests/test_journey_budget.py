@@ -55,13 +55,36 @@ def _budget_document(**overrides):
 
 # ─── the artefact ──────────────────────────────────────────────────────────
 
+def _line_endings(data):
+    """`data` with CRLF folded to LF, so a checkout's endings are not content.
+
+    The repository has no `.gitattributes`, so a Windows runner's
+    `core.autocrlf` hands this file over with CRLF while `render()` writes
+    LF, and a raw comparison would fail on the line endings alone. Folding
+    them leaves the invariant the test is for: the artefact's CONTENT is
+    what `render()` writes for it. A hand-edited or out-of-date file still
+    fails, because its content differs and its endings are not the thing
+    being compared.
+    """
+    return data.replace(b'\r\n', b'\n')
+
+
 def test_the_committed_artefact_is_the_canonical_rendering(tmp):
     del tmp
     policy = _policy()
     document = policy.load(ARTIFACT)
-    assert policy.render(document) == ARTIFACT.read_bytes(), (
+    canonical = policy.render(document)
+    committed = _line_endings(ARTIFACT.read_bytes())
+    assert canonical == committed, (
         'the committed artefact is not what render() writes for it, so the '
         'file is hand-edited or out of date')
+    # The control that keeps the folding above from making this vacuous: a
+    # CRLF checkout of the same content passes, and an edit to a count does
+    # not. Without both, "compare the folded bytes" could be satisfied by
+    # folding everything until nothing differed.
+    assert _line_endings(canonical.replace(b'\n', b'\r\n')) == canonical
+    assert _line_endings(committed.replace(b'"mcp-exec"', b'"mcp-exec "')) \
+        != canonical
 
 
 def test_the_artefact_names_exactly_the_journeys_that_exist(tmp):
