@@ -85,8 +85,11 @@ def _value_error(call):
     return None
 
 
+# Package-import entry points, and nothing else: a name earns a row by
+# selecting on `__package__` itself or by importing down such an arm, which
+# is what makes that arm reachable at all. A name that reaches nothing is a
+# dead row, and the derivation below cannot see one.
 PROMOTED_MODULES = (
-    'scripts.ci.compare_durations',
     'scripts.ci.coverage_suites',
     'scripts.ci.js_module_coverage',
     'scripts.ci.line_lengths',
