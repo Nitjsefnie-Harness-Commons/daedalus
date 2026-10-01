@@ -291,8 +291,17 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
     measurement = json.loads(measurements_file(
         Path(tmp) / 'counts.json', document).read_text('utf-8'))
     for lines in (summaries.probe_lines(probe()),
-                  summaries.summary_lines(measurement),
-                  summaries.rebaseline_lines(measurement),
+                  summaries.verdict_lines(
+                      document, {'command-round-trip': 4000,
+                                 'dashboard-fanout': 4000,
+                                 'mcp-exec': 4000},
+                      {'over': {'mcp-exec': (12000, 1100.0)},
+                       'unmeasured': {}}),
+                  summaries.verdict_lines(
+                      document, {'mcp-exec': 4000},
+                      {'over': {},
+                       'unmeasured': {'mcp-exec': 'perf-instructions'}}),
+                  summaries.rebaseline_lines(12345),
                   summaries.toolchain_lines(document, measurement, {},
                                             gate.TOOLCHAIN_REMEDY),
                   summaries.toolchain_lines(document, measurement,
@@ -300,11 +309,7 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
                                             gate.TOOLCHAIN_REMEDY),
                   summaries.toolchain_lines(document, measurement, {},
                                             gate.THREADS_REMEDY,
-                                            subject='excluded threads'),
-                  # `refusal_lines` renders the policy module's remedies,
-                  # so it lives there rather than beside the summaries.
-                  gate.refusal_lines({'over': {'a': (1, 2.0)},
-                                      'unmeasured': {'c': 'syscalls'}})):
+                                            subject='excluded threads')):
         assert lines, 'a block that renders to nothing is a block nobody reads'
         assert any(line.strip() for line in lines)
     # The two subjects must not be able to read the same: a summary that
