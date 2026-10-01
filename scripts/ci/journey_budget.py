@@ -455,21 +455,21 @@ def _recorded_outcome(args, document, report, changed, gate):
 
 
 def _report_state(document, names, counter, report):
-    """The two artefact states a check reports without refusing on them.
+    """A null `counter` or `tolerance_pct`, reported without a refusal.
 
-    A null `counter` and a null `tolerance_pct` both reach here, and the
-    run's exit then comes from the counts rather than from here: a null
-    counter leaves nothing measured, and a null tolerance leaves a budget
-    equal to the recorded count, so a movement in either direction shows in
-    the counts instead. Both were driven on the CLI, which is what refuted
-    the claim this replaces.
+    Both reach here, and the run's exit then comes from the counts rather
+    than from here: a null counter leaves nothing measured, and a null
+    tolerance leaves a budget equal to the recorded count, so a movement in
+    either direction shows in the counts instead. Both were driven on the
+    CLI, which is what refuted the claim this replaces.
     """
     if counter is None:
         print('the journey budget names no counter yet, so no count is '
               'compared')
     elif document.get('tolerance_pct') is None:
         print(f'the journey budget names {counter} but no tolerance yet, so '
-              'no count is compared')
+              'counts are compared against the recorded count itself, with '
+              'zero headroom')
     missing = unrecorded(document, names)
     if missing:
         print(f'unrecorded, reported and passing: {", ".join(missing)}')
