@@ -617,6 +617,36 @@ def test_a_call_site_bound_reports_its_own_stalled_child(tmp):
     assert caught.deadline_s == budget, caught.deadline_s
 
 
+def test_the_deadline_message_describes_the_ceiling_that_now_exists(_tmp):
+    """The text a maintainer reads when this failure fires must be true.
+
+    Issue #1204 turned the per-suite ceiling into a two-phase GROUP kill: the
+    request goes to the suite's whole process group, a bounded grace follows,
+    and the escalation to the group fires whatever happened in between. A
+    Node child this launcher started is inside that group, so it does NOT
+    survive the ceiling -- which is the opposite of what this message and
+    the `run_node_program` docstring both said, and both said it to exactly
+    the person diagnosing a failure.
+
+    The assertion READS the rendered message rather than grepping the file: a
+    grep cannot tell a message string from the comment above it, and the
+    distinction is the whole point -- one of the two sites is a string a
+    failing test prints into CI output.
+    """
+    import _noderun  # noqa: PLC0415 - one use, and a module under test
+
+    failure = _noderun.ChildDeadlineExceeded(
+        ['node', 'while (true) {}'], 30, 'partial stdout', 'partial stderr',
+        'process group 4242 asked to stop and the suite did')
+    rendered = str(failure)
+    assert 'suite ceiling' in rendered, rendered
+    assert 'whole process group' in rendered, rendered
+    for stale in ('leaves this child running', 'sends SIGTERM to the suite',
+                  'reparented'):
+        assert stale not in rendered, (
+            f'the deadline message still says {stale!r}: {rendered}')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='noderundeadline_')
