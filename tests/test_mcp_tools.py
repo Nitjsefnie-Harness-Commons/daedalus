@@ -507,7 +507,6 @@ def test_a_ping_that_does_not_wait_reports_its_command(_tmp):
     so the shape is pinned here too.
     """
     composition = _load_composition(_mcp_tool_commands.MARKER)
-    marker = _mcp_tool_commands.MARKER
     # The bridge answers with the QUEUE FILE's content, which is the
     # submitted body without the routing `tab` and with the bridge's own
     # stamp. A tool that rebuilt the command from what it sent would have
