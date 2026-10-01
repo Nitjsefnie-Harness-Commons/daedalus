@@ -214,6 +214,11 @@ def tightened(counts, document, names):
 # ─── the probe, as a step summary ──────────────────────────────────────────
 
 def probe_lines(found):
+    """The probe as a step summary, mirroring the JSON it printed.
+
+    The booleans are lowercased so a value a reader copies out of the
+    summary is the value the JSON carries, not Python's spelling of it.
+    """
     stat = found.get('perf_stat')
     lines = ['### Journey counter probe', '',
              'What this runner actually allows, measured rather than assumed.',
@@ -226,7 +231,8 @@ def probe_lines(found):
                      'is not on PATH')
     else:
         lines.append(f"- `perf stat -e {stat['event']} -- true`: returncode "
-                     f"`{stat['returncode']}`, counts: `{stat['counts']}`")
+                     f"`{stat['returncode']}`, counts: "
+                     f"`{str(stat['counts']).lower()}`")
         if stat['stderr']:
             lines += ['', '```', stat['stderr'], '```']
     lines += [f"- valgrind on PATH: `{found['valgrind_path']}`",
@@ -236,7 +242,7 @@ def probe_lines(found):
               f"- callgrind_control --version: "
               f"`{found['callgrind_control_version']}`",
               f"- callgrind_control usable: "
-              f"`{found['callgrind_control_usable']}`",
+              f"`{str(found['callgrind_control_usable']).lower()}`",
               f"- strace on PATH: `{found['strace_path']}`",
               f"- counter selected here: `{found['selected']}`", '']
     return lines
