@@ -9,8 +9,10 @@ The Bearer token is compared with the bridge token resolved by the CLI's
 existing configuration path before it enters the _token ContextVar and is
 forwarded to the local bridge. Missing configuration fails closed.
 """
+import asyncio
 import contextlib
-import os, socket, sys, threading
+import os, socket, sys, threading, time
+from email.utils import formatdate
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -155,9 +157,104 @@ _bound = threading.Event()
 WIN32 = sys.platform == 'win32'
 
 
+class _TickMiddleware:
+    """Runs the front end's per-request tick ahead of every HTTP request.
+
+    It has to stay inside the auth middleware: a request refused on its
+    Bearer token must not pay for a Date header nobody will read.
+    """
+
+    def __init__(self, app, holder):
+        self.app = app
+        self.holder = holder
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] == 'http':
+            await self.holder['server'].request_tick()
+        await self.app(scope, receive, send)
+
+
+def _idle_server_class():
+    """uvicorn.Server whose serve loop arms no timer while nothing is asked.
+
+    The stock loop wakes every 0.1 s for the life of the process and calls
+    on_tick on each wake. Nothing in daedalus_mcp arms that timer — it is
+    uvicorn's own cadence — and it measured at ~3M instructions a second on
+    an idle bridge (issue 1444). Here the loop waits on an Event that only
+    a request or a shutdown wakes, so the event loop stays in its poll.
+
+    The subclass is built here rather than at module scope because the
+    suites drive `_serve` with a fake `uvicorn` in sys.modules, and a class
+    defined at import time would bind the real one before they can.
+    """
+    import uvicorn
+
+    class IdleServer(uvicorn.Server):
+        # Server.__init__ assigns should_exit, so the setter's two members
+        # have to exist before it runs.
+        def __init__(self, config):
+            self._should_exit = False
+            self._wake = asyncio.Event()
+            self._counter = 0
+            super().__init__(config)
+
+        @property
+        def should_exit(self):
+            return self._should_exit
+
+        @should_exit.setter
+        def should_exit(self, value):
+            self._should_exit = value
+            self._wake.set()
+
+        async def main_loop(self):
+            # No timeout, deliberately: any timer here is the cost again.
+            # The clear drops the set() the constructor's assignment left.
+            self._wake.clear()
+            await self._wake.wait()
+
+        async def startup(self, sockets=None):
+            await super().startup(sockets=sockets)
+            # A request uvicorn refuses below ASGI — a malformed request
+            # line it answers itself — never reaches the middleware, so the
+            # headers it answers with are populated here.
+            self.refresh_default_headers()
+
+        def refresh_default_headers(self):
+            """Rebuild `default_headers` as uvicorn's once-a-second tick.
+
+            Written out rather than driven through on_tick, which refreshes
+            only on a counter divisible by ten and this must hold for
+            every request.
+            """
+            if self.config.date_header:
+                date_header = [
+                    (b'date', formatdate(time.time(), usegmt=True).encode())]
+            else:
+                date_header = []
+            self.server_state.default_headers = (
+                date_header + self.config.encoded_headers)
+
+        async def request_tick(self):
+            """The work uvicorn's on_tick did ten times a second.
+
+            Its counter advances once per request, so max-requests,
+            callback_notify and the exit decision all still happen — now on
+            the cadence the bridge is actually asked for.
+            """
+            self.refresh_default_headers()
+            self._counter += 1
+            self._counter %= 864000
+            if await self.on_tick(self._counter):
+                self.should_exit = True
+
+    return IdleServer
+
+
 def _serve():
     global bound_port, startup_error
     try:
+        holder = {}
         app = mcp.streamable_http_app(
             # SDK needs >0; auth enforces 0.
             max_request_body_size=max(MAX_BODY_SIZE, 1),
@@ -166,6 +263,9 @@ def _serve():
                 allowed_hosts=ALLOWED_HOSTS,
             ),
         )
+        app.add_middleware(_TickMiddleware, holder=holder)
+        # Added last, so Starlette's user_middleware list puts it on the
+        # outside of the tick: a refused request does no tick work.
         app.add_middleware(
             auth.BearerAuth,
             max_body_size=MAX_BODY_SIZE,
@@ -199,7 +299,9 @@ def _serve():
         bound_port = sock.getsockname()[1]
         _bound.set()
         print(f'[MCP] streamable-http on 127.0.0.1:{bound_port}', flush=True)
-        uvicorn.Server(config).run(sockets=[sock])
+        server = _idle_server_class()(config)
+        holder['server'] = server
+        server.run(sockets=[sock])
     except Exception as e:
         startup_error = f'[MCP] serve crashed: {log_safe(e)}'
         print(startup_error, file=sys.stderr, flush=True)
