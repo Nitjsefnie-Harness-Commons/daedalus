@@ -25,6 +25,63 @@ import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 
 
+# The prose each gate speaks when it refuses. These live here, beside the
+# module that renders a run's own words, and `journey_budget.py` binds them
+# back by name: the gates that print them and the renderer that shows them
+# are the same responsibility split the rest of this module already follows.
+# The command, not a pointer at where it is printed: these remedies are read
+# on stderr, where a `check` run without `--summary` has printed nothing at
+# all. Named here in full, so the sentence is true wherever it is read.
+REBASELINE_COMMAND = (
+    '`python3 scripts/ci/journey_budget.py rebaseline --measurements '
+    '<counts.json>` writes the whole artefact from one measurement: the '
+    'counts, their shas, the toolchain, the threads excluded and the bands '
+    'applied all from that same run, with the recorded tolerance left where '
+    'you put it.')
+OVER_REMEDY = (
+    'A journey over its budget is a regression in what a user waits for: '
+    'the recorded count is never raised by hand, and no entry is ever added '
+    'by hand. Find what the journey now does that it did not, and make it '
+    'not do it; if the journey genuinely costs more now, the measurement '
+    'this run took is uploaded as the `journey-counts` artifact and '
+    + REBASELINE_COMMAND + ' The commit it leaves is yours to review.')
+SHAPE_REMEDY = (
+    'Rounds of one measurement disagreed about what the journey looks like, '
+    'so their counts are not comparable and none of them is a baseline. The '
+    'rendering is in the journeys module; a field that legitimately varies '
+    'between runs belongs in its exclusion list, and anything else is a '
+    'shape change.')
+UNMEASURED_REMEDY = (
+    'The budget names a counter this runner produced no count in, so no '
+    'journey was compared and a green here would be a run that measured '
+    'nothing. The probe step says what this runner allows: `instructions:u` '
+    'needs less kernel access than an unqualified event, and callgrind is '
+    'the fallback when perf is refused.')
+TOOLCHAIN_REMEDY = (
+    'A recorded count is only comparable against a measurement taken on the '
+    'toolchain it was recorded on. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
+SHA_REMEDY = (
+    'A recorded count describes the journey that rendered when it was '
+    'recorded, so a journey that renders differently cannot be compared '
+    'against it. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
+BANDS_REMEDY = (
+    'The `Ir` band thresholds decide which thread a count excluded, so a '
+    'run whose bands differ from the recorded ones is measuring a different '
+    'quantity whatever it reads. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
+THREADS_REMEDY = (
+    'A recorded count is only comparable against a measurement that '
+    'excluded the same threads. Re-baseline from a measured run: '
+    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
+    'other change to the artefact.')
+REMEDY_FOR = {'over': OVER_REMEDY, 'unmeasured': UNMEASURED_REMEDY}
+
+
 def probe_lines(found):
     """The probe as a step summary, mirroring the JSON it printed.
 
@@ -98,6 +155,23 @@ def verdict_lines(document, counts, found):
         lines.append(f'| {name} | {measured} | {budget} | {sign}{delta:.0f} '
                      f'| {verdict} |')
     return lines
+
+
+def tighten_skipped_lines(subject):
+    """The one line a run that compared nothing leaves for a reader.
+
+    Not a pass: no count was measured against a recorded one, so nothing
+    was tightened and nothing was committed. A green journey-budget with no
+    commit is this case, and without it a reader has to infer it from the
+    absence of a diff.
+    """
+    return [f'**The {subject} moved, so no count was compared and nothing '
+            f'was tightened.**', '',
+            'The recorded baseline was measured against something this run '
+            'was not, so no journey was compared and no commit was made. '
+            'The `rebaseline` command above re-records the budget from a '
+            'measured run; until one is run, every run reports this and '
+            'the budget stays as it is.', '']
 
 
 def rebaseline_lines(run_id=None):

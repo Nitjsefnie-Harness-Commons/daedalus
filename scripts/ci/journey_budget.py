@@ -9,7 +9,10 @@ a new baseline family belongs to a shared owner this file does not edit.
 Nothing here raises a recorded number and nothing adds an entry:
 `--tighten` only follows a journey down, and only drops one the journey set
 no longer has. A run that found a journey over budget tightens nothing at
-all, so the one thing CI can do to the file is make it smaller.
+all, and so does a run where no count was compared at all — a recorded gate
+that moved, most often the runner image the toolchain records. Neither is a
+regression, so neither is a red: the one thing CI can do to the file is make
+it smaller, and a run that made nothing smaller says so rather than failing.
 
   python3 scripts/ci/journey_budget.py probe
   python3 scripts/ci/journey_budget.py measure --rounds 1 --out counts.json
@@ -76,57 +79,16 @@ sha_diff = journey_artifact.sha_diff
 # pylint: disable-next=protected-access
 _validated = journey_artifact._validated  # noqa: SLF001
 
-# The command, not a pointer at where it is printed: these remedies are read
-# on stderr, where a `check` run without `--summary` has printed nothing at
-# all. Named here in full, so the sentence is true wherever it is read.
-REBASELINE_COMMAND = (
-    '`python3 scripts/ci/journey_budget.py rebaseline --measurements '
-    '<counts.json>` writes the whole artefact from one measurement: the '
-    'counts, their shas, the toolchain, the threads excluded and the bands '
-    'applied all from that same run, with the recorded tolerance left where '
-    'you put it.')
-OVER_REMEDY = (
-    'A journey over its budget is a regression in what a user waits for: '
-    'the recorded count is never raised by hand, and no entry is ever added '
-    'by hand. Find what the journey now does that it did not, and make it '
-    'not do it; if the journey genuinely costs more now, the measurement '
-    'this run took is uploaded as the `journey-counts` artifact and '
-    + REBASELINE_COMMAND + ' The commit it leaves is yours to review.')
-SHAPE_REMEDY = (
-    'Rounds of one measurement disagreed about what the journey looks like, '
-    'so their counts are not comparable and none of them is a baseline. The '
-    'rendering is in the journeys module; a field that legitimately varies '
-    'between runs belongs in its exclusion list, and anything else is a '
-    'shape change.')
-UNMEASURED_REMEDY = (
-    'The budget names a counter this runner produced no count in, so no '
-    'journey was compared and a green here would be a run that measured '
-    'nothing. The probe step says what this runner allows: `instructions:u` '
-    'needs less kernel access than an unqualified event, and callgrind is '
-    'the fallback when perf is refused.')
-TOOLCHAIN_REMEDY = (
-    'A recorded count is only comparable against a measurement taken on the '
-    'toolchain it was recorded on. Re-baseline from a measured run: '
-    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
-    'other change to the artefact.')
-SHA_REMEDY = (
-    'A recorded count describes the journey that rendered when it was '
-    'recorded, so a journey that renders differently cannot be compared '
-    'against it. Re-baseline from a measured run: '
-    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
-    'other change to the artefact.')
-BANDS_REMEDY = (
-    'The `Ir` band thresholds decide which thread a count excluded, so a '
-    'run whose bands differ from the recorded ones is measuring a different '
-    'quantity whatever it reads. Re-baseline from a measured run: '
-    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
-    'other change to the artefact.')
-THREADS_REMEDY = (
-    'A recorded count is only comparable against a measurement that '
-    'excluded the same threads. Re-baseline from a measured run: '
-    + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
-    'other change to the artefact.')
-REMEDY_FOR = {'over': OVER_REMEDY, 'unmeasured': UNMEASURED_REMEDY}
+# What each gate says when it refuses lives in the module that renders a
+# run's prose, bound back here because the gates below are what print it.
+OVER_REMEDY = journey_report.OVER_REMEDY
+SHAPE_REMEDY = journey_report.SHAPE_REMEDY
+UNMEASURED_REMEDY = journey_report.UNMEASURED_REMEDY
+TOOLCHAIN_REMEDY = journey_report.TOOLCHAIN_REMEDY
+SHA_REMEDY = journey_report.SHA_REMEDY
+BANDS_REMEDY = journey_report.BANDS_REMEDY
+THREADS_REMEDY = journey_report.THREADS_REMEDY
+REMEDY_FOR = journey_report.REMEDY_FOR
 
 
 def journey_names():
@@ -366,8 +328,16 @@ def main(argv=None):
             print(f'{len(names)} journeys measured against '
                   f'{counter or "no counter"}; none over budget')
             return 0
-        if found['over'] and args.summary:
-            journey_counters.write_summary(journey_report.rebaseline_lines())
+        if args.summary:
+            # Each kind's remedy reaches the summary beside the row that
+            # reports it; stderr is collapsed by default, and the summary
+            # is the only place a reader of an unmeasured journey can act
+            # from.
+            if found['unmeasured']:
+                journey_counters.write_summary([UNMEASURED_REMEDY])
+            if found['over']:
+                journey_counters.write_summary(
+                    journey_report.rebaseline_lines())
         for kind, detail in found.items():
             if detail:
                 print(f'{kind}: {detail}', file=sys.stderr)
@@ -432,9 +402,12 @@ def _recorded_outcome(args, document, report, changed, gate):
     Success, because the tree did not regress — but both outputs say in
     those words that no count was compared, so a green here can never be
     read as a journey having been measured and found within budget. A
-    tighten refuses instead: a count taken against something the recorded
-    baseline was not measured against is not a cheaper journey, and writing
-    it would corrupt the baseline this whole check exists to keep honest.
+    tighten takes the SAME answer and writes nothing: what it refuses is
+    the write, and a count measured against something the recorded
+    baseline was not measured against is not a cheaper journey. Both paths
+    compare no count and write nothing, so a tighten exits 0 here too —
+    agreeing with the check rather than reds a required context on a push
+    to main where nothing regressed.
 
     The subject names the cause in the LOG as well as in the summary, and
     the remedy follows it. A green that compared nothing is exactly the case
@@ -454,10 +427,16 @@ def _recorded_outcome(args, document, report, changed, gate):
                 document, report, {}, remedy, subject=subject))
         return 1
     if args.tighten:
-        print(f'{subject} changed, re-baseline: a count measured against a '
+        print(f'{subject} changed, re-baseline: no count was compared and '
+              f'nothing was tightened, because a count measured against a '
               f'different {subject} is not a cheaper journey', file=sys.stderr)
         print(remedy, file=sys.stderr)
-        return 1
+        if args.summary:
+            journey_counters.write_summary(journey_report.toolchain_lines(
+                document, report, changed, remedy, subject=subject))
+            journey_counters.write_summary(
+                journey_report.tighten_skipped_lines(subject))
+        return 0
     if args.summary:
         journey_counters.write_summary(journey_report.toolchain_lines(
             document, report, changed, remedy, subject=subject))
