@@ -190,6 +190,11 @@ def _remove_entry(entry, restored=None):
     """
     try:
         shutil.rmtree(entry)
+    except FileNotFoundError:
+        # The post-condition is that the entry is gone, and one already
+        # gone satisfies it: the race between the caller's check and
+        # this call. Refusing here would assert a copy that is not there.
+        return 0
     except OSError as why:
         done = f'{restored} was restored and ' if restored else ''
         return _refuse(f'{done}the stored copy at {entry} could not be '
@@ -263,11 +268,12 @@ def restore(path, store):
         return _refuse(f'cannot restore {path}: {why}; the stored copy is '
                        f'still at {entry}')
     # Past here the bytes are published, so no refusal may read as a
-    # restore that did not happen. No arrangement in any suite reaches
-    # this chmod arm, which catches `OSError` as a class: what fails a
-    # chmod on a target this process just created is a property of the
-    # filesystem or the platform, so a control built on one would SKIP
-    # everywhere else rather than test anything.
+    # restore that did not happen. The chmod must land before the entry
+    # goes: the entry carries the recorded mode. Neither this `OSError`
+    # arm nor that order is reachable by any in-suite arrangement -
+    # chmod fails here on a property of the filesystem or the platform,
+    # not of the file's mode. Whether the chmod ran is the control in
+    # `tests/test_plant_restore.py`.
     try:
         os.chmod(path, mode)
     except OSError as why:

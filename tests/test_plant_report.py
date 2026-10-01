@@ -216,10 +216,7 @@ def _restore_over_a_target_nothing_can_read(target, store):
             _util.skip(f'cannot hand the tree to a plain user: {why!r}')
     target.chmod(0o200)
     _assert_the_read_is_refused(target, dropped)
-    if dropped:
-        return _as_nobody([sys.executable, str(PLANT), 'restore',
-                           str(target), '--store', str(store)])
-    return _run_plant('restore', str(target), '--store', str(store))
+    return _plant('restore', target, store, dropped)
 
 
 def test_a_target_nothing_can_read_is_reported_as_uncompared(tmp):
