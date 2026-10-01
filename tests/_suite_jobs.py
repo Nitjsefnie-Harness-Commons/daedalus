@@ -20,12 +20,12 @@ written down whatever the runner is called.
 
 Two bounds, and they are bounds on the WALK rather than on this control's
 reach. A step that merely NAMES a runner reaches the tree here even where
-it runs nothing — `time_tests.py --help` is a step that reaches the suite
-tree and not one that runs a suite — because the alternative is encoding
-which invocations of which runners do what, which is the basename
-fingerprint this module exists to refuse. And a step running a tracked
-file the walk cannot read — a shell wrapper — reaches nothing here, which
-would drop its job out of the door set in silence. That second one is
+it runs nothing — a `--help` probe is a step that reaches the suite tree
+and not one that runs a suite — because the alternative is encoding which
+invocations of which runners do what, which is the basename fingerprint
+this module exists to refuse. And a step running a tracked file the walk
+cannot read — a shell wrapper — reaches nothing here, which would drop its
+job out of the door set in silence. That second one is
 surfaced rather than fixed: `_unclassifiable_steps` names every step in it,
 `tests/test_ci_tool_declarations.py` holds that set to files no
 interpreter can execute, and the walk still reads no shell. What that
@@ -134,11 +134,11 @@ def _tracked(token):
     """The repository file a step's own token names, or None.
 
     A path is tried as written and then with leading components dropped,
-    because the `timed` job checks its two trees out as `base/` and `head/`
-    and names `head/scripts/ci/time_tests.py` — the same tracked file, under
-    a directory that exists only on the runner. Dropping components stops
-    at the first tracked file, so `tests/test_x.py` never resolves to the
-    repository's top-level `test_x.py`.
+    because a job may check its tree out under a prefix and name the file
+    through it — the same tracked file, under a directory that exists only
+    on the runner. Dropping components stops at the first tracked file, so
+    `tests/test_x.py` never resolves to the repository's top-level
+    `test_x.py`.
     """
     parts = [part for part in token.lstrip('./').split('/') if part]
     while parts:
