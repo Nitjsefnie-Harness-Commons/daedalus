@@ -571,6 +571,7 @@
     "_load": {"python": ["tests/_upload_fixture.py"]},
     "_load_answers": {"python": ["tests/_fake_gh.py"]},
     "_load_composition": {"python": ["tests/_mcp_tools_helpers.py"]},
+    "_load_front_end": {"python": ["tests/_journeys.py"]},
     "_load_mcp": {"python": ["tests/_mcp_load.py"]},
     "_load_mcp_at_port": {"python": ["tests/_mcp_load.py"]},
     "_load_queue": {"python": ["tests/_command_candidates.py"]},

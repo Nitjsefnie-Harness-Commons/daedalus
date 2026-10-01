@@ -42,6 +42,7 @@ from pathlib import Path
 # `python3 -m scripts.ci.journey_budget` all do. A relative import would
 # only work for the last of the three.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 import journey_report  # noqa: E402  pylint: disable=wrong-import-position
 
@@ -50,11 +51,24 @@ ARTIFACT = ROOT / '.github' / 'journey-budget.json'
 JOURNEYS = journey_counters.JOURNEYS
 ROUNDS_DEFAULT = journey_counters.ROUNDS_DEFAULT
 # `counter` may only name a candidate the counters module will gate on. A
-# counter it merely reports — the syscall secondary signal — is refused here
-# by name, so a recorded count can never be denominated in a quantity the
-# gate does not defend.
-COUNTERS = journey_counters.GATE_CANDIDATES
-_SCHEMA_VERSION = 1
+# counter it merely reports — the syscall secondary signal — is
+# refused here by name, so a recorded count can never be
+# denominated in a quantity the gate does not defend.
+COUNTERS = journey_artifact.COUNTERS
+
+# The document shape lives in its own module, off this one's ceiling, and is
+# re-exported here so every caller of `journey_budget.load` / `.render` keeps
+# the spelling it had.
+load = journey_artifact.load
+render = journey_artifact.render
+recorded_toolchain = journey_artifact.recorded_toolchain
+recorded_exclusions = journey_artifact.recorded_exclusions
+exclusion_diff = journey_artifact.exclusion_diff
+# `_validated` keeps its underscore because the suites that drive the
+# schema call it by that name; it is the artefact's own predicate and is
+# re-exported unchanged.
+# pylint: disable-next=protected-access
+_validated = journey_artifact._validated  # noqa: SLF001
 
 OVER_REMEDY = (
     'A journey over its budget is a regression in what a user waits for: '
@@ -79,6 +93,12 @@ TOOLCHAIN_REMEDY = (
     're-baseline block in the step summary carries the counts, their '
     'spread, and the identity they were taken on, and nothing in CI writes '
     'the artefact.')
+THREADS_REMEDY = (
+    'A recorded count is only comparable against a measurement that '
+    'excluded the same threads. Re-baseline from a measured run: the '
+    're-baseline block in the step summary carries the counts, their '
+    'spread, the threads this run excluded, and the identity they were '
+    'taken on, and nothing in CI writes the artefact.')
 REMEDY_FOR = {'over': OVER_REMEDY, 'shape': SHAPE_REMEDY,
               'unmeasured': UNMEASURED_REMEDY}
 
@@ -89,100 +109,6 @@ def journey_names():
 
 
 # ─── the committed artefact ────────────────────────────────────────────────
-
-def _validated(value):
-    if not isinstance(value, dict):
-        raise ValueError('the journey budget must be an object')
-    unknown = sorted(set(value) - {'schema_version', 'counter',
-                                   'tolerance_pct', 'toolchain',
-                                   'journeys'})
-    if unknown:
-        raise ValueError(f'unknown field: {unknown[0]}')
-    if value.get('schema_version') != _SCHEMA_VERSION:
-        raise ValueError(
-            f'unsupported schema_version: {value.get("schema_version")}')
-    counter = value.get('counter')
-    if counter is not None and counter not in COUNTERS:
-        raise ValueError(f'unknown counter: {counter}')
-    tolerance = value.get('tolerance_pct')
-    if tolerance is not None and (not isinstance(tolerance, (int, float))
-                                  or isinstance(tolerance, bool)
-                                  or tolerance < 0):
-        raise ValueError('tolerance_pct must be a nonnegative number: '
-                         f'{tolerance}')
-    toolchain = value.get('toolchain')
-    if toolchain is not None and not isinstance(toolchain, dict):
-        raise ValueError('toolchain must be an object')
-    for field, seen in (toolchain or {}).items():
-        if field not in journey_counters.TOOLCHAIN_FIELDS:
-            raise ValueError(f'unknown toolchain field: {field}')
-        # A blank identity compares unequal to every measured value, so a
-        # toolchain that moved on it would read as a match.
-        if seen is not None and (not isinstance(seen, str)
-                                 or not seen.strip()):
-            raise ValueError('a toolchain identity is a non-empty string or '
-                             f'null: {field}')
-    journeys = value.get('journeys')
-    if not isinstance(journeys, dict):
-        raise ValueError('journeys must be an object')
-    for name, recorded in journeys.items():
-        if recorded is None:
-            continue
-        if not isinstance(recorded, int) or isinstance(recorded, bool) \
-                or recorded < 0:
-            raise ValueError(
-                f'a recorded count must be a nonnegative integer: {name}')
-    return value
-
-
-def load(path=ARTIFACT):
-    target = Path(path)
-    try:
-        raw = target.read_bytes()
-    except OSError as error:
-        raise ValueError(
-            f'cannot read the journey budget: {error}') from None
-    try:
-        value = json.loads(raw.decode('utf-8'))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(f'invalid journey budget JSON: {error}') from None
-    return _validated(value)
-
-
-def render(document):
-    """The canonical bytes: one journey per line, so a diff reads as a set."""
-    _validated(document)
-    body = ',\n'.join(
-        f'    {json.dumps(name)}: {json.dumps(document["journeys"][name])}'
-        for name in sorted(document['journeys']))
-    identity = recorded_toolchain(document) or {}
-    toolchain = ',\n'.join(
-        f'    {json.dumps(field)}: {json.dumps(identity.get(field))}'
-        for field in journey_counters.TOOLCHAIN_FIELDS)
-    return ('{\n'
-            f'  "schema_version": {document["schema_version"]},\n'
-            f'  "counter": {json.dumps(document.get("counter"))},\n'
-            f'  "tolerance_pct": {json.dumps(document.get("tolerance_pct"))},'
-            '\n'
-            '  "toolchain": {\n'
-            f'{toolchain}\n'
-            '  },\n'
-            '  "journeys": {\n'
-            f'{body}\n'
-            '  }\n'
-            '}\n').encode('utf-8')
-
-
-def recorded_toolchain(document):
-    """The recorded identity, or None while no field of it is recorded.
-
-    Every field null is the state before the first baseline, and it is
-    reported rather than compared: there is nothing yet to say the
-    toolchain still matches.
-    """
-    recorded = document.get('toolchain') or {}
-    return recorded if any(recorded.values()) else None
-
 
 def toolchain_diff(recorded, measured):
     """Every identity field the recorded and measured toolchains differ on.
@@ -400,6 +326,20 @@ def main(argv=None):
             journey_counters.write_summary(journey_report.toolchain_lines(
                 document, report, {}, TOOLCHAIN_REMEDY))
 
+        # The same second gate, on the same terms: a count measured with a
+        # different set of threads excluded is a different quantity, and
+        # naming which journey lost which role is the whole of the report.
+        threads = recorded_exclusions(document)
+        if threads is not None:
+            moved = exclusion_diff(threads, report.get('excluded_threads'))
+            if moved:
+                return _toolchain_outcome(args, document, report, moved,
+                                          THREADS_REMEDY, 'excluded threads')
+        elif args.summary:
+            journey_counters.write_summary(journey_report.toolchain_lines(
+                document, report, {}, THREADS_REMEDY,
+                subject='excluded threads'))
+
         counts = (journey_counters.counts_of(report, counter)
                   if counter else {})
         found = violations(counts, report.get('shas') or {}, document, names)
@@ -438,7 +378,8 @@ def main(argv=None):
         return 1
 
 
-def _toolchain_outcome(args, document, report, changed):
+def _toolchain_outcome(args, document, report, changed,
+                       remedy=TOOLCHAIN_REMEDY, subject='toolchain'):
     """A toolchain difference, which is not a regression and not a pass.
 
     Success, because the tree did not regress — but the summary says in
@@ -479,6 +420,9 @@ def _report_state(document, names, counter, report):
     if recorded_toolchain(document) is None:
         print('the journey budget records no toolchain yet, so this run has '
               'no recorded identity to be compared against')
+    if recorded_exclusions(document) is None:
+        print('the journey budget records no excluded threads yet, so this '
+              'run has no recorded set of threads to be compared against')
     if counter is None:
         print('the journey budget names no counter yet, so no count is '
               'compared')
