@@ -47,12 +47,6 @@ def probe_lines(found):
             lines += ['', '```', stat['stderr'], '```']
     lines += [f"- valgrind on PATH: `{found['valgrind_path']}`",
               f"- valgrind --version: `{found['valgrind_version']}`",
-              f"- callgrind_control on PATH: "
-              f"`{found['callgrind_control_path']}`",
-              f"- callgrind_control --version: "
-              f"`{found['callgrind_control_version']}`",
-              f"- callgrind_control usable: "
-              f"`{str(found['callgrind_control_usable']).lower()}`",
               f"- strace on PATH: `{found['strace_path']}`",
               f"- counter selected here: `{found['selected']}`", '']
     return lines
@@ -119,36 +113,6 @@ def rebaseline_lines(report, document=None):
             '```json',
             json.dumps(block, indent=2, sort_keys=True),
             '```', '']
-
-
-def _seconds(value):
-    return 'not recorded' if value is None else f'{value:.1f}s'
-
-
-def accounting_lines(report, cost=None):
-    """What this job cost on this runner, measured rather than estimated.
-
-    Accounting only. Nothing here is bounded or asserted, because a
-    wall-clock margin is a quantity this repository refuses to assert and
-    a number measured off any other machine is not this job's.
-    """
-    cost = cost or {}
-    lines = ['### Journey budget cost', '',
-             'What the measurement cost on the runner that produced it. '
-             'Accounting, not a gate: none of these numbers is bounded or '
-             'asserted anywhere.', '',
-             f"- valgrind install step: {_seconds(cost.get('install'))}",
-             f"- valgrind installed files: "
-             f"{cost.get('installed_kib') or 'not recorded'} KiB",
-             f"- measure step: {_seconds(cost.get('measure'))}", '',
-             '| journey | counter | seconds |', '|---|---|---|']
-    for counter in journey_counters.COUNTERS:
-        entry = report.get('counters', {}).get(counter) or {}
-        for name, row in sorted((entry.get('journeys') or {}).items()):
-            lines.append(f"| {name} | {counter} | "
-                         f"{row.get('seconds')} |")
-    lines.append('')
-    return lines
 
 
 def toolchain_lines(document, report, changed, remedy,

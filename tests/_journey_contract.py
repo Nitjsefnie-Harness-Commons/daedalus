@@ -49,6 +49,12 @@ def counters():
     return _util.load(source, 'journey_counters_contract')
 
 
+def artifact():
+    """The artefact's document module, loaded the way the others are."""
+    source = ROOT / 'scripts' / 'ci' / 'journey_artifact.py'
+    return _util.load(source, 'journey_artifact_contract')
+
+
 def summaries():
     """The step-summary module, loaded the way the policy module loads it.
 
@@ -99,8 +105,11 @@ def line_endings(data):
 def measurements_file(path, document, **over):
     """A measurements file whose report carries the document's identity."""
     names = journeys().NAMES
-    report = {'rounds': 1, 'python': sys.version, 'shas': {},
+    report = {'rounds': 1, 'python': sys.version, 'shas': fixture_shas(),
               'toolchain': dict(over.get('toolchain', IDENTITY)),
+              'excluded_threads': {name: list(threads().excluded_for(name))
+                                   for name in names},
+              'thread_bands': dict(threads().BANDS),
               'counters': {'perf-instructions': {
                   'available': True, 'startup_only': 0,
                   'journeys': {name: {'min': 5000, 'max': 5000,
@@ -111,6 +120,72 @@ def measurements_file(path, document, **over):
     return path
 
 
+def fixture_shas():
+    """One sha per journey: the shape a real measurement reports.
+
+    A content hash of the journey's NAME, which is as good as any other for a
+    test: what is under test is that a recorded sha is compared and that a
+    differing one refuses, not which bytes hash to which digest. A LIST,
+    because a measurement carries one per round and the shape check reads
+    them across rounds.
+    """
+    import hashlib
+    return {name: [hashlib.sha256(name.encode('utf-8')).hexdigest()]
+            for name in journeys().NAMES}
+
+
+def recorded_document(**over):
+    """A budget whose four recorded maps all MATCH a fixture measurement.
+
+    A check that compares anything needs all four recorded, because an
+    un-recorded one is a refusal — which is the point of recording them. So
+    the document a comparison hands the gate is built here rather than
+    spelled out per test, or a test that means to exercise the budget would
+    silently be exercising the refusal.
+    """
+    policy = threads()
+    document = budget_document(
+        toolchain=dict(IDENTITY),
+        excluded_threads={name: list(policy.excluded_for(name))
+                          for name in journeys().NAMES},
+        thread_bands=dict(policy.BANDS),
+        shas={name: seen[0]
+              for name, seen in fixture_shas().items()})
+    document.update(over)
+    return document
+
+
+def recorded_maps():
+    """The four maps a measurement carries so a comparison can happen.
+
+    A check refuses on any of them being un-recorded, so a test that means to
+    exercise the BUDGET rather than the refusal has to hand the gate a
+    measurement that says all four.
+    """
+    policy = threads()
+    return {'shas': fixture_shas(),
+            'toolchain': dict(IDENTITY),
+            'excluded_threads': {name: list(policy.excluded_for(name))
+                                 for name in journeys().NAMES},
+            'thread_bands': dict(policy.BANDS)}
+
+
+def _report_file(tmp, toolchain_over, maps):
+    """A measurements file whose report carries `maps` over a valid identity.
+
+    The first argument overrides the identity so a test can hand the gate a
+    measurement taken somewhere else; the second is the four recorded maps
+    the report should carry, verbatim.
+    """
+    report = {'rounds': 1, 'python': sys.version, 'counters': {}}
+    report.update(maps)
+    for field, value in toolchain_over.items():
+        report[field] = value
+    target = Path(tmp) / f'counts-{len(list(Path(tmp).glob("counts*")))}.json'
+    target.write_text(json.dumps(report), encoding='utf-8')
+    return target
+
+
 def probe():
     return {'python': '3.13.0 (main)', 'perf_event_paranoid': 4,
             'perf_path': '/usr/bin/perf',
@@ -118,9 +193,7 @@ def probe():
                           'counts': True, 'stderr': ''},
             'valgrind_path': '/usr/bin/valgrind',
             'valgrind_version': 'valgrind-3.22',
-            'callgrind_control_path': None, 'strace_path': '/usr/bin/strace',
-            'strace_usable': True, 'callgrind_control_version': None,
-            'callgrind_control_usable': False,
+            'strace_path': '/usr/bin/strace', 'strace_usable': True,
             'selected': 'perf-instructions'}
 
 

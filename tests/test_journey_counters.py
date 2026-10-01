@@ -71,10 +71,8 @@ def test_the_identity_is_what_the_runner_reports_about_itself(tmp):
     counters = _journey_contract.counters()
     found = {'python': '3.13.0 (main)', 'valgrind_version': 'valgrind-3.22',
              'perf_event_paranoid': 4, 'perf_path': None, 'perf_stat': None,
-             'valgrind_path': None, 'callgrind_control_path': None,
-             'strace_path': None, 'strace_usable': False,
-             'callgrind_control_version': None,
-             'callgrind_control_usable': False}
+             'valgrind_path': None, 'strace_path': None,
+             'strace_usable': False}
     saved = {name: os.environ.get(name)
              for name in ('ImageOS', 'ImageVersion')}
     try:
@@ -295,9 +293,6 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
     for lines in (summaries.probe_lines(probe()),
                   summaries.summary_lines(measurement),
                   summaries.rebaseline_lines(measurement),
-                  summaries.accounting_lines(measurement, {}),
-                  summaries.accounting_lines(measurement, {'install': 3,
-                                                           'measure': 5}),
                   summaries.toolchain_lines(document, measurement, {},
                                             gate.TOOLCHAIN_REMEDY),
                   summaries.toolchain_lines(document, measurement,

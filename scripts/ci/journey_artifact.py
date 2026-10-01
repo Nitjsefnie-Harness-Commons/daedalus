@@ -25,7 +25,12 @@ ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT = ROOT / '.github' / 'journey-budget.json'
 
 FIELDS = ('schema_version', 'counter', 'tolerance_pct', 'toolchain',
-          'excluded_threads', 'journeys')
+          'excluded_threads', 'thread_bands', 'shas', 'journeys')
+
+# A sha is a content hash, not a magnitude: it says what a journey RENDERED,
+# not how much it cost, so it is comparable across machines and across
+# toolchains, and a run's own value is the value to record.
+SHA_HEX = 64
 
 
 def _validated(value):
@@ -62,6 +67,8 @@ def _validated(value):
     if not isinstance(journeys, dict):
         raise ValueError('journeys must be an object')
     _validated_exclusions(value.get('excluded_threads'), journeys)
+    _validated_bands(value.get('thread_bands'))
+    _validated_shas(value.get('shas'), journeys)
     for name, recorded in journeys.items():
         if recorded is None:
             continue
@@ -111,6 +118,57 @@ def _validated_exclusions(value, journeys):
     return value
 
 
+def _validated_bands(value):
+    """The `Ir` thresholds that decide which thread a profile's thread is.
+
+    `excluded_threads` records the ROLES a journey leaves out, and the
+    comparison checks the same table the measurement used — so the NAMES are
+    guarded while the numbers that put a thread in a role are guarded
+    nowhere. Moving one threshold down a decade changes which thread a count
+    excluded, and nothing would notice. So the bands are recorded beside the
+    roles and compared on the same terms.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError('thread_bands must be an object')
+    for role, threshold in value.items():
+        if role not in journey_threads.BANDS:
+            raise ValueError(f'unknown thread band: {role}')
+        if not isinstance(threshold, int) or isinstance(threshold, bool) \
+                or threshold <= 0:
+            raise ValueError(
+                f'a thread band must be a positive integer: {role} = '
+                f'{threshold}')
+    return value
+
+
+def _validated_shas(value, journeys):
+    """The sha256 each journey's rendering had when its count was recorded.
+
+    A recorded count is a statement about a journey, and a journey that
+    renders differently is a different journey: without this the only sha
+    comparison is across the rounds of ONE measurement, which at one round
+    can never fire, and a changed rendering would be compared against the
+    old counts and read as a regression or a saving.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError('shas must be an object')
+    for name, seen in value.items():
+        if name not in journeys:
+            raise ValueError(f'shas names a journey with no count: {name}')
+        if not isinstance(seen, str) or not seen.strip():
+            raise ValueError(f'a recorded sha is a non-empty string: {name}')
+        if len(seen.strip()) != SHA_HEX or \
+                any(character not in '0123456789abcdef' for character in seen):
+            raise ValueError(
+                f'a recorded sha is {SHA_HEX} lowercase hex characters: '
+                f'{name} = {seen!r}')
+    return value
+
+
 def load(path=ARTIFACT):
     target = Path(path)
     try:
@@ -135,15 +193,17 @@ def render(document):
     toolchain = ',\n'.join(
         f'    {json.dumps(field)}: {json.dumps(identity.get(field))}'
         for field in journey_counters.TOOLCHAIN_FIELDS)
-    # Absent stays absent: a rendering that invented the block would fail
+    # Absent stays absent: a rendering that invented a block would fail
     # the canonical-rendering control for every artefact recorded before it.
-    exclusions = ''
-    if document.get('excluded_threads') is not None:
-        recorded = document['excluded_threads']
+    blocks = ''
+    for field in ('excluded_threads', 'thread_bands', 'shas'):
+        if document.get(field) is None:
+            continue
         rows = ',\n'.join(
-            f'    {json.dumps(name)}: {json.dumps(recorded[name])}'
-            for name in sorted(recorded))
-        exclusions = '  "excluded_threads": {\n' + rows + '\n  },\n'
+            f'    {json.dumps(name)}: {json.dumps(document[field][name])}'
+            for name in sorted(document[field]))
+        blocks += (f'  {json.dumps(field)}: {{\n' + rows
+                   + '\n  },\n')
     return ('{\n'
             f'  "schema_version": {document["schema_version"]},\n'
             f'  "counter": {json.dumps(document.get("counter"))},\n'
@@ -152,7 +212,7 @@ def render(document):
             '  "toolchain": {\n'
             f'{toolchain}\n'
             '  },\n'
-            f'{exclusions}'
+            f'{blocks}'
             '  "journeys": {\n'
             f'{body}\n'
             '  }\n'
@@ -173,6 +233,52 @@ def recorded_toolchain(document):
 def recorded_exclusions(document):
     """The recorded per-journey roles, or None before anything is recorded."""
     return document.get('excluded_threads')
+
+
+def recorded_bands(document):
+    """The recorded `Ir` band thresholds, or None before any are."""
+    return document.get('thread_bands')
+
+
+def recorded_shas(document):
+    """The recorded per-journey shas, or None before any are."""
+    return document.get('shas')
+
+
+def sha_diff(recorded, measured):
+    """Every journey whose recorded sha this measurement does not carry.
+
+    The measured side is ONE SHA PER ROUND and the recorded side is the one
+    the counts were taken on, so what is compared is the value the rounds
+    agree on. A measurement whose rounds disagree is refused here as well
+    rather than compared against whichever of them a set happened to pick —
+    and both states are one line, because a sha is a content hash and
+    nothing about it is a magnitude.
+    """
+    recorded = recorded or {}
+    measured = measured or {}
+    differs = {}
+    for name in sorted(set(recorded) | set(measured)):
+        seen = measured.get(name) or []
+        agreed = set(seen if isinstance(seen, list) else [seen])
+        if agreed != {recorded.get(name)}:
+            differs[name] = (recorded.get(name), sorted(agreed))
+    return differs
+
+
+def map_diff(recorded, measured):
+    """Every key whose recorded and measured value differ, both ways.
+
+    A count measured against a different map is a different quantity, so
+    this is a refusal and not a comparison. A key one side did not record
+    differs too, which is what makes the never-recorded state refuse rather
+    than fall through.
+    """
+    recorded = recorded or {}
+    measured = measured or {}
+    return {key: (recorded.get(key), measured.get(key))
+            for key in sorted(set(recorded) | set(measured))
+            if recorded.get(key) != measured.get(key)}
 
 
 def exclusion_diff(recorded, applied):

@@ -13,7 +13,6 @@ no longer has.
   python3 scripts/ci/journey_budget.py probe
   python3 scripts/ci/journey_budget.py measure --rounds 1 --out counts.json
   python3 scripts/ci/journey_budget.py check --measurements counts.json
-  python3 scripts/ci/journey_budget.py check --measurements counts.json
   python3 scripts/ci/journey_budget.py check --measurements c.json --tighten
 
 A COUNT IS NOT COMPARABLE UNLESS THE JOURNEY STILL IS THE SAME JOURNEY, so
@@ -44,6 +43,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
+import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 import journey_report  # noqa: E402  pylint: disable=wrong-import-position
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,17 +56,19 @@ ROUNDS_DEFAULT = journey_counters.ROUNDS_DEFAULT
 # denominated in a quantity the gate does not defend.
 COUNTERS = journey_artifact.COUNTERS
 
-# The document shape lives in its own module, off this one's ceiling, and is
-# re-exported here so every caller of `journey_budget.load` / `.render` keeps
-# the spelling it had.
+# The document shape lives in its own module, off this one's ceiling. The
+# names below are this module's OWN bindings rather than re-exports: every
+# suite that needs one loads that module directly, and a name this file
+# forwards is a name this file can drift from.
 load = journey_artifact.load
 render = journey_artifact.render
 recorded_toolchain = journey_artifact.recorded_toolchain
 recorded_exclusions = journey_artifact.recorded_exclusions
+recorded_bands = journey_artifact.recorded_bands
+recorded_shas = journey_artifact.recorded_shas
 exclusion_diff = journey_artifact.exclusion_diff
-# `_validated` keeps its underscore because the suites that drive the
-# schema call it by that name; it is the artefact's own predicate and is
-# re-exported unchanged.
+map_diff = journey_artifact.map_diff
+sha_diff = journey_artifact.sha_diff
 # pylint: disable-next=protected-access
 _validated = journey_artifact._validated  # noqa: SLF001
 
@@ -93,6 +95,18 @@ TOOLCHAIN_REMEDY = (
     're-baseline block in the step summary carries the counts, their '
     'spread, and the identity they were taken on, and nothing in CI writes '
     'the artefact.')
+SHA_REMEDY = (
+    'A recorded count describes the journey that rendered when it was '
+    'recorded, so a journey that renders differently cannot be compared '
+    'against it. Re-baseline from a measured run: the re-baseline block in '
+    'the step summary carries the shas this run measured beside the counts, '
+    'and nothing in CI writes the artefact.')
+BANDS_REMEDY = (
+    'The `Ir` band thresholds decide which thread a count excluded, so a '
+    'run whose bands differ from the recorded ones is measuring a different '
+    'quantity whatever it reads. Re-baseline from a measured run: the '
+    're-baseline block in the step summary carries the bands this run '
+    'applied, and nothing in CI writes the artefact.')
 THREADS_REMEDY = (
     'A recorded count is only comparable against a measurement that '
     'excluded the same threads. Re-baseline from a measured run: the '
@@ -246,26 +260,8 @@ def _parser():
     check.add_argument('--tighten', action='store_true',
                        help='follow journeys down instead of reporting')
     check.add_argument('--artifact', type=Path, default=ARTIFACT)
-    check.add_argument('--seconds', type=Path,
-                       help='what this job cost, one JSON object per line, '
-                            'each appended by the workflow step that '
-                            'measured it')
     check.add_argument('--summary', action='store_true')
     return parser
-
-
-def _cost(path):
-    """What the workflow's own steps recorded, read as JSON lines.
-
-    One object per line because the steps that measure are not one step:
-    the valgrind install and the measurement each append what they timed,
-    and neither of them knows the other's keys.
-    """
-    cost = {}
-    for line in Path(path).read_text(encoding='utf-8').splitlines():
-        if line.strip():
-            cost.update(json.loads(line))
-    return cost
 
 
 def _measurements(args):
@@ -309,36 +305,29 @@ def main(argv=None):
         counter = document.get('counter')
         report = _measurements(args)
 
-        if args.seconds and Path(args.seconds).is_file():
-            journey_counters.write_summary(journey_report.accounting_lines(
-                report, _cost(args.seconds)))
-
         # Three states, not two. No identity recorded yet is not a change:
         # there is nothing to have changed from, and saying so is what tells
         # a reader this green measured nothing rather than finding a
         # regression.
-        recorded = recorded_toolchain(document)
-        changed = (toolchain_diff(recorded, report.get('toolchain'))
-                   if recorded else {})
-        if changed:
-            return _toolchain_outcome(args, document, report, changed)
-        if recorded is None and args.summary:
-            journey_counters.write_summary(journey_report.toolchain_lines(
-                document, report, {}, TOOLCHAIN_REMEDY))
+        # A measurement that could not be taken is reported before any
+        # recorded map is compared: there is nothing to compare, and the
+        # reason is not one the recorded maps can speak to.
+        if report.get('shape_failure'):
+            print(f'shape: {report["shape_failure"]}', file=sys.stderr)
+            print(SHAPE_REMEDY, file=sys.stderr)
+            return 1
 
-        # The same second gate, on the same terms: a count measured with a
-        # different set of threads excluded is a different quantity, and
-        # naming which journey lost which role is the whole of the report.
-        threads = recorded_exclusions(document)
-        if threads is not None:
-            moved = exclusion_diff(threads, report.get('excluded_threads'))
-            if moved:
-                return _toolchain_outcome(args, document, report, moved,
-                                          THREADS_REMEDY, 'excluded threads')
-        elif args.summary:
-            journey_counters.write_summary(journey_report.toolchain_lines(
-                document, report, {}, THREADS_REMEDY,
-                subject='excluded threads'))
+        for gate in _recorded_gates(report):
+            # Never-recorded FIRST: a diff against nothing is a difference
+            # from nothing, and reading it as a change would report a red
+            # whose cause is a field nobody has filled in yet.
+            recorded = gate['recorded'](document)
+            if recorded is None:
+                return _recorded_outcome(args, document, report, {}, gate)
+            differs = gate['differs'](recorded, gate['measured'](report))
+            if differs:
+                return _recorded_outcome(args, document, report, differs,
+                                         gate)
 
         counts = (journey_counters.counts_of(report, counter)
                   if counter else {})
@@ -378,27 +367,93 @@ def main(argv=None):
         return 1
 
 
-def _toolchain_outcome(args, document, report, changed,
-                       remedy=TOOLCHAIN_REMEDY, subject='toolchain'):
-    """A toolchain difference, which is not a regression and not a pass.
+def _recorded_gates(report):
+    """Every way a count is only comparable against what was recorded.
 
-    Success, because the tree did not regress — but the summary says in
+    Four, on the same terms: a different toolchain, a different set of
+    excluded threads, different band thresholds, and a different journey
+    rendering are four different quantities, and a count measured against
+    any of them says nothing about the code. A gate whose value has never
+    been recorded is the same refusal — there is nothing to have differed
+    from, and falling through to comparing would compare a count against a
+    question that was never asked.
+    """
+    def _recorded(field):
+        """The recorded map, or None when it is absent or holds nothing.
+
+        A field that is PRESENT AND EMPTY is the never-recorded state, and
+        it must read as that rather than as a value that changed: `{}` and
+        `null` say the same thing about what has been measured, and a gate
+        that treated the first as a change would report a difference from
+        nothing.
+        """
+        def read(document):
+            value = document.get(field)
+            if isinstance(value, dict) and not any(value.values()):
+                return None
+            return value
+        return read
+
+    return (
+        {'subject': 'toolchain', 'remedy': TOOLCHAIN_REMEDY,
+         'recorded': _recorded('toolchain'),
+         'measured': lambda measured: measured.get('toolchain'),
+         'differs': toolchain_diff,
+         'absent': 'the journey budget records no toolchain yet'},
+        {'subject': 'excluded threads', 'remedy': THREADS_REMEDY,
+         'recorded': _recorded('excluded_threads'),
+         'measured': lambda measured: measured.get('excluded_threads'),
+         'differs': exclusion_diff,
+         'absent': 'the journey budget records no excluded threads yet'},
+        {'subject': 'thread bands', 'remedy': BANDS_REMEDY,
+         'recorded': _recorded('thread_bands'),
+         'measured': lambda measured: journey_threads.BANDS,
+         'differs': map_diff,
+         'absent': 'the journey budget records no thread bands yet'},
+        {'subject': 'journey shas', 'remedy': SHA_REMEDY,
+         'recorded': _recorded('shas'),
+         'measured': lambda measured: measured.get('shas') or {},
+         'differs': sha_diff,
+         'absent': 'the journey budget records no journey shas yet'},
+    )
+
+
+def _recorded_outcome(args, document, report, changed, gate):
+    """A recorded-and-measured difference: not a regression, and not a pass.
+
+    Success, because the tree did not regress — but both outputs say in
     those words that no count was compared, so a green here can never be
     read as a journey having been measured and found within budget. A
-    tighten refuses instead: a count taken on a toolchain the recorded
-    baseline was not measured on is not a cheaper journey, and writing it
-    would corrupt the baseline this whole check exists to keep honest.
+    tighten refuses instead: a count taken against something the recorded
+    baseline was not measured against is not a cheaper journey, and writing
+    it would corrupt the baseline this whole check exists to keep honest.
+
+    The subject names the cause in the LOG as well as in the summary, and
+    the remedy follows it. A green that compared nothing is exactly the case
+    a reader debugs from the log, so the two must not disagree about why.
     """
+    subject, remedy = gate['subject'], gate['remedy']
+    if not changed:
+        # A REFUSAL, and it exits 1, so the whole of it goes to stderr: a
+        # reader debugging a red wants the cause beside the remedy, and a
+        # report on stdout is the other half of this file's split — the
+        # outcome that succeeded rather than the one that failed.
+        print(f'{subject} not recorded, so no count is compared against a '
+              'recorded one', file=sys.stderr)
+        print(remedy, file=sys.stderr)
+        if args.summary:
+            journey_counters.write_summary(journey_report.toolchain_lines(
+                document, report, {}, remedy, subject=subject))
+        return 1
     if args.tighten:
-        print('toolchain changed, re-baseline: a count measured on a '
-              'different toolchain is not a cheaper journey',
-              file=sys.stderr)
-        print(TOOLCHAIN_REMEDY, file=sys.stderr)
+        print(f'{subject} changed, re-baseline: a count measured against a '
+              f'different {subject} is not a cheaper journey', file=sys.stderr)
+        print(remedy, file=sys.stderr)
         return 1
     if args.summary:
         journey_counters.write_summary(journey_report.toolchain_lines(
-            document, report, changed, TOOLCHAIN_REMEDY))
-    print('toolchain changed, re-baseline')
+            document, report, changed, remedy, subject=subject))
+    print(f'{subject} changed, re-baseline')
     for field, (was, now) in sorted(changed.items()):
         print(f'  {field}: recorded {was!r}, measured {now!r}')
     print('no count was compared, and this step succeeds because the tree '
@@ -413,10 +468,6 @@ def _report_state(document, names, counter, report):
     state no count can be compared in and the one refusal the counts cannot
     express.
     """
-    if report.get('shape_failure'):
-        print(f'shape: {report["shape_failure"]}', file=sys.stderr)
-        print(SHAPE_REMEDY, file=sys.stderr)
-        return True
     if recorded_toolchain(document) is None:
         print('the journey budget records no toolchain yet, so this run has '
               'no recorded identity to be compared against')

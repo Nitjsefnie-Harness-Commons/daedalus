@@ -22,6 +22,10 @@ from _journey_contract import (  # noqa: E402
     journeys,
     line_endings,
     measurements_file,
+    recorded_document,
+    fixture_shas,
+    recorded_maps,
+    _report_file,
 )
 
 
@@ -226,8 +230,7 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
     """
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(budget_document(
-        toolchain=dict(RECORDED))))
+    artifact.write_bytes(policy.render(recorded_document()))
     measurements = measurements_file(
         Path(tmp) / 'counts.json', None,
         toolchain=dict(RECORDED, valgrind_version='valgrind-3.25.0'))
@@ -263,8 +266,7 @@ def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
     """The outcome is the toolchain's, and it does not swallow the gate."""
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(budget_document(
-        toolchain=dict(RECORDED))))
+    artifact.write_bytes(policy.render(recorded_document()))
     measurements = measurements_file(Path(tmp) / 'counts.json', None)
     spoken = io.StringIO()
     with contextlib.redirect_stderr(spoken):
@@ -334,11 +336,11 @@ def test_the_tighten_command_is_the_one_the_implementation_uses(tmp):
     policy = _journey_contract.policy()
     names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    payload = json.dumps(budget_document()).encode('utf-8')
+    payload = json.dumps(recorded_document()).encode('utf-8')
     artifact.write_bytes(payload)
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
-        'rounds': 1, 'python': sys.version, 'shas': {},
+        'rounds': 1, 'python': sys.version, **recorded_maps(),
         'counters': {'perf-instructions': {
             'available': True, 'startup_only': 0,
             'journeys': {name: {'min': 800, 'max': 800, 'median': 800,
@@ -431,10 +433,10 @@ def test_the_check_command_refuses_with_the_remedy_it_promises(tmp):
     policy = _journey_contract.policy()
     names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(budget_document()))
+    artifact.write_bytes(policy.render(recorded_document()))
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
-        'rounds': 1, 'python': sys.version, 'shas': {},
+        'rounds': 1, 'python': sys.version, **recorded_maps(),
         'counters': {'perf-instructions': {
             'available': True, 'startup_only': 0,
             'journeys': {names[0]: {'min': 5000, 'max': 5000,
@@ -457,7 +459,7 @@ def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
     policy = _journey_contract.policy()
     names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(budget_document()))
+    artifact.write_bytes(policy.render(recorded_document()))
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
         'rounds': 1, 'python': sys.version, 'shas': {},
@@ -556,6 +558,95 @@ def test_an_artefact_that_cannot_be_read_says_which_way_it_failed(tmp):
             assert fragment in str(error), (fragment, error)
             continue
         raise AssertionError(f'the schema accepted {document!r}')
+
+
+def test_a_journey_that_renders_differently_is_not_compared(tmp):
+    """A recorded count describes the journey that rendered when it was
+    recorded, so a different rendering refuses rather than reading as a
+    regression or a saving.
+
+    Two ways to differ: one journey's sha moved, and one journey's sha is
+    not in the measurement at all. Both are a difference from the recorded
+    one, and the never-recorded case is that gate's own test below.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    changed = dict(fixture_shas(), **{names[0]: ['f' * 64]})
+    missing = {name: seen for name, seen in fixture_shas().items()
+               if name != names[0]}
+    for report_maps, named in ((changed, names[0]), (missing, names[0])):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = policy.main([
+                'check', '--artifact', str(artifact),
+                '--measurements', str(_report_file(
+                    tmp, {}, dict(recorded_maps(), shas=report_maps)))])
+        # A CHANGED recorded value is a REPORT, on stdout, exit 0: the tree
+        # did not regress, and the summary says no count was compared.
+        assert code == 0, (report_maps, out.getvalue(), err.getvalue())
+        said = out.getvalue()
+        assert 'journey shas changed' in said, said
+        assert f'  {named}: recorded' in said, said
+        assert 'no count was compared' in said, said
+
+
+def test_nothing_recorded_is_a_refusal_rather_than_a_pass(tmp):
+    """A gate whose value was never recorded has nothing to differ from, and
+    falling through would compare a count against a question never asked."""
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    for field, subject in (('toolchain', 'toolchain'),
+                           ('excluded_threads', 'excluded threads'),
+                           ('thread_bands', 'thread bands'),
+                           ('shas', 'journey shas')):
+        artifact = Path(tmp) / f'{field}.json'
+        document = recorded_document()
+        document.pop(field, None)
+        artifact.write_bytes(policy.render(document))
+        spoken = io.StringIO()
+        with contextlib.redirect_stderr(spoken):
+            code = policy.main([
+                'check', '--artifact', str(artifact),
+                '--measurements', str(_report_file(
+                    tmp, {}, recorded_maps()))])
+        assert code == 1, (field, spoken.getvalue())
+        said = spoken.getvalue()
+        assert subject in said, (field, said)
+        assert f'{subject} not recorded' in said, (field, said)
+    del names
+
+
+def test_the_bands_a_count_measured_under_are_recorded(tmp):
+    """`excluded_threads` records the roles; the `Ir` numbers that put a
+    thread IN a role are recorded beside them, so moving a threshold is a
+    change the gate can see."""
+    policy = _journey_contract.policy()
+    threads = _journey_contract.threads()
+    assert threads.BANDS == {'front-end-import': 1_000_000_000,
+                             'uvicorn-serve': 10_000_000,
+                             'request': 1_000}, threads.BANDS
+    document = recorded_document()
+    assert document['thread_bands'] == threads.BANDS, document['thread_bands']
+    # The recorded artefact carries a threshold the CODE no longer uses,
+    # which is what moving one looks like from the gate's side: the
+    # measurement is the module's own table, so the artefact is the only
+    # thing that can differ.
+    document['thread_bands'] = dict(
+        threads.BANDS, **{'front-end-import': 100_000_000})
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main([
+            'check', '--artifact', str(artifact),
+            '--measurements', str(_report_file(tmp, {}, recorded_maps()))])
+    assert code == 0, spoken.getvalue()
+    said = spoken.getvalue()
+    assert 'thread bands changed' in said, said
+    assert ('front-end-import: recorded 100000000, measured 1000000000'
+            in said), said
 
 
 def main():

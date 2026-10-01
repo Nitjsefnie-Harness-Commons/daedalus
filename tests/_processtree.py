@@ -1,11 +1,11 @@
 """Terminate a child's whole process tree and report what the kill did.
 
-Lives beside the callers rather than in either of them: `tests/_noderun.py`
-exists for the same reason — two modules needed one launcher and importing
-each other was a cycle. The cleanup bound is a parameter because the two
-sites do not share a reason for one number: the speed harness bounds a shell
-it drained, the Node gate bounds a child it launched, and a shared constant
-would tie the two to each other's reasoning.
+Lives beside the callers rather than in either of them, as
+`tests/_noderun.py` does for the same reason: two modules needed one
+launcher and importing each other was a cycle. The cleanup bound is a
+parameter because the two sites do not share a reason for one number — one
+bounds a shell it drained, the other a child it launched, and a shared
+constant would tie the two to each other's reasoning.
 
 Every outcome is named. A caller that discards this string has thrown away
 the only evidence of what happened to a process that had already stopped
