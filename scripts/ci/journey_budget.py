@@ -370,10 +370,18 @@ def main(argv=None):
                 journey_report.accounting_lines(report, json.loads(
                     Path(args.seconds).read_text(encoding='utf-8'))))
 
-        changed = toolchain_diff(recorded_toolchain(document),
-                                 report.get('toolchain'))
+        # Three states, not two. No identity recorded yet is not a change:
+        # there is nothing to have changed from, and saying so is what tells
+        # a reader this green measured nothing rather than finding a
+        # regression.
+        recorded = recorded_toolchain(document)
+        changed = (toolchain_diff(recorded, report.get('toolchain'))
+                   if recorded else {})
         if changed:
             return _toolchain_outcome(args, document, report, changed)
+        if recorded is None and args.summary:
+            journey_counters.write_summary(journey_report.toolchain_lines(
+                document, report, {}, TOOLCHAIN_REMEDY))
 
         counts = (journey_counters.counts_of(report, counter)
                   if counter else {})
