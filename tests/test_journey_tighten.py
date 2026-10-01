@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _journey_contract  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
+from _ratchet_fixture import _git  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _journey_contract import (  # noqa: E402
     ROOT,
@@ -334,32 +335,18 @@ def _push_repo(base):
     """
     work, bare = Path(base) / 'work', Path(base) / 'bare.git'
     bare.mkdir(parents=True)
-    _git('init', '--quiet', '--bare', '-b', 'main', str(bare))
+    _git(bare, 'init', '--quiet', '--bare', '-b', 'main')
     work.mkdir()
-    _git('init', '--quiet', '-b', 'main', str(work))
-    _git('-C', str(work), 'config', 'user.email', 'tests@example.invalid')
-    _git('-C', str(work), 'config', 'user.name', 'Tests')
-    _git('-C', str(work), 'config', f'url.{bare}.insteadOf',
-         'git@github.com:o/r.git')
-    _git('-C', str(work), 'remote', 'add', 'origin', 'git@github.com:o/r.git')
+    _git(work, 'init', '--quiet', '-b', 'main')
+    _git(work, 'config', 'user.email', 'tests@example.invalid')
+    _git(work, 'config', 'user.name', 'Tests')
+    _git(work, 'config', f'url.{bare}.insteadOf', 'git@github.com:o/r.git')
+    _git(work, 'remote', 'add', 'origin', 'git@github.com:o/r.git')
     (work / 'ratcheted.json').write_text('{"n": 2}\n', encoding='utf-8')
-    _git('-C', str(work), 'add', 'ratcheted.json')
-    _git('-C', str(work), 'commit', '--quiet', '-m', 'base')
-    _git('-C', str(work), 'push', '--quiet', 'origin', 'main')
+    _git(work, 'add', 'ratcheted.json')
+    _git(work, 'commit', '--quiet', '-m', 'base')
+    _git(work, 'push', '--quiet', 'origin', 'main')
     return work, bare
-
-
-def _git(*argv):
-    """git, with its own stderr on the failure.
-
-    `check=True` alone reports a bare exit status, and a repository set up
-    wrongly is a setup bug this control should name rather than propagate.
-    """
-    done = subprocess.run(['git', *argv], capture_output=True, text=True)
-    assert done.returncode == 0, (
-        f'git {" ".join(argv)} failed ({done.returncode}): '
-        f'{done.stderr.strip()}')
-    return done
 
 
 def _drive_push(work, refuse):
@@ -375,7 +362,7 @@ def _drive_push(work, refuse):
         hook.write_text('#!/bin/sh\nexit 1\n', encoding='utf-8')
         hook.chmod(0o755)
     (work / 'ratcheted.json').write_text('{"n": 1}\n', encoding='utf-8')
-    _git('-C', str(work), 'commit', '--quiet', '-am', 'tightened')
+    _git(work, 'commit', '--quiet', '-am', 'tightened')
     env = dict(os.environ,
                HOME=str(work.parent / 'home'),
                REPO='o/r',
@@ -418,13 +405,13 @@ def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
     # our comparison, which is what an ordinary concurrent push looks like.
     other = base / 'other'
     other.mkdir()
-    _git('clone', '--quiet', str(bare), str(other))
-    _git('-C', str(other), 'config', 'user.email', 'other@example.invalid')
-    _git('-C', str(other), 'config', 'user.name', 'Other')
+    _git(base, 'clone', '--quiet', str(bare), str(other))
+    _git(other, 'config', 'user.email', 'other@example.invalid')
+    _git(other, 'config', 'user.name', 'Other')
     (other / 'unrelated.txt').write_text('x\n', encoding='utf-8')
-    _git('-C', str(other), 'add', 'unrelated.txt')
-    _git('-C', str(other), 'commit', '--quiet', '-m', 'concurrent')
-    _git('-C', str(other), 'push', '--quiet', 'origin', 'main')
+    _git(other, 'add', 'unrelated.txt')
+    _git(other, 'commit', '--quiet', '-m', 'concurrent')
+    _git(other, 'push', '--quiet', 'origin', 'main')
     outcome, summary = _drive_push(work, refuse=False)
     assert outcome.returncode == 0, (
         'an ordinary concurrent push reddened a required context, which is '
