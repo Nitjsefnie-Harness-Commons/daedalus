@@ -40,7 +40,7 @@ DASHBOARD_TOKEN = 'journeydash'
 
 COMMAND_TAB = 'journeytab'
 DASHBOARD_TAB = 'journeyfan'
-DASHBOARD_URL = 'https://journey.invalid/panel'
+DASHBOARD_URL = 'https://journey.example.com/panel'
 DASHBOARD_TITLE = 'journey panel'
 
 COMMAND_ID = 'journey-command-1'
