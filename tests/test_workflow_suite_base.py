@@ -4,16 +4,15 @@
 The branch-boundary controls in `test_helper_reimplementation.py` read the
 merge base's own declarations, and a checkout that resolves neither
 `origin/main` nor a local `main` makes both boundary tests take their
-refusal arm. That is not a red gate in every job — `timed` records
-durations and does not fail on a failing suite — so the consequence is
-quieter and worse: the branch's central guarantee goes unevaluated in a
-job that runs it, and the two suites drop out of the measured durations.
+refusal arm. In a job that turns a failing suite red, the consequence is
+already visible; in a job that runs the suites without failing on one it
+is quieter and worse — the branch's central guarantee goes unevaluated
+in a job that runs it, and nothing reports that.
 
 The job set is DERIVED. A tracked script is a suite runner when, as an
 AST fact, it launches a suite; a job runs the suites when one of its
-steps invokes one. That replaced a hand-written job list which missed
-the `timed` matrix. The policed set is the three jobs the derivation
-names; the hand list it replaced had two.
+steps invokes one. That replaced a hand-written job list, which was a
+second statement of the same fact and could drift from the first.
 """
 import ast
 import fnmatch
@@ -30,10 +29,10 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 # Which jobs run the suites is DERIVED, not written here: a job is in
 # the set when one of its steps invokes a tracked script that enumerates
-# the tests tree. Deriving it is the whole point — the hand list this
-# replaces missed the `timed` matrix, which runs slices of tests/ and so
-# ran both boundary controls where neither `origin/main` nor a local
-# `main` resolved.
+# the tests tree. Deriving it is the whole point — a hand list is a
+# second statement of the same fact, and a matrix leg added beside the
+# jobs it replaces would leave both boundary controls unevaluated there
+# without any of this noticing.
 #
 def _is_the_tests_directory(node):
     """Whether this expression IS the tests directory, read as a node.
@@ -137,12 +136,10 @@ def _enumerates_the_tests_tree(source):
     re-implementation control's `__main__` rule had, in a second
     control, and it is why the rule reads the tree.
 
-    Three of the twenty-eight tracked scripts enumerate the tests tree,
-    and they are the three that run suites: `run_tests.py`,
-    `scripts/ci/coverage_suites.py` and `scripts/ci/time_tests.py`. The
-    first two write the identical expression; the third spells its
-    receiver differently, which is exactly what a SHAPE rule tolerates
-    and a name rule does not.
+    Two of the twenty-five tracked scripts enumerate the tests tree, and
+    they are the two that run suites: `run_tests.py` and
+    `scripts/ci/coverage_suites.py`. They write the identical expression,
+    which is exactly what a SHAPE rule reads and a name rule does not.
     """
     for node in ast.walk(ast.parse(source)):
         if (isinstance(node, ast.Call)
@@ -206,11 +203,11 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
 
     The branch-boundary controls read the merge base's own declarations,
     and a checkout that resolves neither `origin/main` nor a local `main`
-    makes both boundary tests take their refusal arm. That is not a red
-    gate in every job — `timed` records durations and does not fail on a
-    failing suite — so the consequence is quieter and worse: the branch's
-    central guarantee goes unevaluated in a job that runs it, and the
-    two suites drop out of the measured durations.
+    makes both boundary tests take their refusal arm. In a job that turns
+    a failing suite red that is already visible; in a job that runs the
+    suites without failing on one it is quieter and worse — the branch's
+    central guarantee goes unevaluated in a job that runs it, and nothing
+    reports that.
 
     WHAT THIS DOES NOT COVER, and the test is named for what it proves
     rather than for an enumeration it cannot deliver. A named bypass is a
@@ -220,23 +217,17 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     found by the review that sent this wave back:
 
       * (a) A JOB THAT NAMES A SUITE DIRECTLY, which no bullet below
-        reaches: `timed-timings.yml:300-301` runs two suites at depth 1
-        today. It is the only live instance, and nothing reads a base
-        there, so it is latent rather than a live violation.
-      * (b) A `tests/` DIRECTORY LISTING filtered at run time, which is
-        how `plan_timed_matrix.py` enumerates (`:267` lists `tests/`,
-        `:286` filters `test_*.py`). This is why `plan-matrix` left the
-        policed set, and the loss is benign by that job's own
-        `fetch-depth: 0` rather than by this guard.
-    `timed` IS in the set, matched by the path literal
-    `scripts/ci/time_tests.py` in the step's `run:` — the earlier
-    disclosure listed the matrix entrypoint as uncovered, which
-    under-claimed, and being told less than is true is the safe
-    direction but still wrong.
+        reaches: a step carrying a fixed list of suite paths runs them
+        whatever the tree grows to. `tests/test_ci_lint_tools.py`'s
+        `SUITE_DOORS` is where such a door is declared, and it is empty.
+      * (b) A `tests/` DIRECTORY LISTING filtered at run time, which
+        neither arm can see: `git ls-files -- tests/` names every entry
+        the directory holds, and the filter that narrows it to runnable
+        suites lives beside the listing rather than in the predicate.
 
-    Every one of those needs the WORKFLOW edited, and (c) and (e) need
-    this reader widened. The failing check is the mitigation for the
-    routes it can see; it is not a claim about the rest.
+    Every one of those needs the WORKFLOW edited, and (b) needs this
+    reader widened. The failing check is the mitigation for the routes it
+    can see; it is not a claim about the rest.
     """
     del tmp
     scripts = _tracked_scripts(ROOT)
@@ -286,13 +277,8 @@ def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):
     assert _launches_a_tests_file(
         'import subprocess\n'
         'subprocess.getstatusoutput(["python3", "tests/test_x.py"])\n')
-    # The shape that leaves BOTH arms, read off the REAL script and
-    # pinned against its real source, so the gap cannot close by
-    # accident: `plan_timed_matrix.py` enumerates by listing the tests
-    # DIRECTORY and filtering the names at run time.
-    real = (ROOT / 'scripts' / 'ci' / 'plan_timed_matrix.py').read_text(
-        encoding='utf-8')
-    assert not _launches_a_tests_file(real)
+    # The shape that leaves BOTH arms: a `tests/` DIRECTORY listing
+    # filtered at run time reaches no predicate here.
     assert not _launches_a_tests_file(
         "import subprocess\n"
         "subprocess.run(['git', 'ls-files', '--', 'tests/'])\n")
@@ -310,22 +296,17 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
 
     An earlier version named three runners and left a fourth in the set
     with nothing holding it, so a change to that script would have
-    dropped its job with the guard green. The three members are named.
+    dropped its job with the guard green. The members are named.
 
     One thing this test does NOT show, because it is true: removing the
-    literal-launch arm leaves the set unchanged. All three runners glob,
-    so the arm currently contributes NO member — it is kept for the
-    route it is meant to cover, a workflow step that runs a suite
-    directly (`timed-timings.yml`, bullet (a)), and not for a member of
-    today's set.
-
-    `plan_timed_matrix.py` is deliberately NOT asserted: it reads
-    `False` on both arms and is named in the disclosure as route (b).
+    literal-launch arm leaves the set unchanged. Both runners glob, so
+    the arm currently contributes NO member — it is kept for the route it
+    is meant to cover, a workflow step that runs a suite directly
+    (bullet (a)), and not for a member of today's set.
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
-    for runner in ('run_tests.py', 'scripts/ci/coverage_suites.py',
-                   'scripts/ci/time_tests.py'):
+    for runner in ('run_tests.py', 'scripts/ci/coverage_suites.py'):
         assert runner in runners, (
             f'{runner} no longer enumerates the tests tree or launches a '
             'suite file, so the guard drops the job that runs it. The rule '
@@ -350,7 +331,7 @@ def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
-    for planner_only in ('scripts/ci/compare_durations.py',
+    for planner_only in ('scripts/ci/diff_coverage.py',
                          'scripts/ci/gate_freshness.py'):
         assert planner_only not in runners, (
             f'{planner_only} is in the runner set and enumerates no tests '

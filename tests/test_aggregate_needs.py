@@ -55,11 +55,10 @@ def test_the_real_aggregate_covers_its_graph_derived_shape(tmp):
     derived = set(workflow.jobs) - {AGGREGATE} - descendants - EXEMPT
     assert needs[AGGREGATE] == derived, sorted(
         needs[AGGREGATE] ^ derived)
-    assert descendants == {'timed', 'speed'}, descendants
+    # Nothing waits on the aggregate any more, so the complement is the
+    # whole job set less the exempt one.
+    assert descendants == set(), descendants
     assert EXEMPT == {'diff-coverage'}, EXEMPT
-    # plan-matrix plans from the data file alone, so it needs nothing but
-    # the change classifier and is not a descendant of the aggregate.
-    assert needs['plan-matrix'] == {'changes'}, sorted(needs['plan-matrix'])
 
 
 def test_the_exemption_is_still_documented_in_the_workflow(tmp):
@@ -142,7 +141,7 @@ def test_an_exemption_removed_from_the_workflow_is_a_drift(tmp):
     root = _copy_real(tmp)
     source = _REAL.read_text(encoding='utf-8')
     start = source.index('  diff-coverage:')
-    end = source.index('  timed:')
+    end = source.index('  journey-budget:')
     (root / 'tests.yml').write_text(
         source[:start] + source[end:], encoding='utf-8')
     workflow = load(root / 'tests.yml')
@@ -159,8 +158,9 @@ def test_the_documentation_check_reads_only_the_exempt_jobs_comment(tmp):
               ' deliberately absent\n')
     stripped = source.replace(phrase, '    # not a gate\n')
     relocated = stripped.replace(
-        '  timed:\n', '  timed:\n' + phrase, 1)
-    assert source.count('  timed:\n') == 1, 'the relocation anchor moved'
+        '  journey-budget:\n', '  journey-budget:\n' + phrase, 1)
+    assert source.count('  journey-budget:\n') == 1, (
+        'the relocation anchor moved')
     (root / 'tests.yml').write_text(relocated, encoding='utf-8')
     assert _undocumented(relocated) == list(_DOCUMENTED)
 
@@ -280,7 +280,7 @@ def test_a_descendant_needs_no_entry_of_its_own(tmp):
               '  probe:\n'
               '    runs-on: ubuntu-latest\n'
               '    timeout-minutes: 5\n'
-              '  timed:\n'
+              '  downstream:\n'
               '    needs: aggregate\n'
               '    runs-on: ubuntu-latest\n'
               '    timeout-minutes: 5\n')
