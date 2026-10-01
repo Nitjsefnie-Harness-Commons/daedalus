@@ -222,10 +222,19 @@ def bridge_env(token):
 
 
 def rendering_of(name):
-    """Run one journey against a fresh bridge and return its rendering."""
+    """Run one journey against a fresh bridge and return its rendering.
+
+    `await_mcp=True` is what makes the count comparable: the bridge's
+    `mcp-bootstrap` thread imports the front end beside the journey and
+    readiness deliberately does not wait for it, so a round that started
+    while that import was mid-flight would carry whichever slice of it
+    happened to run alongside. The wait puts the import wholly inside every
+    round or wholly outside all of them.
+    """
     token, run = JOURNEYS[name]
     with tempfile.TemporaryDirectory(prefix='journey_') as directory:
-        with _util.bridge(directory, env=bridge_env(token)) as fixture:
+        with _util.bridge(directory, env=bridge_env(token),
+                          await_mcp=True) as fixture:
             base, docroot = fixture
             return run(base, docroot)
 
