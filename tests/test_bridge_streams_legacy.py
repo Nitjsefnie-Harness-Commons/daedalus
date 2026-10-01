@@ -155,13 +155,14 @@ def test_the_reader_skips_a_delivery_it_has_already_seen(tmp):
 def test_the_reader_delivers_a_frame_the_extension_would_also_run(tmp):
     """A redelivery carrying a new id is delivered, not skipped.
 
-    The bridge derives a legacy delivery id from the object's identity,
-    which moves for one file over time on macOS (#1411), so the same
-    redelivery carries a different `_did` there than it does on Linux or
-    Windows. The reader's answer to that is the extension's answer: an id
-    the ledger has not recorded is a command that has not run, so it is
-    delivered. Skipping it would be the reader guessing, and guessing here
-    is the failure that loses a command.
+    The rule is the reader's, and it needs no bridge: an id the ledger has
+    not recorded is a command that has not run, so the frame is delivered
+    rather than skipped — the extension's answer too, over the same
+    ledger. Skipping it would be the reader guessing, and guessing here
+    is the failure that loses a command. It cannot be assumed away: the
+    bridge's id is the object's device and inode plus a generation that
+    advances only when a removal succeeded, so a name can go on to a new
+    generation and carry a new id with it.
     """
     del tmp
     frames = [
