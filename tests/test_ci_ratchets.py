@@ -439,12 +439,19 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     assert "github.event_name == 'push'" in ratchet['if']
     assert "github.ref == 'refs/heads/main'" in ratchet['if']
     assert 'steps.measure.conclusion == \'success\'' in ratchet['if']
-    assert 'git add .github/ci-thresholds.json' in (
-        commit['run'].splitlines()), commit['run']
-    assert "git commit -m 'ci: update CI ratchets'" in commit['run']
-    assert 'HEAD:main' in commit['run']
-    assert 'GIT_SSH_COMMAND' in commit['run']
-    assert '--force' not in commit['run']
+    # The step calls ONE shared script rather than repeating the push, so
+    # what it still owns is the two arguments: which file the commit stages
+    # and what the commit says it did. The push itself — the deploy key, the
+    # pinned host key, HEAD:main, and telling a refusal from a concurrent
+    # push — lives in that script and is controlled by executing it.
+    assert 'scripts/ci/ratchet_push.sh' in commit['run'], commit['run']
+    assert '.github/ci-thresholds.json' in commit['run'], commit['run']
+    assert "'ci: update CI ratchets'" in commit['run'], commit['run']
+    push = (ROOT / 'scripts' / 'ci' / 'ratchet_push.sh').read_text(
+        encoding='utf-8')
+    assert 'HEAD:main' in push
+    assert 'GIT_SSH_COMMAND' in push
+    assert '--force' not in push, push
     for event, ref, measured, status, expected in (
             ('push', 'refs/heads/main', 'success',
              {'success': True, 'failure': False, 'cancelled': False}, True),

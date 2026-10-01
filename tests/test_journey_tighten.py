@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -176,6 +177,11 @@ def _tighten_step():
     return job, tighten[0]
 
 
+def _guard_step_names(guard):
+    """The step ids a guard reads, off the guard rather than beside it."""
+    return re.findall(r'steps\.([A-Za-z_][\w-]*)\.', guard)
+
+
 def test_the_tighten_guard_refuses_each_of_its_limbs_in_turn(tmp):
     """Every conjunct limb of the guard decides, on its own, to stop the run.
 
@@ -189,23 +195,35 @@ def test_the_tighten_guard_refuses_each_of_its_limbs_in_turn(tmp):
     del tmp
     _, tighten = _tighten_step()
     guard = tighten['if']
+    # The context is built from the step ids the guard itself names, so this
+    # control and the one below read one source of truth: a guard repointed
+    # at another real step is answered here rather than dying as a missing
+    # context path.
+    steps = {name: {'conclusion': 'success'}
+             for name in _guard_step_names(guard)}
     green = {'github': {'event_name': 'push', 'ref': 'refs/heads/main'},
-             'steps': {'check': {'conclusion': 'success'}},
+             'steps': steps,
              'status': {'success': True, 'failure': False,
                         'cancelled': False}}
-    assert evaluate_if(guard, green) is True, guard
+    assert evaluate_if(guard, green) is True, (
+        'the tighten guard does not run on a green push to main, so the '
+        f'feature never fires and no run will ever tighten the budget: '
+        f'{guard}')
     # One flipped context per conjunct limb. Each names the single thing that
     # must stop this run: the job was cancelled, the check found a rise, the
     # event was not a push, or the branch was not main.
-    for limb, context in (
-            ('cancelled', {**green, 'status': {
-                'success': False, 'failure': False, 'cancelled': True}}),
-            ('check concluded', {**green, 'steps': {
-                'check': {'conclusion': 'failure'}}}),
-            ('not a push', {**green, 'github': {
-                'event_name': 'pull_request', 'ref': 'refs/heads/main'}}),
-            ('not main', {**green, 'github': {
-                'event_name': 'push', 'ref': 'refs/heads/other'}})):
+    flipped = [{**green, 'status': {
+        'success': False, 'failure': False, 'cancelled': True}}]
+    failed = {name: {'conclusion': 'failure'} for name in steps}
+    flipped += [{**green, 'steps': failed}]
+    flipped += [
+        {**green, 'github': {'event_name': 'pull_request',
+                             'ref': 'refs/heads/main'}},
+        {**green, 'github': {'event_name': 'push',
+                             'ref': 'refs/heads/other'}}]
+    for limb, context in zip(
+            ('cancelled', 'the check found a rise', 'not a push',
+             'not main'), flipped):
         assert evaluate_if(guard, context) is False, (
             f'the tighten guard ran even though {limb} does not hold: '
             f'{guard}')
@@ -225,7 +243,7 @@ def test_the_tighten_guard_reads_a_step_the_job_actually_declares(tmp):
     # Every step the guard reads, read back off the guard rather than off a
     # literal list beside it: a step id added there tomorrow is covered
     # today.
-    named = set(re.findall(r'steps\.([A-Za-z_][\w-]*)\.', tighten['if']))
+    named = set(_guard_step_names(tighten['if']))
     assert named, f'the guard reads no step at all: {tighten["if"]}'
     assert not sorted(named - set(declared)), (
         f'the guard reads steps the job does not declare, so it resolves to '
@@ -235,50 +253,219 @@ def test_the_tighten_guard_reads_a_step_the_job_actually_declares(tmp):
         'Check the journeys against the budget'), declared['check']
 
 
-def test_every_deploy_key_push_carries_its_own_rejection_discrimination(tmp):
-    """Each copy of the write credential must answer for its own failed push.
+def test_every_step_the_job_reads_is_a_step_the_job_declares(tmp):
+    """The same cross-check over the WHOLE job, not the tighten guard alone.
 
-    There are two of them because the coverage job's is a required context
-    that had to stay byte-identical, and two copies of a security-shaped
-    block is where they drift: the second is a copy, so an edit to the
-    discrimination in the first does not follow it. This walks EVERY step in
-    every workflow whose body holds the key rather than naming either copy,
-    so the third one is covered when it is written.
+    A guard naming an id no step declares resolves to empty, so whichever
+    step reads it either never runs or runs unconditionally. The tighten
+    guard is checked limb by limb above; this covers every other reader in
+    the job too, so an id renamed in one place and not the other is caught
+    wherever it is read.
+    """
+    del tmp
+    job, _ = _tighten_step()
+    declared = {step['id'] for step in job['steps'] if step.get('id')}
+    readers = [step for step in job['steps']
+               if _guard_step_names(step.get('if') or '')]
+    assert len(readers) >= 2, (
+        'the job reads steps from fewer than two guards, so this control is '
+        f'walking a shape the job no longer has: '
+        f'{[step.get("name") for step in readers]}')
+    for step in readers:
+        named = set(_guard_step_names(step['if']))
+        missing = sorted(named - declared)
+        assert not missing, (
+            f'the guard on {step.get("name")!r} reads steps the job does not '
+            f'declare, so it resolves to empty and that step does not run as '
+            f'written: {missing} vs {sorted(declared)}')
+
+
+def test_a_journey_recorded_at_null_still_renders_a_row(tmp):
+    """The schema admits a null recorded count, and a command must not die.
+
+    `journey_artifact._validated` skips a journey whose recorded count is
+    `None` rather than refusing it, so an artefact can name a journey with no
+    count yet — which is what a maintainer writes when a fourth journey is
+    added before it has been measured. There is no budget to print for such
+    a row and no delta against one, so the row says so, and the check
+    exits 0 having written the summary rather than dying inside the render.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = recorded_document()
+    document['journeys'][names[0]] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(_mixed_report(names)), encoding='utf-8')
+    summary = Path(tmp) / 'summary.md'
+    saved = os.environ.get('GITHUB_STEP_SUMMARY')
+    os.environ['GITHUB_STEP_SUMMARY'] = str(summary)
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(measurements),
+                                '--summary'])
+    finally:
+        os.environ.pop('GITHUB_STEP_SUMMARY', None)
+        if saved is not None:
+            os.environ['GITHUB_STEP_SUMMARY'] = saved
+    said = summary.read_text(encoding='utf-8')
+    assert code == 0, (
+        'a journey recorded at null is a legal artefact, and the check '
+        f'said: {said}')
+    row = [line for line in said.splitlines() if line.startswith(f'| {names[0]} ')]
+    assert row, (
+        f'the table carries no row for a journey recorded at null: {said}')
+    assert row[0].endswith('| not recorded yet |'), row[0]
+
+
+PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.sh'
+
+
+def _push_repo(base):
+    """A working checkout with one commit, and a bare repo standing in for
+    github.
+
+    The remote the script builds is `git@github.com:${REPO}.git`, so git's own
+    `url.<base>.insteadOf` maps it onto the bare repo. Nothing else is
+    stubbed: `push` and `fetch` are the real git against a real repository,
+    and the script's reads of HEAD^ and FETCH_HEAD are the repository's.
+    """
+    work, bare = Path(base) / 'work', Path(base) / 'bare.git'
+    bare.mkdir(parents=True)
+    _git('init', '--quiet', '--bare', '-b', 'main', str(bare))
+    work.mkdir()
+    _git('init', '--quiet', '-b', 'main', str(work))
+    _git('-C', str(work), 'config', 'user.email', 'tests@example.invalid')
+    _git('-C', str(work), 'config', 'user.name', 'Tests')
+    _git('-C', str(work), 'config', f'url.{bare}.insteadOf',
+         'git@github.com:o/r.git')
+    _git('-C', str(work), 'remote', 'add', 'origin', 'git@github.com:o/r.git')
+    (work / 'ratcheted.json').write_text('{"n": 2}\n', encoding='utf-8')
+    _git('-C', str(work), 'add', 'ratcheted.json')
+    _git('-C', str(work), 'commit', '--quiet', '-m', 'base')
+    _git('-C', str(work), 'push', '--quiet', 'origin', 'main')
+    return work, bare
+
+
+def _git(*argv):
+    """git, with its own stderr on the failure.
+
+    `check=True` alone reports a bare exit status, and a repository set up
+    wrongly is a setup bug this control should name rather than propagate.
+    """
+    done = subprocess.run(['git', *argv], capture_output=True, text=True)
+    assert done.returncode == 0, (
+        f'git {" ".join(argv)} failed ({done.returncode}): '
+        f'{done.stderr.strip()}')
+    return done
+
+
+def _drive_push(work, refuse):
+    """Run the real script over the prepared checkout.
+
+    `refuse` installs a pre-receive hook that rejects everything, which is
+    what a revoked key or a ruleset refusal looks like from the pushing side:
+    the push fails and main does not move. Without it the push is real, and
+    whether it is rejected is then decided by whether main has moved.
+    """
+    if refuse:
+        hook = work.parent / 'bare.git' / 'hooks' / 'pre-receive'
+        hook.write_text('#!/bin/sh\nexit 1\n', encoding='utf-8')
+        hook.chmod(0o755)
+    (work / 'ratcheted.json').write_text('{"n": 1}\n', encoding='utf-8')
+    _git('-C', str(work), 'commit', '--quiet', '-am', 'tightened')
+    env = dict(os.environ,
+               HOME=str(work.parent / 'home'),
+               REPO='o/r',
+               RATCHET_SSH_KEY='not-a-real-key')
+    summary = work.parent / 'summary.md'
+    env['GITHUB_STEP_SUMMARY'] = str(summary)
+    return subprocess.run(
+        ['bash', str(PUSH), 'ratcheted.json',
+         'ci: tighten the journey budget'],
+        cwd=str(work), capture_output=True, text=True, env=env), summary
+
+
+def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
+    """Both branches of the discrimination, driven through the real script.
 
     A rejected push has two causes and they must not be confused. Main
     moving under a run is ordinary and the next push retries; a rejection
     with main standing still is a real failure — a revoked key, a ruleset
-    refusal, a hook — and reporting that green is how it would go unnoticed.
+    refusal, a hook — and reporting that green is how it goes unnoticed. The
+    converse reds a required context on an ordinary concurrent push.
+
+    This runs the script rather than reading it, because the connective
+    between two `git rev-parse` lines is exactly what no grep can see: `=`
+    and `!=` are two behaviourally different versions of the same three
+    tokens, and a control that accepts both pins neither. Both jobs call this
+    one script, so there is no second copy to drift.
+    """
+    base = Path(tmp) / 'stood-still'
+    work, _ = _push_repo(base)
+    outcome, _summary = _drive_push(work, refuse=True)
+    assert outcome.returncode != 0, (
+        'a push rejected while main stood still was reported as a success, so '
+        f'a revoked key or a ruleset refusal would never be seen: '
+        f'{outcome.stdout}{outcome.stderr}')
+    assert 'stood still' in outcome.stderr, outcome.stderr
+
+    base = Path(tmp) / 'concurrent'
+    work, bare = _push_repo(base)
+    # main moves under the run: someone else pushes between our fetch and
+    # our comparison, which is what an ordinary concurrent push looks like.
+    other = base / 'other'
+    other.mkdir()
+    _git('clone', '--quiet', str(bare), str(other))
+    _git('-C', str(other), 'config', 'user.email', 'other@example.invalid')
+    _git('-C', str(other), 'config', 'user.name', 'Other')
+    (other / 'unrelated.txt').write_text('x\n', encoding='utf-8')
+    _git('-C', str(other), 'add', 'unrelated.txt')
+    _git('-C', str(other), 'commit', '--quiet', '-m', 'concurrent')
+    _git('-C', str(other), 'push', '--quiet', 'origin', 'main')
+    outcome, summary = _drive_push(work, refuse=False)
+    assert outcome.returncode == 0, (
+        'an ordinary concurrent push reddened a required context, which is '
+        f'the outcome the discrimination exists to avoid: '
+        f'{outcome.stdout}{outcome.stderr}')
+    assert 'stood still' not in outcome.stderr, outcome.stderr
+    assert 'Main moved while this run measured' in summary.read_text(
+        encoding='utf-8'), summary.read_text(encoding='utf-8')
+
+
+def test_both_jobs_call_the_one_push_implementation(tmp):
+    """One script, called with each job's own file and message.
+
+    The drift this retires was two copies of a write credential. There is
+    now one, and the walk below reads every step in the two jobs that hold
+    the key rather than naming either, so a third holder is caught if it
+    lands where these two live.
     """
     del tmp
     source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
-    job = complete_job_mapping(source, 'coverage')
-    assert job is not None, 'the coverage job is not in tests.yml'
-    holders = [step for step in job['steps']
-               if 'RATCHET_SSH_KEY' in (step.get('run') or '')]
-    journey = complete_job_mapping(source, 'journey-budget')
-    assert journey is not None, 'the journey-budget job is not in tests.yml'
-    holders += [step for step in journey['steps']
-                if 'RATCHET_SSH_KEY' in (step.get('run') or '')]
-    assert len(holders) >= 2, (
-        'the deploy key now reaches fewer than two steps, so this control is '
-        f'walking a shape the workflow no longer has: '
-        f'{[step.get("name") for step in holders]}')
-    for step in holders:
-        body = step['run']
-        name = step.get('name')
-        for wanted in (
-                'git fetch --quiet "git@github.com:${REPO}.git" main',
-                'git rev-parse HEAD^',
-                'git rev-parse FETCH_HEAD',
-        ):
-            assert wanted in body, (
-                f'the {name!r} step does not {wanted!r}, so a push it rejects '
-                'for a real reason is reported as main having moved: '
-                f'{body}')
-        assert '--force' not in body, (
-            f'the {name!r} step force-pushes to main: {body}')
+    seen = {}
+    for name in ('coverage', 'journey-budget'):
+        job = complete_job_mapping(source, name)
+        assert job is not None, f'the {name} job is not in tests.yml'
+        for step in job['steps']:
+            body = step.get('run') or ''
+            # The key is in the step's env block, not its body: the
+            # body is the script call.
+            if 'RATCHET_SSH_KEY' not in str(step):
+                continue
+            assert 'ratchet_push.sh' in body, (
+                f'the {step.get("name")!r} step holds the deploy key and does '
+                f'not call the shared script, so a second copy of the push '
+                f'is back: {body}')
+            assert body.split('ratchet_push.sh', 1)[1].strip().count(
+                "'") >= 2, (
+                'the push script takes the committed path and the commit '
+                f'message; the call does not supply both: {body}')
+            seen[name] = body
+    assert sorted(seen) == ['coverage', 'journey-budget'], sorted(seen)
 
 
 def main():

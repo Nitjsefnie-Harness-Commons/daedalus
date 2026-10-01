@@ -317,18 +317,13 @@ def test_only_the_main_tighten_may_write_the_artefact(tmp):
     assert len(tighten) == 1, (
         f'the journey-budget job must hold exactly one tightening step: '
         f'{len(tighten)}')
-    guard = tighten[0].split('run:')[0]
-    assert 'if: ${{' in guard, (
-        'the tightening step carries no guard at all, so it can write the '
-        f'artefact on a run that found a rise: {guard}')
-    commit = [block for block in steps if 'git commit' in block]
+    commit = [block for block in steps if 'ratchet_push.sh' in block]
     assert len(commit) == 1, f'expected one commit step, found {len(commit)}'
-    assert "git commit -m 'ci: tighten the journey budget'" in commit[0], (
+    assert artefact in commit[0], (
+        f'the commit step does not commit the artefact: {commit[0]}')
+    assert "'ci: tighten the journey budget'" in commit[0], (
         'the commit message is what a reader of the history sees a tighten '
         f'was: {commit[0]}')
-    assert '--force' not in commit[0], (
-        'a ratchet push that overwrites someone\'s commit is never the '
-        f'right trade: {commit[0]}')
 
 
 # ─── which way a recorded number may move ──────────────────────────────────

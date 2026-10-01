@@ -1155,40 +1155,8 @@ jobs:
           RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
           REPO: ${{ github.repository }}
         run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$RATCHET_SSH_KEY" > ~/.ssh/ratchet
-          chmod 600 ~/.ssh/ratchet
-          # Pinned, not scanned: ssh-keyscan would trust whatever answers, and
-          # this is the one step in the workflow holding a write credential.
-          # The value is github.com's published ed25519 host key (GET /meta).
-          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
-            > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/ci-thresholds.json
-          # No co-author trailer: no model authored this commit.
-          git commit -m 'ci: update CI ratchets'
-          # HEAD:main, never a force: overwriting someone's commit to record a
-          # coverage number is never the right trade.
-          export GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts'
-          if git push "git@github.com:${REPO}.git" HEAD:main; then
-            exit 0
-          fi
-          # A rejected push is usually main moving while this ran, and failing
-          # the job for that would turn `coverage` — a required context — red
-          # for an ordinary concurrent push. Distinguish it rather than
-          # swallowing it: if the remote really did move past the commit this
-          # run measured, the next push raises instead and there is nothing
-          # wrong here. If it did not, the push failed for some other reason
-          # and this job should say so.
-          git fetch --quiet "git@github.com:${REPO}.git" main
-          if [ "$(git rev-parse HEAD^)" = "$(git rev-parse FETCH_HEAD)" ]; then
-            echo "the ratchet push was rejected while main stood still" >&2
-            exit 1
-          fi
-          echo 'Main moved while this run measured; the next push raises instead.' \
-            >> "$GITHUB_STEP_SUMMARY"
+          bash scripts/ci/ratchet_push.sh .github/ci-thresholds.json \
+            'ci: update CI ratchets'
 
   diff-coverage:
     # INFORMATIONAL, never a gate — which is why it is deliberately absent
@@ -1410,39 +1378,8 @@ jobs:
           RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
           REPO: ${{ github.repository }}
         run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$RATCHET_SSH_KEY" > ~/.ssh/ratchet
-          chmod 600 ~/.ssh/ratchet
-          # Pinned, not scanned: ssh-keyscan would trust whatever answers, and
-          # this is the one step in the workflow holding a write credential.
-          # The value is github.com's published ed25519 host key (GET /meta).
-          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
-            > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/journey-budget.json
-          # No co-author trailer: no model authored this commit.
-          git commit -m 'ci: tighten the journey budget'
-          # HEAD:main, never a force: overwriting someone's commit to record
-          # an instruction count is never the right trade.
-          export GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts'
-          if git push "git@github.com:${REPO}.git" HEAD:main; then
-            exit 0
-          fi
-          # A rejected push is usually main moving while this ran, and failing
-          # the job for that would turn a red for an ordinary concurrent push.
-          # Distinguish it rather than swallowing it: if the remote really did
-          # move past the commit this run measured, the next push tightens
-          # instead and there is nothing wrong here. If it did not, the push
-          # failed for some other reason and this job should say so.
-          git fetch --quiet "git@github.com:${REPO}.git" main
-          if [ "$(git rev-parse HEAD^)" = "$(git rev-parse FETCH_HEAD)" ]; then
-            echo "the tighten push was rejected while main stood still" >&2
-            exit 1
-          fi
-          echo 'Main moved while this run measured; the next push tightens instead.' \
-            >> "$GITHUB_STEP_SUMMARY"
+          bash scripts/ci/ratchet_push.sh .github/journey-budget.json \
+            'ci: tighten the journey budget'
 
   aggregate:
     name: Aggregate workflow checks
