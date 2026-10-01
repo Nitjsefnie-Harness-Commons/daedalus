@@ -126,8 +126,10 @@ def _header_values(node):
     return [*decorators, *defaults]
 
 
-# The node types `_bound_values` has an arm for; every other type falls
-# through all of them to no value, so it is answered by one lookup.
+# The node types NO arm of `_bound_values` can match, so every one of
+# them falls through the whole chain to no value. `memo_node_types`
+# takes the arms and answers their complement: one lookup instead of
+# nine `isinstance` tests.
 _UNBOUND_VALUE_NODES = memo_node_types(
     ast.Assign, ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor,
     ast.comprehension, ast.With, ast.AsyncWith, ast.NamedExpr, ast.Match,
