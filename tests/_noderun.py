@@ -129,8 +129,10 @@ class ChildDeadlineExceeded(Exception):
         self.unlinked = unlinked
         super().__init__(
             f'a Node child did not finish within {deadline_s}s and was '
-            f'killed; the suite ceiling is a weaker backstop because it '
-            f'sends SIGTERM to the suite and leaves this child running.\n'
+            f'killed; the suite ceiling is a weaker backstop, but it now '
+            f'sends the request to the suite\'s whole process group and '
+            f'escalates on that group, so this child does not survive '
+            f'it.\n'
             f'  child: {_child_label(argv)}\n'
             f'  deadline: {deadline_s}s\n'
             f'  cleanup: {cleanup}{unlinked}\n'
@@ -247,11 +249,16 @@ def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None,
     expiry can be a named, classified failure carrying the child's partial
     output AND a bounded, verified cleanup: `subprocess.run` kills the child
     it launched and nothing else, so a child that started a grandchild
-    leaves it running, and under the suite ceiling a SIGTERM to the suite
-    leaves the child itself running (reparented, alive). `start_new_session`
-    is applied only where a process group exists to be killed; on Windows
-    the tree is killed through `taskkill /T` instead, which is why the
-    cleanup lives in `tests/_processtree.py` rather than here.
+    leaves it running. The suite ceiling does not: since the per-suite
+    bound it sends the request to the suite's whole process group, waits a
+    bounded grace, and escalates on that group whatever happened in
+    between, so this child is inside it and does not survive. On Windows
+    the tree is killed through `taskkill /T` instead, and `taskkill /F` is
+    a forced termination with no request and no grace -- so a child there
+    is killed outright rather than asked, which is the platform
+    difference, not a weaker ceiling. `start_new_session` is applied only
+    where a process group exists to be killed, which is why the cleanup
+    lives in `tests/_processtree.py` rather than here.
 
     Both scratch directories are `_Scratch`, not `TemporaryDirectory`, so a
     removal that fails is recorded in the report instead of replacing it —
