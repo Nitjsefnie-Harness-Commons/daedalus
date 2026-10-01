@@ -304,6 +304,7 @@
 !/tests/_command_candidates.py
 !/tests/_command_type_readers.py
 !/tests/_completion.py
+!/tests/_composed_bounds.py
 !/tests/_control_calls.py
 !/tests/_control_paths.py
 !/tests/_control_writes.py
@@ -685,6 +686,7 @@
 !/tests/test_mcp_transport.py
 !/tests/test_mcp_transport_close.py
 !/tests/test_mcp_transport_guards.py
+!/tests/test_node_launch_routing.py
 !/tests/test_noderun_deadline.py
 !/tests/test_outer_bound.py
 !/tests/test_overlap_bound.py

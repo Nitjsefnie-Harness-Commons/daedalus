@@ -548,6 +548,7 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     assert not violations, (
         'browser tab sent as typed-command `tab`:\n' + '\n'.join(violations))
 
+
 def test_selected_deferred_callables_stay_beside_their_senders(tmp):
     cases = [(label, SELECTION_PRE + store + '\nsend = ext_cmd\nreturn '
               + invoke + '\n', '', '', expected)
