@@ -243,16 +243,19 @@ def refusal_lines(found):
 
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--root', type=Path, default=ROOT,
-                        help='the checkout to measure')
     sub = parser.add_subparsers(dest='command', required=True)
 
+    # `--root` sits on each subcommand rather than above them, because a
+    # top-level option is only readable BEFORE the subcommand name and a
+    # workflow step that writes `measure --root .` would fail on it.
     probe = sub.add_parser(
         'probe', help='report what this runner actually counts')
     probe.add_argument('--summary', action='store_true',
                        help='also write the report to the step summary')
 
     count = sub.add_parser('measure', help='measure every journey')
+    count.add_argument('--root', type=Path, default=ROOT,
+                       help='the checkout to measure')
     count.add_argument('--rounds', type=int, default=ROUNDS_DEFAULT)
     count.add_argument('--out', type=Path,
                        help='write the measurements JSON here')
@@ -261,6 +264,8 @@ def _parser():
 
     check = sub.add_parser(
         'check', help='compare against the recorded counts')
+    check.add_argument('--root', type=Path, default=ROOT,
+                       help='the checkout to measure')
     check.add_argument('--measurements', type=Path,
                        help='a measure --out file; measured here without one')
     check.add_argument('--rounds', type=int, default=ROUNDS_DEFAULT)
