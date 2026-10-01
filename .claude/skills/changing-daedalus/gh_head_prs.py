@@ -16,6 +16,9 @@ API answers it with that MERGED pull request; and a branch is merged while
 its own earlier commits are still queried. Unfiltered, every commit on the
 line to a merged head looks like an open pull request of its own, which is
 how a wait on `main` would come to read as a pull request that blocks it.
+No control in this tree exercises that, and the pull request body records
+what a broken filter costs when it is measured: a wrong refusal naming the
+wrong pull request, never a green.
 """
 import sys
 from pathlib import Path
