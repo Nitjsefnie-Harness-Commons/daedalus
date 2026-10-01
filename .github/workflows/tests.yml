@@ -540,6 +540,25 @@ jobs:
           fi
           ./actionlint -color "${workflows[@]}"
 
+      - name: shellcheck the CI scripts
+        # actionlint's shellcheck integration lints inline `run:` blocks
+        # only, so a shell script under scripts/ci/ would otherwise leave
+        # this job's surface without a replacement: the deploy-key write,
+        # the pinned host key and the push moved out of a `run:` block and
+        # nothing would read them again. `-S style` matches what actionlint
+        # applies to a `run:` block. nullglob and the emptiness check are
+        # the same shape as the step above, so a directory that matches
+        # nothing cannot read as a clean lint.
+        run: |
+          shopt -s nullglob
+          scripts=(scripts/ci/*.sh)
+          if [ ${#scripts[@]} -eq 0 ]; then
+            echo "no shell scripts matched; refusing to report a clean lint" \
+              >&2
+            exit 1
+          fi
+          shellcheck -S style "${scripts[@]}"
+
       - name: zizmor
         # Runs even when actionlint is red, so one push reports both gates —
         # the same shape the pylint and pycodestyle jobs use. Not when the
@@ -1366,11 +1385,10 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The credential handling below is the coverage job's `Commit the
-      # raise` step, deliberately repeated rather than shared: that step is
-      # a required context and has run on every push to main, and a
-      # composite action would put the one step holding a write credential
-      # behind a second mechanism for no gain in review.
+      # One script, both jobs. `scripts/ci/ratchet_push.sh` holds the deploy
+      # key, the pinned host key and the discrimination between a refused
+      # push and a concurrent one, so a second copy of a write credential
+      # cannot exist here to drift from the coverage job's.
       - name: Commit the tighten
         if: ${{ !cancelled() && steps.tighten.outputs.changed == 'true'
                 && env.RATCHET_SSH_KEY != '' }}
