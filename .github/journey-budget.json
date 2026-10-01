@@ -12,6 +12,16 @@
     "dashboard-fanout": ["front-end-import", "uvicorn-serve"],
     "mcp-exec": ["front-end-import"]
   },
+  "thread_bands": {
+    "front-end-import": 1000000000,
+    "request": 1000,
+    "uvicorn-serve": 10000000
+  },
+  "shas": {
+    "command-round-trip": "3f5ca89e843d0edbf3d16ebcfbc7c1c93a82622eef7abbb1ea1182c5ba67a9fc",
+    "dashboard-fanout": "a73f6fd82e993f22d0e8fc931ef351f99ba1c5aa93ef0dff81489ff386f7b319",
+    "mcp-exec": "0fee0549d2cfba78242e570358e085a555002d0e8b8511d6f8957475325013d9"
+  },
   "journeys": {
     "command-round-trip": 779890807,
     "dashboard-fanout": 774774545,
