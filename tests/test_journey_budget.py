@@ -249,6 +249,29 @@ def test_the_check_command_refuses_with_the_remedy_it_promises(tmp):
         f'so a reader is told something the table does not promise: {said}')
 
 
+def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
+    policy = _policy()
+    names = _journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(_document()))
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps({
+        'rounds': 1, 'python': sys.version, 'shas': {},
+        'shape_failure': 'the mcp-exec journey printed no record',
+        'counters': {}}), encoding='utf-8')
+    for extra in ([], ['--tighten']):
+        spoken = io.StringIO()
+        with contextlib.redirect_stderr(spoken):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(measurements)] + extra)
+        assert code == 1, extra
+        assert policy.SHAPE_REMEDY in spoken.getvalue(), spoken.getvalue()
+    # A tighten that ran off a failed measurement would write a number no
+    # journey produced, so the artefact is untouched.
+    assert json.loads(artifact.read_text(encoding='utf-8'))['journeys'] == {
+        name: 1000 for name in names}
+
+
 # ─── the shape the sha is taken over ───────────────────────────────────────
 
 def test_a_rendered_journey_carries_no_per_run_field(tmp):
