@@ -69,6 +69,7 @@ from _coverage_bindings import (
     _LAUNCHERS, _has_cwd_control, _is_launch_value, _names_one_of,
     _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
+from _coverage_memo import release_bound_census
 from _coverage_scopes import (
     _ScopeFacts, _is_root_spelling, _name_is_unbound,
     _scope_bindings, _scope_shadows, _shadowed_names, _visible_scope_shadows)
@@ -643,6 +644,7 @@ def _helper_rebind_violations(tree, facts, relative):
 
 
 def _analyze(relative, source, keeps):
+    release_bound_census()
     tree = ast.parse(source, filename=relative)
     facts = _ModuleFacts(tree)
     violations = []
@@ -652,6 +654,7 @@ def _analyze(relative, source, keeps):
     violations.extend(
         f'{relative}:{line}: {_BINDING_MESSAGE}'
         for line in _unfollowable_launcher_bindings(tree, facts))
+    release_bound_census()
     return violations
 
 

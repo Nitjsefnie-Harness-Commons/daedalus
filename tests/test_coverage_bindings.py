@@ -558,13 +558,16 @@ def test_a_mutation_sweep_child_imports_no_helper_no_row_reaches(tmp):
     """
     import subprocess
 
+    from _util import child_coverage
+
     tests = Path(__file__).resolve().parent
     child = subprocess.run(
         [sys.executable, '-B', '-S', '-c',
          f'import sys; sys.path.insert(0, {str(tests)!r});'
          ' import test_coverage_bindings;'
          " print(','.join(sys.modules))"],
-        cwd=tmp, capture_output=True, text=True, check=True)
+        cwd=tmp, env=child_coverage('scrub'),
+        capture_output=True, text=True, check=True)
     loaded = child.stdout.split(',')
     unneeded = [name for name in ('_util', 'socket', 'subprocess')
                 if name in loaded]
