@@ -181,6 +181,22 @@ def _entry_detail(entry):
     return f' ({", ".join(parts)})' if parts else ''
 
 
+def _remove_entry(entry, restored=None):
+    """Discard `entry`, or name why it is still there.
+
+    `restore` reaches this after the bytes are published, so a refusal
+    that reads as a save to redo would send the operator back into a
+    store that already holds a copy; it names what did land instead.
+    """
+    try:
+        shutil.rmtree(entry)
+    except OSError as why:
+        done = f'{restored} was restored and ' if restored else ''
+        return _refuse(f'{done}the stored copy at {entry} could not be '
+                       f'removed ({why}); it is still there')
+    return 0
+
+
 def clear(path, store):
     entry = _entry(store, path)
     if not os.path.isdir(entry):
@@ -188,8 +204,7 @@ def clear(path, store):
                        'nothing to clear')
     print(f'discarding the stored copy of {path} at {entry}'
           f'{_entry_detail(entry)}')
-    shutil.rmtree(entry)
-    return 0
+    return _remove_entry(entry)
 
 
 def save(path, store):
@@ -241,8 +256,17 @@ def restore(path, store):
     except OSError as why:
         return _refuse(f'cannot restore {path}: {why}; the stored copy is '
                        f'still at {entry}')
-    os.chmod(path, mode)
-    shutil.rmtree(entry)
+    # Past here the bytes are published, so no refusal may read as a
+    # restore that did not happen.
+    try:
+        os.chmod(path, mode)
+    except OSError as why:
+        return _refuse(f'{path} was restored, but its recorded mode '
+                       f'{mode:o} was not applied ({why}); the stored copy '
+                       f'at {entry} is still there')
+    removed = _remove_entry(entry, path)
+    if removed:
+        return removed
     print(f'restored {path}: {len(payload)} bytes published'
           f'{_published_note(state, changed)}')
     return 0
