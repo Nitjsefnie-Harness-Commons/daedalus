@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The job-scalar reader itself, pinned apart from the policy it serves.
 
-`test_ci_workflows.py` asks whether the speed job's environment is the
-right expression; that answer is only as good as the reader that finds
-the key. A reader that matched the first `environment:` anywhere in the
+`test_workflow_spellings.py` asks whether a named job's `if:` is spelled
+a way the workflow accepts; that answer is only as good as the reader that
+finds the key. A reader that matched the first `if:` anywhere in the
 file, or one outside `jobs` entirely, would report a gate that is not
 there — so the reader gets its own suite, the same way `_workflows.py`
 has `test_workflow_parsing.py`.
@@ -16,40 +16,40 @@ import _util  # noqa: E402
 from _yamlread import job_mapping, job_scalar  # noqa: E402
 
 
-def test_a_decoy_job_cannot_supply_the_speed_environment(tmp):
-    """The environment above answers for `speed`, not for whoever is first.
+def test_a_decoy_job_cannot_supply_the_gates_key(tmp):
+    """The key above answers for `gates`, not for whoever is first.
 
-    Read as raw text this was `workflow.partition('    environment:')`, which
-    matches the first four-space-indented `environment:` anywhere in the
-    file — so hanging the key on a job declared above `speed` and stripping
-    it off `speed` left the gate green with forks running unreviewed.
+    Read as raw text this was `workflow.partition('    permissions:')`, which
+    matches the first four-space-indented `permissions:` anywhere in the
+    file — so hanging the key on a job declared above `gates` and stripping
+    it off `gates` left the gate green with forks running unreviewed.
     """
     del tmp
     workflow = ('jobs:\n'
                 '  decoy:\n'
-                '    environment: benchmark\n'
-                '  speed:\n'
+                '    permissions: read\n'
+                '  gates:\n'
                 '    runs-on: ubuntu-latest\n')
-    assert job_scalar(workflow, 'decoy', 'environment') == 'benchmark'
-    assert job_scalar(workflow, 'speed', 'environment') is None
+    assert job_scalar(workflow, 'decoy', 'permissions') == 'read'
+    assert job_scalar(workflow, 'gates', 'permissions') is None
 
 
 def test_job_scalar_stays_inside_the_jobs_mapping(tmp):
-    """A scalar outside `jobs` cannot impersonate the speed job."""
+    """A scalar outside `jobs` cannot impersonate the gate job."""
     del tmp
     workflow = (
-        'name: speed\n'
+        'name: gates\n'
         'run-name: |\n'
-        '  speed:\n'
-        '    environment: >-\n'
+        '  gates:\n'
+        '    permissions: >-\n'
         "      ${{ github.event_name == 'pull_request'\n"
         '      && github.event.pull_request.head.repo.full_name != '
         'github.repository\n'
-        "      && 'fork-benchmark' || 'benchmark' }}\n"
+        "      && 'fork-read' || 'read' }}\n"
         'jobs:\n'
-        '  speed:\n'
+        '  gates:\n'
         '    runs-on: ubuntu-latest\n')
-    assert job_scalar(workflow, 'speed', 'environment') is None
+    assert job_scalar(workflow, 'gates', 'permissions') is None
 
 
 def test_job_mapping_decodes_keys_and_values_like_yaml(tmp):

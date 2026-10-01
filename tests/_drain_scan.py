@@ -633,7 +633,7 @@ _SITES = (
 # names a real process child; a `threading.Event` wait reads the same but
 # is not one, so it is not a site this control stands on.
 _UNBOUNDED_WITHOUT_STOP = (
-    ('scripts/ci/time_tests.py', 'child.wait()'),
+    ('tests/test_outer_bound.py', 'process.wait()'),
 )
 
 

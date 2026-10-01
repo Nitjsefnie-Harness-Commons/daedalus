@@ -66,13 +66,12 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
 
     ORDER is the property, not membership, and it is measured against the
     first step that REACHES the suite tree rather than the first one that
-    runs a suite in it. Those are not the same step: in `timed` the first is
-    a `--help` probe that runs no suite at all, and the walk cannot tell
-    `time_tests.py --help` from a run of it without encoding which
-    invocations of which runner do what — the basename fingerprint the
-    walk exists to refuse. So the boundary is conservative on purpose, and
-    the message below says which step it is rather than claiming a suite
-    ran there.
+    runs a suite in it. Those are not the same step: a `--help` probe
+    reaches the tree and runs no suite at all, and the walk cannot tell it
+    from a run without encoding which invocations of which runner do what
+    — the basename fingerprint the walk exists to refuse. So the boundary
+    is conservative on purpose, and the message below says which step it
+    is rather than claiming a suite ran there.
 
     A declaration is also a step that RUNS. `if:` is not statically
     knowable from a `uses:`, so a setup step behind a condition is refused
@@ -124,11 +123,11 @@ def _declared_above(before, gated):
     false of any job that reaches that state with a gated action to name:
     the message denied the job every action and then listed the gated ones
     in the next clause, so a reader had to read past the assertion to
-    learn the opposite of what it claimed. `timed` is the job that reaches
-    it — both of its pre-boundary checkouts are gated, and a gated action
-    is not one the control counts — on any tree where the declaration
-    above its boundary is not there, which is the tree this control's own
-    refusal is about.
+    learn the opposite of what it claimed. A job whose every pre-boundary
+    action is gated reaches that state — a gated action is not one the
+    control counts — on any tree where the declaration above its boundary
+    is not there, which is the tree this control's own refusal is
+    about.
     """
     if before:
         named = f'uses {sorted(before)}'

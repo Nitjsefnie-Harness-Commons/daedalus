@@ -589,8 +589,6 @@ def test_a_step_scalar_stops_where_its_own_field_stops(tmp):
          "${{ !cancelled() && steps.measure.conclusion == 'success'"
          " && github.event_name == 'push'"
          " && github.ref == 'refs/heads/main' }}"),
-        (tests_yml, 'timed', 'Build one virtualenv per side', 'if',
-         "steps.baseline.outputs.point != ''"),
     )
     for workflow, job, step, key, expected in shipped:
         assert step_scalar(workflow, job, step, key) == expected, (

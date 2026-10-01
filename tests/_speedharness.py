@@ -1,4 +1,4 @@
-"""Extracting and executing the speed measurement's shell under GitHub's rules.
+"""Extracting and executing a workflow `run:` block under GitHub's rules.
 
 The readers lift one job's step out of a workflow; the runner executes it
 under `bash -e` with stubbed neighbours on PATH. `write_executable` is the

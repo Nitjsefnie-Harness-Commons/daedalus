@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """The workflow-script runner's own runtime behaviour, executed not read back.
 
-`run_workflow_script` is the harness every behavioural pin over the speed
-measurement runs through, so a timeout that lost its evidence or a cleanup
-that outlived its bound would break the pins quietly. The speed gate's own
-shape lives in test_speed_gate.py.
+`run_workflow_script` is what every behavioural pin over a workflow step
+runs through, so a timeout that lost its evidence or a cleanup that
+outlived its bound would break those pins quietly.
 """
 import os
 import subprocess
