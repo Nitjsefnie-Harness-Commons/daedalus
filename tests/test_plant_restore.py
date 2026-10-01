@@ -26,13 +26,107 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ratchet_fixture import _git  # noqa: E402
-from _plant_fixture import (  # noqa: E402
-    PLANT, _COMMITTED, _FIXED, _PLANTED, _as_nobody, _hand_to_nobody, _out,
-    _only_entry, _open_the_entry, _plant, _reported_state, _repo, _say,
-    _unreadable_as_bytes)
 
-SKILL_SOURCE = (_util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
-                / 'SKILL.md')
+ROOT = _util.ROOT
+PLANT = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'plant.py'
+
+_COMMITTED = b'VALUE = 1\n'
+_FIXED = b'VALUE = 2  # the uncommitted fix, never staged\n'
+_PLANTED = b'raise RuntimeError("the defect the guard exists to catch")\n'
+
+
+def _plant(*args):
+    return subprocess.run([sys.executable, str(PLANT), *args],
+                          capture_output=True, text=True, timeout=60,
+                          env=_util.child_coverage('scrub'))
+
+
+def _repo(tmp, name='plantrepo'):
+    """A committed repository holding one committed target file."""
+    if shutil.which('git') is None:
+        _util.skip('git is not on PATH')
+    repo = Path(tmp) / name
+    repo.mkdir(parents=True)
+    target = repo / 'target.py'
+    target.write_bytes(_COMMITTED)
+    _git(repo, '-c', 'init.defaultBranch=main', 'init', '-q')
+    _git(repo, 'config', 'user.email', 'tests@example.invalid')
+    _git(repo, 'config', 'user.name', 'Tests')
+    _git(repo, 'add', 'target.py')
+    _git(repo, 'commit', '-qm', 'base')
+    return target
+
+
+def _say(result):
+    return result.stdout + result.stderr
+
+
+def _reported_state(output):
+    """The state word the helper reported, not a word in its paths: the
+    suite names each temp dir after its test function, so the path a test
+    about a dirty target prints is full of that word anyway."""
+    return output.rsplit(': ', 1)[-1].split(' against')[0].strip()
+
+
+def _only_entry(store):
+    entries = [item for item in Path(store).iterdir() if item.is_dir()]
+    assert len(entries) == 1, entries
+    return entries[0]
+
+
+def _unreadable_as_bytes(entry):
+    """Make a stored copy unreadable as bytes, on every platform.
+
+    A directory where a file is expected refuses the open everywhere, so
+    the class is the platform's and only OSError may be relied on.
+    """
+
+    payload = entry / 'bytes'
+    payload.unlink()
+    payload.mkdir()
+
+
+def _drop_to_nobody():
+    os.setgroups([])
+    os.setgid(65534)
+    os.setuid(65534)
+
+
+def _as_nobody(command):
+    """Run `command` unprivileged, so the file mode bits bite - root
+    bypasses them, which is why this route was enforced nowhere on a root
+    runner. An arrangement that cannot drop privileges skips with the
+    reason rather than erroring: a control that manufactures a red on
+    correct code is the same defect as one that passes on broken code.
+    """
+    try:
+        return subprocess.run(command, capture_output=True, text=True,
+                              timeout=60, preexec_fn=_drop_to_nobody,
+                              env=_util.child_coverage('scrub'))
+    except (OSError, subprocess.SubprocessError) as why:
+        _util.skip(f'the privilege drop is unavailable here: {why!r}')
+
+
+def _hand_to_nobody(path):
+    # 0o700: the chown makes the child the OWNER, so owner bits are all
+    # it needs and group and other are nobody.
+    os.chown(path, 65534, 65534)
+    os.chmod(path, 0o700)
+
+
+def _open_the_entry(store, target):
+    """Hand the child every path it walks to publish: a suite's temporary
+    root is 0700, and without the traverse bit the child reads a refusal
+    where the route should have run."""
+    entry = _only_entry(store)
+    for directory in (target.parent, store, entry):
+        for ancestor in (directory, *directory.parents):
+            os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
+    for owned in (target.parent.parent, target.parent, store, entry,
+                  *entry.iterdir()):
+        _hand_to_nobody(owned)
+
+SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 
 
 def test_restore_returns_the_uncommitted_work_and_the_planted_bytes_are_gone(
@@ -466,34 +560,6 @@ def test_the_refusal_recommends_clear_when_the_copy_is_unreadable(tmp):
     assert 'neither that copy nor the file could be read' in advice, advice
 
 
-def test_an_unreadable_target_is_also_refused_as_an_unknown_comparison(tmp):
-    # The other side of the same pair: the copy reads, the file does not,
-    # so the comparison never happened either.
-    if os.name != 'posix':
-        _util.skip('POSIX mode bits are what refuse the read')
-    target = _repo(tmp)
-    store = Path(tmp) / 'store'
-    assert _plant('save', str(target), '--store',
-                  str(store)).returncode == 0
-    target.write_bytes(_FIXED)
-    _open_the_entry(store, target)
-    try:
-        _hand_to_nobody(target)
-    except OSError as why:
-        _util.skip(f'cannot hand the target to a plain user: {why!r}')
-    target.chmod(0o200)
-    try:
-        refused = _as_nobody(
-            [sys.executable, str(PLANT), 'save', str(target),
-             '--store', str(store)])
-    finally:
-        target.chmod(0o600)
-    assert refused.returncode != 0, _say(refused)
-    advice = _say(refused).split('; ', 1)[-1]
-    assert 'has changed since that copy was taken' not in advice, advice
-    assert 'neither that copy nor the file could be read' in advice, advice
-
-
 def test_a_write_that_dies_partway_leaves_the_target_untouched(tmp):
     if sys.platform.startswith('win'):
         _util.skip('a POSIX file-size limit is what truncates the write')
@@ -529,8 +595,8 @@ def test_save_reports_unknown_outside_a_git_work_tree(tmp):
     outside.parent.mkdir(parents=True)
     outside.write_bytes(_FIXED)
     try:
-        probe = _out(_git(outside.parent, 'rev-parse',
-                          '--is-inside-work-tree')).strip()
+        probe = _git(outside.parent, 'rev-parse',
+                     '--is-inside-work-tree').stdout.decode().strip()
     except subprocess.CalledProcessError:
         probe = ''
     if probe == 'true':

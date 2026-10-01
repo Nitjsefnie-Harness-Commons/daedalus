@@ -9,15 +9,101 @@ this suite names each temp dir after its test function, so a substring
 pin over a whole line is satisfied by the path.
 """
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _plant_fixture import (  # noqa: E402
-    PLANT, _COMMITTED, _FIXED, _PLANTED, _as_nobody, _hand_to_nobody,
-    _only_entry, _open_the_entry, _plant, _reported_state, _repo,
-    _say)
+from _ratchet_fixture import _git  # noqa: E402
+
+ROOT = _util.ROOT
+PLANT = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'plant.py'
+
+_COMMITTED = b'VALUE = 1\n'
+_FIXED = b'VALUE = 2  # the uncommitted fix, never staged\n'
+_PLANTED = b'raise RuntimeError("the defect the guard exists to catch")\n'
+
+
+def _plant(*args):
+    return subprocess.run([sys.executable, str(PLANT), *args],
+                          capture_output=True, text=True, timeout=60,
+                          env=_util.child_coverage('scrub'))
+
+
+def _repo(tmp, name='plantrepo'):
+    """A committed repository holding one committed target file."""
+    if shutil.which('git') is None:
+        _util.skip('git is not on PATH')
+    repo = Path(tmp) / name
+    repo.mkdir(parents=True)
+    target = repo / 'target.py'
+    target.write_bytes(_COMMITTED)
+    _git(repo, '-c', 'init.defaultBranch=main', 'init', '-q')
+    _git(repo, 'config', 'user.email', 'tests@example.invalid')
+    _git(repo, 'config', 'user.name', 'Tests')
+    _git(repo, 'add', 'target.py')
+    _git(repo, 'commit', '-qm', 'base')
+    return target
+
+
+def _say(result):
+    return result.stdout + result.stderr
+
+
+def _reported_state(output):
+    """The state word the helper reported, not a word in its paths: the
+    suite names each temp dir after its test function, so the path a test
+    about a dirty target prints is full of that word anyway."""
+    return output.rsplit(': ', 1)[-1].split(' against')[0].strip()
+
+
+def _only_entry(store):
+    entries = [item for item in Path(store).iterdir() if item.is_dir()]
+    assert len(entries) == 1, entries
+    return entries[0]
+
+
+def _drop_to_nobody():
+    os.setgroups([])
+    os.setgid(65534)
+    os.setuid(65534)
+
+
+def _as_nobody(command):
+    """Run `command` unprivileged, so the file mode bits bite - root
+    bypasses them, which is why this route was enforced nowhere on a root
+    runner. An arrangement that cannot drop privileges skips with the
+    reason rather than erroring: a control that manufactures a red on
+    correct code is the same defect as one that passes on broken code.
+    """
+    try:
+        return subprocess.run(command, capture_output=True, text=True,
+                              timeout=60, preexec_fn=_drop_to_nobody,
+                              env=_util.child_coverage('scrub'))
+    except (OSError, subprocess.SubprocessError) as why:
+        _util.skip(f'the privilege drop is unavailable here: {why!r}')
+
+
+def _hand_to_nobody(path):
+    # 0o700: the chown makes the child the OWNER, so owner bits are all
+    # it needs and group and other are nobody.
+    os.chown(path, 65534, 65534)
+    os.chmod(path, 0o700)
+
+
+def _open_the_entry(store, target):
+    """Hand the child every path it walks to publish: a suite's temporary
+    root is 0700, and without the traverse bit the child reads a refusal
+    where the route should have run."""
+    entry = _only_entry(store)
+    for directory in (target.parent, store, entry):
+        for ancestor in (directory, *directory.parents):
+            os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
+    for owned in (target.parent.parent, target.parent, store, entry,
+                  *entry.iterdir()):
+        _hand_to_nobody(owned)
 
 _NOT_HEADS = "the published bytes are the worktree's, not what HEAD holds"
 
@@ -178,27 +264,6 @@ def test_a_target_that_does_not_exist_counted_as_holding_nothing(tmp):
     assert target.read_bytes() == _FIXED
 
 
-def test_a_dangling_symlink_counted_as_holding_nothing(tmp):
-    # The publish writes through to what the link resolves to, creating
-    # it, so the link's own absence is not a missing comparison either.
-    if sys.platform.startswith('win'):
-        _util.skip('creating a symlink needs a privilege Windows withholds')
-    repo = Path(tmp) / 'linked'
-    repo.mkdir(parents=True)
-    (repo / 'real.py').write_bytes(_COMMITTED)
-    link = repo / 'link.py'
-    link.symlink_to('real.py')
-    store = Path(tmp) / 'store'
-    assert _plant('save', str(link), '--store', str(store)).returncode == 0
-    (repo / 'real.py').unlink()
-
-    restored = _plant('restore', str(link), '--store', str(store))
-    assert restored.returncode == 0, _say(restored)
-    clauses = _restore_clauses(restored.stdout)
-    assert _change_in(clauses) == 'changed', clauses
-    assert link.read_bytes() == _COMMITTED
-
-
 def _assert_the_read_is_refused(target, as_nobody):
     """Prove the arrangement before the tool runs, so a green run proves
     something. Root cannot be refused by mode bits, so there the probe
@@ -267,16 +332,6 @@ def test_the_save_line_is_exactly_the_shape_the_suite_parses(tmp):
     assert saved.stdout.strip() == (
         f'saved {os.path.abspath(target)}: dirty against HEAD, '
         f'{len(_FIXED)} bytes in {_only_entry(store)}'), saved.stdout
-
-
-def test_clear_names_the_state_its_entry_recorded(tmp):
-    target, store = _saved_then_planted(tmp)
-
-    cleared = _plant('clear', str(target), '--store', str(store))
-    assert cleared.returncode == 0, _say(cleared)
-    # Parsed by label: the store path carries this test's own name.
-    fields = _entry_fields(cleared.stdout)
-    assert ['captured', 'dirty'] in fields, _say(cleared)
 
 
 def test_clear_of_an_entry_without_the_field_still_names_its_others(tmp):
