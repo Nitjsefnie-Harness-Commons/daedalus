@@ -88,10 +88,12 @@ def _publish(target, payload):
 
 
 def _differs_from(path, payload):
-    """Whether the target already held the payload, or None when it could
-    not be read: a comparison that was not made is not one that found no
-    difference, and a report that cannot tell the two apart would claim
-    an outcome it has no evidence for."""
+    """Whether the target's bytes DIFFER from the payload, or None when
+    they could not be read: a comparison that was not made is not one
+    that found no difference. A target that is not there holds nothing,
+    which is a difference, so absence is settled before the open."""
+    if not os.path.exists(path):
+        return True
     try:
         with open(path, 'rb') as handle:
             return handle.read() != payload
@@ -99,18 +101,30 @@ def _differs_from(path, payload):
         return None
 
 
-def _recorded_state(entry):
-    """The state the save recorded; 'unknown' for an entry written before
-    the field existed, and for any value this helper cannot vouch for."""
+def _recorded_field(entry, name):
+    """One field the entry recorded, or None when it never wrote it."""
     try:
-        with open(os.path.join(entry, 'head-state'), 'r',
-                  encoding='ascii') as handle:
-            state = handle.read().strip()
+        with open(os.path.join(entry, name), 'r', encoding='utf-8',
+                  errors='replace') as handle:
+            return handle.read().strip()
     except OSError:
-        return 'unknown'
+        return None
+
+
+def _vouched_state(state):
+    """The recorded state this helper stands behind. Anything else, the
+    empty string included, is 'unknown'."""
     return state if state in ('clean', 'dirty') else 'unknown'
 
 
+def _recorded_state(entry):
+    """The state the save recorded; 'unknown' for an entry written before
+    the field existed, and for any value this helper cannot vouch for."""
+    return _vouched_state(_recorded_field(entry, 'head-state'))
+
+
+# Keyed by `_differs_from`'s own polarity, which is what every caller
+# reads: True is a difference, False is not, None is no comparison.
 _WHAT_PUBLISHED = {
     True: 'the file did not already hold these bytes',
     False: 'the file already held these bytes',
@@ -123,7 +137,10 @@ def _published_note(state, changed):
     taken in, whether these bytes are the worktree's, and whether the
     target already held them."""
     clauses = [f'captured {state} against HEAD']
-    if state != 'clean':
+    # Only `dirty` supports the claim. `unknown` also covers a work tree
+    # whose status could not be read, and the bytes there may be exactly
+    # HEAD's.
+    if state == 'dirty':
         clauses.append(
             "the published bytes are the worktree's, not what HEAD holds")
     clauses.append(_WHAT_PUBLISHED[changed])
@@ -131,19 +148,29 @@ def _published_note(state, changed):
 
 
 def _stored_matches(path, entry):
+    """True, False, or None when either side could not be read: a store
+    that will not open its own bytes is not evidence that the file moved
+    on, and the two sides are compared by one helper so one comparison
+    has one failure mode."""
     try:
         with open(os.path.join(entry, 'bytes'), 'rb') as handle:
             stored = handle.read()
-        with open(path, 'rb') as handle:
-            return handle.read() == stored
     except OSError:
-        return False
+        return None
+    differs = _differs_from(path, stored)
+    return None if differs is None else not differs
 
 
 def _entry_advice(path, entry):
     """Advice that never recommends a restore it cannot show is
-    lossless."""
-    if _stored_matches(path, entry):
+    lossless, and never asserts a history it could not read."""
+    matched = _stored_matches(path, entry)
+    if matched is None:
+        return ('but neither that copy nor the file could be read, so '
+                'whether restoring it would lose anything is not known - '
+                f'discard the entry with `plant.py clear {path}` and save '
+                'again')
+    if matched:
         return ('the file still matches that copy, so restoring it loses '
                 'nothing - run `plant.py restore` for this path, or '
                 f'`plant.py clear {path}` to discard the entry')
@@ -155,16 +182,13 @@ def _entry_advice(path, entry):
 def _entry_detail(entry):
     """What the entry recorded; its directory is named by a hash."""
     parts = []
-    for name, label in (('path', 'path'), ('saved-at', 'saved'),
-                        ('head-state', 'captured')):
-        try:
-            with open(os.path.join(entry, name), 'r', encoding='utf-8',
-                      errors='replace') as handle:
-                value = handle.read().strip()
-        except OSError:
-            continue
+    for name, label in (('path', 'path'), ('saved-at', 'saved')):
+        value = _recorded_field(entry, name)
         if value:
             parts.append(f'{label} {value}')
+    state = _recorded_field(entry, 'head-state')
+    if state is not None:
+        parts.append(f'captured {_vouched_state(state)}')
     return f' ({", ".join(parts)})' if parts else ''
 
 
@@ -188,8 +212,6 @@ def save(path, store):
         with open(path, 'rb') as handle:
             payload = handle.read()
         mode = stat.S_IMODE(os.stat(path).st_mode)
-        # Read once, for both the entry and the line below: the state
-        # recorded is the state the stored bytes were taken in.
         state = _head_state(path)
         os.makedirs(entry)
         _publish(os.path.join(entry, 'bytes'), payload)
