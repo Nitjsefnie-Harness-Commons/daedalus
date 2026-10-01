@@ -412,20 +412,19 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_mcp_server.py', '_surface_responder_errors',
      'thread.join(timeout)', 1):
          'a thread join on a thread the fixture started',
+    ('tests/test_mcp_live_tools.py',
+     '_surface_responder_errors', 'thread.join(timeout)', 1):
+         'a thread join on a responder this suite started; the'
+         'failure it surfaces is the responder\'s own',
     ('tests/test_mcp_server.py', 'callers',
      'mod.bridge.ext_cmd(domain, timeout)', 1):
         "an MCP tool call whose timeout is the tool's, not a bound"
          'on a process',
-    ('tests/test_mcp_transport_guards.py',
-     'test_an_unwaited_extension_command_reports_its_command_and_'
-     'nothing_else', 'session.ext_cmd(timeout, wait)', 1):
-         'an unwaited send driven against a stubbed bridge; the'
-         'timeout is the field under test, and it is never used',
-    ('tests/test_mcp_transport_guards.py',
-     'test_an_unwaited_extension_command_reports_its_command_and_'
-     'nothing_else', 'session.ext_cmd(timeout)', 1):
-         'the same call waited, on the terms the other row proves'
-         'it must refuse',
+    ('tests/test_mcp_server.py',
+     'test_a_nonpositive_mcp_timeout_admits_no_command',
+     'getattr()', 1):
+        "the test's subject: an MCP call the server must reject for"
+         'its timeout',
     ('tests/test_mcp_server.py',
      'test_mcp_port_zero_announces_the_actual_bound_port',
      'mod._bound.wait(timeout)', 1):

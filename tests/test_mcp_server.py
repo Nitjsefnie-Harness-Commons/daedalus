@@ -522,27 +522,14 @@ def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
-        # The typed path routes through `ext_cmd`, which validates on the
-        # same terms; a guard that fires on one and not the other admits a
-        # command the caller was told nothing about.
-
-        def evaled(timeout):
-            return mod.exec(cmd_id='_timeout', code='1', timeout=timeout)
-
-        def captured(timeout):
-            return mod.screenshot(timeout=timeout)
-
-        sends = [('exec', evaled), ('screenshot', captured)]
         for timeout in (0, -1.0, float('nan'), float('inf')):
-            for name, send in sends:
-                try:
-                    asyncio.run(send(timeout))
-                except ValueError as error:
-                    assert 'finite positive' in str(error), (
-                        name, timeout, error)
-                else:
-                    raise AssertionError(
-                        f'{name}: timeout {timeout!r} was accepted')
+            try:
+                asyncio.run(getattr(mod, 'exec')(
+                    cmd_id='_timeout', code='1', timeout=timeout))
+            except ValueError as error:
+                assert 'finite positive' in str(error), (timeout, error)
+            else:
+                raise AssertionError(f'timeout {timeout!r} was accepted')
         for name in (f'{TOK}_extension', TOK):
             qdir = Path(docroot) / 'commands' / name
             queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
@@ -860,41 +847,30 @@ def test_port_zero_bridge_mcp_list_tabs_round_trip(tmp):
 
 
 def test_ping_tool_round_trip(tmp):
-    """ping() PUTs a command and correlates the extension's result delivery.
-
-    The second half drives `exec`, which reaches its result through
-    `_send_eval` rather than ping's own put-and-poll. Rewriting the branch's
-    harness to send unwaited left that waited eval round trip with no live
-    witness anywhere, and a compatibility claim nobody exercises is a claim
-    nobody can catch breaking; the simulator answers the tab-targeted
-    command exactly as it answers the broadcast one.
-    """
+    """ping() PUTs a command and correlates the extension's result delivery."""
     _need_deps()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
 
         qdir = Path(docroot) / 'commands' / TOK
-        tab_qdir = Path(docroot) / 'commands' / f'{TOK}_waited'
         answered = set()
         failure = []
 
-        def extension(world, tab=''):
+        def extension(world):
             try:
-                queue = tab_qdir if tab else qdir
                 command = queued_command(
-                    queue, 'the waited command', exclude=answered)
-                queued = sorted(path for path in queue.glob('*.json')
+                    qdir, 'the ping command', exclude=answered)
+                queued = sorted(path for path in qdir.glob('*.json')
                                 if path.name not in answered)
                 assert len(queued) == 1, queued
                 answered.add(queued[0].name)
                 status, _ = _util.post_json(base + '/result', {
-                    'token': TOK, 'tabId': tab, 'id': command['id'],
-                    'result': 'MCP Title', 'error': None, 'ts': 1,
-                    'world': world, '_did': command['_did']})
+                    'token': TOK, 'id': command['id'], 'result': 'MCP Title',
+                    'error': None, 'ts': 1, 'world': world,
+                    '_did': command['_did']})
                 assert status == 200, status
-                if not tab:
-                    queued[0].unlink()  # ping repeats one payload; drain it
+                queued[0].unlink()  # ping repeats one payload; drain it
             except Exception as exc:  # test-thread diagnosis, surfaced below
                 failure.append(exc)
 
@@ -907,20 +883,7 @@ def test_ping_tool_round_trip(tmp):
             assert res['title'] == 'MCP Title', res
             assert res['world'] == world, res
             assert isinstance(res['ms'], int) and res['ms'] >= 0, res
-
-        t = threading.Thread(target=extension, args=('page-main', 'waited'))
-        t.start()
-        with _surface_responder_errors(t, failure, 20):
-            evaluated = asyncio.run(mod.exec(
-                tab_id='waited', cmd_id='_waited', code='1 + 1'))
-        # The envelope comes back whole, with `value` grafted; the two
-        # per-run fields in it are the bridge's own and are not pinned.
-        assert evaluated['id'] == '_waited', evaluated
-        assert evaluated['tabId'] == 'waited', evaluated
-        assert evaluated['world'] == 'page-main', evaluated
-        assert evaluated['value'] == 'MCP Title', evaluated
-        assert evaluated['error'] is None, evaluated
-        assert len(answered) == 3, answered
+        assert len(answered) == 2, answered
 
 
 def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
@@ -1063,57 +1026,6 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
         assert meta == {'path': '_ss/mine.png',
                         'size': len(b'this-invocation')}, meta
         assert image.data == b'this-invocation', image.data
-
-
-def test_an_image_returning_tool_reaches_the_caller_through_the_manager(tmp):
-    """The conversion boundary a return annotation crosses.
-
-    A tool with a return annotation gets an output schema, and the server
-    then runs its answer through `dump_python(..., mode='json')`. `Image` has
-    no JSON form, so annotating an image-returning tool's return turns every
-    such call into `UnexpectedToolError` — while the bare function the rest of
-    this file drives still returns `[meta, Image]` and reads green. Only the
-    manager's own path is the one an MCP client takes.
-    """
-    _need_deps()
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        mod = _load_mcp(base)
-        mod._token.set(TOK)
-        qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-        failure = []
-
-        def extension_simulator():
-            try:
-                command = queued_command(qdir, 'the screenshot command')
-                payload = b'this-invocation'
-                status, body = _util.post_json(base + '/upload', {
-                    'token': TOK, 'id': '_ss', 'filename': 'shot.png',
-                    'data': base64.b64encode(payload).decode()})
-                if status != 200:
-                    failure.append(('upload', status, body))
-                status, body = _util.post_json(base + '/result', {
-                    'token': TOK, 'tabId': 'extension', 'id': command['id'],
-                    'result': {'path': f'{TOK}/_ss/shot.png',
-                               'size': len(payload)},
-                    'error': None, 'ts': 1, '_did': command['_did']})
-                if status != 200:
-                    failure.append((status, body))
-            except Exception as exc:  # test-thread diagnosis, surfaced below
-                failure.append(exc)
-
-        responder = threading.Thread(target=extension_simulator)
-        responder.start()
-        with _surface_responder_errors(responder, failure, 30):
-            answer = asyncio.run(mod.mcp.call_tool(
-                'screenshot', {'include_image': True, 'timeout': 25}))
-
-        schemas = {tool.name: tool.output_schema
-                   for tool in asyncio.run(mod.mcp.list_tools())}
-        # Unannotated is what keeps the schema off, and the schema is what
-        # puts the conversion in the caller's way.
-        assert schemas['screenshot'] is None, schemas['screenshot']
-        assert [item.type for item in answer.content] == ['text', 'image'], (
-            answer.content)
 
 
 def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):

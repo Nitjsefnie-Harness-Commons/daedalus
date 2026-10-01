@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Per-session credentials and bridge URL precedence."""
+"""The MCP transport: credentials, URL precedence, and ext_cmd's wait."""
+import asyncio
 import importlib.util
 import os
 import sys
@@ -20,6 +21,20 @@ def _transport():
     return _util.load(
         _util.ROOT / 'daedalus_mcp' / 'transport.py',
         'mcp_transport_under_test_' + str(time.time_ns()))
+
+
+def _session(transport, token='mcptok', url='http://127.0.0.1:18001'):
+    token_var = ContextVar(
+        'mcp_transport_token_' + str(time.time_ns()), default=token)
+    return transport.BridgeSession(url, token_var)
+
+
+def _capture(coroutine):
+    """Run one coroutine; with `transport`, close the run's real clients."""
+    try:
+        return asyncio.run(coroutine)
+    except Exception as failure:  # noqa: BLE001
+        return f'raised {type(failure).__name__}: {failure}'
 
 
 def test_sessions_keep_distinct_token_contexts(tmp):
@@ -77,6 +92,65 @@ def test_url_resolution_preserves_the_full_precedence_order(tmp):
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+def test_an_extension_command_answers_on_the_terms_its_wait_set(tmp):
+    """Both sides of `wait`, against the real `ext_cmd`.
+
+    The probe the pinned table drives replaces this method wholesale, so a
+    case written there cannot see a change to it — and this is what the
+    table's own no-wait cases lean on. Unwaited it reports the command and
+    neither polls nor checks a timeout it would never use, because
+    `checked_timeout` exists to refuse a wait that cannot wait BEFORE the
+    browser is handed the command. Waited it answers the polled body
+    unchanged: `result.result`, the `roundtrip_ms` graft only when asked
+    for, and the empty default for a body with no result.
+    """
+    del tmp
+    transport = _transport()
+    session = _session(transport)
+    polls, sent = [], []
+
+    async def put(_path, payload):
+        sent.append(payload)
+        return {'did': 'delivery', 'command': {**payload, '_did': 'delivery'}}
+
+    async def poll_result(tab, timeout, **_kwargs):
+        polls.append((tab, timeout))
+        return {'error': None, 'result': {'path': '_ss/shot.png', 'size': 3},
+                'roundtrip_ms': 41}
+
+    session.put = put
+    session.poll_result = poll_result
+
+    unwaited = _capture(session.ext_cmd(
+        '_ss', 'screenshot', timeout=-1, wait=False))
+    assert unwaited == {'command': {
+        'id': '_ss', 'type': 'screenshot', 'tab': 'extension',
+        '_did': 'delivery'}}, unwaited
+    assert polls == [] and len(sent) == 1, (polls, sent)
+
+    plain = _capture(session.ext_cmd('_ss', 'screenshot'))
+    assert plain == {'path': '_ss/shot.png', 'size': 3}, plain
+    grafted = _capture(session.ext_cmd(
+        '_ss', 'screenshot', include_roundtrip=True))
+    assert grafted == {
+        'path': '_ss/shot.png', 'size': 3, 'roundtrip_ms': 41}, grafted
+    assert polls == [('extension', 10.0), ('extension', 10.0)], polls
+
+    async def no_result(*_args, **_kwargs):
+        return {'error': None}
+
+    session.poll_result = no_result
+    assert _capture(session.ext_cmd('_ss', 'screenshot')) == {}
+
+    # The waited limb still refuses, and refuses before the PUT.
+    before = len(sent)
+    refused = _capture(session.ext_cmd('_ss', 'screenshot', timeout=-1))
+    assert refused == (
+        "raised ValueError: timeout must be a finite positive number of "
+        "seconds; got -1"), refused
+    assert len(sent) == before, sent
 
 
 def main():
