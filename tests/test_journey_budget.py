@@ -655,8 +655,10 @@ def test_the_re_baseline_block_carries_what_a_paste_needs(tmp):
         assert block['excluded_threads'][name], name
         assert block['journeys'][name] is not None, name
     assert block['tolerance_pct'] == document['tolerance_pct'], (
-        'a null tolerance lands with no headroom: the budget becomes the '
-        'recorded count itself')
+        'the block did not carry the recorded tolerance, and a tolerance of '
+        'its own lands with no headroom: the budget becomes the recorded '
+        'count itself, and a movement in either direction shows as a '
+        'regression or as nothing at all')
     for name in names:
         assert block['journeys'][name] != document['journeys'][name], (
             f'the block carries the count it replaces: {name}')
