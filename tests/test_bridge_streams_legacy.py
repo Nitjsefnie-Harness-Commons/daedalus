@@ -3,14 +3,15 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (  # noqa: E402
-    BRIDGE_ENV, TOK, _patch_env, _wait_for_delivery_health, frame_reader,
-    framer, next_stream_data, prove_scan, put_command, stub_stream,
-    stream_response)
+    BRIDGE_ENV, TOK, _patch_env, _REDELIVERY_BUDGET_SECONDS,
+    _wait_for_delivery_health, frame_reader, framer, next_stream_data,
+    prove_scan, put_command, stub_stream, stream_response)
 
 # The fault a redelivery needs: the drain removes a command file it has
 # delivered, and a removal that fails is swallowed — the file stays and the
@@ -188,23 +189,30 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
     a thing that depends on which hosts take an unlink.
 
     The redelivery is asserted as its place on the wire rather than as a
-    count read at a moment. One scan of the extension stream drains the
-    broadcast queue and then the broadcast legacy file, so the frame
-    carrying the last command enqueued is followed by that same scan's copy
-    of the stuck file, however many scans have run by the time it is read.
-    A count was what this test used to assert, and it read correct code as
-    a defect on a loaded cell: one repeat had landed when the count was
-    taken.
+    count read at a moment: the last command enqueued is followed, with no
+    other command and no silence between them, by another copy of the stuck
+    file. A count was what this test used to assert, and it read correct
+    code as a defect on a loaded cell — one repeat had landed when the
+    count was taken. Where the two drains sit inside a single scan is
+    `test_the_extension_stream_delivers_every_queue_it_owns`'s business,
+    since a reordering of them still leaves the two adjacent on the wire.
+    What this pins is that a scan which delivers a command also delivers
+    the file, and that the two land next to each other.
+
+    The two readers here are not interchangeable. `frame_reader` is the one
+    that steps over the repeats, and the read below is the only place in
+    the tree where it is exercised end to end on a repeat the real bridge
+    produced — the controls above cover its rule over synthetic frames
+    only. It cannot be used to see the redelivery itself, because it drops
+    a frame whose `_did` it has already seen, which on Linux and Windows is
+    what a repeat of one file carries. So the assertion reads raw.
 
     What this test does NOT claim is that the redelivery carries the id the
     first copy carried: Linux and all four Windows interpreters hand back
     one id for one file, and macOS does not, because the identity the id is
-    built from moves over time there (#1411). So the repeat is read raw,
-    past `frame_reader`'s ledger, which would skip it on two of the three
-    platforms. The reader's rule is pinned on every platform by the two
-    controls above, and the stability of the id over a short interval is
-    pinned by `test_stream_service_legacy_ids`, which drains one object
-    twice and is green on every leg.
+    built from moves over time there (#1411). The stability of the id over
+    a short interval is pinned by `test_stream_service_legacy_ids`, which
+    drains one object twice and is green on every leg.
     """
     env = _refuses_legacy_unlink(tmp)
     served = []
@@ -218,14 +226,37 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
             legacy.write_text('{"id":"kept","code":"1"}', encoding='utf-8')
             delivered = read('the legacy command')
             assert delivered.get('id') == 'kept', delivered
+            # Two commands after the repeats, so the read is not satisfied by
+            # a single stray redelivery whichever id the repeat carried.
             status, _ = put_command(
-                base, {'token': TOK, 'id': 'last', 'code': '2'})
+                base, {'token': TOK, 'id': 'after', 'code': '2'})
             assert status == 200, status
+            status, _ = put_command(
+                base, {'token': TOK, 'id': 'last', 'code': '3'})
+            assert status == 200, status
+            assert read('a command after the repeats').get('_did'), (
+                'the reader returned nothing after the repeats')
             raw = framer(response, served)
+            # A liveness escape on the hunt below, not a bound the assertion
+            # is timed against. The command is already enqueued and the
+            # stream is already hot, so a healthy run takes it on the next
+            # scan; the budget is the one `frame_reader` gives the same hunt
+            # in this file, taken because it is generous rather than fitted
+            # to this test. It exists because the wire is never silent here:
+            # a broadcast drain that stopped would leave the stuck file
+            # redelivering forever and the loop would spin with nothing to
+            # raise, which is the regression the reader's own budget was
+            # written for and the one this loop lost.
+            give_up_at = time.monotonic() + _REDELIVERY_BUDGET_SECONDS
+            skipped = 0
             while True:
                 wanted = raw('the last command enqueued')
                 if wanted.get('id') == 'last':
                     break
+                skipped += 1
+                assert time.monotonic() < give_up_at, (
+                    f'{skipped} frames and no last command, the last of them '
+                    f'{wanted}; the bridge said: {"".join(served[-400:])!r}')
             again = raw('the redelivery after the last command')
             assert again.get('id') == 'kept', (
                 'the scan that delivered the last command did not redeliver '
