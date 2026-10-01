@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
     ARTIFACT,
-    IDENTITY,
     PER_RUN,
     ROOT,
     _util,
@@ -168,7 +167,10 @@ def test_the_artefact_schema_is_closed(tmp):
 
 # ─── the toolchain a count is only comparable on ───────────────────────────
 
-IDENTITY = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
+# One RECORDED toolchain: the three strings a baseline is stamped with, so
+# these tests compare a count against an identity rather than against
+# whatever the runner happens to be today.
+RECORDED = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
             'valgrind_version': 'valgrind-3.24.0',
             'runner_image': 'ubuntu24 20260801.1.0'}
 
@@ -225,10 +227,10 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(budget_document(
-        toolchain=dict(IDENTITY))))
+        toolchain=dict(RECORDED))))
     measurements = measurements_file(
         Path(tmp) / 'counts.json', None,
-        toolchain=dict(IDENTITY, valgrind_version='valgrind-3.25.0'))
+        toolchain=dict(RECORDED, valgrind_version='valgrind-3.25.0'))
     # stdout, not stderr: this is a report, not a refusal. The two are
     # separated deliberately — a reader must be able to tell an outcome
     # that succeeded from one that failed without reading an exit code.
@@ -262,7 +264,7 @@ def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(budget_document(
-        toolchain=dict(IDENTITY))))
+        toolchain=dict(RECORDED))))
     measurements = measurements_file(Path(tmp) / 'counts.json', None)
     spoken = io.StringIO()
     with contextlib.redirect_stderr(spoken):
@@ -270,7 +272,7 @@ def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
                             '--measurements', str(measurements)])
     assert code == 1, 'a count over budget passed on a matching toolchain'
     assert policy.OVER_REMEDY in spoken.getvalue(), spoken.getvalue()
-    assert policy.toolchain_diff(IDENTITY, IDENTITY) == {}
+    assert policy.toolchain_diff(RECORDED, RECORDED) == {}
 
 
 def test_no_workflow_step_writes_the_artefact(tmp):
