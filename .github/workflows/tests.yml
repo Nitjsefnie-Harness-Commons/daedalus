@@ -1284,10 +1284,12 @@ jobs:
     # callgrind, each spawning a real bridge, is minutes rather than seconds.
     timeout-minutes: 45
     env:
-      # How many rounds the measurement takes. Three is a MEASUREMENT, not
-      # the steady state: it is what the tolerance is derived from, and once
-      # that spread is recorded this returns to the committed default of one.
-      JOURNEY_ROUNDS: "3"
+      # How many rounds the measurement takes. One is the steady state:
+      # these counts are deterministic, so a discarded warm-up round buys
+      # nothing. Raise it only to derive a tolerance from a spread, once —
+      # that is what the three rounds on the first measured run were for,
+      # and it is not what every run should pay for.
+      JOURNEY_ROUNDS: "1"
 
     steps:
       # actions/checkout v7.0.1

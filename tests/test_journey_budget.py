@@ -206,7 +206,6 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
 def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
     """The outcome is the toolchain's, and it does not swallow the gate."""
     policy = _policy()
-    names = _journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(_budget_document(
         toolchain=dict(IDENTITY))))
