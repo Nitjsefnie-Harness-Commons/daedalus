@@ -4,9 +4,8 @@ it is written.
 Its own module, off `journey_budget.py`, because the budget and the
 document are different responsibilities and the first was at its ceiling:
 `journey_budget.py` decides what a count may be and this owns the shape a
-recorded one arrives in. `journey_budget` binds the names it uses, so a
-suite that needs one loads this module directly rather than through a
-forward that can drift from it.
+recorded one arrives in. It is bound into that module by name rather than
+reached through a forward, so a name the gates use has one owner.
 """
 import json
 import sys
@@ -238,16 +237,6 @@ def recorded_toolchain(document):
 def recorded_exclusions(document):
     """The recorded per-journey roles, or None before anything is recorded."""
     return document.get('excluded_threads')
-
-
-def recorded_bands(document):
-    """The recorded `Ir` band thresholds, or None before any are."""
-    return document.get('thread_bands')
-
-
-def recorded_shas(document):
-    """The recorded per-journey shas, or None before any are."""
-    return document.get('shas')
 
 
 def sha_diff(recorded, measured):

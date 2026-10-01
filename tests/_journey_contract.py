@@ -149,11 +149,13 @@ def recorded_document(**over):
 
 
 def recorded_maps():
-    """The four maps a measurement carries so a comparison can happen.
+    """The three maps a measurement carries so a comparison can happen.
 
-    A check refuses on any of them being un-recorded, so a test that means to
-    exercise the BUDGET rather than the refusal has to hand the gate a
-    measurement that says all four.
+    The fourth gate is the BANDS, and the measured side of that one is the
+    classifier's own table rather than anything a report carries, so it is
+    not here. A check refuses on any recorded value being un-recorded, so a
+    test that means to exercise the BUDGET rather than the refusal has to
+    hand the gate a measurement that says the other three.
     """
     policy = threads()
     return {'shas': fixture_shas(),
@@ -176,6 +178,30 @@ def _report_file(tmp, toolchain_over, maps):
     target = Path(tmp) / f'counts-{len(list(Path(tmp).glob("counts*")))}.json'
     target.write_text(json.dumps(report), encoding='utf-8')
     return target
+
+
+def artifact():
+    """The artefact's document module, loaded the way the others are."""
+    source = ROOT / 'scripts' / 'ci' / 'journey_artifact.py'
+    return _util.load(source, 'journey_artifact_contract')
+
+
+def fixture_report():
+    """A measurement shaped like a real one: a counter, a toolchain, shas."""
+    shas = fixture_shas()
+    names = journeys().NAMES
+    return {'selected_counter': 'valgrind-callgrind',
+            'toolchain': dict(IDENTITY),
+            'excluded_threads': {name: list(threads().excluded_for(name))
+                                 for name in names},
+            'thread_bands': dict(threads().BANDS),
+            'shas': shas,
+            'counters': {'valgrind-callgrind': {
+                'available': True, 'startup_only': 0,
+                'journeys': {name: {'min': 900, 'max': 1000,
+                                    'median': 950, 'spread': 100,
+                                    'raw': 950}
+                             for name in names}}}}
 
 
 def probe():
@@ -221,3 +247,66 @@ def planting(module, **attributes):
                 delattr(module, name)
             else:
                 setattr(module, name, value)
+
+
+def artifact_shapes():
+    """Every artefact shape that must be refused, and the words it says.
+
+    A table rather than a test body: two suites read it, both are at their
+    ceilings, and one owner for the rows is one thing to keep true. Each
+    entry is `(document, fragment)`, and the fragment is the exact refusal —
+    naming it is what makes a plausible simplification of the validator die
+    here instead of in a later run.
+    """
+    name = journeys().NAMES[0]
+
+    def over(field, value):
+        shaped = budget_document()
+        shaped[field] = value
+        return shaped
+
+    return (
+        ('not an object', 'must be an object'),
+        (over('toolchain', []), 'toolchain must be an object'),
+        (over('toolchain', {'': 'x'}), 'unknown toolchain field'),
+        (over('toolchain', {'python': '  '}), 'non-empty string or null'),
+        (over('excluded_threads', 'none'),
+         'excluded_threads must be an object'),
+        (over('excluded_threads', {'no-such-journey': ['front-end-import']}),
+         'names a journey with no count'),
+        (over('excluded_threads', {name: 'front-end-import'}),
+         'excluded_threads names no thread'),
+        (over('excluded_threads', {name: ['front-end-import',
+                                          'front-end-import']}),
+         'repeats a role'),
+        (over('excluded_threads', {name: ['no-such-role']}),
+         'unknown excluded thread role'),
+        (over('thread_bands', 'big'), 'thread_bands must be an object'),
+        (over('thread_bands', {'no-such-band': 1}), 'unknown thread band'),
+        (over('thread_bands', {'front-end-import': 0}),
+         'a thread band must be a positive integer'),
+        (over('shas', 'one'), 'shas must be an object'),
+        (over('shas', {'no-such-journey': 'a' * 64}),
+         'shas names a journey with no count'),
+        (over('shas', {name: 'abc'}), '64 lowercase hex characters'),
+        (over('shas', {name: '  '}), 'a recorded sha is a non-empty string'),
+        # A PADDED sha is the one a length check that strips and a hex
+        # check that does not lets through: it validates, then reads as a
+        # change rather than a format refusal.
+        (over('shas', {name: f'  {"a" * 64}  '}),
+         '64 lowercase hex characters'),
+        (over('counter', 'wall-clock'), 'unknown counter'),
+        (over('tolerance_pct', -1), 'must be a nonnegative number'),
+        (over('journeys', []), 'journeys must be an object'),
+        (over('journeys', {name: 'many'}),
+         'a recorded count must be a nonnegative integer'),
+        (over('schema_version', 2), 'unsupported schema_version'),
+    )
+
+
+def unreadable_artifacts(tmp):
+    """The two ways a file cannot be read at all, and the words for each."""
+    broken = Path(tmp) / 'broken.json'
+    broken.write_text('{not json', encoding='utf-8')
+    return ((Path(tmp) / 'absent.json', 'cannot read'),
+            (broken, 'invalid journey budget JSON'))

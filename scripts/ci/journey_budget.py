@@ -63,7 +63,6 @@ COUNTERS = journey_artifact.COUNTERS
 load = journey_artifact.load
 render = journey_artifact.render
 recorded_toolchain = journey_artifact.recorded_toolchain
-recorded_exclusions = journey_artifact.recorded_exclusions
 exclusion_diff = journey_artifact.exclusion_diff
 map_diff = journey_artifact.map_diff
 sha_diff = journey_artifact.sha_diff
@@ -242,6 +241,9 @@ def _parser():
     count.add_argument('--rounds', type=int, default=ROUNDS_DEFAULT)
     count.add_argument('--out', type=Path,
                        help='write the measurements JSON here')
+    count.add_argument('--artifact', type=Path, default=ARTIFACT,
+                       help='the recorded budget, read only to carry its '
+                            'tolerance into the re-baseline block')
     count.add_argument('--summary', action='store_true',
                        help='also write the table to the step summary')
 
@@ -291,8 +293,15 @@ def main(argv=None):
             if args.summary:
                 journey_counters.write_summary(
                     journey_report.summary_lines(report))
+                # The recorded artefact, when there is one: a re-baseline
+                # KEEPS the tolerance, and a block that emitted `null` for
+                # it would paste an artefact whose budget is the recorded
+                # count itself — any increase a red, any decrease invisible.
+                carried = None
+                if Path(args.artifact).is_file():
+                    carried = load(args.artifact)
                 journey_counters.write_summary(
-                    journey_report.rebaseline_lines(report))
+                    journey_report.rebaseline_lines(report, carried))
             return 0
 
         document = load(args.artifact)
