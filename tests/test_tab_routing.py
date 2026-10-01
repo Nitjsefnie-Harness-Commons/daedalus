@@ -527,8 +527,9 @@ def test_destructured_and_walrus_alias_boundaries(tmp):
         assert not py_tab_routing_violations(source, source.name), body
 
 
-def test_no_client_sends_the_browser_target_as_the_routing_field():
+def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     """Typed commands route to extension; eval payloads may route by tab."""
+    del tmp
     tree = ast.parse("cmd = dict(BASE)\ncmd['tab'] = tab_id\n"
                      "api('PUT', '/command', cmd)\n")
     assert payload_keys(tree.body[0].value, {}) is None
