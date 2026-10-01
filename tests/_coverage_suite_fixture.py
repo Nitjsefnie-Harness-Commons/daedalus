@@ -299,12 +299,33 @@ def coverage_tree(
     # declaration for the `unlaunchable` and `cpu_count` sites, which this
     # branch did not write; the lines they drive stay measured by the
     # children that have no sitecustomize.
-    mode = 'scrub' if (root / 'sitecustomize.py').exists() else 'keep'
-    result = subprocess.run(
-        [sys.executable, 'scripts/ci/coverage_suites.py', *args],
-        cwd=str(root), env=_util.child_coverage(mode, env, cwd=root),
-        input='runner-only input\n', capture_output=True, text=True,
-        timeout=outer_timeout)
+    # A generated `sitecustomize.py` is scaffolding, not repository source:
+    # the coverage configuration measures the synthetic tree and attributes
+    # what it measured to repository paths, so a child that imports one
+    # hands `coverage report` a measured file with no source and the gate
+    # refuses it. Scrubbing the collector from exactly those children stops
+    # the RECORDING, on every platform -- an exclusion would only hide a
+    # path shape that reads differently per platform. It also lowers the
+    # declaration for the `unlaunchable` and `cpu_count` sites, which this
+    # branch did not write; the lines they drive stay measured by the
+    # children that have no sitecustomize.
+    #
+    # Two launches rather than one launch with a chosen mode, because the
+    # guard reads the mode as a LITERAL at the `env=` keyword: a name bound
+    # once to a `child_coverage(mode, ...)` is `invalid`, and the keep site
+    # this module is allowlisted for stops existing.
+    if (root / 'sitecustomize.py').exists():
+        result = subprocess.run(
+            [sys.executable, 'scripts/ci/coverage_suites.py', *args],
+            cwd=str(root), env=_util.child_coverage('scrub', env, cwd=root),
+            input='runner-only input\n', capture_output=True, text=True,
+            timeout=outer_timeout)
+    else:
+        result = subprocess.run(
+            [sys.executable, 'scripts/ci/coverage_suites.py', *args],
+            cwd=str(root), env=_util.child_coverage('keep', env, cwd=root),
+            input='runner-only input\n', capture_output=True, text=True,
+            timeout=outer_timeout)
     records = root / 'coverage-invocations'
     invocations = [json.loads(record.read_text(encoding='utf-8'))
                    for record in sorted(records.glob('*.json'))]
