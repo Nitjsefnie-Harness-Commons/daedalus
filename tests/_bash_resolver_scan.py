@@ -246,9 +246,10 @@ def _visit(facts, relative, violations):
 
 def _analyze(relative, source):
     tree = ast.parse(source, filename=relative)
-    # Every `shell` route ends in a string constant that names the shell, so
-    # a tree holding none cannot route to one. Read off the constants rather
-    # than the source: `'ba' 'sh'` and `'ba\x73h'` are the same literal.
+    # Every `'shell'` return in `_route` ends in a string constant that
+    # names the shell, so a tree holding none cannot route to one. Read off
+    # the constants rather than the source: `'ba' 'sh'` and `'ba\x73h'` are
+    # the same literal.
     if not any(isinstance(node, ast.Constant) and isinstance(node.value, str)
                and _NAMES_SHELL.search(node.value)
                for node in ast.walk(tree)):

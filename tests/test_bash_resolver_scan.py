@@ -470,9 +470,10 @@ def test_a_shell_spelled_away_from_the_raw_text_is_judged(tmp):
 def test_a_shell_named_without_a_launch_import_stays_clean(tmp):
     """A shell name alone is not a launch, wherever the name is written.
 
-    Both are judged on their facts, never skipped: the second spells
-    `subprocess` only in a docstring and a comment, and a filter keyed on
-    that substring would drop the first outright.
+    Both are judged on their facts, never skipped. The first names the
+    shell and imports nothing that launches; the second spells
+    `subprocess` only in a docstring and a comment, which a filter keyed on
+    that substring would read as an import and keep for the wrong reason.
     """
     del tmp
     assert _judged("""import shutil
@@ -484,6 +485,21 @@ import shutil
 # import subprocess
 shell_name = 'bash'
 ''') == ([], True)
+
+
+def test_every_shell_name_is_matched_by_the_prefilter(tmp):
+    """A name the scan flags is a name the skip cannot skip past.
+
+    `_NAMES_SHELL` and `_SHELL_NAMES` are separate definitions of "names
+    the shell", and nothing else ties them: widen the second without the
+    first and every module naming the new one is filtered out before it is
+    judged. Asserted, not derived - deriving it from `_names_shell` would
+    couple the filter to the separator split, and cost every `shell=True`
+    command-string module its judgement.
+    """
+    del tmp
+    for name in _bash_resolver_scan._SHELL_NAMES:
+        assert _bash_resolver_scan._NAMES_SHELL.search(name), name
 
 
 def test_a_normalised_import_spelling_is_still_judged(tmp):
