@@ -186,7 +186,7 @@ def test_a_count_over_budget_is_a_violation_carrying_its_remedy(tmp):
         counts, shapes, document, names).values())
     over = dict(counts, **{names[0]: 1200})
     found = policy.violations(over, shapes, document, names)
-    assert sorted(found) == ['over', 'shape']
+    assert sorted(found) == ['over', 'shape', 'unmeasured']
     assert found['over'] == {names[0]: (1200, 1100.0)}, found['over']
     assert policy.REMEDY_FOR['over'] == policy.OVER_REMEDY
     assert 'never raised by hand' in policy.REMEDY_FOR['over']
@@ -204,7 +204,31 @@ def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
                               document, names)
     assert not found['over'], found
     assert not found['shape'], found
+    assert not found['unmeasured'], found
     assert policy.unrecorded(document, names) == sorted(names[1:])
+
+
+def test_a_counter_this_runner_refuses_is_a_violation_not_a_pass(tmp):
+    """A green that measured nothing is the false green this exists against.
+
+    The artefact names the counter; a runner that cannot produce it produces
+    no counts at all, and a check that read that as "none over budget" would
+    report a pass on a journey it never ran.
+    """
+    del tmp
+    policy = _policy()
+    names = _journeys().NAMES
+    document = _document()
+    shapes = {name: ['a' * 64] for name in names}
+    assert not any(policy.violations(
+        {name: 1 for name in names}, shapes, document, names).values())
+    found = policy.violations({name: None for name in names}, shapes,
+                              document, names)
+    assert found['unmeasured'] == {
+        name: 'perf-instructions' for name in names}, found['unmeasured']
+    assert not found['over'], found['over']
+    assert policy.REMEDY_FOR['unmeasured'] == policy.UNMEASURED_REMEDY
+    assert 'measured nothing' in policy.REMEDY_FOR['unmeasured']
 
 
 def test_a_sha_mismatch_is_a_violation_naming_both_shas(tmp):
@@ -219,6 +243,7 @@ def test_a_sha_mismatch_is_a_violation_naming_both_shas(tmp):
                               document, names)
     assert found['shape'] == {names[0]: [first, second]}, found['shape']
     assert not found['over'], found['over']
+    assert not found['unmeasured'], found['unmeasured']
     assert policy.REMEDY_FOR['shape'] == policy.SHAPE_REMEDY
     assert 'not comparable' in policy.REMEDY_FOR['shape']
 
