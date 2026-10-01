@@ -140,12 +140,26 @@ def test_checkout_pin_checks_mixed_case_checkout_actions(tmp):
 
 
 def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
-    """A leading GitHub access cannot exempt later dotted accesses."""
+    """A leading GitHub access cannot exempt later dotted accesses.
+
+    Every checkout in the shipped workflows spells its `ref:` as
+    `${{ github.sha }}`, so there is no longer a real expression carrying a
+    second operand to mutate. The shapes are carried here instead, one
+    synthetic workflow per shape rather than an edit of a shipped file.
+    """
     del tmp
-    path = ROOT / '.github' / 'workflows' / 'tests.yml'
-    tests = path.read_text(encoding='utf-8')
-    original = '${{ steps.baseline.outputs.point }}'
-    assert original in tests
+
+    def checkout_of(ref, job='build'):
+        return ('name: mixed contexts\n'
+                'on: push\n'
+                'jobs:\n'
+                f'  {job}:\n'
+                '    runs-on: ubuntu-latest\n'
+                '    steps:\n'
+                '      - uses: actions/checkout@v4\n'
+                '        with:\n'
+                f'          ref: {ref}\n')
+
     needs = (
         'name: mixed contexts\n'
         'on: push\n'
@@ -168,15 +182,13 @@ def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
     cases = (
         (
             '${{ github.sha || steps.baseline.outputs.ref }}',
-            tests.replace(
-                original,
-                '${{ github.sha || steps.baseline.outputs.ref }}', 1),
+            checkout_of(
+                '${{ github.sha || steps.baseline.outputs.ref }}'),
             'ref',
         ),
         (
             '${{ github.sha || env.base_ref }}',
-            tests.replace(
-                original, '${{ github.sha || env.base_ref }}', 1),
+            checkout_of('${{ github.sha || env.base_ref }}'),
             'base_ref',
         ),
         (
