@@ -26,8 +26,10 @@ from _ghexpr import evaluate_if  # noqa: E402
 from _ratchet_fixture import _git  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _journey_contract import (  # noqa: E402
+    IDENTITY,
     ROOT,
     journeys,
+    measurements_file,
     recorded_document,
     recorded_maps,
 )
@@ -534,6 +536,84 @@ def test_a_commit_with_nothing_to_commit_aborts(tmp):
     assert 'Main moved' not in _summary_text(summary), (
         'a run with nothing to commit reported that main had moved: '
         f'{_summary_text(summary)}')
+
+
+def test_a_recorded_gate_that_moved_tightens_nothing_and_succeeds(tmp):
+    """A gate that moved is not a regression, so the tighten path agrees.
+
+    `runner_image` is recorded, and `runs-on: ubuntu-latest` moves it on the
+    hosted image's own schedule. In that state the check exits 0 — nothing
+    was compared, nothing regressed — and a tighten that exited 1 would red
+    `journey-budget`, a `needs:` of the aggregate, and through the gate
+    patterns every open pull request too. What the tighten refuses is the
+    WRITE, and it does not write: so it says what it did, and succeeds.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    measurements = measurements_file(
+        Path(tmp) / 'counts.json', None,
+        toolchain=dict(IDENTITY, runner_image='ubuntu24 20991231.999.9'))
+    summary = Path(tmp) / 'summary.md'
+    saved = os.environ.get('GITHUB_STEP_SUMMARY')
+    os.environ['GITHUB_STEP_SUMMARY'] = str(summary)
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(measurements),
+                                '--tighten', '--summary'])
+    finally:
+        os.environ.pop('GITHUB_STEP_SUMMARY', None)
+        if saved is not None:
+            os.environ['GITHUB_STEP_SUMMARY'] = saved
+    assert code == 0, (
+        'a recorded gate that moved is not a regression, and a tighten that '
+        'exits nonzero reds a required context every time the hosted runner '
+        'image moves')
+    assert artifact.read_bytes() == before, (
+        'nothing was compared, so nothing may be written')
+    said = summary.read_text(encoding='utf-8')
+    assert 'toolchain' in said, said
+    assert 'nothing was tightened' in said, (
+        f'a green run that compared nothing must say so: {said}')
+    del names
+
+
+def test_rounds_that_disagree_about_a_sha_are_not_rebaselined_over(tmp):
+    """A re-baseline records a journey's rendering, so it may only record one
+    the rounds agreed on.
+
+    This is the one refusal in the module whose failure is not an
+    over-refusal. The others stop a human whose measurement was unusable,
+    and a human reads the message and fixes the input. This one, if it stops
+    refusing, writes a sha no journey rendered: the next run's sha gate
+    then refuses to compare, every journey goes unrecorded against the new
+    baseline, and the budget goes inert — silently, with every check green.
+    So the write is the thing under test, not the exit code alone.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    report = _journey_contract.fixture_report()
+    # `--rounds 3` whose rounds disagree about one journey: the count is
+    # real, the rendering is not.
+    report['shas'][names[0]] = ['a' * 64, 'b' * 64]
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(report), encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['rebaseline', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    assert code != 0, (
+        'a measurement whose rounds disagree about what a journey rendered '
+        'was rebaselined, so the artefact now records a sha no journey '
+        'produced and the next run cannot compare against it')
+    assert artifact.read_bytes() == before, (
+        'a re-baseline over rounds that disagree wrote the artefact anyway')
 
 
 def test_both_jobs_call_the_one_push_implementation(tmp):

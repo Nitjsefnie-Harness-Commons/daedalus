@@ -139,7 +139,7 @@ The rest of the gate runs on GitHub:
 | `lint` / `types` / `eslint` | pycodestyle and pylint, pyright, and eslint over the shipped JavaScript. |
 | `codeql` | Security analysis for Python and JavaScript. Findings land in the Security tab, and no CodeQL check is required, so a new query cannot block an unrelated push. Also weekly, because a new query only ever sees code that changed after it shipped. |
 | `actionlint` | `actionlint` + `zizmor` over the workflows themselves. A broken workflow does not go red, it silently stops running. |
-| `tests` (`journey-budget` check) | Counts the instructions three real user journeys execute and fails above a committed, down-only baseline. |
+| `tests` (`journey-budget` check) | Counts the instructions three real user journeys execute and fails above a committed, down-only baseline. A green push to `main` can also commit to `main`: if a journey got cheaper, the same job lowers its recorded count and commits it as `github-actions[bot]` under a message of its own, so a green build may produce a commit you did not write. It only ever lowers. Raising a recorded count stays a reviewed commit, taken with the `journey_budget.py rebaseline` command the step summary prints. |
 | `release` | Builds and publishes the wheel, the sdist and `SHA256SUMS` on a `v*` tag. |
 
 Coverage is two numbers, published and gated separately, and they are
