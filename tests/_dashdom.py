@@ -87,8 +87,7 @@ class El {
     this.focused = false;
     this.selected = false;
     this._value = '';
-    // The scaffold holds no layout. A scenario says where its elements
-    // are before anything measures them; `null` is "not said", not zero.
+    // "Not said", not zero: the scaffold holds no layout.
     this.rect = null;
     this.classList = classListFor(this);
   }
@@ -112,8 +111,7 @@ class El {
     this.children = v === '' ? [] : [textNode(v)];
   }
   // An unmodelled layout refuses by name; a zero rect would let a
-  // selection over geometry pass unnoticed, which is the view this
-  // scaffold exists to make assertable.
+  // selection over geometry agree with anything.
   getBoundingClientRect() {
     if (!this.rect) {
       throw new Error('dashboard shell does not model layout on: '
@@ -399,12 +397,10 @@ function newObserver(callback, options) {
     callback,
     options,
     observed: [],
-    // The targets the observer holds as intersecting. `fire` delivers
-    // the caller's batch verbatim and records what it delivered here, so
-    // a scenario can declare what the band now holds and read back what
-    // the observer still holds inside it. A batch carries only what
-    // changed, so a double that showed nothing else could not say what
-    // did NOT change -- which is the half of the delivery contract.
+    // The observer's own state, which the real IntersectionObserver
+    // does not expose: `fire` records the caller's batch verbatim here,
+    // because a batch carries only what changed and a scenario needs to
+    // read back what the observer still holds.
     intersecting: new Set(),
     observe(el) { self.observed.push(el); },
     unobserve(el) {

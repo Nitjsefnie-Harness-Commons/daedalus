@@ -104,8 +104,7 @@ for (const id of ['s00', 's01', 's02']) {
 }
 """
 
-# The scaffold holds no layout, so a scenario places what it measures:
-# `getBoundingClientRect` refuses an element nobody placed.
+# The scaffold holds no layout, so a scenario places what it measures.
 _PLACE = r"""
 const place = (id, top) => {
   document.querySelector('#' + id).rect = { top };
@@ -511,9 +510,7 @@ def test_the_rail_follows_the_whole_band_and_not_only_the_new_entries(_tmp):
     A real observer delivers only the entries whose intersection state
     changed since the last delivery, so the section that scrolled into
     the band arrives ALONE: the section above it is still in the band
-    and is never mentioned again. Filtering the batch therefore
-    highlights the section that just arrived, one or two ahead of the
-    one being read.
+    and is never mentioned again.
 
     `s01` is the negative control the batch cannot invent -- it is
     genuinely out of the band in both deliveries and must stay dark."""
@@ -525,10 +522,14 @@ const entry = (id, top, on) => ({
   isIntersecting: on, boundingClientRect: { top },
   target: document.querySelector('#' + id),
 });
-place('s00', 20);
+// Each entry's rect is the layout at the frame that created it, and
+// matches the placement below it. By the second delivery the carried
+// rects order `s02` above `s00` and the live layout orders them the
+// other way -- that disagreement is the whole of the control.
+place('s00', 500);
 place('s01', 900);
 place('s02', 1400);
-io.fire([entry('s00', 20, true), entry('s01', 900, false),
+io.fire([entry('s00', 500, true), entry('s01', 900, false),
   entry('s02', 1400, false)]);
 const before = active();
 // The scroll moves the layout and delivers only the section that
