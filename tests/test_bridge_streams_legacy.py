@@ -209,11 +209,9 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
     everywhere and cannot be the instrument here — while the read through
     it above stays the only place in the tree where it is exercised end to
     end on a repeat the real bridge produced, the controls above covering
-    its rule over synthetic frames only. The id's shape and its stability
-    across a failed removal are pinned by `test_stream_service_legacy_ids`;
-    the residual, that a restart or eviction past the 4096-name bound
-    returns a name to its first value, is disclosed in `stream_service`'s
-    own docstring.
+    its rule over synthetic frames only. The id's shape, and its stability
+    across a failed removal, are pinned by `test_stream_service_legacy_ids`;
+    the derivation's residual is disclosed in `stream_service`'s docstring.
     """
     env = _refuses_legacy_unlink(tmp)
     served = []
@@ -238,15 +236,12 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
             assert read('a command after the repeats').get('_did'), (
                 'the reader returned nothing after the repeats')
             raw = framer(response, served)
-            # A liveness escape on the hunt below, not a bound the assertion
-            # is timed against. `next_stream_data` bounds silence, not
-            # elapsed time, and the wire is never silent here — the stuck
-            # file redelivers on every scan — so a hunt that never found its
-            # command would spin rather than raise. The budget is the one
-            # `frame_reader` gives the same hunt in this file, for being
-            # generous rather than fitted to this test. On today's bridge
-            # the read above is what bounds a stopped drain, because the
-            # repeat's `_did` is stable; this fires if that id starts moving.
+            # A liveness escape, not a bound the clock-free assertion above
+            # is timed against: `next_stream_data` bounds silence, so a hunt
+            # that never found its command would spin rather than raise. On
+            # today's bridge the read above is what bounds a stopped drain,
+            # because the repeat's `_did` is stable; this fires if that id
+            # starts moving.
             give_up_at = time.monotonic() + _REDELIVERY_BUDGET_SECONDS
             skipped = 0
             while True:
