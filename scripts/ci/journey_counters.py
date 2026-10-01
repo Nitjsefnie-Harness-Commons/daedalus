@@ -266,14 +266,22 @@ def _callgrind_total(directory, prefix):
 
 
 def _callgrind(name, root, workdir):
-    prefix = str(Path(workdir) / f'callgrind.{name}.%p')
+    prefix = f'callgrind.{name}'
+    # Every round writes into the same workdir under the same prefix, so the
+    # previous round's files are still there and would be summed into this
+    # one's total — a count that grows by a round each time it is taken.
+    # Clearing first is what makes `--rounds 3` three readings rather than
+    # one, two and three times the reading.
+    for stale in Path(workdir).glob(prefix + '.*'):
+        stale.unlink()
     argv = [shutil.which('valgrind'), '--tool=callgrind',
-            '--trace-children=yes', f'--callgrind-out-file={prefix}'
+            '--trace-children=yes',
+            f'--callgrind-out-file={Path(workdir) / (prefix + ".%p")}'
             ] + child_argv(name, root)
     code, _out, err = _run(argv)
     if code != 0:
         return None, {'returncode': code, 'stderr': err.strip()[-400:]}
-    return _callgrind_total(workdir, f'callgrind.{name}'), None
+    return _callgrind_total(workdir, prefix), None
 
 
 def _perf(name, root, workdir):
