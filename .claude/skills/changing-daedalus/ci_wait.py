@@ -99,9 +99,9 @@ Discarding a failure is what that rule costs, so the acceptable line
 names every run the filter dropped, with its workflow, its run id, its
 conclusion and its URL, and its count is the number of lines printed.
 The filter is `ci_gate`'s, and so is the check that applies it, so a
-superseded run's name cannot satisfy the gate and this tool and
-`watch_all.py` cannot answer differently (issue #1262). It is NOT
-applied to a check run: a publisher PATCHes the one it POSTed.
+superseded run's name cannot satisfy the gate and no reader of it can
+answer differently (issue #1262). It is NOT applied to a check run: a
+publisher PATCHes the one it POSTed.
 
 This file is AT the 500 ceiling, the room made by cutting prose, which
 cannot be repeated. There is NO SEAM in it - one tool, one contract - so
@@ -131,14 +131,14 @@ DEFAULT_REPO = ci_gate.DEFAULT_REPO
 DEFAULT_INTERVAL = 60
 DEFAULT_TIMEOUT = 5400
 DEFAULT_GRACE = 300
-# ci_gate's definitions, which `watch_all.py` reads too.
+# ci_gate's definitions, re-exported for callers that reach them here.
 ACCEPTABLE = ci_gate.ACCEPTABLE
 # The workflows whose absence is a refusal rather than a wait, and the
 # default a caller who names nothing is held to. The expectation itself is
-# ci_gate's, which watch_all.py reads too; the name is bound here because it
-# is this tool's public contract. --required REPLACES it for a caller
-# watching another repository and only ADDS to it here (issue #1318);
-# either way a caller who names no gate cannot switch it off.
+# ci_gate's; the name is bound here because it is this tool's public
+# contract. --required REPLACES it for a caller watching another
+# repository and only ADDS to it here (issue #1318); either way a caller
+# who names no gate cannot switch it off.
 REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS
 # The gates this repository's publisher writes as check runs rather than
 # as runs, and so the ones a run-shaped read could never see (issue
@@ -212,12 +212,12 @@ def verdict(runs, checks=(), *, required=REQUIRED_WORKFLOWS,
     the checks, and a red published verdict fails even when the `tests`
     run is absent (issue #1360).
 
-    The set question is ALL-OF and is ci_gate's, which watch_all.py asks
-    through the same call: a head is incomplete unless EVERY required
-    workflow has a run AND every required published check has a check run.
-    Being satisfied by one of two required workflows is not being
-    satisfied. It is asked only once every conclusion is acceptable, which
-    is why both checks sit below the limbs above.
+    The set question is ALL-OF and is ci_gate's: a head is incomplete
+    unless EVERY required workflow has a run AND every required published
+    check has a check run. Being satisfied by one of two required
+    workflows is not being satisfied. It is asked only once every
+    conclusion is acceptable, which is why both checks sit below the
+    limbs above.
 
     The offenders are the runs or the checks that failed, never both - the
     run limb returns before the check limb is reached - and both carry the
