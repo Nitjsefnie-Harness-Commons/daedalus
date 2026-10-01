@@ -10,6 +10,7 @@ from functools import cached_property
 from pathlib import PurePosixPath, PureWindowsPath
 
 from _coverage_memo import _bound_census as memo_bound_names
+from _coverage_memo import node_types as memo_node_types
 from _coverage_memo import nodes as memo_nodes
 
 
@@ -77,6 +78,25 @@ class _ScopeFacts:
         return _unprovable_names(self.tree, self.layout, self)
 
 
+def _children(node):
+    """`ast.iter_child_nodes(node)`, without the generator and the deque.
+
+    The scope walk and the parent map between them ask every node in the
+    tree for its children, and the stdlib answers through a generator over
+    a field generator over a deque. This is the same order and the same
+    nodes: `_fields` in order, a list field flattened, a `None` in one
+    skipped exactly as the `isinstance` test there skips it.
+    """
+    for field in node._fields:
+        value = getattr(node, field, None)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, ast.AST):
+                    yield item
+        elif isinstance(value, ast.AST):
+            yield value
+
+
 def _chain(node):
     parts = []
     while isinstance(node, (ast.Attribute, ast.Subscript)):
@@ -106,7 +126,7 @@ def _reads_attribute(call):
 def _parents(tree):
     parents = {}
     for node in memo_nodes(tree):
-        for child in ast.iter_child_nodes(node):
+        for child in _children(node):
             parents[child] = node
     return parents
 
@@ -168,6 +188,12 @@ def _rebound_by_import(name, rebound):
     return name in rebound or _ALL_NAMES in rebound
 
 
+# The node types the retirement walk below has a reading for; every other
+# type reaches no arm of it.
+_UNOWNED_NODES = memo_node_types(
+    ast.Attribute, ast.Subscript, ast.Name, ast.Call)
+
+
 def root_owner_names(tree, imports=None):
     """Import-bound names of a root module reached only by attribute reads."""
     modules = {}
@@ -179,6 +205,8 @@ def root_owner_names(tree, imports=None):
     parents = _parents(tree)
     retired = set()
     for node in memo_nodes(tree):
+        if type(node) in _UNOWNED_NODES:
+            continue
         if isinstance(node, (ast.Attribute, ast.Subscript)):
             parts, base = _chain(node)
             stored = isinstance(node.ctx, (ast.Store, ast.Del))
@@ -333,6 +361,16 @@ def _containing_binding_scope(scope, parents):
     return scope
 
 
+# The node types `visit` below has an arm of its own for; every other type
+# falls through all of them to the same child walk, so it is answered by
+# one lookup. `type_scopes=False` declines the TypeAlias arm and a type
+# alias then takes the child walk too, which is why the type is declined
+# whether or not that arm is live.
+_PLAIN_VISITS = memo_node_types(
+    ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+    ast.NamedExpr, *_COMPREHENSION_SCOPES, getattr(ast, 'TypeAlias', None))
+
+
 def _evaluation_scopes(tree, type_scopes=True):
     """Nodes with their evaluation or binding scope, plus scope parents."""
     scoped = []
@@ -365,6 +403,10 @@ def _evaluation_scopes(tree, type_scopes=True):
 
     def visit(node, scope):
         scoped.append((node, scope))
+        if type(node) in _PLAIN_VISITS:
+            for child in _children(node):
+                visit(child, scope)
+            return
         if type_scopes and isinstance(node, getattr(ast, 'TypeAlias', ())):
             parents[node] = annotation_scope(node, scope)
             visit(node.name, scope)
@@ -473,7 +515,19 @@ def _bound_names(node):
     return memo_bound_names(node, _bound_names_of)
 
 
+# The node types the census below has an arm for; every other type binds
+# no name, so it is answered by one lookup rather than the seven isinstance
+# tests the arms between them need. `Name` is declined although its arm is
+# open, because a name in a load context binds nothing either.
+_UNBOUND_NAME_NODES = memo_node_types(
+    ast.Name, ast.arg, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+    ast.ExceptHandler, ast.MatchAs, ast.MatchStar, ast.MatchMapping,
+    ast.Import, ast.ImportFrom, *_TYPE_PARAMETERS)
+
+
 def _bound_names_of(node):
+    if type(node) in _UNBOUND_NAME_NODES:
+        return set()
     if (isinstance(node, ast.Name)
             and isinstance(node.ctx, (ast.Store, ast.Del))):
         return {node.id}

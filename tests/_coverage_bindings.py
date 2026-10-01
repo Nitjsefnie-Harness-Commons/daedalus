@@ -1,6 +1,7 @@
 """Launcher bindings the coverage-environment alias walk cannot follow."""
 import ast
 
+from _coverage_memo import node_types as memo_node_types
 from _coverage_memo import nodes as memo_nodes
 
 
@@ -125,6 +126,14 @@ def _header_values(node):
     return [*decorators, *defaults]
 
 
+# The node types `_bound_values` has an arm for; every other type falls
+# through all of them to no value, so it is answered by one lookup.
+_UNBOUND_VALUE_NODES = memo_node_types(
+    ast.Assign, ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor,
+    ast.comprehension, ast.With, ast.AsyncWith, ast.NamedExpr, ast.Match,
+    *_HEADER_FORMS)
+
+
 def _bound_values(node, facts):
     """Every (statement line, value, position) the statement binds unreadably.
 
@@ -141,6 +150,8 @@ def _bound_values(node, facts):
     `[launcher.run(...) for launcher in {'sp': subprocess}.values()]` is
     the same bypass as the loop it is spelled without.
     """
+    if type(node) in _UNBOUND_VALUE_NODES:
+        return []
     if isinstance(node, ast.Assign):
         if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
                 and (_names_one_of(node.value, facts.subprocess_modules)

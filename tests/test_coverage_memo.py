@@ -259,26 +259,22 @@ def test_a_bound_name_is_computed_once_per_node_not_once_per_pass(tmp):
     assert len(computed) == walked, (len(computed), walked)
 
 
-def test_the_bound_name_cache_does_not_outlive_the_trees_it_walked(tmp):
-    """No cached node outlives its own tree.
+def test_the_bound_name_census_is_released_as_each_analysis_ends(tmp):
+    """A scan of five files leaves no cached node behind at all.
 
-    The three context singletons the parser shares between every load,
-    store and delete are keys for the life of the process whatever a tree
-    does, and they hold nothing; every other key has to go with its tree.
+    The census is keyed by the node and holds it, which is what makes a
+    lookup one dictionary read: a weak-keyed map builds and tears down a
+    reference per node, and that measured more expensive than the question
+    the cache answers. A strong key is safe only because an analysis
+    releases what it read, and this is the control on that release.
     """
-    del tmp
-
-    def analyse():
-        _coverage_guard._ModuleFacts(ast.parse(
-            _BOUND.format(note='memo bound weak key probe')))
-
-    analyse()
+    root = _tree(tmp, {f'probe_release_{index}.py': _SAFE.format(
+        note=f'memo release probe {index}') for index in range(5)})
+    _recorded_analyses(root, 1)
     gc.collect()
     # Process-global state: a later control here that parked a module tree
     # at module scope would leave an entry and fail this spuriously.
-    held = [node for node in _coverage_memo._BOUNDS
-            if not isinstance(node, (ast.Load, ast.Store, ast.Del))]
-    assert not held, held
+    assert not _coverage_memo._BOUNDS, list(_coverage_memo._BOUNDS)
 
 
 def test_binding_consumers_do_not_mutate_shared_products(tmp):

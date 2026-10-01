@@ -29,7 +29,14 @@ value is the set every caller read, so a caller that mutated it would
 change what the next one is served; that is why the stored answer is a
 frozenset. A caller that mutates a node BETWEEN two analyses — changing a
 Name's context, an alias's asname — is served the earlier answer, on the
-same grounds the kept node list is: the tree is read, not edited.
+same grounds the kept node list is: the tree is read, not edited. The map
+is strong-keyed and `release_bound_census` empties it as each analysis
+begins, which is what bounds it to the tree under analysis.
+
+`node_types` is the third thing held here rather than in a guard module:
+the set of node types the running grammar defines, which every arm chain
+across these three modules wants and which one enumeration answers for all
+of them.
 """
 import ast
 import weakref
@@ -39,10 +46,12 @@ _ANALYSES = {}
 # leaves the root out because a value holding a strong reference to its
 # own weak key keeps that entry alive for the life of the process.
 _BELOW = weakref.WeakKeyDictionary()
-# The same, keyed on the node itself: a node is held by the tree that owns
-# it, so the same entry dies with the same tree and no analysis can pin a
-# tree it did not already hold.
-_BOUNDS = weakref.WeakKeyDictionary()
+# The same, keyed on the node itself — and NOT weakly, because a weak-key
+# map builds and tears down a reference per node and that measured more
+# expensive than the question the cache answers. `release_bound_census`
+# is what makes a strong key safe, and it is load-bearing rather than
+# tidiness: it is why this map is never wider than the tree being read.
+_BOUNDS = {}
 
 
 def nodes(tree):
@@ -52,6 +61,26 @@ def nodes(tree):
         below = list(ast.walk(tree))[1:]
         _BELOW[tree] = below
     return [tree] + below
+
+
+def node_types(*declined):
+    """Every node class this interpreter defines, bar the `declined` ones.
+
+    A guard arm chain is a sequence of `isinstance` tests whose arms cannot
+    both match, and almost every node falls through all of them. Naming
+    the types no arm can match turns that fall-through into one lookup
+    over a set built here once. The answer is a set of exact types, so a
+    subclass of a named arm still reaches the chain and is judged by it;
+    and a grammar that adds a form is a type this does not name, so it
+    takes the chain exactly as it did before.
+    """
+    types, pending = {ast.AST}, []
+    while pending:
+        for subclass in pending.pop().__subclasses__():
+            if subclass not in types:
+                types.add(subclass)
+                pending.append(subclass)
+    return frozenset(types) - {form for form in declined if form is not None}
 
 
 def _bound_census(node, compute):
@@ -66,6 +95,16 @@ def _bound_census(node, compute):
         names = frozenset(compute(node))
         _BOUNDS[node] = names
     return names
+
+
+def release_bound_census():
+    """Drop every cached name, so a finished analysis keeps no node alive.
+
+    Called where an analysis begins rather than where it ends, so a tree
+    that raised still leaves nothing behind once the next one starts, and
+    so the map is never wider than the tree being read.
+    """
+    _BOUNDS.clear()
 
 
 def analysed(analyze, relative, source, keeps):
