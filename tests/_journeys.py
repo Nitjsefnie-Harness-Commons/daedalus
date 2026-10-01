@@ -123,6 +123,7 @@ def mcp_exec(base, docroot):
         base, docroot, mod,
         lambda: mod.exec(tab_id=MCP_TAB, cmd_id=MCP_COMMAND_ID, code=MCP_CODE),
         MCP_RESULT, tab=MCP_TAB)
+    assert answered is not None, answered
     assert answered.get('value') == MCP_RESULT, answered
     assert answered.get('error') is None, answered
     assert queued.get('code') == MCP_CODE, queued
