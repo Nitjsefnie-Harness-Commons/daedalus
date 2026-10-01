@@ -8,8 +8,7 @@ here, and so does that suite. A wrong reader here would fail every
 caller at once, so tests/test_coverage_comment_boundary.py pins the two
 refusals.
 
-`write_executable` is the one copy of that helper: tests/_speedharness.py
-imports it here rather than carrying a second body, and
+`write_executable` is the one copy of that helper, and
 tests/test_coverage_comment_boundary.py pins both halves of what it does.
 """
 import json
