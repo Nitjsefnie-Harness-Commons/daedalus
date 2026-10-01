@@ -554,6 +554,59 @@ def test_the_sink_pins_the_unplaced_and_ambiguous_branches(tmp):
         assert bound_sites(source, label) == expected, label
 
 
+def test_the_launch_call_routes_the_audit_owns_are_refused_and_pinned(tmp):
+    """The routes a launch call owns, in both directions, and their rows.
+
+    A `**{'timeout': 30}` unpacked on a launch is a launch-call site, so the
+    test-tree census does not read it -- `tests/_launch_audit.py` does, and
+    refuses it at every head. A keyword the `subprocess` does not take is
+    the route handed to that analyser because a misspelled bound
+    (`timout=30`) never runs and is invisible to anything reading the word
+    `timeout`. A launcher built by `functools.partial` is the analyser's
+    `unplaced` arm, and it is planted here so the route cannot be lost
+    silently -- `tests/_bound_site_rows.py` states that it needs no row of
+    its own, which leaves this the only control for it.
+
+    One control, one owner: this fails if the analyser stops refusing any of
+    them, if it starts refusing a clean launch, or if the row that pins one
+    is deleted.
+    """
+    del tmp
+    plants = {
+        'unpack-at-a-non-git-launch':
+            ("import subprocess\n"
+             "def probe():\n"
+             "    subprocess.run(['node', 'x.js'], **{'timeout': 30})\n",
+             [(3, 'non-git', 'unpack')]),
+        'foreign-keyword-on-a-launch':
+            ("import subprocess\n"
+             "def probe():\n"
+             "    subprocess.run(['git', 'status'], check=True, timout=30)\n",
+             [(3, 'git', 'keyword')]),
+        'a-clean-launch-emits-nothing':
+            ("import subprocess\n"
+             "def probe():\n"
+             "    return subprocess.run(['git', 'status'], check=True,\n"
+             "                        cwd='/tmp')\n",
+             []),
+    }
+    for label, (source, expected) in plants.items():
+        assert bound_sites(source, label) == expected, label
+    partial = ("import functools\n"
+               "import subprocess\n"
+               "def probe():\n"
+               "    _r = functools.partial(subprocess.run, timeout=30)\n"
+               "    return _r(['git', 'status'])\n")
+    assert bound_sites(partial, 'partial-as-a-launcher') == [
+        (4, 'unreadable', 'unplaced')], 'the unplaced arm stopped covering it'
+    sunk = {label for label, _, _ in BOUND_SITE_ROWS}
+    refused = {label for label, _, _ in LAUNCH_REFUSAL_ROWS}
+    for label in ('unpack-at-a-non-git-launch', 'foreign-keyword-on-a-launch',
+                  'a-clean-launch-emits-nothing'):
+        assert label in sunk, (label, sorted(sunk))
+    assert 'foreign-keyword-on-a-launch' in refused, sorted(refused)
+
+
 def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
     """machinery_route's `seen` guard is load-bearing, and its mutant does
     not answer wrong — it does not stop.

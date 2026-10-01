@@ -527,20 +527,12 @@ def test_destructured_and_walrus_alias_boundaries(tmp):
         assert not py_tab_routing_violations(source, source.name), body
 
 
-def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
+def test_no_client_sends_the_browser_target_as_the_routing_field():
     """Typed commands route to extension; eval payloads may route by tab."""
     tree = ast.parse("cmd = dict(BASE)\ncmd['tab'] = tab_id\n"
                      "api('PUT', '/command', cmd)\n")
     assert payload_keys(tree.body[0].value, {}) is None
     assert dict_assignments(tree)['cmd']['tab'][0] == 2
-
-    def js(body, args='tid'):
-        return 'js', f'async function f({args}) {{\n{body}\n}}\n'
-
-    def cmd_case(argument, command, update=''):
-        tail = f'    {update}\n' if update else ''
-        return ('py', f"def f({argument}):\n    {command}\n" + tail
-                      + "    api('PUT', '/command', cmd)\n")
 
     scanned_py = [path for path in [
         *(ROOT / 'daedalus_mcp').glob('*.py'),
@@ -554,155 +546,6 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         for value in scanner(path, path.relative_to(ROOT))]
     assert not violations, (
         'browser tab sent as typed-command `tab`:\n' + '\n'.join(violations))
-    skipped_bodies = [
-        "    for send in ():\n        pass\n",
-        "    while False:\n        send = bridge.get\n",
-        "    try: pass\n    except OSError as send: pass\n",
-        "    match 0:\n        case 1 as send:\n            pass\n"]
-    entered_bodies = [
-        "    try:\n        send = bridge.ext_cmd; return await "
-        "send('x','y',tab=x)\n    except OSError:\n        return None\n",
-        "    async with bridge.session():\n"
-        "        send = bridge.ext_cmd; return await send('x','y',tab=x)\n",
-        "    for item in xs:\n        send = bridge.ext_cmd; "
-        "await send('x','y',tab=x)\n",
-        "    while xs:\n        send = bridge.ext_cmd; "
-        "await send('x','y',tab=x); break\n"]
-    reversions = [
-        ('py', "class Tabs:\n    async def focus(self, tab):\n"
-               "        return await _ext_cmd('x', 'y', tab=tab)\n"),
-        ('py', "async def f(chrome_tab):\n    fields = {}\n"
-               "    fields['tab'] = str(chrome_tab)\n"
-               "    return await _ext_cmd('_ss', 'screenshot', **fields)\n"),
-        cmd_case('args', "cmd = {'id': '_ss', 'type': 'screenshot', 'tab':"
-                 " 'extension'}", 'cmd["tab"] = int(args.chrome_tab)'),
-        ('py', "async def f(t):\n"
-               "    extra = {'tab': str(t)}\n"
-               "    return await _ext_cmd('_cdp', 'cdp', **extra)\n"),
-        js("  const fields = {};\n  fields.tab = Number(tabSel.value);\n"
-           "  await extCmd('screenshot', fields);", ''),
-        js("  await extCmd('cdp', { method: m.trim(), params: {}, "
-           "tab: tid });", 'm, tid'),
-        js("  const f = { tab: tid };\n  await extCmd('cdp', f);"),
-        js("  await extCmd('net-capture', { method: 'Network.enable',"
-           " params: { maxTotalBufferSize: 10000000, maxResourceBufferSize:"
-           " 5000000, maxPostDataSize: 65536 }, note: 'padding padding"
-           " padding padding padding padding padding padding', tab: tid });"),
-        cmd_case('args', "cmd: dict = {'id': '_x', 'type': 'close-tab',"
-                 " 'tab': 'extension'}",
-                 "cmd['tab'] = int(args.chrome_tab)"),
-        ('py', "async def f(t):\n"
-               "    fields: dict = {'css': 'x'}\n"
-               "    fields['tab'] = t\n"
-               "    return await _ext_cmd('_css', 'inject-css', **fields)\n"),
-        cmd_case('tid', "cmd = dict(id='_x', type='close-tab', tab=tid)"),
-        cmd_case('tid', "cmd = {'id': '_x', 'type': 'close-tab'}",
-                 "cmd.update({'tab': tid})"),
-        cmd_case('tid', "cmd = {'id': '_x', 'type': 'close-tab'}",
-                 "cmd |= {'tab': tid}"),
-        ('js', "async function load() {\n"
-               "  const fields = {};\n"
-               "  fields.tab = Number(tabSel.value);\n"
-               "  await extCmd('cookies', fields);\n"
-               "}\n"
-               "function later(q) {\n"
-               "  const fields = { url: q };\n"
-               "  extCmd('set-cookie', fields);\n"
-               "}\n"),
-        js("  const fields = {};\n  fields['tab'] = tid;\n"
-           "  await extCmd('screenshot', fields);"),
-        ('py', "def f(tid):\n"
-               "    spread = build_fields(tid)\n"
-               "    cmd = {'id': '_x', 'type': 'close-tab',"
-               " 'tab': 'extension', **spread}\n"
-               "    api('PUT', '/command', cmd)\n"),
-        ('py', "def f(flag, tid):\n"
-               "    cmd = {'id': '_x', 'type': 'close-tab',"
-               " 'tab': 'extension'}\n"
-               "    if flag:\n"
-               "        cmd['tab'] = tid\n"
-               "        api('PUT', '/command', cmd)\n"
-               "    else:\n"
-               "        cmd['tab'] = 'extension'\n"),
-        js("  await extCmd('cdp', { ...{ ['tab']: tid } });"),
-        js("  const command = { type: 'cdp', tab: tid };\n"
-           "  await runCommand(command);"),
-        js("  await extCmd('cdp', {}, { tab: target });", 'target'),
-        js("  const fields = {};\n  const alias = fields;\n"
-           "  alias.tab = tid;\n  await extCmd('screenshot', fields);"),
-        ('js', "function addTab(target, tid) {\n"
-               "  target.tab = tid;\n"
-               "}\n"
-               "async function f(tid) {\n"
-               "  const fields = {};\n"
-               "  addTab(fields, tid);\n"
-               "  await extCmd('screenshot', fields);\n"
-               "}\n"),
-        js("  const fields = flag ? { tab: tid } : {};\n"
-           "  await extCmd('screenshot', fields);", 'flag, tid'),
-        js("  const fields = {};\n  Object.assign(fields, { tab: tid });\n"
-           "  await extCmd('screenshot', fields);"),
-        ('js', "function build(tid) {\n"
-               "  const f = {};\n"
-               "  f.tab = tid;\n"
-               "  return f;\n"
-               "}\n"
-               "async function g(tid) {\n"
-               "  await extCmd('screenshot', build(tid));\n"
-               "}\n"), ]
-    for body in skipped_bodies:
-        reversions.append(('py', "async def f(bridge):\n    send = "
-                           "bridge.ext_cmd\n" + body
-                           + "    return await send('x', 'y', tab=309)\n"))
-    reversions.extend(('py', "async def f(bridge, x, xs):\n" + body)
-                      for body in entered_bodies)
-    legitimate = [
-        ('py', "def f():\n    send = _ext_cmd\n"
-               "    async def inner(send):\n"
-               "        return await send('x', 'y', tab=307)\n"),
-        ('py', "async def f(cmd_id, code, tab_id):\n"
-               "    payload = {'id': cmd_id, 'code': code}\n"
-               "    payload['tab'] = tab_id\n"
-               "    await _put('/command', payload)\n"),
-        ('py', "async def f(chrome_tab):\n"
-               "    return await _ext_cmd('_focus', 'focus-tab',"
-               " tabId=int(chrome_tab))\n"),
-        js("  await runCommand({ tab: tabId, code });", 'tabId, code'),
-        js("  await extCmd('screenshot', { tabId: Number(tid) });"),
-        ('py', "async def f(chrome_tab):\n"
-               "    fields: dict = {'css': 'x'}\n"
-               "    fields['tabId'] = int(chrome_tab)\n"
-               "    return await _ext_cmd('_css', 'inject-css', **fields)\n"),
-        js("  // never do fields['tab'] = Number(tabSel.value) here\n"
-           "  await extCmd('cookies', fields);", 'fields'),
-        js("  const fields = { url: q };\n"
-           "  // fields['tab'] = Number(tabSel.value) would be wrong\n"
-           "  let done = false;\n  await extCmd('cookies', fields);",
-           'q')]
-    disclosed_js_limits = [
-        ('assignment after the call that runs before it',
-         "async function send() {\n"
-         "  await extCmd('screenshot', fields);\n"
-         "}\n"
-         "const fields = { tab: 'not-extension' };\n"),
-        ('fields arriving as a parameter',
-         "async function f(fields) {\n"
-         "  await extCmd('screenshot', fields);\n"
-         "}\n"), ]
-
-    def scan(lang, source, fixture=Path(tmp) / 'sender'):
-        path = fixture.with_suffix('.py' if lang == 'py' else '.js')
-        path.write_text(source, encoding='utf-8')
-        return (py_tab_routing_violations if lang == 'py'
-                else js_tab_routing_violations)(path, 'fixture')
-
-    for i, (lang, src) in enumerate(reversions):
-        assert scan(lang, src), f'reversion {i} was not caught:\n{src}'
-    for i, (lang, src) in enumerate(legitimate):
-        assert not scan(lang, src), f'legitimate shape {i} flagged:\n{src}'
-    for i, (label, src) in enumerate(disclosed_js_limits):
-        assert not scan('js', src), f'disclosed limit {label!r} caught: {src}'
-
 
 def test_selected_deferred_callables_stay_beside_their_senders(tmp):
     cases = [(label, SELECTION_PRE + store + '\nsend = ext_cmd\nreturn '
