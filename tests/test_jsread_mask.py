@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""The mask reveals a template interpolation as code and nothing else."""
+"""The mask reveals a template interpolation as code and nothing else.
+
+It reads each `/` off the token before it: a value or an operand's `}`
+makes one a division; a statement head, a label or a `case`/`default`
+clause makes one a regex opener; a literal already blanked leaves none.
+"""
 import sys
 from pathlib import Path
 
