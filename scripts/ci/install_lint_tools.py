@@ -137,10 +137,10 @@ DOWNLOAD_TIMEOUT = 30
 # what else is not worth a second ask is decided in `_worth_asking_again`.
 DOWNLOAD_ATTEMPTS = 3
 # The wall clock the attempts share, four times the per-socket bound above:
-# three attempts of one socket operation each, which is what a timed-out
-# connect costs, and not a promise of three full ones. An attempt is a
-# sequence of them — connect, then status line — so a read that dribbles is
-# not bounded here; MAX_TRANSFER bounds the bytes served.
+# three attempts of one socket operation each, a timed-out connect on a host
+# resolving to one address, and not a promise of three full ones. An attempt
+# is a sequence of them — connect, then status line — so a read that dribbles
+# is not bounded here; MAX_TRANSFER bounds the bytes served.
 DOWNLOAD_BUDGET = 4 * DOWNLOAD_TIMEOUT
 # What a retry can change. A body cut short mid-transfer raises
 # IncompleteRead, an HTTPException and not an OSError, so a truncated body
