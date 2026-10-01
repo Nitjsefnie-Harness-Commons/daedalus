@@ -66,14 +66,25 @@ def test_the_committed_artefact_is_the_canonical_rendering(tmp):
 
 def test_the_artefact_names_exactly_the_journeys_that_exist(tmp):
     del tmp
-    document = _policy().load(ARTIFACT)
+    policy = _policy()
+    document = policy.load(ARTIFACT)
     names = _journeys().NAMES
     assert sorted(document['journeys']) == sorted(names), (
         'the budget and the journey set disagree: '
         f'{sorted(document["journeys"])} against {sorted(names)}')
-    assert _policy().stale(document, names) == []
-    assert _policy().unrecorded(document, names) == sorted(names), (
-        'every journey is unrecorded until the first baseline is written')
+    assert policy.stale(document, names) == []
+    # A baseline exists, so a journey left unrecorded is a journey the gate
+    # silently never compares — the `unmeasured` false green, reached by
+    # omission rather than by a runner that could not count.
+    assert policy.unrecorded(document, names) == [], (
+        'a baseline is recorded and these journeys carry no count in it, so '
+        f'the gate never compares them: {policy.unrecorded(document, names)}')
+    unmeasured = [name for name in names
+                  if not isinstance(document['journeys'][name], int)
+                  or isinstance(document['journeys'][name], bool)
+                  or document['journeys'][name] <= 0]
+    assert not unmeasured, (
+        f'a recorded count is not a positive integer: {unmeasured}')
 
 
 def test_the_artefact_is_its_own_file_and_a_tracked_one(tmp):
@@ -138,18 +149,27 @@ def _measurements_file(path, document, **over):
 
 
 def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
-    """The identity is recorded, and it is empty until a run records it."""
+    """The identity is present, complete, and exactly the three things.
+
+    The shape is the invariant, not the emptiness. A block with a field
+    missing is a defect that makes a moved toolchain read as a match on
+    that field, so each must be a non-empty string and the set must be
+    exactly what a count depends on and no code change controls.
+    """
     del tmp
     policy = _policy()
     document = policy.load(ARTIFACT)
     recorded = document['toolchain']
     assert sorted(recorded) == sorted(policy.journey_counters
                                       .TOOLCHAIN_FIELDS), recorded
-    assert not any(recorded.values()), (
-        'an identity was recorded here; it must come from a measured CI '
-        f'run in a reviewed commit, not from this tree: {recorded}')
+    for field, seen in sorted(recorded.items()):
+        assert isinstance(seen, str) and seen.strip(), (
+            f'the recorded {field} is not a non-empty string, so a toolchain '
+            f'that moved on it would read as a match: {seen!r}')
     for over in ({'toolchain': []}, {'toolchain': {'cpython': '3.13'}},
-                 {'toolchain': {'python': 31315}}):
+                 {'toolchain': {'python': 31315}},
+                 {'toolchain': {'python': '', 'valgrind_version': 'v',
+                                'runner_image': 'i'}}):
         bad = _budget_document()
         bad.update(over)
         try:
