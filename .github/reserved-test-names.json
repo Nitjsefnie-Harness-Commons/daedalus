@@ -1769,6 +1769,7 @@
     "suite": {"python": ["tests/_watcher_fixtures.py"]},
     "suites_skip_violation": {"python": ["tests/_wfskip_cases.py"]},
     "summaries": {"python": ["tests/_journey_contract.py"]},
+    "surface_responder_errors": {"python": ["tests/_mcp_load.py"]},
     "sweep": {"python": ["tests/_mcp_selection_sweep.py"]},
     "sweep_launches": {"python": ["tests/_sweep_launch_scan.py"]},
     "sync_cells": {"python": ["tests/_pyroute_values.py"]},
