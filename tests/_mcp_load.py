@@ -193,6 +193,27 @@ def _mcp_tool_text(reply):
         if isinstance(item, dict))
 
 
+@contextlib.contextmanager
+def surface_responder_errors(thread, errors, timeout, stop=None):
+    """Join a responder thread and prefer its failure to the caller's.
+
+    A responder that fails in its own thread leaves the caller to report a
+    timeout instead, so the two are joined and the responder's own
+    exception is re-raised in the caller's place. `stop` is set first when
+    given, for a responder that loops until told to stop.
+    """
+    try:
+        yield
+    finally:
+        if stop is not None:
+            stop.set()
+        thread.join(timeout=timeout)
+        failure = next((item for item in errors
+                        if isinstance(item, Exception)), None)
+        if failure is not None:
+            raise failure from None
+
+
 def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     """Run one MCP tool that sends a command, and answer what it sends.
 

@@ -395,13 +395,11 @@ BOUNDED_GIT_LAUNCHES = {
          'an MCP process wait while the test tears it down',
     ('tests/test_mcp_entry_point.py', '_cleanup_mcp', 'proc.wait(timeout)', 2):
          'the reap after that wait, on the same process',
-    ('tests/test_mcp_server.py', '_surface_responder_errors',
+    ('tests/_mcp_load.py', 'surface_responder_errors',
      'thread.join(timeout)', 1):
-         'a thread join on a thread the fixture started',
-    ('tests/test_mcp_live_tools.py',
-     '_surface_responder_errors', 'thread.join(timeout)', 1):
-         'a thread join on a responder this suite started; the'
-         'failure it surfaces is the responder\'s own',
+         'a thread join on a responder a suite started; the'
+         'failure it surfaces is the responder\'s own, and two'
+         'suites read this one definition',
     ('tests/test_mcp_server.py', 'callers',
      'mod.bridge.ext_cmd(domain, timeout)', 1):
         "an MCP tool call whose timeout is the tool's, not a bound"
