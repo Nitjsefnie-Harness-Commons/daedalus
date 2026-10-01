@@ -151,7 +151,8 @@ def accounting_lines(report, cost=None):
     return lines
 
 
-def toolchain_lines(document, report, changed, remedy):
+def toolchain_lines(document, report, changed, remedy,
+                    subject='toolchain'):
     """The toolchain outcome as a step summary, in those words.
 
     Not a regression and not a silent pass: the reader is told in the
@@ -161,20 +162,24 @@ def toolchain_lines(document, report, changed, remedy):
     counter = document.get('counter')
     counts = (journey_counters.counts_of(report, counter) if counter else {})
     if changed:
+        # The same block serves a toolchain that moved and a set of excluded
+        # threads that changed: both say the recorded number and this run's
+        # are different quantities, and the table reads the same either way.
         lines = ['### Journey budget', '',
-                 '**toolchain changed, re-baseline.**', '',
+                 f'**{subject} changed, re-baseline.**', '',
                  'No count was compared. The recorded counts were taken on '
-                 'a different toolchain, so comparing them against this '
-                 "run's numbers would measure the toolchain rather than "
-                 'the code. The step succeeds because the tree did not '
-                 'regress, not because anything was within budget.', '',
+                 'a different '
+                 f'{subject}, so comparing them against this run\'s numbers '
+                 f'would measure the {subject} rather than the code. The '
+                 'step succeeds because the tree did not regress, not '
+                 'because anything was within budget.', '',
                  '| field | recorded | measured |', '|---|---|---|']
         for field, (was, now) in sorted(changed.items()):
             lines.append(f'| {field} | `{was}` | `{now}` |')
     else:
         lines = ['### Journey budget', '',
-                 '**the journey budget records no toolchain yet.**', '',
-                 'No count was compared. There is no recorded identity to '
+                 f'**the journey budget records no {subject} yet.**', '',
+                 f'No count was compared. There is no recorded {subject} to '
                  'say this run still matches, so the measurement is '
                  'reported and nothing is compared until a re-baseline '
                  'records one.']
