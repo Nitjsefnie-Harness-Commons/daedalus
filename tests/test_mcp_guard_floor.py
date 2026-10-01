@@ -5,7 +5,11 @@ Every guard the tools reach is witnessed on a healthy tree, so the
 registration-driven pass in test_mcp_tools.py never sees a gap. These drive
 the floor directly, which is the only way its detection is banked. The
 import closure is what makes the set of modules the floor scans closed,
-and the registration-driven pass drives it over the real tree.
+and the registration-driven pass drives it over the real tree. Three limits
+that closure declares are not exercised by the tree as it stands — a
+code-evaluating builtin, an unreachable position, and a callee read out of
+a nullary lambda's return — so the cases at the foot of this file carry
+them, each on both sides of the limit.
 """
 import ast
 import importlib.util
@@ -15,6 +19,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_guard_floor  # noqa: E402
+import _mcp_import_closure  # noqa: E402
+from _mcp_import_fixtures import _write_tree  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -683,6 +689,94 @@ def test_a_bare_reraise_carries_its_own_line(_tmp):
     assert _mcp_guard_floor.guard_keys(sites) == [
         ('reraise_shapes', 'inner', 'value is None'),
         ('reraise_shapes', 'outer', 'bare raise at line 11')]
+
+
+# The three closure limits below are stated by the same composition source
+# in two forms, so each case is refused or resolved by one change and the
+# other form of the limit is what keeps a rule that over-reaches from
+# passing.
+def _composition_refusal(_tmp, source, phrase):
+    """The scan refuses this composition, and the refusal names the reason."""
+    _write_tree(Path(_tmp), {'composition.py': source})
+    try:
+        _mcp_import_closure.composition_scan_set(
+            Path(_tmp) / 'composition.py', _tmp)
+    except AssertionError as raised:
+        assert phrase in str(raised), raised
+    else:
+        raise AssertionError('a composition the walk must refuse was silent')
+
+
+def _composition_names(_tmp, tree):
+    """The repo-local files this composition's scan set names, relative to
+    the tree it was written into."""
+    _write_tree(Path(_tmp), tree)
+    scanned = _mcp_import_closure.composition_scan_set(
+        Path(_tmp) / 'composition.py', _tmp)
+    return {path.relative_to(Path(_tmp)).as_posix() for path in scanned}
+
+
+def test_a_program_handed_to_a_code_evaluating_builtin_is_refused(_tmp):
+    """A constant string reaching `eval`/`exec`/`compile` is a PROGRAM, and
+    the walk either resolves it or refuses it — never silence.
+
+    The same name bound to a tool, which is what `server.py` does with the
+    `exec` its own tool module exports, is a different function and stays
+    silent. Dropping the shadow resolves on the second line above.
+    """
+    for name in ('eval', 'exec', 'compile'):
+        _composition_refusal(
+            _tmp, f'\n\ndef load(name):\n    return {name}("importlib")(name)\n',
+            'code-evaluating')
+    _composition_names(_tmp, {
+        'composition.py': '\neval_tools = {"exec": print}\n'
+                          'exec = eval_tools["exec"]\n'
+                          '\n\ndef load():\n    return exec("code")\n'})
+
+
+def test_a_position_behind_a_barrier_is_out_of_the_scan_set(_tmp):
+    """A statement the runtime cannot reach contributes no module, and the
+    one before it still does.
+
+    Both halves ride in one tree, so a rule that stopped marking the tail
+    would add `pkg.leaf` and one that over-reached would drop `pkg.before`.
+    """
+    assert _composition_names(_tmp, {
+        'composition.py': '\nimport importlib\n'
+                          '\n\ndef load():\n'
+                          '    importlib.import_module("pkg.before")\n'
+                          '    raise RuntimeError("before the call")\n'
+                          '    return importlib.import_module("pkg.leaf")\n',
+        'pkg/__init__.py': '',
+        'pkg/before.py': 'before = True\n',
+        'pkg/leaf.py': 'leaf = True\n'}) == {
+            'composition.py', 'pkg/__init__.py', 'pkg/before.py'}
+
+
+def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
+    """A call's callee is a VALUE, and `(lambda: op)()` produces the
+    operation, so the module resolves exactly as the direct spelling does.
+
+    A lambda with a required parameter raises before it produces anything,
+    which is the near-miss: that form resolves nothing and refuses nothing.
+    """
+    for callee in ('(lambda: importlib.import_module)()',
+                   '(lambda *a: importlib.import_module)()',
+                   '(lambda a=0: importlib.import_module)()',
+                   '(lambda **k: importlib.import_module)()'):
+        assert 'pkg/leaf.py' in _composition_names(_tmp, {
+            'composition.py': '\nimport importlib\n'
+                              '\n\ndef load():\n'
+                              f'    return {callee}("pkg.leaf")\n',
+            'pkg/__init__.py': '',
+            'pkg/leaf.py': 'leaf = True\n'}), callee
+    assert _composition_names(_tmp, {
+        'composition.py': '\nimport importlib\n'
+                          '\n\ndef load():\n'
+                          '    return (lambda a: importlib.import_module)'
+                          '("pkg.leaf")\n',
+        'pkg/__init__.py': '',
+        'pkg/leaf.py': 'leaf = True\n'}) == {'composition.py'}
 
 
 if __name__ == '__main__':
