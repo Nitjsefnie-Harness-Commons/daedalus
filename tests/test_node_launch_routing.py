@@ -72,19 +72,24 @@ def test_a_module_cannot_rebind_the_shared_hang_multiple(tmp):
     fabricated multiple is not a table.
 
     The plant is a real module's own bytes with one line appended, read back
-    from disk, so what the control reads is what the rule would read. The
-    other seven composed modules are copied unplanted beside it, so the
-    assertion is that this ONE is refused and not that the control refuses
-    everything.
+    from disk, so what the control reads is what the rule would read. Every
+    other composed module is copied unplanted beside it — the population
+    is eight SITES over five files, and the assertion is that this ONE site
+    is refused and not that the control refuses everything.
     """
     root = bounds.composed_population(Path(tmp) / 'planted', '_gm_harness.py',
                                       'SITE_HANG_MULTIPLE = 10 ** 6')
     plant = (root / '_gm_harness.py').read_text(encoding='utf-8')
     assert plant.rstrip().endswith('SITE_HANG_MULTIPLE = 10 ** 6'), (
         'the plant did not reach the real module')
+    # The plant makes `_gm_harness.py:GM_CHILD` the ONLY deviation, so the
+    # equality is over the whole population rather than a membership: a
+    # retyped deadline planted beside it would show up here too, which is
+    # why the message names the population and not just the rebind.
     assert bounds.retyped_bound_sites(root) == ['_gm_harness.py:GM_CHILD'], (
-        'a module that rebinds SITE_HANG_MULTIPLE composed its deadline '
-        f'from a multiple this control never read: '
+        'the planted population is not exactly the one expected \u2014 the '
+        'planted rebind is the cause to check first, but any other site '
+        'that stopped composing its bound reads the same way: '
         f'{bounds.retyped_bound_sites(root)}')
     assert bounds.shared_multiple('_gm_harness.py') == SITE_HANG_MULTIPLE, (
         'the healthy reading of the real module is not the shared multiple')
@@ -124,6 +129,36 @@ def test_a_composed_deadline_is_not_below_what_a_child_could_cost(tmp):
         'a recorded table whose slowest sample is below '
         f'{round(floor, 3)}s, which composes a deadline no child could '
         f'reach: {thin}')
+
+
+def test_the_composed_site_table_is_what_the_tree_carries(tmp):
+    """The eight-site population is measured from the tree, not asserted.
+
+    A table that is right today is right by a hand-written edit nobody has
+    to justify: deleting a row drops a site out of the population and every
+    other control here stops looking at it, silently. So the population is
+    read off the tree instead — every module-level `*_DEADLINE_S` outside
+    the shared launcher, and every `*_SAMPLES_S` with a `*_SLOWEST_S` that
+    reads it — and the table has to equal what that reading finds.
+
+    Three ways this goes, all of them real: a site drops out of the table
+    and stops being checked; a module composes a bound at its own call site
+    and nothing looks at it; and a sample table appears that no deadline was
+    built out of.
+    """
+    del tmp
+    sites, tables, unconsumed = bounds.derived_population()
+    listed = set(bounds.COMPOSED_BOUND_SITES)
+    assert sites == listed, (
+        'the composed-bound sites the tree carries are not the ones the '
+        'table lists, so a site is checked by nothing or a listed site no '
+        f'longer exists: {sorted(sites ^ listed)}')
+    assert len(tables) >= len(sites), (
+        f'{len(tables)} recorded tables for {len(sites)} composed sites, '
+        'so at least one deadline is built out of no measurement')
+    assert not unconsumed, (
+        'a recorded sample table no `max()` in its own module reads, so no '
+        f'deadline was composed from it: {unconsumed}')
 
 
 def main():
