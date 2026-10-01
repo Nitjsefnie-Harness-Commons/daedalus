@@ -315,7 +315,8 @@ def test_a_journey_recorded_at_null_still_renders_a_row(tmp):
     assert code == 0, (
         'a journey recorded at null is a legal artefact, and the check '
         f'said: {said}')
-    row = [line for line in said.splitlines() if line.startswith(f'| {names[0]} ')]
+    wanted = f'| {names[0]} '
+    row = [line for line in said.splitlines() if line.startswith(wanted)]
     assert row, (
         f'the table carries no row for a journey recorded at null: {said}')
     assert row[0].endswith('| not recorded yet |'), row[0]
