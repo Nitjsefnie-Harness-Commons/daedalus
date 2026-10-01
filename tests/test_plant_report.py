@@ -9,98 +9,14 @@ this suite names each temp dir after its test function, so a substring
 pin over a whole line is satisfied by the path.
 """
 import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _ratchet_fixture import _git  # noqa: E402
-
-ROOT = _util.ROOT
-PLANT = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'plant.py'
-
-_COMMITTED = b'VALUE = 1\n'
-_FIXED = b'VALUE = 2  # the uncommitted fix, never staged\n'
-_PLANTED = b'raise RuntimeError("the defect the guard exists to catch")\n'
-
-
-def _plant(*args):
-    return subprocess.run([sys.executable, str(PLANT), *args],
-                          capture_output=True, text=True, timeout=60,
-                          env=_util.child_coverage('scrub'))
-
-
-def _repo(tmp, name='plantrepo'):
-    """A committed repository holding one committed target file."""
-    if shutil.which('git') is None:
-        _util.skip('git is not on PATH')
-    repo = Path(tmp) / name
-    repo.mkdir(parents=True)
-    target = repo / 'target.py'
-    target.write_bytes(_COMMITTED)
-    _git(repo, '-c', 'init.defaultBranch=main', 'init', '-q')
-    _git(repo, 'config', 'user.email', 'tests@example.invalid')
-    _git(repo, 'config', 'user.name', 'Tests')
-    _git(repo, 'add', 'target.py')
-    _git(repo, 'commit', '-qm', 'base')
-    return target
-
-
-def _say(result):
-    return result.stdout + result.stderr
-
-
-def _reported_state(output):
-    """The state word the helper reported, not a word in its paths: the
-    suite names each temp dir after its test function, so the path a test
-    about a dirty target prints is full of that word anyway."""
-    return output.rsplit(': ', 1)[-1].split(' against')[0].strip()
-
-
-def _only_entry(store):
-    entries = [item for item in Path(store).iterdir() if item.is_dir()]
-    assert len(entries) == 1, entries
-    return entries[0]
-
-
-def _drop_to_nobody():
-    os.setgroups([])
-    os.setgid(65534)
-    os.setuid(65534)
-
-
-def _as_nobody(command):
-    """Run `command` unprivileged, so the file mode bits bite - root
-    bypasses them, which is why this route was enforced nowhere on a root
-    runner. An arrangement that cannot drop privileges skips with the
-    reason rather than erroring: a control that manufactures a red on
-    correct code is the same defect as one that passes on broken code.
-    """
-    try:
-        return subprocess.run(command, capture_output=True, text=True,
-                              timeout=60, preexec_fn=_drop_to_nobody,
-                              env=_util.child_coverage('scrub'))
-    except (OSError, subprocess.SubprocessError) as why:
-        _util.skip(f'the privilege drop is unavailable here: {why!r}')
-
-
-def _open_the_entry(store, target):
-    """Hand the child every path it walks to publish, the target
-    included: a suite's temporary root is 0700, and without
-    the traverse bit the child reads a refusal where the route
-    should have run. 0o700 makes the child the OWNER, so owner
-    bits are all it needs."""
-    entry = _only_entry(store)
-    for directory in (target.parent, store, entry):
-        for ancestor in (directory, *directory.parents):
-            os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
-    for owned in (target.parent.parent, target.parent, store, entry,
-                  *entry.iterdir(), target):
-        os.chown(owned, 65534, 65534)
-        os.chmod(owned, 0o700)
-
+from _plant_fixture import (  # noqa: E402
+    PLANT, _FIXED, _PLANTED, _as_nobody, _committed_repo, _only_entry,
+    _open_the_entry, _reported_state, _run_plant, _say)
 
 _NOT_HEADS = "the published bytes are the worktree's, not what HEAD holds"
 
@@ -148,10 +64,11 @@ def _drop_the_state_field(store):
 
 
 def _saved_then_planted(tmp, payload=_FIXED):
-    target = _repo(tmp)
+    target = _committed_repo(tmp)
     store = Path(tmp) / 'store'
     target.write_bytes(payload)
-    assert _plant('save', str(target), '--store', str(store)).returncode == 0
+    assert _run_plant('save', str(target), '--store',
+                      str(store)).returncode == 0
     target.write_bytes(_PLANTED)
     return target, store
 
@@ -159,7 +76,7 @@ def _saved_then_planted(tmp, payload=_FIXED):
 def test_a_dirty_snapshot_is_restored_with_the_state_it_was_taken_in(tmp):
     target, store = _saved_then_planted(tmp)
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _state_in(clauses) == 'dirty', clauses
@@ -169,14 +86,14 @@ def test_a_dirty_snapshot_is_restored_with_the_state_it_was_taken_in(tmp):
 
 
 def test_a_clean_snapshot_is_not_reported_as_the_worktrees(tmp):
-    target = _repo(tmp)
+    target = _committed_repo(tmp)
     store = Path(tmp) / 'store'
-    saved = _plant('save', str(target), '--store', str(store))
+    saved = _run_plant('save', str(target), '--store', str(store))
     assert saved.returncode == 0, _say(saved)
     assert _reported_state(saved.stdout) == 'clean', _say(saved)
     target.write_bytes(_PLANTED)
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _state_in(clauses) == 'clean', clauses
@@ -190,7 +107,7 @@ def test_a_restore_over_identical_bytes_says_it_held_them_already(tmp):
     # and the report has to say so - a count cannot.
     target, store = _saved_then_planted(tmp, payload=_PLANTED)
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _change_in(clauses) == 'unchanged', clauses
@@ -204,7 +121,7 @@ def test_an_entry_saved_before_the_state_field_restores_as_unknown(tmp):
     # existed has, and one whose save never wrote it.
     _drop_the_state_field(store)
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _state_in(clauses) == 'unknown', clauses
@@ -219,7 +136,7 @@ def test_an_unknown_state_never_says_the_bytes_are_not_heads(tmp):
     target, store = _saved_then_planted(tmp)
     _write_state(store, 'unknown')
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _state_in(clauses) == 'unknown', clauses
@@ -231,7 +148,7 @@ def test_a_state_the_helper_will_not_vouch_for_restores_as_unknown(tmp):
     target, store = _saved_then_planted(tmp)
     _write_state(store, 'clean-ish')
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _state_in(clauses) == 'unknown', clauses
@@ -242,7 +159,7 @@ def test_a_state_field_holding_non_ascii_is_read_not_raised_over(tmp):
     target, store = _saved_then_planted(tmp)
     (_only_entry(store) / 'head-state').write_bytes(b'\xff\xfe dirty\n')
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _state_in(clauses) == 'unknown', clauses
@@ -252,7 +169,7 @@ def test_a_target_that_does_not_exist_counted_as_holding_nothing(tmp):
     target, store = _saved_then_planted(tmp)
     os.unlink(target)
 
-    restored = _plant('restore', str(target), '--store', str(store))
+    restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     clauses = _restore_clauses(restored.stdout)
     assert _change_in(clauses) == 'changed', clauses
@@ -300,7 +217,7 @@ def _restore_over_a_target_nothing_can_read(target, store):
     if dropped:
         return _as_nobody([sys.executable, str(PLANT), 'restore',
                            str(target), '--store', str(store)])
-    return _plant('restore', str(target), '--store', str(store))
+    return _run_plant('restore', str(target), '--store', str(store))
 
 
 def test_a_target_nothing_can_read_is_reported_as_uncompared(tmp):
@@ -315,10 +232,10 @@ def test_a_target_nothing_can_read_is_reported_as_uncompared(tmp):
 
 
 def test_the_save_line_is_exactly_the_shape_the_suite_parses(tmp):
-    target = _repo(tmp)
+    target = _committed_repo(tmp)
     store = Path(tmp) / 'store'
     target.write_bytes(_FIXED)
-    saved = _plant('save', str(target), '--store', str(store))
+    saved = _run_plant('save', str(target), '--store', str(store))
     assert saved.returncode == 0, _say(saved)
     # The whole line, not one separator's absence: a clause appended
     # with a comma evades a `'; '` pin and the positional parse alike.
@@ -331,7 +248,7 @@ def test_clear_of_an_entry_without_the_field_still_names_its_others(tmp):
     target, store = _saved_then_planted(tmp)
     _drop_the_state_field(store)
 
-    cleared = _plant('clear', str(target), '--store', str(store))
+    cleared = _run_plant('clear', str(target), '--store', str(store))
     assert cleared.returncode == 0, _say(cleared)
     labels = [label for label, _ in _entry_fields(cleared.stdout)]
     assert labels == ['path', 'saved'], labels
@@ -341,7 +258,7 @@ def test_clear_reports_an_unvouched_state_the_way_restore_does(tmp):
     target, store = _saved_then_planted(tmp)
     _write_state(store, 'clean-ish')
 
-    cleared = _plant('clear', str(target), '--store', str(store))
+    cleared = _run_plant('clear', str(target), '--store', str(store))
     assert cleared.returncode == 0, _say(cleared)
     fields = _entry_fields(cleared.stdout)
     assert ['captured', 'unknown'] in fields, _say(cleared)
