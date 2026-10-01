@@ -4,8 +4,8 @@
 Every guard the tools reach is witnessed on a healthy tree, so the
 registration-driven pass in test_mcp_tools.py never sees a gap. These drive
 the floor directly, which is the only way its detection is banked. The
-import closure that decides which modules it scans is driven in
-test_mcp_import_closure.py.
+import closure is what makes the set of modules the floor scans closed,
+and the registration-driven pass drives it over the real tree.
 """
 import ast
 import importlib.util

@@ -1,17 +1,19 @@
-"""The on-disk composition the import-closure suites hand the scan.
+"""The on-disk composition handed to the import-closure scan.
 
-`composition_scan_set` reads a file tree, so every case in the
-import-closure suites has to put a synthetic package on disk before it
-can ask the scan anything. The tree writer, the refusal assertion and
-the callee verdict were each a private `def` in more than one of those
-suites, so a change to how a fixture is built reached some of the cases
-and not others; they live here so there is one copy.
+`composition_scan_set` reads a file tree, so a case that drives it must
+put a synthetic package on disk before it can ask the scan anything. The
+tree writer and the refusal assertion are what
+`test_helper_assertion_pins.py` drives it with: that suite pins every
+assertion a shared helper makes on its callers' behalf, so the case here
+needs a real composition on disk that the scan refuses for a real
+reason, not a stub of the call.
 
 The refusal assertion is named for the assertion it makes rather than for
-what it generically is, because `main` already binds a different
-`_assert_refusal` in `test_js_lines.py`, `test_mcp_import_code_eval.py`
-and `test_wfjobs.py`, and a shared helper that adopted that name would
-make all three offenders of it (see `test_helper_reimplementation.py`).
+what it generically is, because other test modules already bind that
+name, and a shared helper that adopted a name other modules bind is a
+re-implementation `test_helper_reimplementation.py` detects — generically
+over `UNCONSOLIDATED_NAMES`, so no count of the offenders is asserted
+anywhere.
 """
 from pathlib import Path
 
@@ -36,19 +38,3 @@ def _assert_scan_refusal(_tmp, source, site, phrase):
         assert phrase in str(raised), raised
     else:
         raise AssertionError('a computed import was silently skipped')
-
-
-def _callee_scan(_tmp, callee):
-    """`resolved`, `refused`, or `silent` for one callee, with a resolvable
-    `pkg/leaf.py` on disk so a resolved value is told apart from a silence."""
-    _write_tree(Path(_tmp), {
-        'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n',
-        'composition.py': ('\nimport importlib\n\n\ndef load(c, i):\n'
-                           f'    return {callee}("pkg.leaf")\n')})
-    try:
-        scanned = _mcp_import_closure.composition_scan_set(
-            Path(_tmp) / 'composition.py', _tmp)
-    except AssertionError:
-        return 'refused'
-    names = {path.relative_to(Path(_tmp)).as_posix() for path in scanned}
-    return 'resolved' if 'pkg/leaf.py' in names else 'silent'
