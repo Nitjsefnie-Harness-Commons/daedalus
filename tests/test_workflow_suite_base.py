@@ -51,9 +51,9 @@ def _is_a_runnable_suite_file(node):
     """Whether this string names a file under tests/ THAT CAN BE RUN.
 
     A directory (`tests/`), a listing flag (`-- tests/`) and an
-    unrelated path are not a launch. Reading them as one put
-    `plan-matrix` in the policed set for a `git ls-files` LISTING, in a
-    set whose stated reason was that the rule recognises a launch.
+    unrelated path are not a launch. Reading them as one put a job that
+    ran `git ls-files -- tests/` into the policed set, in a set whose
+    stated reason was that the rule recognises a launch.
     """
     if not (isinstance(node, ast.Constant)
             and isinstance(node.value, str)):

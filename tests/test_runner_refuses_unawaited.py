@@ -351,9 +351,9 @@ def _run_probe(tmp, source, summary):
 def _reported(text):
     """(outcome, test name) per per-test line the runner printed.
 
-    Every outcome but PASS appends `: detail`, so the name the timing parser
-    reads off that line carries the colon with it; a test name is an
-    identifier and never holds one, so it comes off here.
+    Every outcome but PASS appends `: detail`, so the name read off that
+    line carries the colon with it; a test name is an identifier and never
+    holds one, so it comes off here.
     """
     tags = ('  PASS  ', '  SKIP  ', '  FAIL  ', '  ERROR ')
     return [(line.split()[0], line.split()[1].rstrip(':'))
