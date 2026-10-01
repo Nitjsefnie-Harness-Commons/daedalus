@@ -42,7 +42,7 @@ def _journeys():
     return _journeys
 
 
-def _document(**overrides):
+def _budget_document(**overrides):
     document = {
         'schema_version': 1,
         'counter': 'perf-instructions',
@@ -106,7 +106,7 @@ def test_the_artefact_schema_is_closed(tmp):
                  {'schema_version': 2},
                  {'journeys': {'command-round-trip': -5}},
                  {'journeys': {'command-round-trip': 'many'}}):
-        document = _document()
+        document = _budget_document()
         document.update(over)
         try:
             policy._validated(document)
@@ -121,7 +121,7 @@ def test_tightened_follows_a_cheaper_journey_down(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _document()
+    document = _budget_document()
     counts = {name: 900 for name in names}
     assert policy.tightened(counts, document, names) == {
         name: 900 for name in names}
@@ -131,7 +131,7 @@ def test_tightening_never_raises_and_never_adds_a_journey(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _document()
+    document = _budget_document()
     assert policy.tightened(
         {name: 1000 for name in names}, document, names) is None
     assert policy.tightened(
@@ -145,7 +145,7 @@ def test_tightening_drops_a_journey_the_set_no_longer_has(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _document()
+    document = _budget_document()
     document['journeys']['a-journey-nobody-runs'] = 5000
     assert policy.tightened(
         {name: 1000 for name in names}, document, names) == {
@@ -156,7 +156,7 @@ def test_the_tighten_command_is_the_one_the_implementation_uses(tmp):
     policy = _policy()
     names = _journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    payload = json.dumps(_document()).encode('utf-8')
+    payload = json.dumps(_budget_document()).encode('utf-8')
     artifact.write_bytes(payload)
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
@@ -179,7 +179,7 @@ def test_a_count_over_budget_is_a_violation_carrying_its_remedy(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _document()
+    document = _budget_document()
     counts = {name: 1000 for name in names}
     shapes = {name: ['a' * 64] for name in names}
     assert not any(policy.violations(
@@ -196,7 +196,7 @@ def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _document(journeys={names[0]: 1000, names[1]: None,
+    document = _budget_document(journeys={names[0]: 1000, names[1]: None,
                                    names[2]: None})
     measured = {names[0]: 1000, names[1]: 10 ** 9, names[2]: 10 ** 9}
     found = policy.violations(measured,
@@ -218,7 +218,7 @@ def test_a_counter_this_runner_refuses_is_a_violation_not_a_pass(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _document()
+    document = _budget_document()
     shapes = {name: ['a' * 64] for name in names}
     assert not any(policy.violations(
         {name: 1 for name in names}, shapes, document, names).values())
@@ -235,7 +235,7 @@ def test_a_sha_mismatch_is_a_violation_naming_both_shas(tmp):
     del tmp
     policy = _policy()
     names = _journeys().NAMES
-    document = _document()
+    document = _budget_document()
     first, second = 'a' * 64, 'b' * 64
     shapes = {name: [first] for name in names}
     shapes[names[0]] = [first, second]
@@ -252,7 +252,7 @@ def test_the_check_command_refuses_with_the_remedy_it_promises(tmp):
     policy = _policy()
     names = _journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(_document()))
+    artifact.write_bytes(policy.render(_budget_document()))
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
         'rounds': 1, 'python': sys.version, 'shas': {},
@@ -278,7 +278,7 @@ def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
     policy = _policy()
     names = _journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(_document()))
+    artifact.write_bytes(policy.render(_budget_document()))
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
         'rounds': 1, 'python': sys.version, 'shas': {},
