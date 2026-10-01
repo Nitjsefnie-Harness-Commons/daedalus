@@ -155,11 +155,13 @@ _ROWS = [
     ('unpack-mismatch', 0, _RAISES, _CALL, _inside(
         'j, k = 5', 'cmd = {j: 5}')),
     # A `*` part binds a LIST, which no key position can name, so the name
-    # must end the statement holding nothing rather than the one element
-    # the remainder happens to have. A destructured target with too few
-    # elements raises before it binds any of them.
+    # must end the statement holding nothing rather than what it held
+    # before. The prior binding is what makes that observable: a writer that
+    # dropped the arm would leave the name on its old literal. A
+    # destructured target with too few elements raises before it binds any
+    # of them, which is the arity guard's other shape.
     ('unpack-star-binds-list', 0, _RAISES, _CALL, _inside(
-        'a, *b = ("z", "tab")', 'cmd = {b: 5}')),
+        'b = "tab"', 'a, *b = ("z", "tab")', 'cmd = {b: 5}')),
     ('unpack-sequence-arity', 0, _RAISES_VALUE, _CALL, _inside(
         'j, k = ("tab",)', 'cmd = {j: 5}')),
     # One statement that binds a name and reads it: the walrus sits in a
