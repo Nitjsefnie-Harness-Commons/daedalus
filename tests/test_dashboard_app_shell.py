@@ -495,6 +495,38 @@ report({ before, after: active(), refusal });
     assert report['after'] == report['before'], report
 
 
+def test_the_rail_follows_the_whole_band_and_not_only_the_new_entries(_tmp):
+    """`wireRailHighlight` reading the callback's batch as the band.
+
+    A real observer delivers only the entries whose intersection state
+    changed since the last delivery, so the section that scrolled into
+    the band arrives ALONE: the section above it is still in the band
+    and is never mentioned again. Filtering the batch therefore
+    highlights the section that just arrived, one or two ahead of the
+    one being read.
+
+    `s01` is the negative control the batch cannot invent -- it is
+    genuinely out of the band in both deliveries and must stay dark."""
+    report = _run(_RAIL + _IMPORT + _FIRE + r"""
+const links = Array.from(document.querySelectorAll('.rail-list a'));
+const active = () => links.map((a) => a.classList.contains('active'));
+const io = drive.observers()[0];
+const entry = (id, top, on) => ({
+  isIntersecting: on, boundingClientRect: { top },
+  target: document.querySelector('#' + id),
+});
+io.fire([entry('s00', 20, true), entry('s01', 900, false),
+  entry('s02', 1400, false)]);
+const before = active();
+io.fire([entry('s02', 30, true)]);
+report({ before, after: active(),
+  band: Array.from(io.intersecting, (el) => el.id) });
+""")
+    assert report['before'] == [True, False, False], report
+    assert report['after'] == [True, False, False], report
+    assert report['band'] == ['s00', 's02'], report
+
+
 def test_the_bus_reaches_every_listener_and_contains_a_throwing_one(_tmp):
     """`bus.emit` reaching one listener, an escaping throw, a no-op
     unsubscribe."""

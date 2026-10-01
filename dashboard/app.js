@@ -103,9 +103,19 @@ function wireRailHighlight() {
     for (const { a } of sections) a.classList.toggle('active', a.getAttribute('href') === '#' + id);
   };
 
+  // The observer delivers only the entries whose state changed, so what
+  // is in the band has to be carried across callbacks: a section that
+  // scrolled in arrives alone, with the section above it -- still in the
+  // band, unchanged since the last delivery -- absent from the batch.
+  const inBand = new Map();
+
   const io = new IntersectionObserver((entries) => {
     // Pick the entry nearest the top of the viewport that's intersecting.
-    const visible = entries.filter(e => e.isIntersecting);
+    for (const entry of entries) {
+      if (entry.isIntersecting) inBand.set(entry.target, entry);
+      else inBand.delete(entry.target);
+    }
+    const visible = Array.from(inBand.values());
     if (visible.length === 0) return;
     visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
     activate(visible[0].target.id);

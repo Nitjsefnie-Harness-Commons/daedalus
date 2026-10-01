@@ -366,8 +366,8 @@ globalThis.clearTimeout = (id) => { clearParked(id); };
 globalThis.clearInterval = (id) => { clearParked(id); };
 
 const OBSERVER_MEMBERS = new Set([
-  'callback', 'options', 'observed', 'observe', 'unobserve', 'disconnect',
-  'takeRecords', 'fire', 'then',
+  'callback', 'options', 'observed', 'intersecting', 'observe', 'unobserve',
+  'disconnect', 'takeRecords', 'fire', 'then',
 ]);
 
 // An unmodelled member fails by name; undefined would be a silent no-op.
@@ -386,14 +386,31 @@ function newObserver(callback, options) {
     callback,
     options,
     observed: [],
+    // The targets the observer holds as intersecting. `fire` delivers
+    // the caller's batch verbatim and records what it delivered here, so
+    // a scenario can declare what the band now holds and read back what
+    // the observer still holds inside it. A batch carries only what
+    // changed, so a double that showed nothing else could not say what
+    // did NOT change -- which is the half of the delivery contract.
+    intersecting: new Set(),
     observe(el) { self.observed.push(el); },
     unobserve(el) {
       const at = self.observed.indexOf(el);
       if (at >= 0) self.observed.splice(at, 1);
+      self.intersecting.delete(el);
     },
-    disconnect() { self.observed = []; },
+    disconnect() { self.observed = []; self.intersecting.clear(); },
     takeRecords() { return []; },
-    fire(entries) { self.callback(entries, self.agent); },
+    fire(entries) {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          self.intersecting.add(entry.target);
+        } else {
+          self.intersecting.delete(entry.target);
+        }
+      }
+      self.callback(entries, self.agent);
+    },
   };
   self.agent = new Proxy(self, observerGuard);
   OBSERVERS.push(self.agent);
