@@ -295,13 +295,14 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
 
     restored = _plant('restore', target, store, dropped)
     # The publish landed before the removal was reached, so a nonzero exit
-    # here is the refusal, and it has to be the one line the helper's
-    # other failures print rather than a traceback over the whole call
-    # chain.
+    # here is the refusal, and it has to be one line on stderr with nothing
+    # on stdout: a traceback over the whole call chain, or a line
+    # announcing work the run then failed to finish, is what this replaces.
     assert restored.returncode != 0, _say(restored)
     said = _say(restored)
     assert 'Traceback' not in said, said
     assert len(restored.stderr.strip().splitlines()) == 1, said
+    assert restored.stdout == '', said
     refusal = restored.stderr.strip()
     # Which of the two post-publish refusals fired. The chmod one leaves
     # the mode unapplied and says so; this one leaves the entry behind,
@@ -313,12 +314,18 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
     # store that already holds the copy.
     assert f'{target} was restored' in refusal, refusal
     assert 'still there' in refusal, refusal
-    assert str(entry) in refusal, refusal
-    # `_open_the_entry` left the target at 0700, so this is the recorded
-    # mode and not the one it already had: the chmod landed, and the
-    # restore is complete apart from the entry still being on disk.
+    # Our own sentence, not a path substring: the OS error's rendering
+    # carries the entry path too, so `str(entry) in refusal` is satisfied
+    # by the reason clause and proves nothing about ours.
+    assert f'the stored copy at {entry} could not be removed' in refusal, (
+        refusal)
+    # The recorded mode, pinned as a VALUE. `_publish` ends in
+    # `os.replace`, so the target is the fresh temp inode at the umask
+    # default - 0o644 here, which is also what this target records - and
+    # this cannot tell whether `os.chmod` ran at all. Whether it ran is
+    # `test_plant_restore.py`'s control, over a recorded 0o400.
     assert stat.S_IMODE(target.stat().st_mode) == int(
-        (entry / 'mode').read_text().strip(), 8), 'the chmod landed'
+        (entry / 'mode').read_text().strip(), 8), 'the recorded mode'
     assert target.read_bytes() == _FIXED
 
     # The other command, against the same entry that survived the first.
@@ -331,14 +338,15 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
     assert 'Traceback' not in said, said
     assert len(cleared.stderr.strip().splitlines()) == 1, said
     # Nothing announced a discard that did not happen: the line the
-    # refusal used to arrive behind.
+    # refusal used to arrive behind, through either command.
     assert cleared.stdout == '', said
     refusal = cleared.stderr.strip()
     assert 'could not be removed' in refusal, refusal
     # `clear` published nothing, so its line must not say it restored.
     assert f'{target} was restored' not in refusal, refusal
     assert 'still there' in refusal, refusal
-    assert str(entry) in refusal, refusal
+    assert f'the stored copy at {entry} could not be removed' in refusal, (
+        refusal)
     assert entry.is_dir()
 
 

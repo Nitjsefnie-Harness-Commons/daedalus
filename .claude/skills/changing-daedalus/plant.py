@@ -206,9 +206,9 @@ def clear(path, store):
     # afterwards so a refusal is not preceded by a line announcing a
     # discard that did not happen.
     detail = _entry_detail(entry)
-    removed = _remove_entry(entry)
-    if removed:
-        return removed
+    refused = _remove_entry(entry)
+    if refused:
+        return refused
     print(f'discarded the stored copy of {path} at {entry}{detail}')
     return 0
 
@@ -263,19 +263,20 @@ def restore(path, store):
         return _refuse(f'cannot restore {path}: {why}; the stored copy is '
                        f'still at {entry}')
     # Past here the bytes are published, so no refusal may read as a
-    # restore that did not happen. This chmod arm has no in-suite
-    # control: the target is the inode this process just created, so
-    # chmod refuses only on EROFS, an immutable attribute or a Windows
-    # sharing violation, none of which a suite can arrange portably.
+    # restore that did not happen. No arrangement in any suite reaches
+    # this chmod arm, which catches `OSError` as a class: what fails a
+    # chmod on a target this process just created is a property of the
+    # filesystem or the platform, so a control built on one would SKIP
+    # everywhere else rather than test anything.
     try:
         os.chmod(path, mode)
     except OSError as why:
         return _refuse(f'{path} was restored, but its recorded mode '
                        f'{mode:o} was not applied ({why}); the stored copy '
                        f'at {entry} is still there')
-    removed = _remove_entry(entry, path)
-    if removed:
-        return removed
+    refused = _remove_entry(entry, path)
+    if refused:
+        return refused
     print(f'restored {path}: {len(payload)} bytes published'
           f'{_published_note(state, changed)}')
     return 0
