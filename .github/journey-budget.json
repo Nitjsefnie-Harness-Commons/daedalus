@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "counter": null,
-  "tolerance_pct": null,
+  "counter": "valgrind-callgrind",
+  "tolerance_pct": 12,
   "toolchain": {
-    "python": null,
-    "valgrind_version": null,
-    "runner_image": null
+    "python": "3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]",
+    "valgrind_version": "valgrind-3.22.0",
+    "runner_image": "ubuntu24 20260920.314.1"
   },
   "journeys": {
-    "command-round-trip": null,
-    "dashboard-fanout": null,
-    "mcp-exec": null
+    "command-round-trip": 1185783070,
+    "dashboard-fanout": 1008989420,
+    "mcp-exec": 8759741142
   }
 }
