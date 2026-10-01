@@ -107,24 +107,21 @@ def _as_nobody(command):
         _util.skip(f'the privilege drop is unavailable here: {why!r}')
 
 
-def _hand_to_nobody(path):
-    # 0o700: the chown makes the child the OWNER, so owner bits are all
-    # it needs and group and other are nobody.
-    os.chown(path, 65534, 65534)
-    os.chmod(path, 0o700)
-
-
 def _open_the_entry(store, target):
-    """Hand the child every path it walks to publish: a suite's temporary
-    root is 0700, and without the traverse bit the child reads a refusal
-    where the route should have run."""
+    """Hand the child every path it walks to publish, the target
+    included: a suite's temporary root is 0700, and without
+    the traverse bit the child reads a refusal where the route
+    should have run. 0o700 makes the child the OWNER, so owner
+    bits are all it needs."""
     entry = _only_entry(store)
     for directory in (target.parent, store, entry):
         for ancestor in (directory, *directory.parents):
             os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
     for owned in (target.parent.parent, target.parent, store, entry,
-                  *entry.iterdir()):
-        _hand_to_nobody(owned)
+                  *entry.iterdir(), target):
+        os.chown(owned, 65534, 65534)
+        os.chmod(owned, 0o700)
+
 
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 
@@ -440,7 +437,6 @@ def test_restore_returns_a_target_that_was_saved_read_only(tmp):
     if hasattr(os, 'geteuid') and os.geteuid() == 0:
         try:
             _open_the_entry(store, target)
-            _hand_to_nobody(target)
         except OSError as why:
             _util.skip(f'cannot hand the tree to a plain user: {why!r}')
         target.chmod(0o444)
@@ -595,8 +591,10 @@ def test_save_reports_unknown_outside_a_git_work_tree(tmp):
     outside.parent.mkdir(parents=True)
     outside.write_bytes(_FIXED)
     try:
-        probe = _git(outside.parent, 'rev-parse',
-                     '--is-inside-work-tree').stdout.decode().strip()
+        # `_git` launches and discards; `check=True` raises exactly when
+        # this path is not inside a work tree, which is the answer.
+        _git(outside.parent, 'rev-parse', '--is-inside-work-tree')
+        probe = 'true'
     except subprocess.CalledProcessError:
         probe = ''
     if probe == 'true':
@@ -605,6 +603,7 @@ def test_save_reports_unknown_outside_a_git_work_tree(tmp):
     other = _plant('save', str(outside), '--store', str(store))
     assert other.returncode == 0, _say(other)
     assert _reported_state(other.stdout) == 'unknown', _say(other)
+
 
 _PARAGRAPH_ANCHORS = ('have not watched fail', 'plant the defect',
                       'Restore the way')
