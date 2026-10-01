@@ -415,12 +415,11 @@ Promise.all(settled).then(() => {
 # the child is a fixed unit of work and the branch's own rule says such a
 # child carries no call-site `timeout=`. It keeps one anyway, and the reason
 # is architectural rather than behavioural: routing this site through
-# `tests/_noderun.py` puts this module and everything it calls inside
-# `tests/_launch_census.py`'s audited path, which this branch has already
-# grown from 49 modules to 59. The figure is composed from a recorded table
-# rather than typed, the expiry is the named failure the rule asks for, and
-# `tests/test_node_launch_routing.py` reads all three of those — so the
-# deviation is from where the bound lives, never from what it is.
+# `tests/_noderun.py` pulls every module this one calls inside that
+# launcher's audited path. The figure is composed from the recorded
+# table below and the shared multiple in
+# `tests/_node_launch_routing.py`, rather than typed at the call site,
+# and the expiry is that module's named failure.
 GM_CHILD_SAMPLES_S = (3.713, 3.810, 2.981, 4.005,
                       16.873, 7.637, 18.015, 7.419)
 GM_CHILD_SLOWEST_S = max(GM_CHILD_SAMPLES_S)

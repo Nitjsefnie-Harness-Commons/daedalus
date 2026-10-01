@@ -205,9 +205,6 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/test_stream_backoff.py', 'waitFor'):
         'the stream harness polls two thousand times where the boundary '
         'fake polls a thousand, so the two would give up at different steps',
-    ('tests/test_tab_routing_js_operations.py', 'run'):
-        'the routing suite writes two five-line run helpers into its '
-        'operation cases, and neither is a copy of a harness entry',
     ('tests/test_worker_close_tab.py', 'run'):
         'the close-tab harness own entry, 30 lines over one closed tab',
     ('tests/test_worker_close_tab.py', 'setTimeoutStandIn'):

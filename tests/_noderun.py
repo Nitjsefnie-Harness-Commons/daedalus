@@ -32,14 +32,11 @@ from _processtree import cleanup_process_tree
 #   CHILD_DEADLINE_S         107     round(10.70 * 10)
 #   CLEANUP_DEADLINE_S       5       round(107 * 0.05)
 #
-# A1's recording requirement and the guard's own rule are the same
-# requirement, in the part a rule can see: the number is not written at the
-# call site, and every figure it is composed of is itself composed rather
-# than retyped. `tests/_launch_census.py` refuses a bound whose constant
-# chain bottoms out in a literal, which is why the samples are a named
-# table and the multiple is named beside the deadline it scales. The
-# arithmetic is re-derivable by reading these five lines; the measurement
-# they record is in the report.
+# The number is not written at the call site, and every figure it is
+# composed of is itself composed rather than retyped: the samples are a
+# named table and the multiple is named beside the deadline it scales.
+# The arithmetic is re-derivable by reading these five lines; the
+# measurement they record is in the report.
 SLOWEST_CORRECT_CHILD_SAMPLES = (10.57, 10.58, 10.63, 10.70)
 SLOWEST_CORRECT_CHILD_S = max(SLOWEST_CORRECT_CHILD_SAMPLES)
 HANG_DETECTOR_MULTIPLE = 10

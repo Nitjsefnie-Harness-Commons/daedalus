@@ -414,11 +414,11 @@ STALLING_CONTROL_MODULES = (
 # harness, and the two `new Promise` sites in that very file (`:76`, `:96`)
 # both RESOLVE: they are `Promise.race` sentinels, not stalls. Separating
 # them needs a launch predicate that says which child is being waited on, and
-# the tree's own (`tests/_node_launch_sweep.py`) reports no launch for two of
-# the five watched suites — `test_gate_extensions.py` and
-# `test_noderun_deadline.py` — because their children are launched by
-# imported helpers. So the limit stands until there is a predicate that
-# works on all five.
+# no such predicate is read by this tree: two of the five watched suites —
+# `test_gate_extensions.py` and `test_noderun_deadline.py` — launch their
+# children through imported helpers, so a predicate over call sites alone
+# sees no launch in either. So the limit stands until there is a predicate
+# that works on all five.
 STALL_SOURCES = ('setInterval(', 'setTimeout(')
 # How far the reach follows a stall source that is not in the control's own
 # text. Bounded because an unbounded walk over a cyclic tree is a hang, and

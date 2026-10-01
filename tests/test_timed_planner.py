@@ -143,15 +143,12 @@ def test_no_cell_exceeds_the_median_cell_by_more_than_the_stated_margin(
     measured = {
         'test_watcher_budget.py': 76.2, 'test_command_queue.py': 35.8,
         'test_cli.py': 32.3, 'test_overlap_harness.py': 31.5,
-        'test_tab_routing_sequence_reads.py': 28.7,
-        'test_tab_routing_collapse.py': 27.9,
         'test_dashboard_harness.py': 26.8,
         'test_real_browser_eval.py': 26.8, 'test_cmdqueue.py': 25.3,
         'test_tab_routing.py': 23.7, 'test_mcp_server.py': 18.3,
         'test_static_guard_regressions.py': 15.9,
         'test_dashboard_node_retry.py': 12.2,
         'test_stream_lifecycle.py': 12.1,
-        'test_tab_routing_store_sweep.py': 11.2,
         'test_starvation_bounds.py': 10.8,
         'test_coverage_bindings.py': 10.5, 'test_bridge_streams.py': 10.3,
         'test_drain_bounds.py': 10.2, 'test_coverage_suites.py': 10.2}
