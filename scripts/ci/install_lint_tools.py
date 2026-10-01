@@ -41,6 +41,7 @@ import io
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -131,12 +132,15 @@ ARCHITECTURES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64',
                  'arm64': 'arm64'}
 DOWNLOAD_TIMEOUT = 30
 # A connect or a read that fails is the network reaching the asset and not
-# the asset answering wrong — the digest check below is what covers that.
-# Nothing a retry cannot change is retried: a 4xx, the size refusal, the
-# digest mismatch. There is no sleep between attempts.
+# the asset answering wrong — the digest check below is what covers that. A
+# verdict is never retried — the size refusal, the digest mismatch — and
+# what else is not worth a second ask is decided in `_worth_asking_again`.
 DOWNLOAD_ATTEMPTS = 3
-# The wall clock the attempts share, four times the per-socket bound above so
-# that three attempts each costing one still fit inside it.
+# The wall clock the attempts share, four times the per-socket bound above:
+# three attempts of one socket operation each, which is what a timed-out
+# connect costs, and not a promise of three full ones. An attempt is a
+# sequence of them — connect, then status line — so a read that dribbles is
+# not bounded here; MAX_TRANSFER bounds the bytes served.
 DOWNLOAD_BUDGET = 4 * DOWNLOAD_TIMEOUT
 # What a retry can change. A body cut short mid-transfer raises
 # IncompleteRead, an HTTPException and not an OSError, so a truncated body
@@ -173,13 +177,14 @@ def _asset_name():
 
 
 def _worth_asking_again(why):
-    """Whether a second ask could answer differently. A status below 500 is
-    the server answering rather than failing, so it is not asked again — 429
-    and 408 included, which give up on an answer that would have changed.
+    """Whether a second ask could answer differently: a status of 500 or
+    above is the server failing rather than answering, and a certificate
+    that does not verify is the same failure in the handshake. There is no
+    wait between attempts to turn an answer into a different one.
     """
     if isinstance(why, urllib.error.HTTPError):
         return why.code >= 500
-    return True
+    return not isinstance(why, ssl.SSLCertVerificationError)
 
 
 def _fetch(name):
