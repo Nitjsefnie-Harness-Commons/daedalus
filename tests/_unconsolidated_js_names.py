@@ -259,7 +259,4 @@ UNCONSOLIDATED_JS_NAMES = {
         'written into two harnesses whose chrome doubles differ '
         'elsewhere, and a third copy of it does not exist, so a shared '
         'one would have exactly two users',
-    ('tests/test_tab_routing.py', 'load'):
-        'this is the routing suite own payload loader, where the owner is '
-        'the shell harness node loader',
 }
