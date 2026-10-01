@@ -38,11 +38,14 @@ is read now: `_door_jobs` globs `*.yml` and `*.yaml`, so no workflow is
 one this file does not look at, and the bound on what the walk can see is
 stated in `tests/_suite_jobs.py` where it lives.
 """
+import hashlib
 import os
 import re
 import shutil
 import sys
+import urllib.error
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -383,6 +386,237 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
         'verifies belongs to a different release than the job downloads: a '
         'match on the version alone would install one build and lint with '
         'another')
+
+
+class _Fetched:
+    """What the transfer hands back: a context manager over one payload.
+
+    One bounded read is the only shape modelled, because `read` is where the
+    size bound is enforced in the code under test. A second read is a call the
+    installer does not make, so it is refused rather than answered.
+    """
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.reads = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size):
+        self.reads += 1
+        assert self.reads == 1, (
+            f'the installer read the response {self.reads} times; this '
+            'models one bounded read and refuses to answer a second')
+        return self.payload[:size]
+
+
+class _Transfer:
+    """A recording stand-in for the one network call `_fetch` makes.
+
+    It answers the outcomes it was given, in order, and refuses everything
+    else: an ask past the last outcome, a URL other than the one `_fetch`
+    builds for that asset, an altered timeout, an unmodelled keyword. Each
+    refusal is an assertion, so a call shape this does not model fails the
+    control rather than being quietly satisfied.
+    """
+
+    def __init__(self, installer, name, outcomes):
+        self.expected = (f'{installer.RELEASE}/v'
+                         f'{installer.ACTIONLINT_VERSION}/{name}')
+        self.timeout = installer.DOWNLOAD_TIMEOUT
+        self.outcomes = list(outcomes)
+        self.calls = []
+
+    def __call__(self, url, timeout=None, **rest):
+        assert not rest, (
+            f'the installer passed {sorted(rest)} to the fetch, which this '
+            'stand-in does not model')
+        assert timeout == self.timeout, (
+            f'the installer passed timeout={timeout!r} where '
+            f'DOWNLOAD_TIMEOUT is {self.timeout}')
+        assert url == self.expected, (
+            f'the installer asked for {url!r} where the asset it was given '
+            f'names {self.expected!r}')
+        self.calls.append(url)
+        assert self.outcomes, (
+            f'the installer asked for the asset {len(self.calls)} times and '
+            f'this stand-in was given {len(self.calls) - 1} outcomes, so the '
+            'last ask is one it cannot answer')
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return _Fetched(outcome)
+
+
+def _installer_and_transfer(outcomes):
+    """The installer, a stand-in for its transfer, and the asset it fetches.
+
+    `outcomes` is a list, or a callable handed the installer so a payload can
+    be sized from a constant the test only learns at run time."""
+    installer = _util.load(INSTALLER_SOURCE, 'lint_installer_retry')
+    name = installer._asset_name()[0]
+    if callable(outcomes):
+        outcomes = outcomes(installer)
+    return installer, _Transfer(installer, name, outcomes), name
+
+
+def _http_error(code, phrase):
+    return urllib.error.HTTPError(
+        'https://example.invalid/asset', code, phrase, {}, None)
+
+
+def test_a_transient_transfer_failure_is_retried_and_the_next_attempt_serves(
+        tmp):
+    """The defect this retry exists for: one slow connect must not kill the
+    install step — run 36907637031 died at the socket timeout, no test
+    collected. The payload is what the SECOND attempt served, so a loop that
+    kept the first failure is caught by the value as well as the count."""
+    del tmp
+    installer, transfer, name = _installer_and_transfer([
+        urllib.error.URLError(TimeoutError('timed out')), b'the asset bytes'])
+    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+        payload = installer._fetch(name)
+    assert payload == b'the asset bytes', (
+        f'_fetch returned {payload!r} where the second attempt served '
+        "b'the asset bytes'")
+    assert len(transfer.calls) == 2, (
+        f'the transfer failed transiently and was asked '
+        f'{len(transfer.calls)} time(s); one ask fails the install step, '
+        'which is the defect this retry is for')
+
+
+def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
+        tmp):
+    """Every attempt failing raises the LAST failure, and asks no more than
+    the count allows. Two properties because they are the two halves of one
+    loop exit: the bound stops the asking, and the bare `raise` propagates
+    the object the final attempt threw rather than a new one."""
+    del tmp
+    installer = _util.load(INSTALLER_SOURCE, 'lint_installer_retry')
+    name = installer._asset_name()[0]
+    failures = [urllib.error.URLError(TimeoutError(f'attempt {n}'))
+                for n in range(1, installer.DOWNLOAD_ATTEMPTS + 1)]
+    transfer = _Transfer(installer, name, failures)
+    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+        raised = None
+        try:
+            installer._fetch(name)
+        except BaseException as why:  # noqa: BLE001 - the exit is the subject
+            raised = why
+    assert isinstance(raised, urllib.error.URLError), (
+        f'every attempt failed and what came out was '
+        f'{type(raised).__name__}: {raised}')
+    assert raised is failures[-1], (
+        f'what came out was {raised!r} rather than the last failure '
+        f'{failures[-1]!r}; the loop must propagate the object the final '
+        'attempt threw, because the traceback naming _fetch and urlopen is '
+        'what makes a dead install step diagnosable')
+    assert len(transfer.calls) == installer.DOWNLOAD_ATTEMPTS, (
+        f'the transfer was asked {len(transfer.calls)} times and failed '
+        f'every time, against DOWNLOAD_ATTEMPTS='
+        f'{installer.DOWNLOAD_ATTEMPTS}')
+
+
+def test_a_digest_mismatch_is_refused_on_the_transfer_it_fetched(tmp):
+    """The pinned-sha256 guarantee, through `install_actionlint`.
+
+    `_verify` runs on the bytes the transfer returned, so the refusal names
+    that payload's digest and not some other. One call: a digest that does not
+    verify is not a transfer that failed transiently, and asking again would
+    be asking for the same wrong bytes.
+    """
+    del tmp
+    payload = b'bytes that are not the pinned release asset'
+    installer, transfer, _ = _installer_and_transfer([payload])
+    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+        raised = None
+        try:
+            installer.install_actionlint()
+        except BaseException as why:  # noqa: BLE001 - the refusal is the test
+            raised = why
+    assert isinstance(raised, SystemExit), (
+        f'installing an asset whose digest is not the pinned one ended as '
+        f'{type(raised).__name__}: {raised}; the refusal is a SystemExit, '
+        'which is what keeps it out of the retried set')
+    assert len(transfer.calls) == 1, (
+        f'a refused digest was asked for {len(transfer.calls)} times; it is '
+        'a verdict on the bytes served, and asking again serves the same ones')
+    digest = hashlib.sha256(payload).hexdigest()
+    assert digest in str(raised.code), (
+        f'the refusal names {raised.code!r} and not the digest of the payload '
+        f'the transfer served ({digest}), so _verify did not run on those '
+        'bytes')
+
+
+def test_an_oversize_payload_is_refused_after_one_call(tmp):
+    """The size bound is a verdict on what was served, not a failed
+    transfer. The payload is one byte over MAX_TRANSFER, and the call count is
+    asserted as well as the refusal: a loop that caught its own size refusal
+    would reach the stand-in's refusal instead."""
+    del tmp
+    installer, transfer, _ = _installer_and_transfer(
+        lambda i: [b'x' * (i.MAX_TRANSFER + 1)])
+    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+        raised = None
+        try:
+            installer._fetch(installer._asset_name()[0])
+        except BaseException as why:  # noqa: BLE001 - the refusal is the test
+            raised = why
+    assert isinstance(raised, SystemExit), (
+        f'a payload one byte over MAX_TRANSFER ended as '
+        f'{type(raised).__name__}: {raised}')
+    assert len(transfer.calls) == 1, (
+        f'the oversize payload was asked for {len(transfer.calls)} times; a '
+        'verdict on the bytes served is not a transfer worth asking again')
+    assert str(installer.MAX_TRANSFER) in str(raised.code), (
+        f'the refusal {raised.code!r} does not name the ceiling it enforced '
+        f'({installer.MAX_TRANSFER})')
+
+
+def test_a_4xx_is_asked_once_and_propagates(tmp):
+    """A status below 500 is the server answering about this asset.
+
+    A tag with no published asset 404s, and asked again it answers the same,
+    so this is the half of the boundary where a second ask buys nothing.
+    """
+    del tmp
+    installer, transfer, name = _installer_and_transfer([
+        _http_error(404, 'Not Found')])
+    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+        raised = None
+        try:
+            installer._fetch(name)
+        except BaseException as why:  # noqa: BLE001 - the exit is the subject
+            raised = why
+    assert isinstance(raised, urllib.error.HTTPError), (
+        f'a 404 ended as {type(raised).__name__}: {raised}')
+    assert raised.code == 404, raised.code
+    assert len(transfer.calls) == 1, (
+        f'a 404 was asked for {len(transfer.calls)} times; the asset is not '
+        'there, and the second ask gets the same answer')
+
+
+def test_a_5xx_is_asked_again_and_the_next_attempt_serves(tmp):
+    """The other half: a 5xx is the server failing rather than answering.
+    Separate from the 4xx control because a mutant that moves the boundary
+    fails exactly one of them: widening it retries the 404, narrowing it
+    refuses the 500. THE STATUS IS 500 AND NOT 503 — a 503 passes a `> 500`
+    mutant too, so a control written on it does not pin the boundary the
+    installer's comment states."""
+    del tmp
+    installer, transfer, name = _installer_and_transfer([
+        _http_error(500, 'Internal Server Error'), b'the asset bytes'])
+    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+        payload = installer._fetch(name)
+    assert payload == b'the asset bytes', payload
+    assert len(transfer.calls) == 2, (
+        f'a 500 was asked for {len(transfer.calls)} times and not retried; a '
+        'server failing is the transfer failing, which is what the retry is '
+        'for')
 
 
 def main():
