@@ -13,8 +13,8 @@ size_baseline.py's own remedy for a file over it is to relocate the code
 into a new module. The verdict cases that already existed stay there: this
 is the state they had to be able to reach. The head-pull-request controls
 were relocated out of this file by the same remedy when it reached the
-ceiling, and the suite they went to is gone from the tree; the controls
-they carried live here now.
+ceiling, and the suite they went to is gone from the tree along with the
+controls it carried.
 """
 import contextlib
 import io

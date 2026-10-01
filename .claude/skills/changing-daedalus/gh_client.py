@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The rate-limit-aware `gh` client the pull-request watchers share.
+"""The rate-limit-aware `gh` client the pull-request waiter reads through.
 
-Every surface a watcher watches is read through one `gh api graphql` query
-per poll, so an idle pull request costs one request per watcher per tick
-rather than one per surface. The query and its variables travel as one JSON
+Every surface a wait watches is read through one `gh api graphql` query
+per poll, so an idle pull request costs one request per poll rather than
+one per surface. The query and its variables travel as one JSON
 payload on stdin, which is what keeps a GraphQL `null` variable a `null`
 instead of the empty string `-f` would send, and `-i` asks for the response
 headers, which is where the rate-limit reset lives.

@@ -1,13 +1,13 @@
 """The workflows whose absence is a refusal, and what that absence is.
 
-Two waiters read the same run list and have to answer the same question of
-it: was the workflow that gates the merge dispatched on this commit at all?
+One waiter reads the run list and has to answer the question of it: was
+the workflow that gates the merge dispatched on this commit at all?
 `ci_wait.py` refuses with exit 4 when it was not (issue #1217), and a
 watcher once kept its hold rather than releasing a batch whose gating
 matrix was never created (issue #1223). Two copies of the expectation would
 be two mechanisms wearing one name, so the expectation, the predicate, the
 set the predicate is asked of and the answer an absent gate gets live here.
-Each caller reaches what it uses through this module, and `ci_wait` binds
+The caller reaches what it uses through this module, and `ci_wait` binds
 the expectation and the filter and calls the predicate.
 
 They are meant to AGREE, and until issue #1262 they did not: one asked the
@@ -30,12 +30,12 @@ from.
 A run satisfies a requirement by its `name`, exactly. `Tests` and `test` are
 different workflows, and treating either as the gate would reinstate the
 false green this exists to remove. A conclusion is irrelevant to the
-predicate: both callers judge conclusions against rules of their own, and a
+predicate: the caller judges conclusions by rules of its own, and a
 required workflow that is present and red is a failure, not an absence.
-Those rules are the callers' alone, and they do not agree. Both ask the
-gate question of the set below; the wait judges the conclusion question over
-that set, while the hold judged it over the raw runs - deliberately not
-shared.
+Those rules are the caller's alone. The gate question is asked of the set
+below; the wait judges the conclusion question over that set, where a
+watcher's hold once judged it over the raw runs - deliberately not shared,
+and the reason the filter is applied here.
 
 A PUBLISHED CHECK-RUN is a gate that is not a workflow run, and this
 repository has one. The `gate freshness` workflow's own run concludes
