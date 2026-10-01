@@ -64,10 +64,10 @@ def committable(root):
       (`commit_environment`), and any ambient hook or signing setting
       is a difference between this machine and the one that runs it.
 
-    A control that drives a real commit needs a real commit to happen:
-    `tests/test_timed_coverage.py` reads the subject back, and a
-    checkout that cannot commit reads the PREVIOUS subject and reports
-    it as if the step had produced the wrong one.
+    A control that drives a real commit needs a real commit to happen: it
+    reads the subject back, and a checkout that cannot commit reads the
+    PREVIOUS subject and reports it as if the step had produced the wrong
+    one.
     """
     for setting, value in (('user.name', 'base'),
                            ('user.email', 'base@example.invalid'),

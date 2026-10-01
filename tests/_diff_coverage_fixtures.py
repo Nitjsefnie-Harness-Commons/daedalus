@@ -7,8 +7,7 @@ The two bodies were byte-identical, so the layout a run is handed was
 spelled twice and a fix to one spelling reached one suite.
 
 The name is `_written_file` because `_write` is declared at module scope by
-three other modules in this tree - `test_gitignore_control.py`,
-`test_timed_planner.py` and `test_type_errors.py` - and the owner set is
+`test_gitignore_control.py` and `test_type_errors.py`, and the owner set is
 read as a set, so publishing the bare name would make each of them a
 re-implementation of this module. What it returns is the file it wrote.
 """

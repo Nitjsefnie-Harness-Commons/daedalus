@@ -261,12 +261,6 @@ UNCONSOLIDATED_NAMES = {
         '(lineno, leaf, spelling) hits, where the drain owner scans a module '
         'text for unbounded drains and the code-eval owner walks an '
         'expression value; three different arguments',
-    ('tests/test_timed_planner.py', '_run'):
-        'this runs the planner main with stdout captured, where the shared '
-        '_run boots a node scenario',
-    ('tests/test_timed_refresh.py', '_run'):
-        'this runs the refresh main with both streams captured, where the '
-        'shared _run boots a node scenario',
     ('tests/test_version_empty_values.py', '_assert_duplicate_refused'):
         'this asserts the empty string reached stderr and that no ok: line '
         'reached stdout, where the owner takes both competing values and '
