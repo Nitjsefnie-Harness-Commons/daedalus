@@ -317,7 +317,11 @@ def test_only_the_main_tighten_may_write_the_artefact(tmp):
     assert len(tighten) == 1, (
         f'the journey-budget job must hold exactly one tightening step: '
         f'{len(tighten)}')
-    commit = [block for block in steps if 'ratchet_push.sh' in block]
+    # Match the INVOCATION, not the script's name: a comment above the
+    # step belongs to the block before it, and naming the script in
+    # prose would read as a second caller.
+    commit = [block for block in steps
+              if 'bash scripts/ci/ratchet_push.sh' in block]
     assert len(commit) == 1, f'expected one commit step, found {len(commit)}'
     assert artefact in commit[0], (
         f'the commit step does not commit the artefact: {commit[0]}')
