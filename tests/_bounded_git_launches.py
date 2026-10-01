@@ -17,20 +17,6 @@ BOUNDED_GIT_LAUNCHES = {
          'the work-tree and porcelain reads that report whether a saved'
          ' path is dirty against HEAD; a standalone skill script an'
          ' operator runs by hand, so a wedged git hangs an operator',
-    ('.claude/skills/changing-daedalus/watch_all.py', '_aggregate',
-     'sink.get(timeout)', 1):
-         'a queue read with a deadline: the queue is drained,'
-         'nothing is launched',
-    ('.claude/skills/changing-daedalus/watch_all.py', '_repo_root',
-     'subprocess.run(capture_output, text, timeout)', 1):
-         'a standalone skill script an operator runs by hand; no'
-         'suite or CI bound sits above it, so a wedged git hangs an'
-         'operator',
-    ('.claude/skills/changing-daedalus/watch_all.py', '_repo_slug',
-     'subprocess.run(capture_output, check, text, timeout)', 1):
-         'a standalone skill script an operator runs by hand; no'
-         'enclosing bound sits above it, so a wedged git hangs an'
-         'operator',
     ('daedalus_cli/transport.py', 'wait_for_result', '_query_path()', 1):
          'a path builder over `urllib.parse.urlencode`; the timeout'
          'belongs to the poll loop that calls it, and no process is behind'
@@ -463,30 +449,4 @@ BOUNDED_GIT_LAUNCHES = {
      'test_output_close_failure_reaps_the_spawned_suite',
      'spawned[0].wait(timeout)', 3):
          'the final reap, on the same process',
-    ('tests/_watcher_waits.py', 'stop', 'self.proc.wait(timeout)', 1):
-         'a reap that follows a group kill, on a process already signalled',
-    ('tests/test_watcher_lifecycle.py',
-     'test_a_graceful_exit_leaves_no_children_behind',
-     'parent.proc.wait(timeout)', 1):
-         'a parent handle reaping a child it signalled itself, in the'
-         ' graceful-exit control',
-    ('tests/test_watcher_budget.py',
-     'test_a_graceful_exit_leaves_no_children_behind',
-     'parent.proc.wait(timeout)', 1):
-         'the same parent-handle reap, in the copy of the graceful-exit'
-         ' control that test_watcher_budget.py carries',
-    ('tests/test_watcher_budget.py',
-     'test_the_children_die_with_their_parent',
-     'parent.proc.wait(timeout)', 1):
-         'the same parent-handle reap, in the copy of the children-die'
-         ' control that test_watcher_budget.py carries',
-    ('tests/test_watcher_lifecycle.py',
-     'test_the_children_die_with_their_parent',
-     'parent.proc.wait(timeout)', 1):
-         'a parent handle stopping a child the test started',
-    ('tests/test_watcher_waits.py',
-     'test_a_cancel_ends_the_whole_tree_and_not_only_the_child',
-     'child.proc.wait(timeout)', 1):
-         'a cleanup reap on a real child the control started itself, in the'
-         ' finally of the tree-kill control',
 }
