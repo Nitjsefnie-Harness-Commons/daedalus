@@ -209,7 +209,7 @@ def clear(path, store):
     removed = _remove_entry(entry)
     if removed:
         return removed
-    print(f'discarding the stored copy of {path} at {entry}{detail}')
+    print(f'discarded the stored copy of {path} at {entry}{detail}')
     return 0
 
 
