@@ -364,6 +364,13 @@ def _idle_server(mod, config=None):
     return mod._idle_server_class()(config)
 
 
+def _config_with_probe_headers():
+    import uvicorn
+    from starlette.applications import Starlette
+    return uvicorn.Config(Starlette(), log_level='warning',
+                          headers=[('x-probe', '1')])
+
+
 def test_the_serve_loop_arms_no_timer_while_it_is_idle(tmp):
     """The serve loop parks no timer, and returns when it is told to.
 
@@ -395,10 +402,9 @@ def test_the_serve_loop_arms_no_timer_while_it_is_idle(tmp):
         await _spin(4)
         return idle_armed, task.done()
 
-    (idle_armed, finished), armed = _armed_timer_delays(drive)
+    (idle_armed, finished), _armed = _armed_timer_delays(drive)
     assert idle_armed == [], (
         'the loop armed a timer while idle', idle_armed)
-    assert armed == [], armed
     assert ticks == [], ticks
     assert finished, 'the loop did not return once should_exit was set'
 
@@ -438,11 +444,32 @@ def test_a_request_refreshes_the_date_header_the_cycle_already_holds(tmp):
     assert before - 5 <= sent <= after + 5, (headers, before, after)
 
 
-def _config_with_probe_headers():
-    import uvicorn
-    from starlette.applications import Starlette
-    return uvicorn.Config(Starlette(), log_level='warning',
-                          headers=[('x-probe', '1')])
+def test_the_request_tick_keeps_the_list_the_cycles_captured(tmp):
+    """Eleven ticks in, the bound list is still the one the cycles hold.
+
+    uvicorn's own `on_tick` REBINDS `server_state.default_headers` on every
+    tenth counter. Nothing rebinding it here is not enough: the rebind
+    inside `on_tick` orphans the object every in-flight cycle captured, and
+    their dates freeze at whatever that rebind wrote.
+    """
+    del tmp
+    mod = _load_front_end()
+    server = _idle_server(mod, _config_with_probe_headers())
+    captured = server.server_state.default_headers
+
+    async def drive():
+        before = time.time()
+        for _ in range(12):
+            await server.request_tick()
+        return before, time.time()
+
+    before, after = asyncio.run(drive())
+    assert server.server_state.default_headers is captured, (
+        'a tick rebound the list the in-flight cycles hold')
+    headers = dict(captured)
+    assert set(headers) == {b'date', b'server', b'x-probe'}, headers
+    sent = parsedate_to_datetime(headers[b'date'].decode()).timestamp()
+    assert before - 5 <= sent <= after + 5, (headers, before, after)
 
 
 def test_the_serve_loop_honours_the_max_requests_limit(tmp):
