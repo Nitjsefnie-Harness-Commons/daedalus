@@ -4,8 +4,9 @@ it is written.
 Its own module, off `journey_budget.py`, because the budget and the
 document are different responsibilities and the first was at its ceiling:
 `journey_budget.py` decides what a count may be and this owns the shape a
-recorded one arrives in. It is re-exported there, so every existing caller
-of `journey_budget.load` / `.render` keeps the spelling it had.
+recorded one arrives in. `journey_budget` binds the names it uses, so a
+suite that needs one loads this module directly rather than through a
+forward that can drift from it.
 """
 import json
 import sys
@@ -161,8 +162,12 @@ def _validated_shas(value, journeys):
             raise ValueError(f'shas names a journey with no count: {name}')
         if not isinstance(seen, str) or not seen.strip():
             raise ValueError(f'a recorded sha is a non-empty string: {name}')
-        if len(seen.strip()) != SHA_HEX or \
-                any(character not in '0123456789abcdef' for character in seen):
+        # The length and the hex loop read the value AS STORED, not stripped:
+        # stripping the first and not the second let a padded sha validate
+        # and then report as a change rather than a format refusal.
+        if len(seen) != SHA_HEX or \
+                any(character not in '0123456789abcdef'
+                    for character in seen):
             raise ValueError(
                 f'a recorded sha is {SHA_HEX} lowercase hex characters: '
                 f'{name} = {seen!r}')
@@ -260,10 +265,21 @@ def sha_diff(recorded, measured):
     differs = {}
     for name in sorted(set(recorded) | set(measured)):
         seen = measured.get(name) or []
-        agreed = set(seen if isinstance(seen, list) else [seen])
-        if agreed != {recorded.get(name)}:
+        agreed = _as_set(seen)
+        was = _as_set(recorded.get(name))
+        if agreed != was:
             differs[name] = (recorded.get(name), sorted(agreed))
     return differs
+
+
+def _as_set(value):
+    """One sha, or the several a set of rounds reported, as a set.
+
+    The recorded side is one string by the schema, but a caller holding a
+    measurement's own map has a list, and building a set from one of those
+    and not the other would be a crash rather than a comparison.
+    """
+    return set(value) if isinstance(value, list) else {value}
 
 
 def map_diff(recorded, measured):

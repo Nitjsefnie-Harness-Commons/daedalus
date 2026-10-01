@@ -304,7 +304,6 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
                   # `refusal_lines` renders the policy module's remedies,
                   # so it lives there rather than beside the summaries.
                   gate.refusal_lines({'over': {'a': (1, 2.0)},
-                                      'shape': {'b': ['s']},
                                       'unmeasured': {'c': 'syscalls'}})):
         assert lines, 'a block that renders to nothing is a block nobody reads'
         assert any(line.strip() for line in lines)
@@ -317,6 +316,32 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
                                       subject='excluded threads')
     assert 'excluded threads changed, re-baseline' in moved[2], moved[2]
     assert 'toolchain' not in moved[2], moved[2]
+
+
+def test_a_perf_run_that_printed_no_count_says_so(tmp):
+    """perf exits 0 whether or not it counted, so its exit status is not
+    evidence — which makes a None count with no reason the shape that has to
+    be refused rather than passed on.
+
+    Without the guard a None reached `_row` and raised `TypeError` on
+    `None - None`: an abort where this module promises a counter reports
+    itself unavailable.
+    """
+    counters = _journey_contract.counters()
+    with planting(counters,
+                  _run=lambda argv: (0, '', 'perf: not permitted')):
+        value, why = counters._perf('mcp-exec', ROOT, Path(tmp))
+    assert value is None, value
+    assert why is not None, 'a None with no reason reaches _row and aborts'
+    assert why['returncode'] == 0, why
+    assert 'perf printed no instruction count' in why['stderr'], why
+    # The strace twin refuses in its own words, for the same reason.
+    (Path(tmp) / 'strace.mcp-exec.txt').write_text(
+        'nothing a total can be read from\n', encoding='utf-8')
+    with planting(counters, _run=lambda argv: (0, '', '')):
+        value, why = counters._syscalls('mcp-exec', ROOT, tmp)
+    assert value is None, value
+    assert 'no summary to read a total from' in why['stderr'], why
 
 
 def main():
