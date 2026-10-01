@@ -512,8 +512,9 @@ def test_the_rail_follows_the_whole_band_and_not_only_the_new_entries(_tmp):
     the band arrives ALONE: the section above it is still in the band
     and is never mentioned again.
 
-    `s01` is the negative control the batch cannot invent -- it is
-    genuinely out of the band in both deliveries and must stay dark."""
+    `s01` is the negative control the batch cannot invent -- out of the
+    band and dark in the first two deliveries, and in the third it enters
+    below the section being read."""
     report = _run(_RAIL + _PLACE + _IMPORT + _FIRE + r"""
 const links = Array.from(document.querySelectorAll('.rail-list a'));
 const active = () => links.map((a) => a.classList.contains('active'));
