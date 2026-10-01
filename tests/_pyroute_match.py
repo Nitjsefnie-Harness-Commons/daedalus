@@ -8,7 +8,7 @@ subject cannot decide is marked unprovable (a call through it is reported); a
 pattern that provably cannot match the subject leaves its names unpaired; a
 class pattern is the one unmodelled form (issue 1003), whose captures name an
 attribute reached through the subject's class, and the fail-closed
-alternative false-positives on `test_destructured_and_walrus_alias_boundaries`.
+alternative false-positives on destructured and walrus alias boundary cases.
 
 An or-pattern offers every alternative the same subject; a name they disagree
 on is the merge of their values, so differing reachable states become
