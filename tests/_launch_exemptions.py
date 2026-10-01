@@ -173,14 +173,10 @@ UNRESOLVED_LAUNCHES = {
         'a git child',
     ('test_js_coverage_workflow.py', '_capture_updates', 'subprocess.run'):
         "a bash child behind `_util.workflow_bash()`",
-    ('test_plant_report.py', '_as_nobody', 'subprocess.run'):
+    ('_plant_fixture.py', '_as_nobody', 'subprocess.run'):
         'a sys.executable child behind the `command` parameter, running the '
         'plant helper rather than a Node child: the same shape '
         '`tests/test_worker_runtime.py` carries and for the same reason',
-    ('test_plant_restore.py', '_as_nobody', 'subprocess.run'):
-        'the same arrangement the report suite carries, in the suite that '
-        'reaches it for the read-only target: one row per live site, so '
-        'neither read is unclassified and neither is unused',
     ('test_reserved_test_names.py', '_fixture_checkout', 'subprocess.run'):
         'a git child',
     ('test_static_guard_regressions.py', 'run', 'real_run'):
