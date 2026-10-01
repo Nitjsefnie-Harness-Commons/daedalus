@@ -60,7 +60,16 @@ EXCLUDED = {
 
 
 def read(directory, prefix):
-    """Every thread's total, as `(pid, thread, ir, cmd)` from the out files."""
+    """`(rows, failure)` — every thread's total, from the out files.
+
+    A file carrying a `summary:` but no `pid:` or no `cmd:` is a profile
+    this reader has not been written for, and it is NAMED rather than
+    crashed on. Dereferencing a search that found nothing ends the whole
+    measurement in an `AttributeError`, which says nothing about which file
+    was wrong — the same reason the other three refusals carry the thread
+    and its count. A file with no summary at all is not a failure: it is
+    the empty one a process that cost nothing writes.
+    """
     rows = []
     for path in sorted(directory.glob(prefix + '.*')):
         text = path.read_text(encoding='utf-8', errors='replace')
@@ -68,11 +77,18 @@ def read(directory, prefix):
         if not found:
             continue
         thread = THREAD.search(text)
-        rows.append({'pid': int(PID.search(text).group(1)),
+        pid = PID.search(text)
+        cmd = CMD.search(text)
+        if pid is None or cmd is None:
+            missing = 'pid' if pid is None else 'cmd'
+            return rows, (
+                f'{path.name} carries a summary but no {missing}: line, so '
+                'this profile is not one this gate can read')
+        rows.append({'pid': int(pid.group(1)),
                      'thread': int(thread.group(1)) if thread else 1,
                      'ir': int(found.group(1)),
-                     'cmd': CMD.search(text).group(1).strip()})
-    return rows
+                     'cmd': cmd.group(1).strip()})
+    return rows, None
 
 
 def role_of(ir, thread):
@@ -127,13 +143,17 @@ def excluded_for(journey):
     return EXCLUDED.get(journey, ())
 
 
-def total_for(rows, journey):
+def total_for(rows, journey, unread=None):
     """`(kept, excluded, failure)` — the sum over the threads that count.
 
-    A journey that should have a background thread and does not is a
-    failure: the exclusion is part of what the count means, and a profile
-    without the thread is a profile this gate has not read.
+    Two refusals, and neither is a fallback. A profile the reader could not
+    read at all arrives as `unread` and is passed straight through, and a
+    journey that should have a background thread and does not is a failure:
+    the exclusion is part of what the count means, and a profile without
+    the thread is a profile this gate has not read.
     """
+    if unread is not None:
+        return None, excluded_for(journey), unread
     roles, failure = classify(rows)
     if failure is not None:
         return None, (), failure

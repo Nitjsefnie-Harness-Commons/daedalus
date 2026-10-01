@@ -3,14 +3,12 @@
 refusals that happen when a profile is not the shape the gate reads.
 A mis-sorted profile summed as a whole tree is the one failure here
 that produces a plausible number."""
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
-    ARTIFACT,
     _util,
     journeys,
 )
@@ -93,7 +91,8 @@ def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
     (directory / 'cg.1-02').write_text(
         'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 2\n'
         'events: Ir\nsummary: 3800000000\n', encoding='utf-8')
-    rows = thread_classifier.read(directory, 'cg')
+    rows, unread = thread_classifier.read(directory, 'cg')
+    assert unread is None, unread
     assert [row['ir'] for row in rows] == [430000000, 3800000000], rows
     assert all(row['cmd'] == 'python3 server.py' for row in rows), rows
     # mcp-exec excludes only the import, so a profile carrying no serve
@@ -108,6 +107,17 @@ def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
         rows, 'dashboard-fanout')
     assert kept is None and 'uvicorn-serve' in failure, failure
     assert excluded == ('front-end-import', 'uvicorn-serve'), excluded
+    # A file carrying a summary and no `pid:` is NAMED, not dereferenced:
+    # the reader that crashed on it would end the measurement with a
+    # traceback saying nothing about which file was wrong.
+    (directory / 'cg.1-03').write_text(
+        'version: 1\nevents: Ir\nsummary: 90000000\n', encoding='utf-8')
+    _read, unread = thread_classifier.read(directory, 'cg')
+    assert unread is not None and 'cg.1-03' in unread, unread
+    assert 'pid' in unread, unread
+    kept, _excluded, failure = thread_classifier.total_for(
+        [], 'mcp-exec', unread)
+    assert kept is None and failure is unread, (kept, failure)
 
 
 def test_every_journey_the_profiler_keeps_excludes_something(tmp):

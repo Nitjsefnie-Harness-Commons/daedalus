@@ -300,8 +300,8 @@ def _callgrind(name, root, workdir):
     code, _out, err = _run(argv)
     if code != 0:
         return None, {'returncode': code, 'stderr': err.strip()[-400:]}
-    rows = journey_threads.read(Path(workdir), prefix)
-    kept, _excluded, why = journey_threads.total_for(rows, name)
+    rows, unread = journey_threads.read(Path(workdir), prefix)
+    kept, _excluded, why = journey_threads.total_for(rows, name, unread)
     # A classification failure is a sentence rather than the dict a failed
     # child carries: there is no returncode to report, and the sentence is
     # what a reader has to act on.
