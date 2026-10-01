@@ -304,6 +304,34 @@ def _stack_of(app):
     return names
 
 
+def _armed_timer_delays(build):
+    """Run `build(armed)` on a loop that records every timer it arms.
+
+    A poll loop needs wall time to reach its first tick, so asserting that a
+    tick never *happened* cannot tell the two apart. What separates them is
+    the thing the loop arms before it waits: `await wait_for(x, 0.1)` arms a
+    timeout the moment it is entered, and a loop that waits on an Event arms
+    none. `call_at` is the recording point because it is the primitive both
+    spellings go through — `wait_for` arms through it since 3.12 — and
+    `call_soon`, which schedules no timer, does not touch it. Recorded on
+    the loop itself, so the assertion is on a property and never on how fast
+    the machine was. Returns the coroutine's result beside the recording.
+    """
+    loop = asyncio.new_event_loop()
+    armed = []
+    original = loop.call_at
+
+    def call_at(when, callback, *args, context=None):
+        armed.append(round(when - loop.time(), 3))
+        return original(when, callback, *args, context=context)
+
+    loop.call_at = call_at
+    try:
+        return loop.run_until_complete(build(armed)), armed
+    finally:
+        loop.close()
+
+
 def test_serve_hands_uvicorn_a_derived_server(tmp):
     """`_serve` must hand `run` a subclass, not uvicorn's own Server.
 
@@ -326,20 +354,30 @@ def test_serve_hands_uvicorn_a_derived_server(tmp):
     handed[0].close()
 
 
+def _idle_server(mod, config=None):
+    """A real IdleServer on a real uvicorn config, ready to be driven."""
+    import uvicorn
+    if config is None:
+        config = uvicorn.Config(
+            mod.mcp.streamable_http_app(), log_level='warning')
+    config.load()
+    return mod._idle_server_class()(config)
+
+
 def test_the_serve_loop_arms_no_timer_while_it_is_idle(tmp):
-    """The serve loop polls nothing, and returns the moment it is told to.
+    """The serve loop parks no timer, and returns when it is told to.
 
     Stock uvicorn's `main_loop` wakes every 0.1 s and calls `on_tick` on
     each wake, which is ~3M instructions a second on an idle bridge for the
-    life of the process (issue 1444). Asserting that `on_tick` is never
-    called is what a poll loop cannot survive, and it needs no wall clock:
-    the stock loop calls it once before it first sleeps.
+    life of the process (issue 1444). What separates the two loops is not
+    whether a tick happened — a poll needs wall time to reach its first,
+    so that assertion survives a poll — but what the loop arms before it
+    waits. Here it parks no timer at all, and it is still awaiting when
+    `should_exit` is set and finished once it is.
     """
     del tmp
-    import uvicorn
     mod = _load_front_end()
-    server = mod._idle_server_class()(
-        uvicorn.Config(mod.mcp.streamable_http_app(), log_level='warning'))
+    server = _idle_server(mod)
     ticks = []
 
     async def counting(counter):
@@ -348,38 +386,41 @@ def test_the_serve_loop_arms_no_timer_while_it_is_idle(tmp):
 
     server.on_tick = counting
 
-    async def drive():
+    async def drive(armed):
         task = asyncio.ensure_future(server.main_loop())
         await _spin(4)
         assert not task.done(), 'the loop returned while should_exit was False'
-        assert ticks == [], ticks
+        idle_armed = list(armed)
         server.should_exit = True
         await _spin(4)
-        return task.done()
+        return idle_armed, task.done()
 
-    assert asyncio.run(drive())
+    (idle_armed, finished), armed = _armed_timer_delays(drive)
+    assert idle_armed == [], (
+        'the loop armed a timer while idle', idle_armed)
+    assert armed == [], armed
+    assert ticks == [], ticks
+    assert finished, 'the loop did not return once should_exit was set'
 
 
-def test_a_request_refreshes_the_date_header(tmp):
-    """A served request re-derives the Date header the loop used to cache.
+def test_a_request_refreshes_the_date_header_the_cycle_already_holds(tmp):
+    """A served request re-derives the Date on the list the cycle captured.
 
-    The cached `default_headers` is what every response carries, so the
-    per-request tick has to keep it as current as uvicorn's once-a-second
-    refresh did. The Date is compared against the clock either side of the
-    request, which is a value assertion and not a duration.
+    uvicorn's HTTP protocols read `server_state.default_headers` at
+    RequestReceived and concatenate the object they got when the response
+    starts, so a refresh that rebinds the attribute never reaches the
+    response being written. `captured` below is that object, taken before
+    the request the way a cycle takes it.
     """
     del tmp
-    import uvicorn
     from starlette.applications import Starlette
     mod = _load_front_end()
-    config = uvicorn.Config(Starlette(), log_level='warning',
-                            headers=[('x-probe', '1')])
-    config.load()
-    server = mod._idle_server_class()(config)
+    server = _idle_server(mod, _config_with_probe_headers())
     holder = {'server': server}
     app = Starlette()
     app.add_middleware(mod._TickMiddleware, holder=holder)
-    server.server_state.default_headers = [(b'server', b'stale')]
+    server.server_state.default_headers[:] = [(b'server', b'stale')]
+    captured = server.server_state.default_headers
 
     async def drive():
         before = time.time()
@@ -387,12 +428,144 @@ def test_a_request_refreshes_the_date_header(tmp):
         return before, time.time()
 
     before, after = asyncio.run(drive())
-    headers = dict(server.server_state.default_headers)
+    assert server.server_state.default_headers is captured, (
+        'the refresh rebound the attribute instead of updating it')
+    headers = dict(captured)
     assert set(headers) == {b'date', b'server', b'x-probe'}, headers
     assert headers[b'server'] == b'uvicorn', headers
     assert headers[b'x-probe'] == b'1', headers
     sent = parsedate_to_datetime(headers[b'date'].decode()).timestamp()
     assert before - 5 <= sent <= after + 5, (headers, before, after)
+
+
+def _config_with_probe_headers():
+    import uvicorn
+    from starlette.applications import Starlette
+    return uvicorn.Config(Starlette(), log_level='warning',
+                          headers=[('x-probe', '1')])
+
+
+def test_the_serve_loop_honours_the_max_requests_limit(tmp):
+    """`limit_max_requests` still ends the serve, now per request.
+
+    uvicorn decides it inside `on_tick`, so a request tick that stopped
+    consulting `on_tick` would silently drop the limit. The request that
+    takes the served total to the limit is the one that sets `should_exit`,
+    and the ones after it keep it set.
+    """
+    del tmp
+    import uvicorn
+    from starlette.applications import Starlette
+    mod = _load_front_end()
+    config = uvicorn.Config(
+        Starlette(), log_level='warning', limit_max_requests=2,
+        limit_max_requests_jitter=0)
+    server = _idle_server(mod, config)
+    assert server.limit_max_requests == 2, server.limit_max_requests
+
+    async def drive():
+        seen = []
+        for total in range(3):
+            server.server_state.total_requests = total
+            await server.request_tick()
+            seen.append(server.should_exit)
+        return seen
+
+    assert asyncio.run(drive()) == [False, False, True]
+
+
+def test_the_serve_loop_runs_the_configured_callback_notify(tmp):
+    """`callback_notify` still fires, on uvicorn's own once-per-ten gate.
+
+    `on_tick` only reaches the callback on a counter divisible by ten, so
+    the counter the request tick advances is load-bearing: a tick that
+    passed a constant would either never notify or notify on every request.
+    """
+    del tmp
+    import uvicorn
+    from starlette.applications import Starlette
+    mod = _load_front_end()
+    notified = []
+
+    async def callback_notify():
+        notified.append(1)
+
+    config = uvicorn.Config(Starlette(), log_level='warning',
+                            callback_notify=callback_notify,
+                            timeout_notify=0)
+    server = _idle_server(mod, config)
+
+    async def drive():
+        for _ in range(10):
+            await server.request_tick()
+
+    asyncio.run(drive())
+    assert notified, 'callback_notify never ran'
+    assert len(notified) == 1, notified
+
+
+def test_startup_populates_the_headers_a_below_asgi_refusal_sends(tmp):
+    """`startup` fills the cache before any request can be answered.
+
+    A request uvicorn refuses below ASGI never reaches the middleware, so
+    the cached headers it answers with have to be in place from startup.
+    """
+    del tmp
+    import uvicorn
+    mod = _load_front_end()
+    server = _idle_server(mod, _config_with_probe_headers())
+    server.server_state.default_headers[:] = []
+    reached = []
+
+    async def base_startup(_self, sockets=None):
+        reached.append(sockets)
+
+    original = uvicorn.Server.startup
+    uvicorn.Server.startup = base_startup
+    try:
+        asyncio.run(server.startup(sockets=None))
+    finally:
+        uvicorn.Server.startup = original
+    assert reached == [None], reached
+    headers = dict(server.server_state.default_headers)
+    assert set(headers) == {b'date', b'server', b'x-probe'}, headers
+    sent = parsedate_to_datetime(headers[b'date'].decode()).timestamp()
+    assert abs(sent - time.time()) < 5, headers
+
+
+def test_the_tick_middleware_skips_a_non_http_scope(tmp):
+    """Only an HTTP request ticks; a lifespan event must not.
+
+    Starlette routes every scope type through the middleware stack, so the
+    lifespan startup and shutdown this app runs on every boot would each
+    tick — refreshing the Date for no request and advancing the counter the
+    max-requests limit reads.
+    """
+    del tmp
+    from starlette.applications import Starlette
+    mod = _load_front_end()
+    server = _idle_server(mod, _config_with_probe_headers())
+    calls = []
+
+    async def spy():
+        calls.append(1)
+
+    server.request_tick = spy
+    holder = {'server': server}
+    app = Starlette()
+    app.add_middleware(mod._TickMiddleware, holder=holder)
+    down = []
+
+    async def receive():
+        return {'type': 'lifespan.startup'}
+
+    async def send(message):
+        down.append(message['type'])
+
+    asyncio.run(app({'type': 'lifespan', 'asgi': {'version': '3.0'}},
+                    receive, send))
+    assert calls == [], calls
+    assert 'lifespan.startup.complete' in down, down
 
 
 def test_the_tick_middleware_sits_inside_the_bearer_auth_middleware(tmp):
