@@ -633,9 +633,9 @@ def test_the_shared_comment_harness_refuses_a_step_it_cannot_read(tmp):
 def test_the_shared_stub_writer_is_verbatim_and_executable(tmp):
     """The one copy of this helper, pinned on both halves of what it does.
 
-    `tests/_speedharness.py` carried a byte-identical second definition
-    and six readers split between the two, with nothing in the tree
-    complaining: the shadow control needs an import beside the def and
+    This module once carried a byte-identical second definition in a
+    sibling harness, with readers split between the two, and nothing in the
+    tree complaining: the shadow control needs an import beside the def and
     this one needs a suite, so a duplicate body under a second name is
     what neither reports. Bytes that gained a trailing newline would
     reach every reader as a shell syntax error, and a mode that lost
