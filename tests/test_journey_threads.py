@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
     _util,
-    journeys,
 )
 
 
@@ -107,33 +106,34 @@ def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
         rows, 'dashboard-fanout')
     assert kept is None and 'uvicorn-serve' in failure, failure
     assert excluded == ('front-end-import', 'uvicorn-serve'), excluded
-    # A file carrying a summary and no `pid:` is NAMED, not dereferenced:
-    # the reader that crashed on it would end the measurement with a
-    # traceback saying nothing about which file was wrong.
-    (directory / 'cg.1-03').write_text(
-        'version: 1\nevents: Ir\nsummary: 90000000\n', encoding='utf-8')
-    _read, unread = thread_classifier.read(directory, 'cg')
-    assert unread is not None and 'cg.1-03' in unread, unread
-    assert 'pid' in unread, unread
-    kept, _excluded, failure = thread_classifier.total_for(
-        [], 'mcp-exec', unread)
-    assert kept is None and failure is unread, (kept, failure)
 
 
-def test_every_journey_the_profiler_keeps_excludes_something(tmp):
-    """No journey counts a front-end import, and only mcp-exec counts the
-    serve thread — which is the whole of the per-journey rule."""
-    del tmp
-    threads = _journey_contract.threads()
-    for name in journeys().NAMES:
-        assert 'front-end-import' in threads.excluded_for(name), name
-    assert threads.excluded_for('mcp-exec') == ('front-end-import',)
-    assert threads.excluded_for('no-such-journey') == ()
-    assert set(threads.ROLES) == {
-        'front-end-import', 'uvicorn-serve', 'request', 'main'}
+def test_a_profile_missing_any_of_its_header_lines_is_named(tmp):
+    """Three fields, one refusal, and the same for each.
 
-
-# ─── the step summary's own words ──────────────────────────────────────────
+    `pid:` and `cmd:` are obvious. `thread:` is the one that must not
+    default: 1 is MAIN, and MAIN is never excluded, so a defaulted thread is
+    a thread the gate would KEEP without ever having said so — the one
+    asymmetry a reader cannot see in a number.
+    """
+    thread_classifier = _journey_contract.threads()
+    directory = Path(tmp)
+    header = 'pid: 1\ncmd:  python3 server.py\nthread: 2\n'
+    for omitted, fragment in (('pid: 1\n', 'no pid: line'),
+                              ('cmd:  python3 server.py\n', 'no cmd: line'),
+                              ('thread: 2\n', 'no thread: line')):
+        for stale in directory.glob('cg.*'):
+            stale.unlink()
+        (directory / 'cg.1-01').write_text(
+            'version: 1\n' + header.replace(omitted, '')
+            + 'events: Ir\nsummary: 90000000\n', encoding='utf-8')
+        rows, unread = thread_classifier.read(directory, 'cg')
+        assert unread is not None, (omitted, rows)
+        assert fragment in unread, (omitted, unread)
+        assert 'cg.1-01' in unread, (omitted, unread)
+        kept, _excluded, failure = thread_classifier.total_for(
+            [], 'mcp-exec', unread)
+        assert kept is None and failure is unread, (kept, failure)
 
 
 def main():

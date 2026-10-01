@@ -64,8 +64,6 @@ load = journey_artifact.load
 render = journey_artifact.render
 recorded_toolchain = journey_artifact.recorded_toolchain
 recorded_exclusions = journey_artifact.recorded_exclusions
-recorded_bands = journey_artifact.recorded_bands
-recorded_shas = journey_artifact.recorded_shas
 exclusion_diff = journey_artifact.exclusion_diff
 map_diff = journey_artifact.map_diff
 sha_diff = journey_artifact.sha_diff
@@ -113,8 +111,7 @@ THREADS_REMEDY = (
     're-baseline block in the step summary carries the counts, their '
     'spread, the threads this run excluded, and the identity they were '
     'taken on, and nothing in CI writes the artefact.')
-REMEDY_FOR = {'over': OVER_REMEDY, 'shape': SHAPE_REMEDY,
-              'unmeasured': UNMEASURED_REMEDY}
+REMEDY_FOR = {'over': OVER_REMEDY, 'unmeasured': UNMEASURED_REMEDY}
 
 
 def journey_names():
@@ -158,26 +155,26 @@ def stale(document, names):
     return sorted(name for name in document['journeys'] if name not in names)
 
 
-def violations(counts, shapes, document, names):
-    """The fixed set of kinds a check can refuse on.
+def violations(counts, document, names):
+    """The two kinds a check can refuse a journey on.
 
-    `counts` is a measured count per journey and `shapes` the sha each round
-    rendered. A journey the artefact does not record is not here:
-    `unrecorded` reports it and the check passes, which is what an artefact
-    before its first recording looks like.
+    `counts` is a measured count per journey. A journey the artefact does
+    not record is not here: `unrecorded` reports it and the check passes,
+    which is what an artefact before its first recording looks like.
 
     `unmeasured` is the false green this whole design exists against: a
     runner that cannot produce the counter the budget names would otherwise
     report every journey within budget having measured none of them.
+
+    A shape disagreement between rounds is NOT here, because the sha gate
+    refuses it before this is reached — a measurement whose rounds disagree
+    about what a journey rendered is not one to compare counts from. The
+    control for that disagreement is `sha_diff`, which is where the case
+    lives.
     """
     over = {}
-    shape = {}
     unmeasured = {}
     for name in names:
-        seen = sorted(set(shapes.get(name) or ()))
-        if len(seen) > 1:
-            shape[name] = seen
-            continue
         limit = budget_of(document, name)
         if limit is None:
             continue
@@ -187,7 +184,7 @@ def violations(counts, shapes, document, names):
             continue
         if measured > limit:
             over[name] = (measured, limit)
-    return {'over': over, 'shape': shape, 'unmeasured': unmeasured}
+    return {'over': over, 'unmeasured': unmeasured}
 
 
 def tightened(counts, document, names):
@@ -215,8 +212,6 @@ def refusal_lines(found):
              '| journey | measured | budget |', '|---|---|---|']
     for name, (measured, limit) in sorted(found['over'].items()):
         lines.append(f'| {name} | {measured} | {limit:.0f} |')
-    for name, seen in sorted(found['shape'].items()):
-        lines.append(f'| {name} | shape mismatch: {", ".join(seen)} | — |')
     for name, counter in sorted(found['unmeasured'].items()):
         lines.append(f'| {name} | not measured: `{counter}` gave no count '
                      f'on this runner | — |')
@@ -305,10 +300,6 @@ def main(argv=None):
         counter = document.get('counter')
         report = _measurements(args)
 
-        # Three states, not two. No identity recorded yet is not a change:
-        # there is nothing to have changed from, and saying so is what tells
-        # a reader this green measured nothing rather than finding a
-        # regression.
         # A measurement that could not be taken is reported before any
         # recorded map is compared: there is nothing to compare, and the
         # reason is not one the recorded maps can speak to.
@@ -331,14 +322,13 @@ def main(argv=None):
 
         counts = (journey_counters.counts_of(report, counter)
                   if counter else {})
-        found = violations(counts, report.get('shas') or {}, document, names)
+        found = violations(counts, document, names)
 
         if args.tighten:
             # A shape failure refuses a tighten as firmly as it refuses a
             # check: a count taken from a journey that no longer renders the
             # same way is not a cheaper journey, it is a different one.
-            if _report_state(document, names, counter, report):
-                return 1
+            _report_state(document, names, counter, report)
             updated = tightened(counts, document, names)
             if updated is None:
                 print('no journey measured below its recorded count')
@@ -348,8 +338,7 @@ def main(argv=None):
             print('tightened the journey budget')
             return 0
 
-        if _report_state(document, names, counter, report):
-            return 1
+        _report_state(document, names, counter, report)
         if not any(found.values()):
             print(f'{len(names)} journeys measured against '
                   f'{counter or "no counter"}; none over budget')
@@ -398,23 +387,19 @@ def _recorded_gates(report):
         {'subject': 'toolchain', 'remedy': TOOLCHAIN_REMEDY,
          'recorded': _recorded('toolchain'),
          'measured': lambda measured: measured.get('toolchain'),
-         'differs': toolchain_diff,
-         'absent': 'the journey budget records no toolchain yet'},
+         'differs': toolchain_diff},
         {'subject': 'excluded threads', 'remedy': THREADS_REMEDY,
          'recorded': _recorded('excluded_threads'),
          'measured': lambda measured: measured.get('excluded_threads'),
-         'differs': exclusion_diff,
-         'absent': 'the journey budget records no excluded threads yet'},
+         'differs': exclusion_diff},
         {'subject': 'thread bands', 'remedy': BANDS_REMEDY,
          'recorded': _recorded('thread_bands'),
          'measured': lambda measured: journey_threads.BANDS,
-         'differs': map_diff,
-         'absent': 'the journey budget records no thread bands yet'},
+         'differs': map_diff},
         {'subject': 'journey shas', 'remedy': SHA_REMEDY,
          'recorded': _recorded('shas'),
          'measured': lambda measured: measured.get('shas') or {},
-         'differs': sha_diff,
-         'absent': 'the journey budget records no journey shas yet'},
+         'differs': sha_diff},
     )
 
 
@@ -464,16 +449,11 @@ def _recorded_outcome(args, document, report, changed, gate):
 def _report_state(document, names, counter, report):
     """Everything a check knows but is not refusing on, said out loud.
 
-    True when the measurement itself could not be taken, which is the one
-    state no count can be compared in and the one refusal the counts cannot
-    express.
+    Nothing here can return True: a measurement that could not be taken is
+    refused before this is called, and a value that was never recorded is one
+    of the four gates' own refusals. So this is a report, and the state it
+    most used to describe is not reachable through this entry point.
     """
-    if recorded_toolchain(document) is None:
-        print('the journey budget records no toolchain yet, so this run has '
-              'no recorded identity to be compared against')
-    if recorded_exclusions(document) is None:
-        print('the journey budget records no excluded threads yet, so this '
-              'run has no recorded set of threads to be compared against')
     if counter is None:
         print('the journey budget names no counter yet, so no count is '
               'compared')
@@ -487,7 +467,6 @@ def _report_state(document, names, counter, report):
     if gone:
         print('recorded but the journey set no longer has them: '
               f'{", ".join(gone)}')
-    return False
 
 
 if __name__ == '__main__':

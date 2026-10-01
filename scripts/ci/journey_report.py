@@ -20,7 +20,9 @@ from pathlib import Path
 # The path insert is this module's own, so it resolves whichever of the three
 # was imported first rather than only when `journey_budget` went before it.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
+import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def probe_lines(found):
@@ -92,13 +94,28 @@ def rebaseline_lines(report, document=None):
     selected = report.get('selected_counter')
     entry = (report.get('counters') or {}).get(selected) or {}
     journeys = entry.get('journeys') or {}
-    block = {'counter': selected,
-             'toolchain': report.get('toolchain') or {},
-             'journeys': {}, 'spread': {}}
+    # The field list is the SCHEMA'S, not a literal beside it: a re-baseline
+    # that omitted a field would paste an artefact the validator accepts and
+    # the next run refuses, with a remedy pointing at this very block. So
+    # the block is built by walking the same set the validator walks, and
+    # cannot fall behind a field added there.
+    measured = {'schema_version': journey_artifact.SCHEMA_VERSION,
+                'counter': selected,
+                'tolerance_pct': (document or {}).get('tolerance_pct'),
+                'toolchain': report.get('toolchain') or {},
+                'excluded_threads': report.get('excluded_threads') or {},
+                'thread_bands': dict(journey_threads.BANDS),
+                'journeys': {}, 'shas': {}}
+    block = {field: measured[field] for field in journey_artifact.FIELDS}
+    # Not a schema field, and not a claim to be: the spread is what a
+    # reader derives a tolerance from, beside the counts it applies to.
+    block['spread'] = {}
     for name in journey_counters.journey_names():
         row = journeys.get(name) or {}
         block['journeys'][name] = row.get('median')
         block['spread'][name] = row.get('spread')
+        seen = (report.get('shas') or {}).get(name) or []
+        block['shas'][name] = sorted(set(seen))[0] if seen else None
     if document is not None:
         block['recorded'] = {
             'counter': document.get('counter'),
@@ -109,7 +126,9 @@ def rebaseline_lines(report, document=None):
             'What a re-baseline is pasted from, as this run measured it. '
             'Nothing in CI writes `.github/journey-budget.json`; the '
             're-baseline is a reviewed commit carrying these numbers, '
-            'their spread, and the toolchain they were taken on.', '',
+            'their spread, the toolchain and the threads they were taken '
+            'on, and the journeys\' shas and the bands this run applied — '
+            'every field the artefact needs to be valid on its own.', '',
             '```json',
             json.dumps(block, indent=2, sort_keys=True),
             '```', '']
