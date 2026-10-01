@@ -97,7 +97,6 @@
     "tests/test_stream_service.py": 1,
     "tests/test_suite_runner.py": 2,
     "tests/test_tab_registry.py": 3,
-    "tests/test_tab_routing.py": 2,
     "tests/test_version_contract.py": 1,
     "tests/test_version_contract_quote_duplicates.py": 4,
     "tests/test_watch_all.py": 2,

@@ -453,7 +453,6 @@
 !/tests/_suite_jobs.py
 !/tests/_sweep_launch_scan.py
 !/tests/_tabroute_focus.py
-!/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
 !/tests/_teardown.py
 !/tests/_token_mask.py
@@ -748,7 +747,6 @@
 !/tests/test_suite_runner.py
 !/tests/test_sweep_launch_scan.py
 !/tests/test_tab_registry.py
-!/tests/test_tab_routing.py
 !/tests/test_teardown_retry.py
 !/tests/test_type_errors.py
 !/tests/test_unresolved_routes.py

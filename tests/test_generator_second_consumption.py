@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from test_tab_routing import _tracked_focus_verdict  # noqa: E402
+from _tabroute_focus import _tracked_focus_verdict  # noqa: E402
 
 
 def test_generator_second_consumption_re_resolves_yielded_name(tmp):
