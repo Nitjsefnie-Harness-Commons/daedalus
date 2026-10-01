@@ -67,6 +67,25 @@ def _synthetic(source):
     return _bash_resolver_scan._synthetic_violations(source)
 
 
+def _judged(source):
+    """`source`'s violations, and whether its module facts were built.
+
+    Only a module judged on its facts can carry a violation.
+    """
+    built = []
+    original = _bash_resolver_scan._ModuleFacts
+
+    def counting(tree):
+        built.append(tree)
+        return original(tree)
+
+    _bash_resolver_scan._ModuleFacts = counting
+    try:
+        return _bash_resolver_scan._synthetic_violations(source), bool(built)
+    finally:
+        _bash_resolver_scan._ModuleFacts = original
+
+
 def test_every_launch_names_the_shared_resolver(tmp):
     del tmp
     violations = _bash_resolver_scan._tree_violations(ROOT)
@@ -434,6 +453,62 @@ FIXTURE = \"\"\"import subprocess
 subprocess.run(['bash', '-c', 'true'], cwd=tmp)
 \"\"\"
 """) == []
+
+
+def test_a_shell_spelled_away_from_the_raw_text_is_judged(tmp):
+    """The shell is read from the parsed constant, never from the source."""
+    del tmp
+    spellings = ("['ba' 'sh', '-c', 'true']", r"['ba\x73h', '-c', 'true']")
+    for spelling in spellings:
+        violations, judged = _judged(
+            f'import subprocess\nsubprocess.run({spelling}, cwd=tmp)\n')
+        assert judged, spelling
+        assert len(violations) == 1, (spelling, violations)
+        assert "as 'bash'" in violations[0], (spelling, violations)
+
+
+def test_a_shell_named_without_a_launch_import_stays_clean(tmp):
+    """Stage 1 skips a module that cannot reach a launch, verdict intact."""
+    del tmp
+    assert _judged("""import shutil
+resolved = shutil.which('bash')
+assert resolved and len(resolved) > 1, resolved
+""") == ([], False)
+    # The name in prose is the name in the text, so this one is judged on its
+    # facts: only an absence of the substring licenses the skip.
+    assert _judged('''"""This module imports subprocess if it ever launches."""
+import shutil
+# import subprocess
+shell_name = 'bash'
+''') == ([], True)
+
+
+def test_a_launch_naming_no_shell_stays_clean(tmp):
+    """Stage 2 skips a module with no shell-named constant, verdict intact."""
+    del tmp
+    violations, judged = _judged("""import subprocess
+import sys
+subprocess.run([sys.executable, 'child.py'], cwd=tmp)
+""")
+    assert violations == [], violations
+    assert not judged, 'facts built for a module that names no shell'
+
+
+def test_a_continued_import_spelling_is_still_judged(tmp):
+    """A backslash can split the name, so the source cannot be searched."""
+    del tmp
+    violations, judged = _judged(r'''import \
+subprocess
+subprocess.run(['bash', '-c', 'true'], cwd=tmp)
+''')
+    assert judged, 'a continued import was skipped unjudged'
+    assert len(violations) == 1, violations
+    assert 'tests/synthetic.py:3:' in violations[0], violations
+    assert _judged(r'''import \
+subprocess
+resolved = shutil.which('bash')
+assert resolved
+''') == ([], True)
 
 
 def test_each_real_site_is_caught_when_it_bypasses(tmp):

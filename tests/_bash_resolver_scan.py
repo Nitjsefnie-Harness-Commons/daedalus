@@ -23,6 +23,7 @@ _LAUNCHERS = frozenset(
     {'run', 'Popen', 'call', 'check_call', 'check_output'})
 _SHELL_NAMES = frozenset({'bash', 'bash.exe'})
 _ANY_SEPARATOR = re.compile(r'[/\\]')
+_NAMES_SHELL = re.compile('bash', re.IGNORECASE)
 _MAX_PROGRAM_DEPTH = 4
 
 
@@ -244,7 +245,20 @@ def _visit(facts, relative, violations):
 
 
 def _analyze(relative, source):
+    # A violation needs a launch, and `_ModuleFacts._collect` reads launches
+    # only off an import statement spelling `subprocess` - so a source without
+    # that substring carries none, unless a backslash continues the line
+    # across the name, and a source with no backslash has no continuation.
+    if 'subprocess' not in source and '\\' not in source:
+        return []
     tree = ast.parse(source, filename=relative)
+    # Every `shell` route ends in a string constant that names the shell, so
+    # a tree holding none cannot route to one. Asked of the constants, never
+    # of the source: `'ba' 'sh'` and `'ba\x73h'` are the same literal.
+    if not any(isinstance(node, ast.Constant) and isinstance(node.value, str)
+               and _NAMES_SHELL.search(node.value)
+               for node in ast.walk(tree)):
+        return []
     facts = _ModuleFacts(tree)
     violations = []
     _visit(facts, relative, violations)
