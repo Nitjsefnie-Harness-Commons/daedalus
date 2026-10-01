@@ -13,8 +13,14 @@ reviewed commit, so what lands in it has to be this run's own numbers
 rather than a reader's transcription of a table.
 """
 import json
+import sys
+from pathlib import Path
 
-import journey_counters
+# The counter module sits beside this one and is imported by its own name.
+# The path insert is this module's own, so it resolves whichever of the three
+# was imported first rather than only when `journey_budget` went before it.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def probe_lines(found):
