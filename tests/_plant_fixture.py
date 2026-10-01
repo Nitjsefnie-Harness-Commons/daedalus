@@ -81,6 +81,11 @@ def _unreadable_as_bytes(entry):
 
 
 def _drop_to_nobody():
+    # The decision belongs here, not at the call site: `preexec_fn` takes
+    # this function as a reference, and on Windows the three reads below
+    # have no attribute to resolve.
+    if os.name != 'posix':
+        return
     os.setgroups([])
     os.setgid(65534)
     os.setuid(65534)
