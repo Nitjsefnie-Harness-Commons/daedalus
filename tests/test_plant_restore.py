@@ -73,6 +73,45 @@ def _reported_state(output):
     return output.rsplit(': ', 1)[-1].split(' against')[0].strip()
 
 
+_NOT_HEADS = "the published bytes are the worktree's, not what HEAD holds"
+
+_CHANGE_CLAUSES = {
+    'the file did not already hold these bytes': 'changed',
+    'the file already held these bytes': 'unchanged',
+    'the comparison with the file could not be made': 'uncompared',
+}
+
+
+def _restore_clauses(output):
+    """The restore report split into the clauses the helper labels.
+
+    Same reason as `_reported_state`: a substring pin over the whole
+    line is satisfied by the suite's own temp paths, which carry each
+    test's name and so carry whatever word that test is about.
+    """
+    line = output.strip().splitlines()[-1]
+    assert line.startswith('restored '), line
+    return line.split('; ')
+
+
+def _state_in(clauses):
+    found = [c for c in clauses if c.endswith(' against HEAD')]
+    assert len(found) == 1, clauses
+    return found[0].split(' ', 1)[1].split(' against')[0]
+
+
+def _change_in(clauses):
+    found = [c for c in clauses if c in _CHANGE_CLAUSES]
+    assert len(found) == 1, clauses
+    return _CHANGE_CLAUSES[found[0]]
+
+
+def _entry_fields(output):
+    """The labelled fields `_entry_detail` printed, parsed by label."""
+    detail = output.strip().splitlines()[-1].rsplit(' (', 1)[-1]
+    return [item.split(' ', 1) for item in detail.rstrip(')').split(', ')]
+
+
 def _only_entry(store):
     entries = [item for item in Path(store).iterdir() if item.is_dir()]
     assert len(entries) == 1, entries
@@ -606,6 +645,157 @@ def test_save_reports_unknown_outside_a_git_work_tree(tmp):
     other = _plant('save', str(outside), '--store', str(store))
     assert other.returncode == 0, _say(other)
     assert _reported_state(other.stdout) == 'unknown', _say(other)
+
+
+def test_a_dirty_snapshot_is_restored_with_the_state_it_was_taken_in(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    saved = _plant('save', str(target), '--store', str(store))
+    assert saved.returncode == 0, _say(saved)
+    assert _reported_state(saved.stdout) == 'dirty', _say(saved)
+    target.write_bytes(_PLANTED)
+
+    restored = _plant('restore', str(target), '--store', str(store))
+    assert restored.returncode == 0, _say(restored)
+    clauses = _restore_clauses(restored.stdout)
+    assert _state_in(clauses) == 'dirty', clauses
+    assert _NOT_HEADS in clauses, clauses
+    assert _change_in(clauses) == 'changed', clauses
+    assert target.read_bytes() == _FIXED
+
+
+def test_a_clean_snapshot_is_not_reported_as_the_worktrees(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    saved = _plant('save', str(target), '--store', str(store))
+    assert saved.returncode == 0, _say(saved)
+    assert _reported_state(saved.stdout) == 'clean', _say(saved)
+    target.write_bytes(_PLANTED)
+
+    restored = _plant('restore', str(target), '--store', str(store))
+    assert restored.returncode == 0, _say(restored)
+    clauses = _restore_clauses(restored.stdout)
+    assert _state_in(clauses) == 'clean', clauses
+    assert _NOT_HEADS not in clauses, clauses
+    assert _change_in(clauses) == 'changed', clauses
+
+
+def test_a_restore_over_identical_bytes_says_it_held_them_already(tmp):
+    # The recovery the recorded recurrence reaches for: re-save a path
+    # that still carries the plant, then restore it. Nothing changes,
+    # and the report has to say so - a count cannot.
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_PLANTED)
+    saved = _plant('save', str(target), '--store', str(store))
+    assert saved.returncode == 0, _say(saved)
+    assert _reported_state(saved.stdout) == 'dirty', _say(saved)
+
+    restored = _plant('restore', str(target), '--store', str(store))
+    assert restored.returncode == 0, _say(restored)
+    clauses = _restore_clauses(restored.stdout)
+    assert _change_in(clauses) == 'unchanged', clauses
+    assert _state_in(clauses) == 'dirty', clauses
+    assert target.read_bytes() == _PLANTED
+
+
+def test_an_entry_saved_before_the_state_field_restores_as_unknown(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+    # Absent either way: the entry shape a save from before this
+    # field existed has, and one whose save never wrote it.
+    (_only_entry(store) / 'head-state').unlink(missing_ok=True)
+    target.write_bytes(_PLANTED)
+
+    restored = _plant('restore', str(target), '--store', str(store))
+    assert restored.returncode == 0, _say(restored)
+    clauses = _restore_clauses(restored.stdout)
+    assert _state_in(clauses) == 'unknown', clauses
+    assert _change_in(clauses) == 'changed', clauses
+    assert target.read_bytes() == _FIXED
+
+
+def _restore_over_a_target_nothing_can_read(plant, target, store):
+    """Restore a target whose bytes cannot be read, and hand back the
+    result. The arrangement is a real write-only mode, not a mock:
+    `os.replace` needs the directory, which the child owns, so the
+    publish lands while the read before it cannot. Root bypasses mode
+    bits, so there the child runs as a plain user it does not own.
+    """
+    if os.name != 'posix':
+        _util.skip('POSIX mode bits are what refuse the read')
+    if hasattr(os, 'geteuid') and os.geteuid() == 0:
+        try:
+            _open_the_entry(store, target)
+            _hand_to_nobody(target)
+        except OSError as why:
+            _util.skip(f'cannot hand the tree to a plain user: {why!r}')
+        target.chmod(0o200)
+        return _as_nobody([sys.executable, str(plant), 'restore',
+                           str(target), '--store', str(store)])
+    target.chmod(0o200)
+    return _plant('restore', str(target), '--store', str(store))
+
+
+def test_a_target_nothing_can_read_is_reported_as_uncompared(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+    target.write_bytes(_PLANTED)
+
+    restored = _restore_over_a_target_nothing_can_read(PLANT, target, store)
+    assert restored.returncode == 0, _say(restored)
+    clauses = _restore_clauses(restored.stdout)
+    assert _change_in(clauses) == 'uncompared', clauses
+    target.chmod(0o600)
+    assert target.read_bytes() == _FIXED
+
+
+def test_the_save_line_carries_no_clause_of_its_own(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    saved = _plant('save', str(target), '--store', str(store))
+    assert saved.returncode == 0, _say(saved)
+    # Everything new belongs to the restore: a clause here would sit on
+    # a line `tests/test_plant_restore.py` parses positionally.
+    assert '; ' not in saved.stdout.strip(), saved.stdout
+
+
+def test_clear_names_the_state_its_entry_recorded(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+
+    cleared = _plant('clear', str(target), '--store', str(store))
+    assert cleared.returncode == 0, _say(cleared)
+    # Parsed by label: the store path carries this test's own name.
+    fields = _entry_fields(cleared.stdout)
+    assert ['captured', 'dirty'] in fields, _say(cleared)
+
+
+def test_clear_of_an_entry_without_the_field_still_names_its_others(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+    # Absent either way: the entry shape a save from before this
+    # field existed has, and one whose save never wrote it.
+    (_only_entry(store) / 'head-state').unlink(missing_ok=True)
+
+    cleared = _plant('clear', str(target), '--store', str(store))
+    assert cleared.returncode == 0, _say(cleared)
+    labels = [label for label, _ in _entry_fields(cleared.stdout)]
+    assert labels == ['path', 'saved'], labels
 
 
 _PARAGRAPH_ANCHORS = ('have not watched fail', 'plant the defect',

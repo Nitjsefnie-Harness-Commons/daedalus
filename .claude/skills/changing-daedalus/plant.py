@@ -87,6 +87,49 @@ def _publish(target, payload):
         raise
 
 
+def _differs_from(path, payload):
+    """Whether the target already held the payload, or None when it could
+    not be read: a comparison that was not made is not one that found no
+    difference, and a report that cannot tell the two apart would claim
+    an outcome it has no evidence for."""
+    try:
+        with open(path, 'rb') as handle:
+            return handle.read() != payload
+    except OSError:
+        return None
+
+
+def _recorded_state(entry):
+    """The state the save recorded; 'unknown' for an entry written before
+    the field existed, and for any value this helper cannot vouch for."""
+    try:
+        with open(os.path.join(entry, 'head-state'), 'r',
+                  encoding='ascii') as handle:
+            state = handle.read().strip()
+    except OSError:
+        return 'unknown'
+    return state if state in ('clean', 'dirty') else 'unknown'
+
+
+_WHAT_PUBLISHED = {
+    True: 'the file did not already hold these bytes',
+    False: 'the file already held these bytes',
+    None: 'the comparison with the file could not be made',
+}
+
+
+def _published_note(state, changed):
+    """What a byte count cannot carry: the state the stored copy was
+    taken in, whether these bytes are the worktree's, and whether the
+    target already held them."""
+    clauses = [f'captured {state} against HEAD']
+    if state != 'clean':
+        clauses.append(
+            "the published bytes are the worktree's, not what HEAD holds")
+    clauses.append(_WHAT_PUBLISHED[changed])
+    return '; ' + '; '.join(clauses)
+
+
 def _stored_matches(path, entry):
     try:
         with open(os.path.join(entry, 'bytes'), 'rb') as handle:
@@ -112,7 +155,8 @@ def _entry_advice(path, entry):
 def _entry_detail(entry):
     """What the entry recorded; its directory is named by a hash."""
     parts = []
-    for name, label in (('path', 'path'), ('saved-at', 'saved')):
+    for name, label in (('path', 'path'), ('saved-at', 'saved'),
+                        ('head-state', 'captured')):
         try:
             with open(os.path.join(entry, name), 'r', encoding='utf-8',
                       errors='replace') as handle:
@@ -144,6 +188,9 @@ def save(path, store):
         with open(path, 'rb') as handle:
             payload = handle.read()
         mode = stat.S_IMODE(os.stat(path).st_mode)
+        # Read once, for both the entry and the line below: the state
+        # recorded is the state the stored bytes were taken in.
+        state = _head_state(path)
         os.makedirs(entry)
         _publish(os.path.join(entry, 'bytes'), payload)
         _publish(os.path.join(entry, 'mode'), f'{mode:o}\n'.encode('ascii'))
@@ -152,9 +199,11 @@ def save(path, store):
         _publish(os.path.join(entry, 'saved-at'),
                  datetime.now(timezone.utc).isoformat(
                      timespec='seconds').encode('ascii'))
+        _publish(os.path.join(entry, 'head-state'),
+                 f'{state}\n'.encode('ascii'))
     except OSError as why:
         return _refuse(f'cannot save {path}: {why}')
-    print(f'saved {path}: {_head_state(path)} against HEAD, '
+    print(f'saved {path}: {state} against HEAD, '
           f'{len(payload)} bytes in {entry}')
     return 0
 
@@ -173,13 +222,18 @@ def restore(path, store):
         with open(os.path.join(entry, 'mode'), 'r',
                   encoding='ascii') as handle:
             mode = int(handle.read().strip(), 8)
+        state = _recorded_state(entry)
+        # Decided from the bytes on disk before the publish, so the
+        # report never has to read back a write it cannot prove.
+        changed = _differs_from(path, payload)
         _publish(path, payload)
     except OSError as why:
         return _refuse(f'cannot restore {path}: {why}; the stored copy is '
                        f'still at {entry}')
     os.chmod(path, mode)
     shutil.rmtree(entry)
-    print(f'restored {path}: {len(payload)} bytes published')
+    print(f'restored {path}: {len(payload)} bytes published'
+          f'{_published_note(state, changed)}')
     return 0
 
 
