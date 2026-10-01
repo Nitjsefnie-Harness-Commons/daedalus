@@ -23,12 +23,12 @@ copy that wins; that is the uniformity the pin is for, not a shadow of a
 different version.
 
 A runner image shipping a shellcheck of its own is not a supply route this
-relies on. It was, once: the `timed` job invokes its interpreters by
-absolute path, so a venv's console scripts are invisible to the suites
-running under it, and the job resolved shellcheck 0.9.0 from the hosted
-image while the other three doors linted with the pinned 0.11.0.1. A pin
-that is not the version running on one of the four doors is the class of
-defect this script exists to remove, so every door now installs it.
+relies on. It was, once: a job that invokes its interpreters by absolute
+path cannot see a venv's console scripts, so it resolved shellcheck 0.9.0
+from the hosted image while the other doors linted with the pinned
+0.11.0.1. A pin that is not the version running on one of the doors is
+the class of defect this script exists to remove, so every door now
+installs it.
 
 On a CI runner the installed directories are prepended to PATH for the
 steps that follow, and TOOLS is written to $GITHUB_ENV under

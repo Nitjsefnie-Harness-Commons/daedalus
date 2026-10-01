@@ -328,10 +328,10 @@ the names back before building anything that waits on or reads those names;
 the expensive teacher is a wait that burns its whole bound on a commit
 nothing ever checked.
 
-**The `speed` suite gates like any other check.** Its conclusion is waited
-on and read. It outlasts every other check on a head, and that wait is the
-cost of reading it: any "all checks concluded" condition must include it,
-since one that excludes it fires while the gate is still running.
+**The slowest check on a head gates like any other check.** Its conclusion
+is waited on and read, so any "all checks concluded" condition must include
+it: one that excludes the longest-running check fires while that check is
+still running, and reads as a settled head.
 
 ## Before and during a branch
 
@@ -376,8 +376,8 @@ What the aggregator does, and why each part is load-bearing:
 - **A success-only batch is held longer**, because a filling matrix goes quiet
   between cells and every partial tally is superseded by the next. A batch
   holding nothing but settled, actionless conclusions waits until something
-  worth reading lands or until every workflow run on that head has concluded,
-  `speed` included. An
+  worth reading lands or until every workflow run on that head has
+  concluded. An
   unanswerable workflow-runs query keeps it holding rather than flushing: a
   failed query must never look like a settled matrix.
 - **The hold is bounded** by `--max-hold` (default 600s). A push supersedes the
