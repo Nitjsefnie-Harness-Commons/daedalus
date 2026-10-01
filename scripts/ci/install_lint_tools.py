@@ -130,20 +130,17 @@ RELEASE = 'https://github.com/Nitjsefnie-OSC/actionlint/releases/download'
 ARCHITECTURES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64',
                  'arm64': 'arm64'}
 DOWNLOAD_TIMEOUT = 30
-# A connect or a read that fails is the network reaching the asset and not a
-# defect in the asset: the same URL serves the same pinned bytes on the next
-# attempt. Nothing a retry cannot change is retried — a status answer, the
-# size refusal below, the digest mismatch — and there is no sleep between
-# attempts.
+# A connect or a read that fails is the network reaching the asset and not
+# the asset answering wrong — the digest check below is what covers that.
+# Nothing a retry cannot change is retried: a 4xx, the size refusal, the
+# digest mismatch. There is no sleep between attempts.
 DOWNLOAD_ATTEMPTS = 3
 # The wall clock the attempts share, four times the per-socket bound above so
-# that three attempts each costing one still fit inside it. It bounds the
-# socket operations and nothing else: `read()` carries no timeout, and
-# MAX_TRANSFER bounds what is read rather than how long the read takes.
+# that three attempts each costing one still fit inside it.
 DOWNLOAD_BUDGET = 4 * DOWNLOAD_TIMEOUT
 # What a retry can change. A body cut short mid-transfer raises
-# IncompleteRead, an HTTPException and not an OSError, so the commonest
-# failure after a connect succeeds needs naming beside the socket ones.
+# IncompleteRead, an HTTPException and not an OSError, so a truncated body
+# needs naming beside the socket failures.
 TRANSIENT_ERRORS = (OSError, http.client.HTTPException)
 # A whole-process bound, because pip owns the wheel transfer below, so
 # the per-socket one above does not apply to it.
@@ -175,6 +172,16 @@ def _asset_name():
     return name, key
 
 
+def _worth_asking_again(why):
+    """Whether a second ask could answer differently. A status below 500 is
+    the server answering rather than failing, so it is not asked again — 429
+    and 408 included, which give up on an answer that would have changed.
+    """
+    if isinstance(why, urllib.error.HTTPError):
+        return why.code >= 500
+    return True
+
+
 def _fetch(name):
     """The release asset's bytes, bounded in size, on a per-read timeout.
 
@@ -195,13 +202,10 @@ def _fetch(name):
                     url,
                     timeout=max(1, min(DOWNLOAD_TIMEOUT, budget))) as source:
                 payload = source.read(MAX_TRANSFER + 1)
-        except urllib.error.HTTPError:
-            # A status answer whatever its status, and asked again it will
-            # answer the same: the asset is not there, or is not this one.
-            raise
-        except TRANSIENT_ERRORS:
-            if (attempt + 1 == DOWNLOAD_ATTEMPTS
-                    or time.monotonic() >= deadline):
+        except TRANSIENT_ERRORS as why:
+            exhausted = (attempt + 1 == DOWNLOAD_ATTEMPTS
+                         or time.monotonic() >= deadline)
+            if exhausted or not _worth_asking_again(why):
                 raise
             continue
         if len(payload) > MAX_TRANSFER:
