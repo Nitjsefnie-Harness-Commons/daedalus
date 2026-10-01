@@ -140,9 +140,8 @@ def _entry_fields(output):
 
 
 def _write_state(store, value):
-    """Put `value` in the entry's recorded state, whatever a save put
-    there - the field is a file, and a hand-edited one is a shape a
-    store can genuinely hold."""
+    """Put `value` where a save put its own: the field is a file, and a
+    hand-edited one is a shape a store can genuinely hold."""
     (_only_entry(store) / 'head-state').write_text(f'{value}\n',
                                                   encoding='utf-8')
 
@@ -152,7 +151,6 @@ def _drop_the_state_field(store):
 
 
 def _saved_then_planted(tmp, payload=_FIXED):
-    """A stored payload and a planted file, ready for one restore."""
     target = _repo(tmp)
     store = Path(tmp) / 'store'
     target.write_bytes(payload)
@@ -288,10 +286,9 @@ def _assert_the_read_is_refused(target, as_nobody):
 
 
 def _restore_over_a_target_nothing_can_read(target, store):
-    """Restore a target whose bytes cannot be read, and hand back the
-    result. The arrangement is a real write-only mode, not a mock:
-    `os.replace` needs the directory, which the child owns, so the
-    publish lands while the read before it cannot.
+    """A real write-only mode, not a mock: `os.replace` needs the
+    directory, which the child owns, so the publish lands while the read
+    before it cannot.
     """
     if os.name != 'posix':
         _util.skip('POSIX mode bits are what refuse the read')

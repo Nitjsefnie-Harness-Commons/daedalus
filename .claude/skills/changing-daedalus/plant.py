@@ -88,10 +88,9 @@ def _publish(target, payload):
 
 
 def _differs_from(path, payload):
-    """Whether the target's bytes DIFFER from the payload, or None when
-    they could not be read: a comparison that was not made is not one
-    that found no difference. A target that is not there holds nothing,
-    which is a difference, so absence is settled before the open."""
+    """True when the target's bytes differ, None when they could not be
+    read: a comparison that was not made is not one that found no
+    difference."""
     if not os.path.exists(path):
         return True
     try:
@@ -102,7 +101,6 @@ def _differs_from(path, payload):
 
 
 def _recorded_field(entry, name):
-    """One field the entry recorded, or None when it never wrote it."""
     try:
         with open(os.path.join(entry, name), 'r', encoding='utf-8',
                   errors='replace') as handle:
@@ -112,14 +110,11 @@ def _recorded_field(entry, name):
 
 
 def _vouched_state(state):
-    """The recorded state this helper stands behind. Anything else, the
-    empty string included, is 'unknown'."""
+    """The recorded state this helper stands behind, or 'unknown'."""
     return state if state in ('clean', 'dirty') else 'unknown'
 
 
 def _recorded_state(entry):
-    """The state the save recorded; 'unknown' for an entry written before
-    the field existed, and for any value this helper cannot vouch for."""
     return _vouched_state(_recorded_field(entry, 'head-state'))
 
 
@@ -133,13 +128,9 @@ _WHAT_PUBLISHED = {
 
 
 def _published_note(state, changed):
-    """What a byte count cannot carry: the state the stored copy was
-    taken in, whether these bytes are the worktree's, and whether the
-    target already held them."""
     clauses = [f'captured {state} against HEAD']
-    # Only `dirty` supports the claim. `unknown` also covers a work tree
-    # whose status could not be read, and the bytes there may be exactly
-    # HEAD's.
+    # `unknown` also covers a work tree whose status could not be read,
+    # and the bytes there may be exactly HEAD's.
     if state == 'dirty':
         clauses.append(
             "the published bytes are the worktree's, not what HEAD holds")
@@ -150,8 +141,7 @@ def _published_note(state, changed):
 def _stored_matches(path, entry):
     """True, False, or None when either side could not be read: a store
     that will not open its own bytes is not evidence that the file moved
-    on, and the two sides are compared by one helper so one comparison
-    has one failure mode."""
+    on."""
     try:
         with open(os.path.join(entry, 'bytes'), 'rb') as handle:
             stored = handle.read()
@@ -162,8 +152,7 @@ def _stored_matches(path, entry):
 
 
 def _entry_advice(path, entry):
-    """Advice that never recommends a restore it cannot show is
-    lossless, and never asserts a history it could not read."""
+    """Advice that never recommends a restore it cannot show is lossless."""
     matched = _stored_matches(path, entry)
     if matched is None:
         return ('but neither that copy nor the file could be read, so '
