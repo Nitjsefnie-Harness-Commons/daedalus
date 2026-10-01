@@ -395,7 +395,8 @@ def test_the_staller_is_named_when_the_bystander_misses_the_bound_too(tmp):
     assert result.returncode == 1, (result.returncode, result.stdout)
     staller_block = _suite_block(result.stdout, 'test_staller.py')
     assert _timeout_record(_OVERRUN_BOUND_S) in staller_block, result.stdout
-    assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
+    assert 'test_staller.py' in _failed_suites(result.stdout), (
+        result.stdout, result.stderr)
     assert '=== test_passer.py ===' in result.stdout, result.stdout
 
 
