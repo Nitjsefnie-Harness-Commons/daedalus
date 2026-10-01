@@ -362,12 +362,10 @@ def test_a_count_over_budget_is_a_violation_carrying_its_remedy(tmp):
     names = journeys().NAMES
     document = budget_document()
     counts = {name: 1000 for name in names}
-    shapes = {name: ['a' * 64] for name in names}
-    assert not any(policy.violations(
-        counts, shapes, document, names).values())
+    assert not any(policy.violations(counts, document, names).values())
     over = dict(counts, **{names[0]: 1200})
-    found = policy.violations(over, shapes, document, names)
-    assert sorted(found) == ['over', 'shape', 'unmeasured']
+    found = policy.violations(over, document, names)
+    assert sorted(found) == ['over', 'unmeasured']
     assert found['over'] == {names[0]: (1200, 1100.0)}, found['over']
     assert policy.REMEDY_FOR['over'] == policy.OVER_REMEDY
     assert 'never raised by hand' in policy.REMEDY_FOR['over']
@@ -380,11 +378,8 @@ def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
     document = budget_document(journeys={
         names[0]: 1000, names[1]: None, names[2]: None})
     measured = {names[0]: 1000, names[1]: 10 ** 9, names[2]: 10 ** 9}
-    found = policy.violations(measured,
-                              {name: ['a' * 64] for name in names},
-                              document, names)
+    found = policy.violations(measured, document, names)
     assert not found['over'], found
-    assert not found['shape'], found
     assert not found['unmeasured'], found
     assert policy.unrecorded(document, names) == sorted(names[1:])
 
@@ -400,11 +395,9 @@ def test_a_counter_this_runner_refuses_is_a_violation_not_a_pass(tmp):
     policy = _journey_contract.policy()
     names = journeys().NAMES
     document = budget_document()
-    shapes = {name: ['a' * 64] for name in names}
     assert not any(policy.violations(
-        {name: 1 for name in names}, shapes, document, names).values())
-    found = policy.violations({name: None for name in names}, shapes,
-                              document, names)
+        {name: 1 for name in names}, document, names).values())
+    found = policy.violations({name: None for name in names}, document, names)
     assert found['unmeasured'] == {
         name: 'perf-instructions' for name in names}, found['unmeasured']
     assert not found['over'], found['over']
@@ -412,21 +405,39 @@ def test_a_counter_this_runner_refuses_is_a_violation_not_a_pass(tmp):
     assert 'measured nothing' in policy.REMEDY_FOR['unmeasured']
 
 
-def test_a_sha_mismatch_is_a_violation_naming_both_shas(tmp):
-    del tmp
+def test_rounds_that_disagree_are_a_refusal_naming_both(tmp):
+    """A measurement whose rounds disagree about what a journey rendered.
+
+    This case used to live in `violations`, where `main` could no longer reach
+    it — the sha gate refuses first — so it is pinned on the gate that owns
+    it, and the remedy it prints is the one a reader is sent to.
+    """
     policy = _journey_contract.policy()
     names = journeys().NAMES
-    document = budget_document()
     first, second = 'a' * 64, 'b' * 64
-    shapes = {name: [first] for name in names}
-    shapes[names[0]] = [first, second]
-    found = policy.violations({name: 1 for name in names}, shapes,
-                              document, names)
-    assert found['shape'] == {names[0]: [first, second]}, found['shape']
-    assert not found['over'], found['over']
-    assert not found['unmeasured'], found['unmeasured']
-    assert policy.REMEDY_FOR['shape'] == policy.SHAPE_REMEDY
-    assert 'not comparable' in policy.REMEDY_FOR['shape']
+    agreed = {name: [first] for name in names}
+    differs = {name: [first] for name in names}
+    differs[names[0]] = [first, second]
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main([
+            'check', '--artifact', str(artifact),
+            '--measurements', str(_report_file(
+                tmp, {}, dict(recorded_maps(), shas=differs)))])
+    assert code == 0, spoken.getvalue()
+    said = spoken.getvalue()
+    assert f'  {names[0]}: recorded' in said, said
+    assert first in said and second in said, said
+    # Both sides are round-lists here, which is the shape a caller holding a
+    # measurement's own map has; the recorded artefact holds one string and
+    # compares the same way.
+    found_diff = policy.sha_diff(agreed, differs)
+    assert list(found_diff) == [names[0]], found_diff
+    assert found_diff[names[0]] == ([first], [first, second]), found_diff
+    assert policy.sha_diff({name: first for name in names}, differs) == {
+        names[0]: (first, [first, second])}
 
 
 def test_the_check_command_refuses_with_the_remedy_it_promises(tmp):
@@ -551,7 +562,27 @@ def test_an_artefact_that_cannot_be_read_says_which_way_it_failed(tmp):
                                               'front-end-import']}),
              'repeats a role'),
             (over('excluded_threads', {name: ['no-such-role']}),
-             'unknown excluded thread role')):
+             'unknown excluded thread role'),
+            # The bands and the shas each refuse in their own words, and the
+            # exact fragment is the assertion: a plausible simplification of
+            # either — a band of any size, a sha of any shape — has to die
+            # here rather than pass and be caught by a later run.
+            (over('thread_bands', 'big'), 'thread_bands must be an object'),
+            (over('thread_bands', {'no-such-band': 1}),
+             'unknown thread band'),
+            (over('thread_bands', {'front-end-import': 0}),
+             'a thread band must be a positive integer'),
+            (over('shas', 'one'), 'shas must be an object'),
+            (over('shas', {'no-such-journey': 'a' * 64}),
+             'shas names a journey with no count'),
+            (over('shas', {name: 'abc'}), '64 lowercase hex characters'),
+            (over('shas', {name: '  '}),
+             'a recorded sha is a non-empty string'),
+            # A PADDED sha is the one this table could have missed: the
+            # length check strips and the hex check did not, so it validated
+            # and then read as a change rather than a format refusal.
+            (over('shas', {name: f'  {"a" * 64}  '}),
+             '64 lowercase hex characters')):
         try:
             policy._validated(document)
         except ValueError as error:

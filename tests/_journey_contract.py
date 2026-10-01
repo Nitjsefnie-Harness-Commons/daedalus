@@ -49,12 +49,6 @@ def counters():
     return _util.load(source, 'journey_counters_contract')
 
 
-def artifact():
-    """The artefact's document module, loaded the way the others are."""
-    source = ROOT / 'scripts' / 'ci' / 'journey_artifact.py'
-    return _util.load(source, 'journey_artifact_contract')
-
-
 def summaries():
     """The step-summary module, loaded the way the policy module loads it.
 
@@ -109,7 +103,6 @@ def measurements_file(path, document, **over):
               'toolchain': dict(over.get('toolchain', IDENTITY)),
               'excluded_threads': {name: list(threads().excluded_for(name))
                                    for name in names},
-              'thread_bands': dict(threads().BANDS),
               'counters': {'perf-instructions': {
                   'available': True, 'startup_only': 0,
                   'journeys': {name: {'min': 5000, 'max': 5000,
@@ -166,8 +159,7 @@ def recorded_maps():
     return {'shas': fixture_shas(),
             'toolchain': dict(IDENTITY),
             'excluded_threads': {name: list(policy.excluded_for(name))
-                                 for name in journeys().NAMES},
-            'thread_bands': dict(policy.BANDS)}
+                                 for name in journeys().NAMES}}
 
 
 def _report_file(tmp, toolchain_over, maps):

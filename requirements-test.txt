@@ -16,5 +16,7 @@ PyYAML==6.0.3
 # suites lints with the version named here — including a job that runs its
 # interpreters by absolute path and therefore cannot see a console script
 # installed in a virtualenv, and which used to resolve a shellcheck from
-# its runner image at a version no pin named.
+# its runner image at a version no pin named. A job that installs this
+# file also has the binary; on those the installer's copy is first on PATH
+# and is the same version, so the two routes cannot disagree.
 shellcheck-py==0.11.0.1

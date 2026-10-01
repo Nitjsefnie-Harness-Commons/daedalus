@@ -1051,7 +1051,6 @@
     "apply_state_dict_statement": {"python": ["tests/_pyroute_state.py"]},
     "argument": {"python": ["tests/_control_calls.py"]},
     "argument_defaults": {"python": ["tests/_pyroute_state.py"]},
-    "artifact": {"python": ["tests/_journey_contract.py"]},
     "assert_argparse_mutex_storage_contract": {"python": ["tests/_cli_arg_audit_support.py"]},
     "assert_argparse_storage_contract": {"python": ["tests/_cli_arg_audit_support.py"]},
     "assert_broken_worker_is_a_failure": {"python": ["tests/_realbrowser_broken_worker.py"]},
