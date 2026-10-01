@@ -18,10 +18,12 @@ on:
     # Ratchet commits change only this data; audit still gates those pushes.
     # The suite-timings data file joins it: a refresh commit changes one
     # JSON file, and a full matrix run would measure a tree whose code did
-    # not change.
+    # not change. The journey budget's counts join them: a tighten commit
+    # changes one JSON file, and the ratchet that wrote it already ran.
     paths-ignore:
       - '.github/ci-thresholds.json'
       - '.github/suite-timings.json'
+      - '.github/journey-budget.json'
     # release.yml needs a run on the tagged SHA; audit remains unfiltered.
     #
     # Documentation-only runs are narrowed inside the workflow instead, by
@@ -2244,6 +2246,71 @@ jobs:
           else
             echo "No cell uploaded a verdict, so no speed comparison ran."
           fi
+
+  # What three real user journeys cost, counted in instructions rather than
+  # in the wall clock a test function happened to take.
+  #
+  # It measures the TREE, not a verdict about it, so it names no `needs:` and
+  # no `if:` — it runs on a documentation-only change, on a manual dispatch,
+  # and on a tree whose correctness gates are red, because a number nobody
+  # asked for is still a number worth having. It carries no `name:` for the
+  # reason `speed` did: the job id IS the check-run name, and a `name:` here
+  # would be the one that renames it.
+  journey-budget:
+    runs-on: ubuntu-latest
+    # Generous for the worst case the probe finds: three journeys under
+    # callgrind, each spawning a real bridge, is minutes rather than seconds.
+    timeout-minutes: 45
+
+    steps:
+      # actions/checkout v7.0.1
+      - uses: >-
+          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # Nothing here pushes, and a token left in .git/config
+          # is reusable by every later step in the job.
+          persist-credentials: false
+
+      # actions/setup-python v7.0.0
+      - uses: >-
+          actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+
+      # The MCP journey loads the real MCP front end, and the front end's own
+      # dependencies are what a bare interpreter cannot import.
+      - name: Install the test dependencies and project
+        run: |
+          python -m pip install --upgrade pip . ".[mcp]"
+          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements-dev.txt
+
+      # What this runner actually allows, decided by measurement. Which
+      # counter is legal is a property of the kernel the job lands on, so it
+      # is asked here rather than assumed in the script below.
+      - name: Probe the counters
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 scripts/ci/journey_budget.py probe --summary
+
+      # One round. These counts are deterministic, and the paired statistic
+      # over a discarded warm-up that the speed cells use buys nothing here.
+      - name: Measure the journeys
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          COUNTS: ${{ runner.temp }}/journey-counts.json
+        run: |
+          python3 scripts/ci/journey_budget.py measure --root . \
+            --out "$COUNTS"
+
+      - name: Check the journeys against the budget
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          COUNTS: ${{ runner.temp }}/journey-counts.json
+        run: |
+          python3 scripts/ci/journey_budget.py check --root . \
+            --measurements "$COUNTS" --summary
+
   aggregate:
     name: Aggregate workflow checks
     if: ${{ always() }}
@@ -2258,6 +2325,7 @@ jobs:
       - wheel
       - coverage-matrix
       - coverage
+      - journey-budget
       # The timed cells' matrix is planned by a job, so the planner is a
       # gate like every other job here: a planner that cannot plan (a
       # missing or refused timings file, a bound the margin forbids) turns

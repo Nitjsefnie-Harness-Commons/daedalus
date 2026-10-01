@@ -73,6 +73,7 @@
 !/.github/PULL_REQUEST_TEMPLATE.md
 !/.github/ci-thresholds.json
 !/.github/dependabot.yml
+!/.github/journey-budget.json
 !/.github/reserved-test-names.json
 !/.github/suite-timings.json
 
@@ -242,6 +243,8 @@
 !/scripts/ci/diff_coverage.py
 !/scripts/ci/gate_freshness.py
 !/scripts/ci/install_lint_tools.py
+!/scripts/ci/journey_budget.py
+!/scripts/ci/journey_counters.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
 !/scripts/ci/js_module_coverage.py
@@ -357,6 +360,7 @@
 !/tests/_hotfix_quota_scenario.py
 !/tests/_hotfixharness.py
 !/tests/_imported_calls.py
+!/tests/_journeys.py
 !/tests/_js_functions.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
@@ -658,6 +662,7 @@
 !/tests/test_hotfix_store.py
 !/tests/test_http_transport.py
 !/tests/test_install_lint_tools.py
+!/tests/test_journey_budget.py
 !/tests/test_js_coverage.py
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
