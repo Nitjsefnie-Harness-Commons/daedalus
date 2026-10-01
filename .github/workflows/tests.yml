@@ -1288,9 +1288,11 @@ jobs:
       # these counts are deterministic, so a discarded warm-up round buys
       # nothing. A higher value exists to derive a tolerance from a spread,
       # once, and is not what every run should pay for — three is how each
-      # baseline's tolerance has been measured, on the per-journey number,
-      # and it goes back to one as soon as that recording is made.
-      JOURNEY_ROUNDS: "1"
+      # baseline's tolerance has been measured, on the per-journey number.
+      # It is three here because the runner image moved under the recorded
+      # identity, so the counts must be re-measured before that baseline can
+      # be re-recorded, and it goes back to one as soon as it is.
+      JOURNEY_ROUNDS: "3"
 
     steps:
       # actions/checkout v7.0.1

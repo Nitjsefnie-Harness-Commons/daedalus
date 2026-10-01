@@ -16,6 +16,7 @@ from _journey_contract import (  # noqa: E402
     budget_document,
     counter_facts,
     journeys,
+    planting,
     measurements_file,
     probe,
 )
@@ -113,26 +114,23 @@ def test_the_measurement_carries_the_median_the_check_compares(tmp):
     del tmp
     counters = _journey_contract.counters()
     names = journeys().NAMES
-    saved = (counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME)
     seen = []
 
-    def planted(name, root, workdir):
+    def answering(name, root, workdir):
         del root, workdir
         seen.append(name)
         return 1000 + len(seen), None
 
-    try:
-        counters.shapes = lambda names, root, rounds: (
-            {name: ['shape-' + name] for name in names}, None)
-        # `syscalls`, because a counter the probe would not use is reported
-        # unavailable without being run, and this is about what happens once
-        # one has been chosen.
-        counters.COUNTERS = ('syscalls',)
-        counters.COUNTERS_BY_NAME = {'syscalls': (planted, True)}
+    # `syscalls`, because a counter the probe would not use is reported
+    # unavailable without being run, and this is about what happens once
+    # one has been chosen.
+    with planting(counters,
+                  shapes=lambda names, root, rounds: (
+                      {name: ['shape-' + name] for name in names}, None),
+                  COUNTERS=('syscalls',),
+                  COUNTERS_BY_NAME={'syscalls': (answering, True)}):
         report = counters.measure(root=ROOT, rounds=2,
                                   found=counter_facts())
-    finally:
-        counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME = saved
     assert seen[0] == 'startup-only', seen
     assert seen.count('startup-only') == 1, seen
     assert len(seen) == 1 + 2 * len(names), seen
@@ -162,18 +160,15 @@ def test_a_counter_this_runner_cannot_produce_is_reported_not_assumed(tmp):
     """An unavailable counter is unavailable, and the row says so."""
     del tmp
     counters = _journey_contract.counters()
-    saved = (counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME)
-    try:
-        counters.shapes = lambda names, root, rounds: (
-            {name: ['s'] for name in names}, None)
-        counters.COUNTERS = ('syscalls',)
-        counters.COUNTERS_BY_NAME = {
-            'syscalls': (lambda name, root, workdir: (
-                None, 'this runner will not count this'), True)}
+    with planting(counters,
+                  shapes=lambda names, root, rounds: (
+                      {name: ['s'] for name in names}, None),
+                  COUNTERS=('syscalls',),
+                  COUNTERS_BY_NAME={
+                      'syscalls': (lambda name, root, workdir: (
+                          None, 'this runner will not count this'), True)}):
         report = counters.measure(root=ROOT, rounds=1,
                                   found=counter_facts())
-    finally:
-        counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME = saved
     row = report['counters']['syscalls']
     assert row['available'] is False, row
     assert 'will not count' in row['why'], row
@@ -183,15 +178,12 @@ def test_a_journey_that_prints_no_record_stops_the_measurement(tmp):
     """A shape nobody can read is a refusal, not a count of zero."""
     del tmp
     counters = _journey_contract.counters()
-    saved = counters.shapes
-    try:
-        counters.shapes = lambda names, root, rounds: (
-            None, 'the dashboard-fanout journey printed no record '
-                  '(returncode 1): boom')
+    with planting(counters,
+                  shapes=lambda names, root, rounds: (
+                      None, 'the dashboard-fanout journey printed no record '
+                      '(returncode 1): boom')):
         report = counters.measure(root=ROOT, rounds=1,
                                   found=counter_facts())
-    finally:
-        counters.shapes = saved
     assert 'printed no record' in report['shape_failure']
     assert report['counters'] == {}
 
@@ -223,7 +215,6 @@ def test_a_counter_that_stops_mid_measurement_stops_the_measurement(tmp):
     del tmp
     counters = _journey_contract.counters()
     names = journeys().NAMES
-    saved = (counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME)
     answered = []
 
     def flaky(name, root, workdir):
@@ -233,15 +224,13 @@ def test_a_counter_that_stops_mid_measurement_stops_the_measurement(tmp):
             return None, 'this runner stopped counting'
         return 1000, None
 
-    try:
-        counters.shapes = lambda names, root, rounds: (
-            {name: ['s'] for name in names}, None)
-        counters.COUNTERS = ('syscalls',)
-        counters.COUNTERS_BY_NAME = {'syscalls': (flaky, True)}
+    with planting(counters,
+                  shapes=lambda names, root, rounds: (
+                      {name: ['s'] for name in names}, None),
+                  COUNTERS=('syscalls',),
+                  COUNTERS_BY_NAME={'syscalls': (flaky, True)}):
         report = counters.measure(root=ROOT, rounds=2,
                                   found=counter_facts())
-    finally:
-        counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME = saved
     row = report['counters']['syscalls']
     assert row['available'] is False, row
     assert 'stopped counting' in row['why'], row
@@ -254,25 +243,23 @@ def test_a_counter_that_will_not_start_is_reported_before_it_is_run(tmp):
     del tmp
     counters = _journey_contract.counters()
     names = journeys().NAMES
-    saved = (counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME)
     ran = []
 
-    def planted(name, root, workdir):
+    def answering(name, root, workdir):
         del root, workdir
         ran.append(name)
         return 1000, None
 
-    try:
-        counters.shapes = lambda names, root, rounds: (
-            {name: ['s'] for name in names}, None)
-        counters.COUNTERS = ('syscalls', 'valgrind-callgrind')
-        counters.COUNTERS_BY_NAME = {'syscalls': (planted, True),
-                                     'valgrind-callgrind': (planted, True)}
-        found = counter_facts()
-        found['valgrind_path'] = None
+    found = counter_facts()
+    found['valgrind_path'] = None
+    with planting(counters,
+                  shapes=lambda names, root, rounds: (
+                      {name: ['s'] for name in names}, None),
+                  COUNTERS=('syscalls', 'valgrind-callgrind'),
+                  COUNTERS_BY_NAME={
+                      'syscalls': (answering, True),
+                      'valgrind-callgrind': (answering, True)}):
         report = counters.measure(root=ROOT, rounds=1, found=found)
-    finally:
-        counters.shapes, counters.COUNTERS, counters.COUNTERS_BY_NAME = saved
     assert ran and set(ran) <= {'startup-only', *names}, ran
     row = report['counters']['valgrind-callgrind']
     assert row == {

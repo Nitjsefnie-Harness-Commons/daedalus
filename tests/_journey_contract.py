@@ -6,6 +6,7 @@ module here exists: the loaders are the same four lines, and a duplicated
 loader is one that drifts from the module it names without anything
 noticing. Not a suite itself — `run_tests.py` only loads `test_*.py`.
 """
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -129,3 +130,29 @@ def counter_facts():
     found['perf_stat'] = {'event': 'instructions:u', 'returncode': 0,
                           'counts': False, 'stderr': 'not permitted'}
     return found
+
+
+@contextlib.contextmanager
+def planting(module, **attributes):
+    """Set a loaded module's attributes for a block, and put them back.
+
+    `setattr` rather than `module.name = ...`, because the module came out
+    of `_util.load` and a type checker knows nothing about its attributes:
+    the assignment is exactly the shape it cannot see, and a reader of the
+    test is no better off. This is the planting idiom `tests/_cli_dispatch`
+    already uses, and the restore matters as much as the set — a module
+    object outlives the test that loaded it.
+    """
+    missing = object()
+    saved = {name: getattr(module, name, missing)
+             for name in attributes}
+    try:
+        for name, value in attributes.items():
+            setattr(module, name, value)
+        yield module
+    finally:
+        for name, value in saved.items():
+            if value is missing:
+                delattr(module, name)
+            else:
+                setattr(module, name, value)

@@ -1501,6 +1501,7 @@
     "planted_finding_marker": {"python": ["tests/_actionlint.py"]},
     "planted_job": {"python": ["tests/_actionlint.py"]},
     "planted_module_copy": {"python": ["tests/_composed_bounds.py"]},
+    "planting": {"python": ["tests/_journey_contract.py"]},
     "poisonedThen": {"javascript": ["tests/_evalpages.py"]},
     "policy": {"python": ["tests/_journey_contract.py"]},
     "pollTarget": {"javascript": ["tests/_dashsection_transport.py"]},
