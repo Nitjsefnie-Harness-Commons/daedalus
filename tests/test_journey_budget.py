@@ -566,10 +566,7 @@ def test_nothing_recorded_is_a_refusal_rather_than_a_pass(tmp):
     falling through would compare a count against a question never asked."""
     policy = _journey_contract.policy()
     names = journeys().NAMES
-    for field, subject in (('toolchain', 'toolchain'),
-                           ('excluded_threads', 'excluded threads'),
-                           ('thread_bands', 'thread bands'),
-                           ('shas', 'journey shas')):
+    for field, subject in _journey_contract.never_recorded_gates():
         artifact = Path(tmp) / f'{field}.json'
         document = recorded_document()
         document.pop(field, None)
@@ -621,18 +618,18 @@ def test_the_bands_a_count_measured_under_are_recorded(tmp):
 def test_the_re_baseline_block_carries_what_a_paste_needs(tmp):
     """The block a reader pastes, read back and handed to the validator.
 
-    Two claims, and they are the direction a wrong block fails in. It must
-    carry every field the schema requires and nothing it refuses — so the
-    field list is walked, not trusted. And it must carry NO recorded count
-    and a NON-NULL tolerance: old counts riding inside the thing that
-    replaces them can leave a budget ABOVE the new counts, and then a
-    regression passes. That is the false-green direction, which is the only
-    direction this control is for; a wrong remedy STRING is the over-refusal
-    side of the same line and is disclosed in the PR body instead.
+    Both claims are the direction a wrong block fails in: it must carry
+    every field the schema requires and nothing it refuses — the field list
+    is walked, not trusted — and no recorded count and no tolerance of its
+    own, since either can leave a budget above the new counts and let a
+    regression through. A wrong remedy STRING can only over-refuse, and a
+    reader who follows it re-baselines, so it carries no control here.
     """
     del tmp
     summaries = _journey_contract.summaries()
-    document = recorded_document()
+    # A tolerance the fixture does not default to, so a block that hardcoded
+    # the default would pass with it and re-loosen the pasted budget.
+    document = recorded_document(tolerance_pct=2.5)
     lines = summaries.rebaseline_lines(
         _journey_contract.fixture_report(), document)
     fenced = [index for index, line in enumerate(lines) if line == '```json']

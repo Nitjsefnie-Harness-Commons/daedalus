@@ -234,11 +234,6 @@ def recorded_toolchain(document):
     return recorded if any(recorded.values()) else None
 
 
-def recorded_exclusions(document):
-    """The recorded per-journey roles, or None before anything is recorded."""
-    return document.get('excluded_threads')
-
-
 def sha_diff(recorded, measured):
     """Every journey whose recorded sha this measurement does not carry.
 
