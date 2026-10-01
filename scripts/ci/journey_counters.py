@@ -77,7 +77,11 @@ def journey_names():
     """
     sys.path.insert(0, str(JOURNEYS.parent))
     try:
-        import _journeys
+        # The pyright config excludes `tests/`, where this module lives, so
+        # pyright cannot resolve a name that `sys.path` above resolves at
+        # runtime. The suppression states that property of the config; an
+        # unresolvable import is `Any` to pyright either way.
+        import _journeys  # pyright: ignore[reportMissingImports]
     finally:
         sys.path.pop(0)
     return tuple(_journeys.NAMES)
@@ -359,8 +363,9 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 'available': True,
                 'gated': counter in GATE_CANDIDATES,
                 'startup_only': startup if childed else None,
-                'journeys': {name: _row(rows[name], startup if childed
-                                         else 0) for name in names}}
+                'journeys': {
+                    name: _row(rows[name], startup if childed else 0)
+                    for name in names}}
     return report
 
 
