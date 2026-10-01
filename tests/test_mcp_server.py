@@ -860,30 +860,41 @@ def test_port_zero_bridge_mcp_list_tabs_round_trip(tmp):
 
 
 def test_ping_tool_round_trip(tmp):
-    """ping() PUTs a command and correlates the extension's result delivery."""
+    """ping() PUTs a command and correlates the extension's result delivery.
+
+    The second half drives `exec`, which reaches its result through
+    `_send_eval` rather than ping's own put-and-poll. Rewriting the branch's
+    harness to send unwaited left that waited eval round trip with no live
+    witness anywhere, and a compatibility claim nobody exercises is a claim
+    nobody can catch breaking; the simulator answers the tab-targeted
+    command exactly as it answers the broadcast one.
+    """
     _need_deps()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
 
         qdir = Path(docroot) / 'commands' / TOK
+        tab_qdir = Path(docroot) / 'commands' / f'{TOK}_waited'
         answered = set()
         failure = []
 
-        def extension(world):
+        def extension(world, tab=''):
             try:
+                queue = tab_qdir if tab else qdir
                 command = queued_command(
-                    qdir, 'the ping command', exclude=answered)
-                queued = sorted(path for path in qdir.glob('*.json')
+                    queue, 'the waited command', exclude=answered)
+                queued = sorted(path for path in queue.glob('*.json')
                                 if path.name not in answered)
                 assert len(queued) == 1, queued
                 answered.add(queued[0].name)
                 status, _ = _util.post_json(base + '/result', {
-                    'token': TOK, 'id': command['id'], 'result': 'MCP Title',
-                    'error': None, 'ts': 1, 'world': world,
-                    '_did': command['_did']})
+                    'token': TOK, 'tabId': tab, 'id': command['id'],
+                    'result': 'MCP Title', 'error': None, 'ts': 1,
+                    'world': world, '_did': command['_did']})
                 assert status == 200, status
-                queued[0].unlink()  # ping repeats one payload; drain it
+                if not tab:
+                    queued[0].unlink()  # ping repeats one payload; drain it
             except Exception as exc:  # test-thread diagnosis, surfaced below
                 failure.append(exc)
 
@@ -896,7 +907,20 @@ def test_ping_tool_round_trip(tmp):
             assert res['title'] == 'MCP Title', res
             assert res['world'] == world, res
             assert isinstance(res['ms'], int) and res['ms'] >= 0, res
-        assert len(answered) == 2, answered
+
+        t = threading.Thread(target=extension, args=('page-main', 'waited'))
+        t.start()
+        with _surface_responder_errors(t, failure, 20):
+            evaluated = asyncio.run(mod.exec(
+                tab_id='waited', cmd_id='_waited', code='1 + 1'))
+        # The envelope comes back whole, with `value` grafted; the two
+        # per-run fields in it are the bridge's own and are not pinned.
+        assert evaluated['id'] == '_waited', evaluated
+        assert evaluated['tabId'] == 'waited', evaluated
+        assert evaluated['world'] == 'page-main', evaluated
+        assert evaluated['value'] == 'MCP Title', evaluated
+        assert evaluated['error'] is None, evaluated
+        assert len(answered) == 3, answered
 
 
 def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
