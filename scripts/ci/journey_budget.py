@@ -318,6 +318,11 @@ def main(argv=None):
         found = violations(counts, report.get('shas') or {}, document, names)
 
         if args.tighten:
+            # A shape failure refuses a tighten as firmly as it refuses a
+            # check: a count taken from a journey that no longer renders the
+            # same way is not a cheaper journey, it is a different one.
+            if _report_state(document, names, counter, report):
+                return 1
             updated = tightened(counts, document, names)
             if updated is None:
                 print('no journey measured below its recorded count')
