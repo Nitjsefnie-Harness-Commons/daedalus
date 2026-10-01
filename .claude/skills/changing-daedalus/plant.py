@@ -269,11 +269,8 @@ def restore(path, store):
                        f'still at {entry}')
     # Past here the bytes are published, so no refusal may read as a
     # restore that did not happen. The chmod must land before the entry
-    # goes: the entry carries the recorded mode. Neither this `OSError`
-    # arm nor that order is reachable by any in-suite arrangement -
-    # chmod fails here on a property of the filesystem or the platform,
-    # not of the file's mode. Whether the chmod ran is the control in
-    # `tests/test_plant_restore.py`.
+    # goes: the entry carries the recorded mode. No in-suite
+    # arrangement reaches this arm; it catches `OSError` as a class.
     try:
         os.chmod(path, mode)
     except OSError as why:
