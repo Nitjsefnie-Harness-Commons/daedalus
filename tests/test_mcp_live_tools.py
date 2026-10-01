@@ -165,10 +165,16 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
         mod = _load_mcp(base)
         # what daedalus_mcp.auth.BearerAuth does per request
         mod._token.set(TOK)
+        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
         for name, (cmd_type, fields, build) in LIVE_ROWS.items():
-            value, queued = _answer_mcp_command(
+            # A file an earlier iteration left behind is the OLDER of the
+            # two, so comparing the first would pass against the wrong
+            # command for the rest of the loop. Empty the queue before the
+            # send instead of unlinking after it.
+            for leftover in queue.glob('*.json'):
+                leftover.unlink()
+            _value, queued = _answer_mcp_command(
                 base, docroot, mod, build(mod), {})
-            assert value == {'command': queued}, (name, value, queued)
             assert queued.get('type') == cmd_type, (name, cmd_type, queued)
             # Routing is consumed at enqueue time, so the queue a command was
             # read from is what proves it addressed the extension worker.
@@ -177,13 +183,13 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
                 assert queued.get(key) == expected, (
                     name, cmd_type, key, queued)
             # The reported command is the file the bridge published, not a
-            # reconstruction of it.
-            queue = Path(docroot) / 'commands' / f'{TOK}_extension'
+            # reconstruction of it, and the file is named by the delivery id
+            # the report carries.
             published = sorted(queue.glob('*.json'))
-            assert published, (name, cmd_type)
+            assert [path.name for path in published] == [
+                f'{queued["_did"]}.json'], (name, published, queued)
             stored = json.loads(published[0].read_text(encoding='utf-8'))
             assert stored == queued, (name, stored, queued)
-            published[0].unlink()
 
 
 if __name__ == '__main__':

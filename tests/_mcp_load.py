@@ -210,9 +210,13 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     mod._token.set(TOK)
     value = asyncio.run(call())
     queued = value.get('command') if isinstance(value, dict) else None
-    if not queued:
+    # Named before the answer, not while posting it: a truthy command that
+    # is missing either field would otherwise die as a bare KeyError on the
+    # next line, naming neither the tool nor what it answered.
+    if not isinstance(queued, dict) or not {'id', '_did'} <= set(queued):
         raise AssertionError(
-            f'the tool reported no command: {value!r}')
+            "a wait=False send answers {'command': <the enqueued command>}"
+            f' with its id and delivery id; got {value!r}')
     status, _ = _util.post_json(base + '/result', {
         'token': TOK, 'tabId': tab, 'id': queued['id'], 'result': result,
         'error': None, 'ts': 1, '_did': queued['_did']})
