@@ -208,6 +208,19 @@ def cdp_result(base, docroot):
     The bridge dispatches nothing itself — `tab` only chooses the queue —
     so `method` and `params` travel in the command body and the field
     names matter to the rendering rather than to the route.
+
+    ITS RECORDED BUDGET IS NEAR A BILLION INSTRUCTIONS, and that is not
+    a defect to go looking for. This journey's request thread runs to
+    roughly 47 million, which is at or above `SERVE_FROM` (10,000,000) —
+    the band `role_of` reads as uvicorn's serve loop. So `uvicorn-serve`
+    cannot be excluded here without excluding the very work the journey
+    exists to measure, and the bridge's constant serve loop is counted
+    alongside it. The front end's import IS excluded, which is what a
+    reader comparing this journey with `net-capture` will find the
+    asymmetry in: the two journeys swapped which constant they keep. Same
+    rule either way — a journey's exclusion list may never cover work the
+    journey itself caused — and the same deal of counting a constant
+    rather than dropping the band (issue 1461, bridge side).
     """
     del docroot
     status, raw = _bridge.put_command(base, {
