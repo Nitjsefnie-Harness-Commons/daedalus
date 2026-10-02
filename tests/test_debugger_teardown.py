@@ -298,6 +298,48 @@ def test_a_detach_that_throws_is_survived_and_traced(tmp):
     assert outcome['live'] == [7], outcome
 
 
+def test_a_detach_that_throws_at_the_forget_site_is_traced(tmp):
+    """The synchronous throw at the OTHER site, which nothing drove.
+
+    `cdpForgetAttachment` wraps its `chrome.debugger.detach` in the same
+    `try`/`catch` pair the release site does, so the two sites have two
+    mutants between them and a control for one leaves the other green. A
+    `try` with no `catch` is a syntax error, so "delete the handler" is
+    planted as the catch dropping the refusal, and as a catch that rethrows
+    what it caught -- which is what the missing handler would leave behind.
+
+    The two properties are the release site's, in the shape this site has
+    them: the refusal is visible, because a caught throw that leaves no
+    trace is a refused detach and a successful one indistinguishable; and
+    nothing escapes the tab-close listener that called the forget, because
+    what escapes there is the extension's service worker. The record going
+    with it is read off the later claim, which attaches for itself rather
+    than joining -- a surviving claim would show no second attach at all.
+    """
+    del tmp
+    outcome = run_attachment_case({
+        'detachThrows': True,
+        'actions': [
+            {'claim': {'tabId': 7}},
+            {'settle': 2},
+            # A closed tab: the claim still holds, so the forget asks Chrome
+            # to detach and the call throws before it returns a promise.
+            {'tabRemoved': 7},
+            {'claim': {'tabId': 7}},
+            {'settle': 8},
+        ]})
+    assert outcome['detachCalls'] == [7], outcome
+    assert outcome['unhandled'] == [], outcome
+    assert any('detach refused' in line
+               for line in outcome['refused']), outcome
+    assert any('tab 7' in line for line in outcome['refused']), outcome
+    # The record went with the forget: the later claim attached for itself
+    # rather than joining. `live == [7]` is Chrome's holding, not a claim's --
+    # the detach threw before it could give the tab back.
+    assert outcome['attachCalls'] == [7, 7], outcome
+    assert outcome['live'] == [7], outcome
+
+
 def test_a_claim_arriving_after_a_refused_detach_still_works(tmp):
     """The settling is unconditional, and this is what that buys.
 
