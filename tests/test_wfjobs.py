@@ -447,6 +447,70 @@ def test_a_bare_empty_needs_is_refused_as_not_a_list_of_names(tmp):
     assert 'needs is not a list of job names' in message, message
 
 
+def _needs_of(spelling):
+    """`_job_needs` on the shipped suites job with one `needs:` spelling."""
+    return _job_needs(_replaced(BLOCK_NEEDS, spelling), 'suites')
+
+
+def _refuses_needs(spelling):
+    """The refusal on one spelling, with the spelling in the message.
+
+    `_refuses` reports an accepted defect in its own words, so a row
+    dying by acceptance would otherwise not name which spelling regressed.
+    """
+    workflow = _replaced(BLOCK_NEEDS, spelling)
+    try:
+        message = _refuses(_job_needs, workflow, 'suites')
+    except AssertionError as accepted:
+        raise AssertionError(
+            f'{spelling!r} accepted: {accepted}') from accepted
+    assert 'not a list of job names' in message, spelling
+    return message
+
+
+def test_one_needs_dependency_reads_the_same_in_all_three_shapes(tmp):
+    """A bare scalar, a block sequence and a flow sequence name one job.
+
+    The bare scalar is a tolerance the reader grants; asserting it keeps
+    the acceptance from reading as a bug, or the bug as the acceptance.
+    """
+    del tmp
+    for spelling in ('    needs: changes\n',
+                     '    needs:\n      - changes\n',
+                     '    needs: [changes]\n'):
+        assert _needs_of(spelling) == ['changes'], spelling
+
+
+def test_a_needs_flow_sequence_names_the_same_jobs_in_order(tmp):
+    """A flow sequence decodes to the block sequence's list, in order.
+
+    Six names, not one: a one-item sequence survives any reordering.
+    """
+    del tmp
+    expected = ['changes', 'pycodestyle', 'pylint', 'pyright',
+                'eslint', 'actionlint']
+    flow = ('    needs: [changes, pycodestyle, pylint, pyright,'
+            ' eslint, actionlint]\n')
+    assert _job_needs(_tests_yml(), 'suites') == expected, 'shipped block'
+    assert _needs_of(flow) == expected, flow
+
+
+def test_a_needs_mapping_is_refused_as_not_a_list_of_names(tmp):
+    """`needs:` names jobs; a mapping there is a shape, not a spelling."""
+    del tmp
+    for spelling in ("    needs: {changes: 'true'}\n",
+                     '    needs:\n      changes: true\n'):
+        _refuses_needs(spelling)
+
+
+def test_a_needs_member_that_is_not_a_job_name_is_refused(tmp):
+    """A nested collection is a shape, so it names no job either."""
+    del tmp
+    for spelling in ('    needs: [[changes, suites], pylint]\n',
+                     '    needs: [changes, {changes: true}]\n'):
+        _refuses_needs(spelling)
+
+
 def test_a_bare_empty_outputs_is_refused_as_not_a_mapping(tmp):
     """`outputs:` with nothing under it declares no output, and says so."""
     workflow = _real(tmp, _replaced(BLOCK_OUTPUTS, '    outputs:\n'))
