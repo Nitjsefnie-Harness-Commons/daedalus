@@ -347,6 +347,12 @@ def recorded_outside_the_tool_dir(tmp):
     rules out. It must also NOT name the tool that did resolve inside, so a
     control cannot pass against a refusal that lists everything.
 
+    The path is asserted as `repr()` because that is how the refusal carries
+    it: the message interpolates `sorted(elsewhere.values())`, a list, so
+    every path in it is quoted and escaped — which on Windows means each
+    backslash appears twice, and the raw spelling is not in the message at
+    all. The directory is interpolated plainly and is asserted that way.
+
     MUTANT: drop the `if elsewhere` arm. `_record` then writes the record and
     prints it, and the control raises because no refusal came out.
     """
@@ -363,7 +369,7 @@ def recorded_outside_the_tool_dir(tmp):
     with mock.patch.object(installer, 'TOOL_DIR', tool_dir), \
             mock.patch.object(installer.shutil, 'which', finder):
         raised = _the_refusal(installer._record)
-    _must_name(raised, 'shellcheck', str(tool_dir), str(outside))
+    _must_name(raised, 'shellcheck', str(tool_dir), repr(str(outside)))
     assert 'actionlint' not in str(raised.code), (
         f'the refusal names the tool that DID resolve inside {tool_dir}: '
         f'{raised.code!r}')
