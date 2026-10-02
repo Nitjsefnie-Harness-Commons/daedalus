@@ -1315,6 +1315,7 @@
     "scan": {"python": ["tests/_helper_binds.py"]},
     "schedule": {"javascript": ["tests/_boundary_env.py", "tests/_hotfixharness.py"]},
     "scopes_for": {"python": ["tests/_mcp_code_eval.py"]},
+    "screenshot": {"python": ["tests/_journeys.py"]},
     "sectionClearParked": {"javascript": ["tests/_dashsection.py"]},
     "sectionDescribe": {"javascript": ["tests/_dashsection.py"]},
     "sectionLoad": {"javascript": ["tests/_dashsection_transport.py"]},

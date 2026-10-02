@@ -1,4 +1,4 @@
-"""The three user journeys the performance ratchet measures.
+"""The user journeys the performance ratchet measures.
 
 Not a suite itself — run_tests.py only loads `test_*.py`. `scripts/ci/
 journey_budget.py` drives each one in a fresh child process, so this module
@@ -21,6 +21,7 @@ by hand here, at the one place the shapes are known.
 """
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
 import sys
@@ -54,6 +55,53 @@ MCP_TAB = 'journeymcp'
 MCP_COMMAND_ID = 'journey-mcp-1'
 MCP_CODE = '2 + 2'
 MCP_RESULT = {'answer': 4, 'label': 'journey-mcp'}
+
+# Screenshot: the typed capture command, the store it names, and the read
+# back by the path that result carried.
+SHOT_TOKEN = 'journeyshot'
+SHOT_TAB = 'journeyshotab'
+SHOT_ID = 'journey-shot-1'
+SHOT_FILE = 'capture.png'
+# A real 1x1 PNG rather than an empty body: the store base64-decodes and
+# writes what it is given, and empty bytes would skip the decode the capture
+# always pays. Written as a literal so the size is a constant rather than
+# whatever a compressor emits for the interpreter running it.
+SHOT_PNG_B64 = (
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQ'
+    'GAhKmMIQAAAABJRU5ErkJggg==')
+
+# CDP: a typed command whose result is a real protocol response rather than
+# the two-key body the eval journeys carry.
+CDP_TOKEN = 'journeycdp'
+CDP_TAB = 'journeycdptab'
+CDP_ID = 'journey-cdp-1'
+CDP_METHOD = 'Runtime.evaluate'
+CDP_PARAMS = {'expression': 'document.querySelectorAll("*").length',
+              'returnByValue': True, 'awaitPromise': False}
+# How many element snapshots the response carries. A `Runtime.evaluate` over
+# a real page answers with one entry per matched node, so the count is what
+# makes the body the size a CDP response actually is.
+CDP_NODES = 200
+
+# Net capture: the largest result body the bridge handles. Every part of the
+# POST /result path scales with it — the depth scan reads the raw bytes, the
+# parse builds the tree, and the credential pop and re-serialisation walk it
+# again before the slot and the delivery copy are written.
+NET_TOKEN = 'journeynet'
+NET_TAB = 'journeynettab'
+NET_ID = 'journey-net-1'
+# A few thousand requests, each carrying headers and a body. `DAEDALUS_MAX_
+# UNAUTHENTICATED_BODY` is 64 KiB, so a body this size can only be posted
+# with the credential in an Authorization header; the journey does that.
+NET_REQUESTS = 2000
+NET_BODY_CHARS = 1200
+
+# Segment relay: the page-facing routes, which never touch the command
+# queue. A fixed job name is safe because every journey is measured in its
+# own process against a fresh temporary data root.
+SEG_TOKEN = 'journeyseg'
+SEG_JOB = 'journeyseg'
+SEG_COUNT = 5
 
 # The startup-only measurement: the same interpreter and the same imports as
 # a journey child, with no bridge and no journey. Every instruction counter
@@ -115,6 +163,82 @@ def command_round_trip(base, docroot):
         'result': {key: slot[key] for key in
                    ('id', 'tabId', 'result', 'error', 'world', 'ts')
                    if key in slot},
+    }
+
+
+def screenshot(base, docroot):
+    """A capture stored the way the extension stores one, and read back.
+
+    The `filename` form is the one that pins. Left to itself the route
+    mints `<ms>_<counter>.<fmt>` from a clock and a per-process counter, so
+    the `path` the result would carry — and the read-back keyed on it —
+    would be a different string on every run.
+    """
+    del docroot
+    status, raw = _bridge.put_command(base, {
+        'token': SHOT_TOKEN,
+        'tab': SHOT_TAB,
+        'id': SHOT_ID,
+        'type': 'screenshot',
+        # `tab` is routing and is stripped before the command is published,
+        # so the browser's own tab identifier travels under its own name.
+        'tabId': SHOT_TAB,
+    })
+    assert status == 200, (status, raw)
+    enqueued = json.loads(raw)
+
+    frame = _bridge.read_stream_data(base, SHOT_TOKEN, SHOT_TAB)
+    assert frame.get('type') == 'screenshot', frame
+    assert frame.get('id') == SHOT_ID, frame
+    assert frame.get('_did') == enqueued.get('did'), (frame, enqueued)
+
+    status, stored = _util.post_json(base + '/upload', {
+        'token': SHOT_TOKEN,
+        'id': SHOT_ID,
+        'filename': SHOT_FILE,
+        'data': SHOT_PNG_B64,
+    })
+    assert status == 200, (status, stored)
+    assert stored.get('path') == SHOT_ID + '/' + SHOT_FILE, stored
+
+    status, raw = _util.post_json(base + '/result', {
+        'token': SHOT_TOKEN,
+        'tabId': SHOT_TAB,
+        'id': frame['id'],
+        'result': {'path': stored['path'], 'size': stored['size']},
+        'error': None,
+        'ts': 1,
+        '_did': frame['_did'],
+    })
+    assert status == 200, (status, raw)
+
+    # `delivery=` needs no `tab=`: with none the store searches every target
+    # directory the token owns, which is how a caller that never knew the
+    # browser's tab id reads one delivery back.
+    status, slot = _util.get_json(
+        base + '/result?token=' + SHOT_TOKEN
+        + '&delivery=' + frame['_did'])
+    assert status == 200, (status, slot)
+    assert slot.get('id') == SHOT_ID, slot
+    assert slot.get('result') == {'path': stored['path'],
+                                  'size': stored['size']}, slot
+
+    status, served = _util.get(
+        base + '/screenshot?token=' + SHOT_TOKEN + '&path=' + stored['path'])
+    assert status == 200, status
+    assert served == base64.b64decode(SHOT_PNG_B64), served[:16]
+
+    return {
+        'journey': 'screenshot',
+        'enqueued': {'ok': enqueued.get('ok'),
+                     'target': enqueued.get('target')},
+        'frame': {key: frame[key] for key in ('type', 'id', 'tabId')
+                  if key in frame},
+        'upload': {'ok': stored.get('ok'), 'path': stored.get('path'),
+                   'size': stored.get('size')},
+        'result': {key: slot[key] for key in
+                   ('id', 'tabId', 'result', 'error', 'ts') if key in slot},
+        'served': len(served),
     }
 
 
@@ -272,6 +396,7 @@ JOURNEYS = {
     'command-round-trip': (COMMAND_TOKEN, command_round_trip),
     'mcp-exec': (_mcp_load.TOK, mcp_exec),
     'dashboard-fanout': (DASHBOARD_TOKEN, dashboard_fanout),
+    'screenshot': (SHOT_TOKEN, screenshot),
 }
 NAMES = tuple(JOURNEYS)
 
