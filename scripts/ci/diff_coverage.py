@@ -194,13 +194,25 @@ def added_lines(diff_text):
     return added
 
 
+def _analyzer():
+    """A coverage.py reader for config and statement analysis, not for data.
+
+    `analysis2` opens — and creates — the configured coverage DATA FILE, and
+    this reporter reads no coverage data: it asks the analyzer which lines are
+    executable statements and borrows the repository config's omit patterns. So
+    it is given `data_file=None`, coverage.py's no-disk data, and no open can
+    collide with the file the measuring collector already holds (issue 1471).
+    """
+    return Coverage(config_file=True, data_file=None)
+
+
 def validate_statement_records(measured, added):
     """Reject a measured source whose added statements are absent from XML.
 
     Absence is a hard error: it must never silently remove an executable line
     from the denominator and turn incomplete measurement into flattering news.
     """
-    analyzer = Coverage(config_file=True)
+    analyzer = _analyzer()
     for path in sorted(set(measured) & set(added)):
         # Deliberately Python-only: the coverage.py statement analyzer is
         # the oracle for which added lines are executable statements, and
@@ -299,7 +311,7 @@ def unmeasured_sources(measured, added):
     absent path matters when one changed source file is measured and
     another is not: a boolean all-or-nothing guard would hide the latter.
     """
-    config = Coverage(config_file=True)
+    config = _analyzer()
     patterns = [
         pattern
         for option in ('run:omit', 'report:omit')
