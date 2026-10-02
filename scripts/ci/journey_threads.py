@@ -144,7 +144,10 @@ def read(directory, prefix):
     `names` is the set of symbols the file's `fn=` lines DECLARE. A line
     carrying an id and no name repeats a name declared earlier and adds
     nothing, and the id is left out rather than turned into a name of its
-    own.
+    own. `cfn=` declares the same table for a callee and is not read: both
+    signature families were measured to appear as `fn=` on the threads they
+    describe, and a reader debugging a thread no signature claims starts
+    there.
 
     A file carrying a `summary:` but no `pid:` or no `cmd:` is a profile this
     reader has not been written for, and it is NAMED rather than crashed on:
