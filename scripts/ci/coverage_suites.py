@@ -72,9 +72,8 @@ def main(argv=None):
 
     failed = 0
     timed_out = []
-    # The same shape, and for the same reason, as the runner's: a removal
-    # that cannot finish must not take the `TIMED OUT:` report below with
-    # it, because a launcher that raised here reports nothing at all.
+    # The runner's shape, for its reason: a removal that cannot finish must
+    # not take the `TIMED OUT:` report below with it.
     outputs = tempfile.mkdtemp(prefix="daedalus-outputs-")
     try:
         workers = min(len(suites), os.cpu_count() or 1)

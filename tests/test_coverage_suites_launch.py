@@ -63,6 +63,33 @@ def test_the_output_safety_net_asks_and_survives_a_refusal(tmp):
     assert refusal.status == 0, (refusal.stdout.text, refusal.stderr.text)
 
 
+def test_the_runner_removes_its_outputs_through_the_bounded_removal(tmp):
+    """This launcher's own `finally` is the bounded removal, not a bare one.
+
+    Both new controls in `test_run_tests.py` drive the runner, so nothing
+    else watches what this launcher does with its output directory -- and a
+    bare `shutil.rmtree` there raises out of `main()` and takes the
+    `TIMED OUT:` report below it with it, which is issue #1485 on the
+    second of the two launchers.
+
+    The two halves are asserted apart, because either alone is satisfied
+    by the other: the stand-in's own log says the bounded function was
+    entered AT THIS CALL SITE and retried, and the launcher's own verdict
+    says the run still reported after it.
+    """
+    outcome = _launch.run_main(tmp, scripts={
+        'test_alpha': {'result': (0, _launch.KILLED)}},
+        refuse_removals=1)
+    removals = outcome.removals
+    assert removals.calls, (
+        'the runner never removed its output directory through the '
+        'bounded removal, so it removed it some other way')
+    assert len(removals.calls) == 2, (
+        f'one refusal and one answer were expected: {removals.calls}')
+    assert set(removals.calls) == {removals.calls[0]}, removals.calls
+    _launch.assert_timed_out(outcome, _launch.KILLED)
+
+
 def test_an_argument_the_runner_does_not_take_prints_the_usage_it_takes(
         tmp):
     """An unknown argument is refused by name, before anything is launched.

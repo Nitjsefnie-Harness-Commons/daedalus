@@ -13,6 +13,7 @@ from _coverage_suite_fixture import (  # noqa: E402
     FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING, REQUESTED_THEN_GRACED,
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
     records, settle_gone)
+from _suite_bound_stubs import Clock, Removals, swapped  # noqa: E402
 
 ROOT = _util.ROOT
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
@@ -102,22 +103,17 @@ _SLOW_PASSING_SUITE = (
 
 
 # The Windows removal refusal has no POSIX spelling: unlinking a file
-# another process still holds succeeds there, so no Linux or macOS box can
-# produce WinError 32 by holding one open. The two controls below plant it
-# at the single boundary where it happens -- `shutil.rmtree` -- and every
-# line above that call is the real shipped runner, so they say the same
-# thing on all twelve legs. The log is what they read instead of a clock: an
-# assertion on a timing margin passes because the machine was fast enough
-# and fails correct code on a loaded runner.
+# another process still holds succeeds there. The controls below plant it
+# at `shutil.rmtree`, the one boundary where it happens, and read the log
+# rather than a clock -- a timing margin passes on a fast machine.
 _RMTREE_LOG = 'rmtree-calls.log'
 
 
 def _rmtree_sitecustomize(always):
     """The `sitecustomize.py` that stands in for WinError 32.
 
-    Every call is logged before it is answered, and one that does not
-    refuse is delegated to the real `shutil.rmtree`, so a tree that gets
-    its handle back behaves as it would on Windows.
+    Every call is logged before it is answered; one that does not refuse
+    is delegated to the real `shutil.rmtree`.
     """
     refusal = 'True' if always else 'str(path) not in _REFUSED'
     return (
@@ -158,10 +154,8 @@ def _sandbox(tmp, suites, suite_bound=None, refuse_rmtree=None):
     """A copy of the runner over fabricated suites, with what it imports.
 
     `suite_bound` rewrites the one definition the copied runner resolves
-    when it launches, so a control can shrink the real default instead of
-    carrying a second number that stops relating to it. `refuse_rmtree`
-    writes the removal refusal into the same file, which is why the two
-    are composed rather than written one after the other.
+    when it launches, and `refuse_rmtree` writes the removal refusal into
+    the same file, which is why the two patches are composed.
     """
     root = Path(tmp) / 'tree'
     (root / 'tests').mkdir(parents=True)
@@ -180,17 +174,21 @@ def _sandbox(tmp, suites, suite_bound=None, refuse_rmtree=None):
         (root / 'sitecustomize.py').write_text(''.join(patch),
                                                encoding='utf-8')
     for name, source in suites.items():
-        # The planted wedge is written as a placeholder rather than a
-        # literal so it cannot drift away from the number the outer bound
-        # is derived from above.
+        # A placeholder, so the planted wedge cannot drift from the bound.
         (root / 'tests' / name).write_text(
             source.replace('{wedge}', str(_PLANTED_WEDGE_S)),
             encoding='utf-8')
     return root
 
 
-def _run_sandbox(root, timeout_env, outer_timeout=120):
+def _run_sandbox(root, timeout_env, outer_timeout=120, temp_root=None):
     env = dict(os.environ, **timeout_env)
+    if temp_root is not None:
+        # The runner's `mkdtemp` resolves under this, so what a planted
+        # refusal leaves behind lands where the calling fixture reclaims it.
+        temp = Path(temp_root)
+        temp.mkdir(parents=True, exist_ok=True)
+        env.update(TMPDIR=str(temp), TEMP=str(temp), TMP=str(temp))
     if (root / 'sitecustomize.py').exists():
         # `site` looks for a sitecustomize on the path the interpreter has
         # built BEFORE it imports one, and a script's own directory is put
@@ -590,8 +588,7 @@ def test_a_summaries_refused_once_is_retried_and_the_verdict_stands(tmp):
     calls = _rmtree_calls(root)
     refused = [path for path, outcome in calls if outcome == 'raised']
     assert len(refused) == 1, calls
-    # The retry is read off the log rather than off a clock: the same path
-    # answered twice, once by refusing and once by doing the work.
+    # One refusal and one delegation on the same path, read off the log.
     assert [path for path, outcome in calls if outcome == 'delegated'] == \
         refused, calls
     assert not os.path.exists(refused[0]), refused
@@ -601,38 +598,93 @@ def test_a_summaries_refused_once_is_retried_and_the_verdict_stands(tmp):
     assert 'left in place' not in result.stderr, result.stderr
 
 
-# The refusal the above control does NOT clear, so this one costs the whole
-# shared cleanup bound before it can report -- hence the outer bound named
-# here rather than the default, which does not outlast it.
+# The refusal the above control does NOT clear, so this one spends the
+# whole shared cleanup bound before it can report.
 _UNREMOVABLE_OUTER_S = _RUNNER_OUTER_S
 
 
 def test_a_summaries_held_past_the_bound_is_reported_and_verdict_stands(tmp):
     root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE},
                     refuse_rmtree=True)
+    # The refusal is total, so the directory this run cannot remove
+    # outlives it -- which is the whole point of the control. Its own temp
+    # is aimed below so the survivor lands where this fixture reclaims it,
+    # and where the report names a path this test already knows.
+    outputs = Path(tmp) / 'outputs'
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)},
-        outer_timeout=_UNREMOVABLE_OUTER_S)
-    # The aggregate FIRST: a removal that cannot finish must not decide
-    # whether the run says anything, and this is where the base tracebacked
-    # out of `main()` instead.
+        outer_timeout=_UNREMOVABLE_OUTER_S, temp_root=outputs)
+    # The aggregate FIRST: this is where the base tracebacked out of
+    # `main()` instead, taking the run's verdict with it.
     assert result.returncode == 1, (result.returncode, result.stdout)
     assert 'test_staller.py' in _failed_suites(result.stdout), (
         result.stdout, result.stderr)
     assert 'OVERALL: PASS' not in result.stdout, result.stdout
     calls = _rmtree_calls(root)
-    # Every call refused, and there was more than one: the bound was spent
-    # retrying before it gave up and reported.
+    # Every call refused, and more than one: the bound was spent retrying.
     assert len(calls) > 1, calls
     assert {outcome for _path, outcome in calls} == {'raised'}, calls
     directory = calls[0][0]
     assert {path for path, _outcome in calls} == {directory}, calls
     assert os.path.isdir(directory), directory
-    # An OS error's own message is the platform's prose, so the report is
-    # pinned on what this module promised to name: where it is and what is
-    # still in it.
+    assert Path(directory).parent == outputs, (
+        f'the directory that would not go landed in {Path(directory).parent}, '
+        f'which this fixture does not reclaim; it wanted {outputs}')
+    # The OS error's message is the platform's prose, so the report is
+    # pinned on what this module promised to name: where, and what is left.
     assert directory in result.stderr, result.stderr
     assert 'test_staller.output' in result.stderr, result.stderr
+
+
+def test_a_cleanup_that_raised_something_else_is_not_retried(tmp):
+    """A bug inside the cleanup is not a removal that could not finish.
+
+    `discard_outputs` never raises FOR FAILING TO, and a programming
+    error is not failing to: a catch widened to `BaseException` would
+    retry one until the bound and report it as the reason a directory
+    would not go. So the exception has to arrive, on the first attempt.
+    """
+    directory = Path(tmp) / 'outputs'
+    directory.mkdir()
+    clock = Clock()
+    removals = Removals(refuse=1, error=ValueError('a bug in the removal'))
+    escaped = None
+    with swapped(SUITE_BOUND, shutil=removals, time=clock):
+        try:
+            SUITE_BOUND.discard_outputs(str(directory))
+        except ValueError as raised:
+            escaped = raised
+    assert escaped is removals.error, (
+        'the cleanup swallowed a non-OSError and carried on; the calls it '
+        f'made were {removals.calls}')
+    assert removals.calls == [str(directory)], (
+        f'the removal was retried instead of surfacing: {removals.calls}')
+    assert clock.slept == 0, (
+        f'it waited {clock.slept} s for a bug to stop happening')
+
+
+def test_the_cleanup_waits_between_attempts_rather_than_hammering(tmp):
+    """The poll interval is the floor between two removals, not a no-op.
+
+    On the platform where the refusal is real, a tight loop would call
+    the removal for the whole bound instead of a few hundred times. What
+    is asserted is how long the code chose to wait between the calls it
+    made, off a `Clock` that advances only when it sleeps -- so this
+    cannot pass because the machine was fast.
+    """
+    directory = Path(tmp) / 'outputs'
+    directory.mkdir()
+    clock = Clock()
+    removals = Removals(refuse=2)
+    with swapped(SUITE_BOUND, shutil=removals, time=clock):
+        SUITE_BOUND.discard_outputs(str(directory))
+    assert removals.calls == [str(directory)] * 3, removals.calls
+    assert clock.slept == 2 * SUITE_BOUND.GRACE_POLL_S, (
+        f'two refusals were answered by {clock.slept} s of waiting; the '
+        f'interval is {SUITE_BOUND.GRACE_POLL_S} s')
+    assert not os.path.exists(directory), (
+        'the retry reported success it never had; the directory is still '
+        'there')
 
 
 if __name__ == '__main__':

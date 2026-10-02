@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""One per-suite wall-clock bound, and the bounded launch that enforces it.
+"""One per-suite wall-clock bound, and the bounded teardown that enforces it.
 
 `run_tests.py` and `scripts/ci/coverage_suites.py` both launch every
-suite in `tests/`, so both are ended by a wedge in any one of them. The
-bound lives here rather than in either launcher because a number two
-files each hold is two premises: widening one leaves the other bounding
-the value before, and neither file says so.
+suite in `tests/`, so both are ended by a wedge in any one of them, and
+both take away what their suites wrote -- which a suite killed at its
+bound can still be holding open on Windows. The bound, the launch that
+enforces it and the removal of what a suite left live here rather than in
+either launcher because a number two files each hold is two premises:
+widening one leaves the other bounding the value before, and neither
+file says so.
 
 The bound is a parameter of the launch, never a value captured when this
 module was written, so a control that shrinks the constant at runtime
@@ -225,10 +228,9 @@ def discard_outputs(directory):
     already run.
 
     The retry answers that, against the shared cleanup bound, and the report
-    is the other half: a directory that stays unreachable says so once and
-    the caller still gets to print its verdict. A launcher that lets the
-    removal raise trades a stale directory for no verdict at all, and the
-    traceback replaces the aggregate line every reader and CI key on.
+    is the other half: a directory that stays unreachable says so once, and
+    the caller still gets to print its verdict rather than a traceback where
+    a reader and CI both key on the aggregate.
     """
     deadline = time.monotonic() + CLEANUP_TIMEOUT_S
     while True:

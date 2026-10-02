@@ -18,6 +18,7 @@ slow.
 """
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -197,6 +198,36 @@ class Clock:
         self.now += seconds
 
 
+class Removals:
+    """`shutil` as the output cleanup reads it: refusals made, calls kept.
+
+    The refusals `discard_outputs` retries exist on one platform only, so
+    they are built rather than waited for. `refuse` is how many calls
+    refuse before the work is done for real, and `error` is what they
+    raise -- a stand-in that only models the retry has no way to say what
+    something that is not a removal does to the loop. A call past
+    `refuse` is the real `shutil.rmtree`, so running out ends as the
+    machine would.
+    """
+
+    def __init__(self, refuse=0, error=None):
+        self.refuse = refuse
+        self.error = error
+        self.calls = []
+
+    def __getattr__(self, name):
+        return getattr(shutil, name)
+
+    def rmtree(self, path, *args, **kwargs):
+        self.calls.append(str(path))
+        if len(self.calls) <= self.refuse:
+            if self.error is not None:
+                raise self.error
+            raise PermissionError(
+                32, 'in use by another process', str(path))
+        return shutil.rmtree(path, *args, **kwargs)
+
+
 class Spawns:
     """`subprocess` as the subject sees it: no process is ever started.
 
@@ -241,13 +272,19 @@ def swapped(module, **stand_ins):
     themselves: those are shared with every other suite in this process, and
     a control that mutated one would be a control that changed the machine
     rather than the subject.
+
+    A function's `__globals__` is accepted as well as a module, because a
+    control that drives a function imported from elsewhere cannot name the
+    module object it came from -- it has to reach the dict that function
+    reads, which is the same object under a spelling `getattr` cannot reach.
     """
-    saved = {name: getattr(module, name) for name in stand_ins}
-    module.__dict__.update(stand_ins)
+    namespace = module if isinstance(module, dict) else module.__dict__
+    saved = {name: namespace[name] for name in stand_ins}
+    namespace.update(stand_ins)
     try:
         yield
     finally:
-        module.__dict__.update(saved)
+        namespace.update(saved)
 
 
 def require_sigkill():
