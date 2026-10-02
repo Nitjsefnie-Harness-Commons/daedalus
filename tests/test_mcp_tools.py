@@ -678,9 +678,10 @@ def test_store_hotfix_schema_pins_nullable_permanent(_tmp):
 # The closure limits below are the ones the real tree does not exercise, so
 # the pass above cannot witness them: nothing in `daedalus_mcp` hands a
 # program to a code-evaluating builtin, nothing is provably unreachable, and
-# no callee is read out of a nullary lambda's return. Each is stated by one
-# composition in two forms, so the other form of the limit is what keeps a
-# rule that over-reaches from passing.
+# no callee is read out of a nullary lambda's return. Each is stated with
+# the side that refuses and the side that must stay silent, which is what
+# keeps a rule that over-reaches from passing; the arms of the walk the real
+# tree cannot present at all are enumerated in `test_mcp_import_refusals.py`.
 def _composition_names(_tmp, tree):
     """The repo-local files this composition's scan set names, relative to
     the tree it was written into."""
@@ -694,17 +695,20 @@ def test_a_program_handed_to_a_code_evaluating_builtin_is_refused(_tmp):
     """A constant string reaching `eval`/`exec`/`compile` is a PROGRAM, and
     the walk either resolves it or refuses it — never silence.
 
-    The same name bound to a tool, which is what `server.py` does with the
-    `exec` its own tool module exports, is a different function and stays
-    silent.
+    The other side is the same name bound to a tool, which is what
+    `server.py` does with the `exec` its own tool module exports: a
+    different function, so the scan set is READ and answered, not merely
+    not an exception. Reading it is the whole point: a composition that
+    raised some other arm's refusal would answer here too.
     """
     for name in ('eval', 'exec', 'compile'):
         program = f'\n\ndef load(x):\n    return {name}("importlib")(x)\n'
         _assert_scan_refusal(_tmp, program, 4, 'code-evaluating')
-    _composition_names(_tmp, {
+    assert _composition_names(_tmp, {
         'composition.py': '\neval_tools = {"exec": print}\n'
                           'exec = eval_tools["exec"]\n'
-                          '\n\ndef load():\n    return exec("code")\n'})
+                          '\n\ndef load():\n    return exec("code")\n'
+    }) == {'composition.py'}
 
 
 def test_a_position_behind_a_barrier_is_out_of_the_scan_set(_tmp):
@@ -713,6 +717,9 @@ def test_a_position_behind_a_barrier_is_out_of_the_scan_set(_tmp):
 
     Both halves ride in one tree, so a rule that stopped marking the tail
     would add `pkg.leaf` and one that over-reached would drop `pkg.before`.
+    Every barrier kind and that shared near miss are enumerated in
+    `test_mcp_import_refusals.py`; this is the real tree's own suite, and
+    `raise` is the kind the composition above reaches.
     """
     assert _composition_names(_tmp, {
         'composition.py': '\nimport importlib\n'
@@ -730,8 +737,13 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
     """A call's callee is a VALUE, and `(lambda: op)()` produces the
     operation, so the module resolves exactly as the direct spelling does.
 
-    A lambda with a required parameter raises before it produces anything,
-    which is the near-miss: that form resolves nothing and refuses nothing.
+    The near miss is a lambda the SAME call cannot fill, which is the arm
+    this row is about rather than its neighbour: a lambda with a required
+    parameter raises `TypeError` before it produces anything, so it
+    resolves nothing and refuses nothing. The call is what makes it that
+    arm — a lambda written without one is "lambda read in place", which
+    the walk answers differently and which this row would then be testing
+    by accident.
     """
     for callee in ('(lambda: importlib.import_module)()',
                    '(lambda *a: importlib.import_module)()',
@@ -746,7 +758,7 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
     assert _composition_names(_tmp, {
         'composition.py': '\nimport importlib\n'
                           '\n\ndef load():\n'
-                          '    return (lambda a: importlib.import_module)'
+                          '    return (lambda a, b: importlib.import_module)'
                           '("pkg.leaf")\n',
         'pkg/__init__.py': '',
         'pkg/leaf.py': 'leaf = True\n'}) == {'composition.py'}
