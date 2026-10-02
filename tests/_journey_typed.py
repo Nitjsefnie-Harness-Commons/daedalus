@@ -320,6 +320,31 @@ def _net_capture_buffer():
     return entries
 
 
+def _capture_digest(entries):
+    """A digest of the buffer that came back, over a fixed spelling.
+
+    Deliberately NOT `_journeys.canonical`, for two reasons. The bytes the
+    bridge SERVES are the wrong source: they carry `resultGeneration` and
+    `roundtrip_ms`, which are per-run by design, so digesting them makes
+    the rendering different on every run — the one thing a rendering may
+    not be. And re-serialising to reach a canonical form would mean
+    keeping a second copy of that spelling in step with the first.
+
+    Spelling each entry out field by field has neither problem. Every
+    field present is covered, so a new one in the buffer moves the digest
+    without this being edited, and the spelling is two separators and a
+    `sorted`.
+    """
+    rows = []
+    for entry in entries:
+        flat = {key: value for key, value in entry.items()
+                if key != 'headers'}
+        rows.append('\t'.join(
+            [f'{key}={flat[key]}' for key in sorted(flat)]
+            + [f'headers={sorted(entry["headers"].items())}']))
+    return hashlib.sha256('\n'.join(rows).encode('utf-8')).hexdigest()
+
+
 def net_capture(base, docroot):
     """A capture buffer answered at the size the service worker holds it.
 
@@ -372,16 +397,13 @@ def net_capture(base, docroot):
     }, headers=auth, timeout=120)
     assert status == 200, (status, raw)
 
-    # Read the raw bytes rather than a parsed copy re-serialised: the
-    # digest is then over exactly what the bridge SERVED, which is a
-    # tighter check than one over a re-encoding, and it stops the
-    # harness's own `canonical()` over 2.4 MB from landing in a count
-    # meant for the bridge.
-    status, raw = _util.get(
+    # The buffer is read back through `delivery=` and compared whole, so a
+    # byte the bridge lost or altered on the way through fails the journey
+    # rather than being absorbed into the count.
+    status, slot = _util.get_json(
         base + '/result?token=' + NET_TOKEN + '&delivery=' + frame['_did'],
         timeout=120)
-    assert status == 200, status
-    slot = json.loads(raw)
+    assert status == 200, (status, slot)
     assert slot.get('id') == NET_ID, slot
     stored = slot.get('result', {}).get('requests')
     assert stored == entries, 'the capture that came back is not the one sent'
@@ -395,7 +417,7 @@ def net_capture(base, docroot):
         'capture': {
             'requests': len(stored),
             'body_chars': sum(len(entry['body']) for entry in stored),
-            'sha256': hashlib.sha256(raw).hexdigest(),
+            'sha256': _capture_digest(stored),
         },
     }
 
