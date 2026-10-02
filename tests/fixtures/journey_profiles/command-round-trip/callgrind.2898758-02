@@ -1,0 +1,28 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2898758
+cmd:  python3 tests/_journeys.py --journey command-round-trip --root .
+part: 1
+thread: 2
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 232143592
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 171804
+fn=(1150) 0x0000000000189710
+cfn=(898) free
+fn=(812) 0x0000000000189700
+cfn=(814) malloc
+fn=(896) 0x00000000049683d0
+fn=(19358) PyEval_AcquireThread
+cfn=(1631) _Py_Dealloc'2
+fn=(2693) _PyEval_EvalFrameDefault'2
+cfn=(3667) PyObject_Call'2

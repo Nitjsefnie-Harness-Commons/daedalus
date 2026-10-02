@@ -73,29 +73,41 @@ def journeys():
     return _journeys
 
 
-def callgrind_profile(directory, name, slot, thread, ir, signature=()):
+def callgrind_profile(directory, name, slot, thread, ir, signature=(),
+                      pid=4242, cmd=None):
     """The out-file valgrind leaves for one thread, in the shape the
     reader that sums it expects.
 
     `signature` writes the `fn=` lines the thread's role is read from, so a
     fixture can say a background thread ran a loop or executed module
-    bodies instead of only how big it was. It lives here because the suite
-    that grew it is at the size ceiling and the profile is a journey fact
-    rather than a counter fact.
+    bodies instead of only how big it was. `cmd` is the command line of the
+    PROCESS the thread belongs to, because that is what the classifier reads
+    first; it defaults to the harness child, which is what most of them are.
+    It lives here because the suite that grew it is at the size ceiling and
+    the profile is a journey fact rather than a counter fact.
     """
     path = Path(directory) / f'callgrind.{name}.{slot}'
     body = ''.join(f'fn=({index}) {symbol}\n1 12\n'
                    for index, symbol in enumerate(signature, start=1))
+    cmd = cmd or f'python3 tests/_journeys.py --journey {name}'
     path.write_text(
-        f'version: 1\ncreator: callgrind-3.24.0\npid: 4242\npart: 1\n'
-        f'cmd: python3 tests/_journeys.py --journey {name}\n'
+        f'version: 1\ncreator: callgrind-3.24.0\npid: {pid}\npart: 1\n'
+        f'cmd: {cmd}\n'
         f'events: Ir\nthread: {thread}\n{body}1 {ir}\n\nsummary: {ir}\n',
         encoding='utf-8')
     return path
 
 
+# The two command lines a counter measures, spelled the way a real profile
+# spells them: the harness child it launched, and the bridge that child
+# started. The classifier reads the PROCESS before it reads any symbol, so a
+# fixture that gives every row one cmd is a fixture for a different gate.
+HARNESS_CMD = 'python3 tests/_journeys.py --journey mcp-exec --root .'
+BRIDGE_CMD = 'python3 server.py'
+
+
 def bridge_profile(main, request=0, imported=0, served=0):
-    """The classifier's own rows for a profile with one thread per role.
+    """The classifier's own rows for a two-process profile, one per role.
 
     The counterpart to `callgrind_profile`, which writes the FILES a real
     profile arrives as; this hands back what `journey_threads.read` would
@@ -104,22 +116,25 @@ def bridge_profile(main, request=0, imported=0, served=0):
     table rather than from symbols copied here, so a control cannot agree
     with a signature the tree changed.
 
-    A role left at zero is thread 1's neighbour that never ran, and is
-    omitted rather than written as an empty thread: a thread below
-    `REQUEST_FROM` is a refusal about the SHAPE of a profile, and a
-    control that wanted one would be testing something else.
+    `main` and `request` are the journey's own process; `imported` and
+    `served` are the bridge's. A role left at zero is thread 1's neighbour
+    that never ran, and is omitted rather than written as an empty thread: a
+    thread below `REQUEST_FROM` is a refusal about the SHAPE of a profile,
+    and a control that wanted one would be testing something else.
     """
     policy = threads()
-    rows = [{'pid': 1, 'thread': 1, 'ir': main, 'cmd': 'main',
+    rows = [{'pid': 1, 'thread': 1, 'ir': main, 'cmd': HARNESS_CMD,
              'names': frozenset()}]
+    if request:
+        rows.append({'pid': 1, 'thread': 2, 'ir': request,
+                     'cmd': HARNESS_CMD, 'names': frozenset()})
     for thread, (role, ir) in enumerate(
-            ((policy.REQUEST, request), (policy.IMPORT, imported),
-             (policy.SERVE, served)), start=2):
+            ((policy.IMPORT, imported), (policy.SERVE, served)), start=3):
         if not ir:
             continue
-        # `request` is the residual no signature claims, so it is the one
-        # role with no symbols to write and no table entry to read.
-        rows.append({'pid': 1, 'thread': thread, 'ir': ir, 'cmd': role,
+        # `serve` is what no signature claims, so it is the one role with no
+        # symbols to write and no table entry to read.
+        rows.append({'pid': 2, 'thread': thread, 'ir': ir, 'cmd': BRIDGE_CMD,
                      'names': frozenset(policy.SIGNATURES.get(role, ()))})
     return rows
 

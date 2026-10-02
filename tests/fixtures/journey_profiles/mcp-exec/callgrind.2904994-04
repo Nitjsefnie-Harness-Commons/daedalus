@@ -1,0 +1,47 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2904994
+cmd:  python3 server.py
+part: 1
+thread: 4
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 955026815
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 3865269431
+fn=(35188) new_simple_cdata
+cfn=(2128) _PyObject_New
+fn=(35214) _my_Py_InitModule
+cfn=(1610) PyMem_Malloc
+cfn=(21218) PyModule_Create2
+fn=(35222) init_builder_c
+cfn=(5075) PyImport_ImportModule'2
+fn=(35098) PyInit__cffi_backend
+cfn=(1645) _Py_Dealloc'2
+cfn=(42733) scan_once_unicode'2
+fn=(36066) PyInit__brotli
+fn=(33442) PyInit__multiprocessing
+fn=(37906) PyInit_mmap
+fn=(20352) PyInit__contextvars
+fn=(23402) PyInit__zoneinfo
+fn=(20302) PyInit__tokenize
+fn=(20142) PyInit_atexit
+cfn=(34234) PyInit__rust
+cfn=(33474) PyInit__rust_notify
+cfn=(33396) PyInit__queue
+cfn=(33350) PyInit__pickle
+cfn=(23072) PyInit__decimal
+cfn=(21156) PyInit__pydantic_core
+cfn=(20374) PyInit__asyncio
+cfn=(20188) PyInit__opcode
+cfn=(20170) PyInit__ast
+cfn=(20160) PyInit__heapq
+cfn=(35084) PyInit__openssl

@@ -62,20 +62,21 @@ COUNTERS = ('perf-instructions', 'valgrind-callgrind', 'syscalls')
 # on purpose: it is reported, never gated.
 GATE_CANDIDATES = ('perf-instructions', 'valgrind-callgrind')
 
-# The journey the counters' baseline is measured against: the same
+# The journey the counters' floor is measured against: the same
 # interpreter and the same imports as a journey child, with no bridge and no
-# journey. Every count is reported net of this one, so interpreter startup
-# and import cost are not part of what is compared.
+# journey. It is RECORDED, never subtracted: the baseline a count is taken
+# net of is the whole `bridge-only` child below, and that child is itself a
+# child of the same interpreter running the same module, so it has already
+# paid this one in full.
 STARTUP_NAME = 'startup-only'
 
-# The fixed background the other half of that subtraction is measured
-# against: the real bridge, spawned as a journey spawns it, doing no
-# journey's work. `STARTUP_NAME` removes the HARNESS child's interpreter and
-# imports but runs no bridge, so without this every count still carries the
-# bridge child's own interpreter start, imports, startup, MCP bootstrap and
-# serve loop — on `screenshot` that is 99% of the number, which is how a
-# journey can get an order of magnitude more expensive on the path it was
-# added to watch and the gate stays green.
+# The fixed background the count is measured against: the real bridge,
+# spawned as a journey spawns it, doing no journey's work. `STARTUP_NAME`
+# runs the HARNESS child but no bridge, so without this every count would
+# still carry the bridge child's own interpreter start, imports, startup,
+# MCP bootstrap and serve loop — on `screenshot` that is 99% of the number,
+# which is how a journey can get an order of magnitude more expensive on the
+# path it was added to watch and the gate stays green.
 #
 # It is not a journey: `tests/_journeys.py` keeps it out of its journey set
 # and out of the record it prints, so nothing gated walks it.
@@ -436,7 +437,7 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     # every count in the run over the single case that is
                     # already reported rather than hidden.
                     verdict, row_why = _row(
-                        name, rows[name], startup if childed else 0,
+                        name, rows[name],
                         baselines[name] if childed else 0)
                     if row_why is not None:
                         # ABSENT from `verdicts`, rather than present and

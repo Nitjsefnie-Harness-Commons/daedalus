@@ -1,0 +1,28 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2895148
+cmd:  python3 tests/_journeys.py --journey bridge-only --root .
+part: 1
+thread: 2
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 244958020
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 109811
+fn=(1150) 0x0000000000189710
+cfn=(898) free
+fn=(896) 0x00000000049683d0
+fn=(812) 0x0000000000189700
+cfn=(814) malloc
+fn=(1400) bind_gilstate_tstate
+fn=(2957) getset_get'2
+cfn=(2495) PyObject_GetAttr'2
+cfn=(5389) PyObject_VectorcallMethod'2
