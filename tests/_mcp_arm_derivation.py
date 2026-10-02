@@ -84,7 +84,7 @@ def arm_sites(source, name):
             and not isinstance(parents.get(node), ast.Raise)
             and _reaches_raiser(node.func, bound))
         if raisable:
-            found.append((_enclosing(node, parents, name), node.lineno))
+            found.append((_owning_scope(node, parents, name), node.lineno))
     return found
 
 
@@ -268,7 +268,7 @@ def _key(node):
     return None
 
 
-def _enclosing(node, parents, name):
+def _owning_scope(node, parents, name):
     """The innermost function or class a node sits in, or `name`."""
     parent = parents.get(node)
     while parent is not None:
