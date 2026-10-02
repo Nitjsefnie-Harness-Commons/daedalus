@@ -603,6 +603,7 @@
 !/tests/test_http_transport.py
 !/tests/test_install_lint_tools.py
 !/tests/test_journey_budget.py
+!/tests/test_journey_budget_cli.py
 !/tests/test_journey_budget_gates.py
 !/tests/test_journey_counters.py
 !/tests/test_journey_threads.py
