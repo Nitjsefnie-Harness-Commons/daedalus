@@ -95,7 +95,10 @@ def document_from(report, recorded, restore=(), drop=()):
     measured = {'schema_version': journey_artifact.SCHEMA_VERSION,
                 'counter': counter,
                 'tolerance_pct': recorded.get('tolerance_pct'),
-                'tolerances': _carried_tolerances(recorded, names),
+                'tolerances': _carried_tolerances(
+                    recorded,
+                    {name for name, count in journeys.items()
+                     if count is not None}),
                 'toolchain': toolchain,
                 'excluded_threads': exclusions,
                 # `None` rather than absent: every schema field is spelled
@@ -239,18 +242,26 @@ def _dropped(recorded, names):
             if name in journeys and journeys[name] is None]
 
 
-def _carried_tolerances(recorded, names):
-    """The recorded per-journey tolerances, for the journeys that are here.
+def _carried_tolerances(recorded, counted):
+    """The recorded per-journey tolerances, for the journeys this one holds.
 
     Absent stays absent, as everywhere else in the document: a re-baseline
     of an artefact that names no per-journey tolerance writes no block, so
     the canonical rendering of every artefact recorded before the field
     still round-trips.
+
+    `counted` is the journeys this measurement records a COUNT for, not the
+    journeys the set carries. A journey recorded at `null` -- the manager's
+    own case, written only by `--drop` -- is in the set and carries no
+    count, so a bound kept beside it is a bound no arithmetic reads and
+    `_validated_tolerances` refuses the document for: `--drop` would be the
+    one flag that cannot be used on a budget with a per-journey tolerance,
+    and the remedy for that is the hand-edit this command replaces.
     """
     own = recorded.get('tolerances')
     if own is None:
         return None
-    return {name: value for name, value in own.items() if name in names}
+    return {name: value for name, value in own.items() if name in counted}
 
 
 def _agreed_sha(report, name):

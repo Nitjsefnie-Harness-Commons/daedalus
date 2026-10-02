@@ -157,8 +157,8 @@ def _unresolved(name):
     entry['journeys'].pop(name)
     entry['refused'] = {
         name: f'the {name} journey measured [2000] instructions net [-9000] '
-              'against a startup-only baseline of 7000 and a bridge-only '
-              'baseline of 4000, so its own work is smaller than the fixed '
+              'against a bridge-only baseline of 11000 read through its own '
+              'exclusion list, so its own work is smaller than the fixed '
               'background it shares and the run cannot separate them'}
     return report
 
@@ -468,6 +468,43 @@ def test_a_restore_and_a_drop_do_not_refuse_each_other(tmp):
             f'--restore and --drop together recorded {name} against an '
             f'artefact holding it as {state} and a run that {outcome}, which '
             f'are two contradictory requests: {said}')
+
+
+
+def test_a_dropped_journey_carries_no_bound_with_it(tmp):
+    """`--drop` takes the journey's OWN tolerance with it.
+
+    A tolerance is a bound on a count, and a journey recorded at `null` is
+    one the budget does not hold — so a bound kept beside it is a bound no
+    arithmetic reads, and `journey_artifact` refuses the document for
+    exactly that. The refusal lands the moment the budget carries a
+    per-journey tolerance for the journey being dropped, which makes the one
+    remedy the command exists to provide the thing that refuses it: the
+    hand-edit it was written to replace.
+
+    `_carried_tolerances` narrowed to the journeys the SET carries, and a
+    dropped journey is in the set — so this starts from a legal document,
+    the journey holding BOTH a count and a bound, and drives the whole
+    command. A helper-level assertion would pass on a helper the caller
+    never used that way.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped = names[0]
+    document = recorded_document(tolerance_pct=0.5,
+                                 tolerances={dropped: 25.0})
+    assert document['journeys'][dropped] is not None, document['journeys']
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+
+    code, out, err = _rebaseline_over(tmp, artifact, _unresolved(dropped),
+                                      '--drop', dropped)
+    assert code == 0, (
+        f'--drop refused a journey the budget held a count and a bound '
+        f'for: {out}{err}')
+    written = policy.load(artifact)
+    assert written['journeys'][dropped] is None, written['journeys']
+    assert dropped not in written['tolerances'], written['tolerances']
 
 
 def main():
