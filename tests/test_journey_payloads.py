@@ -315,6 +315,53 @@ def test_no_journey_buys_its_own_headroom_from_a_product_setting(tmp):
         sorted(environment)
 
 
+def _product_default():
+    """The TTL default the bridge ships with, read by path.
+
+    By path and not by import: the suite process puts `tests/` on the path
+    without the repository root, so a top-level `daedalus_bridge` import is
+    a resolution this file cannot rely on, and the same loader every other
+    helper here uses is what makes the read work from anywhere.
+    """
+    source = _journey_contract.ROOT / 'daedalus_bridge' / 'env_config.py'
+    return _util.load(source, 'journey_env_config_contract').CMD_TTL_DEFAULT
+
+
+def test_the_ceiling_the_session_is_measured_against_is_the_products(tmp):
+    """The TTL the fan-out message compares against comes from the product.
+
+    It is three times over the message now — the printed figure, the branch
+    that chooses between two sentences, and the prose beside the constant —
+    and the branch is load-bearing rather than decorative, because the
+    literal decides which of the two a reader is sent to. So the number is
+    read from the module that ships it rather than written out, and this
+    says both things: that the journeys module carries no literal of its
+    own, and that what it reads is the value the product ships with.
+    """
+    del tmp
+    fanout = _journeys_module('_journeys')
+    source = Path(fanout.__file__).read_text(encoding='utf-8')
+    assert 'CMD_TTL_DEFAULT' in source, (
+        'the fan-out journey no longer names the command TTL at all, so its '
+        'refusal has nothing to compare the publish loop against')
+    literals = [line.strip() for line in source.splitlines()
+                if 'CMD_TTL_DEFAULT = ' in line]
+    assert not literals, (
+        f'the journeys module states the ceiling itself rather than reading '
+        f'it from the product: {literals}')
+    assert fanout.CMD_TTL_DEFAULT == _product_default(), (
+        f'the ceiling the message compares against is '
+        f'{fanout.CMD_TTL_DEFAULT} and the product ships with '
+        f'{_product_default()}')
+    # And the product is where the number lives: the bridge reads its own
+    # setting through this same constant rather than through a literal.
+    assert 'CMD_TTL_DEFAULT)' in Path(
+        _journey_contract.ROOT / 'daedalus_bridge' / 'config.py'
+    ).read_text(encoding='utf-8'), (
+        'the bridge has stopped reading the TTL default through the shared '
+        'constant, so the two sides have separate copies again')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeypayloads_')
