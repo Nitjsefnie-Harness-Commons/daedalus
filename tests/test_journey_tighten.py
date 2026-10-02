@@ -421,6 +421,133 @@ def test_a_recorded_gate_that_moved_tightens_nothing_and_succeeds(tmp):
     del names
 
 
+def _rebaseline():
+    """The command a rise is answered with, loaded by its own path.
+
+    Driven here rather than through `journey_budget.main` because the
+    refusals under test are the ones that reach `run` itself: a missing
+    file, a file the decoder rejects, and a measurement whose rounds
+    disagree. The command's own spelling of each is what is pinned, and
+    it prints to stderr where a reader of a `check` run never looks.
+    """
+    return _util.load(ROOT / 'scripts' / 'ci' / 'journey_rebaseline.py',
+                      'journey_rebaseline_contract')
+
+
+def _written_artifact(tmp, document):
+    """The recorded budget as bytes, for a control about what a refusal
+    leaves on disk.
+
+    Every refusal in `run` writes nothing, so each control below reads the
+    file back and compares it with what it wrote — the exit code alone
+    would not tell a reader whose recorded budget was still the one that
+    holds.
+    """
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(_journey_contract.policy().render(document))
+    return artifact
+
+
+def _parse_refusal(source):
+    """What the decoder itself says about this file, read the same way.
+
+    `run` prints the exception's own text, so the expectation is computed
+    by decoding the same bytes rather than spelled out beside it: a second
+    literal could drift from the one the command prints and the control
+    would then pass against a refusal that changed.
+    """
+    try:
+        json.loads(source.read_bytes().decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        return str(error)
+    raise AssertionError(f'{source.name} is readable after all')
+
+
+def test_a_rebaseline_missing_its_measurement_file_says_which_path(tmp):
+    """A measurement file that is not there is the commonest refusal there
+    is: the job points at the upload and the upload never arrived.
+
+    The refusal names the path it looked at, because that path is the one
+    thing the person who has to fix it cannot otherwise see — a summary
+    reading "no measurements file" over a step whose `--measurements`
+    argument is scrolled off above it is a question, not a remedy.
+    """
+    rebaseline = _rebaseline()
+    artifact = _written_artifact(tmp, recorded_document())
+    before = artifact.read_bytes()
+    missing = Path(tmp) / 'journey-counts.json'
+    spoken = io.StringIO()
+    with contextlib.redirect_stderr(spoken):
+        code = rebaseline.run(str(missing), str(artifact))
+    said = spoken.getvalue()
+    assert code == 1, said
+    assert 'no measurements file to read at' in said, said
+    assert str(missing) in said, said
+    assert artifact.read_bytes() == before, said
+
+
+def test_a_measurement_file_the_decoder_rejects_is_refused_in_its_words(
+        tmp):
+    """The parser's own refusal reaches the reader, verbatim.
+
+    Two arms, because they are told apart by that text and nothing else:
+    a document truncated mid-object is a JSON error naming a line and a
+    column, and bytes that are not UTF-8 at all are a codec error. A
+    command that flattened both into "could not read the file" answers a
+    question nobody asked — was the upload truncated, or was it something
+    other than a measurement?
+    """
+    rebaseline = _rebaseline()
+    artifact = _written_artifact(tmp, recorded_document())
+    before = artifact.read_bytes()
+    truncated = Path(tmp) / 'truncated.json'
+    truncated.write_text('{"rounds": 1, "counters":', encoding='utf-8')
+    binary = Path(tmp) / 'binary.json'
+    binary.write_bytes(b'\xff\xfe not a measurement at all')
+    for source in (truncated, binary):
+        spoken = io.StringIO()
+        with contextlib.redirect_stderr(spoken):
+            code = rebaseline.run(str(source), str(artifact))
+        said = spoken.getvalue()
+        assert code == 1, (source.name, said)
+        assert _parse_refusal(source) in said, (source.name, said)
+        assert artifact.read_bytes() == before, (source.name, said)
+
+
+def test_a_shape_failure_is_refused_with_the_remedy_it_promises(tmp):
+    """Rounds that disagree is a refusal, and the remedy rides with it.
+
+    The remedy is what turns "the command said shape" into "here is what
+    to do about it", so it is printed whenever the caller supplied one.
+    A caller that supplied none gets the refusal on its own: printing a
+    remedy it never passed would put words in the repository's mouth at
+    the one point the measurement is known to be unusable.
+    """
+    rebaseline = _rebaseline()
+    gate = _journey_contract.policy()
+    artifact = _written_artifact(tmp, recorded_document())
+    before = artifact.read_bytes()
+    reason = 'the mcp-exec journey printed no record'
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(
+        {'rounds': 1, 'python': sys.version, 'shape_failure': reason}),
+        encoding='utf-8')
+    for remedy, expected in ((gate.SHAPE_REMEDY, f'shape: {reason}\n'
+                              f'{gate.SHAPE_REMEDY}'),
+                             (None, f'shape: {reason}')):
+        spoken = io.StringIO()
+        with contextlib.redirect_stderr(spoken):
+            code = rebaseline.run(str(measurements), str(artifact),
+                                  remedy=remedy)
+        said = spoken.getvalue()
+        assert code == 1, (remedy, said)
+        assert said.strip() == expected, (
+            f'remedy={remedy is not None}: the refusal must read as the '
+            f'shape line and nothing else, or the shape line and the '
+            f'remedy, got: {said!r}')
+        assert artifact.read_bytes() == before, (remedy, said)
+
+
 def _rebaseline_over(report, tmp):
     """Drive the real rebaseline and report what it did to the artefact.
 
