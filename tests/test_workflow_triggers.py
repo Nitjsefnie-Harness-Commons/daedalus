@@ -379,7 +379,12 @@ def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
 
 
 def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
-    """A coverage gate runs only on a measurement that succeeded."""
+    """A coverage gate runs only on a measurement that succeeded.
+
+    This table and its four siblings hold the gates the shipped workflows
+    carry; a gate added later needs its own row in one of them — nothing
+    enforces that, for the reason the handle table beside it gives.
+    """
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
