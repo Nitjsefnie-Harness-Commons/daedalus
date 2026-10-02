@@ -93,41 +93,55 @@ WALK_ENTRY = 'composition_scan_set'
 # guessed.
 ARMS = (
     (('_alias', 219), 'a store binds the import-by-name operation to a name',
-     'binds the import-by-name operation to a name this scan', 6, '\nimport importlib\n\n\ndef load():\n'
+     'binds the import-by-name operation to a name this scan',
+     6, '\nimport importlib\n\n\ndef load():\n'
         '    leak = importlib.import_module\n'),
     (('_registry_alias', 224), 'a store binds the module registry to a name',
-     'binds the module registry to a name this scan', 6, '\nimport sys\n\n\ndef load():\n    leak = sys\n'),
+     'binds the module registry to a name this scan',
+     6, '\nimport sys\n\n\ndef load():\n    leak = sys\n'),
     (('_code_eval_alias', 229),
      'a store binds a code-evaluating builtin to a name',
-     'binds a code-evaluating builtin to a name this', 5, '\n\n\ndef load():\n    leak = eval\n'),
+     'binds a code-evaluating builtin to a name this',
+     5, '\n\n\ndef load():\n    leak = eval\n'),
     (('_rebind', 234), 'a store rebinds a name the map tracks',
-     "rebinds 'importlib', which this scan maps to the", 3, '\nimport importlib\nimportlib = print\n'),
+     "rebinds 'importlib', which this scan maps to the",
+     3, '\nimport importlib\nimportlib = print\n'),
     (('_refuse_default', 307), 'a parameter default hands away the operation',
-     'parameter op=importlib.import_module binds the import-by-name', 5, '\nimport importlib\n\n\ndef load(op=importlib.import_module):\n'
+     'parameter op=importlib.import_module binds the import-by-name',
+     5, '\nimport importlib\n\n\ndef load(op=importlib.import_module):\n'
         '    return op\n'),
     (('_refuse_default', 307), 'a parameter default hands away the registry',
-     'parameter op=sys binds the module registry to', 5, '\nimport sys\n\n\ndef load(op=sys):\n    return op\n'),
+     'parameter op=sys binds the module registry to',
+     5, '\nimport sys\n\n\ndef load(op=sys):\n    return op\n'),
     (('_refuse_default', 307),
      'a parameter default hands away a code-evaluating builtin',
-     'parameter op=eval binds a code-evaluating', 4, '\n\n\ndef load(op=eval):\n    return op\n'),
+     'parameter op=eval binds a code-evaluating',
+     4, '\n\n\ndef load(op=eval):\n    return op\n'),
     (('_refused_string_reads', 558),
      'a string names the import-by-name operation',
-     "the string 'import_module' names the import-by-name operation", 2, '\nSPELLING = "import_module"\n'),
+     "the string 'import_module' names the import-by-name operation",
+     2, '\nSPELLING = "import_module"\n'),
     (('_refused_string_reads', 561), 'a module is read out of the registry',
-     'a module is read out of the registry by', 6, '\nimport sys\n\n\ndef load():\n'
+     'a module is read out of the registry by',
+     6, '\nimport sys\n\n\ndef load():\n'
         '    return sys.modules["pkg.leaf"]\n'),
-    (('_import_targets', 616), 'a star import binds names the map cannot hold',
-     'a star import binds names this scan cannot', 2, '\nfrom os import *\n'),
+    (('_import_targets', 616),
+     'a star import binds names the map cannot hold',
+     'a star import binds names this scan cannot',
+     2, '\nfrom os import *\n'),
     (('_import_targets', 647),
      'the operation is called with a name the walk cannot read',
-     'is called with a name this scan cannot read', 6, '\nimport importlib\n\n\ndef load(name):\n'
+     'is called with a name this scan cannot read',
+     6, '\nimport importlib\n\n\ndef load(name):\n'
         '    return importlib.import_module(name)\n'),
     (('_import_targets', 652),
      'a callee reaches the operation through a value it cannot resolve',
-     'reaches the import-by-name operation through a', 6, '\nimport importlib\n\n\ndef load(i):\n'
+     'reaches the import-by-name operation through a',
+     6, '\nimport importlib\n\n\ndef load(i):\n'
         '    return (0, importlib.import_module)[i]("pkg.leaf")\n'),
     (('_import_targets', 657), 'a lookup can hand out the operation',
-     'can hand out the import-by-name operation through', 6, '\nimport importlib\n\n\ndef load():\n'
+     'can hand out the import-by-name operation through',
+     6, '\nimport importlib\n\n\ndef load():\n'
         '    return getattr(importlib, "import_module")\n'),
     # No near miss: this arm refuses EVERY constant program a code-evaluating
     # builtin is handed, whatever it names, because the walk resolves the
@@ -136,9 +150,9 @@ ARMS = (
     # text, so a weaker row here would pin nothing.
     (('_import_targets', 666),
      'a constant program is handed to a code-evaluating builtin',
-     'is handed to a code-evaluating builtin, which', 5, '\n\n\ndef load():\n    return eval("importlib")\n'),
+     'is handed to a code-evaluating builtin, which',
+     5, '\n\n\ndef load():\n    return eval("importlib")\n'),
 )
-
 # (label, the arm it sits beside, the composition the walk must leave
 # alone). The second column is the assertion, not decoration: it says which
 # arm's near miss this is, so a row cannot be read as covering an arm the
@@ -500,7 +514,8 @@ def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
     refusals.
     """
     del _tmp
-    assert sorted(_arm_sites(CONTROL, 'control.py')) == sorted(CONTROL_SITES), (
+    control = sorted(_arm_sites(CONTROL, 'control.py'))
+    assert control == sorted(CONTROL_SITES), (
         'the control module\'s arms are not all found, so the comparison '
         'below cannot be trusted to fail on an arm it missed')
     modules = {path.name: path for path in analyser_modules()}
