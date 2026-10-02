@@ -437,6 +437,15 @@ def artifact_shapes():
          'repeats a role'),
         (over('excluded_threads', {name: ['no-such-role']}),
          'unknown excluded thread role'),
+        # `main` and `request` are what a journey's OWN process produces, so a
+        # list naming either drops every thread of the work the count exists
+        # to measure. The refusal names the journey beside the role, because
+        # one list per journey is seven lists in one document.
+        (over('excluded_threads', {name: ['front-end-import',
+                                          'uvicorn-serve', 'request']}),
+         f'a journey may not exclude its own work: request for {name}'),
+        (over('excluded_threads', {name: ['main']}),
+         f'a journey may not exclude its own work: main for {name}'),
         (over('thread_bands', 'big'), 'thread_bands must be an object'),
         (over('thread_bands', {'no-such-band': 1}), 'unknown thread band'),
         (over('thread_bands', {'front-end-import': 0}),
