@@ -13,6 +13,14 @@ import os
 # reaches this threshold.
 REFUSED_BODY_DRAIN = 65536
 
+# The command TTL's default, stated here rather than beside the read that
+# consumes it. `config.py` cannot be imported to ask — it exits without
+# `DAEDALUS_DIR` — and the journey harness that has to know the ceiling it
+# publishes its events inside does not set that. So the number the product
+# ships with lives in the module that reads no environment until a parser is
+# called, and both sides read it from here rather than from a literal.
+CMD_TTL_DEFAULT = 90
+
 
 def debug_timing():
     """Whether per-phase timing is switched on for the segment store.

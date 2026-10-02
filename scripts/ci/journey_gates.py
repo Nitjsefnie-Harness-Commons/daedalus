@@ -67,8 +67,20 @@ def stale(document, names):
     return sorted(name for name in document['journeys'] if name not in names)
 
 
-def violations(counts, document, names):
-    """The two kinds a check can refuse a journey on.
+def refused_of(report, counter):
+    """The journeys this measurement refused to resolve, per name.
+
+    Distinct from a journey the counter never counted: a refusal carries the
+    journey's own numbers and says its own work was smaller than the
+    background it shares, which is a different finding from a counter that
+    could not run it at all.
+    """
+    entry = ((report or {}).get('counters') or {}).get(counter) or {}
+    return dict(entry.get('refused') or {})
+
+
+def violations(counts, document, names, refused=()):
+    """The kinds a check can refuse a journey on.
 
     `counts` is a measured count per journey. A journey the artefact does
     not record is not here: `unrecorded` reports it and the check passes,
@@ -86,17 +98,28 @@ def violations(counts, document, names):
     """
     over = {}
     unmeasured = {}
+    unresolved = {}
+    refusals = refused or {}
     for name in names:
         limit = budget_of(document, name)
         if limit is None:
             continue
         measured = counts.get(name)
         if measured is None:
-            unmeasured[name] = document['counter']
+            # The two absences are told apart here and nowhere else. A
+            # journey this run REFUSED is one whose own work was smaller
+            # than the background it shares, and the budget holds a count
+            # for it — so a count it cannot compute is never a pass, and
+            # the run's own sentence is what it is reported under.
+            if name in refusals:
+                unresolved[name] = refusals[name]
+            else:
+                unmeasured[name] = document['counter']
             continue
         if measured > limit:
             over[name] = (measured, limit)
-    return {'over': over, 'unmeasured': unmeasured}
+    return {'over': over, 'unmeasured': unmeasured,
+            'unresolved': unresolved}
 
 
 def tightened(counts, document, names):

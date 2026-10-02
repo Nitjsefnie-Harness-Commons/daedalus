@@ -85,6 +85,7 @@ _validated = journey_artifact._validated  # noqa: SLF001
 OVER_REMEDY = journey_report.OVER_REMEDY
 SHAPE_REMEDY = journey_report.SHAPE_REMEDY
 UNMEASURED_REMEDY = journey_report.UNMEASURED_REMEDY
+UNRESOLVED_REMEDY = journey_report.UNRESOLVED_REMEDY
 TOOLCHAIN_REMEDY = journey_report.TOOLCHAIN_REMEDY
 SHA_REMEDY = journey_report.SHA_REMEDY
 SIGNATURES_REMEDY = journey_report.SIGNATURES_REMEDY
@@ -99,6 +100,7 @@ REMEDY_FOR = journey_report.REMEDY_FOR
 toolchain_diff = journey_gates.toolchain_diff
 unrecorded = journey_gates.unrecorded
 stale = journey_gates.stale
+refused_of = journey_gates.refused_of
 violations = journey_gates.violations
 tightened = journey_gates.tightened
 _recorded_gates = journey_gates._recorded_gates  # noqa: SLF001
@@ -160,6 +162,12 @@ def _parser():
                         metavar='JOURNEY',
                         help='record a count for a journey the budget holds '
                              'none for; repeatable')
+    # The mirror. A `null` is written only here and only for the journey
+    # this names, and it refuses a journey the run can separate.
+    rebase.add_argument('--drop', action='append', default=[],
+                        metavar='JOURNEY',
+                        help='write no count for a journey this run cannot '
+                             'separate; repeatable')
     return parser
 
 
@@ -201,7 +209,7 @@ def main(argv=None):
         if args.command == 'rebaseline':
             return journey_rebaseline.run(
                 args.measurements, args.artifact, remedy=SHAPE_REMEDY,
-                restore=args.restore)
+                restore=args.restore, drop=args.drop)
 
         document = load(args.artifact)
         names = journey_names()
@@ -230,7 +238,8 @@ def main(argv=None):
 
         counts = (journey_counters.counts_of(report, counter)
                   if counter else {})
-        found = violations(counts, document, names)
+        found = violations(counts, document, names,
+                           journey_gates.refused_of(report, counter))
 
         if args.tighten:
             # A shape failure refuses a tighten as firmly as it refuses a
@@ -280,6 +289,8 @@ def main(argv=None):
             # from.
             if found['unmeasured']:
                 journey_counters.write_summary([UNMEASURED_REMEDY])
+            if found.get('unresolved'):
+                journey_counters.write_summary([UNRESOLVED_REMEDY])
             if found['over']:
                 journey_counters.write_summary(
                     journey_report.rebaseline_lines())
