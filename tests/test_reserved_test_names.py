@@ -31,6 +31,8 @@ import _util  # noqa: E402
 from _helper_binds import definitions  # noqa: E402
 from _helper_reimplementation import (  # noqa: E402
     _entry_points, _live_sources)
+from _source_anchors import (  # noqa: E402
+    after_call, first_call_line, the_call_line)
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
 from _unconsolidated_names import UNCONSOLIDATED_NAMES  # noqa: E402
@@ -236,6 +238,41 @@ def test_a_planted_fixture_collision_is_reported(tmp):
             name, found)
     # The owner module itself is not a shadow of its own names.
     assert not _reserved_names.fixture_sites(_planted_tree({}))
+
+
+def test_an_anchor_refuses_an_ambiguous_position(tmp):
+    """A plant must name one place, or it is a coin toss.
+
+    The anchors disagree about a second occurrence, and the disagreement
+    is the property: two of them refuse it, and `first_call_line` takes
+    the EARLIER line, which is a promise about order that the name alone
+    does not make. Each refusal carries its own message and its own
+    `else`, because an anchor that accepted the position is a different
+    defect from one that refused it with the wrong words.
+    """
+    del tmp
+    two = ('def _helper(tmp):\n'
+           '    seed(tmp)\n'
+           '    seed(tmp)\n'
+           '    return tmp\n')
+    try:
+        the_call_line(two, 'seed')
+    except AssertionError as error:
+        assert 'the seed call is not unique' in str(error), error
+    else:
+        raise AssertionError('the call anchor took an ambiguous position')
+    try:
+        after_call(two, 'seed', '    seed(tmp)')
+    except AssertionError as error:
+        assert 'the seed anchor is not unique' in str(error), error
+    else:
+        raise AssertionError('the plant anchor took an ambiguous position')
+    calls = ('_helper = None\n'
+             'def test_control(tmp):\n'
+             '    del tmp\n'
+             '    _helper(tmp)\n'
+             '    _helper(tmp)\n')
+    assert first_call_line(calls, '_helper') == 4
 
 
 def test_this_suite_binds_no_reserved_name(tmp):
