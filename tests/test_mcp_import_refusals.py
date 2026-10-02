@@ -674,7 +674,8 @@ def _index_verdicts(_tmp, rows):
     for source, spoken, phrase in rows:
         verdict, detail = _scan_verdict(
             _tmp, {'composition.py': source, **LEAF_TREE})
-        if _read(verdict, detail) != spoken or (phrase and phrase not in detail):
+        wrong_arm = phrase and phrase not in detail
+        if _read(verdict, detail) != spoken or wrong_arm:
             wrong.append(f'{spoken}: {verdict}: {detail}')
     assert not wrong, '; '.join(wrong)
 
