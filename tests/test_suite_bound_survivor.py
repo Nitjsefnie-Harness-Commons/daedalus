@@ -19,8 +19,19 @@ It is a suite of its own rather than two more controls in
 `test_suite_bound.py`: that file is at the 700-line ceiling this repository
 holds test modules to, and its other arms are where a reader looks first for
 what the teardown does when the tree misbehaves.
+
+It stood in for `sys` and not for `signal`, on the reading that the route is
+chosen by the `sys.platform` read and the escalation follows from it. The
+`sys` read is a stand-in, and the escalation was not: `_ask_and_insist` names
+`signal.SIGKILL`, which a windows-latest interpreter has no member for, so
+the read raised inside the arm before the escalation went out and
+`kill_process_tree`'s broad guard made the record that exception instead.
+Both controls then saw one signal where the clause's own record has two
+(`scripts/ci/suite_bound.py`'s `note = insisted or ...`), on all four
+`windows-latest` cells and on no other. The `signal` global is stood in for
+too, so the arm is reached on every cell and neither control depends on what
+this interpreter can name.
 """
-import signal
 import sys
 from pathlib import Path
 
@@ -28,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
-    GROUP, Child, Clock, Platform, Signals, swapped)
+    GROUP, Child, Clock, Escalation, Platform, Signals, swapped)
 
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                          'suite_bound_survivor')
@@ -40,17 +51,21 @@ SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
 ESCALATION_WENT_OUT = 'the escalation reached what was still in it'
 GROUP_WAS_GONE = f'process group {GROUP} was already gone'
 
+# The two signals the clause under test is only reachable behind, in order.
+# `SIGTERM` is the interpreter's own member and the escalation is
+# `Escalation`'s, so this reads the same on a cell that can name an
+# escalation and on one that cannot.
+REQUEST_THEN_ESCALATION = [Escalation.SIGTERM, Escalation.SIGKILL]
+
 
 class _EscalationFindsNothing(Signals):
     """`Signals` whose escalation finds the group already gone.
 
-    Keyed on the SECOND `killpg` rather than on `signal.SIGKILL`, which
-    Windows has no name for. The subject asks and then escalates on every
-    cell -- the route it takes is chosen by a `sys` stand-in, not by the
-    host -- so the ordinal asks the same question the signal-keyed row asks,
-    in a spelling every cell can carry. Keying it on the signal instead
-    would need `require_sigkill()`, and a suite whose every control skips
-    reports no coverage at all on the cells that skipped it.
+    Keyed on the SECOND `killpg` rather than on the escalation's own name:
+    the subject asks and then escalates on every cell now that its `signal`
+    global is stood in for, and the ordinal is what says which of the two
+    calls failed without either control having to know what the escalation
+    is called -- a name this interpreter may not be able to supply.
     """
 
     def __init__(self):
@@ -67,11 +82,14 @@ class _EscalationFindsNothing(Signals):
 def _record_for(signals):
     """The record for a suite that stopped, under the signals it was given.
 
-    The child is stood in for as one that complies with the request, and the
-    clock spends the grace window in arithmetic, so nothing here depends on
-    how fast this machine is or on how long anything really took.
+    The child is stood in for as one that complies with the request, the
+    clock spends the grace window in arithmetic, and the two signals the arm
+    names are stood in for by `Escalation` -- so nothing here depends on how
+    fast this machine is, on how long anything really took, or on whether
+    this interpreter can name an escalation at all.
     """
-    with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals, time=Clock()):
+    with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals, time=Clock(),
+                 signal=Escalation):
         return SUITE_BOUND.kill_process_tree(Child(stops_after=1))
 
 
@@ -87,8 +105,8 @@ def test_a_survivor_clause_names_the_escalation_that_went_out(tmp):
     del tmp
     signals = Signals()
     record = _record_for(signals)
-    assert len(signals.sent) == 2, signals.sent
-    assert signals.sent[0][1] is signal.SIGTERM, signals.sent
+    assert [sig for _group, sig in signals.sent] == \
+        REQUEST_THEN_ESCALATION, signals.sent
     assert record == (f'process group {GROUP} asked to stop and the suite '
                       f'did; {ESCALATION_WENT_OUT}'), record
     assert GROUP_WAS_GONE not in record, record
@@ -107,7 +125,8 @@ def test_a_survivor_clause_names_the_escalation_that_found_nothing(tmp):
     del tmp
     signals = _EscalationFindsNothing()
     record = _record_for(signals)
-    assert len(signals.sent) == 2, signals.sent
+    assert [sig for _group, sig in signals.sent] == \
+        REQUEST_THEN_ESCALATION, signals.sent
     assert record == (f'process group {GROUP} asked to stop and the suite '
                       f'did; {GROUP_WAS_GONE}'), record
     assert ESCALATION_WENT_OUT not in record, record
