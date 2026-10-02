@@ -6,8 +6,8 @@
       "floor": 92.9
     },
     "javascript": {
-      "measured": 89.2,
-      "floor": 87.7
+      "measured": 91.1,
+      "floor": 89.6
     }
   },
   "module_size_baseline": {
@@ -107,9 +107,9 @@
     "dashboard/sections/settings.js": 19,
     "dashboard/sections/tabs.js": 29,
     "dashboard/sections/uploads.js": 14,
-    "extension/content.js": 41,
+    "extension/content.js": 3,
     "extension/options.js": 51,
-    "extension/page.js": 111,
+    "extension/page.js": 105,
     "extension/worker/blocking.js": 28,
     "extension/worker/capture.js": 2,
     "extension/worker/cdp.js": 10,
