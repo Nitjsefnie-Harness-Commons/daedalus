@@ -184,12 +184,16 @@ def test_an_extension_that_is_not_installed_is_a_refusal_naming_it(tmp):
     """
     del tmp
     import importlib.util
+    import types
 
     def unimportable(_name):
         raise ImportError(f'No module named {_name!r}')
 
     def fileless(_name):
-        return importlib.util.ModuleSpec(_name, loader=None, origin=None)
+        # Only `.origin` is read, so a stand-in is the whole stand-in the
+        # answer needs — and it keeps the answer's type out of the type
+        # ratchet for a fixture that exists to be refused.
+        return types.SimpleNamespace(origin=None)
 
     for planted, why in ((unimportable, 'cannot be imported'),
                          (fileless, 'resolves to no file')):
