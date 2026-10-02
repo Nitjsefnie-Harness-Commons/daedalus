@@ -8,8 +8,8 @@ name: claim
 # `/release` are the same command under two names — either removes only the
 # commenter's own assignment, and a hand-made one goes with it. Someone else's
 # assignment comes off only once it has expired, and only when this action made
-# it: by their own `/release`, by any other commenter's `/claim` up to that
-# commenter's own cap, or by a `/release` from an actor with write access. Two
+# it: by any other commenter's `/claim` up to that commenter's own cap, or by a
+# `/release` from an actor with write access. Two
 # names because the reference implementation this was modelled on calls it
 # `/release` and people arrive expecting that word.
 #
