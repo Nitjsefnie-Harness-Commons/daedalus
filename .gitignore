@@ -348,6 +348,7 @@
 !/tests/_hotfixharness.py
 !/tests/_imported_calls.py
 !/tests/_journey_contract.py
+!/tests/_journey_typed.py
 !/tests/_journeys.py
 !/tests/_js_functions.py
 !/tests/_jsread.py
