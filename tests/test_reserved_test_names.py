@@ -236,8 +236,23 @@ def _boundary_repo(tmp):
     probe = repo / 'tests' / 'probe.py'
 
     def git(*argv):
-        return subprocess.run(('git', *argv), cwd=repo, check=True, env=_ENV,
+        """One git command here, reporting WHY it failed.
+
+        This fixture exists to exercise git's ambient behaviour, so a
+        refusal has to name the command, the repository and what git
+        said. A `CalledProcessError` carrying no stderr costs an
+        afternoon: a bad config key, a missing identity or an
+        unwritable path is exactly what a scratch repo inherits from
+        the ambient config and exactly what the caller cannot see.
+        """
+        done = subprocess.run(('git', *argv), cwd=repo, env=_ENV,
                               capture_output=True, text=True)
+        if done.returncode:
+            raise subprocess.CalledProcessError(
+                done.returncode, done.args, output=done.stdout,
+                stderr=f'`git {" ".join(argv)}` in {repo} failed:\n'
+                       f'{done.stderr}')
+        return done
 
     def body(twin, added, edited):
         return (f'def twin(v):\n    return 1\n{twin}'
