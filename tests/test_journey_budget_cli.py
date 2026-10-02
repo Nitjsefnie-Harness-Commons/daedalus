@@ -350,6 +350,69 @@ def test_the_summary_remedies_come_in_the_report_s_order(tmp):
     assert places == sorted(places), (places, said)
 
 
+def test_a_drop_inside_the_tolerance_is_not_recorded(tmp):
+    """A journey's own run-to-run spread is not a cheaper journey.
+
+    The recorded count is what the NEXT check compares against, and the
+    tolerance is the band around it that a measurement of unchanged code
+    lands inside. Recording a count from inside that band moves the band
+    down by the drop, so the run after it — unchanged code, the same
+    spread — measures the count that was already recorded and is now over
+    it. That is issue 1484: a single-round tighten put `screenshot` 0.51%
+    below a run that measured 0.35% above it.
+
+    So a drop is recorded only when it is WIDER than the band: the budget
+    the new record produces then still sits below the count the previous
+    run measured, so that run passes against it. The tolerance is the
+    journey's own, read from the one owner of it, so a journey named in
+    `tolerances` is held to its own band and every other one to the
+    document default.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    wide, exact = names[0], names[1]
+    # The shape the measured values land in: one journey held to a
+    # tolerance above the document default, its neighbour on the default.
+    document = recorded_document(tolerance_pct=0.5, tolerances={wide: 2.0})
+    assert policy.tolerance_of(document, wide) == 2.0, document
+    assert policy.tolerance_of(document, exact) == 0.5, document
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    before = artifact.read_bytes()
+
+    # A tenth of the default band, so it is inside every journey's own.
+    noise = {name: document['journeys'][name] * 999 // 1000 for name in names}
+    assert policy.tightened(noise, document, names) is None, (
+        'a drop inside the tolerance was recorded, so the next unchanged '
+        'run is measured against a count this one measured below: '
+        f'{policy.tightened(noise, document, names)}')
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(measured_report(noise)),
+                            encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements), '--tighten'])
+    assert code == 0, spoken.getvalue()
+    assert artifact.read_bytes() == before, (
+        'a run that recorded nothing still rewrote the artefact')
+
+    # The other direction, or the budget has frozen: a drop past the band
+    # is a real saving and is still recorded, and only that journey moves.
+    halved = dict(noise, **{wide: document['journeys'][wide] // 2})
+    artifact.write_bytes(before)
+    measurements.write_text(json.dumps(measured_report(halved)),
+                            encoding='utf-8')
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements), '--tighten'])
+    assert code == 0, spoken.getvalue()
+    written = json.loads(artifact.read_text(encoding='utf-8'))['journeys']
+    assert written == dict(document['journeys'], **{wide: halved[wide]}), (
+        'a drop past the tolerance was refused, or a journey inside it was '
+        'recorded anyway, so the budget moved without a saving')
+
+
 def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
     """`check` and `check --tighten` must agree about the same measurement.
 

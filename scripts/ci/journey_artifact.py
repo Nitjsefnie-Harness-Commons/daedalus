@@ -361,6 +361,17 @@ def tolerance_of(document, name):
     return document.get('tolerance_pct') or 0.0
 
 
+def budget_for(document, name, count):
+    """The ceiling `count` would set for `name`: itself plus the tolerance.
+
+    The arithmetic, once, over a count the caller names rather than the one
+    recorded — because the tighten asks the same question about a count it
+    has just measured, and answering it here is what keeps its band the same
+    band the gate and the summary are reading.
+    """
+    return count * (1 + tolerance_of(document, name) / 100.0)
+
+
 def budget_of(document, name):
     """The count `name` may reach: its record plus the tolerance.
 
@@ -372,7 +383,7 @@ def budget_of(document, name):
     recorded = document['journeys'].get(name)
     if recorded is None:
         return None
-    return recorded * (1 + tolerance_of(document, name) / 100.0)
+    return budget_for(document, name, recorded)
 
 
 def recorded_toolchain(document):
