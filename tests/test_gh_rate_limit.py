@@ -316,7 +316,15 @@ def test_a_reset_on_a_403_or_a_429_is_a_pause_without_a_counter(tmp):
     already said the request was refused, the reset says when to try
     again and needs no spent counter beside it. Both statuses are driven,
     because a reader that kept only the one this repository happens to
-    have seen answers the other as an ordinary failure."""
+    have seen answers the other as an ordinary failure.
+
+    The third arm is the pair's negative space, and the status is the
+    load-bearing part of it: a reset says when to try again only under a
+    status that already refused the request, and a 400 is not one. The
+    404 and the 500 in the control below catch a widening to every
+    status; this row is here for a widening that adds the one status
+    either refusal list in this module would reach for next.
+    """
     client = _client()
     for status in (403, 429):
         refusal = _paused(client, tmp, {
@@ -324,18 +332,28 @@ def test_a_reset_on_a_403_or_a_429_is_a_pause_without_a_counter(tmp):
             'headers': {'x-ratelimit-reset': '1900'},
             'body': {'message': 'try later'}})
         assert refusal.resume_at == 1900.0, (status, refusal.resume_at)
+    _undelivered(client, tmp, {
+        'status': 400, 'exit': 1, 'stderr': '',
+        'headers': {'x-ratelimit-reset': '1900'},
+        'body': {'message': 'try later'}})
 
 
 # ---- the body, read only where the status has already said something ----
 
 def test_the_body_is_a_carrier_on_a_refusal_status_and_on_nothing_else(
         tmp):
-    """Five statuses, one body, both directions. A throttled GraphQL
-    query is answered 200, so a reader that read the body only on 403 and
-    429 misses the shape this repository actually met; and a body naming
-    a limit under any other status says so by accident - the words are as
-    likely to be a bug report's. A 404 and a 500 carrying the same two
-    words are the near misses, and both are failures."""
+    """Six statuses, one body, both directions. A throttled GraphQL query
+    is answered 200, so a reader that read the body only on 403 and 429
+    misses the shape this repository actually met; and a body naming a
+    limit under any other status says so by accident - the words are as
+    likely to be a bug report's.
+
+    The 400 is the near miss a widening to one status would reach for,
+    and it is here because `gh` answers a GraphQL request it rejects as
+    malformed with one: a validation error quoting the rate-limit field
+    the caller sent is a body naming a limit under a status that never
+    refused one. A 404 and a 500 catch a widening to every status; only
+    a row for the status that was actually added catches this one."""
     client = _client()
     body = 'API rate limit exceeded for user 1'
     for status in (200, 403, 429):
@@ -343,7 +361,7 @@ def test_the_body_is_a_carrier_on_a_refusal_status_and_on_nothing_else(
             'status': status, 'exit': 1, 'headers': {}, 'stderr': '',
             'body': body})
         assert str(refusal) == f'HTTP {status}: {body}', (status, refusal)
-    for status in (404, 500):
+    for status in (404, 400, 500):
         _undelivered(client, tmp, {
             'status': status, 'exit': 1, 'headers': {}, 'stderr': '',
             'body': body})
@@ -518,6 +536,28 @@ def test_an_errors_entry_that_is_not_an_object_is_stepped_over(tmp):
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
         'body': {'data': {'repository': None},
                  'errors': ['API rate limit exceeded']}})
+    assert data == {'repository': None}, data
+
+
+def test_an_errors_message_is_not_the_report_the_labels_carry(tmp):
+    """The field beside the pair, and the reason the pair is two and not
+    three: `type` and `code` are labels the server writes and no caller
+    can put its own data into, while `message` is free text - a
+    validation error or a complaint about a field quotes the two words
+    while saying nothing about a window. An entry whose labels name
+    nothing and whose message names everything is the discriminating
+    input a reader that added `message` meets first.
+
+    Driven on a delivered 200, where the body carrier is never asked, so
+    the two words this body spells are the entry's own message and
+    nothing else here can be what read them.
+    """
+    client = _client()
+    data = _the_data(client, tmp, {
+        'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
+        'body': {'data': {'repository': None},
+                 'errors': [{'type': 'NOT_FOUND',
+                             'message': 'API rate limit exceeded'}]}})
     assert data == {'repository': None}, data
 
 

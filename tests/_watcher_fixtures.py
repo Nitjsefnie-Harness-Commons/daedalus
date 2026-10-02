@@ -8,6 +8,12 @@ apart into two subjects under one name. `RUNS_QUERY` is the selection the
 answers are keyed on, and `page_info` is the pagination shape
 `runs_page` writes them with.
 
+`test_gh_rate_limit.py` consumes both as "an answer that delivered", not
+as a runs page: its subjects are which `gh` answers are a rate-limit
+refusal, and the fake `gh` is keyed on the query text, so a delivered
+body has to be keyed on a selection this tree really sends. That is the
+reuse, not a second consumer of the ci_wait subject.
+
 Not a suite itself - `run_tests.py` only loads `test_*.py`.
 """
 
