@@ -27,7 +27,7 @@ import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 
-def document_from(report, recorded):
+def document_from(report, recorded, restore=()):
     """The artefact this measurement justifies, as a validated document.
 
     Counts, shas, toolchain and excluded threads all come from `report`
@@ -44,12 +44,16 @@ def document_from(report, recorded):
     has is a rule nothing enforces, which is the same fate a stale count
     has.
 
-    A journey recorded at `null` stays at `null`. That is not an absence of
-    data: the measurement this reads DOES count the journey, and the null
-    says the budget deliberately does not hold it because its own work is
-    not separable from the background it shares. Re-adding the count would
-    reinstate a budget a person decided against, silently, on the next
-    re-baseline of anything at all.
+    A journey recorded at `null` is a journey the budget deliberately does
+    not hold, and this measurement SEPARATES it. That is a change of fact,
+    so the command refuses and names the journey and the residual that makes
+    it a question: a `null` nothing can undo is a policy hole with a green
+    face — the journey reports `unrecorded`, passes, and stays that way
+    forever. Restoring it is a decision, so it takes `--restore` naming the
+    journey; a routine re-baseline never makes that decision on its own, and
+    a name the artefact does not hold at `null` is refused rather than
+    ignored, because an ignored flag and a misspelled one look identical
+    from the command line.
     """
     counter = report.get('selected_counter')
     counts = journey_counters.counts_of(report, counter)
@@ -63,8 +67,7 @@ def document_from(report, recorded):
                 'nothing to record and a budget without it compares '
                 'nothing')
         journeys[name] = measured
-    for name in _dropped(recorded, names):
-        journeys[name] = None
+    _restored(_dropped(recorded, names), restore, report, counter, journeys)
     shas = {name: _agreed_sha(report, name) for name in names}
     toolchain = report.get('toolchain') or {}
     if not journey_artifact.recorded_toolchain({'toolchain': toolchain}):
@@ -97,6 +100,37 @@ def document_from(report, recorded):
     # pylint: disable-next=protected-access
     return journey_artifact._validated(
         {field: measured[field] for field in journey_artifact.FIELDS})
+
+
+def _restored(dropped, restore, report, counter, journeys):
+    """Settle the journeys the recorded budget holds no count for.
+
+    `dropped` is every journey recorded at `null`; this measurement
+    separates all of them, or the refusal above would have fired first. So
+    every one of them needs a decision, and this is where it is refused
+    rather than taken.
+
+    The residual is named because it is the evidence: "unrecorded" says the
+    budget holds no count and nothing about whether that is still true, and
+    the number is what says it is no longer.
+    """
+    named = set(restore)
+    unknown = sorted(named - set(dropped))
+    if unknown:
+        raise ValueError(
+            f'--restore names a journey the budget holds a count for, so '
+            f'there is nothing there to restore: {unknown[0]}')
+    for name in dropped:
+        if name in named:
+            continue
+        row = ((report.get('counters') or {}).get(counter) or {}).get(
+            'journeys', {}).get(name) or {}
+        raise ValueError(
+            f'the budget holds no count for {name} and this measurement '
+            f'separates it by {row.get("median")} instructions (spread '
+            f'{row.get("spread")}), so the recorded null is a decision the '
+            f'measurement no longer supports: pass --restore {name} to '
+            'record it, or drop the journey again on purpose')
 
 
 def _dropped(recorded, names):
@@ -143,7 +177,7 @@ def _agreed_sha(report, name):
     return seen[0]
 
 
-def run(measurements, artifact, remedy=None):
+def run(measurements, artifact, remedy=None, restore=()):
     """Write the artefact from one measurement file; the exit is the verdict.
 
     Every refusal writes nothing, so a failed re-baseline leaves the
@@ -164,7 +198,8 @@ def run(measurements, artifact, remedy=None):
             print(remedy, file=sys.stderr)
         return 1
     try:
-        document = document_from(report, journey_artifact.load(artifact))
+        document = document_from(report, journey_artifact.load(artifact),
+                                 restore=restore)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 1

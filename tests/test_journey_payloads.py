@@ -9,18 +9,19 @@ them. The fix is a payload sized from a cited product basis.
 WHAT IS PINNED HERE, and what is not, is worth stating exactly, because the
 difference is what a reviewer is being asked to trust:
 
-  - Pinned: every size is the number this file holds, and the generator
-    that builds the body produces exactly that many bytes.
-  - Pinned: the product still CALLS what the basis says it calls, matched
-    as a call in a file that has to exist.
+  - Pinned: every size is the number this file holds, AND the thing that
+    builds it produces exactly that many of them — the capture's base64
+    encodes to the capture's byte count, each segment is the segment size,
+    and the tab list the fan-out posts is the tab count.
+  - Pinned: the product still makes the CALL the basis names, and still
+    says the NUMBER the basis names, in a file that has to exist.
   - NOT pinned: that the size is REPRESENTATIVE. No control can derive
     that and none tries. A size moved together with its pin here is not
     caught by anything in the tree — that is what makes it a reviewable
     commit and not a quiet loosening of a budget, and it is the judgement
     the citation exists to inform. What these controls buy is that the
     tripwire fires on the common case (a number edited, the pin not), and
-    that the claim each number rests on still names a call the product
-    makes.
+    that each number still rests on a claim the product has to keep making.
 
 No journey is RUN here. A journey costs what the machine it ran on costs, so
 a control that drove one would be asserting a number this repository must
@@ -53,6 +54,14 @@ from _journey_contract import (  # noqa: E402
 # saying the word, a word search stayed green — the same false green as a
 # basis nobody can re-derive. `None` is where there is no product claim to
 # make and the basis is a property of the content rather than of this tree.
+#
+# The third column is checked in the product file too, not only in the
+# journeys module. A call and a SIZE are two different claims, and the tab
+# count is only in the second: `chrome.tabs.query({}, …)` carries no `10`,
+# the extension's own comment at `scheduleRegisterAllTabs` does. A pin that
+# checked only the call let the product change its statement of a 10-url
+# session to a 30-url one without a word — which is exactly the loose end
+# the call recogniser introduced when it replaced the word search.
 BASES = (
     ('SHOT_CAPTURE_BYTES', 196608, 'captureVisibleTab',
      'extension/worker/capture.js',
@@ -63,7 +72,7 @@ BASES = (
      r'chrome\.tabs\.query\s*\(', '_journeys'),
     ('FANOUT_HEARTBEATS', 20, 'periodInMinutes: 0.5',
      'extension/background.js',
-     r"chrome\.alarms\.create\(\s*'daedalus-heartbeat',\s*"
+     r"chrome\.alarms\.create\(\s*['\"]daedalus-heartbeat['\"],\s*"
      r'\{\s*periodInMinutes:\s*0\.5\s*\}\s*\)', '_journeys'),
 )
 
@@ -140,6 +149,15 @@ def test_every_resized_payload_carries_the_size_it_was_given(tmp):
         assert len(typed.segment_payload(index)) == typed.SEG_BODY_BYTES, (
             f'segment {index} is not the pinned size: '
             f'{len(typed.segment_payload(index))}')
+    # The fan-out's BOTH halves, on the same argument as the capture's: a
+    # constant nothing builds is a number nothing reads. `_dashboard_tabs`
+    # is what every sync above posts, so the tab count the basis justifies
+    # is the tab count the journey sends — and `range(1, 3)` sent two while
+    # this file and the constant both still said ten.
+    fanout = _journeys_module('_journeys')
+    assert len(fanout._dashboard_tabs()) == fanout.FANOUT_TABS, (
+        'the tab list the fan-out posts is not the pinned tab count: '
+        f'{len(fanout._dashboard_tabs())} against {fanout.FANOUT_TABS}')
 
 
 def test_every_basis_is_still_the_call_it_cites(tmp):
@@ -154,14 +172,22 @@ def test_every_basis_is_still_the_call_it_cites(tmp):
     heartbeat that still fires but fires twice a minute is a different basis,
     not the same one.
 
-    The segment size is the row with no call to resolve: an HLS segment's
-    length is a property of the encode a page happens to be watching rather
-    than of anything in this tree. What is asked of that row is the prose
-    basis under the constant, which is the only place a reader can re-derive
-    it from.
+    And the FIGURE the basis names, checked in the same file, because a call
+    and a number are separate claims and the tab count is only in the second:
+    `chrome.tabs.query({}, …)` says nothing about how many tabs a session
+    has, so a pin that checked the call alone let the product's own "10-url
+    open_tabs" become a 30-url one without a word. Under `a4f09a27`'s word
+    search that edit was caught; the call recogniser introduced the gap and
+    this is the fix.
+
+    The segment size is the row with no product claim to resolve: an HLS
+    segment's length is a property of the encode a page happens to be
+    watching rather than of anything in this tree. What is asked of that row
+    is the prose basis under the constant, which is the only place a reader
+    can re-derive it from.
     """
     del tmp
-    for name, _size, _token, product, call, _which in BASES:
+    for name, _size, token, product, call, _which in BASES:
         if product is None:
             assert call is None, (
                 f'{name} carries a call to resolve and no file to resolve it '
@@ -176,10 +202,20 @@ def test_every_basis_is_still_the_call_it_cites(tmp):
             f'the basis for {name} names a file that is not in the tree: '
             f'{product}')
         text = target.read_text(encoding='utf-8')
+        # TWO claims, two sentences: the file must still make the call the
+        # basis rests on, and must still say the NUMBER the basis names. The
+        # call alone is not enough — the tab count is nowhere in
+        # `chrome.tabs.query({}, …)`, only in the extension's own comment
+        # saying a session is a 10-url open_tabs, so a pin that checked the
+        # call alone let the product triple its statement of one silently.
         assert re.search(call, text), (
             f'{name} is sized from {product}, which no longer makes the call '
             f'{call!r}: the number is quoted from something the product no '
             'longer does')
+        assert token in text, (
+            f'{name} is sized from {product}, which no longer says '
+            f'{token!r}: the number is quoted from a figure the product no '
+            'longer states')
 
 
 def test_every_basis_is_still_stated_beside_its_number(tmp):
