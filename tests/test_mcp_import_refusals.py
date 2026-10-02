@@ -53,8 +53,9 @@ row rather than borrowing a weak one.
 The dead-code barrier kinds are arms of the same question asked of
 POSITIONS: each kind is what makes the tail behind it contribute nothing,
 so each is carried with the near miss that keeps the case a walk does not
-take. `test_mcp_tools.py` carries the real-tree walk and the limits it
-cannot exercise; this suite carries the arms.
+take. `test_mcp_tools.py` carries the real-tree walk and
+`test_mcp_closure_limits.py` the three limits it cannot exercise; this
+suite carries the arms.
 """
 import ast
 import sys
