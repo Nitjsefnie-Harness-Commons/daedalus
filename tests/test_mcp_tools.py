@@ -2,10 +2,10 @@
 """Per-registration bridge binding for every returned MCP tool.
 
 The refusal pass below walks the real `daedalus_mcp` tree, so it can only
-witness a closure property the tree actually presents. The three import
-closure limits it does not are carried in
-`test_mcp_closure_limits.py`, each on a synthetic composition, and the arms
-of the walk itself are enumerated in `test_mcp_import_refusals.py`.
+witness a closure property the tree actually presents. The one import
+closure limit it does not is carried in `test_mcp_closure_limits.py`, on a
+synthetic composition, and the arms of the walk itself are enumerated in
+`test_mcp_import_refusals.py`.
 """
 import asyncio
 import gc
