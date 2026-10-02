@@ -149,8 +149,11 @@ def test_the_measurement_carries_the_median_the_check_compares(tmp):
     startup = counter['startup_only']
     bridge = counter['bridge_only'][names[0]]
     assert len(row['raw']) == 2, row
-    assert row['net'] == [value - startup - bridge
-                          for value in row['raw']], row
+    # The bridge baseline ONCE. `startup` is recorded beside them and is
+    # not an operand: the bridge-only child is a child of the same
+    # interpreter running the same module, so it has already paid it.
+    assert row['net'] == [value - bridge for value in row['raw']], row
+    assert startup > 0, counter
     assert row['min'] == min(row['net']) and row['max'] == max(row['net'])
     # What the count is, stated per journey, is the thing the artefact
     # records beside it.
@@ -323,9 +326,10 @@ def _toolbox(**present):
     return SimpleNamespace(which=present.get)
 
 
-def _profile(directory, name, slot, thread, ir, signature=()):
+def _profile(directory, name, slot, thread, ir, signature=(), pid=4242,
+             cmd=None):
     return _journey_contract.callgrind_profile(
-        directory, name, slot, thread, ir, signature)
+        directory, name, slot, thread, ir, signature, pid=pid, cmd=cmd)
 
 
 def test_a_child_that_cannot_start_is_an_answer_not_an_exception(tmp):
@@ -490,8 +494,13 @@ def test_a_callgrind_round_counts_the_last_one_not_the_sum_of_them(tmp):
     def answering(argv):
         asked.append(list(argv))
         _profile(tmp, 'mcp-exec', 0, 1, 9_000)
-        _profile(tmp, 'mcp-exec', 1, 2, 2_000_000_000,
-                 threads.SIGNATURES[threads.IMPORT])
+        # The front end's thread is the BRIDGE's, which is why the profile
+        # carries two command lines: the classifier reads the process a
+        # thread ran in before it reads a symbol, so a bootstrap import
+        # declared on the harness child would be the journey's own work.
+        _profile(tmp, 'mcp-exec', 1, 4, 2_000_000_000,
+                 threads.SIGNATURES[threads.IMPORT], pid=4243,
+                 cmd=_journey_contract.BRIDGE_CMD)
         return 0, '', ''
 
     with planting(counters, shutil=_toolbox(valgrind='/usr/bin/valgrind'),
