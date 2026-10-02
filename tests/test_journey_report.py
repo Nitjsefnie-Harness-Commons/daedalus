@@ -176,6 +176,46 @@ def test_the_table_and_the_gate_are_held_to_the_same_number(tmp):
         f'the gate compares against: {named}')
 
 
+def test_the_table_never_reads_a_refused_journey_as_within_budget(tmp):
+    """A journey the check refuses must not render green in the table.
+
+    `verdict_lines` decides its verdict from three branches, and a journey
+    this run refused arrives at none of the first two — `budget_of` answers
+    a number, `unmeasured` does not carry it — so it fell through to
+    "within budget" for a journey that was never measured. That is the same
+    false green the check refuses, arriving through the report layer instead
+    of the exit status, and the table is the surface a person reads.
+    """
+    del tmp
+    summaries = _journey_contract.summaries()
+    names = journeys().NAMES
+    refused = names[0]
+    document = budget_document()
+    counts = {name: 1000 for name in names}
+    del counts[refused]
+    refusal = 'the journey measured [2000] net [-9000]'
+    found = {'over': {}, 'unmeasured': {},
+             'unresolved': {refused: refusal}}
+    lines = summaries.verdict_lines(document, counts, found)
+    row = next(line for line in lines
+               if line.startswith(f'| {refused} '))
+    assert 'within budget' not in row, (
+        f'the table calls a journey within budget that this run refused to '
+        f'measure: {row}')
+    assert 'OVER BUDGET' not in row, row
+    assert 'no count for' not in row, row
+    assert 'could not resolve' in row, row
+    # And the same document with the journey recorded at null reads as the
+    # other thing it is, rather than the same false green by another route.
+    dropped = budget_document()
+    dropped['journeys'] = dict(document['journeys'], **{refused: None})
+    row = next(line for line in summaries.verdict_lines(
+        dropped, counts,
+        {'over': {}, 'unmeasured': {}, 'unresolved': {}})
+        if line.startswith(f'| {refused} '))
+    assert 'within budget' not in row, row
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeyreport_')

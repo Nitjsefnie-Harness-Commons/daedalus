@@ -246,12 +246,27 @@ def main(argv=None):
             # check: a count taken from a journey that no longer renders the
             # same way is not a cheaper journey, it is a different one.
             _report_state(document, names, counter, report)
+            # The same argument settles both, and neither is a rise: a
+            # budget the NEXT check cannot accept is not one this command
+            # may write and report success on. `over` is the obvious case;
+            # `unresolved` is the one that needed probing — the arithmetic
+            # is right to skip an unmeasured journey's row, and the WRITE is
+            # not, so `check` and `check --tighten` read the same measurement
+            # to opposite answers until this.
             if found['over']:
                 print('a journey is over its budget, so nothing is tightened: '
                       'lowering the journeys that fell would land a smaller '
                       'budget with the rise still in the tree and nothing '
                       'recording it', file=sys.stderr)
                 print(OVER_REMEDY, file=sys.stderr)
+                return 1
+            if found.get('unresolved'):
+                refused = ', '.join(sorted(found['unresolved']))
+                print(f'the run could not resolve {refused}, so nothing is '
+                      'tightened: lowering the journeys it did measure would '
+                      'land a budget the next check refuses over the ones it '
+                      'could not', file=sys.stderr)
+                print(UNRESOLVED_REMEDY, file=sys.stderr)
                 return 1
             recorded = document['journeys']
             updated = tightened(counts, document, names)

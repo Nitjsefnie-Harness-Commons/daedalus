@@ -329,11 +329,13 @@ def dashboard_fanout(base, docroot):
     # `command_queue.gc_loop` sweeps every `min(30, DAEDALUS_CMD_TTL)`
     # seconds and `remove_expired` unlinks anything older than the TTL —
     # regardless of a subscription, and before the fan-out drain ever sees
-    # it. The default TTL is 90 s, so the precondition this journey now has
-    # is that the whole window above, from the FIRST publish to the read
-    # below, completes inside it. At two events that was free; at
-    # FANOUT_EVENTS round trips under callgrind it is a real budget, and it
-    # is the one thing that could make this journey fail on a slow runner.
+    # it. So the precondition this journey now has is that the whole window
+    # above, from the FIRST publish to the read below, completes inside the
+    # TTL, whose default is `CMD_TTL_DEFAULT` — the product's own, read at
+    # the top of this file rather than written here. At two events that was
+    # free; at FANOUT_EVENTS round trips under callgrind it is a real
+    # budget, and it is the one thing that could make this journey fail
+    # on a slow runner.
     #
     # Neither side of it moves for this journey. The TTL is a product
     # constant with its own documented default and this journey does not
@@ -363,18 +365,13 @@ def dashboard_fanout(base, docroot):
         response.close()
         connection.close()
 
-    # The elapsed time is in the message because the CAUSE otherwise is an
-    # assertion this journey has not measured: `DAEDALUS_CMD_TTL` sweeps an
-    # event nobody was watching yet, and whether this loop spent longer than
-    # the TTL is a fact only this run knows. So the reader is handed the two
-    # numbers that decide it — the window the loop actually took, and the
-    # default it has to fit inside — rather than a sentence saying which one
-    # of them it was.
     # ONE clock read, because the printed figure and the branch that decides
     # between two sentences used to be two reads: at the boundary this run
-    # could print `89.9s` and then say it was over. The two numbers the
-    # reader needs are the window the loop actually took and the ceiling it
-    # has to fit inside, and both come from here.
+    # could print `89.9s` and then say it was over. The cause is in the
+    # message because it is otherwise an assertion this journey has not
+    # measured — whether this loop spent longer than the TTL is a fact only
+    # this run knows — so the reader is handed both numbers that decide it,
+    # the window the loop took and the ceiling it has to fit inside.
     elapsed = time.monotonic() - started
     assert len(syncs) == FANOUT_HEARTBEATS, (
         f'only {len(syncs)} of the {FANOUT_HEARTBEATS} syncs this session '

@@ -71,7 +71,14 @@ def document_from(report, recorded, restore=(), drop=()):
                 'nothing to record and a budget without it compares '
                 'nothing')
         journeys[name] = measured
-    _restored(_dropped(recorded, names), restore, report, counter)
+    # Less whatever `--drop` names: that journey's recorded null is the
+    # one decision this command has been asked to make again, and the
+    # refusal below would otherwise answer it with a measurement that
+    # cannot separate it — naming a residual of `None` and offering a
+    # `--restore` that cannot succeed, on the one journey the flag
+    # exists for.
+    _restored([name for name in _dropped(recorded, names)
+               if name not in set(drop)], restore, report, counter)
     _dropped_now(drop, names, report, counter)
     shas = {name: _agreed_sha(report, name) for name in names}
     toolchain = report.get('toolchain') or {}
@@ -122,7 +129,8 @@ def _restored(dropped, restore, report, counter):
     budget holds no count and nothing about whether that is still true, and
     the number is what says it is no longer.
     """
-    _named_journeys(restore, dropped, '--restore')
+    _named_journeys(restore, '--restore')
+    _restorable(restore, dropped)
     for name in dropped:
         if name in set(restore):
             continue
@@ -135,13 +143,12 @@ def _restored(dropped, restore, report, counter):
             'record it again')
 
 
-def _named_journeys(named, allowed, flag):
-    """Every name on `flag` that the artefact's state does not allow.
+def _named_journeys(named, flag):
+    """Every name on `flag` that no journey is called.
 
-    Two failures, two sentences, because they are told apart by nothing
-    else and the likelier one was getting the rarer one's explanation: a
-    name this journey set does not have at all, against a name it has and
-    already holds a count for. A misspelling is the first.
+    The likeliest thing that goes wrong with a per-journey flag is a
+    misspelling, and it used to be reported as a fact about the budget
+    instead. One failure, one sentence, and it is this one.
     """
     names = journey_counters.journey_names()
     for name in sorted(set(named)):
@@ -150,11 +157,21 @@ def _named_journeys(named, allowed, flag):
                 f'{flag} names {name}, which no journey is called, so there '
                 'is nothing there to act on: a journey set is '
                 f'{sorted(names)}')
-    unknown = sorted(set(named) - set(allowed))
+
+
+def _restorable(named, dropped):
+    """Every `--restore` name the artefact is not already holding at null.
+
+    `--drop` has no counterpart to this: every journey in the set can be
+    dropped, so a name that reached it is already a valid one and a second
+    refusal there could only describe a case that cannot occur.
+    """
+    unknown = sorted(set(named) - set(dropped))
     if unknown:
         raise ValueError(
-            f'{flag} names {unknown[0]}, which the budget already holds a '
-            'count for, so there is nothing there to restore or drop')
+            f'--restore names {unknown[0]}, which the budget already holds a '
+            'count for, so there is nothing there to restore')
+    return [name for name in named if name in set(dropped)]
 
 
 def _measured_row(report, counter, name):
@@ -177,7 +194,7 @@ def _dropped_now(drop, names, report, counter):
     would remove the one journey a person most wants the gate to hold. The
     run is the evidence, so the refusal names what the run measured.
     """
-    _named_journeys(drop, names, '--drop')
+    _named_journeys(drop, '--drop')
     for name in sorted(set(drop)):
         row = _measured_row(report, counter, name)
         if row:
