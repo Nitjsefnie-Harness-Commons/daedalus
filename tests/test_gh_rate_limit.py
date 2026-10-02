@@ -156,7 +156,6 @@ def test_an_empty_answer_whose_complaint_names_a_limit_is_a_pause(tmp):
     refusal = _paused(client, tmp, {
         'status': 200, 'stdout': '', 'exit': 1,
         'stderr': 'gh: API rate limit exceeded for user 1\n'})
-    assert isinstance(refusal, client.RateLimited), refusal
     assert refusal.resume_at is None, refusal.resume_at
     assert str(refusal) == 'gh: API rate limit exceeded for user 1', refusal
 
@@ -171,7 +170,6 @@ def test_an_empty_answer_whose_complaint_names_nothing_is_a_failure(tmp):
     failure = _undelivered(client, tmp, {
         'status': 200, 'stdout': '', 'exit': 1,
         'stderr': 'gh: could not resolve host\n'})
-    assert not isinstance(failure, client.RateLimited), failure
     assert str(failure) == 'gh: could not resolve host', failure
 
 
@@ -204,7 +202,6 @@ def test_an_undelivered_answer_carrying_no_evidence_is_a_failure(tmp):
     failure = _undelivered(client, tmp, {
         'status': 500, 'exit': 1, 'headers': {}, 'stderr': '',
         'body': {'message': 'server error'}})
-    assert not isinstance(failure, client.RateLimited), failure
     assert 'server error' in str(failure), failure
 
 
@@ -273,13 +270,17 @@ def test_a_reset_on_its_own_is_not_evidence(tmp):
     says nothing about when it returns, and a wait needs a moment to wake
     at - so a 200 that exited 1 carrying a reset and nothing beside it is
     a failure. The near miss of the two rows below, which are this
-    fixture with one header or one status added."""
+    fixture with one header or one status added.
+
+    `_undelivered` returning rather than raising is the assertion, and
+    this row is also what catches a widening of the refusal pair to every
+    status: a 200 refused nothing and its reset names no limit of its
+    own, so a reader that read the status as the whole answer takes it."""
     client = _client()
-    failure = _undelivered(client, tmp, {
+    _undelivered(client, tmp, {
         'status': 200, 'exit': 1, 'headers': {'x-ratelimit-reset': '1900'},
         'stderr': '',
         'body': {'errors': [{'message': 'could not resolve'}]}})
-    assert not isinstance(failure, client.RateLimited), failure
 
 
 def test_a_spent_counter_with_no_reset_carries_no_instant_to_wait_for(tmp):
@@ -287,12 +288,14 @@ def test_a_spent_counter_with_no_reset_carries_no_instant_to_wait_for(tmp):
     rather than the clock: the counter says the limit is gone and the
     answer does not say when it returns. Evidence needs both a moment and
     a reason to believe one, and this fixture has the moment's absence on
-    the header and the reason's absence everywhere else."""
+    the header and the reason's absence everywhere else.
+
+    As above, `_undelivered` returning rather than raising is what this
+    row asserts, and a reader that made the counter enough takes it."""
     client = _client()
-    failure = _undelivered(client, tmp, {
+    _undelivered(client, tmp, {
         'status': 200, 'exit': 1, 'headers': {'x-ratelimit-remaining': '0'},
         'stderr': '', 'body': {'errors': [{'message': 'nope'}]}})
-    assert not isinstance(failure, client.RateLimited), failure
 
 
 def test_a_spent_counter_beside_a_reset_is_a_pause_at_that_reset(tmp):
@@ -311,7 +314,7 @@ def test_a_spent_counter_beside_a_reset_is_a_pause_at_that_reset(tmp):
     assert refusal.resume_at == 1900.0, refusal.resume_at
 
 
-def test_a_reset_on_a_403_or_a_429_is_a_pause_without_a_counter(tmp):
+def test_a_reset_on_a_403_or_a_429_is_a_pause_and_a_400_is_a_failure(tmp):
     """The other way the co-condition completes: on a status that has
     already said the request was refused, the reset says when to try
     again and needs no spent counter beside it. Both statuses are driven,
@@ -321,9 +324,10 @@ def test_a_reset_on_a_403_or_a_429_is_a_pause_without_a_counter(tmp):
     The third arm is the pair's negative space, and the status is the
     load-bearing part of it: a reset says when to try again only under a
     status that already refused the request, and a 400 is not one. The
-    404 and the 500 in the control below catch a widening to every
-    status; this row is here for a widening that adds the one status
-    either refusal list in this module would reach for next.
+    200 in `test_a_reset_on_its_own_is_not_evidence` is what catches a
+    widening to every status; this row is here for a widening that adds
+    the one status either refusal list in this module would reach for
+    next.
     """
     client = _client()
     for status in (403, 429):
@@ -509,8 +513,15 @@ def test_every_spelling_of_the_report_is_read_and_a_lookalike_is_not(tmp):
     witness there is.
 
     The near misses are the other half, on the same fixture: a different
-    report, a word that merely ENDS in the two behind a letter, and the
-    two words the other way round. All three are failures.
+    report, a word that merely ENDS in the two behind a letter, letters
+    standing BETWEEN the two, and the two words the other way round. All
+    four are failures. The separator class the matcher holds between the
+    two words is what rejects the third, and a matcher widened to take
+    anything there takes a code no server has ever written.
+
+    `_undelivered` returning is the check for these four: it raises the
+    moment a label reads as the report, and the raise names the label,
+    because the refusal it found carries the body it read the label in.
     """
     client = _client()
     for label in ('RATE_LIMITED', 'RATE_LIMIT', 'graphql_rate_limit'):
@@ -518,11 +529,11 @@ def test_every_spelling_of_the_report_is_read_and_a_lookalike_is_not(tmp):
             'status': 500, 'exit': 1, 'headers': {}, 'stderr': '',
             'body': {'data': None, 'errors': [{'code': label}]}})
         assert refusal.resume_at is None, (label, refusal.resume_at)
-    for label in ('NOT_FOUND', 'SUBRATELIMITED', 'limit_reached'):
-        failure = _undelivered(client, tmp, {
+    for label in ('NOT_FOUND', 'SUBRATELIMITED', 'RATEWINDOWLIMIT',
+                  'limit_reached'):
+        _undelivered(client, tmp, {
             'status': 500, 'exit': 1, 'headers': {}, 'stderr': '',
             'body': {'data': None, 'errors': [{'code': label}]}})
-        assert not isinstance(failure, client.RateLimited), (label, failure)
 
 
 def test_an_errors_entry_that_is_not_an_object_is_stepped_over(tmp):
