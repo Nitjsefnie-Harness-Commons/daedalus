@@ -295,7 +295,6 @@
 !/tests/_command_candidates.py
 !/tests/_command_type_readers.py
 !/tests/_completion.py
-!/tests/_composed_bounds.py
 !/tests/_control_calls.py
 !/tests/_control_paths.py
 !/tests/_control_writes.py
@@ -506,7 +505,6 @@
 !/tests/test_client_credentials.py
 !/tests/test_client_states.py
 !/tests/test_cmdqueue.py
-!/tests/test_cmdqueue_bounds.py
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py
 !/tests/test_command_admission.py
@@ -524,7 +522,6 @@
 !/tests/test_coverage_comment_fork.py
 !/tests/test_coverage_comment_workflow.py
 !/tests/test_coverage_config.py
-!/tests/test_coverage_decorated_launch.py
 !/tests/test_coverage_environment.py
 !/tests/test_coverage_memo.py
 !/tests/test_coverage_name_bindings.py
@@ -628,7 +625,6 @@
 !/tests/test_mcp_transport.py
 !/tests/test_mcp_transport_close.py
 !/tests/test_mcp_transport_guards.py
-!/tests/test_node_launch_routing.py
 !/tests/test_noderun_deadline.py
 !/tests/test_outer_bound.py
 !/tests/test_overlap_bound.py
