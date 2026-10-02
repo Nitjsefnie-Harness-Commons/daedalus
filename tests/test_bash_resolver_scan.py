@@ -102,6 +102,52 @@ def test_the_scan_reads_exactly_the_tracked_test_tree(tmp):
     assert scanned == tracked, sorted(scanned ^ tracked)
 
 
+# The scan above reads only that a launch ROUTES through `workflow_bash`,
+# never how the resolver ORDERS what it hands back, so the order is stated
+# here. It is the one thing in this file no other suite can see, and the
+# class of failure it causes is invisible off Windows: a `.gitattributes`
+# regression once passed every local suite and all eight Linux and macOS
+# cells and failed all four Windows cells, because `bash` there resolves
+# to the launcher System32 puts near the front of PATH.
+def test_the_windows_resolver_puts_git_bash_ahead_of_the_wsl_launcher(tmp):
+    """Git's Bash leads; a PATH carrying only the launcher still resolves.
+
+    The third case is the fallback half, and restoring the first two
+    without it would narrow the contract to machines that have Git
+    installed: the resolver returns the launchers last precisely so the
+    list is empty on none of them.
+    """
+    del tmp
+
+    def only(*present):
+        return lambda candidate: candidate in present
+
+    launcher = 'C:\\Windows\\System32\\bash.exe'
+    git_bin = 'C:\\Program Files\\Git\\bin\\bash.exe'
+    both = _util.bash_candidates(
+        'C:\\Windows\\System32;C:\\Program Files\\Git\\bin', True,
+        exists=only(launcher, git_bin))
+    assert both == [git_bin, launcher], both
+    installed = (
+        'C:\\Program Files\\Git\\bin\\bash.exe',
+        'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+        'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+        'C:\\AppData\\Programs\\Git\\bin\\bash.exe')
+    fallback = _util.bash_candidates(
+        'C:\\Windows\\System32', True,
+        exists=only(launcher, *installed),
+        program_files='C:\\Program Files',
+        program_files_x86='C:\\Program Files (x86)',
+        local_app_data='C:\\AppData')
+    assert fallback == [*installed, launcher], fallback
+    assert _util.bash_candidates(
+        'C:\\Windows\\System32', True, exists=only(launcher)) == [launcher]
+    posix = _util.bash_candidates(
+        '/usr/local/bin:/usr/bin', False,
+        exists=only('/usr/local/bin/bash', '/usr/bin/bash'))
+    assert posix == ['/usr/local/bin/bash', '/usr/bin/bash'], posix
+
+
 def test_a_write_through_a_container_binds_no_name(tmp):
     """A subscript or attribute target is not a binding of its base name."""
     del tmp
