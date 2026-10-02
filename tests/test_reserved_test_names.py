@@ -202,15 +202,15 @@ def test_an_allowance_row_may_not_name_a_branch_added_declaration(tmp):
         assert not boundary.introduced, (
             'rows excuse a declaration the base tree does not carry, so the '
             f'branch wrote it: {boundary.introduced}')
-    # A reader that never compares passes the loop above: on a clean tree
-    # the clean answer is right. `added` names one no base carries.
-    added = ('tests/test_reserved_test_names.py',
-             'test_no_allowance_row_names_a_dead_site')
-    probe = introduced_rows({added}, python_digests, ROOT)
-    if probe.reason is None:  # the loop above already pins the reason
-        assert probe.introduced == [added], (
-            'the boundary did not compare counts, so a declaration no base '
-            f'carries reads as nothing introduced: {probe.introduced}')
+    # The two reasons are answers this function OWES rather than answers it
+    # happens to give today, and both are reachable from the public `bases=`
+    # whatever this branch added: time-invariant by construction.
+    for label, table, read in (('py', UNCONSOLIDATED_NAMES, python_digests),
+                               ('js', UNCONSOLIDATED_JS_NAMES, js_digests)):
+        refused = introduced_rows(table, read, ROOT, bases=('no-such-base',))
+        assert refused.reason == UNREADABLE, (label, refused.reason)
+        skipped = introduced_rows(table, read, ROOT, bases=('HEAD',))
+        assert skipped.reason == IS_THE_BASE, (label, skipped.reason)
 
 
 def test_no_workflow_fixture_name_is_bound_outside_its_module(tmp):
