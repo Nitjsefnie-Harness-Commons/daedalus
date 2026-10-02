@@ -35,11 +35,10 @@ CLAIM_PREFILTER = (
 )
 
 
-def _claim_workflow():
-    """Return the tracked claim workflow's text and its complete decoding."""
-    text = (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
+def _claim_text():
+    """Return the tracked claim workflow's own bytes."""
+    return (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
         encoding='utf-8')
-    return text, workflow_mapping(text)
 
 
 def _claim_job(workflow):
@@ -62,7 +61,7 @@ def _claim_step(workflow):
 
 def test_the_claim_trigger_is_a_new_issue_comment(tmp):
     del tmp
-    _workflow, decoded = _claim_workflow()
+    decoded = workflow_mapping(_claim_text())
     assert decoded.get('on') == {
         'issue_comment': {'types': ['created']},
     }, 'claim must run only for newly created issue comments'
@@ -70,7 +69,7 @@ def test_the_claim_trigger_is_a_new_issue_comment(tmp):
 
 def test_the_claim_prefilter_matches_the_operator_semantics(tmp):
     del tmp
-    workflow, _decoded = _claim_workflow()
+    workflow = _claim_text()
     condition = _claim_job(workflow).get('if')
     assert isinstance(condition, str), 'claim must declare an if scalar'
     assert ' '.join(condition.split()) == CLAIM_PREFILTER, (
@@ -82,22 +81,23 @@ def test_the_claim_prefilter_matches_the_operator_semantics(tmp):
 
 def test_claim_scopes_its_permission_to_the_job(tmp):
     del tmp
-    workflow, decoded = _claim_workflow()
+    workflow = _claim_text()
+    decoded = workflow_mapping(workflow)
     job = _claim_job(workflow)
     assert 'permissions' not in decoded, (
         'claim must declare no workflow-level permissions block, or the job '
         'scope that replaces it is decorative')
-    effective = job.get('permissions', decoded.get('permissions'))
-    assert effective == {'issues': 'write'}, (
-        "claim's effective scope must be exactly issues: write, declared on "
-        'the job that uses it')
     assert 'permissions' in job, (
         'claim must declare the scope on the job, not inherit it')
+    effective = job.get('permissions')
+    assert effective == {'issues': 'write'}, (
+        "claim's effective scope must be exactly issues: write, which the two "
+        'assertions above leave on the job')
 
 
 def test_claim_pins_the_current_release(tmp):
     del tmp
-    workflow, _decoded = _claim_workflow()
+    workflow = _claim_text()
     uses = _claim_step(workflow).get('uses')
     assert uses == f'Nitjsefnie-Actions/claim@{CLAIM_COMMIT}', (
         'claim must pin the current release by its commit')
@@ -110,7 +110,7 @@ def test_claim_pins_the_current_release(tmp):
 
 def test_claim_passes_the_reference_claim_policy(tmp):
     del tmp
-    workflow, _decoded = _claim_workflow()
+    workflow = _claim_text()
     assert _claim_step(workflow).get('with') == CLAIM_POLICY, (
         'claim must pass the reference per-role caps and expiry, so one '
         'account cannot hold unlimited claims and an idle claim cannot '
@@ -119,7 +119,8 @@ def test_claim_passes_the_reference_claim_policy(tmp):
 
 def test_claim_keeps_its_serialization_and_runner_shape(tmp):
     del tmp
-    workflow, decoded = _claim_workflow()
+    workflow = _claim_text()
+    decoded = workflow_mapping(workflow)
     assert decoded.get('concurrency') == {
         'group': 'claim-${{ github.event.issue.number }}',
         'cancel-in-progress': 'false',
