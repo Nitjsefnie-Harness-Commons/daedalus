@@ -28,15 +28,25 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _lint_tool_refusals import (  # noqa: E402
-    no_wheel, oversize_wheel, recorded_missing,
+    no_pin, no_wheel, oversize_wheel, recorded_missing,
     recorded_outside_the_tool_dir, resolved_outside_the_tool_dir,
-    too_many_wheels, unreadable_requirements, unreadable_wheel)
+    several_pins, too_many_wheels, unreadable_requirements, unreadable_wheel)
 
 
 def test_a_requirements_file_the_installer_cannot_read_is_refused(tmp):
     """The pin is read out of a file; a file that cannot be read is refused."""
     del tmp
     unreadable_requirements()
+
+
+def test_a_requirements_file_that_pins_no_version_is_refused(tmp):
+    """No pin at all is the supply route gone, and it is refused by name."""
+    no_pin(Path(tmp))
+
+
+def test_a_requirements_file_that_pins_it_twice_is_refused(tmp):
+    """Two pins for one file: refused with the count and both lines."""
+    several_pins(Path(tmp))
 
 
 def test_a_download_that_brought_no_wheel_is_refused(tmp):
