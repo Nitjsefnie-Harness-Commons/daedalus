@@ -658,7 +658,7 @@ def test_only_the_key_holders_own_top_level_declaration_is_exempt(tmp):
 
     here.write_text(owner, encoding='utf-8')
     there.write_text('', encoding='utf-8')
-    assert holders(phrase, Path(tmp)) == ([], 0), 'the own declaration'
+    assert holders(phrase, Path(tmp)) == ([], 0), 'the holder itself'
     there.write_text(owner, encoding='utf-8')
     assert holders(phrase, Path(tmp)) == (['other.py'], 1), 'another file'
     there.write_text('', encoding='utf-8')
