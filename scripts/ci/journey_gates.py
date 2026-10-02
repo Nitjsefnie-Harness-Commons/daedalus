@@ -1,31 +1,28 @@
 """Every gate a recorded count has to pass, and the state a run reports.
 
-Split out of `journey_budget.py`, which was at its size ceiling, along the
-boundary that file already drew: everything above its command-line marker
-is what DECIDES, and everything below is what the workflow steps CALL. One
-module owning both meant the policy grew into the CLI and the CLI grew into
-the policy.
+What DECIDES, against what the workflow steps CALL: `journey_budget.py`
+owns the subcommands and this file every answer they give. One module
+owning both meant the policy grew into the CLI and the CLI grew into the
+policy.
 
-A PURE MOVE — every function below is the one that was there, and
-`journey_budget.py` binds each back by name, so a suite that reached one
-through the policy module still reaches the same function. Nothing here
-reads `args`, writes the artefact, or parses a subcommand.
+Nothing here reads `args`, writes the artefact, or parses a subcommand, and
+`journey_budget.py` binds each of these back by name, so a suite that
+reached one through the policy module still reaches the same function.
 """
 import sys
 from pathlib import Path
 
-# The document, counter, thread and prose modules sit beside this one and
-# are imported by their own names, which is what a run from the repository
-# root, a run from anywhere else and `python3 -m scripts.ci.journey_budget`
-# all do. A relative import would only work for the last of the three.
+# Beside this one and imported by their own names, as
+# `journey_rebaseline.py` does: a relative import would only work for
+# `python3 -m scripts.ci.journey_budget`.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 import journey_report  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
-# The comparisons this file gates on, bound from the document module that
-# owns them for the same reason the prose is bound: one name, one owner.
+# One name, one owner: the comparisons are bound from the module that
+# defines them so a suite reads them through one import.
 budget_of = journey_artifact.budget_of
 sha_diff = journey_artifact.sha_diff
 map_diff = journey_artifact.map_diff

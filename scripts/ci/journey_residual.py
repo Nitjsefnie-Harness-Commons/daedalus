@@ -1,9 +1,7 @@
 """One journey's residual: its own work, net of the background it shares.
 
-Its own module because it is arithmetic over four numbers with a refusal
-attached, and it was the reason `journey_counters.py` sat at its ceiling
-while the thing that decides a budget's fate needed to change. It depends
-on nothing in this tree — a counter hands it four numbers and it hands back
+Arithmetic over four numbers with a refusal attached, and it depends on
+nothing in this tree — a counter hands it four numbers and it hands back
 a row or a sentence — so it can be imported by whichever module owns the
 loop without either of them reaching the other.
 """

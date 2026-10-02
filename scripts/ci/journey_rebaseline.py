@@ -1,7 +1,6 @@
 """Write the journey budget from one measurement, whole.
 
-Its own module because `journey_budget.py` sits at its size ceiling and the
-document this writes is a document, not a verdict: `journey_budget.py`
+The document this writes is a document, not a verdict: `journey_budget.py`
 decides whether a count may be compared and `journey_artifact.py` owns the
 shape one is recorded in, while the mapping from a measurement to that
 shape is neither of those jobs.

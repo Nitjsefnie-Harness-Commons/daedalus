@@ -2,12 +2,8 @@
 """What a journey run SAYS: the prose every verdict and remedy is rendered
 through.
 
-Split out of `test_journey_counters.py`, which owns the counting these
-blocks report, and which was at its size ceiling. The split is along the
-module under test and nothing else: every control below was written
-against `journey_report.py` and none of them loads the counters module,
-so moving them neither changed what they drive nor where the fixtures
-come from.
+Every control below is written against `journey_report.py` and none of
+them loads the counters module.
 """
 import json
 import sys

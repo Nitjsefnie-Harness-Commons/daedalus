@@ -1,11 +1,8 @@
 """Every line of markdown the journey harness writes to a step summary.
 
-Split out of the two modules that decide and measure, because both had
-grown past the production size ceiling and this is the responsibility
-neither of them owns: `journey_counters.py` counts and
-`journey_budget.py` decides, and what a run SAYS about either is a third
-thing. Each function here takes data and returns lines; writing them is
-the callers' business.
+The third thing neither module that counts nor the module that decides owns:
+what a run SAYS about either. Each function here takes data and returns
+lines; writing them is the callers' business.
 
 Nothing here writes the artefact, and nothing here prints it either. A
 re-baseline used to be pasted out of a block of JSON, which made the
