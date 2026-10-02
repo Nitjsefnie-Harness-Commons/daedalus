@@ -25,6 +25,7 @@ from _journey_contract import (  # noqa: E402
     ROOT,
     journeys,
     measured_report,
+    summaries,
     planting,
     recorded_document,
     summary_file,
@@ -296,6 +297,57 @@ def test_a_refused_journey_reaches_the_summary_with_its_remedy(tmp):
     assert '--drop' in said, (
         'the remedy for this refusal is the only place any reader learns the '
         f'command exists, and it is not in the summary: {said}')
+
+
+def test_the_summary_remedies_come_in_the_report_s_order(tmp):
+    """The step summary lists what a reader must act on, in one order.
+
+    stderr is collapsed by default, so the summary is where a person meets
+    a run this gate refuses — and the log beside it lists the same kinds.
+    Three hand-written `if`s each naming a kind were free to print them in
+    a different order from the report, and a reader comparing the two had
+    both orders to hold in their head for no gain.
+
+    So the order is `found`'s, which is the report's, and this drives a run
+    that refuses on EVERY kind at once — the only shape where an order is
+    observable at all, because one kind's remedy beside another's says
+    nothing.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = recorded_document(tolerance_pct=0.5)
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    counts = Path(tmp) / 'counts.json'
+    report = measured_report({name: 5000 for name in names})
+    entry = report['counters']['perf-instructions']
+    unresolved, unmeasured = names[0], names[1]
+    entry['journeys'].pop(unresolved)
+    entry['journeys'].pop(unmeasured)
+    entry['refused'] = {unresolved: 'its own work is smaller than the '
+                                     'background it shares'}
+    counts.write_text(json.dumps(report), encoding='utf-8')
+    with summary_file(tmp, 'every-kind.md') as summary:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(counts), '--summary'])
+    said = summary.read_text(encoding='utf-8')
+    assert code == 1, out.getvalue()
+    reported = [line.split(':', 1)[0] for line in err.getvalue().split('\n')
+                if line.startswith(('over:', 'unmeasured:', 'unresolved:'))]
+    assert reported == ['over', 'unmeasured', 'unresolved'], reported
+    # Every remedy reaches the summary, and the two that are different
+    # strings are distinguishable in it — an order control that could not
+    # tell them apart would pass on any order.
+    assert policy.UNMEASURED_REMEDY in said, said
+    assert policy.UNRESOLVED_REMEDY in said, said
+    over = summaries().rebaseline_lines()[0]
+    assert over in said, (over, said)
+    places = [said.index(over),
+              said.index(policy.UNMEASURED_REMEDY),
+              said.index(policy.UNRESOLVED_REMEDY)]
+    assert places == sorted(places), (places, said)
 
 
 def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
