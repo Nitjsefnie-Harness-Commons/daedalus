@@ -27,6 +27,11 @@ The comparison cannot pass by returning nothing on both sides. `CONTROL`
 below is a module whose arms are spelled in every shape the old marker
 missed, and the derivation is asked to find all of them.
 
+A key is a LINE, the same convention `_mcp_guard_floor` keys its own sites
+on, so an edit above a site in one of these modules moves it and this case
+says exactly where it moved to. That is the cost of naming a place, and it
+is a loud one: the derived set is printed in the failure.
+
 Two details are shaped so a plain grep of the analysers under-counts them,
 and the labels read both shapes rather than one:
 
@@ -204,7 +209,7 @@ FLOOR_ARMS = (
      '::test_a_reached_or_guard_is_refused'),
 )
 FIXTURE_ARMS = (
-    (('_assert_scan_refusal', 46), 'test_helper_assertion_pins.py drives '
+    (('_assert_scan_refusal', 49), 'test_helper_assertion_pins.py drives '
      'the reader this site is the last assertion of'),
 )
 
