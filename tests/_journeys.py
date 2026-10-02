@@ -75,11 +75,36 @@ STARTUP_ONLY = 'startup-only'
 BRIDGE_ONLY = 'bridge-only'
 BRIDGE_TOKEN = 'journeybase'
 
-# How many dashboard frames the fan-out journey will step over looking for the
-# register's own event. A sync above seeds the registry and publishes one event
-# of its own; anything past that is a shape this journey has never seen and is
-# refused rather than skipped past.
-FANOUT_MAX_FRAMES = 8
+# The shape of a dashboard session, which is what the fan-out journey carries.
+#
+# Every tab the extension has open is re-POSTed to `/sync-tabs` in full every
+# 30 seconds, and every one of those posts publishes a `tabs-synced` event to
+# every connected dashboard window. So a window left open sees one
+# `tabs-synced` per heartbeat for as long as it is open, and the fan-out it
+# receives is a function of the SESSION's length rather than of one request.
+FANOUT_TABS = 10
+# The extension's own figure for a session: the comment on
+# `scheduleRegisterAllTabs` in `extension/worker/registry.js` calls "a 10-url
+# open_tabs" the case its coalescing was written for. Each sync posts the
+# WHOLE list, so this is also what makes a `tabs-synced` event the size one
+# really is rather than a single-entry fixture.
+FANOUT_HEARTBEATS = 20
+# `chrome.alarms.create('daedalus-heartbeat', { periodInMinutes: 0.5 })` in
+# `extension/background.js` arms the heartbeat and its `registerAllTabs`
+# posts the entire tab list every time it fires: two syncs a minute, so the
+# count above is the ten minutes a panel is kept open while a task is driven
+# through it.
+#
+# One `/register` on top of those, because a tab whose url or title changed
+# publishes a `tab-updated` of its own, and that is the event this journey
+# has always read its way to.
+FANOUT_REGISTRATIONS = 1
+# The frames a run of this shape publishes, and how far past them the read
+# will step before calling a shape it has never seen a failure. Every event
+# above is published BEFORE the subscription opens, so the first pass of the
+# drain delivers all of them.
+FANOUT_EVENTS = FANOUT_HEARTBEATS + FANOUT_REGISTRATIONS
+FANOUT_MAX_FRAMES = FANOUT_EVENTS + 1
 
 
 def command_round_trip(base, docroot):
@@ -213,36 +238,65 @@ def mcp_exec(base, docroot):
     }
 
 
-def _read_until(response, wanted_type):
-    """The first dashboard frame whose `type` is `wanted_type`.
+def _read_all(response, wanted):
+    """Every frame of a run of a known shape, and the one that was read for.
 
     The fan-out subscription receives every event published while it is
-    connected, so the sync that seeds the registry arrives first. Reading for
-    the type rather than the first frame is what makes this a journey rather
-    than a read of the drain's ordering.
+    connected, so a session of `FANOUT_EVENTS` events arrives as exactly that
+    many frames. Reading all of them rather than stepping over them to the
+    first `tab-updated` is what makes the journey a measurement of the
+    DRAIN — the per-connection cursor stepping over a session's events and
+    each one leaving only once every window has passed it — rather than of
+    the ordering of the first two.
     """
+    frames = []
     for _ in range(FANOUT_MAX_FRAMES):
         frame = _bridge.next_stream_data(response, timeout=30)
-        if frame.get('type') == wanted_type:
-            return frame
+        if frame.get('type') in wanted:
+            return frames + [frame], frames
+        frames.append(frame)
     raise AssertionError(
-        f'no {wanted_type!r} event arrived in {FANOUT_MAX_FRAMES} frames')
+        f'none of the wanted {sorted(wanted)} events arrived in '
+        f'{FANOUT_MAX_FRAMES} frames; got '
+        f'{[frame.get("type") for frame in frames]}')
+
+
+def _dashboard_tabs():
+    """The tab list a heartbeat re-POSTs, at the size a session carries.
+
+    One tab is the journey's own and carries the ids the assertions below are
+    written against; the rest are the siblings a real window has open, and
+    they are what makes each `/sync-tabs` the size the extension's own
+    comment calls a session rather than a single-entry fixture.
+    """
+    tabs = [{'tabId': DASHBOARD_TAB, 'url': DASHBOARD_URL,
+             'title': DASHBOARD_TITLE}]
+    for index in range(1, FANOUT_TABS):
+        tabs.append({'tabId': f'{DASHBOARD_TAB}-{index:02d}',
+                     'url': f'https://journey.example.com/page/{index:02d}',
+                     'title': f'journey page {index:02d}'})
+    return tabs
 
 
 def dashboard_fanout(base, docroot):
-    """A tab registered, and the event every dashboard window receives."""
+    """A session's fan-out: every event a dashboard window receives."""
     del docroot
+    tabs = _dashboard_tabs()
+    synced = []
     # /register is update-only, so the registry has to hold the tab before it
-    # can publish anything. Seeding through /sync-tabs publishes an event of
-    # its own, which is what the read below steps over.
-    status, body = _util.post_json(base + '/sync-tabs', {
-        'token': DASHBOARD_TOKEN,
-        'tabs': [{'tabId': DASHBOARD_TAB, 'url': DASHBOARD_URL,
-                  'title': DASHBOARD_TITLE}],
-    })
-    assert status == 200, (status, body)
+    # can publish anything, and every sync above publishes an event of its
+    # own. The extension re-syncs every 30 seconds for as long as the browser
+    # is open, so a session is a RUN of syncs rather than one: this journey
+    # takes the ten minutes a panel is kept open while a task is driven
+    # through it, which is FANOUT_HEARTBEATS syncs of FANOUT_TABS tabs.
+    for _ in range(FANOUT_HEARTBEATS):
+        status, body = _util.post_json(base + '/sync-tabs', {
+            'token': DASHBOARD_TOKEN, 'tabs': tabs,
+        })
+        assert status == 200, (status, body)
+        synced.append(body)
 
-    # BOTH events are published BEFORE the subscription opens, and that
+    # EVERY event is published BEFORE the subscription opens, and that
     # ordering is the determinism, not a convenience. The bridge's stream loop
     # delivers whatever is queued on its first pass and otherwise idles on a
     # wall-clock tick, so a stream held open across a client round-trip
@@ -251,27 +305,36 @@ def dashboard_fanout(base, docroot):
     # instructions, which is not a count a ratchet can compare. It is also the
     # more honest journey: an event published with no window attached is
     # retained for the next one, which is the fan-out property itself.
-    status, body = _util.post_json(base + '/register', {
-        'token': DASHBOARD_TOKEN,
-        'tabId': DASHBOARD_TAB,
-        'url': DASHBOARD_URL,
-        'title': DASHBOARD_TITLE,
-    })
-    assert status == 200, (status, body)
+    registered = None
+    for _ in range(FANOUT_REGISTRATIONS):
+        status, body = _util.post_json(base + '/register', {
+            'token': DASHBOARD_TOKEN,
+            'tabId': DASHBOARD_TAB,
+            'url': DASHBOARD_URL,
+            'title': DASHBOARD_TITLE,
+        })
+        assert status == 200, (status, body)
+        registered = body
 
     connection, response = _bridge.stream_response(
         base, DASHBOARD_TOKEN, _fanout.DASHBOARD)
     try:
-        frame = _read_until(response, 'tab-updated')
+        frames, syncs = _read_all(response, {'tab-updated'})
     finally:
         response.close()
         connection.close()
 
-    assert frame.get('kind') == 'event', frame
+    assert len(syncs) == FANOUT_HEARTBEATS, [f.get('type') for f in syncs]
+    assert all(frame.get('kind') == 'event' for frame in syncs), syncs
+    assert all(frame.get('count') == FANOUT_TABS for frame in syncs), syncs
+    frame = frames[-1]
     assert frame.get('tabId') == DASHBOARD_TAB, frame
     return {
         'journey': 'dashboard-fanout',
-        'registered': body,
+        'synced': {'ok': synced[-1].get('ok'),
+                   'count': synced[-1].get('count')},
+        'registered': registered,
+        'events': [frame.get('type') for frame in frames],
         'event': {'kind': frame.get('kind'), 'type': frame.get('type'),
                   'tabId': frame.get('tabId'), 'url': frame.get('url'),
                   'title': frame.get('title')},

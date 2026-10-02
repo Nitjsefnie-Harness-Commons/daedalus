@@ -29,6 +29,27 @@ import _util  # noqa: E402
 
 SHOT_TOKEN = 'journeyshot'
 SHOT_TAB = 'journeyshotab'
+
+
+def _high_entropy(size, seed):
+    """`size` deterministic bytes that look like compressed media.
+
+    A PNG's IDAT and an HLS segment's transport stream are both
+    high-entropy, so a stand-in for either has to be: a body of one
+    repeated block would compress against any future transport and would
+    read as padding where the real thing is not. A linear congruential
+    generator over fixed moduli gives a body no two runs can differ on and
+    no clock, uuid or `random` can put in — the same requirement every
+    other fixed input in this module is under.
+    """
+    words = []
+    state = seed & 0xFFFFFFFF
+    for _ in range(size // 4):
+        state = (1103515245 * state + 12345) & 0xFFFFFFFF
+        words.append(state.to_bytes(4, 'big'))
+    return b''.join(words)
+
+
 # Chrome's own tab id, which is NOT the routing tab. The bridge strips `tab`
 # before publishing, so a sender that put its browser tab there would arrive
 # with nothing; keeping the two distinct is what makes the rendering say
@@ -38,13 +59,27 @@ SHOT_TAB = 'journeyshotab'
 SHOT_CHROME_TAB = '1458'
 SHOT_ID = 'journey-shot-1'
 SHOT_FILE = 'capture.png'
-# A real 1x1 PNG rather than an empty body: the store base64-decodes and
-# writes what it is given, and empty bytes would skip the decode the capture
-# always pays. Written as a literal so the size is a constant rather than
-# whatever a compressor emits for the interpreter running it.
-SHOT_PNG_B64 = (
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQ'
-    'GAhKmMIQAAAABJRU5ErkJggg==')
+# The size of the capture this journey hands the bridge, in bytes of image.
+# The basis is `captureVisibleTab` — extension/worker/capture.js photographs
+# the ACTIVE tab of a window with `format: 'png'` and posts the base64 of the
+# data URL with the prefix stripped, and a 1280x720 viewport of ordinary web
+# content is a PNG in the low hundreds of kilobytes. 192 KiB sits inside that
+# band rather than at its edge, and it is the number the tolerance and the
+# recorded count are measured against: a payload past the size the product
+# produces is a number nobody measured, and a payload under it is the
+# defect this journey was resized to remove.
+SHOT_CAPTURE_BYTES = 196608
+# A capture's body is base64, so the JSON envelope is 4/3 of this: 256 KiB,
+# which is four times `DAEDALUS_MAX_UNAUTHENTICATED_BODY`. That is why the
+# upload below carries its credential in a header — at a 1x1 PNG the body
+# form was accepted, and at a real capture's size the same call is answered
+# 401 without the body ever being read.
+SHOT_CAPTURE_B64 = base64.b64encode(
+    _high_entropy(SHOT_CAPTURE_BYTES, 0x5EEDC0DE)).decode('ascii')
+# A body this size takes longer to hand over than `request`'s 10 s default
+# allows on a loaded runner, and a timeout here would read as a journey that
+# failed rather than as one that waited.
+SHOT_TIMEOUT = 120
 
 # CDP: a typed command whose result is a real protocol response rather than
 # the two-key body the eval journeys carry.
@@ -79,7 +114,28 @@ NET_BODY_CHARS = 1200
 SEG_TOKEN = 'journeyseg'
 SEG_JOB = 'journeyseg'
 SEG_COUNT = 5
-SEG_BODY_CHARS = 800
+# The size of one HLS segment, in bytes. An HLS segment is a few seconds of
+# one encode, so its length is set by the stream a page happens to be
+# watching rather than by anything in this tree — a typical encode lands
+# within an order of magnitude of a megabyte per segment, and that is the
+# band the size below is taken from.
+#
+# The caps it has to sit under, all of which it does by three orders of
+# magnitude: `DAEDALUS_MAX_BODY_SIZE` (64 MiB) bounds the request, so a
+# segment over it is a refusal and a journey that asserted one would be
+# measuring the refusal rather than the relay; `DAEDALUS_MAX_SEGMENTS_PER_JOB`
+# (10000) bounds the count; `DAEDALUS_MAX_SEGMENT_JOB_SIZE` (4 GiB) bounds
+# the job, and this journey's whole job is five segments.
+SEG_BODY_BYTES = 1048576
+# ONE body, posted once per segment. The relay path is measured per request,
+# and a body regenerated per index would put megabytes of harness work into
+# a count the bridge is not responsible for — work no page does either, since
+# a page relays bytes it was handed. Nothing downstream of `POST /segment`
+# reads a segment's content, so what the count is sensitive to is its length.
+SEG_BODY = _high_entropy(SEG_BODY_BYTES, 0x5EC7A1)
+# Five megabytes of POST is past `request`'s 10 s default on a loaded runner,
+# and a timeout there would read as a failed journey rather than a slow one.
+SEG_TIMEOUT = 300
 
 
 def screenshot(base, docroot):
@@ -89,6 +145,14 @@ def screenshot(base, docroot):
     mints `<ms>_<counter>.<fmt>` from a clock and a per-process counter, so
     the `path` the result would carry — and the read-back keyed on it —
     would be a different string on every run.
+
+    The capture is a real capture's SIZE, sized from `SHOT_CAPTURE_BYTES`,
+    and the credential travels in an `Authorization` header because of it:
+    the base64 of that capture is four times
+    `DAEDALUS_MAX_UNAUTHENTICATED_BODY`, so the same call made in the body
+    form this journey used at a 1x1 PNG is now answered 401 without the
+    body being read. A journey that asserted that would be measuring the
+    refusal rather than the store.
 
     ITS RECORDED BUDGET IS AN ORDER OF MAGNITUDE ABOVE `command-round-trip`'s,
     and that is a constant rather than a defect. This journey excludes the
@@ -128,13 +192,13 @@ def screenshot(base, docroot):
     assert frame.get('_did') == enqueued.get('did'), (frame, enqueued)
 
     status, stored = _util.post_json(base + '/upload', {
-        'token': SHOT_TOKEN,
         'id': SHOT_ID,
         'filename': SHOT_FILE,
-        'data': SHOT_PNG_B64,
-    })
+        'data': SHOT_CAPTURE_B64,
+    }, headers={'Authorization': 'Bearer ' + SHOT_TOKEN}, timeout=SHOT_TIMEOUT)
     assert status == 200, (status, stored)
     assert stored.get('path') == SHOT_ID + '/' + SHOT_FILE, stored
+    assert stored.get('size') == SHOT_CAPTURE_BYTES, stored
 
     status, raw = _util.post_json(base + '/result', {
         'token': SHOT_TOKEN,
@@ -160,9 +224,10 @@ def screenshot(base, docroot):
                                   'size': stored['size']}, slot
 
     status, served = _util.get(
-        base + '/screenshot?token=' + SHOT_TOKEN + '&path=' + stored['path'])
+        base + '/screenshot?token=' + SHOT_TOKEN + '&path=' + stored['path'],
+        timeout=SHOT_TIMEOUT)
     assert status == 200, status
-    assert served == base64.b64decode(SHOT_PNG_B64), served[:16]
+    assert served == base64.b64decode(SHOT_CAPTURE_B64), served[:16]
 
     return {
         'journey': 'screenshot',
@@ -441,10 +506,13 @@ def net_capture(base, docroot):
     }
 
 
-def _segment_payload(index):
-    """One HLS segment's bytes, as the page would hand them over."""
-    seed = f'journey-segment-{index}-'
-    return (seed * (SEG_BODY_CHARS // len(seed) + 1))[:SEG_BODY_CHARS].encode()
+def segment_payload(index):
+    """One HLS segment's bytes, as the page would hand them over.
+
+    The same body at every index, for the reason `SEG_BODY` records.
+    """
+    del index
+    return SEG_BODY
 
 
 def segment_relay(base, docroot):
@@ -455,6 +523,12 @@ def segment_relay(base, docroot):
     is what authorizes a write. The `sig` is `secrets.token_urlsafe(32)` and
     is not deterministic, so it is excluded from the rendering and only `ok`
     is recorded.
+
+    Each segment is a real segment's SIZE, sized from `SEG_BODY_BYTES` and
+    cited there. At the 800 characters this journey used to post, no thread
+    of this journey rose above the background every child shares, so its own
+    work was not separable from it at all and the count was a measurement of
+    the harness's plumbing rather than of the relay.
 
     ITS RECORDED BUDGET IS AN ORDER OF MAGNITUDE ABOVE `command-round-trip`'s,
     and for the same reason `screenshot`'s is: only the front end's import
@@ -484,11 +558,12 @@ def segment_relay(base, docroot):
     auth = {'X-Daedalus-Segment-Sig': sig}
     written = []
     for index in range(SEG_COUNT):
-        payload = _segment_payload(index)
+        payload = segment_payload(index)
         status, body = _util.post_json(
             f'{base}/segment?job={SEG_JOB}&seg={index}&total={SEG_COUNT}',
             payload, headers={**auth, 'Content-Type':
-                              'application/octet-stream'})
+                              'application/octet-stream',
+                              }, timeout=SEG_TIMEOUT)
         # The status first: `post_json` parses the body, and a refusal that is
         # not JSON raises out of the helper before the pairing that would
         # have named it ever gets built.
@@ -504,7 +579,7 @@ def segment_relay(base, docroot):
                        / f'{row["seg"]:06d}.ts')
         assert stored_path.is_file(), stored_path
         stored = stored_path.read_bytes()
-        assert stored == _segment_payload(row['seg']), row['seg']
+        assert stored == segment_payload(row['seg']), row['seg']
         assert len(stored) == row['bytes'], (row['seg'], len(stored))
 
     status, seen = _util.get_json(
