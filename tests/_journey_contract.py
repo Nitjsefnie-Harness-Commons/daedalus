@@ -394,6 +394,19 @@ def artifact_shapes():
         shaped[field] = value
         return shaped
 
+    def dropped(name):
+        """A document that HOLDS no count for `name`, and bounds it anyway.
+
+        `budget_of` answers None for such a journey before it reads a
+        tolerance, so an entry naming one decides nothing — and a committed
+        document is where a rule that decides nothing is a rule nobody
+        enforces.
+        """
+        shaped = budget_document()
+        shaped['journeys'][name] = None
+        shaped['tolerances'] = {name: 1.0}
+        return shaped
+
     return (
         ('not an object', 'must be an object'),
         (over('toolchain', []), 'toolchain must be an object'),
@@ -453,6 +466,10 @@ def artifact_shapes():
          f'a journey tolerance must be a nonnegative number: {name} = '),
         (over('tolerances', {name: True}),
          f'a journey tolerance must be a nonnegative number: {name} = True'),
+        # A bound for a journey the budget does not hold reads nothing:
+        # `budget_of` answers None before it reaches the tolerance.
+        (dropped(name),
+         'a tolerance for a journey the budget does not hold decides nothing'),
         (over('journeys', []), 'journeys must be an object'),
         (over('journeys', {name: 'many'}),
          'a recorded count must be a nonnegative integer'),

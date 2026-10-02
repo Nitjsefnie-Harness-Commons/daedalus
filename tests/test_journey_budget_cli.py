@@ -215,6 +215,44 @@ def test_a_rebaseline_keeps_the_bounds_and_keeps_a_dropped_journey_dropped(
     assert policy.unrecorded(written, names) == [dropped], written['journeys']
 
 
+def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
+    """A bound for a journey the journey set no longer has goes with it.
+
+    The narrowing this pins is load-bearing and silent either way: the
+    recorded document is a legal one, because `_validated_tolerances` only
+    asks whether the journeys map carries the name, and a stale journey is
+    exactly the one a re-baseline drops. Carrying the bound forward past the
+    journey leaves a document whose own schema refuses it — so the command
+    that exists to make the artefact current fails on the artefact being
+    current, which is a re-baseline nobody can run and a budget nobody can
+    re-record. Dropping it is the same fate a stale count has, which is what
+    makes the two consistent rather than merely convenient.
+    """
+    policy = _journey_contract.policy()
+    gone = 'a-journey-nobody-runs'
+    document = recorded_document(tolerance_pct=0.5, tolerances={gone: 1.0})
+    document['journeys'][gone] = 5000
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    assert policy.stale(policy.load(artifact), journeys().NAMES) == [gone], (
+        'the rendering did not carry the stale journey, so this control is '
+        'not testing what it says it is')
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(
+        json.dumps(_journey_contract.fixture_report()), encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['rebaseline', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    assert code == 0, (
+        'a re-baseline over an artefact naming a journey the set no longer '
+        'has refused, so the budget cannot be re-recorded until someone '
+        f'hand-edits it: {spoken.getvalue()}')
+    written = policy.load(artifact)
+    assert gone not in written['journeys'], written['journeys']
+    assert written['tolerances'] == {}, written.get('tolerances')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeycli_')
