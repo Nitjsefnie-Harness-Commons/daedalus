@@ -214,26 +214,31 @@ def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
         raise AssertionError(f'the schema accepted {over}')
 
 
-# ─── the bands, and every shape the schema refuses ───────────────────────────
+# ─── the signatures, and every shape the schema refuses ─────────────────────
 
 
-def test_the_bands_a_count_measured_under_are_recorded(tmp):
-    """`excluded_threads` records the roles; the `Ir` numbers that put a
-    thread IN a role are recorded beside them, so moving a threshold is a
-    change the gate can see."""
+def test_the_signatures_a_count_was_classified_under_are_recorded(tmp):
+    """`excluded_threads` records the roles; the symbols that put a thread
+    IN a role are recorded beside them, so reading a profile by different
+    symbols is a change the gate can see.
+
+    This is the bands gate's own argument with its subject replaced. The
+    `Ir` thresholds stopped deciding a role when identity replaced size, so
+    the field that records them was replaced rather than left comparing a
+    table nothing reads.
+    """
     policy = _journey_contract.policy()
     threads = _journey_contract.threads()
-    assert threads.BANDS == {'front-end-import': 1_000_000_000,
-                             'uvicorn-serve': 10_000_000,
-                             'request': 1_000}, threads.BANDS
     document = recorded_document()
-    assert document['thread_bands'] == threads.BANDS, document['thread_bands']
-    # The recorded artefact carries a threshold the CODE no longer uses,
-    # which is what moving one looks like from the gate's side: the
+    assert document['thread_signatures'] == {
+        role: list(names) for role, names in threads.SIGNATURES.items()}, \
+        document['thread_signatures']
+    # The recorded artefact carries a symbol the CODE no longer matches on,
+    # which is what changing the table looks like from the gate's side: the
     # measurement is the module's own table, so the artefact is the only
     # thing that can differ.
-    document['thread_bands'] = dict(
-        threads.BANDS, **{'front-end-import': 100_000_000})
+    document['thread_signatures'] = {
+        threads.IMPORT: ['some_other_symbol']}
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(document))
     spoken = io.StringIO()
@@ -243,17 +248,17 @@ def test_the_bands_a_count_measured_under_are_recorded(tmp):
             '--measurements', str(_report_file(tmp, {}, recorded_maps()))])
     assert code == 0, spoken.getvalue()
     said = spoken.getvalue()
-    assert 'thread bands changed' in said, said
-    assert ('front-end-import: recorded 100000000, measured 1000000000'
-            in said), said
+    assert 'thread signatures changed' in said, said
+    assert (f"{threads.IMPORT}: recorded ['some_other_symbol'], measured "
+            f"{threads.SIGNATURES[threads.IMPORT]}") in said, said
 
 
 def test_every_shape_the_schema_refuses_is_still_refused(tmp):
     """The table is shared, so one suite reads it and every row must die.
 
     Each row names the exact refusal, which is what makes a plausible
-    simplification of the validator — a band of any size, a sha of any
-    shape — fail here rather than in a later run.
+    simplification of the validator — a signature symbol of any string, a
+    sha of any shape — fail here rather than in a later run.
     """
     policy = _journey_contract.policy()
     for document, fragment in _journey_contract.artifact_shapes():

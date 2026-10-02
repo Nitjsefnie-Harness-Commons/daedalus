@@ -410,16 +410,9 @@ def _toolbox(**present):
     return SimpleNamespace(which=present.get)
 
 
-def _profile(directory, name, slot, thread, ir):
-    """The out-file valgrind leaves for one thread, in the shape the
-    reader that sums it expects."""
-    path = Path(directory) / f'callgrind.{name}.{slot}'
-    path.write_text(
-        'version: 1\ncreator: callgrind-3.24.0\npid: 4242\npart: 1\n'
-        f'cmd: python3 tests/_journeys.py --journey {name}\n'
-        f'events: Ir\nthread: {thread}\n1 {ir}\n\nsummary: {ir}\n',
-        encoding='utf-8')
-    return path
+def _profile(directory, name, slot, thread, ir, signature=()):
+    return _journey_contract.callgrind_profile(
+        directory, name, slot, thread, ir, signature)
 
 
 def test_a_child_that_cannot_start_is_an_answer_not_an_exception(tmp):
@@ -577,20 +570,22 @@ def test_a_callgrind_round_counts_the_last_one_not_the_sum_of_them(tmp):
     interpolated plainly, so the platform spells the separator.
     """
     counters = _journey_contract.counters()
+    threads = _journey_contract.threads()
     _profile(tmp, 'mcp-exec', 9, 1, 5_000_000)
     asked = []
 
     def answering(argv):
         asked.append(list(argv))
-        _profile(tmp, 'mcp-exec', 0, 1, 900)
-        _profile(tmp, 'mcp-exec', 1, 2, 2_000_000_000)
+        _profile(tmp, 'mcp-exec', 0, 1, 9_000)
+        _profile(tmp, 'mcp-exec', 1, 2, 2_000_000_000,
+                 threads.SIGNATURES[threads.IMPORT])
         return 0, '', ''
 
     with planting(counters, shutil=_toolbox(valgrind='/usr/bin/valgrind'),
                   _run=answering):
         kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
     assert why is None, why
-    assert kept == 900, f'the previous round was summed into this one: {kept}'
+    assert kept == 9_000, f'the previous round was summed in: {kept}'
     assert asked[0][:2] == ['/usr/bin/valgrind', '--tool=callgrind'], asked
     tail = Path(tmp) / 'callgrind.mcp-exec.%p'
     out_file = next(part for part in asked[0] if '--callgrind-out-file='

@@ -99,14 +99,16 @@ def screenshot(base, docroot):
     developer box's, about 12.7% hot against the runner that records the
     budgets and on a different toolchain, so they are not the runner's.
 
-    Excluding the serve band instead is what the budget must not do. Its own
-    thread measured 6,603,084, only 1.51x below `SERVE_FROM`, so a 51% growth
-    would have reclassified that thread as the serve loop — where the
-    bridge's constant loop already sits. Two threads in one excluded band is
-    a refusal rather than a drop: `kept=None`, the counter unavailable, the
-    gate exiting 1. Loud, but resting on the companion's presence instead of
-    on this journey; the import alone makes the count robust and removes the
-    dependence outright (issue 1461, bridge side).
+    The exclusion list is the import alone. Under size bands this was the
+    only robust choice: its own request thread measured 6,603,084, only
+    1.51x below the serve floor, so growth would have reclassified that
+    thread as the serve loop sitting beside the bridge's constant one, and
+    `classify` refuses two threads of an excluded role rather than dropping
+    one (issue 1461, bridge side). Roles now come from what a thread
+    executed, so that growth can no longer happen: this journey's own work
+    is a `request` thread at any size and no journey excludes `request`
+    (issue 1466). The list is unchanged because it is the one the recorded
+    count was measured under, not because the band argument still holds.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -220,17 +222,17 @@ def cdp_result(base, docroot):
     matter to the rendering rather than to the route.
 
     ITS RECORDED BUDGET IS NEAR A BILLION INSTRUCTIONS, and that is not a
-    defect to go looking for. This journey's request thread runs to roughly 47
-    million, which is at or above `SERVE_FROM` (10,000,000) — the band
-    `role_of` reads as uvicorn's serve loop. So `uvicorn-serve` cannot be
-    excluded here without excluding the very work the journey exists to
-    measure, and the bridge's constant serve loop is counted alongside it. The
-    front end's import IS excluded, which is what a reader comparing this
-    journey with `net-capture` will find the asymmetry in: the two journeys
-    swapped which constant they keep. Same rule either way — a journey's
-    exclusion list may never cover work the journey itself caused — and the
-    same deal of counting a constant rather than dropping the band (issue
-    1461, bridge side).
+    defect to go looking for. The bridge's constant serve loop is counted
+    alongside this journey's own work, and the front end's import IS
+    excluded, which is what a reader comparing this journey with
+    `net-capture` will find the asymmetry in: the two journeys swapped which
+    constant they keep. Same rule either way — a journey's exclusion list may
+    never cover work the journey itself caused — and the same deal of
+    counting a constant rather than dropping it. Under size bands this
+    journey's request thread was itself barred from the serve role by
+    sitting at 47 million, above the floor that role started at; a role now
+    comes from what the thread executed, so that bar is gone (issue 1466)
+    and the list is the one the recorded count was measured under.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -373,15 +375,16 @@ def net_capture(base, docroot):
     ITS RECORDED BUDGET IS DOMINATED BY A CONSTANT, so a reader who sees a
     multi-billion figure for one journey is not looking at an error. The
     request thread this journey puts to work runs to billions of
-    instructions, which is at or above `IMPORT_FROM` (1,000,000,000) — the
-    band `role_of` reads as the MCP front end's import. So `front-end-import`
-    cannot be excluded here without excluding the very work the journey
-    exists to measure, and the bridge's own one-off bootstrap import counts
-    alongside it. That is the deal this journey makes deliberately (issue
-    1461, bridge side): the constant is counted so the per-byte work is too.
-    A per-byte regression that pushed the request further up would still move
-    the total, because a larger number in the same band is still counted —
-    the band only decides inclusion here, never exclusion.
+    instructions, which under size bands landed in the import band — so the
+    front end's import could not be excluded here without excluding the very
+    work the journey exists to measure, and the bridge's own one-off
+    bootstrap import counts alongside it (issue 1461, bridge side). That
+    coupling is gone: the request thread is a `request` thread whatever it
+    costs, and `front-end-import` now names a thread that executed module
+    bodies, so the two can no longer be the same thread (issue 1466). The
+    list is left as it was because it is the one the recorded count was
+    measured under, and the constant is still counted so the per-byte work
+    is counted beside it.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -454,15 +457,15 @@ def segment_relay(base, docroot):
     ITS RECORDED BUDGET IS AN ORDER OF MAGNITUDE ABOVE `command-round-trip`'s,
     and for the same reason `screenshot`'s is: only the front end's import
     is excluded, so the bridge's uvicorn serve loop is counted as the
-    constant it is, beside a request thread too small here to separate from
-    it. The alternative — excluding the serve band, as `command-round-trip`
-    does — would put this journey's own work, on any growth that lifted it
-    to `SERVE_FROM`, into the band the bridge's constant serve loop already
-    occupies. Two threads in one excluded band is the refusal `classify`
-    exists to make, not a silent drop: the count comes back unavailable and
-    the gate exits 1. Loud, but resting on the companion's presence rather
-    than on this journey, so the import alone is the robust list (issue
-    1461, bridge side).
+    constant it is. The alternative — excluding the serve role, as
+    `command-round-trip` does — used to put this journey's own work, on any
+    growth that lifted its request thread past the serve floor, into a role
+    the bridge's constant serve loop already occupied, and `classify`
+    refuses two threads of an excluded role rather than dropping one: the
+    count comes back unavailable and the gate exits 1 (issue 1461, bridge
+    side). A role comes from what the thread executed now, so no growth can
+    put this journey's own work in one, and it counts whatever it costs
+    (issue 1466). The import alone stays the robust list.
     """
     status, minted = _util.post_json(base + '/segment-job', {
         'token': SEG_TOKEN, 'job': SEG_JOB,
