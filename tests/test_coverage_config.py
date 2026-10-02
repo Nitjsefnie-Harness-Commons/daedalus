@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from coverage import Coverage, CoverageData
+from coverage.files import GlobMatcher, prep_patterns
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -23,6 +24,28 @@ _UNEXECUTED_FILES = (
 _NODE_MODULE_FILE = (
     Path('node_modules') / 'arbitrary_dependency' / 'python'
     / 'vendor_tool.py')
+_SKILL_DIR = Path('.claude') / 'skills' / 'changing-daedalus'
+# Tracked: shipped with the skill and part of the repository, so measured like
+# any other source. `plant.py` belongs here for the same reason as the rest.
+_SKILL_MODULES = ('ci_gate.py', 'ci_wait.py', 'gh_client.py',
+                  'gh_head_prs.py', 'gh_rate_limit.py', 'plant.py')
+# Untracked session machinery beside them: a checkout carries no copy, and
+# measuring them makes the floor track the tools rather than the product.
+_SKILL_WATCHERS = ('ci_watch.py', 'pr_comment_watch.py', 'watch_all.py')
+
+
+def _omitted(relative):
+    """Does this repository's omit list drop `relative`?
+
+    Resolved the way the reporter resolves it: `run:omit` and `report:omit`
+    through `prep_patterns` into the same GlobMatcher, matched against the
+    absolute path coverage hands the matcher.
+    """
+    config = Coverage(config_file=str(_RCFILE)).config
+    patterns = [pattern for option in ('run:omit', 'report:omit')
+                for pattern in (config.get_option(option) or [])]
+    matcher = GlobMatcher(prep_patterns(patterns))
+    return matcher.match(str((ROOT / relative).resolve()))
 
 
 def _coverage_report(cwd):
@@ -150,6 +173,16 @@ def test_github_runner_checkout_roots_are_path_aliases(tmp):
     measured = combined.get_data().measured_files()
     assert str((ROOT / relative).resolve()) in measured, measured
     assert str(foreign) not in measured, measured
+
+
+def test_tracked_skill_modules_are_measured_and_watchers_are_omitted(tmp):
+    del tmp
+    measured = {name for name in _SKILL_MODULES
+                if not _omitted(_SKILL_DIR / name)}
+    assert measured == set(_SKILL_MODULES), sorted(measured)
+    watchers = {name for name in _SKILL_WATCHERS
+                if _omitted(_SKILL_DIR / name)}
+    assert watchers == set(_SKILL_WATCHERS), sorted(watchers)
 
 
 def test_whitespace_only_report_lines_are_ignored(tmp):
