@@ -41,6 +41,20 @@ A journey that later moves its work onto a worker has it excluded, which is
 why `tests/test_journey_threads.py` asserts the placement rather than
 trusting it.
 
+The same overlap arrives from the BRIDGE side, and there the remedy is the
+mirror image. A bridge request thread answering a multi-megabyte result
+runs to billions of instructions, which is the import band, while the
+bridge's own one-off MCP bootstrap import sits in the same band; a request
+answering a few hundred kilobytes runs to tens of millions, which is the
+serve band, alongside uvicorn's serve loop. So for the large journeys the
+band the exclusion would drop is the band holding the journey's own work,
+and excluding it drops the work the journey exists to measure — the
+bridge-side face of issue 1461. `EXCLUDED` therefore records, per journey,
+the constant each one keeps rather than the work it would lose, and
+`classify` refuses a profile only where the ambiguity actually costs
+something: two threads in a band the journey EXCLUDES. Two threads in a
+band it does not exclude is two threads of counted work.
+
 Anything this cannot read is a REFUSAL naming the thread and its count,
 never a silent inclusion. A mis-sorted profile that quietly sums the thread
 the gate exists to exclude is the worst failure this harness has, and it is
@@ -73,21 +87,43 @@ ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 # because it is read from a thread's POSITION, not from a size.
 BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
 
-# What each journey stops counting, per journey, and why. The non-MCP
-# journeys exercise the bridge's HTTP surface and nothing of the front end's
-# event loop, so the loop's idle tick is not their work. `mcp-exec` calls
-# that loop, so its tick stays in as the named residual. The import band
-# applies to every journey, not just the ones that call a tool: the bridge
-# each of them spawns starts its own MCP listener whatever the journey asks
-# of it, so the bootstrap import thread is real in all of them.
+# What each journey stops counting, per journey, and why.
+#
+# THE RULE AN ENTRY MUST OBEY: a journey's exclusion list may never cover
+# work the journey itself caused. A total is the only evidence there is
+# about a background thread, and the bridge's fixed background and a large
+# request overlap in cost, so a band is not a verdict on whose work it is
+# — which means an excluded band that happens to hold the journey's own
+# request thread drops the work the journey exists to measure. That is the
+# same defect as issue 1461, on the bridge side, and the cure is the same:
+# put the work where the count can see it, and count a constant rather
+# than exclude a whole band.
+#
+# The import applies to every journey, not only the ones that call a tool:
+# the bridge each spawns starts its own MCP listener whatever the journey
+# asks of it, so the bootstrap import thread is real in all of them.
+#
+# The non-MCP journeys exercise the bridge's HTTP surface and nothing of
+# the front end's event loop, so the loop's idle tick is not their work.
+# `mcp-exec` calls that loop, so its tick stays in as the named residual.
+#
+# `cdp-result` and `net-capture` are the two that cannot follow the
+# pattern. Their request threads run to tens and hundreds of millions of
+# instructions, which is at or above `SERVE_FROM` and `IMPORT_FROM`
+# respectively — so the band holding them is the one being excluded, and
+# excluding it would drop the very work each journey measures. Both
+# therefore keep the constant and count the request: `cdp-result` gives up
+# the import and keeps the serve loop, `net-capture` the other way round.
+# The recorded budget for each says so in its journey's docstring, because
+# a multi-billion figure for one journey otherwise reads as a bug.
 EXCLUDED = {
     'command-round-trip': (IMPORT, SERVE),
     'dashboard-fanout': (IMPORT, SERVE),
     'mcp-exec': (IMPORT,),
     'screenshot': (IMPORT, SERVE),
-    'cdp-result': (IMPORT, SERVE),
-    'net-capture': (IMPORT, SERVE),
     'segment-relay': (IMPORT, SERVE),
+    'cdp-result': (IMPORT,),
+    'net-capture': (SERVE,),
 }
 
 
@@ -152,11 +188,21 @@ def role_of(ir, thread):
     return None
 
 
-def classify(rows):
+def classify(rows, excluded=()):
     """`(roles, failure)` for a whole process tree.
 
     `roles` maps `(pid, thread)` to a role. The failure is a sentence naming
     what could not be read, or None.
+
+    `excluded` is the journey's exclusion list, and it decides only the
+    two-threads-in-one-band refusal below. Two threads in a band the
+    journey EXCLUDES is a genuine ambiguity: the gate has to pick which of
+    them is the background it is dropping, and nothing in the profile says
+    which — so it refuses rather than pick. Two threads in a band the
+    journey does NOT exclude is not an ambiguity at all: every thread in
+    it is counted, and two of them is two threads of work. Refusing there
+    would refuse a profile for holding more work than one thread's worth,
+    which is the normal condition of the large journeys.
     """
     roles = {}
     for row in rows:
@@ -169,12 +215,14 @@ def classify(rows):
         roles[(row['pid'], row['thread'])] = found
     for pid in {pid for pid, _thread in roles}:
         for role in (IMPORT, SERVE):
+            if role not in excluded:
+                continue
             slots = sorted(thread for (owner, thread), name in roles.items()
                            if owner == pid and name == role)
             if len(slots) > 1:
                 return {}, (f'pid {pid} has {len(slots)} threads in the '
-                            f'{role} band ({slots}), so which of them is the '
-                            'one the gate excludes cannot be told')
+                            f'excluded {role} band ({slots}), so which of '
+                            'them is the one the gate excludes cannot be told')
     return roles, None
 
 
@@ -194,10 +242,10 @@ def total_for(rows, journey, unread=None):
     """
     if unread is not None:
         return None, excluded_for(journey), unread
-    roles, failure = classify(rows)
+    excluded = excluded_for(journey)
+    roles, failure = classify(rows, excluded)
     if failure is not None:
         return None, (), failure
-    excluded = excluded_for(journey)
     present = set(roles.values())
     missing = [role for role in excluded if role not in present]
     if missing:
