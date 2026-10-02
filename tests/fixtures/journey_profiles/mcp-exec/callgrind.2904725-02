@@ -1,0 +1,28 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2904725
+cmd:  python3 tests/_journeys.py --journey mcp-exec --root .
+part: 1
+thread: 2
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 1208313406
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 144265
+fn=(812) 0x0000000000189700
+cfn=(814) malloc
+fn=(1150) 0x0000000000189710
+cfn=(898) free
+fn=(896) 0x00000000049683d0
+fn=(19384) deque_remove
+cfn=(1631) _Py_Dealloc'2
+fn=(2957) getset_get'2
+fn=(4265) method_vectorcall'2

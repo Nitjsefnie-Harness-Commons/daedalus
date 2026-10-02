@@ -1,0 +1,33 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2898942
+cmd:  python3 server.py
+part: 1
+thread: 5
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 954124515
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 87100517
+fn=(40784) _BlocksOutputBuffer_Finish
+fn=(3434) PyTraceBack_Here
+cfn=(3398) PyErr_GetRaisedException
+cfn=(1554) PyBytes_FromStringAndSize
+cfn=(3386) PyException_GetTraceback
+cfn=(1506) _PyObject_GC_New
+cfn=(1645) _Py_Dealloc'2
+fn=(3449) tb_dealloc'2
+fn=(40446) PyInit_parser
+cfn=(4257) PyImport_ImportModuleLevelObject'2
+fn=(41146) PyInit_speedups
+fn=(41164) PyInit_gc
+cfn=(41182) PyInit_loop
+cfn=(40960) PyInit_url_parser

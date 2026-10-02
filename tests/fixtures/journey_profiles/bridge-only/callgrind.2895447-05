@@ -1,0 +1,31 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2895447
+cmd:  python3 server.py
+part: 1
+thread: 5
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 946465405
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 51734418
+fn=(19774) sock_initobj
+cfn=(4206) PyLong_AsInt
+cfn=(5436) PyType_GetModuleByDef
+cfn=(2592) PySys_Audit
+cfn=(5102) PyEval_SaveThread
+cfn=(19788) socket
+cfn=(33717) 0x000000000013e260'2
+fn=(40976) PyInit_url_parser
+cfn=(20867) encoder_listencode_obj'2
+cfn=(1645) _Py_Dealloc'2
+cfn=(41162) PyInit_speedups
+cfn=(40462) PyInit_parser

@@ -1,0 +1,70 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2898942
+cmd:  python3 server.py
+part: 1
+thread: 1
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 954124515
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 447550620
+fn=(10796) call_typing_args_kwargs
+fn=(9964) 0x000000000001c6c0
+cfn=(5074) PyImport_ImportModule
+cfn=(3220) PyObject_GetAttrString
+cfn=(1556) PyTuple_New
+cfn=(3681) PyObject_Call'2
+cfn=(1644) _Py_Dealloc
+fn=(9970) PyInit__ssl
+cfn=(2491) PyObject_Vectorcall'2
+fn=(4948) PyInit_time
+fn=(10374) PyInit_zlib
+fn=(11102) PyInit_grp
+fn=(18432) PyInit__random
+fn=(9686) PyInit_binascii
+fn=(9164) PyInit__datetime
+fn=(18716) PyInit__ctypes
+fn=(10420) PyInit__bz2
+fn=(11222) PyInit__uuid
+fn=(18232) PyInit__blake2
+cfn=(1645) _Py_Dealloc'2
+fn=(6536) PyInit_errno
+fn=(11088) PyInit_pwd
+fn=(4654) PyInit__io
+fn=(10768) PyInit__typing
+fn=(5936) PyInit__signal
+fn=(3208) PyInit__imp
+fn=(8462) PyInit__operator
+fn=(8748) PyInit__functools
+fn=(5720) PyInit__codecs
+fn=(9698) PyInit__string
+fn=(9240) PyInit__sre
+cfn=(18560) PyInit_unicodedata
+cfn=(18412) PyInit__bisect
+cfn=(11246) PyInit__hashlib
+cfn=(11184) PyInit__posixsubprocess
+cfn=(11166) PyInit_fcntl
+cfn=(11130) PyInit__locale
+cfn=(10640) PyInit__json
+cfn=(10468) PyInit__lzma
+cfn=(9796) PyInit__struct
+cfn=(9020) PyInit_array
+cfn=(8588) PyInit_select
+cfn=(8566) PyInit_math
+cfn=(8466) PyInit__collections
+cfn=(8456) PyInit_itertools
+cfn=(8420) PyInit__socket
+cfn=(6308) PyInit__stat
+cfn=(5964) PyInit__abc
+cfn=(4710) PyInit_posix
+cfn=(3754) PyInit__weakref
+cfn=(3692) PyInit__thread

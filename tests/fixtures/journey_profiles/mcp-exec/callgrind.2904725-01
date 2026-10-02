@@ -1,0 +1,77 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2904725
+cmd:  python3 tests/_journeys.py --journey mcp-exec --root .
+part: 1
+thread: 1
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 1208313406
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 1765580106
+fn=(9942) 0x000000000001c6c0
+fn=(58154) 0x000000000001c610
+fn=(58144) 0x000000000001c680
+cfn=(58150) 0x000000000519c3f0
+fn=(32356) _PySSLContext_get_keylog_filename
+fn=(53472) Py_XDECREF
+fn=(9948) PyInit__ssl
+fn=(21509) CONF_parse_list'2
+cfn=(11005) CRYPTO_THREAD_run_once'2
+fn=(11123) OPENSSL_init_crypto'2
+fn=(18288) PyInit__lzma
+fn=(52990) PyInit__ctypes
+fn=(18336) PyInit__bisect
+fn=(9726) PyInit_array
+fn=(18504) PyInit_grp
+fn=(9636) PyInit_select
+fn=(10866) PyInit__asyncio
+fn=(9572) PyInit__socket
+fn=(10848) PyInit__contextvars
+fn=(18594) PyInit__datetime
+fn=(5700) PyInit__codecs
+fn=(5944) PyInit__abc
+fn=(18490) PyInit_pwd
+fn=(10416) PyInit__ast
+fn=(8716) PyInit__sre
+fn=(8416) PyInit__collections
+fn=(8440) PyInit__functools
+fn=(3740) PyInit__weakref
+fn=(4928) PyInit_time
+fn=(10634) PyInit__typing
+fn=(3678) PyInit__thread
+fn=(6526) PyInit_errno
+fn=(4690) PyInit_posix
+fn=(10588) PyInit__tokenize
+fn=(52952) PyInit_gc
+fn=(3194) PyInit__imp
+fn=(8406) PyInit_itertools
+fn=(5916) PyInit__signal
+fn=(9756) PyInit__locale
+fn=(8412) PyInit__operator
+fn=(9424) PyInit_atexit
+fn=(6298) PyInit__stat
+fn=(4634) PyInit__io
+fn=(9196) PyInit__string
+cfn=(32474) PyInit_unicodedata
+cfn=(18356) PyInit__random
+cfn=(18240) PyInit__bz2
+cfn=(18194) PyInit_zlib
+cfn=(18116) PyInit__json
+cfn=(17936) PyInit__blake2
+cfn=(10950) PyInit__hashlib
+cfn=(10472) PyInit__opcode
+cfn=(10090) PyInit_binascii
+cfn=(10064) PyInit__struct
+cfn=(9826) PyInit__posixsubprocess
+cfn=(9808) PyInit_fcntl
+cfn=(9614) PyInit_math
+cfn=(9550) PyInit__heapq

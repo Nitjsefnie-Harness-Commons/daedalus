@@ -1,0 +1,47 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2898942
+cmd:  python3 server.py
+part: 1
+thread: 4
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 954124515
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 3858453424
+fn=(33356) 0x00000000000164c0
+fn=(33422) pickle_traverse
+cfn=(2764) visit_reachable
+cfn=(2736) visit_decref
+fn=(33366) _pickle_exec
+cfn=(8432) PyType_FromMetaclass
+fn=(23070) PyInit__decimal
+cfn=(23115) PyObject_CallObject'2
+fn=(33362) PyInit__pickle
+fn=(33454) PyInit__multiprocessing
+fn=(33408) PyInit__queue
+fn=(20152) PyInit__heapq
+fn=(20182) PyInit__opcode
+cfn=(5075) PyImport_ImportModule'2
+fn=(35110) PyInit__cffi_backend
+fn=(36076) PyInit__brotli
+fn=(37912) PyInit_mmap
+cfn=(3681) PyObject_Call'2
+fn=(20162) PyInit__ast
+cfn=(34246) PyInit__rust
+cfn=(33486) PyInit__rust_notify
+cfn=(23408) PyInit__zoneinfo
+cfn=(20926) PyInit__pydantic_core
+cfn=(20366) PyInit__asyncio
+cfn=(20344) PyInit__contextvars
+cfn=(20294) PyInit__tokenize
+cfn=(20134) PyInit_atexit
+cfn=(35096) PyInit__openssl

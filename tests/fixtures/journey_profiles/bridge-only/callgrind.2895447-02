@@ -1,0 +1,28 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2895447
+cmd:  python3 server.py
+part: 1
+thread: 2
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 946465405
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 25601
+fn=(1150) 0x0000000000189710
+cfn=(898) free
+fn=(1644) _Py_Dealloc
+cfn=(2290) tupledealloc
+fn=(2050) PyObject_SetAttr
+cfn=(2056) _PyUnicode_InternMortal
+fn=(3277) _PyFunction_Vectorcall'2
+cfn=(2693) _PyEval_Vector'2
+fn=(3681) PyObject_Call'2
