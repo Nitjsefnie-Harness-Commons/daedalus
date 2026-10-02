@@ -16,10 +16,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _coverage_memo  # noqa: E402
 import _util  # noqa: E402
 from _coverage_source_fixtures import _normalized_source  # noqa: E402
-from _sweep_launch_scan import SWEEP_ENTRY, sweep_launches  # noqa: E402
+from _sweep_launch_scan import sweep_launches  # noqa: E402
 
 HERE = 'tests/synthetic.py'
-PROGRAM = f'suite.{SWEEP_ENTRY}(tmp)'
+# Spelled out rather than read off `_sweep_launch_scan.SWEEP_ENTRY`: a fixture
+# built from the subject's own constant cannot see that constant change.
+PROGRAM = ('suite.test_each_new_binding_and_match_arm_is_mutation_'
+           'sensitive(tmp)')
 
 
 def _scan_of(body, head='import subprocess\n'):
@@ -47,19 +50,53 @@ def test_a_scope_is_fully_bound_before_any_call_in_it_is_judged(tmp):
     the analysis.
 
     `_sweep_scope_nodes` yields a scope's own statements in document order
-    but expands their subtrees only afterwards, so a program bound inside
-    a branch — where real code puts one, and what the analyser's own
-    docstring names — is yielded AFTER the launch standing beside it. One
-    loop that binds and judges as it goes therefore judges that launch
-    before the name it runs has been bound, and the deadline scan reports
-    a bounded sweep launch as unbounded. The first pass is what makes walk
-    order irrelevant; collapsing the two loops is a false green, not a
-    simplification.
+    but expands their subtrees only afterwards. So a program bound INSIDE A
+    BRANCH — where real code puts one, and what the analyser's own docstring
+    names — is yielded after the launch standing beside it, and that ordering
+    holds only because the branch precedes the launch; put the launch first
+    and its statement is yielded first too. Either way one loop that binds
+    and judges as it goes can reach a launch before the name it runs has been
+    bound, and the deadline scan reports a bounded sweep launch as unbounded.
+    The first pass is what makes walk order irrelevant; collapsing the two
+    loops is a false green, not a simplification.
     """
     del tmp
     assert _scan_of(f'if True:\n    p = ["-c", "{PROGRAM}"]\n'
                     'subprocess.run(p, timeout=120)\n') == (
         [(HERE, 4)], [(HERE, 4)])
+
+
+def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
+    """The LAST binding at or before a launch, never the join of them all.
+
+    `_spelled` filters a name's bindings to those at or before the line
+    being judged. Without that filter a launch reads a program bound after
+    it, and a sweep launch with no deadline in sight at its own line is
+    reported as one with the deadline — the false red this filter exists to
+    stop. The second launch in the fixture is the control that keeps the
+    filter from being a plain "the first binding" rule.
+    """
+    del tmp
+    assert _scan_of(f'program = "print(1)"\n'
+                    'subprocess.run([program], timeout=5)\n'
+                    f'program = ["-c", "{PROGRAM}"]\n'
+                    'subprocess.run([program])\n') == (
+        [(HERE, 5)], [])
+
+
+def test_a_scope_node_binds_its_own_program(tmp):
+    """Every member of `_SCOPE_NODES` is a scope, and hides from outside.
+
+    A class body is a scope of its own, so a program written inside one is
+    not in force in the module beside it. Drop `ast.ClassDef` from the tuple
+    and its bindings join the enclosing scope, the launch standing next to
+    the class reads them, and a `timeout=` on a launch running something
+    else is refused as the sweep's own.
+    """
+    del tmp
+    assert _scan_of('class A: pass\n'
+                    f'class C: argv = ["-c", "{PROGRAM}"]\n'
+                    'subprocess.run(argv, timeout=5)\n') == ([], [])
 
 
 def test_the_analysed_tree_is_its_own_first_node(tmp):
@@ -73,13 +110,10 @@ def test_the_analysed_tree_is_its_own_first_node(tmp):
     """
     del tmp
     tree = ast.parse('import os\n\nSUBJECT = "a value"\n')
-    found = _coverage_memo.nodes(tree)
-    assert found[0] is tree, found[:1]
-    assert isinstance(found[0], ast.Module)
-    assert found == list(ast.walk(tree))
+    assert _coverage_memo.nodes(tree) == list(ast.walk(tree))
 
 
-def test_a_crlf_module_reads_back_with_normalised_line_offsets(tmp):
+def test_a_crlf_module_reads_back_normalised(tmp):
     """The reader's CRLF arm, over bytes on disk rather than in memory.
 
     A checkout can carry CRLF, and a guard that reads a copied test module
@@ -93,9 +127,7 @@ def test_a_crlf_module_reads_back_with_normalised_line_offsets(tmp):
     target = Path(tmp) / 'crlf.py'
     target.write_bytes(b'import os\r\nSUBJECT = "a value"\r\n')
     assert b'\r\n' in target.read_bytes()
-    text = _normalized_source(target)
-    assert text == 'import os\nSUBJECT = "a value"\n', repr(text)
-    assert text[:text.index('SUBJECT')].count('\n') == 1
+    assert _normalized_source(target) == 'import os\nSUBJECT = "a value"\n'
 
 
 if __name__ == '__main__':
