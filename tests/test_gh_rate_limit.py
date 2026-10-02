@@ -456,23 +456,31 @@ def test_a_report_naming_no_instant_is_a_pause_with_no_instant(tmp):
 def test_every_spelling_of_the_report_is_read_and_a_lookalike_is_not(tmp):
     """The match is on the two WORDS rather than on a list of the strings,
     so a spelling nobody has seen yet still reads as the report it is.
-    Driven through the `code` field as well as `type`, and - the near
-    miss - beside three labels that are not it: one that is a different
-    report, one that merely ENDS in the two words behind a letter, and
-    one carrying them the other way round. All three must deliver."""
+
+    Driven on a 500, and the status is the load-bearing part of the
+    fixture. An answer the body carrier is also asked spells the two
+    words in its own JSON, so a suite proving the `errors[]` entry was
+    read could be proving the body text was read instead - which is
+    exactly what happened the first time this fixture was a 200, and why
+    dropping `code` from the pair of fields read left it green. On a
+    status the body is not read on, the entry's own `code` is the only
+    witness there is.
+
+    The near misses are the other half, on the same fixture: a different
+    report, a word that merely ENDS in the two behind a letter, and the
+    two words the other way round. All three are failures.
+    """
     client = _client()
     for label in ('RATE_LIMITED', 'RATE_LIMIT', 'graphql_rate_limit'):
         refusal = _paused(client, tmp, {
-            'status': 200, 'exit': 1, 'headers': {}, 'stderr': '',
-            'body': {'data': {'repository': None},
-                     'errors': [{'code': label}]}})
+            'status': 500, 'exit': 1, 'headers': {}, 'stderr': '',
+            'body': {'data': None, 'errors': [{'code': label}]}})
         assert refusal.resume_at is None, (label, refusal.resume_at)
     for label in ('NOT_FOUND', 'SUBRATELIMITED', 'limit_reached'):
-        data = _delivered(client, tmp, {
-            'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
-            'body': {'data': {'repository': None},
-                     'errors': [{'code': label}]}})
-        assert data == {'repository': None}, (label, data)
+        failure = _undelivered(client, tmp, {
+            'status': 500, 'exit': 1, 'headers': {}, 'stderr': '',
+            'body': {'data': None, 'errors': [{'code': label}]}})
+        assert not isinstance(failure, client.RateLimited), (label, failure)
 
 
 def test_an_errors_entry_that_is_not_an_object_is_stepped_over(tmp):
