@@ -167,7 +167,11 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     than pass on a green that meant nothing ran.
     """
     client, fake = _client(tmp, runs_page([]), gate=True)
-    client.GH_TIMEOUT = 1
+    # `setattr`, because the module was executed from a path rather than
+    # imported: its names are as dynamic as the module object carries them
+    # and a checker reading it as a typed namespace would be reading a
+    # file it never saw.
+    setattr(client, 'GH_TIMEOUT', 1)
     try:
         failure = _failed(client, fake)
     finally:
@@ -269,10 +273,10 @@ def test_a_body_with_no_data_is_a_failure_quoting_the_server(tmp):
     object IS data, and a `data` that is not an object is this same
     failure rather than something handed back to the caller.
     """
+    answer = 'Could not resolve to a Repository with the name o/r.'
     client, fake = _client(tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
-        'body': {'errors': [{'message': 'Could not resolve to a '
-                                      'Repository with the name o/r.'}]}})
+        'body': {'errors': [{'message': answer}]}})
     failure = _failed(client, fake)
     assert str(failure).startswith('no data in the gh response: '), failure
     assert 'Could not resolve to a Repository' in str(failure), failure
