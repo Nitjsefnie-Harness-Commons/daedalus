@@ -77,9 +77,10 @@ def document_from(report, recorded, restore=(), drop=()):
     # cannot separate it — naming a residual of `None` and offering a
     # `--restore` that cannot succeed, on the one journey the flag
     # exists for.
-    _restored([name for name in _dropped(recorded, names)
-               if name not in set(drop)], restore, report, counter)
-    _dropped_now(drop, names, report, counter)
+    held = _dropped(recorded, names)
+    _restored([name for name in held if name not in set(drop)],
+              held, restore, report, counter)
+    _dropped_now(drop, report, counter)
     shas = {name: _agreed_sha(report, name) for name in names}
     toolchain = report.get('toolchain') or {}
     if not journey_artifact.recorded_toolchain({'toolchain': toolchain}):
@@ -114,13 +115,21 @@ def document_from(report, recorded, restore=(), drop=()):
         {field: measured[field] for field in journey_artifact.FIELDS})
 
 
-def _restored(dropped, restore, report, counter):
+def _restored(dropped, held, restore, report, counter):
     """Settle the journeys the recorded budget holds no count for.
 
-    `dropped` is every journey recorded at `null`; a measurement that could
-    not separate one of them carries no count for it, and the refusal above
-    would have fired first. So every one that IS here is separable, every one
-    needs a decision, and this is where it is refused rather than taken.
+    TWO lists, and each means only what its name says. `held` is every
+    journey the artefact records at `null`; `dropped` is those the caller is
+    not already dropping, which is why the two differ. A one-line subtraction
+    used to hand `dropped` to both, and the second reader rendered it as
+    "journeys held at null" — so a journey being dropped and held at null at
+    once was reported as holding a COUNT, and `--restore X --drop X` together
+    was refused on the one invocation that works.
+
+    A measurement that could not separate one of these carries no count for
+    it, and the refusal in the counts loop would have fired first — unless
+    `--drop` named it, which is the case the subtraction exists for. Every
+    one that IS here is therefore separable, and every one needs a decision.
 
     Nothing here writes: restoring is the counts loop above having already
     assigned every name, so this decides only whether to object.
@@ -130,7 +139,7 @@ def _restored(dropped, restore, report, counter):
     the number is what says it is no longer.
     """
     _named_journeys(restore, '--restore')
-    _restorable(restore, dropped)
+    _restorable(restore, held)
     for name in dropped:
         if name in set(restore):
             continue
@@ -159,19 +168,22 @@ def _named_journeys(named, flag):
                 f'{sorted(names)}')
 
 
-def _restorable(named, dropped):
-    """Every `--restore` name the artefact is not already holding at null.
+def _restorable(named, held):
+    """Refuse a `--restore` the artefact is not already holding at null.
 
-    `--drop` has no counterpart to this: every journey in the set can be
-    dropped, so a name that reached it is already a valid one and a second
-    refusal there could only describe a case that cannot occur.
+    `held` is the ARTEFACT's own set, never a caller's subset of it: the
+    question is what the document records, and a list something else has
+    been subtracted from answers a different one.
+
+    `--drop` has no counterpart: every journey in the set can be dropped, so
+    a name that reached it is already a valid one and a second refusal there
+    could only describe a case that cannot occur.
     """
-    unknown = sorted(set(named) - set(dropped))
+    unknown = sorted(set(named) - set(held))
     if unknown:
         raise ValueError(
             f'--restore names {unknown[0]}, which the budget already holds a '
             'count for, so there is nothing there to restore')
-    return [name for name in named if name in set(dropped)]
 
 
 def _measured_row(report, counter, name):
@@ -180,7 +192,7 @@ def _measured_row(report, counter, name):
     return (entry.get('journeys') or {}).get(name) or {}
 
 
-def _dropped_now(drop, names, report, counter):
+def _dropped_now(drop, report, counter):
     """Settle every journey `--drop` names, and write nothing.
 
     The mirror of `--restore`, and the ruling is symmetric: a `null` is the
