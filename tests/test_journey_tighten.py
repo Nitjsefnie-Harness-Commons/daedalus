@@ -54,6 +54,52 @@ def _mixed_report(names):
                              for name, seen in measured.items()}}}}
 
 
+def test_both_remedies_reach_the_step_summary_on_one_failing_run(tmp):
+    """Each kind's remedy lands in the summary beside the row that reports it.
+
+    The rows themselves were controlled by rendering `verdict_lines`
+    directly, which is the number and not the sentence a reader acts from.
+    The two remedy writes were not controlled at all, and they are what the
+    summary is for: stderr is collapsed by default, so an unmeasured journey
+    whose remedy went there showed three rows and no next step.
+
+    One run carries both — a journey over budget and a journey this runner
+    measured nothing — because that is the shape the two writes share a
+    path with, and a control that drove only one would not have exercised
+    the branch that decides between them.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    report = _mixed_report(names)
+    # names[2] is dropped from the measurement entirely, so the counter
+    # reports it unmeasured while names[0] is over its budget.
+    report['counters']['perf-instructions']['journeys'].pop(names[2])
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(report), encoding='utf-8')
+    summary = Path(tmp) / 'summary.md'
+    saved = os.environ.get('GITHUB_STEP_SUMMARY')
+    os.environ['GITHUB_STEP_SUMMARY'] = str(summary)
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(measurements),
+                                '--summary'])
+    finally:
+        os.environ.pop('GITHUB_STEP_SUMMARY', None)
+        if saved is not None:
+            os.environ['GITHUB_STEP_SUMMARY'] = saved
+    assert code == 1, 'a journey over budget must exit nonzero'
+    said = summary.read_text(encoding='utf-8')
+    assert policy.UNMEASURED_REMEDY in said, (
+        'the remedy for an unmeasured journey never reached the summary, so '
+        f'the rows naming it carried no next step: {said}')
+    assert 'journey_budget.py rebaseline' in said, (
+        'the one command a re-baseline is run from never reached the '
+        f'summary: {said}')
+
+
 def test_a_tighten_that_meets_a_rise_writes_nothing(tmp):
     """The ruling, in the shape a regression takes it: one up, one down.
 
