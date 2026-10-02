@@ -55,10 +55,12 @@ jobs:
       issues: write
 
     steps:
-      # A cap by repository role: a reader — an outsider falls here — may hold
-      # 2, triage 4, write 6, maintain 10, admin unlimited. A claim idle for 7
-      # days expires, and the next `/claim` takes it over. Reaching a cap is
-      # refused with a reply naming the role, never a silent no-op.
+      # Caps are keyed by repository role, and an account the repository does
+      # not know falls in the `read` bucket. Reaching one is a reply on the
+      # issue naming the role, the cap and your count, never a silent no-op.
+      # The expiry below runs from when the holder was assigned, not from their
+      # last activity, so a claim can lapse while its holder still works the
+      # issue; the next commenter to `/claim` it takes it over.
       - uses: Nitjsefnie-Actions/claim@8abff4f2f27d59b984528cb736f64b9391952a25  # v2.0.1
         with:
           max-claims: 'read=2, triage=4, write=6, maintain=10, admin=-1'
