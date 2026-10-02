@@ -27,8 +27,10 @@ caught anywhere in this file: an answer that pauses is the classifier's
 verdict, `test_gh_rate_limit.py` owns it, and a row here that expected
 one would be reading that suite's subject through this one's client.
 """
+import contextlib
 import os
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -46,6 +48,13 @@ SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 # a number rather than a band. A band passes on a reader that returned
 # half the answer, and the wait is the subject.
 FROZEN = 1000.0
+
+# How long a held call is left in the call before its gate is opened from
+# elsewhere. A ceiling on a hang, not a margin on a result: nothing here
+# asserts that something did NOT happen inside a window this short, and
+# the one row it serves reads a bound of one second, so this only ever
+# fires for a call that is not coming back on its own.
+RELEASE_CEILING = 5.0
 
 
 def _client(tmp, answer, gate=False):
@@ -98,6 +107,46 @@ def _failed(client, fake, variables=None, env=None):
     if failure is None:
         raise AssertionError(f'nothing failed: {data!r}')
     return failure
+
+
+@contextlib.contextmanager
+def _gate_opened_off_thread(fake):
+    """Release a hold from a thread the call is not on.
+
+    `_fake_gh` writes its launcher per platform, and the two forms do
+    not agree about what the process being killed IS. A POSIX script
+    `exec`s, so the process `subprocess.run` launched is the python
+    reading stdin; a `.bat` cannot, so on Windows the process launched
+    is `cmd.exe` and the python is its child. The bound kills `cmd.exe`
+    only, and CPython's reaping of what is left is not the same on the
+    two: `subprocess.run`'s timeout branch calls `communicate()` again
+    under `_mswindows` and only `wait()` everywhere else, so the
+    Windows read waits for every handle the surviving grandchild still
+    holds - and that grandchild is blocked in the hold, waiting for the
+    gate only the call holding it can open. Opening it here, on a
+    thread, is what the finally below the call could no longer do once
+    the call had stopped returning.
+
+    It opens the gate on the way out as well, which is the finally this
+    replaces, and it opens it while the call is still in it only after
+    the ceiling - never on a path the bound has not already fired on.
+    A fake that had answered inside the bound raises `nothing failed`
+    rather than the timeout the row asserts, so this can release a
+    stalled call without being able to pass a call that never stalled.
+    """
+    finished = threading.Event()
+
+    def release():
+        finished.wait(RELEASE_CEILING)
+        fake.open_gate()
+
+    watchdog = threading.Thread(target=release, daemon=True)
+    watchdog.start()
+    try:
+        yield
+    finally:
+        finished.set()
+        watchdog.join(RELEASE_CEILING)
 
 
 def _the_data(client, fake):
@@ -210,10 +259,8 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     # and a checker reading it as a typed namespace would be reading a
     # file it never saw.
     setattr(client, 'GH_TIMEOUT', 1)
-    try:
+    with _gate_opened_off_thread(fake):
         failure = _failed(client, fake)
-    finally:
-        fake.open_gate()
     assert fake.entered(), 'the call never reached the hold'
     assert str(failure).startswith('gh failed: '), failure
     assert 'timed out' in str(failure), failure
