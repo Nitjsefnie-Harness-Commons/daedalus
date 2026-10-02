@@ -6,10 +6,10 @@ has to be runnable from a `__main__` handed nothing but a journey name and
 the repository root.
 
 Each journey drives the REAL bridge through `_util.bridge()`, which spawns
-`server.py` and polls `/health`, so what is measured is what a user waits
-for rather than how long a test function took. Every input is fixed — token,
-tab, command id, code, result payload — because a counter measured over
-moving inputs is a counter over the harness.
+`server.py` and polls `/health`, so what is measured is what a user waits for
+rather than how long a test function took. Every input is fixed — token, tab,
+command id, code, result payload — because a counter measured over moving
+inputs is a counter over the harness.
 
 What a journey RETURNS is its observable rendering, and the harness records
 the sha256 of that rendering. A sha is the shape contract: a journey that
@@ -35,9 +35,9 @@ import _journey_typed  # noqa: E402
 import _mcp_load  # noqa: E402
 import _util  # noqa: E402
 
-# The journey whose own bridge spawn carries this credential. A bridge
-# refuses a data root a second process holds, and each journey is measured in
-# its own child, so nothing here is shared between two runs.
+# The journey whose own bridge spawn carries this credential. A bridge refuses
+# a data root a second process holds, and each journey is measured in its own
+# child, so nothing here is shared between two runs.
 COMMAND_TOKEN = 'journeycmd'
 DASHBOARD_TOKEN = 'journeydash'
 
@@ -56,16 +56,16 @@ MCP_COMMAND_ID = 'journey-mcp-1'
 MCP_CODE = '2 + 2'
 MCP_RESULT = {'answer': 4, 'label': 'journey-mcp'}
 
-# The startup-only measurement: the same interpreter and the same imports as
-# a journey child, with no bridge and no journey. Every instruction counter
-# is reported net of this one, so interpreter startup and import cost are
-# not part of what the ratchet compares.
+# The startup-only measurement: the same interpreter and the same imports as a
+# journey child, with no bridge and no journey. Every instruction counter is
+# reported net of this one, so interpreter startup and import cost are not
+# part of what the ratchet compares.
 STARTUP_ONLY = 'startup-only'
 
-# How many dashboard frames the fan-out journey will step over looking for
-# the register's own event. A sync above seeds the registry and publishes one
-# event of its own; anything past that is a shape this journey has never
-# seen and is refused rather than skipped past.
+# How many dashboard frames the fan-out journey will step over looking for the
+# register's own event. A sync above seeds the registry and publishes one event
+# of its own; anything past that is a shape this journey has never seen and is
+# refused rather than skipped past.
 FANOUT_MAX_FRAMES = 8
 
 
@@ -111,8 +111,8 @@ def command_round_trip(base, docroot):
         'frame': {key: frame[key] for key in ('type', 'id', 'code')
                   if key in frame},
         # resultGeneration is a uuid and roundtrip_ms is a clock reading; the
-        # delivery id is excluded with them. What remains is what the bridge
-        # stored, which is the shape the round trip produced.
+        # delivery id is excluded with them. What remains is the shape the
+        # round trip produced.
         'result': {key: slot[key] for key in
                    ('id', 'tabId', 'result', 'error', 'world', 'ts')
                    if key in slot},
@@ -124,17 +124,15 @@ def _load_front_end(base):
 
     The bridge excludes its copy of the front end by WAITING for it — the
     `mcp-bootstrap` thread finishes before the journey's first request — and
-    the client's copy is excluded the other way round, by having already
-    paid it. Neither excludes the CALL: the `exec` round trip below is the
-    work, and it runs on the journey's main thread, which counts whatever
-    it costs.
+    the client's copy is excluded the other way round, by having already paid
+    it. Neither excludes the CALL: the `exec` round trip below is the work,
+    and it runs on the journey's main thread, which counts whatever it costs.
 
-    The load has to be off the main thread for it to be excludable at all.
-    A main thread is read as the main thread whatever its size, so an import
-    on one is the journey's own work by every rule the profiler's thread
-    bands apply. Loading it here and waiting is the whole of the asymmetry,
-    and it is harness-side: the module the tool call reaches is the same one
-    either way.
+    The load has to be off the main thread for it to be excludable at all: a
+    main thread is read as the main thread whatever its size, so an import on
+    one is the journey's own work by every rule the profiler's thread bands
+    apply. The asymmetry is harness-side — the module the tool call reaches is
+    the same one either way.
     """
     box = {}
 
@@ -160,16 +158,15 @@ def mcp_exec(base, docroot):
     result is then read back through the `result` tool, which is the read an
     unwaited send leaves behind.
 
-    The round trip runs on the journey's MAIN thread, and that placement
-    is part of what this journey measures, not an accident.
-    `journey_threads` reads `thread == 1` FIRST and whatever its total, so
-    the round trip is counted wherever the journey puts it; a non-main
-    slot is instead read by its total against the `front-end-import` band,
-    and this journey's own work measured 1,311,350,558 — inside that band
-    — so a worker carried roughly three hundred million instructions of it
-    straight out of the count. The import above is the one thing here that
-    must NOT be counted, and a main thread is read as counted whatever its
-    size, which is why `_load_front_end` keeps it on a worker of its own.
+    The round trip runs on the journey's MAIN thread, and that placement is
+    part of what this journey measures, not an accident. `journey_threads`
+    reads `thread == 1` FIRST and whatever its total, so the round trip is
+    counted wherever the journey puts it; a non-main slot is instead read by
+    its total against the `front-end-import` band, and this journey's own
+    work measured 1,311,350,558 — inside that band — so a worker carried
+    roughly three hundred million instructions of it straight out of the
+    count. The import above is the one thing here that must NOT be counted,
+    which is why `_load_front_end` keeps it on a worker of its own.
     """
     del docroot
     mod = _load_front_end(base)
@@ -207,8 +204,8 @@ def _read_until(response, wanted_type):
 
     The fan-out subscription receives every event published while it is
     connected, so the sync that seeds the registry arrives first. Reading for
-    the type rather than for the first frame is what makes this journey a
-    journey rather than a read of the drain's ordering.
+    the type rather than the first frame is what makes this a journey rather
+    than a read of the drain's ordering.
     """
     for _ in range(FANOUT_MAX_FRAMES):
         frame = _bridge.next_stream_data(response, timeout=30)
@@ -232,16 +229,14 @@ def dashboard_fanout(base, docroot):
     assert status == 200, (status, body)
 
     # BOTH events are published BEFORE the subscription opens, and that
-    # ordering is the determinism, not a convenience. The bridge's stream
-    # loop delivers whatever is queued on its first pass and otherwise idles
-    # on a wall-clock tick, so a stream held open across a client round-trip
+    # ordering is the determinism, not a convenience. The bridge's stream loop
+    # delivers whatever is queued on its first pass and otherwise idles on a
+    # wall-clock tick, so a stream held open across a client round-trip
     # performs a number of idle passes that depends on how long the machine
     # took — the same code and the same events counting different
-    # instructions, which is not a count a ratchet can compare. Publishing
-    # first means the drain has something on its first pass and the loop
-    # never idles. It is also the more honest journey: an event published
-    # with no window attached is retained for the next one, which is the
-    # fan-out property itself rather than a race against a live reader.
+    # instructions, which is not a count a ratchet can compare. It is also the
+    # more honest journey: an event published with no window attached is
+    # retained for the next one, which is the fan-out property itself.
     status, body = _util.post_json(base + '/register', {
         'token': DASHBOARD_TOKEN,
         'tabId': DASHBOARD_TAB,
@@ -273,10 +268,6 @@ JOURNEYS = {
     'command-round-trip': (COMMAND_TOKEN, command_round_trip),
     'mcp-exec': (_mcp_load.TOK, mcp_exec),
     'dashboard-fanout': (DASHBOARD_TOKEN, dashboard_fanout),
-    # The typed-command and page-facing journeys live in their own module,
-    # so this one holds the registry, the three eval-round-trip journeys
-    # and the CLI rather than growing past the size ceiling every other
-    # module is held to. Their tokens and constants move with them.
     'screenshot': (_journey_typed.SHOT_TOKEN, _journey_typed.screenshot),
     'cdp-result': (_journey_typed.CDP_TOKEN, _journey_typed.cdp_result),
     'net-capture': (_journey_typed.NET_TOKEN, _journey_typed.net_capture),
