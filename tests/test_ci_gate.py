@@ -488,6 +488,79 @@ def test_the_waiter_reads_this_one_predicate(tmp):
     assert wait.ci_gate.REQUIRED_WORKFLOWS == mod.REQUIRED_WORKFLOWS
 
 
+def test_an_unreadable_timestamp_ranks_as_the_absent_one(tmp):
+    """What the ordering does with a stamp it cannot parse.
+
+    The fallback is not merely "something early" - it is the SAME instant
+    a run carrying no timestamp at all reads as, so the two hold one
+    position in the order and the numeric id alone decides between them.
+    A fallback with an instant of its own would order a garbled stamp
+    against an absent one, which is an ordering no producer emits and no
+    reader can audit.
+
+    Asked of `superseded` rather than of the judged set, because the
+    judged set keeps whichever run carries the higher id either way and
+    so cannot say WHICH of the two it kept.
+    """
+    del tmp
+    mod = _ci_gate()
+    garbled = _run(10, 'cancelled', 'not a timestamp')
+    absent = _run(9, 'success', None, name='tests')
+    assert mod.superseded(garbled, [garbled, absent]) is False, garbled['id']
+    assert mod.superseded(absent, [garbled, absent]) is True, absent['id']
+    garbled = _run(9, 'cancelled', 'not a timestamp')
+    absent = _run(10, 'success', None, name='tests')
+    assert mod.superseded(garbled, [garbled, absent]) is True, garbled['id']
+    assert mod.superseded(absent, [garbled, absent]) is False, absent['id']
+
+
+def test_a_naive_timestamp_is_read_as_utc(tmp):
+    """The other half of the same read, and the one that makes the two
+    comparable at all.
+
+    A stamp without a zone is the SAME instant as the same stamp written
+    with `Z`, so the id alone decides between the two - and a naive stamp
+    compared against an aware one is the `TypeError` this arm removes.
+    Deleting it does not change an answer, it ends the comparison with an
+    exception, which is why what is asserted here is the equality of the
+    two positions and not a verdict about a head.
+
+    The second pair says the read is UTC rather than the runner's own
+    zone: a stamp an hour earlier in UTC is earlier whoever is carrying
+    it, and on a runner west of Greenwich a local-zone read would order
+    the pair the other way.
+    """
+    del tmp
+    mod = _ci_gate()
+    naive = _run(9, 'cancelled', '2026-09-20T10:00:00')
+    utc = _run(10, 'success', '2026-09-20T10:00:00Z', name='tests')
+    assert mod.superseded(naive, [naive, utc]) is True, naive['id']
+    assert mod.superseded(utc, [naive, utc]) is False, utc['id']
+    earlier = _run(11, 'success', '2026-09-20T09:00:00Z')
+    assert mod.superseded(naive, [naive, earlier]) is False, naive['id']
+    assert mod.superseded(earlier, [naive, earlier]) is True, earlier['id']
+
+
+def test_the_absent_gate_value_names_what_was_missing(tmp):
+    """The fourth answer, printed as itself.
+
+    Nothing in this tree constructs `GateAbsent` - the class is carried
+    deliberately and its own docstring says so - so the only thing a
+    control can hold is the text a refusal built from it would carry.
+    That is what is pinned here: the missing names as a tuple, and a
+    representation that spells them rather than naming the class and its
+    address.
+    """
+    del tmp
+    mod = _ci_gate()
+    absent = mod.GateAbsent(['tests', 'ci'])
+    assert absent.missing == ('tests', 'ci'), absent.missing
+    assert repr(absent) == 'gate absent: tests, ci', repr(absent)
+    empty = mod.GateAbsent([])
+    assert empty.missing == (), empty.missing
+    assert repr(empty) == 'gate absent: ', repr(empty)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='cigate_')
 
