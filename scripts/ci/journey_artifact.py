@@ -1,8 +1,7 @@
 """The committed journey budget as a document: what it may hold, and how
 it is written.
 
-Its own module, off `journey_budget.py`, because the budget and the
-document are different responsibilities and the first was at its ceiling:
+The budget and the document are different responsibilities:
 `journey_budget.py` decides what a count may be and this owns the shape a
 recorded one arrives in. It is bound into that module by name rather than
 reached through a forward, so a name the gates use has one owner.

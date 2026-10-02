@@ -113,8 +113,6 @@ def journey_names():
     return journey_counters.journey_names()
 
 
-# ─── the committed artefact ────────────────────────────────────────────────
-
 # ─── the command line ──────────────────────────────────────────────────────
 
 def _parser():
@@ -162,8 +160,8 @@ def _parser():
                         metavar='JOURNEY',
                         help='record a count for a journey the budget holds '
                              'none for; repeatable')
-    # The mirror. A `null` is written only here and only for the journey
-    # this names, and it refuses a journey the run can separate.
+    # The mirror of `--restore`, for the other one of the two values a
+    # journey's row can hold.
     rebase.add_argument('--drop', action='append', default=[],
                         metavar='JOURNEY',
                         help='write no count for a journey this run cannot '

@@ -2,8 +2,7 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`, and
 `tests/_journeys.py` is what runs a journey. This module is the other half
-of that registry, split out so neither file grows past the ceiling
-`tests/test_file_sizes.py` holds every other module to.
+of that registry.
 
 Each journey drives the REAL bridge through `_util.bridge()`, plays the
 extension itself — there is no browser and no Chrome in the counted

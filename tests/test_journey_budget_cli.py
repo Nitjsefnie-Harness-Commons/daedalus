@@ -403,6 +403,11 @@ def test_a_tighten_writes_nothing_the_check_refuses_over_a_missing_journey(
     assert policy.UNRESOLVED_REMEDY not in said, (
         'the two remedies are distinct findings and must not be collapsed '
         f'into one sentence: {said}')
+    # The arm's OWN clause, which neither assertion above reaches.
+    assert (f'the run counted no journey under perf-instructions for '
+            f'{missing}' in said), (
+        'the unmeasured refusal must say what the run did instead of '
+        f'counting this journey, under the counter it used: {said}')
     # And the check on the artefact the tighten refused still refuses it.
     with contextlib.redirect_stdout(io.StringIO()), \
             contextlib.redirect_stderr(io.StringIO()):
