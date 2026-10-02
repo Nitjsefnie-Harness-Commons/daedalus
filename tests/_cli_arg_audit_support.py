@@ -20,7 +20,18 @@ read by that same control with the refusal removed, the first of them
 'computed key, concatenation'; and the real tree is the control for its
 exemption, test_cli_audit_refuses_frame_namespaces_in_the_real_package,
 which reds on exactly the eleven correct slices the CLI already has when
-the range-and-tuple exemption is removed."""
+the range-and-tuple exemption is removed.
+What these controls cannot see is the other direction. A guard operand ADDED
+to the resolver fires nothing here: the completeness assertion holding the
+condition set derived from the resolver's AST against a ledger's rows went
+with the deleted ledger. Two additions measured here both leave this suite
+31/31 — a NamedExpr arm on frame_read deciding nothing the fallthrough did
+not, and the `key is not None` conjunct dropped from _subscript_read — and
+neither widens acceptance, the first inert and the second turning one accept
+into a refuse. Two samples are not a rule for every addition. One blind spot
+survives the deletion: frame_read's attribute arm has no control of its own,
+the two tests dying with the whole arm removed both dying with only the
+member test inside it removed."""
 import argparse
 import builtins
 import contextlib
