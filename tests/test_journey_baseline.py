@@ -10,8 +10,10 @@ with a journey whose own work is smaller than the constant it shares
 refusing rather than reporting a clamped zero.
 """
 import contextlib
+import io
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
@@ -25,18 +27,20 @@ from _journey_contract import (  # noqa: E402
 
 def _profile_counter(counters, journey_main, bridge_main, request=2_000,
                      imported=3_000, served=5_000, startup=7_000):
-    """A counter that answers every name with a real classifier profile.
+    """A counter that answers every name the way the callgrind leaf does.
 
-    The startup-only run answers with a bare number, because a counter
-    that counts a process tree whole has no threads to read; every other
-    run answers with rows the real `journey_threads.total_for` sorts, so
-    the journey's own profile and the baseline's profile go through one
-    reader rather than two that agree today.
+    Every name, `startup-only` included, gets rows the real
+    `journey_threads.total_for` sorts. A double that special-cased the
+    startup run to answer a bare number hid the shape the real leaf has
+    always returned for that name, which is the whole of what the control
+    below exists to pin. The startup child is one thread that started and
+    left — it has no bridge, so there is nothing for it to exclude.
     """
     def answering(name, root, workdir):
         del root, workdir
         if name == counters.STARTUP_NAME:
-            return startup, None
+            return {'rows': _journey_contract.bridge_profile(main=startup),
+                    'unread': None}, None
         return {'rows': _journey_contract.bridge_profile(
             main=bridge_main if name == counters.BRIDGE_NAME else journey_main,
             request=request, imported=imported, served=served),
@@ -145,11 +149,16 @@ def test_bridge_only_spawns_the_bridge_and_is_not_a_journey(tmp):
 
     with planting(journeys._util, bridge=bridge):
         rendering = journeys.bridge_only_rendering()
-        assert journeys.main(['--journey', journeys.BRIDGE_ONLY,
-                              '--root', str(ROOT)]) == 0
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            assert journeys.main(['--journey', journeys.BRIDGE_ONLY,
+                                  '--root', str(ROOT)]) == 0
     assert rendering == {'journey': 'bridge-only'}, rendering
     assert entered == [({'DAEDALUS_TOKEN': journeys.BRIDGE_TOKEN,
                          'TOKEN': ''}, True)] * 2, entered
+    # Nothing printed, the way `startup-only` prints nothing: this run is a
+    # constant to subtract, not a journey whose rendering anyone compares.
+    assert journeys.RECORD_MARKER not in printed.getvalue(), printed.getvalue()
     assert journeys.BRIDGE_ONLY not in journeys.JOURNEYS
     assert journeys.BRIDGE_ONLY not in journeys.NAMES
     gate = _journey_contract.policy()
@@ -159,6 +168,64 @@ def test_bridge_only_spawns_the_bridge_and_is_not_a_journey(tmp):
         'a journey the artefact records nothing about is reported by every '
         f'check, and the artefact records nothing about this one: {names}')
     assert gate.stale(document, names) == [], names
+
+
+def test_the_startup_baseline_is_read_through_the_same_reader(tmp):
+    """`startup-only` is measured by the REAL leaf, so its row is a number.
+
+    The callgrind leaf answers rows for every name it is given, the startup
+    baseline is measured by that same leaf, and a leaf whose answer was
+    taken raw put a mapping where a count belongs. The crash that reached
+    was unhandled where it landed — `journey_budget` catches no `TypeError`
+    — so `measure` aborted and the gate produced no counts at all, on the
+    one counter this artefact is denominated in.
+
+    Only the launcher is planted. The leaf, `journey_threads.read`, the
+    classification and the whole subtraction are the shipped code.
+    """
+    del tmp
+    counters = _journey_contract.counters()
+    asked = []
+
+    def answering(argv):
+        directory = Path(next(part for part in argv if part.startswith(
+            '--callgrind-out-file=')).split('=', 1)[1]).parent
+        name = argv[argv.index('--journey') + 1]
+        asked.append(name)
+        # Every role is present whatever the name, because a journey that
+        # excludes a role no thread carries is a refusal. Only the main
+        # thread's total differs: the startup child starts and leaves, and
+        # the bridge child has no journey's work on top of its background.
+        profile = _journey_contract.bridge_profile(
+            main={counters.STARTUP_NAME: 7_000,
+                  counters.BRIDGE_NAME: 30_000}.get(name, 100_000),
+            request=2_000, imported=3_000, served=5_000)
+        for slot, row in enumerate(profile):
+            _journey_contract.callgrind_profile(
+                str(directory), name, slot, row['thread'], row['ir'],
+                sorted(row['names']))
+        return 0, '', ''
+
+    with planting(counters,
+                  shapes=lambda names, root, rounds: (
+                      {name: ['s'] for name in names}, None),
+                  shutil=SimpleNamespace(
+                      which=lambda _program: '/usr/bin/valgrind'),
+                  _run=answering, COUNTERS=('valgrind-callgrind',),
+                  COUNTERS_BY_NAME={'valgrind-callgrind': (
+                      counters._callgrind, True)}):
+        report = counters.measure(root=ROOT, rounds=1, found=counter_facts())
+    row = report['counters']['valgrind-callgrind']
+    assert row['available'] is True, row
+    assert asked[:2] == [counters.STARTUP_NAME, counters.BRIDGE_NAME], asked
+    # The WHOLE profile, 7,000 on the main thread and 10,000 on the three
+    # beside it: `startup-only` excludes no role, so every thread that
+    # child ran is its own cost. A count taken raw from the leaf would be
+    # the mapping, and a reader that kept only the main thread would say
+    # 7,000.
+    assert row['startup_only'] == 17_000, row
+    assert row['bridge_only']['mcp-exec'] == 37_000, row
+    assert row['journeys']['mcp-exec']['net'] == [53_000], row
 
 
 def main():
