@@ -2,8 +2,8 @@
 """The workflow-reader suites import no sibling suite module.
 
 The reader was split three ways, and a split creates no boundary while one
-suite reaches another for a helper: running the scalar suite then imports
-both other suites, and a change to one lands in every run. Each suite is
+suite reaches another for a helper: running the scalar suite then imported
+both other suites, and a change to one landed in every run. Each suite is
 imported in a fresh subprocess, and only its own name may land in
 `sys.modules`.
 """
