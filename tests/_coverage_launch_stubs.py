@@ -64,7 +64,7 @@ class Launches:
 
 
 def run_main(tmp, *, scripts=None, platform=None, argv=(),
-           suites=(SUITE,), output=MEASURED):
+             suites=(SUITE,), output=MEASURED):
     """Run the runner's `main()` here, over a tree holding `suites`.
 
     `platform` is what `sys.platform` reads as for the length of the call,
@@ -80,8 +80,9 @@ def run_main(tmp, *, scripts=None, platform=None, argv=(),
     for name in suites:
         (root / 'tests' / name).write_text("print('measured')\n",
                                            encoding='utf-8')
-    policy.ROOT = root
-    policy.launch_suite = launch = Launches(scripts, output)
+    setattr(policy, 'ROOT', root)
+    launch = Launches(scripts, output)
+    setattr(policy, 'launch_suite', launch)
     stdout, stderr = io.StringIO(), io.StringIO()
     with contextlib.ExitStack() as stack:
         if platform is not None:
@@ -161,9 +162,10 @@ def run_main_on_streams(tmp, *, tty=False, error=None, suites=(SUITE,)):
     for name in suites:
         (root / 'tests' / name).write_text("print('measured')\n",
                                            encoding='utf-8')
-    policy.ROOT = root
-    policy.launch_suite = launch = Launches()
-    policy.sys = Sys(Stream(tty, error), Stream(tty, error))
+    setattr(policy, 'ROOT', root)
+    launch = Launches()
+    setattr(policy, 'launch_suite', launch)
+    setattr(policy, 'sys', Sys(Stream(tty, error), Stream(tty, error)))
     with contextlib.redirect_stdout(io.StringIO()):
         status = policy.main([])
     return SimpleNamespace(status=status, stdout=policy.sys.stdout,

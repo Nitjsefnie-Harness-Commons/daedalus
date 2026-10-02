@@ -42,8 +42,11 @@ def _omitted(relative):
     absolute path coverage hands the matcher.
     """
     config = Coverage(config_file=str(_RCFILE)).config
-    patterns = [pattern for option in ('run:omit', 'report:omit')
-                for pattern in (config.get_option(option) or [])]
+    patterns = []
+    for option in ('run:omit', 'report:omit'):
+        configured = config.get_option(option)
+        if isinstance(configured, list):
+            patterns.extend(configured)
     matcher = GlobMatcher(prep_patterns(patterns))
     return matcher.match(str((ROOT / relative).resolve()))
 
