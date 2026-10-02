@@ -40,9 +40,12 @@ billions of instructions, which is the import band, where the bridge's own
 one-off MCP bootstrap import also sits. So for the large journeys the band
 an exclusion would COVER is the band holding the journey's own work — and
 covering it does not drop that work quietly: the bridge's constant thread
-in the band is there beside it, so `classify` finds two threads in an
-excluded band and refuses, the count comes back unavailable and the gate
-fails. That is the bridge-side face of issue 1461. `EXCLUDED` therefore
+in the band sits there beside it, so for as long as it does `classify`
+finds two threads in an excluded band and refuses, the count comes back
+unavailable and the gate fails. That is loud, but it rests on the companion
+being there — thread layout, not a property of the journey — so the journeys
+below take an exclusion that does not depend on it. That is the bridge-side
+face of issue 1461. `EXCLUDED` therefore
 records, per journey, the constant each one keeps rather than the work it
 would cover, and `classify` refuses a profile only where the ambiguity
 actually costs something: two threads in a band the journey EXCLUDES. Two

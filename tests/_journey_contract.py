@@ -1,7 +1,7 @@
-"""What the three journey-budget suites share: how to load each module, and
+"""What the journey-budget suites share: how to load each module, and
 the documents they hand it.
 
-A shared module rather than three copies, for the reason every other shared
+A shared module rather than one copy each, for the reason every other shared
 module here exists: the loaders are the same four lines, and a duplicated
 loader is one that drifts from the module it names without anything
 noticing. Not a suite itself — `run_tests.py` only loads `test_*.py`.
