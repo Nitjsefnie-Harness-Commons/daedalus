@@ -248,20 +248,22 @@ belong in this repository's tracker.
 The body must be exactly the command after trimming — `/claim`, `/unclaim` or
 `/release`, each optionally followed by the issue number, with or without the
 `#` prefix, which must match the issue the comment is posted on. What counts as
-an attempt is where the command word sits: a line that **starts** with it,
-whatever else follows on that line. A word inside a sentence, a URL or a path
-is a mention, not an attempt, and gets nothing at all.
+an attempt is where the command word sits: a line that begins with the word
+followed by a space or the end of that line. `/claimed items` begins with a
+command word and is still not one — it mentions a word, it does not issue a
+command, and like a word inside a sentence, a URL or a path it gets nothing at
+all.
 
 A decline is loud, not silent: a mismatched number, a closed issue, a pull
-request, and a body one of whose lines starts with a command word — `/claim`
-followed by anything else on that line — each get an answer on the issue and
-fail the run. An issue somebody already holds is answered with the holder named,
-and reaching the cap for your role is answered too, naming the role, the cap and
-your count, though that run still succeeds. Three silences remain: a body with no
-command word anywhere, and a bot's comment, are both skipped before the action
-runs, and a body that merely mentions a command word mid-line starts a run that
-ends quietly. Re-read the issue afterwards and confirm your login is in
-`assignees`: a posted comment is not a claim.
+request, and a body whose line begins with a command word properly — as
+`/claim`, `/claim 1479` or `/claim this one` — each get an answer on the issue
+and fail the run. An issue somebody already holds is answered with the holder
+named, and reaching the cap for your role is answered too, naming the role, the
+cap and your count, though that run still succeeds. Some comments get no answer
+at all: a body with no command word anywhere, and a bot's comment, are both
+skipped before the action runs, and a body that merely mentions a command word
+mid-line starts a run that ends quietly. Re-read the issue afterwards and
+confirm your login is in `assignees`: a posted comment is not a claim.
 
 A claim you take this way also ages out: held longer than seven days, it
 expires, and another commenter's `/claim` takes it over — or someone with write
