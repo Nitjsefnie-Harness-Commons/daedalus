@@ -212,9 +212,7 @@ def test_the_step_summary_is_written_only_where_there_is_one_to_write(tmp):
             os.environ['GITHUB_STEP_SUMMARY'] = saved
 
 
-# ─── the thread reader, against a profile the shape is taken from ─────────
-
-
+# ─── the thread reader, against a profile the shape is taken from ─────
 def test_a_counter_that_stops_mid_measurement_stops_the_measurement(tmp):
     """A counter that answers for the first journey and then refuses has
     already produced rows, and those rows must not be reported: a partial
@@ -319,9 +317,7 @@ def test_a_perf_run_that_printed_no_count_says_so(tmp):
     assert 'no summary to read a total from' in why['stderr'], why
 
 
-# ─── the probe, and the children every counter launches ──────────────────
-
-
+# ─── the probe, and the children every counter launches ─────────────────
 def _toolbox(**present):
     """`shutil` as the probe finds it: the named tools, and nothing else."""
     return SimpleNamespace(which=present.get)
@@ -340,9 +336,10 @@ def test_every_measured_child_runs_with_the_two_settings_a_count_depends_on(
 
     `PYTHONHASHSEED` unset makes CPython randomise string hashing per
     process, so which order a module's globals are built in — and what that
-    costs — differs between two runs of the same tree. `PYTHONDONTWRITEBYTECODE`
-    unset makes a warm `__pycache__` cheap: measured on two runs of the same
-    tree under valgrind, the first child's harness main thread compiled
+    costs — differs between two runs of the same tree.
+    `PYTHONDONTWRITEBYTECODE` unset makes a warm `__pycache__` cheap:
+    measured on two runs of the same tree under valgrind, the first
+    child's harness main thread compiled
     21,930,238 instructions of source and the second 6,268,419.
 
     Neither is a number to subtract and neither is a tolerance to widen: both

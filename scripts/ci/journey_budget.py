@@ -324,8 +324,8 @@ def main(argv=None):
             # below prints them in. Three hand-written `if`s each naming a
             # kind were free to disagree with it, and a reader comparing the
             # summary against the log had two orders to hold in their head.
-            for kind in found:
-                if not found[kind]:
+            for kind, detail in found.items():
+                if not detail:
                     continue
                 if kind == 'over':
                     journey_counters.write_summary(
