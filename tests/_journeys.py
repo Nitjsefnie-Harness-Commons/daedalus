@@ -62,6 +62,19 @@ MCP_RESULT = {'answer': 4, 'label': 'journey-mcp'}
 # part of what the ratchet compares.
 STARTUP_ONLY = 'startup-only'
 
+# The bridge-only measurement, and the fixed background it stands for: the
+# real bridge, spawned exactly as a journey spawns it, with no journey's work
+# at all. `startup-only` removes the HARNESS child's interpreter and imports
+# but runs no bridge, so every journey's number still carries the bridge
+# child's own ~800M Ir — which on `screenshot` is 99% of what is measured.
+# `journey_counters` measures this ONCE per counter and reads it through each
+# journey's own exclusion list, so what is left is the journey's own work.
+#
+# It is a pseudo-journey in the way `STARTUP_ONLY` is: it is not in `NAMES`,
+# it produces no shape sha, and no count is ever recorded for it.
+BRIDGE_ONLY = 'bridge-only'
+BRIDGE_TOKEN = 'journeybase'
+
 # How many dashboard frames the fan-out journey will step over looking for the
 # register's own event. A sync above seeds the registry and publishes one event
 # of its own; anything past that is a shape this journey has never seen and is
@@ -265,6 +278,18 @@ def dashboard_fanout(base, docroot):
     }
 
 
+def bridge_only(base, docroot):
+    """The bridge, spawned and idle: the fixed background, and no journey.
+
+    Nothing here performs a journey's work, and that is the whole of it. The
+    bridge is the same one, under the same credential and the same readiness
+    wait a journey is measured under, so the constant this measures is the
+    one every journey pays.
+    """
+    del base, docroot
+    return {'journey': BRIDGE_ONLY}
+
+
 JOURNEYS = {
     'command-round-trip': (COMMAND_TOKEN, command_round_trip),
     'mcp-exec': (_mcp_load.TOK, mcp_exec),
@@ -287,6 +312,14 @@ def bridge_env(token):
     return {'DAEDALUS_TOKEN': token, 'TOKEN': ''}
 
 
+def _against_a_fresh_bridge(token, run):
+    with tempfile.TemporaryDirectory(prefix='journey_') as directory:
+        with _util.bridge(directory, env=bridge_env(token),
+                          await_mcp=True) as fixture:
+            base, docroot = fixture
+            return run(base, docroot)
+
+
 def rendering_of(name):
     """Run one journey against a fresh bridge and return its rendering.
 
@@ -297,12 +330,17 @@ def rendering_of(name):
     happened to run alongside. The wait puts the import wholly inside every
     round or wholly outside all of them.
     """
-    token, run = JOURNEYS[name]
-    with tempfile.TemporaryDirectory(prefix='journey_') as directory:
-        with _util.bridge(directory, env=bridge_env(token),
-                          await_mcp=True) as fixture:
-            base, docroot = fixture
-            return run(base, docroot)
+    return _against_a_fresh_bridge(*JOURNEYS[name])
+
+
+def bridge_only_rendering():
+    """The fixed background, off a bridge that did no journey's work.
+
+    The same scaffolding a journey runs under, which is the point: a
+    constant measured from a bridge spawned any other way is a different
+    constant.
+    """
+    return _against_a_fresh_bridge(BRIDGE_TOKEN, bridge_only)
 
 
 def canonical(rendering):
@@ -326,7 +364,7 @@ def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--journey', required=True,
                         help=f'one of {", ".join(NAMES)}, or '
-                             f'{STARTUP_ONLY}')
+                             f'{STARTUP_ONLY} or {BRIDGE_ONLY}')
     parser.add_argument('--root', type=Path, default=_util.ROOT)
     return parser
 
@@ -335,6 +373,11 @@ def main(argv=None):
     """Run one journey in this process and print its record."""
     args = _parser().parse_args(argv)
     if args.journey == STARTUP_ONLY:
+        return 0
+    if args.journey == BRIDGE_ONLY:
+        # No record, and deliberately: this run is a constant to subtract,
+        # not a journey whose rendering anyone can compare.
+        bridge_only_rendering()
         return 0
     if args.journey not in JOURNEYS:
         print(f'no journey named {args.journey!r}', file=sys.stderr)

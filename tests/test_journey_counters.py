@@ -111,7 +111,10 @@ def test_the_measurement_carries_the_median_the_check_compares(tmp):
     def answering(name, root, workdir):
         del root, workdir
         seen.append(name)
-        return 1000 + len(seen), None
+        # A count that rises, because both fixed backgrounds come off the
+        # top of it and a counter answering one number for everything nets
+        # every journey a negative residual, which is its own refusal.
+        return 1000 * len(seen), None
 
     # `syscalls`, because a counter the probe would not use is reported
     # unavailable without being run; this is about what happens after.
@@ -124,7 +127,12 @@ def test_the_measurement_carries_the_median_the_check_compares(tmp):
                                   found=counter_facts())
     assert seen[0] == 'startup-only', seen
     assert seen.count('startup-only') == 1, seen
-    assert len(seen) == 1 + 2 * len(names), seen
+    # The bridge baseline is ONCE per counter too, for the same reason: it
+    # is the same bridge whatever is measured beside it, and seven
+    # measurements of one constant is seven times the CI cost of none.
+    assert seen[1] == 'bridge-only', seen
+    assert seen.count('bridge-only') == 1, seen
+    assert len(seen) == 2 + 2 * len(names), seen
     assert report['shape_failure'] is None
     assert report['shas'] == {name: ['shape-' + name] for name in names}
     counts = counters.counts_of(report, 'syscalls')
@@ -135,10 +143,14 @@ def test_the_measurement_carries_the_median_the_check_compares(tmp):
     row = report['counters']['syscalls']['journeys'][names[0]]
     assert row['spread'] == row['max'] - row['min'], row
     # Reported both ways because only the net one is the budget: the raw
-    # total carries the startup the child pays whatever is measured.
-    startup = report['counters']['syscalls']['startup_only']
+    # total carries the fixed background the child pays whatever is
+    # measured, and both of those are named here.
+    counter = report['counters']['syscalls']
+    startup = counter['startup_only']
+    bridge = counter['bridge_only'][names[0]]
     assert len(row['raw']) == 2, row
-    assert row['net'] == [value - startup for value in row['raw']], row
+    assert row['net'] == [value - startup - bridge
+                          for value in row['raw']], row
     assert row['min'] == min(row['net']) and row['max'] == max(row['net'])
     # What the count is, stated per journey, is the thing the artefact
     # records beside it.
@@ -239,7 +251,10 @@ def test_a_counter_that_will_not_start_is_reported_before_it_is_run(tmp):
     def answering(name, root, workdir):
         del root, workdir
         ran.append(name)
-        return 1000, None
+        # A count that rises, because both fixed backgrounds come off the
+        # top of it: a counter answering one number for everything nets
+        # every journey a negative residual, which is its own refusal.
+        return 1000 * len(ran), None
 
     found = counter_facts()
     found['valgrind_path'] = None
@@ -251,7 +266,7 @@ def test_a_counter_that_will_not_start_is_reported_before_it_is_run(tmp):
                       'syscalls': (answering, True),
                       'valgrind-callgrind': (answering, True)}):
         report = counters.measure(root=ROOT, rounds=1, found=found)
-    assert ran and set(ran) <= {'startup-only', *names}, ran
+    assert ran and set(ran) <= {'startup-only', 'bridge-only', *names}, ran
     row = report['counters']['valgrind-callgrind']
     assert row == {
         'available': False,
@@ -481,7 +496,8 @@ def test_a_callgrind_round_counts_the_last_one_not_the_sum_of_them(tmp):
 
     with planting(counters, shutil=_toolbox(valgrind='/usr/bin/valgrind'),
                   _run=answering):
-        kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
+        kept, why = counters.kept_for(
+            counters._callgrind('mcp-exec', ROOT, tmp)[0], 'mcp-exec')
     assert why is None, why
     assert kept == 9_000, f'the previous round was summed in: {kept}'
     assert asked[0][:2] == ['/usr/bin/valgrind', '--tool=callgrind'], asked
@@ -512,7 +528,8 @@ def test_a_profile_the_gate_cannot_read_comes_back_as_a_sentence(tmp):
     _profile(tmp, 'mcp-exec', 0, 1, 900)
     with planting(counters, shutil=_toolbox(valgrind='/usr/bin/valgrind'),
                   _run=lambda argv: (0, '', '')):
-        kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
+        kept, why = counters.kept_for(
+            counters._callgrind('mcp-exec', ROOT, tmp)[0], 'mcp-exec')
     assert kept is None, kept
     assert isinstance(why, str), why
     assert "'front-end-import'" in why, (

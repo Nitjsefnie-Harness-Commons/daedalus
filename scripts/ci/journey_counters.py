@@ -63,6 +63,19 @@ GATE_CANDIDATES = ('perf-instructions', 'valgrind-callgrind')
 # and import cost are not part of what is compared.
 STARTUP_NAME = 'startup-only'
 
+# The fixed background the other half of that subtraction is measured
+# against: the real bridge, spawned as a journey spawns it, doing no
+# journey's work. `STARTUP_NAME` removes the HARNESS child's interpreter and
+# imports but runs no bridge, so without this every count still carries the
+# bridge child's own interpreter start, imports, startup, MCP bootstrap and
+# serve loop — on `screenshot` that is 99% of the number, which is how a
+# journey can get an order of magnitude more expensive on the path it was
+# added to watch and the gate stays green.
+#
+# It is not a journey: `tests/_journeys.py` keeps it out of its journey set
+# and out of the record it prints, so nothing gated walks it.
+BRIDGE_NAME = 'bridge-only'
+
 _PARANOID = '/proc/sys/kernel/perf_event_paranoid'
 # perf's machine rendering under `-x,`, and the default rendering the probe
 # reads. Both are produced, so both are read.
@@ -288,11 +301,29 @@ def _callgrind(name, root, workdir):
     if code != 0:
         return None, {'returncode': code, 'stderr': err.strip()[-400:]}
     rows, unread = journey_threads.read(Path(workdir), prefix)
-    kept, _excluded, why = journey_threads.total_for(rows, name, unread)
-    # A classification failure is a sentence rather than the dict a failed
-    # child carries: there is no returncode to report, and the sentence is
-    # what a reader has to act on.
-    return kept, why
+    return {'rows': rows, 'unread': unread}, None
+
+
+def kept_for(measurement, journey):
+    """One journey's kept total, read out of one counter's measurement.
+
+    A counter that counts a process tree whole hands back a number, and
+    that number is the total. A counter that separates threads hands back
+    the profile's rows, and `journey_threads.total_for` is what reads
+    them — the same call the journey's own profile goes through, so the
+    baseline side and the journey side are under ONE rule rather than two
+    that agree today. `journey` is the exclusion list applied, which is
+    why the same baseline profile answers differently per journey.
+
+    A classification failure is a sentence rather than the dict a failed
+    child carries: there is no returncode to report, and the sentence is
+    what a reader has to act on.
+    """
+    if isinstance(measurement, dict):
+        kept, _excluded, why = journey_threads.total_for(
+            measurement['rows'], journey, measurement['unread'])
+        return kept, why
+    return measurement, None
 
 
 def _perf(name, root, workdir):
@@ -361,23 +392,41 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     'available': False,
                     'why': 'the probe did not find this counter usable here'}
                 continue
-            # The startup-only baseline is measured ONCE per counter and
-            # reused by every journey: it is the same interpreter and the
-            # same imports whatever is measured beside it, so paying for it
-            # per journey would buy nothing.
+            # Both fixed costs are measured ONCE per counter and reused by
+            # every journey: each is the same work whatever is measured
+            # beside it, so paying for them per journey would buy nothing.
             startup, why = run(STARTUP_NAME, root, workdir)
+            bridge = None
+            if why is None:
+                bridge, why = run(BRIDGE_NAME, root, workdir)
+            baselines = {}
+            if why is None:
+                for name in names:
+                    baselines[name], why = kept_for(bridge, name)
+                    if why is not None:
+                        break
             rows = {}
             if why is None:
                 for name in names:
                     counted = []
                     for _round in range(rounds):
-                        value, why = run(name, root, workdir)
+                        measured, why = run(name, root, workdir)
+                        if why is None:
+                            value, why = kept_for(measured, name)
                         if why is not None:
                             break
                         counted.append(value)
                     if why is not None:
                         break
                     rows[name] = counted
+            if why is None:
+                verdicts = {}
+                for name in names:
+                    verdicts[name], why = _row(
+                        name, rows[name], startup if childed else 0,
+                        baselines[name] if childed else 0)
+                    if why is not None:
+                        break
             if why is not None:
                 report['counters'][counter] = {
                     'available': False, 'why': why}
@@ -386,28 +435,46 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 'available': True,
                 'gated': counter in GATE_CANDIDATES,
                 'startup_only': startup if childed else None,
-                'journeys': {
-                    name: _row(rows[name], startup if childed else 0)
-                    for name in names}}
+                # What was taken off, per journey for a counter that
+                # separates threads and as one number for one that does
+                # not, because the exclusion list the baseline is read
+                # through is the journey's own.
+                'bridge_only': baselines if childed else None,
+                'journeys': verdicts}
     return report
 
 
-def _row(raw_values, startup):
-    """One journey's row: the raw total, the startup-net one, the spread.
+def _row(name, raw_values, startup, bridge):
+    """One journey's row, or the refusal a negative residual gets.
 
     Both numbers are reported because only one of them is the budget: a
-    journey's own total carries the interpreter start and the imports the
-    startup-only child already accounts for, and a ratchet on that number
-    would go red on a dependency bump rather than on a change to the work.
+    journey's own total carries the interpreter start, the imports and the
+    whole bridge every child pays whatever is measured, and a ratchet on
+    that number would go red on a dependency bump rather than on a change
+    to the work.
 
+    A residual below zero is a REFUSAL naming every number in it, never a
+    clamp. A journey whose own work is smaller than the run-to-run wobble
+    of the threads it shares will produce one, and that is the answer:
+    clamping to zero would report it as costing nothing and absorb the
+    exact condition this subtraction exists to detect.
     """
-    net = [value - startup for value in raw_values]
+    net = [value - startup - bridge for value in raw_values]
+    if any(value < 0 for value in net):
+        return None, (
+            f'the {name} journey measured {raw_values} instructions net '
+            f'{net}, against a startup-only baseline of {startup} and a '
+            f'bridge-only baseline of {bridge} read through its own '
+            f'exclusion list, so its own work is smaller than the fixed '
+            'background it shares and the run cannot separate them; that '
+            'is reported rather than clamped to zero, because a clamp '
+            'would absorb exactly this')
     return {'raw': raw_values,
             'net': net,
             'min': min(net) if net else None,
             'max': max(net) if net else None,
             'median': statistics.median(net) if net else None,
-            'spread': max(net) - min(net) if net else None}
+            'spread': max(net) - min(net) if net else None}, None
 
 
 def counts_of(report, counter):

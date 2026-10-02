@@ -95,6 +95,36 @@ def callgrind_profile(directory, name, slot, thread, ir, signature=()):
     return path
 
 
+def bridge_profile(main, request=0, imported=0, served=0):
+    """The classifier's own rows for a profile with one thread per role.
+
+    The counterpart to `callgrind_profile`, which writes the FILES a real
+    profile arrives as; this hands back what `journey_threads.read` would
+    have read out of them, so a control can drive the real classifier
+    without a profiler. The signatures come from the classifier's own
+    table rather than from symbols copied here, so a control cannot agree
+    with a signature the tree changed.
+
+    A role left at zero is thread 1's neighbour that never ran, and is
+    omitted rather than written as an empty thread: a thread below
+    `REQUEST_FROM` is a refusal about the SHAPE of a profile, and a
+    control that wanted one would be testing something else.
+    """
+    policy = threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': main, 'cmd': 'main',
+             'names': frozenset()}]
+    for thread, (role, ir) in enumerate(
+            ((policy.REQUEST, request), (policy.IMPORT, imported),
+             (policy.SERVE, served)), start=2):
+        if not ir:
+            continue
+        # `request` is the residual no signature claims, so it is the one
+        # role with no symbols to write and no table entry to read.
+        rows.append({'pid': 1, 'thread': thread, 'ir': ir, 'cmd': role,
+                     'names': frozenset(policy.SIGNATURES.get(role, ()))})
+    return rows
+
+
 def budget_document(**overrides):
     document = {
         'schema_version': 1,
