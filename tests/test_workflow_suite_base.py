@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Every job this guard identifies must be able to read the merge base.
 
-The branch-boundary controls in `test_helper_reimplementation.py` read the
-merge base's own declarations, and a checkout that resolves neither
-`origin/main` nor a local `main` makes both boundary tests take their
-refusal arm. In a job that turns a failing suite red, the consequence is
-already visible; in a job that runs the suites without failing on one it
-is quieter and worse — the branch's central guarantee goes unevaluated
-in a job that runs it, and nothing reports that.
+The branch-boundary control in `tests/test_reserved_test_names.py` reads
+the merge base's own declarations over both allowance tables, and a
+checkout that resolves neither `origin/main` nor a local `main` makes it
+take its refusal arm. In a job that turns a failing suite red, the
+consequence is already visible; in a job that runs the suites without
+failing on one it is quieter and worse — the branch's central guarantee
+goes unevaluated in a job that runs it, and nothing reports that.
 
 The job set is DERIVED. A tracked script is a suite runner when, as an
 AST fact, it launches a suite; a job runs the suites when one of its

@@ -29,6 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _reserved_names  # noqa: E402
 import _util  # noqa: E402
 from _helper_binds import definitions  # noqa: E402
+from _branch_boundary import (IS_THE_BASE, UNREADABLE, introduced_rows,
+                              js_digests, python_digests)  # noqa: E402
 from _helper_reimplementation import (  # noqa: E402
     _entry_points, _live_sources)
 from _source_anchors import (  # noqa: E402
@@ -87,8 +89,7 @@ def _planted_tree(modules):
     The extras arrive as one mapping rather than unpacked, because a
     `**`-unpacked call is a launch the launch audit cannot place.
     """
-    sources = {'tests/_owner.py': _OWNER,
-               'tests/_wffixtures.py': _FIXTURES}
+    sources = {'tests/_owner.py': _OWNER, 'tests/_wffixtures.py': _FIXTURES}
     sources.update(modules)
     return sources
 
@@ -138,10 +139,10 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     HERE.
 
     `len(residue_sites())` is not that set's size, and both are worth
-    knowing. The
-    residue tables are keyed `(path, name)`, and two modules declare a
-    reserved JavaScript name more than once, so the list carries three rows
-    the set does not: `tests/_gm_harness.py::makeStorage` twice and
+    knowing. The residue tables are keyed `(path, name)`, and two
+    modules declare a reserved JavaScript name more than once, so the
+    list carries three rows the set does not:
+    `tests/_gm_harness.py::makeStorage` twice and
     `tests/test_gm_transfers.py::flushMessages` three times. The equality is
     about the set, because that is what the tables key on; the count is
     about the list, because that is what a refusal prints.
@@ -161,6 +162,27 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     assert not unallowed, (
         'reserved names re-implemented with no row in the matching residue '
         'table:\n' + '\n'.join(unallowed))
+
+
+def test_an_allowance_row_may_not_name_a_branch_added_declaration(tmp):
+    """A row may not legalise a duplication the branch itself wrote.
+
+    Both tables: a control that reads one of a pair is a half-control.
+    `UNREADABLE` FAILS and `IS_THE_BASE` SKIPS and prints, because a skip
+    that asserted nothing is indistinguishable from a pass.
+    """
+    del tmp
+    for label, table, read in (('py', UNCONSOLIDATED_NAMES, python_digests),
+                               ('js', UNCONSOLIDATED_JS_NAMES, js_digests)):
+        boundary = introduced_rows(table, read, ROOT)
+        assert boundary.reason != UNREADABLE, boundary.reason
+        if boundary.reason:
+            print(f'[{label}] the branch boundary was NOT evaluated: '
+                  f'{boundary.reason}')
+            assert boundary.reason == IS_THE_BASE, boundary.reason
+        assert not boundary.introduced, (
+            'rows excuse a declaration the base tree does not carry, so the '
+            f'branch wrote it: {boundary.introduced}')
 
 
 def test_no_workflow_fixture_name_is_bound_outside_its_module(tmp):
@@ -246,14 +268,11 @@ def test_an_anchor_refuses_an_ambiguous_position(tmp):
     The anchors disagree about a second occurrence, and the disagreement
     is the property: two of them refuse it, and `first_call_line` takes
     the EARLIER line, which is a promise about order that the name alone
-    does not make. Each refusal carries its own message and its own
-    `else`, because an anchor that accepted the position is a different
-    defect from one that refused it with the wrong words.
+    does not make. Each refusal carries its own `else`, because an anchor
+    that accepted the position is a different defect from a wrong message.
     """
     del tmp
-    two = ('def _helper(tmp):\n'
-           '    seed(tmp)\n'
-           '    seed(tmp)\n'
+    two = ('def _helper(tmp):\n    seed(tmp)\n    seed(tmp)\n'
            '    return tmp\n')
     try:
         the_call_line(two, 'seed')
@@ -267,11 +286,8 @@ def test_an_anchor_refuses_an_ambiguous_position(tmp):
         assert 'the seed anchor is not unique' in str(error), error
     else:
         raise AssertionError('the plant anchor took an ambiguous position')
-    calls = ('_helper = None\n'
-             'def test_control(tmp):\n'
-             '    del tmp\n'
-             '    _helper(tmp)\n'
-             '    _helper(tmp)\n')
+    calls = ('_helper = None\ndef test_control(tmp):\n    del tmp\n'
+             '    _helper(tmp)\n    _helper(tmp)\n')
     assert first_call_line(calls, '_helper') == 4
 
 
