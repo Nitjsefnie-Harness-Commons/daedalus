@@ -634,22 +634,26 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
 
 
 def test_only_the_key_holders_own_top_level_declaration_is_exempt(tmp):
-    """The one exemption, and the four shapes it must not reach.
+    """The one exemption, and every shape that must not reach it.
 
     A control that refuses a second statement of an authority has to hold
     that authority's keys somewhere, and holding them is a statement of
-    them. What this pins is where the subtraction may be SPENT, one shape
-    per assertion: the key-holder's own top-level declaration is spared,
-    and the same declaration in another file, a nested one, an unspelled
-    one and a value that merely contains the key are all counted. Dropping
-    the `path.name == _KEY_HOLDER` arm spends it on a statement in any
-    file under any name, which is worse than the file-name skip the
-    exemption replaced.
+    them. So what this pins is where the subtraction may be SPENT, one
+    shape per assertion: the key-holder's own top-level declaration is
+    spared, and another file, a nested scope, and four spellings of the
+    value that are not the bare literal are all counted. The folded
+    adjacent-literal one is the load-bearing of those four — its VALUE is
+    the key while its WRITTEN source is not, so exempting it would spend
+    the subtraction on a statement beside it instead.
     """
     from _coverage_authority_scan import _KEY_HOLDER
+    # Two statements, not one: `ModuleNames.import_origin` resolves a name
+    # only when the module binds it exactly once, so a second bare import
+    # turns `test_controls_never_write_inside_the_repository` red.
     from _coverage_authority_scan import phrase_holders as holders
 
-    phrase = 'a synthetic probe phrase'
+    left, right = 'a synthetic', 'probe phrase'
+    phrase = f'{left} {right}'
     holder = '_coverage_authority_scan.py'
     assert holder == _KEY_HOLDER, (holder, _KEY_HOLDER)
     owner = f'KEY = {phrase!r}\n'
@@ -659,15 +663,23 @@ def test_only_the_key_holders_own_top_level_declaration_is_exempt(tmp):
     here.write_text(owner, encoding='utf-8')
     there.write_text('', encoding='utf-8')
     assert holders(phrase, Path(tmp)) == ([], 0), 'the holder itself'
-    there.write_text(owner, encoding='utf-8')
-    assert holders(phrase, Path(tmp)) == (['other.py'], 1), 'another file'
-    there.write_text('', encoding='utf-8')
     here.write_text(f'def go():\n    {owner}', encoding='utf-8')
     assert holders(phrase, Path(tmp)) == ([holder], 1), 'a nested scope'
-    here.write_text(f'# {phrase}\nKEY = "another"\n', encoding='utf-8')
-    assert holders(phrase, Path(tmp)) == ([holder], 1), 'an unspelled key'
+    here.write_text(f'KEY = {left!r} {right!r}\n# {phrase}\n',
+                    encoding='utf-8')
+    assert holders(phrase, Path(tmp)) == ([holder], 1), 'a folded literal'
+    here.write_text(f'KEY = f"{phrase}"\n# {phrase}\n', encoding='utf-8')
+    assert holders(phrase, Path(tmp)) == ([holder], 2), 'an f-string value'
+    here.write_text(f'KEY = {left!r} + {right!r}\n# {phrase}\n',
+                    encoding='utf-8')
+    assert holders(phrase, Path(tmp)) == ([holder], 1), 'a joined value'
+    here.write_text(f'KEY: str = {phrase!r}\n# {phrase}\n', encoding='utf-8')
+    assert holders(phrase, Path(tmp)) == ([holder], 1), 'an annotated key'
     here.write_text(f'KEY = "a {phrase} b"\n', encoding='utf-8')
     assert holders(phrase, Path(tmp)) == ([holder], 1), 'a containing value'
+    here.write_text(owner, encoding='utf-8')
+    there.write_text(owner, encoding='utf-8')
+    assert holders(phrase, Path(tmp)) == (['other.py'], 1), 'another file'
 
 
 def test_controls_never_write_inside_the_repository(tmp):
