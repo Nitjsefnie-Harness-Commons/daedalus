@@ -86,6 +86,7 @@ EXCLUDED = {
     'mcp-exec': (IMPORT,),
     'screenshot': (IMPORT, SERVE),
     'cdp-result': (IMPORT, SERVE),
+    'net-capture': (IMPORT, SERVE),
 }
 
 

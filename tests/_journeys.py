@@ -349,6 +349,112 @@ def cdp_result(base, docroot):
     }
 
 
+def _net_capture_buffer():
+    """The capture buffer the service worker hands back, headers and bodies.
+
+    This is the largest result body the bridge handles, and it is what
+    the journey is FOR: the depth scan reads the raw bytes, the parse
+    builds the tree, the credential pop and the re-serialisation walk it
+    again, and the slot and the delivery copy are both written from it. A
+    per-byte regression that a typical-size result hides shows here.
+
+    Two thousand requests at NET_BODY_CHARS apiece is a few megabytes:
+    enough to be the large case, small enough that the job's ceiling
+    still has room for the other journeys.
+
+    Every entry is built by a fixed formula over the index — never a
+    clock, a uuid or `random` — because a counter measured over moving
+    inputs is a counter over the harness.
+    """
+    entries = []
+    for index in range(NET_REQUESTS):
+        seed = f'request-{index:06d}-body-'
+        body = seed * (NET_BODY_CHARS // len(seed) + 1)
+        entries.append({
+            'requestId': f'journey-{index:06d}',
+            'frameId': f'F{index:06d}',
+            'loaderId': f'L{index % 8:06d}',
+            'url': (f'https://net.journey.example.com/assets/'
+                    f'{index % 250:03d}/chunk-{index:06d}.js'),
+            'method': 'GET',
+            'status': 200,
+            'type': 'Script',
+            'mimeType': 'application/javascript',
+            'initiator': 'parser',
+            'headers': {
+                'content-type': 'application/javascript; charset=utf-8',
+                'content-length': str(NET_BODY_CHARS),
+                'cache-control': 'no-cache',
+                'server': 'journey-edge',
+                'x-request-id': f'req-{index:06d}',
+            },
+            'body': body[:NET_BODY_CHARS],
+        })
+    return entries
+
+
+def net_capture(base, docroot):
+    """A capture buffer answered at the size the service worker holds it.
+
+    The credential travels in an `Authorization` header, and that is not
+    a style choice: a body-carried token is only accepted for a body
+    within `DAEDALUS_MAX_UNAUTHENTICATED_BODY` (64 KiB by default), and
+    anything larger with no header is answered 401 without being read.
+    The same trap holds for any real PNG, which is why the upload above
+    would need it too.
+    """
+    del docroot
+    status, raw = _bridge.put_command(base, {
+        'token': NET_TOKEN,
+        'tab': NET_TAB,
+        'id': NET_ID,
+        'type': 'net-capture-get',
+        'maxRequests': NET_REQUESTS,
+    })
+    assert status == 200, (status, raw)
+    enqueued = json.loads(raw)
+
+    frame = _bridge.read_stream_data(base, NET_TOKEN, NET_TAB)
+    assert frame.get('type') == 'net-capture-get', frame
+    assert frame.get('id') == NET_ID, frame
+
+    entries = _net_capture_buffer()
+    auth = {'Authorization': 'Bearer ' + NET_TOKEN}
+    status, raw = _util.post_json(base + '/result', {
+        'token': NET_TOKEN,
+        'tabId': NET_TAB,
+        'id': frame['id'],
+        'result': {'requests': entries},
+        'error': None,
+        'ts': 1,
+        '_did': frame['_did'],
+    }, headers=auth, timeout=120)
+    assert status == 200, (status, raw)
+
+    status, slot = _util.get_json(
+        base + '/result?token=' + NET_TOKEN + '&delivery=' + frame['_did'],
+        timeout=120)
+    assert status == 200, (status, slot)
+    assert slot.get('id') == NET_ID, slot
+    stored = slot.get('result', {}).get('requests')
+    assert stored == entries, 'the capture that came back is not the one sent'
+
+    # The digest is taken over what the bridge STORED, not over what was
+    # posted, so a byte lost on the way through moves the number.
+    return {
+        'journey': 'net-capture',
+        'enqueued': {'ok': enqueued.get('ok'),
+                     'target': enqueued.get('target')},
+        'frame': {key: frame[key]
+                  for key in ('type', 'id', 'maxRequests') if key in frame},
+        'capture': {
+            'requests': len(stored),
+            'body_chars': sum(len(entry['body']) for entry in stored),
+            'sha256': hashlib.sha256(canonical(stored)).hexdigest(),
+        },
+    }
+
+
 def _load_front_end(base):
     """The MCP front end, loaded on a thread of its own and waited for.
 
@@ -505,6 +611,7 @@ JOURNEYS = {
     'dashboard-fanout': (DASHBOARD_TOKEN, dashboard_fanout),
     'screenshot': (SHOT_TOKEN, screenshot),
     'cdp-result': (CDP_TOKEN, cdp_result),
+    'net-capture': (NET_TOKEN, net_capture),
 }
 NAMES = tuple(JOURNEYS)
 
