@@ -17,7 +17,7 @@ settles a name taken from a sibling.
 
 THE JAVASCRIPT LIMB CARRIES THE FLOOR. `js_declarations` reports every
 declaration a helper module makes, including one- and two-line ones, and
-`js_reimplementations` owns a name only at or above `JS_FLOOR`. The set
+the JavaScript limb owns a name only at or above `JS_FLOOR`. The set
 stated here is the set the rule enforces, so the floor decides both
 sides: a one-line `function f` in a helper is not a name a module may
 not bind, and how many helper declarations sit below the floor is a
@@ -133,10 +133,9 @@ def residue_sites(sources=None, derived=None):
     """Every site binding a reserved name outside the module that owns it.
 
     A Python site is a definition the import limb does not settle and the
-    JavaScript one a declaration at or above `JS_FLOOR`; both are the two
-    limbs `reimplementations` and `js_reimplementations` compare, over the
-    union rather than over one rule's half of it. `limb` is the rule whose
-    residue table the site would need a row in.
+    JavaScript one a declaration at or above `JS_FLOOR`. `limb` names
+    which of the two residue tables the site would need a row in, and a
+    site is reported over the union rather than over one limb's half.
     """
     if sources is None:
         sources, parsed = _derive()
