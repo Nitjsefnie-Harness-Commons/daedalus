@@ -4,10 +4,23 @@
 Three of the seven journeys posted a payload far smaller than the one a user
 actually produces, so their own work was not separable from the fixed
 background every child shares and the budget could not mean anything for
-them. The fix is a payload sized from a cited product basis, and this file
-is what stops a later change from quietly inflating one past that basis to
-chase a number: every size below is pinned here, and every basis is pinned
-to a symbol that still has to be in the product.
+them. The fix is a payload sized from a cited product basis.
+
+WHAT IS PINNED HERE, and what is not, is worth stating exactly, because the
+difference is what a reviewer is being asked to trust:
+
+  - Pinned: every size is the number this file holds, and the generator
+    that builds the body produces exactly that many bytes.
+  - Pinned: the product still CALLS what the basis says it calls, matched
+    as a call in a file that has to exist.
+  - NOT pinned: that the size is REPRESENTATIVE. No control can derive
+    that and none tries. A size moved together with its pin here is not
+    caught by anything in the tree — that is what makes it a reviewable
+    commit and not a quiet loosening of a budget, and it is the judgement
+    the citation exists to inform. What these controls buy is that the
+    tripwire fires on the common case (a number edited, the pin not), and
+    that the claim each number rests on still names a call the product
+    makes.
 
 No journey is RUN here. A journey costs what the machine it ran on costs, so
 a control that drove one would be asserting a number this repository must
@@ -15,6 +28,7 @@ not write down; what is asserted is the shape the journey builds, the basis
 the size comes from, and the call the size made necessary.
 """
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -25,25 +39,32 @@ from _journey_contract import (  # noqa: E402
 )
 
 
-# Every resized journey: the size it was given, the token that says where the
-# size comes from, the product file that token is quoted from (or None where
-# the basis is a property of the content rather than of this tree), and which
-# journeys module declares the constant.
+# Every resized journey, and two separate claims per row.
 #
-# The sizes are not chosen here and not chosen in the journeys module
-# either: each is read off a product symbol — the capture the extension
-# takes, the tab count the extension's own comment calls a session, the
-# heartbeat period the extension arms. A symbol rather than a sentence,
-# because a basis stated only in this file drifts the moment the product
-# moves, while one that has to still be there fails the day it is renamed.
+# The first three columns are the journeys module's constant, the size this
+# file holds for it, and the word the module's own comment beside that
+# constant has to contain — the basis, written where a reader meets the
+# number.
+#
+# The last two are the product claim: the file that has to exist, and the
+# CALL that file has to still make, matched as a call. A call rather than a
+# name, because the name survives a rename in a comment: with
+# `captureVisibleTab` renamed at its one call site and the citation left
+# saying the word, a word search stayed green — the same false green as a
+# basis nobody can re-derive. `None` is where there is no product claim to
+# make and the basis is a property of the content rather than of this tree.
 BASES = (
     ('SHOT_CAPTURE_BYTES', 196608, 'captureVisibleTab',
-     'extension/worker/capture.js', '_journey_typed'),
-    ('SEG_BODY_BYTES', 1048576, 'HLS', None, '_journey_typed'),
+     'extension/worker/capture.js',
+     r'chrome\.tabs\.captureVisibleTab\s*\(', '_journey_typed'),
+    ('SEG_BODY_BYTES', 1048576, 'HLS', None, None, '_journey_typed'),
     ('FANOUT_TABS', 10, '10-url open_tabs',
-     'extension/worker/registry.js', '_journeys'),
+     'extension/worker/registry.js',
+     r'chrome\.tabs\.query\s*\(', '_journeys'),
     ('FANOUT_HEARTBEATS', 20, 'periodInMinutes: 0.5',
-     'extension/background.js', '_journeys'),
+     'extension/background.js',
+     r"chrome\.alarms\.create\(\s*'daedalus-heartbeat',\s*"
+     r'\{\s*periodInMinutes:\s*0\.5\s*\}\s*\)', '_journeys'),
 )
 
 
@@ -98,15 +119,20 @@ def test_every_resized_payload_carries_the_size_it_was_given(tmp):
     their basis.
     """
     del tmp
-    for name, size, _token, _product, which in BASES:
+    for name, size, _token, _product, _call, which in BASES:
         module = _journeys_module(which)
         assert getattr(module, name) == size, (
             f'{name} is {getattr(module, name, None)} and the basis this '
             f'file pins says {size}: a payload past the size the product '
             'produces is a number nobody measured')
     typed = _journeys_module('_journey_typed')
-    assert len(typed.SHOT_CAPTURE_B64) == (
-        typed.SHOT_CAPTURE_BYTES * 4) // 3, (
+    # `4 * -(-n // 3)` and not `4n // 3`: base64 emits one character per
+    # three bytes plus a `=` pad per remainder, so the length of an ENCODING
+    # is the ceiling. `(4n) // 3` holds only for a multiple of three and reds
+    # on a 4 MiB capture — a valid encoding of exactly that size — so the
+    # arithmetic was refusing a real body rather than a bad one.
+    assert len(typed.SHOT_CAPTURE_B64) == 4 * -(
+        -typed.SHOT_CAPTURE_BYTES // 3), (
         'the capture body the journey posts is not the base64 of a capture '
         f'of the pinned size: {len(typed.SHOT_CAPTURE_B64)} characters for '
         f'{typed.SHOT_CAPTURE_BYTES} bytes')
@@ -116,38 +142,66 @@ def test_every_resized_payload_carries_the_size_it_was_given(tmp):
             f'{len(typed.segment_payload(index))}')
 
 
-def test_every_basis_is_still_the_symbol_it_cites(tmp):
-    """A citation that has moved is a size nobody can re-derive.
+def test_every_basis_is_still_the_call_it_cites(tmp):
+    """The product still CALLS what the basis says it calls.
 
-    Each basis is stated in the comment under the constant it justifies, and
-    every one of them but the segment's is also a symbol in a product file
-    — so the product file is resolved too, and a renamed symbol or a deleted
-    comment fails rather than leaving a number quoted from something that no
-    longer says it. The segment size is the one with no symbol to resolve:
-    an HLS segment's length is a property of the encode a page happens to be
-    watching rather than of anything in this tree, which is exactly why the
-    prose basis under the constant is what the control asks for.
+    Matched as a call, in a file that has to exist. A word search does not
+    survive the move a basis pin exists for: with `captureVisibleTab` renamed
+    at its one call site and the citation left saying the word, the suite
+    stayed 3/3 — so the number stayed quoted from something the product no
+    longer does. The recogniser is anchored on the call and on its arguments
+    where an argument carries the size (`periodInMinutes: 0.5`), because a
+    heartbeat that still fires but fires twice a minute is a different basis,
+    not the same one.
+
+    The segment size is the row with no call to resolve: an HLS segment's
+    length is a property of the encode a page happens to be watching rather
+    than of anything in this tree. What is asked of that row is the prose
+    basis under the constant, which is the only place a reader can re-derive
+    it from.
     """
     del tmp
-    for name, _size, token, product, which in BASES:
-        module = _journeys_module(which)
-        # Folded, because a citation quoted from a wrapped line of prose
-        # arrives here wrapped too, and a control that could not read its own
-        # citation would be fixed by editing the citation.
-        cited = ' '.join(_cited_comment(module, name).split())
-        assert token in cited, (
-            f'{name} carries no basis saying {token!r} beside it, so the '
-            f'number is one nobody can re-derive: {cited!r}')
+    for name, _size, _token, product, call, _which in BASES:
         if product is None:
+            assert call is None, (
+                f'{name} carries a call to resolve and no file to resolve it '
+                'in, so one of the two was forgotten rather than both')
             continue
+        assert call is not None, (
+            f'{name} names a product file but no call in it, so the basis '
+            'would be checked for a word and survive a rename of the thing '
+            'the word names')
         target = _journey_contract.ROOT / product
         assert target.is_file(), (
             f'the basis for {name} names a file that is not in the tree: '
             f'{product}')
-        assert token in target.read_text(encoding='utf-8'), (
-            f'{name} is sized from {product}, which no longer says '
-            f'{token!r}: the number is quoted from something the product '
-            'no longer says')
+        text = target.read_text(encoding='utf-8')
+        assert re.search(call, text), (
+            f'{name} is sized from {product}, which no longer makes the call '
+            f'{call!r}: the number is quoted from something the product no '
+            'longer does')
+
+
+def test_every_basis_is_still_stated_beside_its_number(tmp):
+    """The basis is written where a reader meets the number.
+
+    The call above is about the product; this one is about the journeys
+    module. A size whose constant carries no comment saying where it came
+    from is a number a reader has to take on trust, and the call in the
+    product says what the product does — not what this journey decided a
+    session is.
+
+    Folded before matching, because a citation quoted from a wrapped line of
+    prose arrives here wrapped too, and a control that could not read its own
+    citation would be fixed by editing the citation.
+    """
+    del tmp
+    for name, _size, token, _product, _call, which in BASES:
+        module = _journeys_module(which)
+        cited = ' '.join(_cited_comment(module, name).split())
+        assert token in cited, (
+            f'{name} carries no basis saying {token!r} beside it, so the '
+            f'number is one nobody can re-derive: {cited!r}')
 
 
 def test_the_capture_body_travels_under_a_header_and_not_in_the_body(tmp):
@@ -193,6 +247,36 @@ def test_the_capture_body_travels_under_a_header_and_not_in_the_body(tmp):
     assert 'Authorization' in headers and 'SHOT_TOKEN' in headers, (
         f'the upload sends no credential header, so at a real capture size '
         f'the bridge answers 401 unread: {headers}')
+
+
+def test_no_journey_buys_its_own_headroom_from_a_product_setting(tmp):
+    """A journey may not raise a product constant to make its own budget.
+
+    The fan-out session has to publish every event before the subscription
+    opens, and `command_queue.gc_loop` unlinks anything older than
+    `DAEDALUS_CMD_TTL` (90 s by default) whether or not a window is attached.
+    The window is therefore the whole publish loop, and a slow runner could
+    spend it. The two available moves are both wrong: raising the TTL
+    measures a bridge configured unlike every other one, and cutting the
+    session to fit sizes the journey to an infrastructure ceiling instead of
+    to the product.
+
+    This control says which way it went, so a reviewer is not left inferring
+    it. `bridge_env` is the one place a journey's bridge is configured, so
+    it is where a journey would quietly do it.
+    """
+    del tmp
+    journeys_module = _journeys_module('_journeys')
+    environment = journeys_module.bridge_env(journeys_module.COMMAND_TOKEN)
+    for setting in ('DAEDALUS_CMD_TTL', 'DAEDALUS_MAX_BODY_SIZE',
+                    'DAEDALUS_MAX_UNAUTHENTICATED_BODY',
+                    'DAEDALUS_STREAM_MAX_AGE'):
+        assert setting not in environment, (
+            f'{setting} is set on a journey\'s own bridge, so that journey is '
+            'measured against a configuration no other one runs under: '
+            f'{sorted(environment)}')
+    assert sorted(environment) == ['DAEDALUS_TOKEN', 'TOKEN'], \
+        sorted(environment)
 
 
 def main():

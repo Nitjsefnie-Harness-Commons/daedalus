@@ -125,6 +125,16 @@ def _validated_tolerances(value, journeys):
         if name not in journeys:
             raise ValueError(
                 f'tolerances names a journey with no count: {name}')
+        # A journey the budget holds no count for is a journey nothing is
+        # compared against, so a bound beside it is read by no arithmetic at
+        # all: `budget_of` answers None before it reaches the tolerance. An
+        # entry like that in a committed document looks like a rule and
+        # enforces nothing, which is the same defect as the stale band table
+        # this file still carries for a different reason.
+        if journeys[name] is None:
+            raise ValueError(
+                'a tolerance for a journey the budget does not hold decides '
+                f'nothing: {name}')
         if not _is_a_tolerance(tolerance):
             raise ValueError('a journey tolerance must be a nonnegative '
                              f'number: {name} = {tolerance!r}')
