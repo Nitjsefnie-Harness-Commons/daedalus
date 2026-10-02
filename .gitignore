@@ -608,6 +608,7 @@
 !/tests/test_journey_counters.py
 !/tests/test_journey_payloads.py
 !/tests/test_journey_placement.py
+!/tests/test_journey_rebaseline.py
 !/tests/test_journey_report.py
 !/tests/test_journey_threads.py
 !/tests/test_journey_tighten.py
