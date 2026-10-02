@@ -29,6 +29,7 @@ one would be reading that suite's subject through this one's client.
 """
 import contextlib
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -107,6 +108,30 @@ def _failed(client, fake, variables=None, env=None):
     if failure is None:
         raise AssertionError(f'nothing failed: {data!r}')
     return failure
+
+
+def _launch_refusal(executable):
+    """(class, message) of the refusal this platform makes of a launch.
+
+    Asked of `subprocess` itself rather than read out of the failure
+    under test, because that text belongs to the operating system: POSIX
+    names the path it could not find, Windows names a code and a sentence
+    and the path is not in it anywhere. Comparing the two refusals keeps
+    this file out of that prose and still pins WHICH refusal the client
+    reported - a caller gets the launch's own words, whatever this
+    platform's are.
+
+    The shape is the client's own - a payload on stdin - so both refusals
+    are raised the same way and only the wording can differ. The bound is
+    a ceiling on a launch that must not happen, never a margin on an
+    answer.
+    """
+    try:
+        subprocess.run([executable], input=b'', capture_output=True,
+                       timeout=1)
+    except OSError as refusal:
+        return type(refusal), str(refusal)
+    raise AssertionError(f'{executable} was launched')
 
 
 @contextlib.contextmanager
@@ -232,12 +257,21 @@ def test_a_gh_that_cannot_be_launched_is_a_failure(tmp):
 
     `DAEDALUS_GH` is the module's own override, so this is a real launch
     failing rather than the transport replaced.
+
+    Three things are pinned here, and all three are what a pause would
+    take away: the exact failure class, so a refusal handed to the caller
+    as something to sleep on is caught here rather than hours later in a
+    wait; the message, which must be the launch's own refusal and nothing
+    this suite made up; and the exception it was raised from, which is
+    what tells this half apart from the timeout beside it.
     """
     client, fake = _client(tmp, runs_page([]))
     absent = os.path.join(fake.dir, 'gh-that-was-never-installed')
+    refusal_type, message = _launch_refusal(absent)
     failure = _failed(client, fake, env={'DAEDALUS_GH': absent})
-    assert str(failure).startswith('gh failed: '), failure
-    assert absent in str(failure), failure
+    assert type(failure) is client.QueryError, failure
+    assert str(failure) == f'gh failed: {message}', failure
+    assert type(failure.__cause__) is refusal_type, failure
 
 
 def test_a_gh_that_never_answers_is_a_failure_too(tmp):
@@ -252,6 +286,11 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     proving nothing. `entered` is the proof the call reached the hold,
     so a run whose fake answered before the bound would fail here rather
     than pass on a green that meant nothing ran.
+
+    The cause is compared by class as well as the message read, because
+    that is the first paragraph's sentence made checkable: the two rows
+    either side of the tuple assert causes no single narrower `except`
+    could have raised, so narrowing the tuple takes one of them red.
     """
     client, fake = _client(tmp, runs_page([]), gate=True)
     # `setattr`, because the module was executed from a path rather than
@@ -264,6 +303,7 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     assert fake.entered(), 'the call never reached the hold'
     assert str(failure).startswith('gh failed: '), failure
     assert 'timed out' in str(failure), failure
+    assert type(failure.__cause__) is subprocess.TimeoutExpired, failure
 
 
 def test_only_the_launch_becomes_a_failure(tmp):
