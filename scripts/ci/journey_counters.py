@@ -118,6 +118,31 @@ def journey_names():
 
 # ─── the probe: what this runner actually allows ───────────────────────────
 
+# What every measured child runs with, so two runs of the same tree execute
+# the same instructions. Both are host state rather than tree state, and
+# neither is under this repository's control:
+#
+#   `PYTHONHASHSEED` -- CPython randomises string hashing per process when it
+#   is unset, so which order a module's globals are built in, and therefore
+#   what that costs, differs between two runs of the same tree. The
+#   startup-only child is the whole of that term: it is a bare interpreter
+#   that did nothing, so whatever its cost varies with, it varies with.
+#
+#   `PYTHONDONTWRITEBYTECODE` -- a warm `__pycache__` makes a child cheaper
+#   by however much source it would have compiled, and which children find
+#   one depends on what ran before them. Measured on two runs of the same
+#   tree (CPython 3.13.14, valgrind 3.24.0): the first child's harness main
+#   thread compiled 21,930,238 instructions of source and the second
+#   compiled 6,268,419 -- a 15,661,819 difference that is not the journey's
+#   work, and the baseline does not cancel it, because the baseline is
+#   whichever child happened to run first.
+#
+# Fixing the seed and the cache makes both sides of the subtraction pay the
+# same compile, which is the property the whole measurement rests on. Neither
+# is a tolerance and neither subtracts anything.
+MEASURED_ENV = {'PYTHONHASHSEED': '0', 'PYTHONDONTWRITEBYTECODE': '1'}
+
+
 def _run(argv):
     """One child's status and streams, or the failure that stopped it.
 
@@ -125,10 +150,15 @@ def _run(argv):
     suite's or the CI job's bound, which is a better failure than a margin
     measured on a loaded runner. Every child here is one the harness itself
     spawned, so nothing waits on a lock or the network behind it.
+
+    The environment is `MEASURED_ENV` over the inherited one, and it reaches
+    every child the counter traces -- the interpreter under valgrind or perf
+    and, through it, the bridge that interpreter starts.
     """
+    environment = {**os.environ, **MEASURED_ENV}
     try:
         done = subprocess.run(argv, capture_output=True, text=True,
-                              check=False)
+                              check=False, env=environment)
     except (OSError, subprocess.SubprocessError) as error:
         return None, '', str(error)
     return done.returncode, done.stdout, done.stderr

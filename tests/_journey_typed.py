@@ -119,12 +119,13 @@ SEG_COUNT = 5
 # within an order of magnitude of a megabyte per segment, and that is the
 # band the size below is taken from.
 #
-# The caps it has to sit under, all of which it does by three orders of
-# magnitude: `DAEDALUS_MAX_BODY_SIZE` (64 MiB) bounds the request, so a
+# The caps it has to sit under, each by its own margin and not one blanket
+# figure: `DAEDALUS_MAX_BODY_SIZE` (64 MiB) bounds the request, so a
 # segment over it is a refusal and a journey that asserted one would be
-# measuring the refusal rather than the relay; `DAEDALUS_MAX_SEGMENTS_PER_JOB`
-# (10000) bounds the count; `DAEDALUS_MAX_SEGMENT_JOB_SIZE` (4 GiB) bounds
-# the job, and this journey's whole job is five segments.
+# measuring the refusal rather than the relay — that is 64x;
+# `DAEDALUS_MAX_SEGMENTS_PER_JOB` (10000) bounds the count, which this
+# journey uses five of — 2000x; and `DAEDALUS_MAX_SEGMENT_JOB_SIZE` (4 GiB)
+# bounds the job, and this journey's whole job is five segments — 800x.
 SEG_BODY_BYTES = 1048576
 # ONE body, posted once per segment. The relay path is measured per request,
 # and a body regenerated per index would put megabytes of harness work into
