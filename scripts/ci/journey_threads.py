@@ -87,6 +87,7 @@ EXCLUDED = {
     'screenshot': (IMPORT, SERVE),
     'cdp-result': (IMPORT, SERVE),
     'net-capture': (IMPORT, SERVE),
+    'segment-relay': (IMPORT, SERVE),
 }
 
 

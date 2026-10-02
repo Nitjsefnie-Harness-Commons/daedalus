@@ -102,6 +102,7 @@ NET_BODY_CHARS = 1200
 SEG_TOKEN = 'journeyseg'
 SEG_JOB = 'journeyseg'
 SEG_COUNT = 5
+SEG_BODY_CHARS = 800
 
 # The startup-only measurement: the same interpreter and the same imports as
 # a journey child, with no bridge and no journey. Every instruction counter
@@ -605,6 +606,59 @@ def dashboard_fanout(base, docroot):
     }
 
 
+def _segment_payload(index):
+    """One HLS segment's bytes, as the page would hand them over."""
+    seed = f'journey-segment-{index}-'
+    return (seed * (SEG_BODY_CHARS // len(seed) + 1))[:SEG_BODY_CHARS].encode()
+
+
+def segment_relay(base, docroot):
+    """A capability minted, five segments stored under it, and the status.
+
+    These are the page-facing routes, so nothing here goes through the
+    command queue: the page never holds the bridge token, and the minted
+    capability is what authorizes a write. The `sig` is
+    `secrets.token_urlsafe(32)` and is not deterministic, so it is
+    excluded from the rendering and only `ok` is recorded.
+    """
+    del docroot
+    status, minted = _util.post_json(base + '/segment-job', {
+        'token': SEG_TOKEN, 'job': SEG_JOB,
+    })
+    assert status == 200, (status, minted)
+    assert minted.get('ok') is True, minted
+    sig = minted.get('sig')
+    assert isinstance(sig, str) and sig, minted
+
+    # The header form, not `&sig=`: every in-repo client sends the
+    # capability that way, and a query string is the one place a proxy
+    # access log would carry it. The body is the raw segment, so the
+    # content type is set here rather than defaulted to JSON.
+    auth = {'X-Daedalus-Segment-Sig': sig}
+    written = []
+    for index in range(SEG_COUNT):
+        payload = _segment_payload(index)
+        status, body = _util.post_json(
+            f'{base}/segment?job={SEG_JOB}&seg={index}&total={SEG_COUNT}',
+            payload, headers={**auth, 'Content-Type':
+                              'application/octet-stream'})
+        written.append({'seg': index, 'status': status, 'ok': body.get('ok'),
+                        'bytes': len(payload)})
+        assert status == 200, (status, body)
+
+    status, seen = _util.get_json(
+        f'{base}/segment-status?job={SEG_JOB}', headers=auth)
+    assert status == 200, (status, seen)
+    assert seen.get('done') == list(range(SEG_COUNT)), seen
+
+    return {
+        'journey': 'segment-relay',
+        'minted': {'ok': minted.get('ok')},
+        'segments': written,
+        'status': {'done': seen.get('done'), 'count': seen.get('count')},
+    }
+
+
 JOURNEYS = {
     'command-round-trip': (COMMAND_TOKEN, command_round_trip),
     'mcp-exec': (_mcp_load.TOK, mcp_exec),
@@ -612,6 +666,7 @@ JOURNEYS = {
     'screenshot': (SHOT_TOKEN, screenshot),
     'cdp-result': (CDP_TOKEN, cdp_result),
     'net-capture': (NET_TOKEN, net_capture),
+    'segment-relay': (SEG_TOKEN, segment_relay),
 }
 NAMES = tuple(JOURNEYS)
 
