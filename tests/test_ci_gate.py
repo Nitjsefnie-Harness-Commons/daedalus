@@ -12,6 +12,7 @@ import contextlib
 import io
 import symtable
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,6 +48,63 @@ def _published_check(conclusion='success'):
     return {'id': 7, 'name': 'gate freshness', 'status': 'completed',
             'conclusion': conclusion, 'completed_at': '2026-09-20T10:10:00Z',
             'html_url': 'https://github.com/o/r/runs/7'}
+
+
+# Which call anchored each stamp the subject parsed, in parse order.
+#
+# `replace(tzinfo=utc)` ANCHORS a zone-less stamp to UTC and `astimezone()`
+# CONVERTS it into whatever zone the runner is in. On a runner that runs in
+# UTC the two are the same instant, so no ordering the predicate produces
+# can tell them apart -- which is why this record exists rather than a wider
+# pair of stamps, and why GitHub-hosted runners, which are UTC, are the ones
+# a control reading only the verdict cannot catch a defect in.
+_ANCHORS = []
+
+
+class _AnchoredStamp(datetime):
+    """A parsed stamp that remembers the call that anchored it.
+
+    A real `datetime` rather than a stand-in object, so every comparison
+    and every tuple the predicate goes on to build behaves as it would
+    without the fixture: what is read back is the anchor, not a fake
+    leaking into the verdict.
+    """
+
+    def replace(self, *args, **kwargs):
+        _ANCHORS.append('replace')
+        return datetime.replace(self, *args, **kwargs)
+
+    def astimezone(self, tz=None):
+        _ANCHORS.append('astimezone')
+        return datetime.astimezone(self, tz)
+
+
+class _ParsingDatetime(datetime):
+    """`datetime` as `_started_key` parses with, and the anchor on record.
+
+    Swapped on the subject's own module global for the length of one
+    control, so every other control keeps parsing with the real class.
+    """
+
+    @classmethod
+    def fromisoformat(cls, date_string):
+        parsed = datetime.fromisoformat(date_string)
+        return _AnchoredStamp(parsed.year, parsed.month, parsed.day,
+                              parsed.hour, parsed.minute, parsed.second,
+                              parsed.microsecond, parsed.tzinfo)
+
+
+@contextlib.contextmanager
+def _recording_anchors(mod):
+    """The subject's parses, watched, with the anchors they chose."""
+    del _ANCHORS[:]
+    saved = mod.datetime
+    mod.datetime = _ParsingDatetime
+    try:
+        yield _ANCHORS
+    finally:
+        mod.datetime = saved
+        del _ANCHORS[:]
 
 
 def test_a_gating_run_is_present(tmp):
@@ -528,17 +586,28 @@ def test_a_naive_timestamp_is_read_as_utc(tmp):
     The second pair says the read is UTC rather than the runner's own
     zone: a stamp an hour earlier in UTC is earlier whoever is carrying
     it, and on a runner west of Greenwich a local-zone read would order
-    the pair the other way.
+    the pair the other way. On a runner IN Greenwich that pair cannot see
+    the difference at all -- `astimezone()` and `replace(tzinfo=utc)` are
+    the same instant there -- so this control reads what the subject did
+    with a zone-less stamp, which is the premise the pair depends on and
+    which is the same on every host.
     """
     del tmp
     mod = _ci_gate()
     naive = _run(9, 'cancelled', '2026-09-20T10:00:00')
     utc = _run(10, 'success', '2026-09-20T10:00:00Z', name='tests')
-    assert mod.superseded(naive, [naive, utc]) is True, naive['id']
-    assert mod.superseded(utc, [naive, utc]) is False, utc['id']
-    earlier = _run(11, 'success', '2026-09-20T09:00:00Z')
-    assert mod.superseded(naive, [naive, earlier]) is False, naive['id']
-    assert mod.superseded(earlier, [naive, earlier]) is True, earlier['id']
+    with _recording_anchors(mod) as anchors:
+        earlier = _run(11, 'success', '2026-09-20T09:00:00Z')
+        assert mod.superseded(naive, [naive, utc]) is True, naive['id']
+        assert mod.superseded(utc, [naive, utc]) is False, utc['id']
+        assert mod.superseded(naive, [naive, earlier]) is False, naive['id']
+        assert mod.superseded(earlier, [naive, earlier]) is True, earlier['id']
+        # Anchored, not converted: an `astimezone()` reads a zone-less stamp
+        # in the runner's own zone, which is UTC here and on every
+        # GitHub-hosted runner, so the ordering above answers the same
+        # either way and the control would be green with the defect in
+        # place.
+        assert set(anchors) == {'replace'}, sorted(set(anchors))
 
 
 def test_the_absent_gate_value_names_what_was_missing(tmp):
