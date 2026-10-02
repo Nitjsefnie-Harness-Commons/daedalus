@@ -13,6 +13,9 @@ another: `_assert_scan_refusal` for the arms that REFUSE, and
 `_scan_verdict` for a tree whose answer is read whichever way it falls.
 `test_mcp_import_refusals.py` carries the enumeration those readers are
 driven from, and `test_helper_assertion_pins.py` drives the first of them.
+The CALLEE verdict is not a third reader: it is `_scan_verdict`'s answer in
+three words over a tree the case writes, and it lives with the two cases
+that read it, which is all of them once the synthetic-tree suites are gone.
 
 The refusal assertion is named for the assertion it makes rather than for
 what it generically is, because other test modules already bind that
