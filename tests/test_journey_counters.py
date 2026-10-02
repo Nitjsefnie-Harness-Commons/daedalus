@@ -2,6 +2,7 @@
 """Contracts for how a journey is COUNTED: which counter this runner
 allows, what a measurement carries, and every way a measurement can
 refuse rather than answer."""
+import json
 import os
 import sys
 from pathlib import Path
@@ -330,6 +331,51 @@ def _profile(directory, name, slot, thread, ir, signature=(), pid=4242,
              cmd=None):
     return _journey_contract.callgrind_profile(
         directory, name, slot, thread, ir, signature, pid=pid, cmd=cmd)
+
+
+def test_every_measured_child_runs_with_the_two_settings_a_count_depends_on(
+        tmp):
+    """The count must not move with host state, and the two settings that
+    move it are set on the child rather than subtracted afterwards.
+
+    `PYTHONHASHSEED` unset makes CPython randomise string hashing per
+    process, so which order a module's globals are built in — and what that
+    costs — differs between two runs of the same tree. `PYTHONDONTWRITEBYTECODE`
+    unset makes a warm `__pycache__` cheap: measured on two runs of the same
+    tree under valgrind, the first child's harness main thread compiled
+    21,930,238 instructions of source and the second 6,268,419.
+
+    Neither is a number to subtract and neither is a tolerance to widen: both
+    make ONE side of the subtraction different from the other, and the
+    baseline is whichever child happened to run first. So they are set on
+    every child the counter traces, which is a real child here rather than a
+    stand-in for `subprocess.run` — a planted launcher would pass whatever
+    the module hands it and prove nothing about what the interpreter reads.
+    """
+    del tmp
+    counters = _journey_contract.counters()
+    assert counters.MEASURED_ENV == {'PYTHONHASHSEED': '0',
+                                     'PYTHONDONTWRITEBYTECODE': '1'}, (
+        counters.MEASURED_ENV)
+    program = ('import json, os, sys;'
+               ' json.dump({name: os.environ.get(name)'
+               ' for name in sys.argv[1:]}, sys.stdout)')
+    code, out, err = counters._run(
+        [sys.executable, '-c', program, *sorted(counters.MEASURED_ENV)])
+    assert code == 0, err
+    seen = json.loads(out)
+    assert seen == counters.MEASURED_ENV, seen
+    # And the value has to be one the interpreter acts on: seed 0 is a fixed
+    # hash order, not merely a variable that is set.
+    seen_order = []
+    for _ in range(2):
+        code, out, err = counters._run(
+            [sys.executable, '-c',
+             'import sys; sys.stdout.write(repr(sorted({str(i) for i in'
+             ' range(1000)}, key=hash))[:40])'])
+        assert code == 0, err
+        seen_order.append(out)
+    assert seen_order[0] == seen_order[1], seen_order
 
 
 def test_a_child_that_cannot_start_is_an_answer_not_an_exception(tmp):
