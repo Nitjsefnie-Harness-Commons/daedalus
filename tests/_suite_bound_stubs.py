@@ -25,6 +25,10 @@ import time
 # be holding, so a control that intends to signal it is signalling a stand-in
 # rather than anything real.
 GROUP = 424241
+# The group the launcher itself runs in, which by default is NOT the child's:
+# the two are the same only where a launch was not given its own session, and
+# a control that means that case says so rather than reading the real one.
+LAUNCHER_GROUP = GROUP + 1
 # A bound small enough that a stand-in child outlives it instantly. It is the
 # subject's own parameter, not an assertion about elapsed time.
 TINY_BOUND_S = 0.05
@@ -88,10 +92,18 @@ class Signals:
     one part of a tree kill no returned string can carry, since a string
     saying the escalation happened is produced by the same branch either
     way.
+
+    `launcher_group` is what `getpgrp` answers, and it is a parameter rather
+    than the process's own group because this stand-in owns both sides of the
+    comparison: the case a control means is the two being EQUAL, and reading
+    the real one makes that a statement about the machine it runs on -- and an
+    `os.getpgrp()` call is a POSIX-only API a Windows leg does not have.
     """
 
-    def __init__(self, group=GROUP, lookup_error=None, killpg_errors=None):
+    def __init__(self, group=GROUP, launcher_group=LAUNCHER_GROUP,
+                 lookup_error=None, killpg_errors=None):
         self.group = group
+        self.launcher_group = launcher_group
         self.lookup_error = lookup_error
         self.killpg_errors = killpg_errors or {}
         self.sent = []
@@ -103,6 +115,9 @@ class Signals:
         if self.lookup_error is not None:
             raise self.lookup_error
         return self.group
+
+    def getpgrp(self):
+        return self.launcher_group
 
     def killpg(self, group, sig):
         self.sent.append((group, sig))

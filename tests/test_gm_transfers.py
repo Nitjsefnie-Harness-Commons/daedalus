@@ -568,20 +568,18 @@ vm.runInNewContext(
 vm.runInNewContext(
   fs.readFileSync(pagePath, 'utf8'), context, { filename: pagePath });
 
-function flushMessages() {
-  while (messages.length) {
-    const data = messages.shift();
-    for (const listener of listeners.message) {
-      listener({ source: windowObject, data });
-    }
-  }
-}
-
 windowObject.GM.openInTab('about:blank', { active: false });
-flushMessages();
 windowObject.GM.notification(
   { title: 'Run finished', text: 'Nothing failed.' });
-flushMessages();
+
+// Both page messages are queued by the calls above, so one drain delivers them
+// in the order they were made; a second drain would find the queue empty.
+while (messages.length) {
+  const data = messages.shift();
+  for (const listener of listeners.message) {
+    listener({ source: windowObject, data });
+  }
+}
 
 process.stdout.write(JSON.stringify({
   sent: sent.filter((message) => message.type === 'openTab'

@@ -124,7 +124,6 @@ _KEEPALIVE_LIFECYCLE_HARNESS = _dashnode.DashboardNodeHarness(
 phase('dashboard harness started');
 const fs = require('fs');
 const vm = require('vm');
-const contentSource = fs.readFileSync(process.argv[1], 'utf8');
 """ + event_target_stub() + r"""
 // One content-script realm with controllable timers and RETAINED disconnect
 // listeners. `invalidated` makes chrome.runtime.connect throw, which is what
@@ -175,7 +174,8 @@ function realm(invalidated) {
     clearInterval: (id) => cancel(intervals, id),
     console: { log() {}, error() {} },
   }, contentScriptPage()));
-  vm.runInContext(contentSource, context, { filename: process.argv[1] });
+  vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context,
+    { filename: process.argv[1] });
   return { timers, intervals, ports };
 }
 
