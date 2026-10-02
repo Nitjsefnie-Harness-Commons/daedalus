@@ -28,8 +28,13 @@ from _node_harness_fixtures import (  # noqa: E402
 from _wfgraph import _job_needs, _tests_yml  # noqa: E402
 from _wffixtures import BLOCK_NEEDS, _refuses, _replaced  # noqa: E402
 
-# The closure suite's own refusing composition: the leading newline puts
-# the call on line 6, which is the line SCAN_SITE counts.
+# The composition `_assert_scan_refusal` is driven with here, and the
+# property that makes its site countable: the leading newline puts the
+# `import_module` call on line 6 of the source, and SCAN_SITE is that
+# number. The analyser names the site by a node's own `lineno`, so the
+# case's site argument is a claim about the source text and nothing in the
+# walk counts it for us. The call the walk refuses is the unreadable-name
+# arm; its own arm carries the boundary in `test_mcp_import_refusals.py`.
 COMPUTED_IMPORT = (
     '\nimport importlib\n'
     '\n'

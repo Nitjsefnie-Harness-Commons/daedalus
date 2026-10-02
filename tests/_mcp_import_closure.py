@@ -36,12 +36,18 @@ operation and the registry. A store that USES the builtin as a call's
 EFFECTIVE CALLEE receives the call's RESULT — the declared call-result
 limit below, not a delivery — and the callee is resolved by the VALUE it
 produces, so a builtin in a DATA position of it (an argument, a lookup key)
-stays a delivery. Three shapes it cannot follow are ACCEPTED as declared
-limits. A value reached through a call's result. A tracked module or the
-operation handed as a call ARGUMENT (`use(sys)`). A value COMPUTED at
-runtime — an interpolated f-string, a subscript that selects one
-(`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`), a starred argument. Any
-accepted shape leaves the closure quietly short.
+stays a delivery. This module spells FOURTEEN refusals at THIRTEEN sites —
+`_refuse_default` spells three at one site, because its message names the
+thing handed away through a table rather than by its own text — and
+`test_mcp_import_refusals.py` enumerates them and re-derives the set from
+this file. Beside them are three shapes the walk ACCEPTED as declared
+limits and follows no further: a value reached through a call's result, a
+tracked module or the operation handed as a call ARGUMENT (`use(sys)`), and
+a value COMPUTED at runtime — an interpolated f-string, a subscript that
+selects one (`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`), a starred
+argument. No control pins those three, and one should not: pinning a
+declared limit forbids closing it. Any accepted shape leaves the closure
+quietly short.
 """
 import ast
 from pathlib import Path
