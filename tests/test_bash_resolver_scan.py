@@ -139,7 +139,8 @@ def test_the_windows_resolver_puts_git_bash_ahead_of_the_wsl_launcher(tmp):
         program_files='C:\\Program Files',
         program_files_x86='C:\\Program Files (x86)',
         local_app_data='C:\\AppData')
-    assert fallback == [*installed, launcher], f'b, launcher and install: {fallback}'
+    assert fallback == [*installed, launcher], (
+        f'b, launcher and install: {fallback}')
     launcher_only = _util.bash_candidates(
         'C:\\Windows\\System32', True, exists=only(launcher))
     assert launcher_only == [launcher], (
