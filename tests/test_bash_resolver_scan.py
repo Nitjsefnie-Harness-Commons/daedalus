@@ -127,7 +127,7 @@ def test_the_windows_resolver_puts_git_bash_ahead_of_the_wsl_launcher(tmp):
     both = _util.bash_candidates(
         'C:\\Windows\\System32;C:\\Program Files\\Git\\bin', True,
         exists=only(launcher, git_bin))
-    assert both == [git_bin, launcher], both
+    assert both == [git_bin, launcher], f'a, both on PATH: {both}'
     installed = (
         'C:\\Program Files\\Git\\bin\\bash.exe',
         'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
@@ -139,13 +139,16 @@ def test_the_windows_resolver_puts_git_bash_ahead_of_the_wsl_launcher(tmp):
         program_files='C:\\Program Files',
         program_files_x86='C:\\Program Files (x86)',
         local_app_data='C:\\AppData')
-    assert fallback == [*installed, launcher], fallback
-    assert _util.bash_candidates(
-        'C:\\Windows\\System32', True, exists=only(launcher)) == [launcher]
+    assert fallback == [*installed, launcher], f'b, launcher and install: {fallback}'
+    launcher_only = _util.bash_candidates(
+        'C:\\Windows\\System32', True, exists=only(launcher))
+    assert launcher_only == [launcher], (
+        f'c, launcher alone must still resolve: {launcher_only}')
     posix = _util.bash_candidates(
         '/usr/local/bin:/usr/bin', False,
         exists=only('/usr/local/bin/bash', '/usr/bin/bash'))
-    assert posix == ['/usr/local/bin/bash', '/usr/bin/bash'], posix
+    assert posix == ['/usr/local/bin/bash', '/usr/bin/bash'], (
+        f'posix, plain path order: {posix}')
 
 
 def test_a_write_through_a_container_binds_no_name(tmp):
