@@ -391,6 +391,9 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_gate_freshness_run.py', '_writing_read', '_flow_read()', 1):
          'building a reader double whose recorded writes carry the head'
          'sha; the flow is data the fake reader replays',
+    ('tests/test_gh_client_lifetime.py', '_ended', 'child.wait(timeout)', 1):
+        'the reap of a gh child this suite spawned, killed first when'
+         ' it is still running, so the wait can only return',
     ('tests/test_mcp_entry_point.py', '_cleanup_mcp', 'proc.wait(timeout)', 1):
          'an MCP process wait while the test tears it down',
     ('tests/test_mcp_entry_point.py', '_cleanup_mcp', 'proc.wait(timeout)', 2):
