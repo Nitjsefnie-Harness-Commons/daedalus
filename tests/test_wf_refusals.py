@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wffixtures import _value_error  # noqa: E402
 from _yamlread import (  # noqa: E402
     job_mapping, step_scalar, step_scalars, top_level_mapping)
 from _yamlsteps import complete_job_mapping, step_mappings  # noqa: E402
@@ -15,14 +16,6 @@ sys.path[:0] = [str(ROOT), str(ROOT / 'scripts' / 'ci')]
 
 from workflow_yaml import (  # noqa: E402
     workflow_step_items as _step_items)
-
-
-def _value_error(call):
-    try:
-        call()
-    except ValueError as error:
-        return str(error)
-    return None
 
 
 # A key written twice can hide a `run:` behind a decoy, so every decoder

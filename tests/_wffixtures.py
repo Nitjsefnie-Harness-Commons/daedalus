@@ -1,4 +1,4 @@
-"""Fixtures shared by the planted-workflow suites."""
+"""Fixtures shared by the workflow-reading suites."""
 import os
 from pathlib import Path
 
@@ -51,6 +51,20 @@ def _refuses(call, *args, contains=None):
             assert contains in message, message
         return message
     raise AssertionError(f'{call.__name__} accepted the planted defect')
+
+
+def _value_error(call):
+    """The ValueError `call` raised, or None when it raised none.
+
+    The None is the assertion, not an accident: a caller comparing the
+    return against the message it expects goes red on an acceptance,
+    where `_refuses` raises on one.
+    """
+    try:
+        call()
+    except ValueError as error:
+        return str(error)
+    return None
 
 
 def _probe_workflow(tmp, name, source):
