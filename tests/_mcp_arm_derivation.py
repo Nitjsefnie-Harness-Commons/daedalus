@@ -227,11 +227,17 @@ def _holds_raiser(value, bound, partials):
 
 
 def _reaches_raiser(node, bound):
-    """Whether an expression IS a refusal raiser, by the object it reaches."""
+    """Whether an expression IS a refusal raiser, by the object it reaches.
+
+    A walrus is the value it binds, which is what the walk's own fold says
+    of it and what the runtime evaluates it to, so a call through one calls
+    what the store put in the name."""
     if isinstance(node, ast.Name):
         return node.id in bound
     if isinstance(node, ast.Attribute):
         return node.attr in bound or _key(node) in bound
+    if isinstance(node, ast.NamedExpr):
+        return _reaches_raiser(node.value, bound)
     return False
 
 
