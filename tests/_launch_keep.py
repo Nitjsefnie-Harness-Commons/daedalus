@@ -4,9 +4,9 @@ Both decisions below are written once here and read from here by
 `tests/test_repo_layout.py`: it walks the whole tracked tree on the first
 and keeps or drops each site on the second, so a copy there would narrow
 that control's population with nothing to report it. The first also has a
-second reader on two planted fixtures a tree walk cannot express, in that
-same suite. Either way the hole would be silent in the shrinking
-direction.
+second reader in that same suite, on one planted fixture a tree walk
+cannot express and it reads at two assertions. Either way the hole would
+be silent in the shrinking direction.
 
 The figures the two rules were tuned against — 139 dropped sites narrowed to
 55, then 70 — were measured before #1408 and none has been re-measured
@@ -33,14 +33,18 @@ def in_launch_population(name, source):
     back out (#1408): the analyser also bounds a call on any keyword the
     stdlib does not take, so `timout=30` is a site, and PEP 3131 normalises
     a fullwidth `timeout` to the ASCII spelling in `ast.keyword.arg` from a
-    file whose own text never spells it. Both fixtures are in
-    `tests/test_repo_layout.py`'s
-    `test_a_normalised_identifier_bound_is_still_read`, and the cost of the
-    walk over the whole tree is paid in the analyser.
+    file whose own text never spells it. The fullwidth fixture is
+    `FULLWIDTH_BOUND` in `tests/test_repo_layout.py`, read at two
+    assertions of `test_a_normalised_identifier_bound_is_still_read`; the
+    `timout=30` one is the shared `foreign-keyword-on-a-launch` row in
+    `tests/_bound_site_rows.py` and `tests/_launch_refusal_rows.py`. The
+    cost of the walk over the whole tree is paid in the analyser.
 
-    `source` is still the second argument because every reader already
-    reads the file to hand it over, and a parameter nothing reads is a
-    signature that lies about what the control costs.
+    `source` is still the second argument because the tree walk has the
+    file's text in hand already to hand over, and a parameter nothing
+    reads is a signature that lies about what the control costs. The
+    fixture assertion reads a module-level string rather than a file, and
+    is the reader that does not pay the read.
     """
     del source
     return name.endswith('.py')
