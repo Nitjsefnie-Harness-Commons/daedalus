@@ -3,9 +3,8 @@
 Shared, because `run_tests.py` gives every suite its own process: a
 control that imported a sibling suite for this would re-execute that
 suite's whole body and read a private copy. Every control that reads a
-door set reads it from here, across both files that own one —
-`tests/test_ci_lint_tools.py` and `tests/test_ci_tool_declarations.py` —
-so they cannot disagree about which jobs run suites.
+door set reads it from here, and both files that own one read it here:
+`tests/test_ci_lint_tools.py` and `tests/test_ci_tool_declarations.py`.
 
 `SUITE_RUNNERS` recognises the sanctioned runners by a substring of each
 step's `run:` text, and the complement — every other route into the suite
