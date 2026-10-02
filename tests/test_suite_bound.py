@@ -6,9 +6,8 @@ drive the real launchers over real planted suites rather than importing
 its functions: a guard written against a fixture shows what the guard
 thinks, and only a launcher that really ran says whether the bound held.
 
-The teardown's arms are the exception, and they are called out where they
-are: no launcher ever takes them, so they are reached through stand-ins
-that record what the subject actually signalled or ran.
+The teardown's arms are the exception: no launcher ever takes them, so they
+are reached through stand-ins that record what the subject signalled or ran.
 """
 import ast
 import os
@@ -24,6 +23,7 @@ from _coverage_suite_fixture import (  # noqa: E402
     OPERATOR_ASKS_FIRST, OPERATOR_FORCES, REQUESTED_THEN_GRACED,
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
     records, settle_gone)
+from _processtree import taskkill_argv  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
     GROUP, TINY_BOUND_S, Child, Clock, Platform, Signals, Spawns, swapped)
@@ -393,17 +393,15 @@ def test_every_wait_this_module_makes_is_bounded(_tmp):
     """A bounded cleanup path is the only one that can be trusted to end.
 
     Read from the source rather than from a run, and this is one of the two
-    properties a source read is sound for. The bound is unobservable at
-    runtime: a process the kill has already reached always reaps, so the
-    wait returns whether or not it carried a bound, and no run can tell
-    the two apart.
+    properties a source read is sound for: the bound is unobservable at
+    runtime, because a process the kill has already reached always reaps.
 
     Two shapes of unbounded wait are read, because the module uses two.
     A `.wait(`/`.communicate()` with no `timeout=` keyword, and a
     `time.sleep()` inside a `while` loop that never compares the clock
-    again -- which is what a grace window spelled as a poll looks like
-    with its deadline check deleted, and no member-call spelling would see
-    it. Deleting either bound turns this red.
+    again -- which is what a grace window spelled as a poll looks like with
+    its deadline check deleted, and no member-call spelling would see it.
+    Deleting either bound turns this red.
     """
     unbounded = []
     for function in ast.walk(ast.parse(
@@ -502,11 +500,10 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
 
 
 # The arms no launcher reaches. Most controls above drive a real launcher;
-# these ask what the teardown does when the tree misbehaves, which no CI run
-# takes because on a healthy runner nothing misbehaves. Each asserts on what
-# was SIGNALLED or RECORDED, never only on the string the subject returned --
-# that string is its own account of the event, and a branch that rendered it
-# without sending anything satisfies it just as well.
+# these ask what the teardown does when the tree misbehaves, which no healthy
+# CI run takes. Each asserts on what was SIGNALLED or RECORDED, never only on
+# the string the subject returned: that string is its own account of the event,
+# and rendering it without sending anything satisfies it just as well.
 
 
 def test_a_process_group_that_cannot_be_looked_up_is_named_for_that(tmp):
@@ -536,7 +533,7 @@ def test_a_child_in_the_launchers_own_group_is_killed_on_its_own(tmp):
              'child shares the launcher group; '
              'direct kill failed: the kill was refused')):
         child = Child(kill_error=kill_error)
-        signals = Signals(group=os.getpgrp())
+        signals = Signals(launcher_group=GROUP)
         with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals):
             record = SUITE_BOUND.kill_process_tree(child)
         assert child.killed == 1, 'the attempt is what the record is about'
@@ -591,8 +588,8 @@ def test_the_windows_route_is_one_forced_taskkill_of_the_whole_tree(tmp):
     """The dispatch and the command it builds, not the platform's answer.
 
     This runs on every cell, so what it proves is that a Windows platform
-    sends exactly this argv with exactly this bound. Only a `windows-latest`
-    cell proves that a real `taskkill` ends a real tree.
+    sends exactly the tree kill's own argv with exactly this bound. Only a
+    `windows-latest` cell proves that a real `taskkill` ends a real tree.
     """
     del tmp
     child = Child()
@@ -601,7 +598,7 @@ def test_the_windows_route_is_one_forced_taskkill_of_the_whole_tree(tmp):
         record = SUITE_BOUND.kill_process_tree(child)
     assert len(spawns.runs) == 1, 'one forced call, never a graceful one'
     argv, keywords = spawns.runs[0]
-    assert argv == ['taskkill', '/F', '/T', '/PID', str(child.pid)], argv
+    assert argv == taskkill_argv(child.pid), argv
     assert keywords['timeout'] == SUITE_BOUND.CLEANUP_TIMEOUT_S, keywords
     assert keywords['check'] is False, keywords
     assert child.killed == 0, 'the tree is ended by pid, not from here'
@@ -627,6 +624,13 @@ def test_a_taskkill_that_failed_is_reported_for_its_own_reason(tmp):
         assert ('may still be running' in record) is ran, record
 
 
+def _launch(argv, tmp):
+    """Every arm's launch, with the `env=` an unmapped tree's launch owes."""
+    return SUITE_BOUND.launch_suite(
+        argv, cwd=tmp, output_path=Path(tmp, 'suite.out'),
+        env=_util.child_coverage('scrub'), timeout=TINY_BOUND_S)
+
+
 def test_a_suite_that_overruns_is_stopped_then_reaped_and_both_are_named(tmp):
     """The bound expired: the tree is ended, then the child is collected."""
     child = Child(wait_errors=[
@@ -637,9 +641,7 @@ def test_a_suite_that_overruns_is_stopped_then_reaped_and_both_are_named(tmp):
     argv = [sys.executable, 'suite.py']
     with swapped(SUITE_BOUND, sys=Platform('linux'), subprocess=spawns,
                  os=signals, time=clock):
-        returncode, cleanup = SUITE_BOUND.launch_suite(
-            argv, cwd=tmp, output_path=Path(tmp) / 'suite.out',
-            timeout=TINY_BOUND_S)
+        returncode, cleanup = _launch(argv, tmp)
     assert spawns.spawns[0][0] == argv, spawns.spawns
     assert spawns.spawns[0][1]['start_new_session'] is True, spawns.spawns
     assert [sig for _group, sig in signals.sent] == [
@@ -664,9 +666,8 @@ def test_a_reap_that_did_not_happen_is_named_by_why(tmp):
         with swapped(SUITE_BOUND, sys=Platform('linux'),
                      subprocess=Spawns(child=child), os=Signals(),
                      time=Clock()):
-            returncode, cleanup = SUITE_BOUND.launch_suite(
-                [sys.executable, 'suite.py'], cwd=tmp,
-                output_path=Path(tmp) / 'suite.out', timeout=TINY_BOUND_S)
+            returncode, cleanup = _launch(
+                [sys.executable, 'suite.py'], tmp)
         assert child.waits == [TINY_BOUND_S, SUITE_BOUND.CLEANUP_TIMEOUT_S]
         assert cleanup.endswith(expected), cleanup
         assert '; process reaped' not in cleanup, cleanup
@@ -684,9 +685,7 @@ def test_an_interrupt_around_the_launch_still_ends_and_reaps_the_child(tmp):
     with swapped(SUITE_BOUND, sys=Platform('linux'), subprocess=spawns,
                  os=signals, time=clock):
         try:
-            SUITE_BOUND.launch_suite(
-                [sys.executable, 'suite.py'], cwd=tmp,
-                output_path=Path(tmp) / 'suite.out', timeout=TINY_BOUND_S)
+            _launch([sys.executable, 'suite.py'], tmp)
         except KeyboardInterrupt:
             interrupted = 're-raised'
     assert interrupted == 're-raised', 'the interrupt was swallowed'
