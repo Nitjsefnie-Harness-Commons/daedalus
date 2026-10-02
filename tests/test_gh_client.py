@@ -87,7 +87,7 @@ def _failed(client, fake, variables=None, env=None):
     return failure
 
 
-def _delivered(client, fake):
+def _the_data(client, fake):
     """The data one answer delivered, or a failure naming why not."""
     data, failure = _answered(client, fake)
     if data is None:
@@ -217,7 +217,7 @@ def test_a_body_that_is_not_json_is_a_failure_naming_the_parse(tmp):
     fake.write_answers({RUNS_QUERY: {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
         'body': '{"data": {"repository": null}}'}})
-    assert _delivered(client, fake) == {'repository': None}
+    assert _the_data(client, fake) == {'repository': None}
 
 
 def test_a_body_that_is_json_but_not_an_object_is_a_failure(tmp):
@@ -252,7 +252,7 @@ def test_a_body_that_is_json_but_not_an_object_is_a_failure(tmp):
     fake.write_answers({RUNS_QUERY: {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
         'body': {'data': {}}}})
-    assert _delivered(client, fake) == {}
+    assert _the_data(client, fake) == {}
 
 
 def test_a_body_with_no_data_is_a_failure_quoting_the_server(tmp):
@@ -294,7 +294,7 @@ def test_a_body_with_no_data_is_a_failure_quoting_the_server(tmp):
     fake.write_answers({RUNS_QUERY: {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
         'body': {'data': {}}}})
-    assert _delivered(client, fake) == {}
+    assert _the_data(client, fake) == {}
 
 
 # ---- the read the pages become ----
