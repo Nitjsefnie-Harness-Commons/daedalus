@@ -675,13 +675,18 @@ def test_store_hotfix_schema_pins_nullable_permanent(_tmp):
         'store_hotfix permanent schema default must be null')
 
 
-# The closure limits below are the ones the real tree does not exercise, so
-# the pass above cannot witness them: nothing in `daedalus_mcp` hands a
-# program to a code-evaluating builtin, nothing is provably unreachable, and
-# no callee is read out of a nullary lambda's return. Each is stated with
-# the side that refuses and the side that must stay silent, which is what
-# keeps a rule that over-reaches from passing; the arms of the walk the real
-# tree cannot present at all are enumerated in `test_mcp_import_refusals.py`.
+# Two of the three cases below close shapes the real tree does not exercise,
+# so the pass above cannot witness them: nothing in `daedalus_mcp` hands a
+# program to a code-evaluating builtin, and no callee is read out of a
+# nullary lambda's return. Each of those two states a REFUSAL and a SILENCE
+# — a constant program reaching `eval`/`exec`/`compile` is refused while the
+# same name bound to a tool is not, a nullary lambda callee resolves while a
+# lambda with a required parameter refuses — which is what keeps a rule that
+# over-reaches from passing. The third is a MEMBERSHIP rather than such a
+# pair, and it is on the real tree: the barrier case pins that the call
+# before a barrier contributes its module and the call behind it does not.
+# The arms of the walk the real tree cannot present at all are enumerated in
+# `test_mcp_import_refusals.py`.
 def _composition_names(_tmp, tree):
     """The repo-local files this composition's scan set names, relative to
     the tree it was written into."""
