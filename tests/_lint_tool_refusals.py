@@ -155,6 +155,58 @@ def unreadable_requirements():
         'the read failure that produced it, so the reason is lost')
 
 
+def no_pin(tmp):
+    """A requirements file that pins no version: refused, and named.
+
+    Zero pins and two pins are both refused, because the pin is the whole
+    supply route: with none, the install has nothing to install, and with
+    two the file has stopped saying which of them is the version running.
+    This control is the first of the pair -- the file names the package but
+    does not pin it, so the arm is reached for the reason it is written for
+    rather than because the file was empty.
+
+    MUTANT: drop the `if not found` arm. `found[0]` then raises an
+    IndexError, the control raises on the type, and the arm is gone.
+    """
+    installer = _installer_module('lint_installer_no_pin')
+    package = installer.SHELLCHECK_PACKAGE
+    path = Path(tmp) / installer.REQUIREMENTS.name
+    path.write_text(f'# no pin for {package} in this file\n'
+                    f'{package}>=0.0.0\n', encoding='utf-8')
+    with mock.patch.object(installer, 'REQUIREMENTS', path):
+        raised = _the_refusal(installer.shellcheck_pin)
+    _must_name(raised, path.name, f'{package}==<version>',
+               'whole supply route')
+
+
+def several_pins(tmp):
+    """A requirements file that pins the package twice: refused, both named.
+
+    Which of the two is the version that runs is not this script's to guess,
+    so the refusal is the only place the ambiguity can be caught, and a
+    reader needs the COUNT and both lines to see it. The lines are spelled
+    from the tree's own pin so the control cannot pass against a pair whose
+    second line the file would never have carried.
+
+    MUTANT: drop the `if len(found) > 1` arm. `found[0]` then returns the
+    first pin silently, and the control raises because no refusal came out.
+    """
+    installer = _installer_module('lint_installer_several_pins')
+    package = installer.SHELLCHECK_PACKAGE
+    tree = installer.REQUIREMENTS.read_text(encoding='utf-8')
+    assert tree.count(f'{package}==') == 1, (
+        f'the tree pins {package} more than once already, so this control is '
+        'not about the arm it names')
+    first = f'{package}=={installer.shellcheck_pin()}'
+    second = f'{package}==0.0.0'
+    path = Path(tmp) / installer.REQUIREMENTS.name
+    path.write_text(f'{first}\n{second}\n', encoding='utf-8')
+    with mock.patch.object(installer, 'REQUIREMENTS', path):
+        raised = _the_refusal(installer.shellcheck_pin)
+    _must_name(raised, path.name, package, '2', first, second,
+               'one file must name one version')
+
+
 def no_wheel(staging):
     """An sdist where a wheel was pinned: refused, and both halves named.
 
