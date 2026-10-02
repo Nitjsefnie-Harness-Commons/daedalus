@@ -89,6 +89,23 @@ time.sleep(300)
 REPORT = ('import os, sys; sys.stdout.write('
           'os.environ.get("DAEDALUS_WATCH_PARENT_FD", ""))')
 
+# A child asked to watch a name that is not a pipe. `regular` is opened
+# by the child itself rather than handed down a descriptor, because a
+# descriptor this process opened is not one the child would have: PEP
+# 446 made inherited descriptors opt-in, and a row that quietly measured
+# the wrong branch on the platform where that opt-in is not available
+# would be a row that could not fail there.
+REFUSER = '''import os, sys
+sys.path.insert(0, {skill!r})
+import gh_client
+name = sys.argv[1]
+if name == 'regular':
+    name = str(os.open(sys.argv[2], os.O_RDONLY))
+os.environ[gh_client.PARENT_WATCH_ENV] = name
+gh_client.watch_parent()
+print('accepted', flush=True)
+'''
+
 
 def _client():
     return _util.load(SKILL / 'gh_client.py', 'gh_client_lifetime')
@@ -288,37 +305,36 @@ def test_watch_parent_started_by_hand_leaves_the_process_alone(tmp):
 
 
 def test_a_name_that_is_not_an_inherited_pipe_is_refused(tmp):
-    """Every way the name can fail to be a pipe, and each one exits
-    rather than carrying on: a number that is not a descriptor at all,
-    a word that is not a number, and - the one that is easy to get
-    wrong - a perfectly good descriptor that belongs to a file. The last
-    is the near miss that matters, because a child that ignored a
-    descriptor it was handed and read somebody's file until end of file
-    would exit on the next unrelated close, which is the parent's death
-    arriving on somebody else's schedule.
+    """Every way the name can fail to be a pipe, and each one ends the
+    watcher rather than carrying on: a number that is not a descriptor
+    at all, a word that is not a number, and - the one that is easy to
+    get wrong - a perfectly good descriptor that belongs to a file. The
+    last is the near miss that matters, because a child that accepted it
+    would read somebody's file to its end and exit on the next close
+    that was nobody's parent, which is the parent's death arriving on
+    an unrelated schedule.
 
-    In this process and not a child's, because every one of the three
-    refuses before the thread is started and a thread that reached
-    `os._exit` from inside the suite would take the run down with it.
+    Each one runs in a child, which is the only place the third can be
+    driven at all: accepting it starts the very thread whose `os._exit`
+    would take this process down with it, so an in-process row could
+    never be shown to fail - a `watch_parent` that stopped checking
+    would have ended the suite with a zero exit code and a passing
+    summary. In the child the same mistake is a zero exit code, which
+    is what the row reads.
     """
     client = _client()
     plain = os.path.join(tmp, 'not-a-pipe')
     with open(plain, 'w', encoding='utf-8') as handle:
         handle.write('x')
-    regular = os.open(plain, os.O_RDONLY)
-    try:
-        for raw in (str(regular), 'not-a-number', '99999999'):
-            os.environ[client.PARENT_WATCH_ENV] = raw
-            try:
-                client.watch_parent()
-            except SystemExit as refusal:
-                assert client.PARENT_WATCH_ENV in str(refusal), (
-                    raw, refusal)
-            else:
-                raise AssertionError(f'{raw} was taken for a pipe')
-    finally:
-        os.environ.pop(client.PARENT_WATCH_ENV, None)
-        os.close(regular)
+    refuser = os.path.join(tmp, 'refused_watcher.py')
+    with open(refuser, 'w', encoding='utf-8') as handle:
+        handle.write(REFUSER.format(skill=str(SKILL)))
+    for name in ('regular', 'not-a-number', '99999999'):
+        done = subprocess.run(
+            [sys.executable, refuser, name, plain],
+            capture_output=True, text=True, timeout=LIFETIME)
+        assert done.returncode != 0, (name, done.stdout)
+        assert client.PARENT_WATCH_ENV in done.stderr, (name, done.stderr)
 
 
 def main():
