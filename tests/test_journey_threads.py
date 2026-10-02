@@ -15,18 +15,18 @@ from _journey_contract import (  # noqa: E402
     _util,
 )
 
-# What was MEASURED on this box, spelled out here rather than read back
-# from the module that holds it. `_carries` requires every member, so
-# deleting one WIDENS a signature toward calling a request thread the role
-# it names — and a control that reads its expectation from the subject
-# cannot see that. These two tuples are the evidence the signatures are
-# allowed to be exactly.
+# The event-loop signature, MEASURED: exclusive to a thread running a
+# CPython asyncio event loop and to no other thread in a profile of an event
+# loop beside a blocking socket worker. It is a literal here because there
+# is nothing installed to derive it from — these are CPython's own
+# internals, not a file on this runner — and because the module's tuple is
+# the CONTRACT under test while this is the EVIDENCE it is allowed to match,
+# which are two different things and are held in two places on purpose.
 #
-# The first: exclusive to a thread running a CPython asyncio event loop and
-# to no other thread in a profile of an event loop and a blocking socket
-# worker. The second: exclusive to a thread that imported the MCP front end
-# and to no other thread in a profile of that import and of one unrelated
-# stdlib import.
+# `_carries` requires every member, so deleting one WIDENS a signature
+# toward calling a request thread the role it names, and a control that
+# reads its expectation from the subject cannot see that. The member-by-
+# member loop below is what covers it.
 MEASURED_LOOP_SYMBOLS = (
     'FutureIter_iternext',
     'FutureObj_dealloc',
@@ -36,12 +36,47 @@ MEASURED_LOOP_SYMBOLS = (
     'TaskObj_finalize',
     'TaskStepMethWrapper_dealloc',
 )
-MEASURED_FRONT_END_SYMBOLS = ('PyInit_pydantic_core',)
+# The front end's signature has no literal HERE, deliberately: its owner is
+# the installed extension, and `front_end_symbol()` derives the init symbol
+# from the file that extension actually is. A literal in the tree is a
+# second copy of a contract with an owner, and a rename moves both copies
+# in one commit and leaves the suite agreeing with itself.
+FRONT_END_EXTENSION = 'pydantic_core._pydantic_core'
 # What a thread that imports ANY module carries, and what the front end's
 # import has to be told apart from. A signature of these would call every
 # request thread that imported anything the front end's import, and the
 # journeys that exclude it would drop the journey's own work.
 GENERIC_IMPORT_SYMBOLS = ('_PyImport_RunModInitFunc', 'import_find_and_load')
+
+
+def front_end_symbol():
+    """The CPython init symbol of the INSTALLED front-end extension.
+
+    CPython's init macro prefixes `PyInit_` to the module's leaf name, and
+    the leaf name here is `_pydantic_core` — which is why the symbol has
+    two underscores and not one. Deriving it from the file the module
+    resolves to is what makes this an oracle rather than a second copy of
+    the constant: a renamed or rebuilt extension moves the expectation with
+    it, and a constant that names a symbol nothing exports fails here
+    rather than in a CI run.
+
+    An extension that is not installed is a REFUSAL naming it. There is no
+    fallback to a literal, because a literal is exactly the thing this
+    exists not to be.
+    """
+    import importlib.util
+    try:
+        spec = importlib.util.find_spec(FRONT_END_EXTENSION)
+    except (ImportError, AttributeError, ValueError) as error:
+        raise AssertionError(
+            f'{FRONT_END_EXTENSION} is not installed, so the front end\'s '
+            'signature cannot be checked against anything: '
+            f'{error}') from None
+    assert spec is not None and spec.origin, (
+        f'{FRONT_END_EXTENSION} resolves to no file, so the front end\'s '
+        'signature cannot be checked against anything')
+    leaf = spec.origin.replace('\\', '/').rsplit('/', 1)[-1]
+    return 'PyInit_' + leaf.split('.')[0]
 
 
 def test_the_reader_collects_the_names_a_thread_declared(tmp):
@@ -110,23 +145,50 @@ def test_the_event_loop_signature_names_the_serve_thread(tmp):
             == classifier.SERVE)
 
 
-def test_the_module_init_signature_names_the_import_thread(tmp):
-    """The FRONT END's import, told by a module only the front end pulls.
+def test_the_module_init_signature_is_the_installed_extensions_init_symbol(
+        tmp):
+    """The front end's symbol, checked against the installed extension.
 
     `daedalus_mcp/*.py` is pure Python and has no `PyInit_<name>` of its
     own, but `mcp==2.2.0` pulls pydantic v2, whose compiled core is a C
-    extension. Measured on this box: a worker that imported
-    `daedalus_mcp.server` carries `PyInit_pydantic_core` and a worker that
-    imported one unrelated stdlib module does not, and neither does the
-    main thread.
+    extension and is the one thing on the front end's import thread that an
+    importing request thread never initialises. The expected symbol comes
+    from the file that extension resolves to, so this fails on a constant
+    that names something nothing exports, and survives a rename the way a
+    literal cannot: the review shipped `PyInit_pydantic_core` where the
+    symbol is `PyInit__pydantic_core`, and a literal on both sides of the
+    assertion agreed with itself all the way to green.
     """
     del tmp
     classifier = _journey_contract.threads()
-    assert (sorted(MEASURED_FRONT_END_SYMBOLS)
-            == classifier.SIGNATURES[classifier.IMPORT]), \
-        classifier.SIGNATURES[classifier.IMPORT]
-    assert (classifier.role_of(2, frozenset(MEASURED_FRONT_END_SYMBOLS))
+    expected = front_end_symbol()
+    assert classifier.SIGNATURES[classifier.IMPORT] == [expected], (
+        f'the front end\'s import is told by '
+        f'{classifier.SIGNATURES[classifier.IMPORT]} and the installed '
+        f'{FRONT_END_EXTENSION} exports {expected}')
+    assert (classifier.role_of(2, frozenset({expected}))
             == classifier.IMPORT)
+
+
+def test_the_installed_extensions_init_symbol_is_the_one_that_was_measured(
+        tmp):
+    """The oracle AND the measurement, which are two different claims.
+
+    The oracle above says the constant is spelled the way the installed
+    file says. This says the constant is spelled the way a callgrind
+    profile says, which is the claim the oracle cannot make: a
+    `PyInit_<leaf>` that no module exports and one that no thread executes
+    fail the same way from the reader's side and differently from the
+    build's.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    measured = ('PyInit__pydantic_core',)
+    assert (classifier.SIGNATURES[classifier.IMPORT] == list(measured)), (
+        classifier.SIGNATURES[classifier.IMPORT])
+    assert front_end_symbol() in measured, (
+        'the symbol measured on the front end\'s import thread is not the '
+        f'one {FRONT_END_EXTENSION} exports: {front_end_symbol()}')
 
 
 def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
@@ -152,7 +214,7 @@ def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
              'cmd': 'python3 server.py', 'names': frozenset()},
             {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
              'cmd': 'python3 server.py',
-             'names': frozenset(MEASURED_FRONT_END_SYMBOLS)},
+             'names': frozenset({front_end_symbol()})},
             {'pid': 1, 'thread': 3, 'ir': 5_000,
              'cmd': 'python3 server.py',
              'names': frozenset(GENERIC_IMPORT_SYMBOLS)}]
@@ -165,20 +227,21 @@ def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
 def test_presence_is_not_exclusivity(tmp):
     """Carrying a symbol is not the role; carrying the signature is.
 
-    Driven member by member from the measured sets rather than from the
-    module's: a signature missing one member of these is a signature whose
-    role is claimed by one symbol fewer, and the role is an excluded one.
+    Over the LOOP signature only, which is the side where removing a member
+    is a real case: the front end's signature holds one member, so removing
+    it leaves the empty set and the assertion below would be true of any
+    classifier. The front end's side is pinned by the two controls above —
+    the oracle and the exact-set equality — and nothing here claims more.
     """
     del tmp
     classifier = _journey_contract.threads()
-    for measured in (MEASURED_LOOP_SYMBOLS, MEASURED_FRONT_END_SYMBOLS):
-        for member in measured:
-            without = set(measured) - {member}
-            assert classifier.role_of(2, without) == classifier.REQUEST, (
-                member, without)
+    for member in MEASURED_LOOP_SYMBOLS:
+        without = set(MEASURED_LOOP_SYMBOLS) - {member}
+        assert classifier.role_of(2, without) == classifier.REQUEST, (
+            member, without)
     assert (classifier.role_of(
         2, frozenset(MEASURED_LOOP_SYMBOLS) | frozenset(
-            MEASURED_FRONT_END_SYMBOLS)) == classifier.SERVE), \
+            {front_end_symbol()})) == classifier.SERVE), \
         'a thread carrying both is the loop, which is the more specific'
 
 
@@ -296,6 +359,15 @@ def test_a_thread_the_profile_does_not_have_is_a_refusal(tmp):
     assert failure is not None and 'excludes' in failure, failure
     assert kept is None, kept
     assert excluded == ('front-end-import', 'uvicorn-serve'), excluded
+    # The refusal names the symbol it was looking for, not only the role.
+    # A missing signature is a misspelled or uninstalled one far more often
+    # than it is a thread that did not run, and a sentence naming the role
+    # alone sends a reader to the profile instead of to the constant that
+    # matched nothing. Both roles are checked, through the two journeys
+    # that exclude one of them each.
+    assert 'FutureIter_iternext' in failure, failure
+    _kept, _excluded, no_import = threads.total_for(rows[:1], 'mcp-exec')
+    assert front_end_symbol() in no_import, no_import
     rows.append({'pid': 1, 'thread': 3, 'ir': 90_000_000,
                  'cmd': 'python3 server.py',
                  'names': frozenset(threads.SIGNATURES[threads.SERVE])})
@@ -517,6 +589,18 @@ def test_every_journey_says_which_roles_it_stops_counting(tmp):
         assert roles, name
         assert set(roles) <= set(threads.ROLES), (name, roles)
         assert threads.REQUEST not in roles, name
+    # The SHAPE the module docstring's bullet list states, pinned without
+    # naming a journey: the bootstrap import is excluded by all but one, and
+    # the one that keeps it is the one that keeps the serve thread. A
+    # docstring that named the journey instead would be a second copy of
+    # the table, and a table entry added or changed moves both.
+    names = _journey_contract.journeys().NAMES
+    keeps = [name for name in names
+             if threads.IMPORT not in threads.excluded_for(name)]
+    assert len(keeps) == 1, keeps
+    assert threads.SERVE in threads.excluded_for(keeps[0]), keeps
+    assert all(threads.IMPORT in threads.excluded_for(name)
+               for name in names if name != keeps[0]), keeps
 
 
 def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
@@ -534,7 +618,7 @@ def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
     assert set(threads.SIGNATURES) == {threads.IMPORT, threads.SERVE}, \
         threads.SIGNATURES
     assert threads.SIGNATURES == {
-        threads.IMPORT: sorted(MEASURED_FRONT_END_SYMBOLS),
+        threads.IMPORT: [front_end_symbol()],
         threads.SERVE: sorted(MEASURED_LOOP_SYMBOLS)}, threads.SIGNATURES
 
 

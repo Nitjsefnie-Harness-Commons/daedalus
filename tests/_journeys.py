@@ -162,7 +162,8 @@ def mcp_exec(base, docroot):
     part of what this journey measures, not an accident. `journey_threads`
     reads `thread == 1` FIRST and whatever it executed, so the round trip is
     counted wherever the journey puts it. A worker is instead read by what it
-    ran — the front end's import, or an asyncio event loop — so this
+    ran — the front end's import, told by a symbol only that dependency
+    tree initialises, or an asyncio event loop — so this
     journey's own work measured 1,311,350,558 could be moved out of the
     count by nothing it does. The import is the one thing here that must NOT
     be counted, which is why `_load_front_end` keeps it on a worker of its
