@@ -149,7 +149,7 @@ def unreadable_requirements():
     with mock.patch.object(installer, 'REQUIREMENTS', absent):
         raised = _the_refusal(installer.shellcheck_pin)
     _must_name(raised, absent.name, installer.SHELLCHECK_PACKAGE,
-           'could not be read')
+               'could not be read')
     assert isinstance(raised.__cause__, OSError), (
         f'the refusal carries {raised.__cause__!r} as its cause rather than '
         'the read failure that produced it, so the reason is lost')
