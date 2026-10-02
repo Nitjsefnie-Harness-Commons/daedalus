@@ -150,6 +150,11 @@ def _validated_exclusions(value, journeys):
     from the recorded ones compares nothing — a changed gate, not a
     regression.
 
+    The two roles that are the journey's own work are refused by name: a
+    list naming `main` or `request` states that the count deliberately does
+    not carry the work it was taken to measure, and no run compares such a
+    list against anything but itself, so nothing downstream would ever say so.
+
     Absent is a state, not a shape error: until the first recording of this
     field there is nothing to compare, which is reported rather than
     refused, exactly as an unrecorded toolchain is.
@@ -173,6 +178,17 @@ def _validated_exclusions(value, journeys):
         if len(set(roles)) != len(roles):
             raise ValueError(f'excluded_threads repeats a role: {name}')
         for role in roles:
+            # A journey's own work is the whole of what its count is for, and
+            # `main` and `request` are the roles its OWN process produces.
+            # Excluding either drops that work with no complaint anywhere
+            # else, so the refusal belongs here rather than in a table that
+            # happens to name neither. This is what makes the classifier's
+            # process-first split load-bearing: a role read from the process
+            # is the one role a list cannot reach.
+            if role in (journey_threads.MAIN, journey_threads.REQUEST):
+                raise ValueError(
+                    'a journey may not exclude its own work: '
+                    f'{role} for {name}')
             if role not in journey_threads.ROLES:
                 raise ValueError(
                     f'unknown excluded thread role: {role} for {name}')

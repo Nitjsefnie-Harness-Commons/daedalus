@@ -353,11 +353,10 @@ def test_a_refusal_names_a_role_that_has_no_symbol_of_its_own(tmp):
 
     The refusal names the symbol it was looking for, and for two of the four
     roles there is no symbol: `main` is the main thread wherever it is, and
-    `request` is what the journey's own process leaves over. A journey whose
-    exclusion named one of them is a table entry nothing else refuses — the
-    artefact's validator accepts any role in `ROLES` — so the sentence that
-    would describe the missing one has to have a case that is not an index
-    into the signature table.
+    `request` is what the journey's own process leaves over. The artefact's
+    validator refuses both in a recorded exclusion list, so the sentence that
+    would describe a missing one is reached here by planting the table entry
+    directly — which is what keeps the non-indexing case honest.
     """
     del tmp
     threads = _journey_contract.threads()
