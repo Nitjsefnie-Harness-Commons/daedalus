@@ -4,6 +4,8 @@
 These tests parse workflow configuration and evaluate job conditions to
 check permissions, dependencies, release gates and action pins.
 """
+# 699 of the 700-line ceiling in scripts/ci/size_baseline.py; the split
+# seam when it closes is the ten-row actionlint/zizmor cluster below.
 import fnmatch
 import os
 import re
@@ -589,8 +591,8 @@ def test_the_eslint_job_pins_exact_versions_behind_a_failing_gate(tmp):
     green. A renamed or deleted env pin resolves empty, and an empty pin
     makes the integer comparison error inside its own `if`, which reads
     as "not stale" -- so without the `drift` branch the job passes on a
-    pin it never saw, and a range spec in place of an exact one rots
-    unnoticed because nothing ever compared it.
+    pin it never saw. Setting the flag is not the claim: each flag's own
+    `-ne 0` block has to reach `exit 1`, and each is pinned to that.
     """
     del tmp
     workflow = _tests_yml()
@@ -608,6 +610,10 @@ def test_the_eslint_job_pins_exact_versions_behind_a_failing_gate(tmp):
         assert f'"{var}:{package}"' in gate, (package, var, gate)
     assert 'if [ -z "${pinned}" ]' in gate, gate
     assert '    drift=1\n' in gate, gate
+    for flag in ('drift', 'stale'):
+        block = re.search(rf'\$\{{{flag}\}}.*-ne 0.*\n(.*\n)*?fi\n', gate)
+        assert block and '  exit 1\n' in block.group(0), (
+            f'{flag} has no -ne 0 block of its own ending in exit 1')
     assert "git ls-files '*.js' ':!:examples/*'" in lint, lint
     at = {match.group(1): offset for offset, line in
           enumerate(_job_section(workflow, 'eslint'))
