@@ -269,11 +269,11 @@ def restore(path, store):
                        f'still at {entry}')
     # Past here the bytes are published, so no refusal may read as a
     # restore that did not happen. The chmod must land before the entry
-    # goes: the entry carries the recorded mode. No in-suite
-    # arrangement reaches this arm and no filesystem does either: the
-    # publish above needed write permission on this directory, and
-    # whoever holds that owns the file the chmod names. It catches
-    # `OSError` as a class, for the shape where that does not hold.
+    # goes: the entry carries the recorded mode. The publish above
+    # created the inode this chmod names, so its owner is this user and
+    # the call cannot be refused. It catches `OSError` as a class, for
+    # the shape where that does not hold - a share that reports an
+    # ownership the rename did not use.
     try:
         os.chmod(path, mode)
     except OSError as why:

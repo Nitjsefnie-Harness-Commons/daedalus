@@ -15,6 +15,7 @@ import shutil
 import stat
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -421,6 +422,92 @@ def test_save_reports_unknown_when_git_cannot_report_a_status(tmp):
     # this is what tells the two apart.
     assert log.read_text(encoding='utf-8') == (
         'rev-parse answered true\nstatus refused\n'), log.read_text()
+
+
+def _a_target_the_plain_user_may_replace_but_not_chmod(target, store):
+    """Root's inode in a directory the plain user owns: `os.replace` needs
+    the directory and lands, `os.chmod` needs the inode and is refused.
+    One process over one static tree - nothing here races."""
+    if os.name != 'posix':
+        _util.skip('POSIX ownership is what refuses the chmod')
+    if not hasattr(os, 'geteuid') or os.geteuid() != 0:
+        _util.skip('only root can hand an inode away')
+    try:
+        _open_the_entry(store, target)
+    except OSError as why:
+        _util.skip(f'cannot hand the tree to a plain user: {why!r}')
+    # Root's again and owner-only: nobody holds any mode on it at all, so
+    # the chmod has no path to success for the user running the publish.
+    os.chown(target, 0, 0)
+    os.chmod(target, 0o600)
+    probe = ('import os, sys\n'
+             'try:\n'
+             '    os.chmod(sys.argv[1], 0o600)\n'
+             'except PermissionError:\n'
+             '    sys.exit(0 if os.access(sys.argv[2], os.W_OK) else 8)\n'
+             'sys.exit(9)\n')
+    out = _as_nobody([sys.executable, '-c', probe, str(target),
+                      str(target.parent)])
+    # Both halves, or a green proves one arrangement and not the other:
+    # a refusal with an unwritable directory would fail the publish first.
+    assert out.returncode == 0, (out.returncode, _say(out))
+
+
+def test_a_target_it_may_not_chmod_is_restored_not_refused(tmp):
+    target, store = _saved_then_planted(tmp)
+    _a_target_the_plain_user_may_replace_but_not_chmod(target, store)
+
+    restored = _plant('restore', target, store, True)
+    # The arm's own reasoning is that a file we may not chmod is not
+    # necessarily one we may not replace. A refusal here would be the
+    # error about a flag standing where the report belongs.
+    assert restored.returncode == 0, _say(restored)
+    assert restored.stdout.startswith('restored '), restored.stdout
+    assert target.read_bytes() == _FIXED
+
+
+def _a_git_that_never_answers(directory):
+    """A `git` on PATH that is launched and never comes back.
+
+    `exec` so the timeout's kill lands on the sleeper rather than on a
+    shell that has a child of its own. The log is what proves the fake
+    was reached: a hang nobody entered proves nothing.
+    """
+    bin_dir = Path(directory) / 'bin'
+    bin_dir.mkdir()
+    log = Path(directory) / 'git.log'
+    script = bin_dir / 'git'
+    script.write_text(
+        '#!/bin/sh\n'
+        'echo "hung: $*" >> "$DAEDALUS_FAKE_GIT_LOG"\n'
+        'exec sleep 30\n', encoding='utf-8')
+    script.chmod(0o755)
+    return bin_dir, log
+
+
+def test_save_reports_unknown_when_git_never_answers(tmp):
+    if sys.platform.startswith('win'):
+        _util.skip('a POSIX shell script is what stands in for git here')
+    target = _committed_repo(tmp)
+    target.write_bytes(_FIXED)
+    bin_dir, log = _a_git_that_never_answers(tmp)
+    # In-process, because the arm is the timeout `subprocess.run` raises
+    # and only this process sets the deadline: `GIT_TIMEOUT` is a
+    # constant, and a suite that waits it out costs half a minute.
+    plant = _util.load(PLANT, 'plant_hung_git')
+    environment = {
+        'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}',
+        'DAEDALUS_FAKE_GIT_LOG': str(log),
+    }
+    said = io.StringIO()
+    with mock.patch.object(plant, 'GIT_TIMEOUT', 3), \
+            mock.patch.dict(os.environ, environment), \
+            contextlib.redirect_stdout(said):
+        status = plant.save(str(target), str(Path(tmp) / 'store'))
+    assert status == 0, said.getvalue()
+    assert _reported_state(said.getvalue()) == 'unknown', said.getvalue()
+    assert log.read_text(encoding='utf-8').startswith('hung: '), (
+        said.getvalue())
 
 
 def test_a_publish_that_cannot_clean_up_its_temp_reports_the_publish(tmp):

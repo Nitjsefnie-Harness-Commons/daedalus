@@ -130,18 +130,18 @@ def child_coverage(mode, environment=None, cwd=None):
     A 'keep' must also prove at runtime that its tree is mapped. The
     collector's `source = ["."]` resolves against the child's own cwd, so
     the checkout is mapped by being itself and needs no alias at all; a
-    copied tree is mapped only under a `tree` component, which is the
-    anchor pyproject's [tool.coverage.paths] carries. So the launch's cwd
-    is required, and a renamed directory fails here rather than later in
-    `coverage report`. What that proves is the cwd and nothing else: the
-    program a child runs is not an argument here, so a launch whose
-    program sits outside the tree it names passes this check too. While
-    `source` is the cwd the recorded set is bounded by it either way, so
-    that shape costs nothing today; it would matter if `source` were
-    ever anything else, which is why it is said here. It proves the
-    retention too: an environment the caller already scrubbed keeps
-    nothing, so a collector name this process carries must survive into
-    the child's.
+    copied tree is mapped under a `tree` component - one of the anchors
+    pyproject's [tool.coverage.paths] carries, and the only one this
+    check accepts. So the launch's cwd is required, and a renamed
+    directory fails here rather than later in `coverage report`. What
+    that proves is the cwd and nothing else: the program a child runs
+    is not an argument here, so a launch whose program sits outside
+    the tree it names passes this check too. While `source` is the cwd
+    the recorded set is bounded by it either way, so that shape costs
+    nothing today; it would matter if `source` were ever anything else,
+    which is why it is said here. It proves the retention too: an
+    environment the caller already scrubbed keeps nothing, so a
+    collector name this process carries must survive into the child's.
     """
     if environment is None:
         environment = os.environ

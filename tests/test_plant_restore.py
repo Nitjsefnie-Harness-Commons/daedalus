@@ -451,9 +451,11 @@ def test_a_restore_onto_a_directory_refuses_and_leaves_no_temp_behind(tmp):
     # The stored copy is what the refusal sends the operator back to.
     assert (_only_entry(store) / 'bytes').is_file(), said
     # The temp the failed publish wrote is gone with it: a temp left in
-    # the target's directory is litter a plant cycle leaves behind.
-    assert not list(target.parent.glob('.target.py.*.tmp')), (
-        sorted(p.name for p in target.parent.iterdir()))
+    # the target's directory is litter a plant cycle leaves behind. The
+    # whole directory, not a glob quoting the subject's own temp name -
+    # a change to that spelling would make the glob vacuous.
+    assert sorted(p.name for p in target.parent.iterdir()) == [
+        '.git', 'target.py'], sorted(p.name for p in target.parent.iterdir())
 
 
 def test_restore_leaves_another_pending_plant_alone(tmp):
