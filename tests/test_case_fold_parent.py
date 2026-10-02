@@ -80,7 +80,7 @@ def _folding_parent(tmp):
 def _folding_work(root, name):
     """A work tree on the folding parent, removed again on the way out.
 
-    The runner's `TemporaryDirectory` is not on this parent, so a tree left
+    The runner's `mkdtemp` is not on this parent, so a tree left
     here would outlive the run and turn the next one into eight skips at
     exit 0 -- a green that executes nothing, which is the worst answer a
     gate can give. Clearing what is there and removing what it made is what
@@ -170,7 +170,7 @@ DELIVERY_CAP = 8
 def test_the_work_tree_is_created_and_removed_for_every_invocation(tmp):
     """A second run against the same root runs, rather than skipping.
 
-    The gate's work tree cannot live in the runner's `TemporaryDirectory`,
+    The gate's work tree cannot live in the runner's `mkdtemp`,
     which is not on the folding parent, so a tree left there outlives the
     run. A leftover that makes the next run skip is a green that executes
     nothing, so the helper clears what is there and removes what it made --

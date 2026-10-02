@@ -120,11 +120,9 @@ def main() -> int:
     if not suites:
         print("no suites found", file=sys.stderr)
         return 1
-    # `mkdtemp` and a `finally` rather than a `TemporaryDirectory`: that
-    # context manager removes its tree in `__exit__`, so a removal refused
-    # for a few seconds raises out of `main()` and the aggregate below is
-    # never printed. A cleanup that cannot finish must not decide whether
-    # the run reports anything.
+    # `mkdtemp` and a `finally` rather than a `TemporaryDirectory`, which
+    # removes its tree in `__exit__`: a removal refused for a few seconds
+    # would raise out of `main()` and take the aggregate below with it.
     results = {}
     summaries = tempfile.mkdtemp(prefix="daedalus-summaries-")
     try:
