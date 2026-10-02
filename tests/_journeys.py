@@ -129,10 +129,10 @@ def _load_front_end(base):
     and it runs on the journey's main thread, which counts whatever it costs.
 
     The load has to be off the main thread for it to be excludable at all: a
-    main thread is read as the main thread whatever its size, so an import on
-    one is the journey's own work by every rule the profiler's thread bands
-    apply. The asymmetry is harness-side — the module the tool call reaches is
-    the same one either way.
+    main thread is read as the main thread whatever it executed, so an
+    import on one is the journey's own work by every rule the profiler's
+    thread classifier applies. The asymmetry is harness-side — the module the
+    tool call reaches is the same one either way.
     """
     box = {}
 
@@ -160,13 +160,13 @@ def mcp_exec(base, docroot):
 
     The round trip runs on the journey's MAIN thread, and that placement is
     part of what this journey measures, not an accident. `journey_threads`
-    reads `thread == 1` FIRST and whatever its total, so the round trip is
-    counted wherever the journey puts it; a non-main slot is instead read by
-    its total against the `front-end-import` band, and this journey's own
-    work measured 1,311,350,558 — inside that band — so a worker carried
-    roughly three hundred million instructions of it straight out of the
-    count. The import above is the one thing here that must NOT be counted,
-    which is why `_load_front_end` keeps it on a worker of its own.
+    reads `thread == 1` FIRST and whatever it executed, so the round trip is
+    counted wherever the journey puts it. A worker is instead read by what it
+    ran — the front end's module bodies, or an asyncio event loop — so this
+    journey's own work measured 1,311,350,558 could be moved out of the
+    count by nothing it does. The import is the one thing here that must NOT
+    be counted, which is why `_load_front_end` keeps it on a worker of its
+    own.
     """
     del docroot
     mod = _load_front_end(base)

@@ -1,10 +1,13 @@
-"""What the journey-budget suites share: how to load each module, and
-the documents they hand it.
+"""What the journey-budget suites share: how to load each module, the
+documents they hand it, and the profile fixture they write.
 
 A shared module rather than one copy each, for the reason every other shared
 module here exists: the loaders are the same four lines, and a duplicated
 loader is one that drifts from the module it names without anything
-noticing. Not a suite itself — `run_tests.py` only loads `test_*.py`.
+noticing. The profile fixture is here for the same reason and one more:
+`test_journey_counters.py` is at the size ceiling, and a callgrind out file
+is a journey fact rather than a counter fact. Not a suite itself —
+`run_tests.py` only loads `test_*.py`.
 """
 import contextlib
 import json
@@ -69,6 +72,27 @@ def journeys():
     finally:
         sys.path.pop(0)
     return _journeys
+
+
+def callgrind_profile(directory, name, slot, thread, ir, signature=()):
+    """The out-file valgrind leaves for one thread, in the shape the
+    reader that sums it expects.
+
+    `signature` writes the `fn=` lines the thread's role is read from, so a
+    fixture can say a background thread ran a loop or executed module
+    bodies instead of only how big it was. It lives here because the suite
+    that grew it is at the size ceiling and the profile is a journey fact
+    rather than a counter fact.
+    """
+    path = Path(directory) / f'callgrind.{name}.{slot}'
+    body = ''.join(f'fn=({index}) {symbol}\n1 12\n'
+                   for index, symbol in enumerate(signature, start=1))
+    path.write_text(
+        f'version: 1\ncreator: callgrind-3.24.0\npid: 4242\npart: 1\n'
+        f'cmd: python3 tests/_journeys.py --journey {name}\n'
+        f'events: Ir\nthread: {thread}\n{body}1 {ir}\n\nsummary: {ir}\n',
+        encoding='utf-8')
+    return path
 
 
 def budget_document(**overrides):
@@ -144,7 +168,8 @@ def recorded_document(**over):
         toolchain=dict(IDENTITY),
         excluded_threads={name: list(policy.excluded_for(name))
                           for name in journeys().NAMES},
-        thread_bands=dict(policy.BANDS),
+        thread_signatures={
+            role: list(names) for role, names in policy.SIGNATURES.items()},
         shas={name: seen[0]
               for name, seen in fixture_shas().items()})
     document.update(over)
@@ -154,9 +179,9 @@ def recorded_document(**over):
 def recorded_maps():
     """The three maps a measurement carries so a comparison can happen.
 
-    The fourth gate is the BANDS, and the measured side of that one is the
-    classifier's own table rather than anything a report carries, so it is
-    not here. A check refuses on any recorded value being un-recorded, so a
+    The fourth gate is the SIGNATURES, and the measured side of that one is
+    the classifier's own table rather than anything a report carries, so it
+    is not here. A check refuses on any recorded value being un-recorded, so a
     test that means to exercise the BUDGET rather than the refusal has to
     hand the gate a measurement that says the other three.
     """
@@ -235,7 +260,9 @@ def fixture_report():
             'toolchain': dict(IDENTITY),
             'excluded_threads': {name: list(threads().excluded_for(name))
                                  for name in names},
-            'thread_bands': dict(threads().BANDS),
+            'thread_signatures': {
+                role: list(names)
+                for role, names in threads().SIGNATURES.items()},
             'shas': shas,
             'counters': {'valgrind-callgrind': {
                 'available': True, 'startup_only': 0,
@@ -249,7 +276,7 @@ def never_recorded_gates():
     """Each recorded field, and the subject its refusal is printed under."""
     return (('toolchain', 'toolchain'),
             ('excluded_threads', 'excluded threads'),
-            ('thread_bands', 'thread bands'),
+            ('thread_signatures', 'thread signatures'),
             ('shas', 'journey shas'))
 
 
@@ -357,6 +384,16 @@ def artifact_shapes():
         (over('thread_bands', {'no-such-band': 1}), 'unknown thread band'),
         (over('thread_bands', {'front-end-import': 0}),
          'a thread band must be a positive integer'),
+        (over('thread_signatures', 'big'),
+         'thread_signatures must be an object'),
+        (over('thread_signatures', {'request': ['a_symbol']}),
+         'unknown thread signature'),
+        (over('thread_signatures', {'front-end-import': []}),
+         'names no symbol for front-end-import'),
+        (over('thread_signatures', {'front-end-import': ['a', 'a']}),
+         'repeats a symbol'),
+        (over('thread_signatures', {'front-end-import': ['  ']}),
+         'a signature symbol is a non-empty string'),
         (over('shas', 'one'), 'shas must be an object'),
         (over('shas', {'no-such-journey': 'a' * 64}),
          'shas names a journey with no count'),

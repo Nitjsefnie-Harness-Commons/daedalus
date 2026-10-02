@@ -16,152 +16,282 @@ from _journey_contract import (  # noqa: E402
 )
 
 
+def test_the_reader_collects_the_names_a_thread_declared(tmp):
+    """`fn=(id) name` names a symbol; `fn=(id)` only repeats one.
+
+    A thread's identity is read from what it executed, so the reader has to
+    keep the names and nothing else. An unnamed repeat carries the id of a
+    name declared earlier in the same file, and inventing a name for it
+    would put a symbol in the set that no call ever named.
+    """
+    classifier = _journey_contract.threads()
+    directory = Path(tmp)
+    (directory / 'cg.1-01').write_text(
+        'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 2\n'
+        'events: Ir\nsummary: 90000000\n'
+        'fn=(1) first_symbol\n'
+        '1 12\n'
+        'fn=(1)\n'
+        '2 14\n'
+        'fn=(2) second_symbol\n'
+        '3 16\n', encoding='utf-8')
+    rows, unread = classifier.read(directory, 'cg')
+    assert unread is None, unread
+    assert rows[0]['names'] == frozenset({'first_symbol', 'second_symbol'}), \
+        rows[0]['names']
+
+
+def test_a_repeated_symbol_name_still_matches_a_signature(tmp):
+    """Callgrind suffixes a CLONE of a symbol, and a clone is the symbol.
+
+    Two threads in one profile run the same C function and callgrind
+    writes one of them as `import_find_and_load'2`. A reader that compares
+    names literally never sees that thread's module execution, and the
+    bootstrap import thread stops being the import thread.
+    """
+    classifier = _journey_contract.threads()
+    directory = Path(tmp)
+    body = ''.join(f"fn=({index}) {name}\n1 12\n"
+                   for index, name in enumerate(
+                       classifier.MODULE_INIT_SIGNATURE, start=1))
+    (directory / 'cg.1-01').write_text(
+        'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 2\n'
+        'events: Ir\nsummary: 90000000\n'
+        + body.replace('import_find_and_load\n',
+                       "import_find_and_load'2\n"), encoding='utf-8')
+    rows, unread = classifier.read(directory, 'cg')
+    assert unread is None, unread
+    assert classifier.role_of(2, rows[0]['names']) == classifier.IMPORT
+
+
+def test_the_event_loop_signature_names_the_serve_thread(tmp):
+    """The loop is told from what CPython runs to advance it.
+
+    A profile holds no Python-level name at all, so this is the C symbol
+    set an asyncio event loop is made of, and the symbols are pinned here
+    by the ones measured on this box rather than trusted as a list.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    assert 'TaskObj_dealloc' in classifier.EVENT_LOOP_SIGNATURE
+    assert 'PyGen_am_send' in classifier.EVENT_LOOP_SIGNATURE
+    assert len(classifier.EVENT_LOOP_SIGNATURE) >= 2, \
+        classifier.EVENT_LOOP_SIGNATURE
+    assert (classifier.role_of(2, frozenset(
+        classifier.EVENT_LOOP_SIGNATURE)) == classifier.SERVE)
+
+
+def test_the_module_init_signature_names_the_import_thread(tmp):
+    """The bootstrap import is told from the machinery that runs a module.
+
+    `daedalus_mcp/` is pure Python and has no `PyInit_<name>` of its own;
+    those belong to C extensions. What a thread that executes module
+    bodies carries is the import finding and loading a module and running
+    an initialiser, which is what this pins.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    assert 'import_find_and_load' in classifier.MODULE_INIT_SIGNATURE
+    assert len(classifier.MODULE_INIT_SIGNATURE) >= 2, \
+        classifier.MODULE_INIT_SIGNATURE
+    assert (classifier.role_of(2, frozenset(
+        classifier.MODULE_INIT_SIGNATURE)) == classifier.IMPORT)
+
+
+def test_presence_is_not_exclusivity(tmp):
+    """Carrying a symbol is not the role; carrying the signature is.
+
+    The symbol sets are C symbols, and a thread that touches one of them
+    once is not the thread that is defined by all of them. A classifier
+    that tested one member would call the first request thread to import
+    anything the front end's import, and drop it.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    loop = frozenset(classifier.EVENT_LOOP_SIGNATURE)
+    init = frozenset(classifier.MODULE_INIT_SIGNATURE)
+    assert classifier.role_of(2, {sorted(loop)[0]}) == classifier.REQUEST
+    assert classifier.role_of(2, {sorted(init)[0]}) == classifier.REQUEST
+    assert classifier.role_of(2, loop | init) == classifier.SERVE, \
+        'a thread carrying both is the loop, which is the more specific'
+
+
+def test_the_main_thread_is_main_whatever_it_executed(tmp):
+    """The property the whole exclusion rests on, with the contrast it needs.
+
+    `role_of` reads thread 1 first and whatever its total and its names, so
+    a journey's own work counts by construction. The totals ABOVE what a
+    size-ordered classifier would have called the front end's import are
+    the ones that matter: `mcp-exec`'s round trip measured 1,311,350,558
+    and `command-round-trip`'s own request thread measured 3,548,079,
+    which a band read moves out of the count (issue 1466).
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    for names in (frozenset(),
+                  frozenset(classifier.EVENT_LOOP_SIGNATURE),
+                  frozenset(classifier.MODULE_INIT_SIGNATURE)):
+        for total in (999, 3_548_079, 1_311_350_558, 3_800_000_000):
+            assert classifier.role_of(1, names) == classifier.MAIN, \
+                (total, names)
+
+
+def test_a_request_thread_is_a_request_thread_at_any_size(tmp):
+    """Issue 1466's regression: a role that moves when the work grows.
+
+    A per-connection request thread measured 3,548,079 instructions, which
+    is 2.82x under the floor a band read held the serve thread to. Grow
+    that thread past it and a band-ordered classifier calls it
+    `uvicorn-serve` — a role `command-round-trip` and `dashboard-fanout`
+    exclude — so the journey's own work silently leaves the count. The
+    role here comes from what the thread executed and nothing else, so no
+    size moves it, and the whole ladder the old ladder test walked is gone
+    with the ladder.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    empty = frozenset()
+    for total in (classifier.REQUEST_FROM, 3_548_079, 10_000_000,
+                  3_548_079_000, 1_000_000_000, 90_000_000_000):
+        assert classifier.role_of(7, empty) == classifier.REQUEST, total
+    assert classifier.role_of(7, empty) != classifier.SERVE
+    assert classifier.role_of(7, empty) != classifier.IMPORT
+
+
+def test_a_thread_with_no_signature_is_a_request_thread(tmp):
+    """The fall-through is stated, and it is the counted side.
+
+    A thread no signature claims is not an unreadable profile: it is a
+    worker doing the journey's own work, and no journey excludes `request`.
+    So it counts. Refusing here instead would make every count depend on
+    a signature being complete, and would drop real work the moment one
+    CPython renamed a symbol.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    assert classifier.role_of(9, frozenset()) == classifier.REQUEST
+    for name in _journey_contract.journeys().NAMES:
+        assert classifier.REQUEST not in classifier.excluded_for(name), name
+
+
+def test_a_thread_below_the_floor_is_a_refusal_naming_it(tmp):
+    """The floor is a shape check now, and it stays.
+
+    `REQUEST_FROM` no longer decides a role; it says a thread this small
+    never entered the interpreter, so a profile carrying one is not the
+    shape this gate reads. A refusal is still the answer, and it still
+    names the thread and its count.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
+             'cmd': 'python3 server.py', 'names': frozenset()},
+            {'pid': 1, 'thread': 4, 'ir': 400,
+             'cmd': 'python3 server.py', 'names': frozenset()}]
+    kept, _excluded, failure = classifier.total_for(rows, 'mcp-exec')
+    assert failure is not None and kept is None, (kept, failure)
+    assert '400' in failure and 'thread 4' in failure, failure
+
+
 def test_a_thread_the_profile_does_not_have_is_a_refusal(tmp):
     """A missing background thread is a failure, never a silent whole-tree sum.
 
     The failure this guards is the one the whole change exists to end: a
     profile the classifier could not read, summed as though every thread in
-    it counted, and reported as a number nobody can read back.
+    it counted, and reported as a number nobody can read back. Roles now
+    come from what each thread executed, so a journey that excludes a role
+    whose signature is in no thread is refused here — the check is more
+    load-bearing than it was, not less.
     """
     del tmp
     threads = _journey_contract.threads()
     rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py', 'names': frozenset()},
             {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'}]
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.IMPORT])}]
     kept, excluded, failure = threads.total_for(rows, 'dashboard-fanout')
     assert failure is not None and 'excludes' in failure, failure
     assert kept is None, kept
     assert excluded == ('front-end-import', 'uvicorn-serve'), excluded
     rows.append({'pid': 1, 'thread': 3, 'ir': 90_000_000,
-                 'cmd': 'python3 server.py'})
+                 'cmd': 'python3 server.py',
+                 'names': frozenset(threads.SIGNATURES[threads.SERVE])})
     kept, excluded, failure = threads.total_for(rows, 'dashboard-fanout')
     assert failure is None, failure
-    # Only the main thread is left: the serve thread is one of the two this
-    # journey excludes, and the import is the other.
     assert kept == 430_000_000, kept
 
 
-def test_a_thread_below_every_band_is_a_refusal_naming_it(tmp):
+def test_two_threads_in_one_excluded_role_cannot_be_told_apart(tmp):
     del tmp
     threads = _journey_contract.threads()
     rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py', 'names': frozenset()},
             {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.IMPORT])},
             {'pid': 1, 'thread': 3, 'ir': 90_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 4, 'ir': 400,
-             'cmd': 'python3 server.py'}]
-    kept, _excluded, failure = threads.total_for(rows, 'dashboard-fanout')
-    assert failure is not None, 'a profile this shape must not be summed'
-    assert '400' in failure and 'thread 4' in failure, failure
-    assert kept is None
-
-
-def test_a_worker_is_read_by_its_total_down_to_the_last_rung(tmp):
-    """The ladder `role_of` reads a background thread by, rung by rung.
-
-    Each rung is asserted at its own boundary rather than by one value from
-    the middle of a band, because a `>=` written as `>` moves a boundary by
-    one instruction and a value in the middle cannot see it. The last rung
-    is the one with no role at all: a thread under `REQUEST_FROM` never
-    entered the interpreter, so it has no rung to sit in and `classify`
-    refuses the profile instead of including it quietly.
-    """
-    del tmp
-    threads = _journey_contract.threads()
-    role_of = threads.role_of
-    assert role_of(threads.REQUEST_FROM - 1, 7) is None
-    assert role_of(threads.REQUEST_FROM, 7) == threads.REQUEST
-    assert role_of(threads.SERVE_FROM, 7) == threads.SERVE
-    assert role_of(threads.IMPORT_FROM, 7) == threads.IMPORT
-
-
-def test_the_main_thread_is_main_at_any_size(tmp):
-    """The property the whole exclusion rests on, with the contrast it needs.
-
-    `role_of` reads thread 1 first and whatever its total, so a journey's own
-    work counts by construction and a worker's total never decides whether
-    the work counts. The totals ABOVE the import band are the ones that
-    matter: `mcp-exec`'s round trip measured 1,311,350,558, which a
-    size-ordered classifier reads as the front end's import — and the same
-    call on a non-main thread still reads it that way, which is the whole of
-    issue 1461.
-    """
-    del tmp
-    threads = _journey_contract.threads()
-    for total in (999, threads.REQUEST_FROM, threads.SERVE_FROM,
-                  threads.IMPORT_FROM - 1, threads.IMPORT_FROM,
-                  1_311_350_558, 3_800_000_000):
-        assert threads.role_of(total, 1) == threads.MAIN, total
-    assert threads.role_of(1_311_350_558, 2) == threads.IMPORT
-
-
-def test_two_threads_in_one_band_cannot_be_told_apart(tmp):
-    del tmp
-    threads = _journey_contract.threads()
-    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'},
-            {'pid': 1, 'thread': 3, 'ir': 90_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.SERVE])},
             {'pid': 1, 'thread': 4, 'ir': 95_000_000,
-             'cmd': 'python3 server.py'}]
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.SERVE])}]
     kept, _excluded, failure = threads.total_for(rows, 'dashboard-fanout')
-    assert failure is not None, 'two threads in the serve band are ambiguous'
+    assert failure is not None, 'two serve threads are ambiguous'
     assert 'uvicorn-serve' in failure, failure
     assert kept is None
 
 
-def test_two_threads_in_a_band_the_journey_does_not_exclude_are_counted(
+def test_two_threads_in_a_role_the_journey_does_not_exclude_are_counted(
         tmp):
     """The half of the refusal that has no case, and the half that ships.
 
-    `classify` refuses a profile carrying two threads in one band, and that
-    is right only where the journey EXCLUDES the band: there the gate has
-    to pick which of the two is the background it drops, and nothing in the
-    profile says which. In a band it does not exclude, every thread counts
-    and two of them is two threads of work.
+    `classify` refuses a profile carrying two threads of one role, and
+    that is right only where the journey EXCLUDES the role: there the gate
+    has to pick which of the two is the background it drops, and nothing
+    in the profile says which. In a role it does not exclude, every thread
+    counts and two of them is two threads of work.
 
     This is the shape `net-capture` produces: its request thread runs to
-    billions and lands in the import band beside the bridge's own bootstrap
-    import. Deleting the `if role not in excluded: continue` guard restores
-    the original defect, refuses this profile, and `journey_counters` then
-    marks the whole counter unavailable — so every journey in the run reads
-    unmeasured, and it does so behind a suite that is otherwise green. The
-    journey under callgrind is the expensive path nobody runs locally, which
-    is the whole reason this is pinned here.
+    billions and, under the old bands, landed in the import band beside
+    the bridge's own bootstrap import. Deleting the `if role not in
+    excluded: continue` guard restores the original defect, refuses this
+    profile, and `journey_counters` then marks the whole counter
+    unavailable — so every journey in the run reads unmeasured, and it
+    does so behind a suite that is otherwise green. The journey under
+    callgrind is the expensive path nobody runs locally, which is the
+    whole reason this is pinned here.
     """
     del tmp
     threads = _journey_contract.threads()
     rows = [{'pid': 1, 'thread': 1, 'ir': 959_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py', 'names': frozenset()},
             {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.IMPORT])},
             {'pid': 1, 'thread': 3, 'ir': 2_100_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py', 'names': frozenset()},
             {'pid': 1, 'thread': 4, 'ir': 87_000_000,
-             'cmd': 'python3 server.py'}]
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.SERVE])}]
     kept, excluded, failure = threads.total_for(rows, 'net-capture')
     assert failure is None, failure
-    assert kept is not None, 'two threads in a counted band is not a refusal'
+    assert kept is not None, 'two counted threads is not a refusal'
     # Derived from the table rather than written out, so this pins the
     # BEHAVIOUR and not the value of any exclusion list: the table is data,
     # and a test that asserted its contents is a second place for them to
     # drift.
     expected = sum(row['ir'] for row in rows
-                   if threads.role_of(row['ir'], row['thread'])
+                   if threads.role_of(row['thread'], row['names'])
                    not in excluded)
     assert kept == expected, (kept, expected)
 
 
-def test_two_threads_in_an_excluded_band_are_still_a_refusal_naming_it(tmp):
+def test_two_threads_in_an_excluded_role_are_still_a_refusal_naming_it(tmp):
     """The other half, which the widened rule must not have cost.
 
-    The guard now has two halves and a reader cannot tell which one is
-    load-bearing, so both are pinned. An EXCLUDED band with two threads in
+    The guard has two halves and a reader cannot tell which one is
+    load-bearing, so both are pinned. An EXCLUDED role with two threads in
     it is still the ambiguity the refusal exists for: the gate has to pick
     which of them it is dropping, and guessing would make the number mean
     something other than the journey.
@@ -172,15 +302,17 @@ def test_two_threads_in_an_excluded_band_are_still_a_refusal_naming_it(tmp):
     del tmp
     threads = _journey_contract.threads()
     rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py', 'names': frozenset()},
             {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.IMPORT])},
             {'pid': 1, 'thread': 3, 'ir': 2_100_000_000,
-             'cmd': 'python3 server.py'}]
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.IMPORT])}]
     planted = {**threads.EXCLUDED, 'planted-journey': (threads.IMPORT,)}
     with _journey_contract.planting(threads, EXCLUDED=planted):
         kept, excluded, failure = threads.total_for(rows, 'planted-journey')
-    assert failure is not None, 'two threads in an excluded band must refuse'
+    assert failure is not None, 'two threads of one role must refuse'
     assert threads.IMPORT in failure, failure
     assert kept is None, kept
     # `total_for` hands back an EMPTY exclusion list beside a classify
@@ -189,21 +321,22 @@ def test_two_threads_in_an_excluded_band_are_still_a_refusal_naming_it(tmp):
     assert excluded == (), excluded
 
 
-def test_one_thread_in_a_band_the_journey_does_not_exclude_just_counts(tmp):
+def test_one_thread_in_a_role_nobody_excludes_just_counts(tmp):
     """The plain case the widened rule has to leave exactly as it was.
 
-    One thread in a band nobody excludes is not an ambiguity and never was;
+    One thread of a role nobody excludes is not an ambiguity and never was;
     this is the contrast the refusal above needs, so that a reader can see
     the guard is about COUNT and not about the number of threads.
     """
     del tmp
     threads = _journey_contract.threads()
     rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py', 'names': frozenset()},
             {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
-             'cmd': 'python3 server.py'},
+             'cmd': 'python3 server.py',
+             'names': frozenset(threads.SIGNATURES[threads.IMPORT])},
             {'pid': 1, 'thread': 3, 'ir': 90_000_000,
-             'cmd': 'python3 server.py'}]
+             'cmd': 'python3 server.py', 'names': frozenset()}]
     planted = {**threads.EXCLUDED, 'planted-journey': (threads.IMPORT,)}
     with _journey_contract.planting(threads, EXCLUDED=planted):
         kept, _excluded, failure = threads.total_for(rows, 'planted-journey')
@@ -224,14 +357,22 @@ def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
     (directory / 'cg.1').write_text('', encoding='utf-8')
     (directory / 'cg.1-01').write_text(
         'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 1\n'
-        'events: Ir\nsummary: 430000000\n', encoding='utf-8')
+        'events: Ir\nsummary: 430000000\n'
+        'fn=(1) a_symbol\n1 12\n', encoding='utf-8')
     (directory / 'cg.1-02').write_text(
         'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 2\n'
-        'events: Ir\nsummary: 3800000000\n', encoding='utf-8')
+        'events: Ir\nsummary: 3800000000\n'
+        + ''.join(
+            f'fn=({index}) {name}\n1 12\n'
+            for index, name in enumerate(
+                thread_classifier.SIGNATURES[thread_classifier.IMPORT],
+                start=1)),
+        encoding='utf-8')
     rows, unread = thread_classifier.read(directory, 'cg')
     assert unread is None, unread
     assert [row['ir'] for row in rows] == [430000000, 3800000000], rows
     assert all(row['cmd'] == 'python3 server.py' for row in rows), rows
+    assert rows[0]['names'] == frozenset({'a_symbol'}), rows[0]['names']
     # mcp-exec excludes only the import, so a profile carrying no serve
     # thread is a complete one for it — and the sum is the rest.
     kept, excluded, failure = thread_classifier.total_for(rows, 'mcp-exec')
@@ -282,7 +423,9 @@ def test_every_journey_says_which_roles_it_stops_counting(tmp):
     added to `_journeys.NAMES` and forgotten here is discovered by a CI run
     rather than by this suite. Every role is also checked to be one
     `role_of` can return, because a name that is not a role excludes nothing
-    while looking like it excludes something.
+    while looking like it excludes something. And no journey may exclude
+    `request`, which is the whole of issue 1466: a request thread is
+    whatever a request thread grew to be.
     """
     del tmp
     threads = _journey_contract.threads()
@@ -291,6 +434,27 @@ def test_every_journey_says_which_roles_it_stops_counting(tmp):
         roles = threads.excluded_for(name)
         assert roles, name
         assert set(roles) <= set(threads.ROLES), (name, roles)
+        assert threads.REQUEST not in roles, name
+
+
+def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
+    """The gate compares the table the measurement classified by.
+
+    `excluded_threads` records the ROLES a journey leaves out while the
+    table that PUTS a thread in one of them is guarded nowhere, so a run
+    that read a profile by a different set of symbols would compare a
+    count taken under one classifier against counts taken under another.
+    That is the bands gate's argument with its subject replaced, and the
+    subject has to be replaced: the bands no longer decide a role.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    assert set(threads.SIGNATURES) == {threads.IMPORT, threads.SERVE}, \
+        threads.SIGNATURES
+    for role, names in threads.SIGNATURES.items():
+        assert names == sorted(names), (role, names)
+        assert names, role
+        assert names == sorted(set(threads.SIGNATURES[role])), role
 
 
 def test_rendering_of_runs_a_journey_on_the_main_thread(tmp):
@@ -337,13 +501,14 @@ def test_the_mcp_round_trip_runs_on_the_journeys_main_thread(tmp):
     """The placement issue 1461 turns on, recorded rather than read.
 
     `rendering_of` calls a journey on the main thread (the test above
-    drives that), and `role_of` reads thread 1 as `MAIN` whatever its total,
-    so the round trip counts wherever the journey puts it — provided the
-    journey puts it there, which is what this one pins. The stand-in front
-    end records the thread each tool call was made from and refuses any
-    payload that is not the one the journey is supposed to send, because a
-    stub that swallows its arguments cannot tell a journey that changed
-    what it does from one that only changed where it does it.
+    drives that), and `role_of` reads thread 1 as `MAIN` whatever its total
+    and whatever it executed, so the round trip counts wherever the journey
+    puts it — provided the journey puts it there, which is what this one
+    pins. The stand-in front end records the thread each tool call was made
+    from and refuses any payload that is not the one the journey is supposed
+    to send, because a stub that swallows its arguments cannot tell a
+    journey that changed what it does from one that only changed where it
+    does it.
     """
     del tmp
     journeys = _journey_contract.journeys()
@@ -392,11 +557,11 @@ def test_the_mcp_round_trip_runs_on_the_journeys_main_thread(tmp):
 def test_the_mcp_front_end_is_loaded_off_the_journeys_main_thread(tmp):
     """The one thing this journey must NOT count, kept off the main thread.
 
-    A main thread is read as `MAIN` whatever its total, so an import on one
-    is the journey's own work by every rule the bands apply. Loading it on a
-    worker of its own and waiting for it is the whole of the asymmetry, and
-    it costs the count nothing: the module the tool call reaches is the same
-    one either way.
+    A main thread is read as `MAIN` whatever its total and whatever it
+    executed, so an import on one is the journey's own work by every rule
+    this classifier applies. Loading it on a worker of its own and waiting
+    for it is the whole of the asymmetry, and it costs the count nothing:
+    the module the tool call reaches is the same one either way.
     """
     del tmp
     journeys = _journey_contract.journeys()

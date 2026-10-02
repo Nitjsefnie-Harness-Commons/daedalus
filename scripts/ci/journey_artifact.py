@@ -24,8 +24,15 @@ SCHEMA_VERSION = 1
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT = ROOT / '.github' / 'journey-budget.json'
 
+# `thread_bands` is the record made before a thread's role was read from
+# what it executed: the `Ir` thresholds that used to decide which role a
+# thread fell in. Nothing compares it and no re-baseline writes it — the
+# signatures below replaced it as the table a count is classified under —
+# and it stays in the schema only so a document recorded before that change
+# still loads until it is re-recorded.
 FIELDS = ('schema_version', 'counter', 'tolerance_pct', 'toolchain',
-          'excluded_threads', 'thread_bands', 'shas', 'journeys')
+          'excluded_threads', 'thread_bands', 'thread_signatures', 'shas',
+          'journeys')
 
 # A sha is a content hash, not a magnitude: it says what a journey RENDERED,
 # not how much it cost, so it is comparable across machines and across
@@ -68,6 +75,7 @@ def _validated(value):
         raise ValueError('journeys must be an object')
     _validated_exclusions(value.get('excluded_threads'), journeys)
     _validated_bands(value.get('thread_bands'))
+    _validated_signatures(value.get('thread_signatures'))
     _validated_shas(value.get('shas'), journeys)
     for name, recorded in journeys.items():
         if recorded is None:
@@ -119,27 +127,64 @@ def _validated_exclusions(value, journeys):
 
 
 def _validated_bands(value):
-    """The `Ir` thresholds that decide which thread a profile's thread is.
+    """The `Ir` thresholds a count was recorded under, before roles came
+    from identity.
 
-    `excluded_threads` records the ROLES a journey leaves out, and the
-    comparison checks the same table the measurement used — so the NAMES are
-    guarded while the numbers that put a thread in a role are guarded
-    nowhere. Moving one threshold down a decade changes which thread a count
-    excluded, and nothing would notice. So the bands are recorded beside the
-    roles and compared on the same terms.
+    A role is no longer read from a thread's total, so these numbers decide
+    nothing and no gate compares them; `thread_signatures` is the table that
+    does. The shape is still checked — a document carrying this field has to
+    carry a sane one — so a half-written artefact is refused rather than
+    loaded and re-rendered, and a re-baseline drops the field outright.
     """
     if value is None:
         return None
     if not isinstance(value, dict):
         raise ValueError('thread_bands must be an object')
     for role, threshold in value.items():
-        if role not in journey_threads.BANDS:
+        if role not in journey_threads.ROLES:
             raise ValueError(f'unknown thread band: {role}')
         if not isinstance(threshold, int) or isinstance(threshold, bool) \
                 or threshold <= 0:
             raise ValueError(
                 f'a thread band must be a positive integer: {role} = '
                 f'{threshold}')
+    return value
+
+
+def _validated_signatures(value):
+    """The function names that put a thread in each signature-decided role.
+
+    `excluded_threads` records the ROLES a journey leaves out while the
+    table that PUTS a thread in one of them is guarded nowhere, so a run
+    that read a profile by different symbols would compare a count taken
+    under one classifier against counts taken under another. That is why
+    this field exists, and it is why it replaced the `Ir` bands rather than
+    sitting beside them: the bands stopped deciding a role when identity
+    replaced size, so a gate comparing them would be comparing a field
+    nothing reads.
+
+    Absent is the state, not a shape error, exactly as for the roles: until
+    the first recording of this field there is nothing to compare, which is
+    reported rather than refused.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError('thread_signatures must be an object')
+    for role, names in value.items():
+        if role not in journey_threads.SIGNATURES:
+            raise ValueError(f'unknown thread signature: {role}')
+        if not isinstance(names, list) or not names:
+            raise ValueError(
+                f'thread_signatures names no symbol for {role}, so that '
+                'thread carries a signature nothing can match')
+        if len(set(names)) != len(names):
+            raise ValueError(f'thread_signatures repeats a symbol: {role}')
+        for name in names:
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    f'a signature symbol is a non-empty string: {role} = '
+                    f'{name!r}')
     return value
 
 
@@ -200,7 +245,8 @@ def render(document):
     # Absent stays absent: a rendering that invented a block would fail
     # the canonical-rendering control for every artefact recorded before it.
     blocks = ''
-    for field in ('excluded_threads', 'thread_bands', 'shas'):
+    for field in ('excluded_threads', 'thread_bands', 'thread_signatures',
+                  'shas'):
         if document.get(field) is None:
             continue
         rows = ',\n'.join(

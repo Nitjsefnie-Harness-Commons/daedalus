@@ -900,6 +900,7 @@
     "call_judgement": {"python": ["tests/_control_calls.py"]},
     "call_list": {"python": ["tests/_coverage_comment_publication.py"]},
     "callee_value": {"python": ["tests/_mcp_selection_fold.py"]},
+    "callgrind_profile": {"python": ["tests/_journey_contract.py"]},
     "camelCase": {"javascript": ["tests/_dashdom.py"]},
     "canonical": {"python": ["tests/_journeys.py"]},
     "captured_stdout": {"python": ["tests/_fanout.py"]},
