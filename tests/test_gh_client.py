@@ -269,9 +269,9 @@ def test_a_gh_that_cannot_be_launched_is_a_failure(tmp):
     absent = os.path.join(fake.dir, 'gh-that-was-never-installed')
     refusal_type, message = _launch_refusal(absent)
     failure = _failed(client, fake, env={'DAEDALUS_GH': absent})
-    assert type(failure) is client.QueryError, failure
+    assert isinstance(failure, client.QueryError), failure
     assert str(failure) == f'gh failed: {message}', failure
-    assert type(failure.__cause__) is refusal_type, failure
+    assert isinstance(failure.__cause__, refusal_type), failure
 
 
 def test_a_gh_that_never_answers_is_a_failure_too(tmp):
@@ -303,7 +303,7 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     assert fake.entered(), 'the call never reached the hold'
     assert str(failure).startswith('gh failed: '), failure
     assert 'timed out' in str(failure), failure
-    assert type(failure.__cause__) is subprocess.TimeoutExpired, failure
+    assert isinstance(failure.__cause__, subprocess.TimeoutExpired), failure
 
 
 def test_only_the_launch_becomes_a_failure(tmp):
