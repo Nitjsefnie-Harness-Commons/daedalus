@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.ci.suite_bound import (  # noqa: E402
-    kill_process_tree, suite_timeout, timeout_record)
+    discard_outputs, kill_process_tree, suite_timeout, timeout_record)
 # Re-exported, not used here: `tests/test_suite_runner.py` drives
 # `_run_suite` with the bound the runner itself resolves, and that is this
 # name. A second copy of the number here is what this change removes.
@@ -120,14 +120,20 @@ def main() -> int:
     if not suites:
         print("no suites found", file=sys.stderr)
         return 1
-    with tempfile.TemporaryDirectory() as summaries:
+    # `mkdtemp` and a `finally` rather than a `TemporaryDirectory`: that
+    # context manager removes its tree in `__exit__`, so a removal refused
+    # for a few seconds raises out of `main()` and the aggregate below is
+    # never printed. A cleanup that cannot finish must not decide whether
+    # the run reports anything.
+    results = {}
+    summaries = tempfile.mkdtemp(prefix="daedalus-summaries-")
+    try:
         workers = min(len(suites), os.cpu_count() or 1)
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(_run_suite, suite, summaries, timeout): suite
                 for suite in suites
             }
-            results = {}
             for future in as_completed(futures):
                 suite = futures[future]
                 try:
@@ -143,6 +149,8 @@ def main() -> int:
                     block += "\n"
                 print(block, end="", flush=True)
                 results[suite] = returncode, summary
+    finally:
+        discard_outputs(summaries)
 
     failed, empty, unrun = [], [], []
     passed = skipped = 0

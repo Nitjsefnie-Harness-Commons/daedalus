@@ -23,6 +23,7 @@ on a test module, and that file is held by an open pull request.
 """
 import math
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -210,6 +211,46 @@ def _taskkill(process):
                 'and no grace was given, so the suite flushed nothing')
     return (f'taskkill /F exited {result.returncode}, so the tree may still '
             'be running; no request was sent and no grace was given')
+
+
+def discard_outputs(directory):
+    """Remove a launcher's output directory, and never raise for failing to.
+
+    A suite's output file IS its stdout, so the handle on it is inherited
+    by everything that suite started, and on Windows a killed process keeps
+    that handle until its process object is destroyed -- which happens when
+    the last handle to that object closes. `taskkill /F /T` returning 0 says
+    the terminations went out, not that the handles are back, and a launcher
+    cannot observe that, so a removal can lose a race the launcher has
+    already run.
+
+    The retry answers that, against the shared cleanup bound, and the report
+    is the other half: a directory that stays unreachable says so once and
+    the caller still gets to print its verdict. A launcher that lets the
+    removal raise trades a stale directory for no verdict at all, and the
+    traceback replaces the aggregate line every reader and CI key on.
+    """
+    deadline = time.monotonic() + CLEANUP_TIMEOUT_S
+    while True:
+        try:
+            shutil.rmtree(directory)
+            return
+        except OSError as refusal:
+            error = refusal
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(GRACE_POLL_S)
+    print(f'could not remove the suite output directory {directory} after '
+          f'{CLEANUP_TIMEOUT_S} s: {error!r}; left in place: '
+          f'{_leftovers(directory)}', file=sys.stderr)
+
+
+def _leftovers(directory):
+    """What is still in a directory this module could not remove."""
+    try:
+        return ', '.join(sorted(os.listdir(directory)))
+    except OSError as error:
+        return f'(unreadable: {error!r})'
 
 
 def launch_suite(argv, *, cwd, output_path, env=None, timeout):

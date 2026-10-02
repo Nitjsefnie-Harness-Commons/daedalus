@@ -101,12 +101,67 @@ _SLOW_PASSING_SUITE = (
 )
 
 
-def _sandbox(tmp, suites, suite_bound=None):
+# The Windows removal refusal has no POSIX spelling: unlinking a file
+# another process still holds succeeds there, so no Linux or macOS box can
+# produce WinError 32 by holding one open. The two controls below plant it
+# at the single boundary where it happens -- `shutil.rmtree` -- and every
+# line above that call is the real shipped runner, so they say the same
+# thing on all twelve legs. The log is what they read instead of a clock: an
+# assertion on a timing margin passes because the machine was fast enough
+# and fails correct code on a loaded runner.
+_RMTREE_LOG = 'rmtree-calls.log'
+
+
+def _rmtree_sitecustomize(always):
+    """The `sitecustomize.py` that stands in for WinError 32.
+
+    Every call is logged before it is answered, and one that does not
+    refuse is delegated to the real `shutil.rmtree`, so a tree that gets
+    its handle back behaves as it would on Windows.
+    """
+    refusal = 'True' if always else 'str(path) not in _REFUSED'
+    return (
+        'import shutil\n'
+        'from pathlib import Path\n'
+        '\n'
+        f'_LOG = Path(__file__).resolve().with_name({_RMTREE_LOG!r})\n'
+        '_REAL = shutil.rmtree\n'
+        '_REFUSED = set()\n'
+        '\n'
+        '\n'
+        'def rmtree(path, *args, **kwargs):\n'
+        f'    refused = {refusal}\n'
+        '    _REFUSED.add(str(path))\n'
+        '    with _LOG.open("a", encoding="utf-8") as log:\n'
+        '        log.write(str(path) + "\\t" + '
+        '("raised" if refused else "delegated") + "\\n")\n'
+        '    if refused:\n'
+        "        raise PermissionError(32, 'in use by another process',\n"
+        '                             str(path))\n'
+        '    return _REAL(path, *args, **kwargs)\n'
+        '\n'
+        '\n'
+        'shutil.rmtree = rmtree\n'
+    )
+
+
+def _rmtree_calls(root):
+    """`(path, outcome)` for every call the planted refusal saw."""
+    log = root / _RMTREE_LOG
+    if not log.exists():
+        return []
+    lines = log.read_text(encoding='utf-8').splitlines()
+    return [tuple(line.split('\t')) for line in lines if line]
+
+
+def _sandbox(tmp, suites, suite_bound=None, refuse_rmtree=None):
     """A copy of the runner over fabricated suites, with what it imports.
 
     `suite_bound` rewrites the one definition the copied runner resolves
     when it launches, so a control can shrink the real default instead of
-    carrying a second number that stops relating to it.
+    carrying a second number that stops relating to it. `refuse_rmtree`
+    writes the removal refusal into the same file, which is why the two
+    are composed rather than written one after the other.
     """
     root = Path(tmp) / 'tree'
     (root / 'tests').mkdir(parents=True)
@@ -114,11 +169,16 @@ def _sandbox(tmp, suites, suite_bound=None):
     shutil.copy(ROOT / 'run_tests.py', root / 'run_tests.py')
     shutil.copy(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                 root / 'scripts' / 'ci' / 'suite_bound.py')
+    patch = []
     if suite_bound is not None:
-        (root / 'sitecustomize.py').write_text(
+        patch.append(
             'import scripts.ci.suite_bound as _bound\n'
-            f'_bound.DEFAULT_SUITE_TIMEOUT_S = {suite_bound!r}\n',
-            encoding='utf-8')
+            f'_bound.DEFAULT_SUITE_TIMEOUT_S = {suite_bound!r}\n')
+    if refuse_rmtree is not None:
+        patch.append(_rmtree_sitecustomize(always=refuse_rmtree))
+    if patch:
+        (root / 'sitecustomize.py').write_text(''.join(patch),
+                                               encoding='utf-8')
     for name, source in suites.items():
         # The planted wedge is written as a placeholder rather than a
         # literal so it cannot drift away from the number the outer bound
@@ -520,6 +580,59 @@ def test_both_launchers_read_the_one_definition_of_the_bound(tmp):
         suite_bound=_SHARED_BOUND_S, outer_timeout=_SHARED_BOUND_S * 20)
     assert record in coverage_group(coverage.stdout, 'test_wedged.py'), (
         coverage.stdout, coverage.stderr)
+
+
+def test_a_summaries_refused_once_is_retried_and_the_verdict_stands(tmp):
+    root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE},
+                    refuse_rmtree=False)
+    result = _run_sandbox(
+        root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
+    calls = _rmtree_calls(root)
+    refused = [path for path, outcome in calls if outcome == 'raised']
+    assert len(refused) == 1, calls
+    # The retry is read off the log rather than off a clock: the same path
+    # answered twice, once by refusing and once by doing the work.
+    assert [path for path, outcome in calls if outcome == 'delegated'] == \
+        refused, calls
+    assert not os.path.exists(refused[0]), refused
+    assert result.returncode == 1, (result.returncode, result.stdout)
+    assert 'test_staller.py' in _failed_suites(result.stdout), (
+        result.stdout, result.stderr)
+    assert 'left in place' not in result.stderr, result.stderr
+
+
+# The refusal the above control does NOT clear, so this one costs the whole
+# shared cleanup bound before it can report -- hence the outer bound named
+# here rather than the default, which does not outlast it.
+_UNREMOVABLE_OUTER_S = _RUNNER_OUTER_S
+
+
+def test_a_summaries_held_past_the_bound_is_reported_and_verdict_stands(tmp):
+    root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE},
+                    refuse_rmtree=True)
+    result = _run_sandbox(
+        root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)},
+        outer_timeout=_UNREMOVABLE_OUTER_S)
+    # The aggregate FIRST: a removal that cannot finish must not decide
+    # whether the run says anything, and this is where the base tracebacked
+    # out of `main()` instead.
+    assert result.returncode == 1, (result.returncode, result.stdout)
+    assert 'test_staller.py' in _failed_suites(result.stdout), (
+        result.stdout, result.stderr)
+    assert 'OVERALL: PASS' not in result.stdout, result.stdout
+    calls = _rmtree_calls(root)
+    # Every call refused, and there was more than one: the bound was spent
+    # retrying before it gave up and reported.
+    assert len(calls) > 1, calls
+    assert {outcome for _path, outcome in calls} == {'raised'}, calls
+    directory = calls[0][0]
+    assert {path for path, _outcome in calls} == {directory}, calls
+    assert os.path.isdir(directory), directory
+    # An OS error's own message is the platform's prose, so the report is
+    # pinned on what this module promised to name: where it is and what is
+    # still in it.
+    assert directory in result.stderr, result.stderr
+    assert 'test_staller.output' in result.stderr, result.stderr
 
 
 if __name__ == '__main__':

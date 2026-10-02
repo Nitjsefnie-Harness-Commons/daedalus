@@ -8,7 +8,8 @@ from pathlib import Path
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level
-    from .suite_bound import launch_suite, suite_timeout, timeout_record
+    from .suite_bound import (
+        discard_outputs, launch_suite, suite_timeout, timeout_record)
 else:
     # A workflow step runs this file by path, so `sys.path[0]` is
     # `scripts/ci` and the repository root is on no path at all. Which
@@ -18,7 +19,8 @@ else:
     # inside the shared module, and it would load one file under two
     # names — two module objects, two copies of the bound, which is the
     # drift this import exists to prevent.
-    from suite_bound import launch_suite, suite_timeout, timeout_record
+    from suite_bound import (
+        discard_outputs, launch_suite, suite_timeout, timeout_record)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,7 +72,11 @@ def main(argv=None):
 
     failed = 0
     timed_out = []
-    with tempfile.TemporaryDirectory() as outputs:
+    # The same shape, and for the same reason, as the runner's: a removal
+    # that cannot finish must not take the `TIMED OUT:` report below with
+    # it, because a launcher that raised here reports nothing at all.
+    outputs = tempfile.mkdtemp(prefix="daedalus-outputs-")
+    try:
         workers = min(len(suites), os.cpu_count() or 1)
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
@@ -100,6 +106,8 @@ def main(argv=None):
                 print(block, end="", flush=True)
                 if cleanup:
                     timed_out.append(relative)
+    finally:
+        discard_outputs(outputs)
 
     if timed_out:
         # A suite that overran is not a suite that failed, and what it
