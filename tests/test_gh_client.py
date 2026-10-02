@@ -131,6 +131,14 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
     reads this way at all: a re-translated ending carries a `\\r` on
     every line, and a reader that cut at the first blank-line byte pair
     would take the block's last header for the body's first line.
+
+    The whitespace-only separator separates a line that is BLANK from one
+    that is merely whitespace. Those are the same line to a caller - both
+    say the header block is over - and not to a reader testing `line ==
+    ''`: that one walks past the whitespace-only line, reads it as a
+    header (partition finds no colon, so nothing is stored), reaches the
+    end and raises, reporting a `gh` that answered in pieces as one that
+    answered nothing.
     """
     del tmp
     client = _util.load(SKILL / 'gh_client.py', 'gh_client_answers')
@@ -147,6 +155,9 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
     assert client._parse('HTTP/2.0 200 OK\n\n') == (200, {}, '')
     assert client._parse(
         'HTTP/2.0 200 OK\r\nx-ratelimit-remaining: 4999\r\n\r\n{"data": {}}'
+    ) == (200, {'x-ratelimit-remaining': '4999'}, '{"data": {}}')
+    assert client._parse(
+        'HTTP/2.0 200 OK\nx-ratelimit-remaining: 4999\n \n{"data": {}}'
     ) == (200, {'x-ratelimit-remaining': '4999'}, '{"data": {}}')
 
     # The reason the parser reads line by line, and the only one of its
