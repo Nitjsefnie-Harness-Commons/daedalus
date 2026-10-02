@@ -21,6 +21,7 @@ import traceback
 import typing
 from pathlib import Path
 
+import _child_ready  # noqa: E402
 import _mcp_ready
 from _completion import run_to_completion
 # A re-export, not a use: the suites read the log-rendering contract table at
@@ -305,18 +306,12 @@ def drain_lines(proc, collected=None):
     Nothing else may read the pipe: the readiness line the fixture waits for
     travels on this stream, and an undrained pipe would eventually fill and
     block the child.
+
+    The relay and the thing a waiter blocks on are one object on the child,
+    in `_child_ready`: the wait is what makes the drain worth having, and
+    `_util` is at its size ceiling.
     """
-    collected = [] if collected is None else collected
-
-    def pump():
-        for line in proc.stdout:
-            collected.append(line)
-
-    thread = threading.Thread(target=pump, daemon=True,
-                              name='bridge-stdout-drain')
-    setattr(proc, '_daedalus_drain_thread', thread)
-    thread.start()
-    return collected
+    return _child_ready.drain(proc, collected)
 
 
 def _startup_observations(proc, drained, waited):
@@ -367,45 +362,33 @@ def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
     """Return the port the child actually bound, read from its Listening line.
 
     server.py prints the line only after ThreadingHTTPServer has bound, so
-    the number it carries is the bound port itself, never a guess.
+    the number it carries is the bound port itself, never a guess. A wait
+    that polls for it costs a number of instructions per tick and a number of
+    ticks equal to however long the child took, so this blocks on the line
+    instead, in `_child_ready`, and the iteration count is the number of
+    lines the child printed.
 
-    The announcement is SEARCHED FOR across every line the child has printed
-    so far, not assumed to be the first one. A bridge prints whatever its
-    platform gives it cause to — a malloc-tuning diagnostic where mallopt is
-    not a glibc symbol before it gets that far, an MCP bootstrap failure from
-    its own thread at whatever moment that front end's missing dependencies
-    surface — and a reader that inspected only the first line would take one
-    of those for the announcement, miss the port, and time out on a bridge
-    that came up fine.
-
-    The scan stays bounded in both directions: a child that exits is
-    reported the moment it does, and one that stays up without announcing
-    fails at `timeout`. Either way the failure carries the child's captured
-    output, which is what says which line arrived instead.
+    Both bounds are reported, and each says something the other cannot: a
+    child that exits is a failure to start, and one that stays up without
+    announcing is a child that never said. Either way the failure carries the
+    child's captured output, which is what says which line arrived instead.
     """
-    started = time.time()
+    started = time.monotonic()
     deadline = started + timeout
-    seen = 0
-    while True:
-        pending = drained[seen:]
-        seen += len(pending)
-        port = listening_port(pending)
-        if port is not None:
-            return port
+    line = _child_ready.await_line(proc, drained, LISTENING.search, timeout)
+    if line is None:
+        waited = time.monotonic() - started
         if proc.poll() is not None:
             raise RuntimeError(
                 'bridge exited during startup: '
-                + _startup_observations(
-                    proc, drained, time.time() - started))
-        if time.time() > deadline:
-            # Both bounds, equal here, so nothing can tell them apart.
-            applied = round(deadline - started, 6)
-            raise RuntimeError(
-                f'bridge did not announce its port in {timeout}s '
-                f'(bound applied {applied:g}s): '
-                + _startup_observations(
-                    proc, drained, time.time() - started))
-        time.sleep(0.05)
+                + _startup_observations(proc, drained, waited))
+        # Both bounds, equal here, so nothing can tell them apart.
+        applied = round(deadline - started, 6)
+        raise RuntimeError(
+            f'bridge did not announce its port in {timeout}s '
+            f'(bound applied {applied:g}s): '
+            + _startup_observations(proc, drained, waited))
+    return int(line.group(1))
 
 
 @contextlib.contextmanager
@@ -463,25 +446,19 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
         timeout = startup_timeout()
         port = await_listening_line(proc, drained, timeout=timeout)
         base = f'http://127.0.0.1:{port}'
-        started = time.time()
-        deadline = started + timeout
-        while True:
-            if proc.poll() is not None:
-                raise RuntimeError(
-                    'bridge exited during startup: '
-                    + _startup_observations(
-                        proc, drained, time.time() - started))
-            try:
-                get(base + '/health')
-                break
-            except (urllib.error.URLError, OSError) as exc:
-                if time.time() > deadline:
-                    raise RuntimeError(
-                        f'bridge did not answer /health in {timeout}s: '
-                        + _startup_observations(
-                            proc, drained,
-                            time.time() - started)) from exc
-                time.sleep(0.05)
+        # ONE request, because the request is the event. The socket is bound
+        # before the announcement above, so a connection made now waits in
+        # the backlog until `serve_forever` accepts it — and a poll loop here
+        # only ever measured how long that took, at a number of instructions
+        # per tick.
+        started = time.monotonic()
+        try:
+            get(base + '/health', timeout=timeout)
+        except (urllib.error.URLError, OSError) as exc:
+            raise RuntimeError(
+                f'bridge did not answer /health in {timeout}s: '
+                + _startup_observations(
+                    proc, drained, time.monotonic() - started)) from exc
         if await_mcp:
             _mcp_ready.await_mcp_ready(proc, drained,
                                        _startup_observations)

@@ -280,6 +280,7 @@
 !/tests/_case_fold.py
 !/tests/_cdpharness.py
 !/tests/_child_boot_env.py
+!/tests/_child_ready.py
 !/tests/_ci_imports.py
 !/tests/_ci_publisher.py
 !/tests/_ci_wait_fixtures.py
@@ -474,6 +475,7 @@
 !/tests/test_change_classifier_callers.py
 !/tests/test_checkout_pin.py
 !/tests/test_child_coverage.py
+!/tests/test_child_ready.py
 !/tests/test_ci_gate.py
 !/tests/test_ci_lint_tool_refusals.py
 !/tests/test_ci_lint_tools.py
