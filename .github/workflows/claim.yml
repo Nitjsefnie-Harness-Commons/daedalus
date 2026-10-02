@@ -60,7 +60,7 @@ jobs:
       # issue naming the role, the cap and your count, never a silent no-op.
       # The expiry below runs from when the holder was assigned, not from their
       # last activity, so a claim can lapse while its holder still works the
-      # issue; the next commenter to `/claim` it takes it over.
+      # issue; another commenter's `/claim` takes it over.
       - uses: Nitjsefnie-Actions/claim@8abff4f2f27d59b984528cb736f64b9391952a25  # v2.0.1
         with:
           max-claims: 'read=2, triage=4, write=6, maintain=10, admin=-1'

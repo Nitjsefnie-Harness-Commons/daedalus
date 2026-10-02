@@ -515,19 +515,21 @@ that is about to succeed. That empty read is a race, not evidence - never
 re-post on the strength of it. Check on your next natural touch of the issue.
 A declined claim - a closed issue, a pull request, an inexact body carrying a
 command word, or a mismatched number - answers on the issue and fails the run.
-So does reaching your role's cap, answered naming the role, the cap and your
-count rather than ignored - though that run still succeeds. A body with no
-command word is skipped by the trigger filter before the action runs, and a
-bot's comment is refused without answering - the two silences that remain.
+Reaching the cap for your role - which limits how many claims you may hold at
+once - is answered too, with the role, the cap and your count, though that run
+still succeeds. A body with no command word is skipped by the trigger filter
+before the action runs, and a bot's comment is refused without answering - the
+two silences that remain.
 
 **A claim lapses on its assignment age, not on your silence.** The holder's
 clock runs from when they were assigned, so a claim can expire while its holder
-is still working the issue every day. Expiry is strictly longer than the limit,
-judged inside the run that answers a comment rather than on a schedule, and
-only an assignment the action made itself can expire - one a maintainer added
-by hand never does. Your own `/claim` on an issue you still hold tells you so
-and changes nothing, whatever its age; it is another commenter's `/claim` that
-takes an expired one over, and someone with write access may release it instead.
+is still working the issue every day. It expires only once that assignment is
+more than seven days old, judged inside the run that answers a comment rather
+than on a schedule, and only an assignment the action made itself can expire -
+one a maintainer added by hand never does. Your own `/claim` on an issue you
+still hold tells you so and changes nothing, whatever its age; it is another
+commenter's `/claim` that takes an expired one over, and someone with write
+access may release it instead.
 
 **Declare an absorbed issue in the pull request body the moment it is
 absorbed.** A branch that takes on work filed under a second issue - a finding
