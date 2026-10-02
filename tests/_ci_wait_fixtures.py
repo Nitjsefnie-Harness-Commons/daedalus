@@ -5,11 +5,9 @@ Not a suite itself — `run_tests.py` only loads `test_*.py`.
 These four live here rather than in any one suite because three suites now
 need them: `test_ci_wait.py` and `test_ci_wait_gate.py` both classify runs
 through the verdict contract, and `test_ci_gate.py` asks the gate predicate
-what it answers. A
-helper declared in one and imported from the other is a suite importing a
-sibling suite, and `run_tests.py` gives each suite its own process. A
-`tests/_*.py` module is where a shared helper belongs; this is that module
-for these three.
+what it answers. `run_tests.py` gives each suite its own process, so one
+cannot import another; a `tests/_*.py` module is where a shared helper
+belongs, and this is that module for these three.
 
 All four carry a `ci_wait` prefix and none keeps the bare name it had in
 its declaring suite. That is the same reason twice for `_run` and

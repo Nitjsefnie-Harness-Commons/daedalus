@@ -6,7 +6,7 @@ normaliser, and two synthetic-source suites spelled the binding diagnostic
 they compare against the same way. Each pair was a byte-identical copy, so
 a fix to one shape reached one suite and not the other.
 
-The two readers here are new, and each had to be. `_module_text` belongs to
+The two readers here are new. `_module_text` belongs to
 `tests/_binding_assertions.py`, which keeps it, so the reader is named for
 what it returns; and `_at` is bound by `tests/test_wfjobs.py`, where it
 walks a decoded workflow document rather than a source. The owner set is
@@ -20,11 +20,11 @@ pair has to mean the callee writes nothing, which this one does not: it
 copies the test tree and hands back the path every later write is proved
 against, so tabling it would be the checker losing sight of where a
 control writes. It is neither tabled nor local, so
-`tests/_control_writes.py` reads this file and judges that body itself,
-with the kinds each call site hands it. `tests/test_shared_helper_calls.py`
-holds that GUARD -- its rows, its hop bound and its refusals -- but it
-drives it through synthetic sources, so what this file's `_real_module_copy`
-reaches is pinned as guard behaviour, not as this callee's own route.
+`tests/_control_writes.py` reads this file and judges that body itself.
+`tests/test_shared_helper_calls.py` holds that GUARD -- its rows, its hop
+bound and its refusals -- but it drives it through synthetic sources, so
+what this file's `_real_module_copy` reaches is pinned as guard behaviour,
+not as this callee's own route.
 """
 from pathlib import Path
 

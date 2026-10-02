@@ -4,7 +4,6 @@
 reads the changed paths through, so driving it needs a webhook event and a
 stand-in for that read. Both classifier suites built both, each with its own
 copy, so a change to either shape reached one of them and not the other.
-They are here so there is one copy of each to fix.
 
 `_recording_run` is a rename. It was `_recorder`, and the short name is
 already held by `tests/test_aggregate_gate.py` over a different body — a
