@@ -544,7 +544,7 @@ _ARGUMENTS = (
 # list holds the callee and keyword names the case tables name, so it is
 # the strongest form of the mistake: a gate tuned to satisfy every row.
 # A gate like this one satisfies the tables, which is why the tables are
-# not the whole defence — the runtime probes reject it behaviourally,
+# not the whole defence — the enumeration is closed by construction,
 # because a gate naming every name here must also name to_thread,
 # callback and finalize, and the next name written is not on its list.
 _ENUMERATION = (
