@@ -323,6 +323,34 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
     assert 'toolchain' not in moved[2], moved[2]
 
 
+def test_the_probe_row_says_whether_perf_ran_and_why_it_did_not(tmp):
+    """The two probe states a runner can be in, neither of them a default.
+
+    `perf_stat` is absent on a runner with no perf on PATH at all, and it
+    carries stderr on one where perf ran and refused to count. Those are
+    the two sentences a reader uses to decide whether a low count means
+    anything, and they are told apart by the text: without perf there is
+    no fenced block at all, and with it the block is what carries the
+    refusal, since the returncode perf exits with is not evidence.
+    """
+    del tmp
+    summaries = _journey_contract.summaries()
+    absent = summaries.probe_lines(dict(probe(), perf_stat=None))
+    joined = '\n'.join(absent)
+    assert ('- `perf stat -e instructions:u -- true`: not run, perf is not on '
+            'PATH') in joined, joined
+    assert '```' not in joined, (
+        'a runner with no perf at all fenced a block for it, so the summary '
+        f'carries an output nothing produced: {joined}')
+    refused = summaries.probe_lines(counter_facts())
+    said = '\n'.join(refused)
+    assert 'returncode `0`' in said, said
+    assert '\n```\nnot permitted\n```' in said, (
+        "perf's own stderr is what says it was refused, and the summary "
+        f'drops it: {said}')
+    assert '```\nnot permitted' not in '\n'.join(absent), absent
+
+
 def test_the_verdict_table_pins_every_row_it_renders(tmp):
     """One row per recorded journey, each carrying its own numbers.
 

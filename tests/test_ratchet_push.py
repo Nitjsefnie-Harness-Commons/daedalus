@@ -100,7 +100,7 @@ def _push_repo(base, remote_at=None):
     return work, bare
 
 
-def _drive_push(work, refuse, change=True):
+def _drive_push(work, refuse, change=True, arguments=None, environment=None):
     """Run the real script over the prepared checkout.
 
     `refuse` installs a pre-receive hook that rejects everything, which is
@@ -111,6 +111,13 @@ def _drive_push(work, refuse, change=True):
     `change` is what gets committed. Leaving it False stages nothing, so
     `git commit` has nothing to commit and fails — the route where the
     recorded file was already committed by an earlier step.
+
+    `arguments` replaces the call the script is given and `environment`
+    overrides variables in it, which is how the three refusals `main` makes
+    before it touches the repository are reached. A variable whose value is
+    None is REMOVED rather than emptied: `os.environ.get` reads an absent
+    key and an empty one alike, while subprocess has no spelling for
+    `None`, so a control that set one would be testing the wrong arm.
     """
     if refuse:
         hook = work / 'bare.git' / 'hooks' / 'pre-receive'
@@ -127,16 +134,22 @@ def _drive_push(work, refuse, change=True):
     # module-level environment could carry neither.
     # The COPY, not `PUSH`: it stands where the collector can see it, and
     # `paths` maps that path back onto the repository's own file.
+    child = dict(os.environ,
+                 HOME=str(work.parent / 'home'),
+                 REPO='o/r',
+                 RATCHET_SSH_KEY='not-a-real-key',
+                 GITHUB_STEP_SUMMARY=str(summary))
+    for name, value in (environment or {}).items():
+        if value is None:
+            child.pop(name, None)
+        else:
+            child[name] = value
     return subprocess.run(
         [sys.executable, str(work / 'scripts' / 'ci' / 'ratchet_push.py'),
-         'ratcheted.json', 'ci: tighten the journey budget'],
+         *(arguments if arguments is not None else
+           ['ratcheted.json', 'ci: tighten the journey budget'])],
         cwd=str(work), capture_output=True, text=True,
-        env=_util.child_coverage('keep', dict(
-            os.environ,
-            HOME=str(work.parent / 'home'),
-            REPO='o/r',
-            RATCHET_SSH_KEY='not-a-real-key',
-            GITHUB_STEP_SUMMARY=str(summary)), cwd=work)), summary
+        env=_util.child_coverage('keep', child, cwd=work)), summary
 
 
 def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
@@ -257,6 +270,55 @@ def test_a_commit_with_nothing_to_commit_aborts(tmp):
     assert 'Main moved' not in _summary_text(summary), (
         'a run with nothing to commit reported that main had moved: '
         f'{_summary_text(summary)}')
+
+
+def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
+    """Each of the three refusals says which of its inputs was absent.
+
+    These are the only three ways this script declines, and all three are
+    reached before a single `git` call, so the checkout is real and the
+    assertion is that it did not move. An exit status alone would not
+    separate them: all three answer 2, and a script that answered 2 while
+    printing nothing at all would pass every control that reads only the
+    status. A job that reddens with a sentence is a job whose reader can
+    fix the invocation; one that reddens silently is one they must read
+    the source to diagnose.
+    """
+    base = Path(tmp) / 'refusals'
+    work, bare = _push_repo(base)
+    message = 'ci: tighten the journey budget'
+    usage = 'usage: ratchet_push.py <path> <commit message>'
+    before = subprocess.run(['git', '-C', str(bare), 'rev-parse', 'main'],
+                            capture_output=True, text=True, check=True)
+    for arguments, environment, wanted in (
+            ([], {}, usage),
+            (['ratcheted.json'], {}, usage),
+            ([message], {}, usage),
+            (['ratcheted.json', ''], {}, usage),
+            (['', message], {}, usage),
+            (['ratcheted.json', message], {'RATCHET_SSH_KEY': None},
+             'the deploy key is not set; nothing is pushed'),
+            (['ratcheted.json', message], {'RATCHET_SSH_KEY': ''},
+             'the deploy key is not set; nothing is pushed'),
+            (['ratcheted.json', message], {'REPO': None},
+             'the repository is not set; there is nowhere to push'),
+            (['ratcheted.json', message], {'REPO': ''},
+             'the repository is not set; there is nowhere to push')):
+        outcome, _summary = _drive_push(
+            work, refuse=False, change=False, arguments=arguments,
+            environment=environment)
+        said = f'{outcome.stdout}{outcome.stderr}'
+        assert outcome.returncode == 2, (arguments, environment, said)
+        assert wanted in outcome.stderr, (
+            f'arguments={arguments!r} {environment!r}: the refusal must name '
+            f'what was wrong, and said: {said!r}')
+    after = subprocess.run(['git', '-C', str(bare), 'rev-parse', 'main'],
+                           capture_output=True, text=True, check=True)
+    assert after.stdout == before.stdout, (
+        'a refusal still pushed, so the ratchet landed from a run that '
+        'recorded nothing')
+    summary = work.parent / 'summary.md'
+    assert 'Main moved' not in _summary_text(summary), _summary_text(summary)
 
 
 def test_both_jobs_call_the_one_push_implementation(tmp):
