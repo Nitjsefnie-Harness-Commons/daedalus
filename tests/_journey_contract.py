@@ -167,6 +167,44 @@ def recorded_maps():
                                  for name in journeys().NAMES}}
 
 
+def measured_report(counts, **maps):
+    """A measurement whose median per journey is `counts`, gates all matching.
+
+    A named journey may simply be absent from `counts`, which is what a
+    runner whose counter refused one journey reports - and what a control
+    about a journey with no count hands the check on purpose. Every gate's
+    recorded side is carried too, or the check would refuse on the first one
+    instead of reaching the budget the control is about.
+    """
+    report = {'rounds': 1, 'python': sys.version, **recorded_maps(), **maps}
+    report['counters'] = {'perf-instructions': {
+        'available': True, 'startup_only': 0,
+        'journeys': {name: {'min': seen, 'max': seen, 'median': seen,
+                            'spread': 0, 'raw': seen}
+                     for name, seen in counts.items()}}}
+    return report
+
+
+@contextlib.contextmanager
+def summary_file(tmp, name='step-summary.md'):
+    """`GITHUB_STEP_SUMMARY` aimed at a file, and the caller's value back.
+
+    What a reader of a run meets is the FILE, so a control reads the file
+    rather than a stand-in collector: the wrong call writing the right lines
+    still puts them there, and a summary written nowhere reads as a run that
+    said nothing.
+    """
+    path = Path(tmp) / name
+    saved = os.environ.get('GITHUB_STEP_SUMMARY')
+    os.environ['GITHUB_STEP_SUMMARY'] = str(path)
+    try:
+        yield path
+    finally:
+        os.environ.pop('GITHUB_STEP_SUMMARY', None)
+        if saved is not None:
+            os.environ['GITHUB_STEP_SUMMARY'] = saved
+
+
 def _report_file(tmp, toolchain_over, maps):
     """A measurements file whose report carries `maps` over a valid identity.
 
