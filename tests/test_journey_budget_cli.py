@@ -350,6 +350,67 @@ def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
             'the artefact the tighten refused is one the check accepts')
 
 
+
+
+
+def test_a_tighten_writes_nothing_the_check_refuses_over_a_missing_journey(
+        tmp):
+    """The same disagreement, one key over: a journey with no count at all.
+
+    `unresolved` is a journey the run refused and `unmeasured` is one it
+    never counted, and only the first was guarded. So a measurement that
+    simply lacked a journey let the tighten write six lowered counts and
+    print success, and the `check` on the artefact it wrote exited 1 on
+    `unmeasured`. Same run, same measurement, opposite answers.
+
+    The sentence that settles it is the same one and is true of both: a
+    budget the next check cannot accept is not one this command may write.
+    `tightened()` skips the missing journey's row for the same reason it
+    skips a refused one.
+
+    The remedies stay DISTINCT, because a reader who hits one has to be
+    told the thing that fixes that one — and this control pins both, so
+    hoisting the guard cannot quietly collapse them into one sentence.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    missing = names[0]
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    # No `refused` entry at all: the counter simply produced no count for
+    # this journey, which is the other way a journey can be missing.
+    counts = {name: 1000 for name in names if name != missing}
+    counts[names[1]] = 10
+    report = measured_report(counts)
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(report), encoding='utf-8')
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements), '--tighten'])
+    assert code != 0, (
+        'a tighten wrote a budget the next check refuses because of an '
+        f'unmeasured journey, and reported success: {out.getvalue()}')
+    assert artifact.read_bytes() == before, (
+        'a refused tighten wrote the artefact anyway')
+    said = err.getvalue()
+    assert missing in said, said
+    assert policy.UNMEASURED_REMEDY in said, (
+        'the refusal for an unmeasured journey must name the remedy for an '
+        f'unmeasured journey, not the one for a refused residual: {said}')
+    assert policy.UNRESOLVED_REMEDY not in said, (
+        'the two remedies are distinct findings and must not be collapsed '
+        f'into one sentence: {said}')
+    # And the check on the artefact the tighten refused still refuses it.
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        assert policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements)]) == 1, (
+            'the artefact the tighten refused is one the check accepts')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeycli__')
