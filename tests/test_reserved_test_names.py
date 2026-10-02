@@ -32,10 +32,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _reserved_names  # noqa: E402
 import _util  # noqa: E402
 from _helper_binds import definitions  # noqa: E402
-from _branch_boundary import (IS_THE_BASE, UNREADABLE, introduced_rows,
+from _branch_boundary import (IS_THE_BASE, UNREADABLE, _parsed,
+                              introduced_rows,
                               js_digests, python_digests)  # noqa: E402
 from _helper_reimplementation import (  # noqa: E402
-    _entry_points, _live_sources)
+    _entry_points, _live_sources, js_declarations)
 from _source_anchors import (  # noqa: E402
     after_call, first_call_line, the_call_line)
 from _unconsolidated_js_names import (  # noqa: E402
@@ -287,6 +288,74 @@ def test_the_boundary_compares_counts_not_names(tmp):
         'the boundary did not compare COUNTS: a new name and a second '
         f'byte-identical copy are introduced, an edit is not: '
         f'{found.introduced}')
+
+
+# Every declaration form `js_declarations` admits, spelling one name.
+_ADMITTED = (
+    'function eventTarget(listener) {\n',
+    'async function eventTarget(listener) {\n',
+    'const eventTarget = function (listener) {\n',
+    'const eventTarget = function inner(listener) {\n',
+    'let eventTarget = (listener) => {\n',
+    'var eventTarget = async (listener) => {\n',
+    'const eventTarget = listener => {\n',
+)
+
+# Named here rather than left as a shape that silently stops declaring.
+_UNREAD = (
+    'const chrome = {\n'
+    '  onRemoved: {\n'
+    '    addListener(listener) {\n'
+    '      return 1;\n'
+    '    },\n'
+    '  },\n'
+    '};\n',
+)
+
+
+def _declared_names(body, path='tests/_probe.py'):
+    """The names `js_declarations` reads out of one fabricated module."""
+    text = f'_HARNESS = r"""\n{body}\n"""\n'
+    # A fabricated case is a program a tests module could contain, so it
+    # has to compile: `ast.parse` accepts a string whose JavaScript does
+    # not, and this is the surface the reader works in.
+    compile(text, path, 'exec')
+    return [d.name for d in js_declarations({path: text}).get(path, [])]
+
+
+def test_every_admitted_declaration_form_is_read(tmp):
+    """Seven spellings, one name: the reader admits each of them.
+
+    The recogniser is LIVE -- `tests/_reserved_names.py` reads a shared
+    helper's JavaScript to decide the union -- so a reader that quietly
+    stopped admitting `const`, `let` or `var` would narrow the rule
+    instead of failing it. That is the direction this pins, and the
+    shapes below are the ones a harness writes.
+    """
+    del tmp
+    for head in _ADMITTED:
+        names = _declared_names(f'{head}  return 1;\n}}\n')
+        assert names == ['eventTarget'], (head, names)
+    for body in _UNREAD:
+        names = _declared_names(body)
+        assert names == [], (body, names)
+
+
+def test_a_module_that_does_not_parse_fails_the_control(tmp):
+    """`_parsed` refuses by name rather than dropping the module.
+
+    A shared helper a control cannot read is a finding about itself, not
+    a module to pass over: a reader that swallowed the `SyntaxError` would
+    make the union quietly smaller, which is the same failure shape as a
+    recogniser that admits less than it used to.
+    """
+    del tmp
+    try:
+        _parsed('tests/_probe.py', 'def broken(:\n')
+    except AssertionError as error:
+        assert 'tests/_probe.py' in str(error), error
+    else:
+        raise AssertionError('the reader accepted a module that cannot parse')
 
 
 def test_the_artifact_suite_binds_no_reserved_name(tmp):
