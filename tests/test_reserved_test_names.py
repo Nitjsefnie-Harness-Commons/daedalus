@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """The names a new tests module may not bind, derived and stated once.
 
-Two controls decide that set and neither computes the other's half.
-`test_helper_reimplementation.py` owns every name a module under
+Two halves decide that set and neither computes the other's.
+The re-implementation half is every name a module under
 `tests/_*.py` defines, in Python and in JavaScript;
 `test_wf_suite_boundaries.py` owns the module-level bindings of
 `tests/_wffixtures.py` and nowhere else. A module colliding with a name
 from the other half is caught only by that other control running, so the
 set is discovered by collision rather than known in advance.
 
-This suite derives the union from the recognisers those two controls
+This suite derives the union from the recognisers those two halves
 already use, states it in a generated artifact, and asserts against it.
 The derivation is `tests/_reserved_names.py`, beside the recognisers it
 composes; `scripts/ci/reserved_names.py` writes the artifact and this

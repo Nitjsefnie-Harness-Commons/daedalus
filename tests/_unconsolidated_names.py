@@ -240,11 +240,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_tab_registry.py', '_load'):
         'this loads tab_registry by path under a name of its own, where the '
         'shared owner loads the upload routes module',
-    ('tests/test_suite_import_boundaries.py', '_scan'):
-        'this walks one module AST for sibling-suite imports and returns '
-        '(lineno, leaf, spelling) hits, where the drain owner scans a module '
-        'text for unbounded drains and the code-eval owner walks an '
-        'expression value; three different arguments',
     ('tests/test_version_empty_values.py', '_assert_duplicate_refused'):
         'this asserts the empty string reached stderr and that no ok: line '
         'reached stdout, where the owner takes both competing values and '
