@@ -429,7 +429,6 @@
 !/tests/_version_contract_dashboard_duplicates.py
 !/tests/_version_contract_scanners.py
 !/tests/_watcher_fixtures.py
-!/tests/_wfassert.py
 !/tests/_wfcheckout.py
 !/tests/_wffixtures.py
 !/tests/_wfgraph.py
@@ -585,7 +584,6 @@
 !/tests/test_gh_client.py
 !/tests/test_gh_client_lifetime.py
 !/tests/test_gh_rate_limit.py
-!/tests/test_ghexpr.py
 !/tests/test_gitignore_control.py
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_relay_authority.py
@@ -713,9 +711,7 @@
 !/tests/test_vm_file_load_guard.py
 !/tests/test_wf_refusals.py
 !/tests/test_wf_suite_boundaries.py
-!/tests/test_wfcheckout.py
 !/tests/test_wfjobs.py
-!/tests/test_wfscalars.py
 !/tests/test_worker_close_tab.py
 !/tests/test_worker_command_types.py
 !/tests/test_worker_module_boundary.py
@@ -729,20 +725,11 @@
 !/tests/test_worker_sources.py
 !/tests/test_worker_tabs_chrome.py
 !/tests/test_worker_tabs_misc.py
-!/tests/test_workflow_bash.py
 !/tests/test_workflow_cache_boundary.py
-!/tests/test_workflow_eslint.py
 !/tests/test_workflow_job_timeouts.py
-!/tests/test_workflow_parsing.py
-!/tests/test_workflow_spellings.py
 !/tests/test_workflow_suite_base.py
 !/tests/test_workflow_triggers.py
 !/tests/test_workflow_yaml_uses.py
 !/tests/test_yamlblock.py
-!/tests/test_yamlread.py
 !/tests/test_yamlread_anchor_edges.py
 !/tests/test_yamlread_anchors.py
-!/tests/test_yamlread_blocks.py
-!/tests/test_yamlread_bom.py
-!/tests/test_yamlread_mapping_values.py
-!/tests/test_yamlread_steps.py
