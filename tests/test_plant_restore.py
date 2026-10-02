@@ -160,10 +160,12 @@ def _states_while_restoring(plant, target, store):
     bytes. Whether the sampler COULD see a third state is settled by the
     hard-link control, not by this loop's length.
     """
+    root = _util.ROOT
     proc = subprocess.Popen(
         [sys.executable, str(plant), 'restore', str(target),
          '--store', str(store)], stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, env=_util.child_coverage('scrub'))
+        stderr=subprocess.PIPE, cwd=root,
+        env=_util.child_coverage('keep', cwd=root))
     seen = set()
     while proc.poll() is None:
         try:
@@ -291,6 +293,7 @@ def _link_sees_after_restore(plant, tmp):
     """
     repo = Path(tmp) / 'repo'
     repo.mkdir(parents=True)
+    root = _util.ROOT
     target = repo / 'target.py'
     target.write_bytes(_COMMITTED)
     link = repo / 'link.py'
@@ -302,7 +305,7 @@ def _link_sees_after_restore(plant, tmp):
     out = subprocess.run(
         [sys.executable, str(plant), 'restore', str(target),
          '--store', str(store)], capture_output=True, text=True,
-        env=_util.child_coverage('scrub'), timeout=120)
+        cwd=root, env=_util.child_coverage('keep', cwd=root), timeout=120)
     assert out.returncode == 0, out.stdout + out.stderr
     return link.read_bytes()
 

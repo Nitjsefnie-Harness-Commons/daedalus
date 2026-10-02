@@ -27,9 +27,13 @@ def _out(result):
 
 
 def _run_plant(*args):
+    # The helper's own bytes are the subject here, so the child keeps the
+    # collector and runs where the collector's `source` can see it.
+    root = _util.ROOT
     return subprocess.run([sys.executable, str(PLANT), *args],
                           capture_output=True, text=True, timeout=60,
-                          env=_util.child_coverage('scrub'))
+                          cwd=root, env=_util.child_coverage('keep',
+                                                             cwd=root))
 
 
 def _committed_repo(tmp, name='plantrepo'):
