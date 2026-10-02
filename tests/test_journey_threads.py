@@ -115,6 +115,102 @@ def test_two_threads_in_one_band_cannot_be_told_apart(tmp):
     assert kept is None
 
 
+def test_two_threads_in_a_band_the_journey_does_not_exclude_are_counted(
+        tmp):
+    """The half of the refusal that has no case, and the half that ships.
+
+    `classify` refuses a profile carrying two threads in one band, and that
+    is right only where the journey EXCLUDES the band: there the gate has
+    to pick which of the two is the background it drops, and nothing in the
+    profile says which. In a band it does not exclude, every thread counts
+    and two of them is two threads of work.
+
+    This is the shape `net-capture` produces: its request thread runs to
+    billions and lands in the import band beside the bridge's own bootstrap
+    import. Deleting the `if role not in excluded: continue` guard restores
+    the original defect, refuses this profile, and `journey_counters` then
+    marks the whole counter unavailable — so every journey in the run reads
+    unmeasured, and it does so behind a suite that is otherwise green. The
+    journey under callgrind is the expensive path nobody runs locally, which
+    is the whole reason this is pinned here.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': 959_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 3, 'ir': 2_100_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 4, 'ir': 87_000_000,
+             'cmd': 'python3 server.py'}]
+    kept, excluded, failure = threads.total_for(rows, 'net-capture')
+    assert failure is None, failure
+    assert kept is not None, 'two threads in a counted band is not a refusal'
+    # Derived from the table rather than written out, so this pins the
+    # BEHAVIOUR and not the value of any exclusion list: the table is data,
+    # and a test that asserted its contents is a second place for them to
+    # drift.
+    expected = sum(row['ir'] for row in rows
+                   if threads.role_of(row['ir'], row['thread'])
+                   not in excluded)
+    assert kept == expected, (kept, expected)
+
+
+def test_two_threads_in_an_excluded_band_are_still_a_refusal_naming_it(tmp):
+    """The other half, which the widened rule must not have cost.
+
+    The guard now has two halves and a reader cannot tell which one is
+    load-bearing, so both are pinned. An EXCLUDED band with two threads in
+    it is still the ambiguity the refusal exists for: the gate has to pick
+    which of them it is dropping, and guessing would make the number mean
+    something other than the journey.
+
+    The journey is planted rather than named, so this pins no value of
+    `EXCLUDED` either.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 3, 'ir': 2_100_000_000,
+             'cmd': 'python3 server.py'}]
+    planted = {**threads.EXCLUDED, 'planted-journey': (threads.IMPORT,)}
+    with _journey_contract.planting(threads, EXCLUDED=planted):
+        kept, excluded, failure = threads.total_for(rows, 'planted-journey')
+    assert failure is not None, 'two threads in an excluded band must refuse'
+    assert threads.IMPORT in failure, failure
+    assert kept is None, kept
+    # `total_for` hands back an EMPTY exclusion list beside a classify
+    # failure, not the journey's own: the count never started, so what it
+    # would have dropped is not a fact about this run.
+    assert excluded == (), excluded
+
+
+def test_one_thread_in_a_band_the_journey_does_not_exclude_just_counts(tmp):
+    """The plain case the widened rule has to leave exactly as it was.
+
+    One thread in a band nobody excludes is not an ambiguity and never was;
+    this is the contrast the refusal above needs, so that a reader can see
+    the guard is about COUNT and not about the number of threads.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    rows = [{'pid': 1, 'thread': 1, 'ir': 430_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+             'cmd': 'python3 server.py'},
+            {'pid': 1, 'thread': 3, 'ir': 90_000_000,
+             'cmd': 'python3 server.py'}]
+    planted = {**threads.EXCLUDED, 'planted-journey': (threads.IMPORT,)}
+    with _journey_contract.planting(threads, EXCLUDED=planted):
+        kept, _excluded, failure = threads.total_for(rows, 'planted-journey')
+    assert failure is None, failure
+    assert kept == 430_000_000 + 90_000_000, kept
+
+
 def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
     """The reader is driven by files in callgrind's own format.
 
