@@ -73,14 +73,18 @@ ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 # because it is read from a thread's POSITION, not from a size.
 BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
 
-# What each journey stops counting, per journey, and why. The two non-MCP
+# What each journey stops counting, per journey, and why. The non-MCP
 # journeys exercise the bridge's HTTP surface and nothing of the front end's
 # event loop, so the loop's idle tick is not their work. `mcp-exec` calls
-# that loop, so its tick stays in as the named residual.
+# that loop, so its tick stays in as the named residual. The import band
+# applies to every journey, not just the ones that call a tool: the bridge
+# each of them spawns starts its own MCP listener whatever the journey asks
+# of it, so the bootstrap import thread is real in all of them.
 EXCLUDED = {
     'command-round-trip': (IMPORT, SERVE),
     'dashboard-fanout': (IMPORT, SERVE),
     'mcp-exec': (IMPORT,),
+    'screenshot': (IMPORT, SERVE),
 }
 
 
