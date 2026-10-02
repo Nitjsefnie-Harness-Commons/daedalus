@@ -37,7 +37,6 @@ FROZEN = 1000000000.0
 
 
 def _frozen_date(at):
-    """The header value the front end must emit for a frozen clock."""
     return formatdate(at, usegmt=True).encode()
 
 
@@ -106,9 +105,10 @@ def _bridge_instance(mod, created, address):
 def test_the_windows_bridge_arm_excludes_the_port(tmp):
     """The win32 bind disables reuse and takes the exclusive option first.
 
-    The module's own platform name drives the arm, so a Linux or macOS
-    runner takes the branch a Windows bridge takes.
-    """
+        The module's own platform name drives the arm, so a Linux or macOS
+        runner takes the branch a Windows bridge takes.
+
+        """
     mod = _load_server(Path(tmp) / 'win32-bridge')
     created = []
     mod.socket = _StubSocketModule(created)
@@ -127,9 +127,10 @@ def test_the_windows_bridge_arm_excludes_the_port(tmp):
 def test_the_posix_bridge_arm_keeps_the_reuse_path(tmp):
     """The non-win32 bind stays byte-for-byte the stdlib reuse bind.
 
-    Both arms are driven by the same name the Windows arm uses, so the
-    assertion holds on a Windows runner too.
-    """
+        Both arms are driven by the same name the Windows arm uses, so the
+        assertion holds on a Windows runner too.
+
+        """
     mod = _load_server(Path(tmp) / 'posix-bridge')
     created = []
     mod.WIN32 = False
@@ -142,11 +143,12 @@ def test_the_posix_bridge_arm_keeps_the_reuse_path(tmp):
 
 def test_the_posix_bridge_listener_keeps_reuse_address(tmp):
     """getsockopt on the bound socket is the only proof that survives the
-    factory: the flag is applied by the standard library inside the bind
-    the bridge overrides, so no call record of the override's own shows
-    it. Darwin reports the flag as the option's bit value (4), Linux as
-    1; zero is unset on both.
-    """
+        factory: the flag is applied by the standard library inside the bind
+        the bridge overrides, so no call record of the override's own shows
+        it. Darwin reports the flag as the option's bit value (4), Linux as
+        1; zero is unset on both.
+
+        """
     if sys.platform == 'win32':
         _util.skip('the Windows arm is pinned by the recorded binds')
     with _daedalus_env.isolated({
@@ -202,13 +204,14 @@ def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
 def test_the_armed_bridge_platform_value_matches_the_host(tmp):
     """The bridge's platform read must arm on Windows and stay off elsewhere.
 
-    Every other test here overwrites the platform name, so a corrupted
-    read — an inverted comparison, a hoisted False — would pass this whole
-    suite on Linux while silently reintroducing the defect on Windows.
-    This pin loads the module fresh and holds the read against the host,
-    which is what bites on the Windows legs. It needs no MCP dependencies,
-    so it stands on its own.
-    """
+        Every other test here overwrites the platform name, so a corrupted
+        read — an inverted comparison, a hoisted False — would pass this whole
+        suite on Linux while silently reintroducing the defect on Windows.
+        This pin loads the module fresh and holds the read against the host,
+        which is what bites on the Windows legs. It needs no MCP dependencies,
+        so it stands on its own.
+
+        """
     mod = _load_server(Path(tmp) / 'armed-bridge')
     expected = sys.platform == 'win32'
     assert mod.WIN32 == expected, (mod.WIN32, sys.platform)
@@ -265,14 +268,12 @@ def _send_http(app, headers=(), path='/mcp'):
 
 
 def _armed_timer_delays(build):
-    """Run `build(armed)` on a loop that records every timer it arms.
-
-    `await wait_for(x, 0.1)` arms a timeout the moment it is entered and a
-    wait on an Event arms none; `call_at` is where both spellings go
-    through, and `call_soon` touches neither. Recorded on the loop itself,
-    so the assertion is on a property and never on how fast the machine
-    was. Returns the coroutine's result beside the recording.
-    """
+    """Run `build(armed)` on a loop that records every timer it arms. `await
+    wait_for(x, 0.1)` arms a timeout the moment it is entered and a wait on
+    an Event arms none; `call_at` is where both spellings go through, and
+    `call_soon` touches neither. Recorded on the loop itself, so the
+    assertion is on a property and never on how fast the machine was.
+    Returns the coroutine's result beside the recording."""
     loop = asyncio.new_event_loop()
     armed = []
     original = loop.call_at
@@ -343,14 +344,17 @@ def test_serve_hands_uvicorn_a_derived_server(tmp):
     handed[0].close()
 
 
-def _idle_server(mod, config=None):
+def _idle_server(mod, config=None, date_header=True):
     """A real IdleServer on a real uvicorn config, ready to be driven."""
     import uvicorn
     if config is None:
-        config = uvicorn.Config(
-            mod.mcp.streamable_http_app(), log_level='warning')
+        config = uvicorn.Config(mod.mcp.streamable_http_app(),
+                                log_level='warning',
+                                date_header=date_header)
     config.load()
-    return mod._idle_server_class()(config)
+    server = mod._idle_server_class()(config)
+    server.refresh_default_headers()
+    return server
 
 
 def _config_with_probe_headers():
@@ -360,16 +364,23 @@ def _config_with_probe_headers():
                           headers=[('x-probe', '1')])
 
 
+def test_the_tick_omits_the_date_when_the_config_disables_it(tmp):
+    """`date_header=False` means no Date, as uvicorn's own tick reads it. The
+    other arm of `_default_headers`; every other case runs with the header
+    on."""
+    del tmp
+    server = _idle_server(_idle_front_end(), date_header=False)
+    headers = dict(server.server_state.default_headers)
+    assert set(headers) == {b'server'}, headers
+
+
 def test_the_serve_loop_parks_on_one_wait_and_arms_no_timer(tmp):
-    """No timer while idle, one wait, and a return on either exit. Stock
-    uvicorn's main_loop wakes every 0.1 s and calls on_tick on each wake. A
-    poll needs wall time to reach its first tick, so counting ticks cannot
-    separate the two loops; what the loop does while it waits can. A re-
-    waiting loop counts more than one wait, a sleep(0) spin counts none,
-    and either costs more than the poll it replaced. The exit arrives after
-    entry in the first drive and before it in the second: Server.__init__
-    reaches the setter, so the clear at entry would swallow an exit set
-    before it."""
+    """No timer while idle, one wait, and a return on either exit. A poll
+    needs wall time to reach its first tick, so counting ticks cannot
+    separate the two loops; what the loop does while it waits can. A
+    re-waiting loop counts more than one wait and a sleep(0) spin counts
+    none. The exit arrives after entry in the first drive and before it in
+    the second, which the clear at entry would otherwise swallow."""
     del tmp
     mod = _idle_front_end()
 
@@ -401,10 +412,9 @@ def test_the_serve_loop_parks_on_one_wait_and_arms_no_timer(tmp):
 
 
 def test_the_timer_recorder_sees_a_timer_when_one_is_armed(tmp):
-    """The recorder's own positive control: arm one and be seen. Without this
-    the idle assertion would pass just as happily against a recorder that
-    records nothing at all, which is the one failure mode no other control
-    here can reach."""
+    """The recorder's own positive control: arm one and be seen. Without it
+        the idle assertion passes against a recorder that records nothing.
+        the idle assertion passes against a recorder that records nothing."""
     del tmp
 
     async def drive(_armed):
@@ -416,11 +426,10 @@ def test_the_timer_recorder_sees_a_timer_when_one_is_armed(tmp):
 
 def test_a_request_refreshes_the_date_header_the_cycle_already_holds(tmp):
     """A served request re-derives the Date on the list the cycle captured.
-    uvicorn's HTTP protocols read `server_state.default_headers` at
-    RequestReceived and concatenate the object they got when the response
-    starts, so a refresh that rebinds the attribute never reaches the
-    response being written. `captured` below is that object, taken before
-    the request the way a cycle takes it."""
+        captured below is that object, taken the way a cycle takes it: the
+        protocols concatenate what they got when the response starts, so a
+        refresh that rebinds never reaches it.
+        refresh that rebinds never reaches it."""
     del tmp
     from starlette.applications import Starlette
     mod = _idle_front_end()
@@ -474,10 +483,9 @@ def test_the_tick_runs_before_the_app_reads_the_headers(tmp):
 
 def test_the_request_tick_keeps_the_list_the_cycles_captured(tmp):
     """Eleven ticks in, the bound list is still the one the cycles hold.
-    uvicorn's own `on_tick` REBINDS `server_state.default_headers` on every
-    tenth counter. Nothing rebinding it here is not enough: the rebind
-    inside `on_tick` orphans the object every in-flight cycle captured, and
-    their dates freeze at whatever that rebind wrote."""
+        uvicorn's own on_tick REBINDS default_headers on every tenth
+        counter, orphaning the object every in-flight cycle captured.
+        counter, orphaning the object every in-flight cycle captured."""
     del tmp
     mod = _idle_front_end()
     frozen = _freeze_the_front_end_clock(mod)
@@ -497,11 +505,10 @@ def test_the_request_tick_keeps_the_list_the_cycles_captured(tmp):
 
 
 def test_a_connection_refreshes_the_headers_a_parser_refusal_answers(tmp):
-    """A connection refreshes before uvicorn's parser can refuse a request. A
-    malformed request line is answered by the protocol itself, from
-    `server_state.default_headers` read live, and never reaches the
-    middleware at all. Without this the refusal's Date is as old as the
-    last request, which is the whole idle window."""
+    """A connection refreshes before uvicorn's parser can refuse a request.
+        A malformed request line is answered by the protocol itself, from
+        the cached list read live, never reaching the middleware at all.
+        the cached list read live, never reaching the middleware at all."""
     del tmp
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59985)
@@ -611,11 +618,9 @@ def test_startup_populates_the_headers_a_below_asgi_refusal_sends(tmp):
 
 
 def test_the_tick_middleware_skips_a_non_http_scope(tmp):
-    """Only an HTTP request ticks; a lifespan event must not. Starlette routes
-    every scope type through the middleware stack, so the lifespan startup
-    and shutdown this app runs on every boot would each tick — refreshing
-    the Date for no request and advancing the counter the max-requests
-    limit reads."""
+    """Only an HTTP request ticks. Starlette routes every scope type through
+        the stack, so the lifespan startup and shutdown would each tick.
+        the stack, so the lifespan startup and shutdown would each tick."""
     del tmp
     from starlette.applications import Starlette
     mod = _idle_front_end()
@@ -644,10 +649,9 @@ def test_the_tick_middleware_skips_a_non_http_scope(tmp):
 
 
 def test_the_tick_middleware_sits_outside_the_bearer_auth_middleware(tmp):
-    """The tick is on the outside of the auth middleware, and must be. A
-    refusal is a response, and a response's Date comes from the cached list
-    the tick refreshes. Read off the stack `_serve` actually built, not off
-    the order the two are added in."""
+    """The tick is on the outside of the auth middleware, and must be. Read
+    off the stack `_serve` built, not off the order the two are added in.
+    in."""
     del tmp
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59984)
@@ -663,11 +667,9 @@ def test_the_tick_middleware_sits_outside_the_bearer_auth_middleware(tmp):
 
 def test_a_refused_request_still_refreshes_the_date_header(tmp):
     """A request refused on auth answers with the Date it just refreshed. The
-    clock moves between building the app and driving the refusal, so a tick
-    that does not run on the refused path leaves the previous instant's
-    date on the list the response is assembled from. That is the whole of
-    the regression: the refusal's Date was as old as the last request the
-    front end accepted."""
+        clock moves between building the app and driving the refusal, so a
+        tick that does not run there leaves the previous instant's date.
+        tick that does not run there leaves the previous instant's date."""
     del tmp
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59986)

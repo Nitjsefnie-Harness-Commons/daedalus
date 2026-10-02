@@ -1311,6 +1311,40 @@ def test_mcp_host_and_origin_repeated_headers_are_rejected(tmp):
                     host_replies, origin_replies)
 
 
+def _refusal_date(port):
+    """The Date one parser-level refusal answers with, over a new socket."""
+    sock = socket.create_connection(('127.0.0.1', port), timeout=10)
+    try:
+        sock.sendall(b'NOT-A-REQUEST\r\n\r\n')
+        raw = b''
+        while b'\r\n\r\n' not in raw:
+            raw += sock.recv(4096)
+    finally:
+        sock.close()
+    assert raw.startswith(b'HTTP/1.1 400'), raw[:120]
+    for line in raw.split(b'\r\n'):
+        if line[:5].lower() == b'date:':
+            return line.split(b':', 1)[1].strip()
+    raise AssertionError(f'the refusal carried no Date: {raw[:200]!r}')
+
+
+def test_a_parser_refusal_carries_the_date_its_connection_refreshed(tmp):
+    """A refusal uvicorn answers itself still carries a current Date.
+
+    It never reaches the tick middleware, so the refresh that reaches it is
+    the one the connection does. Two refusals either side of a gap carry
+    different dates; without that refresh both carry the last one, however
+    long the gap. Compared as values, so nothing depends on the clock.
+    """
+    _need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+    _mod, port = _start_mcp_in_process('http://127.0.0.1:1')
+    first = _refusal_date(port)
+    time.sleep(2)
+    assert first != _refusal_date(port), first
+
+
 def test_mcp_initialize_accepts_nested_application_token_members(tmp):
     """Nested application members named token are not MCP credentials."""
     _need_deps()

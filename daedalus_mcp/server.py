@@ -217,7 +217,7 @@ def _idle_server_class():
     with a fake `uvicorn` in sys.modules, and a class defined at import time
     would bind the real one before they can.
 
-    Four uvicorn names carry rename risk, and each fails its own way.
+    Five uvicorn names carry rename risk, and each fails its own way.
     `main_loop` and `startup` are OVERRIDDEN, and an override cannot raise
     on a rename of the name it overrides: uvicorn dispatches through `self`,
     so the rename makes ours dead code and its own method runs. A renamed
@@ -230,6 +230,11 @@ def _idle_server_class():
     `if self.should_exit` never reads true and a graceful exit silently
     never happens. `on_tick` we CALL rather than override, so its rename is
     an AttributeError on the first request — the good case.
+    `config.http_protocol_class` is the silent one: a uvicorn that stopped
+    reading it in `create_protocol` and cached the class elsewhere would
+    leave this branch noticing nothing while the per-connection refresh
+    quietly stopped happening. Every other coupling here — the constructor
+    signature, the `connection_made` signature — fails loudly instead.
     """
     import uvicorn
 
