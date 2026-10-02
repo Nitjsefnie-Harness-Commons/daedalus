@@ -125,7 +125,7 @@ def _paused(client, tmp, answer):
     return refusal
 
 
-def _delivered(client, tmp, answer):
+def _the_data(client, tmp, answer):
     """The data one answer delivered, or a failure naming why not."""
     data, refusal, failure = _answered(client, tmp, answer)
     if data is None:
@@ -356,7 +356,7 @@ def test_a_delivered_200_carrying_a_limit_name_is_not_a_pause(tmp):
     such a field in it, and reading its body as a report would refuse a
     call that worked and returned exactly what it was asked for."""
     client = _client()
-    data = _delivered(client, tmp, {
+    data = _the_data(client, tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
         'body': {'data': {'viewer': {'rateLimit': {'remaining': 4999}}}}})
     assert data == {'viewer': {'rateLimit': {'remaining': 4999}}}, data
@@ -372,7 +372,7 @@ def test_a_delivered_200_with_a_limit_mention_on_stderr_is_not_a_pause(
     which is the row above this one; the delivery is the whole difference.
     """
     client = _client()
-    data = _delivered(client, tmp, {
+    data = _the_data(client, tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'body': runs_page([]),
         'stderr': 'gh: warning: rate limit remaining 12\n'})
     assert data == runs_page([])['data'], data
@@ -386,7 +386,7 @@ def test_the_last_good_request_is_not_discarded_for_its_own_reset(tmp):
     two headers on an answer that did not deliver is the pause three rows
     up; delivery is the whole difference again."""
     client = _client()
-    data = _delivered(client, tmp, {
+    data = _the_data(client, tmp, {
         'status': 200, 'exit': 0, 'stderr': '', 'body': runs_page([]),
         'headers': {'x-ratelimit-remaining': '0',
                     'x-ratelimit-reset': '1900'}})
@@ -514,7 +514,7 @@ def test_an_errors_entry_that_is_not_an_object_is_stepped_over(tmp):
     exactly and is still not the report: an `errors[]` entry is read for
     its `type` and its `code`, which are the labels the server writes."""
     client = _client()
-    data = _delivered(client, tmp, {
+    data = _the_data(client, tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
         'body': {'data': {'repository': None},
                  'errors': ['API rate limit exceeded']}})
