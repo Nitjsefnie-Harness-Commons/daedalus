@@ -26,6 +26,12 @@ from _package_layout import (  # noqa: E402
 
 ROOT = _util.ROOT
 
+# Spelled as escapes so this file stays ASCII.
+FULLWIDTH_TIMEOUT = 'ｔｉｍｅｏｕｔ'
+FULLWIDTH_BOUND = (
+    'import subprocess\n\n\ndef probe():\n'
+    f'    subprocess.run(["git", "status"], {FULLWIDTH_TIMEOUT}=30)\n')
+
 
 def _clone(root, target):
     """The one clone invocation every fixture tree comes from.
@@ -552,6 +558,24 @@ def test_the_sink_pins_the_unplaced_and_ambiguous_branches(tmp):
     del tmp
     for label, source, expected in BOUND_SITE_ROWS:
         assert bound_sites(source, label) == expected, label
+
+
+def test_a_normalised_identifier_bound_is_still_read(tmp):
+    """PEP 3131 hands the analyser ASCII `timeout` from a source that never
+    spells it, so both halves of this control must read the parse.
+
+    The first assertion is the fixture's own precondition: a bound spelled in
+    ASCII cannot tell a rule reading the source text from one reading the
+    parse. The third is why the population is every tracked Python file and
+    not a spelling filter — a text filter drops this file on its own.
+    """
+    del tmp
+    assert 'timeout' not in FULLWIDTH_BOUND, 'the fixture spells ASCII'
+    assert bound_sites(FULLWIDTH_BOUND, 'probe.py') == [
+        (5, 'git', 'timeout')], 'the analyser no longer normalises it'
+    assert in_launch_population('probe.py', FULLWIDTH_BOUND), (
+        'a file whose only bounded launch is written in normalised '
+        'identifiers fell out of the launch control population')
 
 
 def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
