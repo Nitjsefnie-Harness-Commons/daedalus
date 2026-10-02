@@ -54,6 +54,34 @@ def test_a_failed_storage_write_rejects_instead_of_resolving(tmp):
             name, outcome)
 
 
+def test_a_worker_that_never_answered_rejects_every_gm_call(tmp):
+    """A GM message the worker never received rejects, and says which way.
+
+    The relay only looked at the response object, so a sendMessage that never
+    reached a service worker -- Chrome hands the callback nothing and reports
+    it through lastError -- read as a successful call carrying no value. Every
+    handler had the same hole, so the page resolved a write it never made.
+    """
+    del tmp
+    reported = _gm_harness.run_dead_worker('lastError')
+    assert set(reported) == {
+        'getValue', 'setValue', 'deleteValue', 'listValues'}, reported
+    for name, outcome in sorted(reported.items()):
+        assert outcome == {
+            'settled': 'rejected',
+            'error': 'Could not establish connection.',
+        }, (name, outcome)
+
+    # The bare absent response is the same failure arriving from the other
+    # side, and names itself rather than reading as an empty success.
+    silent = _gm_harness.run_dead_worker('silent')
+    for name, outcome in sorted(silent.items()):
+        assert outcome == {
+            'settled': 'rejected',
+            'error': 'no response from background (service worker dead?)',
+        }, (name, outcome)
+
+
 def test_page_storage_rejects_coercible_reserved_keys(tmp):
     """GM.setValue rejects coercible reserved keys before storage is called."""
     del tmp
