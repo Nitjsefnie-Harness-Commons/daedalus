@@ -310,7 +310,10 @@ def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
     recorded = recorded_document(journeys=policy.load(ARTIFACT)['journeys'])
     unmeasured, measured = names[0], names[1:]
     kept = recorded['journeys'][unmeasured]
-    followed = {name: recorded['journeys'][name] - 1 for name in measured}
+    # A quarter off, because a tighten follows a journey down only past its
+    # own tolerance (issue 1484), and the fixture's is ten percent: a drop
+    # of one count is the journey's own spread, not a saving to record.
+    followed = {name: recorded['journeys'][name] * 3 // 4 for name in measured}
     assert kept not in followed.values(), (
         f'the count {unmeasured} keeps is one a measured journey is followed '
         'down to, so "left alone" and "followed down" are the same value and '
@@ -370,7 +373,8 @@ def test_a_tighten_that_lowered_nothing_says_so_and_writes_nothing(tmp):
                             '--tighten'])
     assert code == 0, spoken.getvalue()
     said = spoken.getvalue()
-    assert 'no journey measured below its recorded count' in said, said
+    assert 'no journey measured a drop wider than its own tolerance' in said, (
+        said)
     assert 'tightened the journey budget' not in said, (
         f'a run that lowered nothing reported a tightening: {said}')
     assert artifact.read_bytes() == before, (
