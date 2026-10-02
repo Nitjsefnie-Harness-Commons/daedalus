@@ -515,11 +515,11 @@ that is about to succeed. That empty read is a race, not evidence - never
 re-post on the strength of it. Check on your next natural touch of the issue.
 A declined claim - a closed issue, a pull request, an inexact body carrying a
 command word, or a mismatched number - answers on the issue and fails the run.
-Reaching the cap for your role - which limits how many claims you may hold at
-once - is answered too, with the role, the cap and your count, though that run
-still succeeds. A body with no command word is skipped by the trigger filter
-before the action runs, and a bot's comment is refused without answering - the
-two silences that remain.
+Reaching the cap for your role - which limits how many open issues you are
+assigned at once - is answered too, with the role, the cap and your count,
+though that run still succeeds. A body with no command word is skipped by the
+trigger filter before the action runs, and a bot's comment is refused without
+answering - the two silences that remain.
 
 **A claim lapses on its assignment age, not on your silence.** The holder's
 clock runs from when they were assigned, so a claim can expire while its holder
