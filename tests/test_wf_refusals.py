@@ -25,14 +25,12 @@ def _value_error(call):
     return None
 
 
-# A key written twice is how a workflow hides a `run:` behind a decoy, so
-# every DECODER BELOW refuses one rather than leaving a consumer to guess.
-# Not every reader does: the shipped reader decodes only `name`, `id` and
-# `uses`, so a repeated `run:` is recorded as None every time, its duplicate
-# check is skipped because the key is never a decoded one, and no consumer
-# sees either write.  One test per decoder, because a helper over all of
-# them hides which guard died; the two shared-message refusals get fixtures
-# that exclude each other.
+# A key written twice can hide a `run:` behind a decoy, so every decoder
+# below refuses one. The shipped reader is the exception: it decodes only
+# `name`, `id` and `uses`, so a repeated `run:` is recorded as None every
+# time and no consumer sees either write. One test per decoder, so a dying
+# guard names itself; the two shared-message refusals get fixtures that
+# exclude each other.
 STEP_JOB_HEAD = 'jobs:\n  sample:\n    steps:\n'
 JOB_HEAD = 'jobs:\n  sample:\n'
 DUP = 'duplicate mapping key: '

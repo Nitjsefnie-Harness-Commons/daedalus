@@ -6,6 +6,8 @@ from _repo import ROOT
 from _yamlscalar import YAMLReadError
 from _wfgraph import _tests_yml
 
+# Verbatim blocks from .github/workflows/tests.yml: the suites job's needs,
+# and the changes job's outputs.
 BLOCK_NEEDS = (
     '    needs:\n'
     '      - changes\n'
@@ -22,7 +24,6 @@ BLOCK_OUTPUTS = (
 
 
 def _real(tmp, source, name='tests.yml'):
-    """Write one workflow out and read it back as a target."""
     path = os.path.join(tmp, name)
     with open(path, 'w', encoding='utf-8', newline='') as handle:
         handle.write(source)
@@ -53,7 +54,6 @@ def _refuses(call, *args, contains=None):
 
 
 def _probe_workflow(tmp, name, source):
-    """Write one fixture workflow into a fresh workflows directory."""
     root = Path(tmp) / name
     root.mkdir(parents=True, exist_ok=True)
     (root / 'probe.yml').write_text(source, encoding='utf-8')
