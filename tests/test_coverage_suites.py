@@ -10,8 +10,10 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _coverage_launch_stubs as _launch  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    SYNTHETIC_PROCESS_START, coverage_tree)
+    OPERATOR_ASKS_FIRST, OPERATOR_FORCES, SYNTHETIC_PROCESS_START,
+    coverage_tree)
 from _repo import ROOT  # noqa: E402
 
 
@@ -655,6 +657,43 @@ def test_unterminated_suite_output_gets_a_group_separator(tmp):
     expected = ('::group::tests/test_unterminated.py\nno newline\n'
                 '::endgroup::\n')
     assert result.stdout == expected, result.stdout
+
+
+def test_a_suite_ended_at_its_bound_is_recorded_and_refuses_the_run(tmp):
+    """A suite stopped at the bound leaves its record and refuses the run."""
+    outcome = _launch.run_main(tmp, scripts={
+        'test_alpha': {'result': (0, _launch.KILLED)}})
+    _launch.assert_timed_out(outcome, _launch.KILLED)
+
+
+def test_a_forced_kill_is_told_so_and_the_other_platform_is_not(tmp):
+    """The platform the runner read picks the sentence an operator reads."""
+    outcome = _launch.run_main(tmp, platform='win32', scripts={
+        'test_alpha': {'result': (0, _launch.KILLED)}})
+    _launch.assert_timed_out(outcome, _launch.KILLED)
+    assert outcome.launch.calls[0].platform == 'win32', outcome.launch.calls
+    assert OPERATOR_FORCES in outcome.stderr, outcome.stderr
+    assert OPERATOR_ASKS_FIRST not in outcome.stderr, outcome.stderr
+
+
+def test_a_suite_that_could_not_start_is_grouped_not_fatal(tmp):
+    """A suite the launcher never started is named, not fatal to the run."""
+    outcome = _launch.run_main(
+        tmp, suites=('test_alpha.py', 'test_beta.py'),
+        scripts={'test_alpha': {'error': FileNotFoundError('no python')}})
+    _launch.assert_launch_failed(outcome, 'test_alpha.py')
+    assert ('::group::tests/test_beta.py\nmeasured\n::endgroup::\n'
+            in outcome.stdout), outcome.stdout
+
+
+def test_the_output_safety_net_asks_and_survives_a_refusal(tmp):
+    """`main()` re-arms its output and keeps going when that fails."""
+    refusal = _launch.run_main_on_streams(tmp, tty=True, error=OSError())
+    asked = _launch.run_main_on_streams(tmp, tty=True)
+    assert asked.launch.calls[0].platform == sys.platform
+    assert asked.stdout.reconfigured == [{'errors': 'replace'}], asked
+    assert refusal.stdout.reconfigured, refusal.stdout.reconfigured
+    assert refusal.status == 0, (refusal.stdout.text, refusal.stderr.text)
 
 
 raise SystemExit(_util.runner(_util.collect(dict(globals()))))
