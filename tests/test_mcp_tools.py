@@ -740,10 +740,11 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
     The near miss is a lambda the SAME call cannot fill, which is the arm
     this row is about rather than its neighbour: a lambda with a required
     parameter raises `TypeError` before it produces anything, so it
-    resolves nothing and refuses nothing. The call is what makes it that
-    arm — a lambda written without one is "lambda read in place", which
-    the walk answers differently and which this row would then be testing
-    by accident.
+    resolves nothing and refuses nothing. The zero-argument CALL after the
+    lambda is what makes it that arm — it is the shape every positive here
+    has, differing only in the signature. Without that call the row would be
+    testing "a lambda read in place", which the walk answers by the
+    call-result limit instead, and a rule that confused the two would pass.
     """
     for callee in ('(lambda: importlib.import_module)()',
                    '(lambda *a: importlib.import_module)()',
@@ -758,7 +759,7 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
     assert _composition_names(_tmp, {
         'composition.py': '\nimport importlib\n'
                           '\n\ndef load():\n'
-                          '    return (lambda a, b: importlib.import_module)'
+                          '    return (lambda a: importlib.import_module)()'
                           '("pkg.leaf")\n',
         'pkg/__init__.py': '',
         'pkg/leaf.py': 'leaf = True\n'}) == {'composition.py'}
