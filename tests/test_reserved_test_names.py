@@ -79,8 +79,7 @@ _FIXTURES = (
     '    return call(*args)\n')
 
 
-# The two owner modules every generator run needs, as the mapping
-# `_fixture_checkout` and `_planted_tree` both take. Read-only to both.
+# The two owner modules, the mapping both readers take; read-only to both.
 _OWNER_TREE = {'tests/_owner.py': _OWNER,
                'tests/_wffixtures.py': _FIXTURES}
 
@@ -149,10 +148,6 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     `tests/test_gm_transfers.py::flushMessages` three times. The equality
     is about the set, because that is what the tables key on; the count
     is about the list, because that is what a refusal prints.
-
-    It is kept rather than deleted for the day that stops being true: a
-    fixture module that is not a shared helper puts its names in the
-    union and nowhere else, and this is the statement that would notice.
     """
     del tmp
     unallowed = sorted(
@@ -167,9 +162,9 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
 def test_no_allowance_row_names_a_dead_site(tmp):
     """A row claims one LIVE site; both halves of that must hold.
 
-    Both tables: a control that reads one of a pair is a half-control. A
-    stale row is a refusal, and a row with no reason is worse, because
-    nothing tells a reader which of the two it is looking at.
+    Both tables: a control that reads one of a pair is a half-control. A stale
+    row is a refusal, and a row with no reason is worse, because nothing tells
+    a reader which of the two it is looking at.
     """
     del tmp
     for limb, table in sorted(RESIDUE_TABLES.items()):
@@ -192,8 +187,8 @@ def test_an_allowance_row_may_not_name_a_branch_added_declaration(tmp):
     """A row may not legalise a duplication the branch itself wrote.
 
     Both tables: a control that reads one of a pair is a half-control.
-    `UNREADABLE` FAILS and `IS_THE_BASE` SKIPS and prints, because a skip
-    that asserted nothing is indistinguishable from a pass.
+    `UNREADABLE` FAILS and `IS_THE_BASE` SKIPS and prints, because a skip that
+    asserted nothing is indistinguishable from a pass.
     """
     del tmp
     for label, table, read in (('py', UNCONSOLIDATED_NAMES, python_digests),
@@ -207,6 +202,15 @@ def test_an_allowance_row_may_not_name_a_branch_added_declaration(tmp):
         assert not boundary.introduced, (
             'rows excuse a declaration the base tree does not carry, so the '
             f'branch wrote it: {boundary.introduced}')
+    # A reader that never compares passes the loop above: on a clean tree
+    # the clean answer is right. `added` names one no base carries.
+    added = ('tests/test_reserved_test_names.py',
+             'test_no_allowance_row_names_a_dead_site')
+    probe = introduced_rows({added}, python_digests, ROOT)
+    if probe.reason is None:  # the loop above already pins the reason
+        assert probe.introduced == [added], (
+            'the boundary did not compare counts, so a declaration no base '
+            f'carries reads as nothing introduced: {probe.introduced}')
 
 
 def test_no_workflow_fixture_name_is_bound_outside_its_module(tmp):
@@ -289,11 +293,10 @@ def test_a_planted_fixture_collision_is_reported(tmp):
 def test_an_anchor_refuses_an_ambiguous_position(tmp):
     """A plant must name one place, or it is a coin toss.
 
-    The anchors disagree about a second occurrence and that disagreement
-    is the property: two refuse it, and `first_call_line` takes the EARLIER
-    line, a promise about order the name alone does not make. Each carries
-    its own `else`: accepting the position is a defect apart from a wrong
-    message.
+    The anchors disagree about a second occurrence and that disagreement is
+    the property: two refuse it, and `first_call_line` takes the EARLIER line,
+    a promise about order the name alone does not make. Each carries its own
+    `else`: accepting the position is a defect apart from a wrong message.
     """
     del tmp
     two = ('def _helper(tmp):\n    seed(tmp)\n    seed(tmp)\n'
@@ -372,8 +375,7 @@ def test_the_committed_set_is_what_the_rules_derive(tmp):
     """The staleness gate: the committed form is generated, never typed.
 
     A name added to or dropped from a shared helper changes what a module
-    may bind, and nothing reads the artifact until a control does, so a
-    hand-typed one is a rule nobody enforces.
+    may bind, and nothing reads the artifact until a control does.
     """
     del tmp
     policy = _contract()
