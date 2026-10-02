@@ -277,8 +277,8 @@ def _run_from_suites(suites):
     logic already reads.
     """
     runs = [run for run in (_suite_run(suite) for suite in suites) if run]
-    if not runs:
-        return None
+    # `runs` is never empty, and the `if run` below is what says so: a
+    # suite is grouped under a run only where it carried one.
     first = min(runs, key=lambda run: run.get('createdAt') or '')
     workflow = first.get('workflow') or {}
     states = [(suite.get('status') or '').upper() for suite in suites]
