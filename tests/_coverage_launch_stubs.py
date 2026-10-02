@@ -187,14 +187,18 @@ def assert_timed_out(outcome, cleanup, suite=SUITE):
     assert outcome.launch.calls[0].timeout > 0, outcome.launch.calls
 
 
-def assert_launch_failed(outcome, suite):
+def assert_launch_failed(outcome, suite, marker):
     """A suite the launcher never started, in its own group and on its own.
 
-    The sibling's own block is asserted by the caller: this half is what
-    says the failure was contained rather than skipped.
+    The marker is the caller's: it is the runner's own account of a suite
+    that did not pass, and the caller is where that sentence is spelled.
+    Asserting it here is what says the failure was COUNTED rather than
+    merely printed -- a launch failure that did not increment the tally
+    would leave every other part of this block intact.
     """
     assert outcome.status == 0, (outcome.stdout, outcome.stderr)
     failed = group(outcome, suite)
     assert failed.startswith(f'::group::tests/{suite}\nLAUNCH FAILED: '), (
         failed)
     assert 'FileNotFoundError' in failed, failed
+    assert marker in failed, failed
