@@ -7,16 +7,20 @@ Namespace stores are refused as namespace store escapes.
 FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
 namespace, planted into a real module and read one per row here. They are
 plants, not the rule's inputs: the rule answers the operation once, from
-the member set the resolver reads off types.FrameType. Three rows are the
-sole catcher of one arm each — the callee that is itself a call, the
-starred expansion, and the getattr whose name is an expression — so
-dropping one of those three arms reds the row that names it. The
-unreadable-subscript arm is pinned on both sides, by different
-controls: four rows below are the sole catchers of its refusal, and the
-real tree is the control for its exemption, since removing the
-range-and-tuple exemption refuses the eleven correct slices the CLI
-already has. The ledger in tests/_cli_arg_audit_conditions.py names the
-control for each half."""
+the member set the resolver reads off types.FrameType. Three rows are each
+the sole plant that dies with one arm — the callee that is itself a call,
+the starred expansion, and the getattr whose name is an expression — and
+test_cli_audit_refuses_every_frame_namespace_plant reads one per row, so
+removing any of the three arms reds that control on the row that names
+the arm. The starred expansion is also an escape case read by
+test_cli_audit_reports_namespace_escapes, so it is not sole among the
+controls. The unreadable-subscript arm is pinned on both sides, by
+different controls: four rows below are the sole catchers of its refusal,
+read by that same control with the refusal removed, the first of them
+'computed key, concatenation'; and the real tree is the control for its
+exemption, test_cli_audit_refuses_frame_namespaces_in_the_real_package,
+which reds on exactly the eleven correct slices the CLI already has when
+the range-and-tuple exemption is removed."""
 import argparse
 import builtins
 import contextlib
