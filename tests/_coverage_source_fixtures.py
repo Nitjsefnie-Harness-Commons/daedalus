@@ -21,7 +21,10 @@ copies the test tree and hands back the path every later write is proved
 against, so tabling it would be the checker losing sight of where a
 control writes. It is neither tabled nor local, so
 `tests/_control_writes.py` reads this file and judges that body itself,
-with the kinds each call site hands it.
+with the kinds each call site hands it. `tests/test_shared_helper_calls.py`
+holds that GUARD -- its rows, its hop bound and its refusals -- but it
+drives it through synthetic sources, so what this file's `_real_module_copy`
+reaches is pinned as guard behaviour, not as this callee's own route.
 """
 from pathlib import Path
 

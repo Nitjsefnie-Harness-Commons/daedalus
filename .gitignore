@@ -422,6 +422,7 @@
 !/tests/_token_policy_cases.py
 !/tests/_unconsolidated_js_names.py
 !/tests/_unconsolidated_names.py
+!/tests/_unjudged_scan.py
 !/tests/_upload_fixture.py
 !/tests/_util.py
 !/tests/_version_contract.py
@@ -673,6 +674,7 @@
 !/tests/test_segment_storage.py
 !/tests/test_segment_store.py
 !/tests/test_segment_write_retry.py
+!/tests/test_shared_helper_calls.py
 !/tests/test_speed_gate_jobs.py
 !/tests/test_speedharness.py
 !/tests/test_starvation_bounds.py

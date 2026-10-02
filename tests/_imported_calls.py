@@ -8,9 +8,10 @@ helper is neither, so this reads the file the import names and hands the
 callee back as a plain `ast.FunctionDef`, which is what lets the path
 proof and the write rules work on it unchanged. A hop past the bound, a
 file that will not parse, and a name the file does not define all answer
-None, so the caller keeps refusing. No control pins these claims on their
-own: `tests/test_control_writes.py` reaches this module only through the
-write side it judges.
+None, so the caller keeps refusing. Each of those refusals has its own
+control in `tests/test_shared_helper_calls.py` -- the hop bound, a helper
+that cannot be read, a name the file does not define, a cycle -- each
+reached through the guard rather than by importing this module.
 """
 import ast
 
