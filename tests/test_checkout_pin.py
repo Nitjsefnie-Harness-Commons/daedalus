@@ -323,6 +323,44 @@ def test_checkout_pin_refuses_schema_equivalent_job_keys_before_refs(tmp):
         raise AssertionError('expected schema-typed job key refusal')
 
 
+_ONE_JOBS = (
+    'name: escaped duplicate jobs\n'
+    'on: push\n'
+    'jobs:\n'
+    '  build:\n'
+    '    runs-on: ubuntu-latest\n'
+    '    steps:\n'
+    '      - run: echo one\n')
+_TWO_JOBS = (
+    '  other:\n'
+    '    runs-on: ubuntu-latest\n'
+    '    steps:\n'
+    '      - run: echo two\n')
+
+
+def test_checkout_refs_refuses_a_duplicate_jobs_behind_a_quoted_key(tmp):
+    """The duplicate check reads the DECODED key, not the spelling.
+
+    Every other duplicate-`jobs` row in the tree spells the key plainly,
+    so each one proves the check fires without proving it fires on a key
+    written some other way. These two spell it quoted and escaped -- the
+    second a hex escape, the first with no escape at all -- because a
+    reader that compared the raw text rather than the decoded scalar
+    would read both as a new key and merge two job mappings.
+    """
+    del tmp
+    for spelling in ('"jo\\x62s":', '"jobs":'):
+        workflow = _ONE_JOBS + spelling + '\n' + _TWO_JOBS
+        try:
+            _assert_checkout_refs_safe(workflow)
+        except AssertionError as error:
+            assert 'second top-level jobs mapping' in str(error), (
+                spelling, error)
+        else:
+            raise AssertionError(
+                f'a second top-level jobs spelled {spelling} was accepted')
+
+
 def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     """No checkout's `ref:` may come from a name that reads like a head.
 
