@@ -167,8 +167,12 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
     shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                  root / 'scripts' / 'ci' / 'suite_bound.py')
-    for helper in ('_util.py', '_mcp_ready.py', '_completion.py',
-                   '_teardown.py', '_log_safe_cases.py', '_child_boot_env.py'):
+    # `_util` imports `_child_ready` beside it, and `_mcp_ready` reaches it
+    # too, so a clone carrying one without the other builds a tree whose
+    # helper cannot be imported at all.
+    for helper in ('_util.py', '_mcp_ready.py', '_child_ready.py',
+                   '_completion.py', '_teardown.py', '_log_safe_cases.py',
+                   '_child_boot_env.py'):
         shutil.copy2(ROOT / 'tests' / helper, root / 'tests' / helper)
     shutil.copy2(ROOT / 'daedalus_bridge' / 'parent_watch.py',
                  root / 'daedalus_bridge' / 'parent_watch.py')
