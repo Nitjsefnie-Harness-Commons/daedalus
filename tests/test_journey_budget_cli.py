@@ -173,46 +173,124 @@ def test_a_check_with_no_measurement_file_measures_here(tmp):
         f'reads it: {written}')
 
 
-def test_a_rebaseline_keeps_the_bounds_and_keeps_a_dropped_journey_dropped(
-        tmp):
+def _dropped_document(tmp, dropped, widened, **over):
+    """A written artefact whose budget holds no count for `dropped`."""
+    document = recorded_document(tolerance_pct=0.5,
+                                 tolerances={widened: 25.0}, **over)
+    document['journeys'][dropped] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(_journey_contract.policy().render(document))
+    return artifact
+
+
+def _rebaseline_over(tmp, artifact, report, *flags):
+    """Drive the real command, and return `(code, stdout, stderr)`.
+
+    Stderr is captured as well as stdout because every refusal `run` prints
+    goes to stderr — a control that quoted only the other stream reported an
+    empty reason for a refusal it had just caused.
+    """
+    policy = _journey_contract.policy()
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(report), encoding='utf-8')
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = policy.main(['rebaseline', '--artifact', str(artifact),
+                            '--measurements', str(measurements), *flags])
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_a_rebaseline_keeps_the_bounds_it_did_not_ask_to_move(tmp):
     """What a re-baseline may move: the counts, and nothing else.
 
     Every tolerance — the default and a journey's own — is a bound a person
     set from a measured spread, so a command that carried the counts and
-    dropped them would widen every budget by a number nobody measured. And a
-    journey sized representatively and still inseparable from the shared
-    baseline is dropped DELIBERATELY, on a measurement that still counted it:
-    a re-baseline that filled the null back in would quietly reinstate a
-    budget the maintainer decided does not separate, and the next run would
-    compare a journey the artefact says nothing about.
+    dropped them would widen every budget by a number nobody measured. The
+    journey the artefact holds no count for is the manager's case and has its
+    own control below.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
     dropped, widened = names[0], names[1]
-    document = recorded_document(tolerance_pct=0.5,
-                                 tolerances={widened: 25.0})
-    document['journeys'][dropped] = None
-    artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(document))
+    artifact = _dropped_document(tmp, dropped, widened)
     report = _journey_contract.fixture_report()
-    measurements = Path(tmp) / 'counts.json'
-    measurements.write_text(json.dumps(report), encoding='utf-8')
-    spoken = io.StringIO()
-    with contextlib.redirect_stdout(spoken):
-        code = policy.main(['rebaseline', '--artifact', str(artifact),
-                            '--measurements', str(measurements)])
-    assert code == 0, spoken.getvalue()
+    code, _out, err = _rebaseline_over(
+        tmp, artifact, report, '--restore', dropped)
+    assert code == 0, err
     written = policy.load(artifact)
-    # The measurement DID count the dropped journey, which is what makes the
-    # null a decision rather than an absence of data.
-    assert report['counters']['valgrind-callgrind']['journeys'][dropped], (
-        'the fixture no longer counts the dropped journey, so this control '
-        'is not testing that a count was declined')
-    assert written['journeys'][dropped] is None, written['journeys']
     assert written['tolerance_pct'] == 0.5, written['tolerance_pct']
     assert written['tolerances'] == {widened: 25.0}, written.get('tolerances')
     assert written['journeys'][widened] == 950, written['journeys']
-    assert policy.unrecorded(written, names) == [dropped], written['journeys']
+
+
+def test_a_rebaseline_refuses_to_silently_restore_a_dropped_journey(tmp):
+    """A `null` nothing can undo is a policy hole with a green face.
+
+    The journey reports `unrecorded`, passes, and stays that way forever. So a
+    measurement that now SEPARATES it is a change of fact, and a command that
+    answered it by either restoring the count or leaving the null would be
+    choosing between two decisions without saying which. It refuses instead,
+    naming the journey and the residual that makes the question a question —
+    a residual nobody can read off "it says unrecorded".
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped = names[0]
+    artifact = _dropped_document(tmp, dropped, names[1])
+    report = _journey_contract.fixture_report()
+    row = report['counters']['valgrind-callgrind']['journeys'][dropped]
+    assert row['median'] is not None, (
+        'the fixture measures no residual for the dropped journey, so this '
+        'control is not testing the separable case')
+    code, _out, err = _rebaseline_over(tmp, artifact, report)
+    assert code != 0, (
+        'a measurement that separates the journey a re-baseline was asked to '
+        'leave alone was recorded without saying so')
+    assert dropped in err, err
+    assert str(row['median']) in err, (
+        f'the refusal must name the residual that makes it separable: {err}')
+    assert '--restore' in err, err
+    assert policy.load(artifact)['journeys'][dropped] is None, (
+        'a refused re-baseline wrote the artefact anyway')
+
+
+def test_a_restore_flag_records_only_the_journey_it_names(tmp):
+    """Restoring is explicit and per-journey, and a typo is not silent.
+
+    Two arms, and the second is the one that matters: a name the artefact
+    does not hold at `null` is refused rather than ignored, because an
+    ignored `--restore` and a misspelled one look identical from the command
+    line and only one of them does what the person meant.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped = names[0]
+    artifact = _dropped_document(tmp, dropped, names[1])
+    report = _journey_contract.fixture_report()
+
+    code, _out, err = _rebaseline_over(tmp, artifact, report,
+                                       '--restore', names[2])
+    assert code != 0, (
+        f'--restore {names[2]} named a journey the budget holds a count for, '
+        'and was ignored, so a misspelled name does the same as a correct one')
+    assert names[2] in err, err
+    assert policy.load(artifact)['journeys'][dropped] is None, (
+        'a refused re-baseline wrote the artefact anyway')
+
+    code, _out, err = _rebaseline_over(
+        tmp, artifact, report, '--restore', dropped, '--restore', names[2])
+    assert code != 0, (
+        'a correct --restore beside a wrong one was accepted, so half the '
+        f'request ran: {err}')
+    assert policy.load(artifact)['journeys'][dropped] is None, (
+        'a refused re-baseline wrote the artefact anyway')
+
+    code, _out, err = _rebaseline_over(tmp, artifact, report,
+                                       '--restore', dropped)
+    assert code == 0, err
+    written = policy.load(artifact)
+    assert written['journeys'][dropped] == 950, written['journeys']
+    assert policy.unrecorded(written, names) == [], written['journeys']
 
 
 def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
@@ -237,17 +315,15 @@ def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
     assert policy.stale(policy.load(artifact), journeys().NAMES) == [gone], (
         'the rendering did not carry the stale journey, so this control is '
         'not testing what it says it is')
-    measurements = Path(tmp) / 'counts.json'
-    measurements.write_text(
-        json.dumps(_journey_contract.fixture_report()), encoding='utf-8')
-    spoken = io.StringIO()
-    with contextlib.redirect_stdout(spoken):
-        code = policy.main(['rebaseline', '--artifact', str(artifact),
-                            '--measurements', str(measurements)])
+    # Both streams, and the reason is not decoration: every refusal `run`
+    # prints goes to stderr, so a control quoting only stdout reported an
+    # empty reason for a refusal it had just caused.
+    code, out, err = _rebaseline_over(
+        tmp, artifact, _journey_contract.fixture_report())
     assert code == 0, (
         'a re-baseline over an artefact naming a journey the set no longer '
         'has refused, so the budget cannot be re-recorded until someone '
-        f'hand-edits it: {spoken.getvalue()}')
+        f'hand-edits it: {out}{err}')
     written = policy.load(artifact)
     assert gone not in written['journeys'], written['journeys']
     assert written['tolerances'] == {}, written.get('tolerances')

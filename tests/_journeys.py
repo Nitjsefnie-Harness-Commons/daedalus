@@ -26,6 +26,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -283,6 +284,10 @@ def dashboard_fanout(base, docroot):
     del docroot
     tabs = _dashboard_tabs()
     synced = []
+    # The clock the TTL runs on, read here so the refusal below can carry
+    # the evidence rather than assert a cause. `monotonic`, because this is
+    # a DURATION and a wall clock can step.
+    started = time.monotonic()
     # /register is update-only, so the registry has to hold the tab before it
     # can publish anything, and every sync above publishes an event of its
     # own. The extension re-syncs every 30 seconds for as long as the browser
@@ -344,16 +349,28 @@ def dashboard_fanout(base, docroot):
         response.close()
         connection.close()
 
+    # The elapsed time is in the message because the CAUSE otherwise is an
+    # assertion this journey has not measured: `DAEDALUS_CMD_TTL` sweeps an
+    # event nobody was watching yet, and whether this loop spent longer than
+    # the TTL is a fact only this run knows. So the reader is handed the two
+    # numbers that decide it — the window the loop actually took, and the
+    # default it has to fit inside — rather than a sentence saying which one
+    # of them it was.
     assert len(syncs) == FANOUT_HEARTBEATS, (
         f'only {len(syncs)} of the {FANOUT_HEARTBEATS} syncs this session '
         'published were still in the queue when the window attached. Every '
-        'event is published before the subscription opens, so what removes '
-        'one in between is `DAEDALUS_CMD_TTL` (90 s by default) sweeping an '
-        'event nobody was watching yet — which is the retention the fan-out '
-        'depends on having a ceiling to. Shorten the session rather than '
-        'raise the TTL: this journey does not set it, and a count sized to '
-        'an infrastructure ceiling is the padding this journey was resized '
-        f'to remove. Saw: {[f.get("type") for f in syncs]}')
+        'event is published before the subscription opens, so the only thing '
+        f'that removes one in between is `DAEDALUS_CMD_TTL`, and publishing '
+        f'the session took {time.monotonic() - started:.1f}s against a '
+        'default of 90s'
+        + (' — OVER the ceiling, so that is the cause.'
+           if time.monotonic() - started > 90 else
+           ' — inside it, so something else took these and this message no '
+           'longer knows what.')
+        + ' Shorten the session rather than raise the TTL: this journey does '
+        'not set it, and a session sized to an infrastructure ceiling is the '
+        'padding this journey was resized to remove. Saw: '
+        f'{[f.get("type") for f in syncs]}')
     assert all(frame.get('kind') == 'event' for frame in syncs), syncs
     assert all(frame.get('count') == FANOUT_TABS for frame in syncs), syncs
     frame = frames[-1]

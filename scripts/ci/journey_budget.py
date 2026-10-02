@@ -217,6 +217,14 @@ def _parser():
                         help='a measure --out file, read and not measured '
                              'here')
     rebase.add_argument('--artifact', type=Path, default=ARTIFACT)
+    # Per-journey and repeatable, because restoring a count the budget
+    # deliberately dropped is a decision about that journey and nothing
+    # else. A flag that restored whatever it found separable would make the
+    # decision on every re-baseline of anything.
+    rebase.add_argument('--restore', action='append', default=[],
+                        metavar='JOURNEY',
+                        help='record a count for a journey the budget holds '
+                             'none for; repeatable')
     return parser
 
 
@@ -257,7 +265,8 @@ def main(argv=None):
 
         if args.command == 'rebaseline':
             return journey_rebaseline.run(
-                args.measurements, args.artifact, remedy=SHAPE_REMEDY)
+                args.measurements, args.artifact, remedy=SHAPE_REMEDY,
+                restore=args.restore)
 
         document = load(args.artifact)
         names = journey_names()
