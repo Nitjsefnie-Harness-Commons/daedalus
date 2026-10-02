@@ -211,17 +211,50 @@ def test_an_undelivered_answer_carrying_no_evidence_is_a_failure(tmp):
 # ---- the headers: an instant, and the two things that make it evidence ----
 
 def test_a_retry_after_header_is_the_instant_the_refusal_carries(tmp):
-    """A `Retry-After` is a report on its own - no spent counter beside it
-    and no limit anywhere in the body - and it counts DOWN, so the instant
-    is the clock plus the number. Stated as an exact value because a band
-    would pass on a reader that returned the wall clock, the reset beside
-    it, or half the number: all three are pauses with a different wait.
+    """A `Retry-After` is a report on its own - no spent counter beside it,
+    no reset beside it, and no limit anywhere in the body - and it counts
+    DOWN, so the instant is the clock plus the number. Driven on a 200
+    rather than a 403 because that is the status that cannot complete the
+    co-condition any other way: a reader that dropped the header fast path
+    and fell through to the spent counter beside a reset would still
+    answer this on a 403, and the short-circuit is the whole of the
+    header's own rule. The value is exact because a band would pass on a
+    reader returning the wall clock, the reset beside it, or half the
+    number: all three are pauses with a different wait.
     """
     client = _client()
     refusal = _paused(client, tmp, {
-        'status': 403, 'exit': 1, 'headers': {'Retry-After': '7'},
+        'status': 200, 'exit': 1, 'headers': {'Retry-After': '7'},
         'stderr': '', 'body': {'message': 'forbidden'}})
     assert refusal.resume_at == FROZEN + 7, refusal.resume_at
+
+
+def test_a_retry_after_the_reader_cannot_count_falls_to_the_reset(tmp):
+    """`Retry-After` is an HTTP-date as often as it is a count, and a date
+    is not something this reader can turn into a moment - so the value is
+    not read as one, and the reset beside it is. Dropping the digits
+    check instead would make `int()` raise on a legal header and answer a
+    throttled query with a loud failure; believing the date as a count
+    would wake a watcher in the past.
+
+    And the same header with no reset beside it is still a REPORT, by the
+    module's own rule that a `Retry-After` needs nothing else - it is a
+    pause that carries no instant, so the waiter falls back to its plain
+    minute. Pinning that says the date is not refused, rather than
+    refusing an answer the API called a retry.
+    """
+    client = _client()
+    dated = 'Wed, 21 Oct 2026 07:28:00 GMT'
+    refusal = _paused(client, tmp, {
+        'status': 200, 'exit': 1, 'stderr': '',
+        'headers': {'Retry-After': dated, 'x-ratelimit-reset': '1900'},
+        'body': {'message': 'forbidden'}})
+    assert refusal.resume_at == 1900.0, refusal.resume_at
+    alone = _paused(client, tmp, {
+        'status': 200, 'exit': 1, 'stderr': '',
+        'headers': {'Retry-After': dated},
+        'body': {'message': 'forbidden'}})
+    assert alone.resume_at is None, alone.resume_at
 
 
 def test_a_reset_on_its_own_is_not_evidence(tmp):
