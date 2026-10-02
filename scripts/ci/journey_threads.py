@@ -27,15 +27,26 @@ zero `.py`, zero `uvicorn`, zero `asyncio` names anywhere, because CPython
 runs every thread through the same C entry points. What IS available is
 CPython's own C symbol set, and it separates the populations cleanly.
 Measured on this box, CPython 3.13.14 under valgrind 3.24.0 with
-`--separate-threads=yes`: two threads in one process, an asyncio tick loop
-and a blocking socket worker, share 89 of their 280 and 484 distinct
-names. Unique to the loop thread and to nothing else: `TaskObj_dealloc`,
-`TaskObj_finalize`, `TaskStepMethWrapper_dealloc`, `FutureIter_iternext`,
-`FutureObj_dealloc`, `FutureObj_finalize`, `PyGen_am_send`. Unique to the
-importing worker: `import_find_and_load`, `_PyImport_RunModInitFunc`.
-`PyInit_<name>` belongs to C extension modules and the front end is pure
-Python, so the import is read from the machinery that executes a module
-body rather than from a per-module initialiser.
+`--separate-threads=yes`.
+
+The event loop, against a blocking socket worker in the same process: the
+two share 89 of their 314 and 463 distinct names, and seven appear on the
+loop thread and on no other — `TaskObj_dealloc`, `TaskObj_finalize`,
+`TaskStepMethWrapper_dealloc`, `FutureIter_iternext`, `FutureObj_dealloc`,
+`FutureObj_finalize`, `PyGen_am_send`.
+
+The front end, against a thread that imported one unrelated stdlib module
+in the same process: 305 shared names of 2,124 and 593, and 28 `PyInit_`
+initialisers on the front-end thread against 2 on the other. The front
+end's own `daedalus_mcp/*.py` files are pure Python and have no
+`PyInit_<name>` of their own, but `mcp==2.2.0` pulls pydantic v2 and
+`pydantic_core` is a compiled extension, so `PyInit_pydantic_core` is
+initialised on the thread that imported the front end and on no other
+thread in that profile — nor on the main thread, nor on the one that
+imported the unrelated module.
+
+The signature has to name the front end rather than imports in general,
+because imports in general is every request thread: see the constant.
 
 A slot's whole cost is still assigned from one role, so a signature says
 what the slot spent its life on, not which of the threads that shared it
@@ -109,15 +120,24 @@ EVENT_LOOP_SIGNATURE = (
     'TaskStepMethWrapper_dealloc',
 )
 
-# What executing a module body is made of: the import finding and loading a
-# module, and the machinery that runs an initialiser. The front end's
-# basenames cannot be named here — `daedalus_mcp/*.py` is pure Python and
-# has no `PyInit_<name>` of its own — so the signature is the machinery
-# `mcp_bootstrap` reaches it through.
-MODULE_INIT_SIGNATURE = (
-    '_PyImport_RunModInitFunc',
-    'import_find_and_load',
-)
+# What the FRONT END's import leaves on the thread that ran it.
+#
+# It has to name the front end, not imports. The front end's own modules are
+# pure Python and have no `PyInit_<name>`, but `mcp==2.2.0` pulls pydantic
+# v2, whose compiled core is a C extension: `PyInit_pydantic_core` is
+# initialised on the thread that imported `daedalus_mcp.server` and on no
+# other thread in a profile of that import beside a thread that imported
+# one unrelated stdlib module.
+#
+# The narrower of the two directions is the safe one. A signature of the
+# import MACHINERY instead — `import_find_and_load` and
+# `_PyImport_RunModInitFunc`, which any importing thread carries — claims
+# every request thread that imported anything, and the journeys that exclude
+# this role then drop the journey's own work with no refusal and no report:
+# issue 1466's own shape through the new door. A thread that missed a
+# signature is a thread that is COUNTED, which is a number that moved
+# rather than a number that lost work.
+MODULE_INIT_SIGNATURE = ('PyInit_pydantic_core',)
 
 # The table that puts a thread in a role, by role, so the artefact records
 # the one a recorded count was classified under and a run that read a

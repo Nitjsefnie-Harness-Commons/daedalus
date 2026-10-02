@@ -15,6 +15,34 @@ from _journey_contract import (  # noqa: E402
     _util,
 )
 
+# What was MEASURED on this box, spelled out here rather than read back
+# from the module that holds it. `_carries` requires every member, so
+# deleting one WIDENS a signature toward calling a request thread the role
+# it names — and a control that reads its expectation from the subject
+# cannot see that. These two tuples are the evidence the signatures are
+# allowed to be exactly.
+#
+# The first: exclusive to a thread running a CPython asyncio event loop and
+# to no other thread in a profile of an event loop and a blocking socket
+# worker. The second: exclusive to a thread that imported the MCP front end
+# and to no other thread in a profile of that import and of one unrelated
+# stdlib import.
+MEASURED_LOOP_SYMBOLS = (
+    'FutureIter_iternext',
+    'FutureObj_dealloc',
+    'FutureObj_finalize',
+    'PyGen_am_send',
+    'TaskObj_dealloc',
+    'TaskObj_finalize',
+    'TaskStepMethWrapper_dealloc',
+)
+MEASURED_FRONT_END_SYMBOLS = ('PyInit_pydantic_core',)
+# What a thread that imports ANY module carries, and what the front end's
+# import has to be told apart from. A signature of these would call every
+# request thread that imported anything the front end's import, and the
+# journeys that exclude it would drop the journey's own work.
+GENERIC_IMPORT_SYMBOLS = ('_PyImport_RunModInitFunc', 'import_find_and_load')
+
 
 def test_the_reader_collects_the_names_a_thread_declared(tmp):
     """`fn=(id) name` names a symbol; `fn=(id)` only repeats one.
@@ -68,51 +96,89 @@ def test_the_event_loop_signature_names_the_serve_thread(tmp):
     """The loop is told from what CPython runs to advance it.
 
     A profile holds no Python-level name at all, so this is the C symbol
-    set an asyncio event loop is made of, and the symbols are pinned here
-    by the ones measured on this box rather than trusted as a list.
+    set an asyncio event loop is made of, and the set is pinned to the
+    measured one member for member: a member removed from the module is a
+    member the module no longer requires, which widens the role rather
+    than narrowing it.
     """
     del tmp
     classifier = _journey_contract.threads()
-    assert 'TaskObj_dealloc' in classifier.EVENT_LOOP_SIGNATURE
-    assert 'PyGen_am_send' in classifier.EVENT_LOOP_SIGNATURE
-    assert len(classifier.EVENT_LOOP_SIGNATURE) >= 2, \
-        classifier.EVENT_LOOP_SIGNATURE
-    assert (classifier.role_of(2, frozenset(
-        classifier.EVENT_LOOP_SIGNATURE)) == classifier.SERVE)
+    assert (sorted(MEASURED_LOOP_SYMBOLS)
+            == classifier.SIGNATURES[classifier.SERVE]), \
+        classifier.SIGNATURES[classifier.SERVE]
+    assert (classifier.role_of(2, frozenset(MEASURED_LOOP_SYMBOLS))
+            == classifier.SERVE)
 
 
 def test_the_module_init_signature_names_the_import_thread(tmp):
-    """The bootstrap import is told from the machinery that runs a module.
+    """The FRONT END's import, told by a module only the front end pulls.
 
-    `daedalus_mcp/` is pure Python and has no `PyInit_<name>` of its own;
-    those belong to C extensions. What a thread that executes module
-    bodies carries is the import finding and loading a module and running
-    an initialiser, which is what this pins.
+    `daedalus_mcp/*.py` is pure Python and has no `PyInit_<name>` of its
+    own, but `mcp==2.2.0` pulls pydantic v2, whose compiled core is a C
+    extension. Measured on this box: a worker that imported
+    `daedalus_mcp.server` carries `PyInit_pydantic_core` and a worker that
+    imported one unrelated stdlib module does not, and neither does the
+    main thread.
     """
     del tmp
     classifier = _journey_contract.threads()
-    assert 'import_find_and_load' in classifier.MODULE_INIT_SIGNATURE
-    assert len(classifier.MODULE_INIT_SIGNATURE) >= 2, \
-        classifier.MODULE_INIT_SIGNATURE
-    assert (classifier.role_of(2, frozenset(
-        classifier.MODULE_INIT_SIGNATURE)) == classifier.IMPORT)
+    assert (sorted(MEASURED_FRONT_END_SYMBOLS)
+            == classifier.SIGNATURES[classifier.IMPORT]), \
+        classifier.SIGNATURES[classifier.IMPORT]
+    assert (classifier.role_of(2, frozenset(MEASURED_FRONT_END_SYMBOLS))
+            == classifier.IMPORT)
+
+
+def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
+        tmp):
+    """The finding that made the generic signature unshippable.
+
+    A request thread that imports anything at all is the thread the
+    journeys that exclude the import silently drop, and the number it
+    produces is plausible: the reviewer drove the gate and `mcp-exec`
+    answered `kept=400000000, failure=None` with 5,000 instructions of
+    journey work gone and nothing said. That is issue 1466's own shape
+    through the new door — a journey loses its own work with no refusal —
+    so the signature has to name the front end rather than imports.
+    """
+    del tmp
+    classifier = _journey_contract.threads()
+    # A COMPLETE mcp-exec profile: the main thread, the front end's own
+    # bootstrap import, and a request thread that imported something of its
+    # own. The front end's thread is there so the journey's exclusion is
+    # satisfied and the count starts, which is what makes the request
+    # thread's fate the question.
+    rows = [{'pid': 1, 'thread': 1, 'ir': 400_000_000,
+             'cmd': 'python3 server.py', 'names': frozenset()},
+            {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+             'cmd': 'python3 server.py',
+             'names': frozenset(MEASURED_FRONT_END_SYMBOLS)},
+            {'pid': 1, 'thread': 3, 'ir': 5_000,
+             'cmd': 'python3 server.py',
+             'names': frozenset(GENERIC_IMPORT_SYMBOLS)}]
+    kept, excluded, failure = classifier.total_for(rows, 'mcp-exec')
+    assert failure is None, failure
+    assert excluded == ('front-end-import',), excluded
+    assert kept == 400_000_000 + 5_000, kept
 
 
 def test_presence_is_not_exclusivity(tmp):
     """Carrying a symbol is not the role; carrying the signature is.
 
-    The symbol sets are C symbols, and a thread that touches one of them
-    once is not the thread that is defined by all of them. A classifier
-    that tested one member would call the first request thread to import
-    anything the front end's import, and drop it.
+    Driven member by member from the measured sets rather than from the
+    module's: a signature missing one member of these is a signature whose
+    role is claimed by one symbol fewer, and the role is an excluded one.
     """
     del tmp
     classifier = _journey_contract.threads()
-    loop = frozenset(classifier.EVENT_LOOP_SIGNATURE)
-    init = frozenset(classifier.MODULE_INIT_SIGNATURE)
-    assert classifier.role_of(2, {sorted(loop)[0]}) == classifier.REQUEST
-    assert classifier.role_of(2, {sorted(init)[0]}) == classifier.REQUEST
-    assert classifier.role_of(2, loop | init) == classifier.SERVE, \
+    for measured in (MEASURED_LOOP_SYMBOLS, MEASURED_FRONT_END_SYMBOLS):
+        for member in measured:
+            without = set(measured) - {member}
+            assert classifier.role_of(2, without) == classifier.REQUEST, (
+                member, without)
+    assert (classifier.role_of(
+        2, frozenset(MEASURED_LOOP_SYMBOLS) | frozenset(
+            MEASURED_FRONT_END_SYMBOLS)) == classifier.SERVE), \
         'a thread carrying both is the loop, which is the more specific'
 
 
@@ -467,10 +533,9 @@ def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
     threads = _journey_contract.threads()
     assert set(threads.SIGNATURES) == {threads.IMPORT, threads.SERVE}, \
         threads.SIGNATURES
-    for role, names in threads.SIGNATURES.items():
-        assert names == sorted(names), (role, names)
-        assert names, role
-        assert names == sorted(set(threads.SIGNATURES[role])), role
+    assert threads.SIGNATURES == {
+        threads.IMPORT: sorted(MEASURED_FRONT_END_SYMBOLS),
+        threads.SERVE: sorted(MEASURED_LOOP_SYMBOLS)}, threads.SIGNATURES
 
 
 def test_rendering_of_runs_a_journey_on_the_main_thread(tmp):
