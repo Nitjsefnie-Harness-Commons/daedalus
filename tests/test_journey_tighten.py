@@ -406,16 +406,20 @@ def _drive_push(work, refuse, change=True):
     # with nothing to commit on every leg.
     if change:
         (work / 'ratcheted.json').write_text('{"n": 1}\n', encoding='utf-8')
-    env = dict(os.environ,
-               HOME=str(work.parent / 'home'),
-               REPO='o/r',
-               RATCHET_SSH_KEY='not-a-real-key')
     summary = work.parent / 'summary.md'
-    env['GITHUB_STEP_SUMMARY'] = str(summary)
+    # The declaration is at the launch rather than at a name: this helper
+    # gives every test its own HOME and its own summary path, and a
+    # module-level environment could carry neither.
     return subprocess.run(
         [sys.executable, str(PUSH), 'ratcheted.json',
          'ci: tighten the journey budget'],
-        cwd=str(work), capture_output=True, text=True, env=env), summary
+        cwd=str(work), capture_output=True, text=True,
+        env=_util.child_coverage('scrub', dict(
+            os.environ,
+            HOME=str(work.parent / 'home'),
+            REPO='o/r',
+            RATCHET_SSH_KEY='not-a-real-key',
+            GITHUB_STEP_SUMMARY=str(summary)))), summary
 
 
 def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
