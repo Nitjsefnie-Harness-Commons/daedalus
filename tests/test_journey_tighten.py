@@ -421,6 +421,86 @@ def test_a_recorded_gate_that_moved_tightens_nothing_and_succeeds(tmp):
     del names
 
 
+def _rebaseline_over(report, tmp):
+    """Drive the real rebaseline and report what it did to the artefact.
+
+    Returns `(code, wrote, said)`. `wrote` is read off the bytes rather than
+    off the exit status, because a refusal that wrote anyway is exactly the
+    case an exit code alone would hide.
+    """
+    policy = _journey_contract.policy()
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(report), encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['rebaseline', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    return code, artifact.read_bytes() != before, spoken.getvalue()
+
+
+def _assert_refused(report, tmp, what):
+    """A measurement this incomplete must leave the artefact untouched.
+
+    Each of these three refusals was planted out in turn and each one WROTE
+    an artefact with exit 0 and no output at all: `_validated` accepts the
+    result, so the incompleteness travelled into the committed baseline
+    rather than stopping the run. The damage is downstream — a count of
+    `null` compares as nothing, an empty toolchain reads as a match
+    against every measured value — which is why each gets its own case
+    rather than one over all three.
+    """
+    code, wrote, said = _rebaseline_over(report, tmp)
+    assert not wrote, (
+        f'{what} was recorded anyway, so the committed budget now describes '
+        f'a measurement that was never made: {said}')
+    assert code != 0, (
+        f'{what} left the artefact byte-identical and still reported '
+        f'success, so the refusal is doing nothing a reader can see: {said}')
+
+
+def test_a_measurement_with_no_count_for_a_journey_is_not_recorded(tmp):
+    """A journey with no count records nothing, rather than a null.
+
+    `violations()` and `tightened()` both skip a null recorded count, so a
+    `null` in the journeys map is a budget that compares nothing — the
+    budget going inert rather than a run going red.
+    """
+    report = _journey_contract.fixture_report()
+    report['counters']['valgrind-callgrind']['journeys'].pop(
+        journeys().NAMES[0])
+    _assert_refused(report, tmp, 'a journey with no count')
+
+
+def test_a_measurement_with_no_toolchain_is_not_recorded(tmp):
+    """An empty toolchain records nothing.
+
+    `_validated` accepts an all-null toolchain, so this one reaches the
+    artefact rather than being caught on the way: every field then reads as
+    a match against whatever the next run measures, and no count is ever
+    compared against a recorded one again.
+    """
+    report = _journey_contract.fixture_report()
+    report['toolchain'] = {}
+    _assert_refused(report, tmp, 'a measurement with no toolchain identity')
+
+
+def test_a_measurement_missing_a_journeys_threads_is_not_recorded(tmp):
+    """A journey whose excluded threads go unrecorded records nothing.
+
+    A count that drops a background thread means something the count alone
+    cannot say, so `excluded_threads` is what says it. Writing a document
+    without that for one journey leaves the count looking comparable to
+    every other run's, which is the comparison the field exists to refuse.
+    """
+    report = _journey_contract.fixture_report()
+    report['excluded_threads'].pop(journeys().NAMES[0])
+    _assert_refused(report, tmp,
+                    'a measurement that excludes no thread for one journey')
+
+
 def test_rounds_that_disagree_about_a_sha_are_not_rebaselined_over(tmp):
     """A re-baseline records a journey's rendering, so it may only record one
     the rounds agreed on.
