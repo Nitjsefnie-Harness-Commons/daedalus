@@ -81,15 +81,15 @@ sha_diff = journey_artifact.sha_diff
 _validated = journey_artifact._validated  # noqa: SLF001
 
 # What each gate says when it refuses lives in the module that renders a
-# run's prose, bound back here because the gates below are what print it.
+# run's prose. The four below are the ones THIS module prints, beside the
+# row that reports them. The recorded-gate remedies are not re-bound here:
+# they travel with the gate they belong to, out of `journey_gates`, which is
+# what prints them — and a binding nothing reads is a second name for a
+# string that can move without anything noticing.
 OVER_REMEDY = journey_report.OVER_REMEDY
 SHAPE_REMEDY = journey_report.SHAPE_REMEDY
 UNMEASURED_REMEDY = journey_report.UNMEASURED_REMEDY
 UNRESOLVED_REMEDY = journey_report.UNRESOLVED_REMEDY
-TOOLCHAIN_REMEDY = journey_report.TOOLCHAIN_REMEDY
-SHA_REMEDY = journey_report.SHA_REMEDY
-SIGNATURES_REMEDY = journey_report.SIGNATURES_REMEDY
-THREADS_REMEDY = journey_report.THREADS_REMEDY
 REMEDY_FOR = journey_report.REMEDY_FOR
 
 # What DECIDES lives in `journey_gates.py` — the recorded comparisons, the
