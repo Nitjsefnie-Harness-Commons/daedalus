@@ -113,6 +113,9 @@ const chrome = {
       const tabId = target.tabId;
       detachCalls.push(tabId);
       order.push('detach:' + tabId);
+      // Chrome's `detach` returns a promise, but the CALL can fail before
+      // it returns one, and only a double that is not `async` can throw.
+      if (spec.detachThrows) throw new Error('detach threw');
       if (spec.detachFails) {
         return Promise.reject(new Error('detach refused'));
       }

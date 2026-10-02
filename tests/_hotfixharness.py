@@ -128,7 +128,8 @@ function openContentFrame(doc) {
   const context = vm.createContext({
     window: { addEventListener() {}, postMessage() {} },
     document: {
-      documentElement: doc.documentElement,
+      documentElement: spec.documentElementDeferred ? null
+                                            : doc.documentElement,
       addEventListener(type, listener) {
         if (type === 'DOMContentLoaded') doc.onReady = listener;
       },
@@ -169,9 +170,16 @@ function openContentFrame(doc) {
     fs.readFileSync(contentPath, 'utf8'), context,
     { filename: contentPath });
   // A document that found no documentElement at document_start defers its
-  // whole replay to DOMContentLoaded, so the harness fires that too rather
-  // than leaving the case with no request at all.
-  if (doc.onReady) doc.onReady();
+  // whole replay to DOMContentLoaded, so the harness grows the root and
+  // fires that too rather than leaving the case with no request at all.
+  // What the first pass sent is kept, because "deferred" and "asked on
+  // nothing" are the two answers the deferral is told apart by, and a
+  // document that registered no listener reports nothing here.
+  if (doc.onReady) {
+    doc.askedBeforeReady = messages.map((message) => message.type);
+    context.document.documentElement = doc.documentElement;
+    doc.onReady();
+  }
   doc.messages = messages;
   doc.answers = answers;
   doc.frameListeners = listeners;
@@ -618,6 +626,11 @@ async function waitFor(predicate) {
     // Chrome delivered the content script's callback with `lastError` set.
     answered: spec.ask === false ? null : asker.answered,
     asker: { id: asker.id, url: asker.url },
+    // What each document's content script had already sent when it
+    // registered a DOMContentLoaded listener, and null for the documents
+    // that found a root on the first pass and never needed one.
+    askedBeforeReady: Object.fromEntries(documents.map((doc) => [doc.id,
+      doc.askedBeforeReady === undefined ? null : doc.askedBeforeReady])),
     current: currentDocument ? currentDocument.id : null,
     documentUrls: Object.fromEntries(
       documents.map((doc) => [doc.id, doc.url])),

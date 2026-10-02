@@ -236,6 +236,43 @@ def test_a_plain_http_page_mints_a_token_without_crypto_randomuuid(tmp):
     assert not _errors(positive), positive
 
 
+def test_a_document_with_no_root_defers_its_replay_to_the_dom_being_ready(
+        tmp):
+    """The `document_start` arm, which no double reaches.
+
+    A content script is injected before the document has a root element, so
+    `document.documentElement` is null and there is nothing to plant a token
+    into. The shipped producer defers its whole replay to `DOMContentLoaded`
+    rather than skipping it, and every other double in the tree hands it a
+    truthy root from the first evaluation — so this is the only place that
+    deferral is reached at all.
+
+    The sequence is the whole claim, so both halves are asserted: the first
+    pass asked the background for nothing but `register`, the script's own
+    boot message, and registered the listener; and the pass the event fires
+    plants the token and sends the request. A producer that dropped the
+    deferral raises at load instead, and one that asked without a root would
+    send a request carrying no token at all.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [SITE],
+        'current': 0,
+        'asker': 0,
+        'documentElementDeferred': True,
+        'fixes': [{'id': 'fix1', 'code': FIX}],
+    })
+    # Nothing about the replay went out before the root existed — the
+    # listener registered instead, which is the only other thing that pass
+    # did, and `null` for a document that never registered one.
+    assert outcome['askedBeforeReady'] == {'doc-1': ['register']}, outcome
+    # The deferred pass had a root: it planted the token it minted and asked
+    # for the replay, and that request is the one the worker answered.
+    assert outcome['minted']['doc-1'] is not None, outcome
+    assert _delivered(outcome) == {'doc-1': ['fix1']}, outcome
+    assert not _errors(outcome), outcome
+
+
 def test_the_content_script_takes_its_token_back_out_when_the_worker_answers(
         tmp):
     """M4: the answer is what runs the content script's cleanup.
