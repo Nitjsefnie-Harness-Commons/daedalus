@@ -51,9 +51,11 @@ FROZEN = 1000.0
 def _client(tmp, answer, gate=False):
     """The real module, and the fake `gh` it will read one answer from.
 
-    Keyed on the selection rather than on the whole query, so a query
-    that asked for something else finds no fixture and is refused -
-    which is what keeps a control honest about the query it is driving.
+    Keyed on the selection, not on the whole query: a query that stopped
+    asking for check runs finds no fixture and is refused. That is the
+    width of it - the key is a substring of the request, so a query that
+    kept `checkRuns` and dropped `checkSuites` would still match, and
+    presence is not exclusivity.
     """
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: answer}, gate=gate)
     return _util.load(SKILL / 'gh_client.py', 'gh_client_answers'), fake
@@ -72,11 +74,22 @@ def _answered(client, fake, variables=None, env=None):
     below.
     """
     with fake.activate():
+        before = {name: os.environ.get(name) for name in (env or {})}
         os.environ.update(env or {})
         try:
             return client.graphql(client.RUNS_QUERY, variables), None
         except client.QueryError as failure:
             return None, failure
+        finally:
+            # Only the activation's own names were ever restored; an `env`
+            # key outside them would otherwise stand for the rest of the
+            # process, and the row after this one would read an
+            # environment it never asked for.
+            for name, value in before.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
 
 def _failed(client, fake, variables=None, env=None):
@@ -135,6 +148,19 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
     assert client._parse(
         'HTTP/2.0 200 OK\r\nx-ratelimit-remaining: 4999\r\n\r\n{"data": {}}'
     ) == (200, {'x-ratelimit-remaining': '4999'}, '{"data": {}}')
+
+    # The reason the parser reads line by line, and the only one of its
+    # two fixtures that names it: a re-translated ending carries TWO
+    # `\r`s, so the line after the status line is a blank one where a
+    # reader that split on the blank-line byte pair would have cut the
+    # block in half. The single `\r` above is an ordinary CRLF response
+    # and the two splits agree on it, so it cannot tell the readers
+    # apart; this one can, and this is what fails if they are confused.
+    doubled = 'HTTP/2.0 200 OK\r\r\nx-ratelimit-remaining: 4999\r\r\n\r\r\n'
+    doubled += '{"data": {}}'
+    assert client._parse(doubled) == (
+        200, {'x-ratelimit-remaining': '4999'}, '{"data": {}}'
+    )
 
 
 def test_a_gh_that_cannot_be_launched_is_a_failure(tmp):

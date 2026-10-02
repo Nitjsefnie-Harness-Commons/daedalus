@@ -178,7 +178,10 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
     watcher child is spawned with the environment it is to run under;
     a reader that merged the caller's over this process's own would hand
     every child this process's variables, which is the opposite of what
-    a caller that named one asked for.
+    a caller that named one asked for. So the read-back is two-sided and
+    the environment it names is minimal: passing this process's own and
+    reading back the one name added to it would say nothing, because
+    the reader that merged carries that name too.
     """
     client = _client()
     report = [sys.executable, '-c', REPORT]
@@ -207,14 +210,19 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
         # is what proves the child received a descriptor it could read.
         assert not _still_open(handed), handed
 
+    # Two names read back from one child, and the second is the one the
+    # docstring above is about. `PATH` is in this process's environment
+    # on every platform this suite runs on, and the child is started
+    # with an absolute interpreter, so it never needs to look one up.
+    probe = ('import os,sys; sys.stdout.write('
+             'os.environ.get("DAEDALUS_MARK", "unset") + "|" + ('
+             '"inherited" if "PATH" in os.environ else "clean"))')
     marked, write_fd = client.spawn_watched(
-        [sys.executable, '-c',
-         'import os,sys; sys.stdout.write(os.environ.get('
-         '"DAEDALUS_MARK", "unset"))'],
-        env=dict(os.environ, DAEDALUS_MARK='set'),
+        [sys.executable, '-c', probe],
+        env={'DAEDALUS_MARK': 'set'},
         stdout=subprocess.PIPE, text=True)
     try:
-        assert marked.communicate(timeout=LIFETIME)[0] == 'set'
+        assert marked.communicate(timeout=LIFETIME)[0] == 'set|clean'
     finally:
         os.close(write_fd)
         _ended(marked)
