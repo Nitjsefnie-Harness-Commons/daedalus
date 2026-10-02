@@ -78,6 +78,20 @@ def _run_main(tmp, *args):
     return status, out.getvalue()
 
 
+@contextlib.contextmanager
+def _coverage_file(path):
+    """Point the coverage data-file name at `path` for one block."""
+    previous = os.environ.get('COVERAGE_FILE')
+    os.environ['COVERAGE_FILE'] = str(path)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop('COVERAGE_FILE', None)
+        else:
+            os.environ['COVERAGE_FILE'] = previous
+
+
 def _both_reports(tmp):
     """Write one report per language and return their CLI arguments."""
     coverage_xml = _written_file(tmp, 'coverage.xml', _PYTHON_XML)
@@ -327,6 +341,33 @@ def test_a_report_measuring_no_language_gets_a_distinct_sentence(tmp):
 
     assert _NO_LANGUAGE_NOTE in body, body
     assert 'Only the  report' not in body, body
+
+
+def test_the_reporter_never_opens_the_configured_data_file(tmp):
+    """No coverage data is read here, so no data file may be touched.
+
+    `analysis2` opens — and creates — whatever data file the configuration
+    names, though the reporter uses the analyzer only as the oracle for
+    which added lines are executable statements. A run whose name points
+    at the file the measuring collector already holds therefore collides
+    with it, which is how the windows-latest coverage leg died with
+    WinError 32. The name here points at a path that does not exist, and
+    what is asserted is the contract rather than the symptom: the run
+    leaves it alone, on every platform.
+    """
+    package = Path(tmp) / 'pkg'
+    package.mkdir()
+    _written_file(package, 'mod.py', 'one = 1\n')
+    diff = _written_file(tmp, 'patch.diff',
+                         '--- a/pkg/mod.py\n'
+                         '+++ b/pkg/mod.py\n'
+                         '@@ -0,0 +1 @@\n'
+                         '+one = 1\n')
+    data_file = Path(tmp) / 'configured-coverage-data'
+    with _coverage_file(data_file):
+        status, out = _run_main(tmp, *_both_reports(tmp), '--diff', str(diff))
+    assert status == 0, (status, out)
+    assert not data_file.exists(), data_file
 
 
 if __name__ == '__main__':
