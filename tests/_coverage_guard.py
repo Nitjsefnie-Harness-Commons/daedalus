@@ -102,6 +102,11 @@ _KEEP_ALLOWLIST = frozenset({
     'tests/test_version_contract.py::test_check_versions_detects_drift',
     'tests/test_version_contract.py::'
     'test_check_versions_sites_all_present_in_copy',
+    # ratchet_push.py IS the subject of these launch probes: its behaviour is
+    # pinned by running it against a real repository, so scrubbing the
+    # collector would report zero coverage of the one file the controls
+    # exist to measure.
+    'tests/test_ratchet_push.py::_drive_push',
 })
 
 

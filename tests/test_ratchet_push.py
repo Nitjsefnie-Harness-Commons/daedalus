@@ -56,7 +56,11 @@ def _push_repo(base, remote_at=None):
     push and the fetch then fail against a remote that cannot answer, which
     is the transient failure the recovery branch must not read as movement.
     """
-    work, bare = Path(base) / 'work', Path(base) / 'bare.git'
+    # Under a `tree` component: pyproject maps `*/tree` back onto this
+    # repository, which is what `child_coverage('keep')' proves at
+    # runtime before it retains the collector.
+    root = Path(base) / 'tree'
+    work, bare = root / 'work', root / 'bare.git'
     bare.mkdir(parents=True)
     _git(bare, 'init', '--quiet', '--bare', '-b', 'main')
     work.mkdir()
@@ -108,12 +112,12 @@ def _drive_push(work, refuse, change=True):
         [sys.executable, str(PUSH), 'ratcheted.json',
          'ci: tighten the journey budget'],
         cwd=str(work), capture_output=True, text=True,
-        env=_util.child_coverage('scrub', dict(
+        env=_util.child_coverage('keep', dict(
             os.environ,
             HOME=str(work.parent / 'home'),
             REPO='o/r',
             RATCHET_SSH_KEY='not-a-real-key',
-            GITHUB_STEP_SUMMARY=str(summary)))), summary
+            GITHUB_STEP_SUMMARY=str(summary)), cwd=work)), summary
 
 
 def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
