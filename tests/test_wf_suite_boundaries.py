@@ -139,7 +139,8 @@ def test_shared_workflow_fixtures_are_bound_only_in_their_module(tmp):
     """
     del tmp
     shared = frozenset((
-        'BLOCK_NEEDS', 'BLOCK_OUTPUTS', '_real', '_replaced', '_refuses'))
+        'BLOCK_NEEDS', 'BLOCK_OUTPUTS', '_real', '_replaced', '_refuses',
+        '_value_error'))
     named = subprocess.run(
         ['git', 'ls-files', 'tests/*.py'], cwd=ROOT, capture_output=True,
         text=True, check=True).stdout.splitlines()

@@ -21,6 +21,7 @@ from _ci_publisher import (  # noqa: E402
     seed_publisher_tree as _seed_publisher_tree)
 from _ghexpr import evaluate_if  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wffixtures import _value_error  # noqa: E402
 from _workflowrun import run_step  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -75,14 +76,6 @@ def _run_ratchet(tmp, language, measured, thresholds_path):
         [sys.executable, str(RATCHET_PATH), '--language', language,
          '--measured', str(measured), '--thresholds', str(thresholds_path)],
         cwd=str(ROOT), capture_output=True, text=True, timeout=60)
-
-
-def _value_error(call):
-    try:
-        call()
-    except ValueError as error:
-        return str(error)
-    return None
 
 
 # Package-import entry points, and nothing else: a name earns a row by

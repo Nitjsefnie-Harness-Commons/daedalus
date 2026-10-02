@@ -790,6 +790,7 @@
     "_unresolved_dict": {"python": ["tests/_binding_assertions.py"]},
     "_unwrap": {"python": ["tests/_ghexpr.py"]},
     "_update_builtin_bindings": {"python": ["tests/_cli_arg_audit_resolver.py"]},
+    "_value_error": {"python": ["tests/_wffixtures.py"], "fixture": ["tests/_wffixtures.py"]},
     "_value_extent": {"python": ["tests/_yamlsteps.py"]},
     "_value_preserving_cases": {"python": ["tests/_carrier_cases.py"]},
     "_vanish_during_read": {"python": ["tests/_cmdqueue_faults.py"]},

@@ -4,7 +4,7 @@ The re-implementation limb is every name a module under `tests/_*.py`
 binds at module-execution scope as a `def`, an `async def` or a `class`,
 plus every `function` it declares inside a string constant at or above
 `JS_FLOOR`. `tests/test_wf_suite_boundaries.py` owns the
-module-level bindings of `tests/_wffixtures.py`, five names it hardcodes
+module-level bindings of `tests/_wffixtures.py`, six names it hardcodes
 because the rule is stated over them rather than derived.
 
 Nothing joins the two, so a name a shared helper owns is invisible to the
@@ -23,7 +23,7 @@ sides: a one-line `function f` in a helper is not a name a module may
 not bind, and how many helper declarations sit below the floor is a
 figure to measure rather than a number to repeat here.
 
-THE FIXTURE LIMB IS A BIND, NOT A DEFINITION. Two of the five
+THE FIXTURE LIMB IS A BIND, NOT A DEFINITION. Two of the six
 (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are assignments, so the re-implementation
 rule cannot own them however they are read; the fixture rule can, and
 this module reads them with `scan` for that reason.
