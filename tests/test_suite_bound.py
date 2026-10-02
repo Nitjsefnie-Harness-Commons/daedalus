@@ -26,7 +26,8 @@ from _coverage_suite_fixture import (  # noqa: E402
 from _processtree import taskkill_argv  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
-    GROUP, TINY_BOUND_S, Child, Clock, Platform, Signals, Spawns, swapped)
+    GROUP, TINY_BOUND_S, Child, Clock, Platform, Signals, Spawns,
+    require_sigkill, swapped)
 
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                          'suite_bound_under_test')
@@ -76,8 +77,7 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 child = subprocess.Popen(
     [sys.executable, '-c',
      'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN);'
-     ' time.sleep(120)'],
-    stdin=subprocess.DEVNULL)
+     ' time.sleep(120)'], stdin=subprocess.DEVNULL)
 (root / 'grandchild.pid').write_text(str(child.pid), encoding='ascii')
 print('wedged suite reached its own body', flush=True)
 time.sleep(120)
@@ -93,8 +93,7 @@ time.sleep(120)
 # drift this issue is about. The suite's own sleep is a multiple of it, so
 # the bound is what ends the run on any machine: no assertion anywhere
 # below reads a wall clock.
-_WEDGE_BOUND_S = max(1, round(
-    SUITE_BOUND.DEFAULT_SUITE_TIMEOUT_S * 0.002))
+_WEDGE_BOUND_S = max(1, round(SUITE_BOUND.DEFAULT_SUITE_TIMEOUT_S * 0.002))
 # This control's own ceiling, derived from the bound it observes so the two
 # cannot drift into one another, and INDEPENDENT of it: the bound under
 # test cannot also be what ends the control that proves it, or a launcher
@@ -545,8 +544,7 @@ def test_a_request_that_never_went_out_is_the_whole_record(tmp):
     """Nothing was signalled, so nothing after the request may be claimed."""
     del tmp
     for error, expected in (
-            (ProcessLookupError(),
-             f'process group {GROUP} was already gone'),
+            (ProcessLookupError(), f'process group {GROUP} was already gone'),
             (OSError('denied'), 'process-group SIGTERM failed: denied')):
         child = Child()
         signals = Signals(killpg_errors={signal.SIGTERM: error})
@@ -560,6 +558,7 @@ def test_a_request_that_never_went_out_is_the_whole_record(tmp):
 def test_a_suite_that_ignored_the_request_reports_the_escalation_it_lost(tmp):
     """The grace ran out, and the escalation did not go out either."""
     del tmp
+    require_sigkill()
     clock = Clock()
     signals = Signals(killpg_errors={signal.SIGKILL: ProcessLookupError()})
     with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals, time=clock):
@@ -633,6 +632,7 @@ def _launch(argv, tmp):
 
 def test_a_suite_that_overruns_is_stopped_then_reaped_and_both_are_named(tmp):
     """The bound expired: the tree is ended, then the child is collected."""
+    require_sigkill()
     child = Child(wait_errors=[
         subprocess.TimeoutExpired('suite', TINY_BOUND_S)])
     spawns = Spawns(child=child)
@@ -676,6 +676,7 @@ def test_a_reap_that_did_not_happen_is_named_by_why(tmp):
 
 def test_an_interrupt_around_the_launch_still_ends_and_reaps_the_child(tmp):
     """The spawn is inside the guard, so the teardown has to run anyway."""
+    require_sigkill()
     child = Child(running=True, stops_after=1, wait_errors=[
         KeyboardInterrupt, OSError('the child could not be collected')])
     spawns = Spawns(child=child)

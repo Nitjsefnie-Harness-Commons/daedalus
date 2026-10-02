@@ -1215,6 +1215,7 @@
     "require_case_sensitive": {"python": ["tests/_case_fold.py"]},
     "require_node": {"python": ["tests/_stream_fake.py"]},
     "require_second_name": {"python": ["tests/_case_fold.py"]},
+    "require_sigkill": {"python": ["tests/_suite_bound_stubs.py"]},
     "require_undecodable_names": {"python": ["tests/_util.py"]},
     "reserved": {"python": ["tests/_reserved_names.py"]},
     "reset": {"javascript": ["tests/_gm_harness.py"]},
