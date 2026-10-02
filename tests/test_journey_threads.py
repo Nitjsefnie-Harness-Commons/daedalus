@@ -184,16 +184,16 @@ def test_an_extension_that_is_not_installed_is_a_refusal_naming_it(tmp):
     """
     del tmp
     import importlib.util
-    import types
 
     def unimportable(_name):
         raise ImportError(f'No module named {_name!r}')
 
     def fileless(_name):
-        # Only `.origin` is read, so a stand-in is the whole stand-in the
-        # answer needs — and it keeps the answer's type out of the type
-        # ratchet for a fixture that exists to be refused.
-        return types.SimpleNamespace(origin=None)
+        # A namespace portion, which is what `find_spec` really answers for
+        # one. A stand-in carrying only a falsy `.origin` failed on the
+        # other conjunct, which left the `is not None` half of the guard
+        # undriven and the limb that has to refuse a bare None with it.
+        return None
 
     for planted, why in ((unimportable, 'cannot be imported'),
                          (fileless, 'resolves to no file')):
