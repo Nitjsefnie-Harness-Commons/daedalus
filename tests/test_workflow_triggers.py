@@ -13,6 +13,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _workflows import (  # noqa: E402
     _event_option_keys, _workflow_path_filters, _workflow_triggers)
+from _yamlread import step_scalar  # noqa: E402
 
 
 def _assert_no_workflow_gates_one_commit_twice(workflows):
@@ -335,6 +336,153 @@ def test_workflow_trigger_filters_accept_string_pairs_and_opposite_quotes(tmp):
             assert 'control.yml' in str(failure), failure
         else:
             raise AssertionError(f'{name}: unsupported quote was accepted')
+
+
+def test_duplicate_branches_option_is_refused(tmp):
+    """A repeated `branches:` is refused rather than read last-wins."""
+    del tmp
+    content = ('name: control\n\non:\n  push:\n'
+               '    branches: [main]\n    branches: [release]\n')
+    try:
+        triggers = _workflow_triggers(content, 'control.yml')
+        _workflow_path_filters(triggers['push'], 'control.yml')
+    except AssertionError as failure:
+        assert 'duplicate event option' in str(failure), failure
+    else:
+        raise AssertionError('a duplicate branches option was accepted')
+
+
+def test_duplicate_paths_ignore_option_is_refused(tmp):
+    """A repeated `paths-ignore:` is refused rather than read last-wins."""
+    del tmp
+    content = ('name: control\n\non:\n  push:\n'
+               '    paths-ignore: [docs/**]\n'
+               '    paths-ignore: [.github/**]\n')
+    try:
+        triggers = _workflow_triggers(content, 'control.yml')
+        _workflow_path_filters(triggers['push'], 'control.yml')
+    except AssertionError as failure:
+        assert 'duplicate event option' in str(failure), failure
+    else:
+        raise AssertionError('a duplicate paths-ignore option was accepted')
+
+
+def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
+    """A key below the option indent is not one of the event's options."""
+    del tmp
+    content = ('name: control\n\non:\n  push:\n'
+               '    paths:\n      - src/**\n'
+               '    types:\n'
+               '      branches: [main]\n      branches: [release]\n')
+    triggers = _workflow_triggers(content, 'control.yml')
+    assert _workflow_path_filters(triggers['push'], 'control.yml') == {
+        'paths': ['src/**']}, triggers['push']
+
+
+def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
+    """A coverage gate runs only on a measurement that finished."""
+    del tmp
+    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    measured = "${{ !cancelled() && steps.measure.conclusion == 'success' }}"
+    expected_by_step = (
+        ('Python coverage summary', measured),
+        ('Python coverage gate', measured),
+        ('JavaScript coverage summary', measured),
+        ('JavaScript coverage gate', measured),
+        ('JavaScript per-module coverage gate', measured),
+        ('Upload coverage XML', measured),
+        ('Work out the raise this run justifies',
+         "${{ !cancelled() && steps.measure.conclusion == 'success'"
+         " && github.event_name == 'push'"
+         " && github.ref == 'refs/heads/main' }}"),
+    )
+    for step, expected in expected_by_step:
+        actual = step_scalar(tests_yml, 'coverage', step, 'if')
+        assert actual == expected, f'{step}: {actual!r}'
+
+
+def test_the_ratchet_is_only_committed_when_it_changed(tmp):
+    """The job writes its own calibration file; only a real change is one."""
+    del tmp
+    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    actual = step_scalar(tests_yml, 'coverage', 'Commit the raise', 'if')
+    assert actual == (
+        "${{ !cancelled() && steps.ratchet.outputs.changed == 'true'"
+        " && env.RATCHET_SSH_KEY != '' }}"), (
+            f'coverage/Commit the raise: {actual!r}')
+
+
+def test_the_audit_is_gated_on_a_successful_install(tmp):
+    """The audit runs only where the tool it needs actually installed."""
+    del tmp
+    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    actual = step_scalar(tests_yml, 'actionlint', 'zizmor', 'if')
+    assert actual == (
+        "${{ !cancelled() && steps.install_zizmor.outcome == 'success' }}"), (
+            f'actionlint/zizmor: {actual!r}')
+
+
+def test_coverage_matrix_uploads_are_split_by_leg(tmp):
+    """Each matrix leg uploads exactly one leg's coverage data."""
+    del tmp
+    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    for step, expected in (
+            ('Upload Ubuntu coverage data',
+             "${{ !cancelled() && steps.measure.conclusion == 'success'"
+             " && matrix.os == 'ubuntu-latest' }}"),
+            ('Upload Python coverage data',
+             "${{ !cancelled() && steps.measure.conclusion == 'success'"
+             " && matrix.os != 'ubuntu-latest' }}")):
+        actual = step_scalar(tests_yml, 'coverage-matrix', step, 'if')
+        assert actual == expected, f'coverage-matrix/{step}: {actual!r}'
+
+
+def test_journey_budget_steps_are_gated_on_the_steps_before_them(tmp):
+    """The journey job's later steps read the earlier steps' outcomes."""
+    del tmp
+    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    for step, expected in (
+            ('Upload the measured counts',
+             "${{ !cancelled() && steps.measure.conclusion == 'success' }}"),
+            ('Follow the journeys that got cheaper',
+             "${{ !cancelled() && steps.check.conclusion == 'success'"
+             " && github.event_name == 'push'"
+             " && github.ref == 'refs/heads/main' }}"),
+            ('Commit the tighten',
+             "${{ !cancelled() && steps.tighten.outputs.changed == 'true'"
+             " && env.RATCHET_SSH_KEY != '' }}")):
+        actual = step_scalar(tests_yml, 'journey-budget', step, 'if')
+        assert actual == expected, f'journey-budget/{step}: {actual!r}'
+
+
+def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
+    """The handles this workflow declares today, at the step declaring each.
+
+    `actionlint` is the one nothing reads; the deleted suite held it. A
+    handle added later needs its own row here — nothing enforces that.
+    """
+    del tmp
+    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    for job, step, expected in (
+            ('changes', 'Classify the changed paths', 'classify'),
+            ('actionlint', 'Install zizmor', 'install_zizmor'),
+            ('actionlint', 'actionlint', 'actionlint'),
+            ('coverage-matrix', 'Measure', 'measure'),
+            ('coverage', 'Combine per-OS coverage data', 'measure'),
+            ('coverage', 'Work out the raise this run justifies', 'ratchet'),
+            ('journey-budget', 'Measure the journeys', 'measure'),
+            ('journey-budget', 'Check the journeys against the budget',
+             'check'),
+            ('journey-budget', 'Follow the journeys that got cheaper',
+             'tighten')):
+        actual = step_scalar(tests_yml, job, step, 'id')
+        assert actual == expected, f'{job}/{step}: {actual!r}'
 
 
 def main():
