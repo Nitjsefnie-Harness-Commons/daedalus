@@ -305,6 +305,26 @@ def dashboard_fanout(base, docroot):
     # instructions, which is not a count a ratchet can compare. It is also the
     # more honest journey: an event published with no window attached is
     # retained for the next one, which is the fan-out property itself.
+    #
+    # THAT RETENTION HAS A CEILING, and the resize made it load-bearing.
+    # `command_queue.gc_loop` sweeps every `min(30, DAEDALUS_CMD_TTL)`
+    # seconds and `remove_expired` unlinks anything older than the TTL —
+    # regardless of a subscription, and before the fan-out drain ever sees
+    # it. The default TTL is 90 s, so the precondition this journey now has
+    # is that the whole window above, from the FIRST publish to the read
+    # below, completes inside it. At two events that was free; at
+    # FANOUT_EVENTS round trips under callgrind it is a real budget, and it
+    # is the one thing that could make this journey fail on a slow runner.
+    #
+    # Neither side of it moves for this journey. The TTL is a product
+    # constant with its own documented default and this journey does not
+    # raise it: a harness that bought its own headroom by overriding a
+    # product setting would be measuring a bridge configured differently
+    # from every other one. And the event count is not cut to fit the TTL
+    # either, because a session sized to an infrastructure ceiling rather
+    # than to a product basis is the padding error this journey was resized
+    # to remove. So the ceiling is left visible and the shortfall is named
+    # in the assertion below, and whether it holds is a measurement.
     registered = None
     for _ in range(FANOUT_REGISTRATIONS):
         status, body = _util.post_json(base + '/register', {
@@ -324,7 +344,16 @@ def dashboard_fanout(base, docroot):
         response.close()
         connection.close()
 
-    assert len(syncs) == FANOUT_HEARTBEATS, [f.get('type') for f in syncs]
+    assert len(syncs) == FANOUT_HEARTBEATS, (
+        f'only {len(syncs)} of the {FANOUT_HEARTBEATS} syncs this session '
+        'published were still in the queue when the window attached. Every '
+        'event is published before the subscription opens, so what removes '
+        'one in between is `DAEDALUS_CMD_TTL` (90 s by default) sweeping an '
+        'event nobody was watching yet — which is the retention the fan-out '
+        'depends on having a ceiling to. Shorten the session rather than '
+        'raise the TTL: this journey does not set it, and a count sized to '
+        'an infrastructure ceiling is the padding this journey was resized '
+        f'to remove. Saw: {[f.get("type") for f in syncs]}')
     assert all(frame.get('kind') == 'event' for frame in syncs), syncs
     assert all(frame.get('count') == FANOUT_TABS for frame in syncs), syncs
     frame = frames[-1]
