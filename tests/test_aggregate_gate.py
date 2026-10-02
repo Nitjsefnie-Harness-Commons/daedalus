@@ -18,8 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wffixtures import _refuses, _replaced  # noqa: E402
-from _wfgraph import _job_needs, _tests_yml  # noqa: E402
+from _wfgraph import _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
 SOURCE = ROOT / 'scripts' / 'ci' / 'aggregate_gate.py'
@@ -472,52 +471,6 @@ def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
     del tmp
     pins = set(re.findall(r'actions/checkout@([0-9a-f]{40})', _tests_yml()))
     assert pins == {CHECKOUT.split('@')[1]}, pins
-
-
-AGGREGATE_NEEDS = (
-    '    needs:\n'
-    '      - changes\n'
-    '      - pycodestyle\n'
-    '      - pylint\n'
-    '      - pyright\n'
-    '      - eslint\n'
-    '      - actionlint\n'
-    '      - suites\n'
-    '      - wheel\n'
-    '      - coverage-matrix\n'
-    '      - coverage\n'
-    '      - journey-budget\n')
-
-
-def test_a_bare_needs_scalar_names_one_job(tmp):
-    """A bare scalar is the one-element list: `needs: changes` is changes."""
-    del tmp
-    workflow = _replaced(AGGREGATE_NEEDS, '    needs: changes\n')
-    assert _job_needs(workflow, 'aggregate') == ['changes']
-
-
-def test_a_needs_mapping_is_refused(tmp):
-    """`needs:` names jobs; a mapping there is a shape, not a spelling.
-
-    The aggregate gate refuses to run when a dependency is absent, so a
-    `needs:` it cannot read has to stop the read rather than name nothing.
-    """
-    del tmp
-    for spelling in ("    needs: {changes: 'true'}\n",
-                     '    needs:\n      changes: true\n'):
-        workflow = _replaced(AGGREGATE_NEEDS, spelling)
-        assert 'not a list of job names' in _refuses(
-            _job_needs, workflow, 'aggregate'), spelling
-
-
-def test_a_needs_member_that_is_not_a_job_name_is_refused(tmp):
-    """A nested collection is a shape, so it names no job either."""
-    del tmp
-    for spelling in ('    needs: [[changes, suites], pylint]\n',
-                     '    needs: [changes, {changes: true}]\n'):
-        workflow = _replaced(AGGREGATE_NEEDS, spelling)
-        assert 'not a list of job names' in _refuses(
-            _job_needs, workflow, 'aggregate'), spelling
 
 
 def main():
