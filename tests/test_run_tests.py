@@ -663,14 +663,19 @@ def test_a_cleanup_that_raised_something_else_is_not_retried(tmp):
         f'it waited {clock.slept} s for a bug to stop happening')
 
 
+# The interval the retry waits between removals, written out rather than
+# read from the module: an expectation read back from the subject moves with
+# it, so a `GRACE_POLL_S` of zero satisfies both sides of the comparison.
+_GRACE_POLL_INTERVAL_S = 0.05
+
+
 def test_the_cleanup_waits_between_attempts_rather_than_hammering(tmp):
     """The poll interval is the floor between two removals, not a no-op.
 
     On the platform where the refusal is real, a tight loop would call
     the removal for the whole bound instead of a few hundred times. What
-    is asserted is how long the code chose to wait between the calls it
-    made, off a `Clock` that advances only when it sleeps -- so this
-    cannot pass because the machine was fast.
+    is asserted is how long the code chose to wait, off a `Clock` that
+    advances only when it sleeps -- so this cannot pass on a fast box.
     """
     directory = Path(tmp) / 'outputs'
     directory.mkdir()
@@ -679,9 +684,9 @@ def test_the_cleanup_waits_between_attempts_rather_than_hammering(tmp):
     with swapped(SUITE_BOUND, shutil=removals, time=clock):
         SUITE_BOUND.discard_outputs(str(directory))
     assert removals.calls == [str(directory)] * 3, removals.calls
-    assert clock.slept == 2 * SUITE_BOUND.GRACE_POLL_S, (
+    assert clock.slept == 2 * _GRACE_POLL_INTERVAL_S, (
         f'two refusals were answered by {clock.slept} s of waiting; the '
-        f'interval is {SUITE_BOUND.GRACE_POLL_S} s')
+        f'interval is {_GRACE_POLL_INTERVAL_S} s')
     assert not os.path.exists(directory), (
         'the retry reported success it never had; the directory is still '
         'there')
