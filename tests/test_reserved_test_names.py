@@ -24,6 +24,7 @@ and the branch-boundary rows over the two allowance tables.
 # synthetic string; these are plain data both suites derive against.
 # pylint: disable=duplicate-code
 import ast
+import subprocess
 import sys
 from pathlib import Path
 
@@ -211,6 +212,81 @@ def test_an_allowance_row_may_not_name_a_branch_added_declaration(tmp):
         assert refused.reason == UNREADABLE, (label, refused.reason)
         skipped = introduced_rows(table, read, ROOT, bases=('HEAD',))
         assert skipped.reason == IS_THE_BASE, (label, skipped.reason)
+
+
+def _boundary_repo(tmp):
+    """A two-commit checkout whose head raises one row's declaration COUNT.
+
+    The head carries a second BYTE-IDENTICAL copy of `twin` and adds
+    `added`, and REWRITES `edited` in place. The copy is the case a
+    set-keyed comparison misses: the base already carries that exact body,
+    so a set reports the file clean while the count rose.
+    """
+    repo = Path(tmp) / 'branch'
+    (repo / 'tests').mkdir(parents=True)
+    probe = repo / 'tests' / 'probe.py'
+    scrub = _util.child_coverage('scrub')
+
+    def body(twin, added, edited):
+        return (f'def twin(v):\n    return 1\n{twin}'
+                f'def pair(v):\n    return 1\n{added}'
+                f'def edited(v):\n    return {edited}\n')
+
+    def commit(name, text):
+        probe.write_text(text, encoding='utf-8')
+        for argv in (['git', 'add', '-A'], ['git', 'commit', '-qm', name]):
+            subprocess.run(argv, cwd=repo, check=True, env=scrub)
+
+    for argv in (['git', 'init', '-q'],
+                 ['git', 'config', 'user.email', 't@example.invalid'],
+                 ['git', 'config', 'user.name', 'T']):
+        subprocess.run(argv, cwd=repo, check=True, env=scrub)
+    commit('base', body('', '', '1'))
+    subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True, env=scrub)
+    commit('branch', body('def twin(v):\n    return 1\n\n',
+                          'def added(v):\n    return 2\n\n', '3'))
+    return repo
+
+
+def test_the_boundary_compares_counts_not_names(tmp):
+    """The reader DECIDES: a new name and a second copy are introduced.
+
+    Every input here is a pair this control builds, so the verdict is the
+    same on any tree, after this branch merges and on the next branch --
+    unlike an expectation read off what the branch happened to add. The
+    two names left out are the half that makes it a comparison: `pair` is
+    untouched and `edited` is one declaration whose body the branch
+    rewrote, which is an edit rather than an authorship.
+    """
+    repo = _boundary_repo(tmp)
+    table = {('tests/probe.py', name): 'a row'
+             for name in ('twin', 'pair', 'added', 'edited')}
+    found = introduced_rows(table, python_digests, repo, bases=('main',))
+    assert found.reason is None, found.reason
+    assert found.introduced == [('tests/probe.py', 'added'),
+                                ('tests/probe.py', 'twin')], (
+        'the boundary did not compare COUNTS: a new name and a second '
+        f'byte-identical copy are introduced, an edit is not: '
+        f'{found.introduced}')
+
+
+def test_the_artifact_suite_binds_no_reserved_name(tmp):
+    """Self-application for the artifact half, which the split unpinned.
+
+    `test_this_suite_binds_no_reserved_name` measures the file it lives
+    in, so splitting the suite left the new half to its own row. Same
+    rule and the same exemption: the entry point and nothing else.
+    """
+    del tmp
+    path = 'tests/test_reserved_names_artifact.py'
+    other = Path(__file__).resolve().parent / 'test_reserved_names_artifact.py'
+    tree = ast.parse(other.read_text(encoding='utf-8'), path)
+    entry = _entry_points(tree)
+    bound = {name for name in definitions(tree) if name not in entry}
+    derived = _reserved_names.reserved()
+    collisions = sorted(bound & set(derived))
+    assert not collisions, (
+        f'{path} binds names the reserved set owns: {collisions}')
 
 
 def test_no_workflow_fixture_name_is_bound_outside_its_module(tmp):
