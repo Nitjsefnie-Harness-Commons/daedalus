@@ -254,8 +254,7 @@ def test_the_cli_answer_helper_survives_a_transient_queue_read_refusal(tmp):
 # the bridge reports the command it enqueued, so the helper has the bytes
 # with no poll to refuse. Retargeting it would make it a copy of its CLI
 # twin rather than a check of anything. The reader it used to exercise,
-# _cmdqueue._poll_queue_reads, is still covered by the CLI case here and by
-# the ~20 other callers test_cmdqueue_bounds.py pins.
+# _cmdqueue._poll_queue_reads, is still covered by the CLI case here.
 
 
 def test_a_refused_leftover_coalesces_the_identical_cli_retry(tmp):
