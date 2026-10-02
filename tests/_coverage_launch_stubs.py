@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _suite_bound_stubs import Removals, swapped  # noqa: E402
 
 # The launcher binds `suite_bound` by the FLAT name, because it is run by
 # path, so its own directory is the only import that resolves there. Putting
@@ -68,7 +69,7 @@ class Launches:
 
 
 def run_main(tmp, *, scripts=None, platform=None, argv=(),
-             suites=(SUITE,), output=MEASURED):
+             suites=(SUITE,), output=MEASURED, refuse_removals=0):
     """Run the runner's `main()` here, over a tree holding `suites`.
 
     `platform` is what `sys.platform` reads as for the length of the call,
@@ -77,6 +78,13 @@ def run_main(tmp, *, scripts=None, platform=None, argv=(),
     read is the one that chose the sentence; what a Windows run does at its
     own bound stays proven by the windows-latest cells, which run the real
     launcher on that host.
+
+    `refuse_removals` makes that many of the runner's removals of its own
+    output directory fail before it is really done. The stand-in goes onto
+    `discard_outputs.__globals__` -- the dict the shipped function reads --
+    rather than onto a looked-up module, because `_util.load` may hand
+    back a different `suite_bound` object than the one a control would
+    find by name.
     """
     policy = _util.load(_util.ROOT / RUNNER, 'coverage_suites_in_process')
     root = Path(tmp) / 'tree'
@@ -87,8 +95,12 @@ def run_main(tmp, *, scripts=None, platform=None, argv=(),
     setattr(policy, 'ROOT', root)
     launch = Launches(scripts, output)
     setattr(policy, 'launch_suite', launch)
+    removals = Removals(refuse=refuse_removals) if refuse_removals else None
     stdout, stderr = io.StringIO(), io.StringIO()
     with contextlib.ExitStack() as stack:
+        if removals is not None:
+            stack.enter_context(
+                swapped(policy.discard_outputs.__globals__, shutil=removals))
         if platform is not None:
             stack.enter_context(unittest.mock.patch.object(
                 sys, 'platform', platform))
@@ -96,7 +108,8 @@ def run_main(tmp, *, scripts=None, platform=None, argv=(),
         stack.enter_context(contextlib.redirect_stderr(stderr))
         status = policy.main(list(argv))
     return SimpleNamespace(status=status, stdout=stdout.getvalue(),
-                           stderr=stderr.getvalue(), launch=launch)
+                           stderr=stderr.getvalue(), launch=launch,
+                           removals=removals)
 
 
 def group(outcome, name=SUITE):
