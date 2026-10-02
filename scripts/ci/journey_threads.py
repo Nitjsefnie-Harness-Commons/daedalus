@@ -89,21 +89,32 @@ BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
 # the front end's event loop, so the loop's idle tick is not their work.
 # `mcp-exec` calls that loop, so its tick stays in as the named residual.
 #
-# `cdp-result` and `net-capture` are the two that cannot follow the
-# pattern. Their request threads run to tens and hundreds of millions of
-# instructions, which is at or above `SERVE_FROM` and `IMPORT_FROM`
-# respectively — so the band holding them is the one being excluded, and
-# excluding it would drop the very work each journey measures. Both
-# therefore keep the constant and count the request: `cdp-result` gives up
-# the import and keeps the serve loop, `net-capture` the other way round.
-# The recorded budget for each says so in its journey's docstring, because
-# a multi-billion figure for one journey otherwise reads as a bug.
+# Three of the four journeys this branch adds exclude the import ALONE, and
+# that is what keeps the rule above true for them: no band their own request
+# thread can reach is one they exclude, so the work counts in whatever band
+# it lands and growth moves the count instead of dropping a thread into a
+# hole. It is a narrow rule, not a safe default. `screenshot` measured
+# 6,603,084 on its own request thread, 1.51x below `SERVE_FROM`, and
+# excluding the serve band would have lost that thread outright on a 51%
+# growth — the recorded count falling while the journey got slower. So the
+# test is whether a journey's own work can CROSS a floor into a band it
+# excludes, never what it measures today: a thread already past every floor
+# above it cannot cross one.
+#
+# `net-capture` is the fourth and is past them all. Its own request thread
+# runs to 2.12 billion instructions, which IS the import band, where the
+# bridge's one-off MCP bootstrap import also sits: excluding the import there
+# would drop the very work the journey exists to measure, so it excludes the
+# serve band instead and keeps the import — the same trade `cdp-result`
+# makes from the other side. The recorded budget for each says so in its
+# journey's docstring, because a multi-billion figure for one journey
+# otherwise reads as a bug.
 EXCLUDED = {
     'command-round-trip': (IMPORT, SERVE),
     'dashboard-fanout': (IMPORT, SERVE),
     'mcp-exec': (IMPORT,),
-    'screenshot': (IMPORT, SERVE),
-    'segment-relay': (IMPORT, SERVE),
+    'screenshot': (IMPORT,),
+    'segment-relay': (IMPORT,),
     'cdp-result': (IMPORT,),
     'net-capture': (SERVE,),
 }
