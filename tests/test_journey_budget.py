@@ -25,6 +25,7 @@ from _journey_contract import (  # noqa: E402
     budget_document,
     journeys,
     line_endings,
+    measured_report,
     recorded_document,
     recorded_maps,
 )
@@ -269,6 +270,130 @@ def test_every_shape_the_schema_refuses_is_still_refused(tmp):
             assert fragment in str(error), (path, error)
             continue
         raise AssertionError(f'load accepted {path.name}')
+
+
+# ─── what a half-recorded budget reports ────────────────────────────────────
+
+
+def test_a_budget_that_names_no_counter_says_no_count_was_compared(tmp):
+    """An artefact before its first baseline names no counter, and a run
+    that finds that says so rather than reporting a green.
+
+    Nothing can be denominated, so every recorded journey is unmeasured —
+    which is the refusal, not a pass — and the line that says which half of
+    the budget is missing is printed beside the refusal that follows it. The
+    OTHER state must not be printed with it: a budget that names a counter
+    has no missing tolerance, and reporting both tells a reader to fix
+    something that is already there.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = recorded_document()
+    document['counter'] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    assert policy.load(artifact)['counter'] is None, (
+        'the rendering did not carry a null counter, so this control would '
+        'be measuring a document the artefact cannot hold')
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(measured_report(
+        {name: 1000 for name in names})), encoding='utf-8')
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    assert code == 1, 'a budget naming no counter measured nothing'
+    said = out.getvalue()
+    assert 'the journey budget names no counter yet, so no count is ' \
+           'compared' in said, said
+    assert 'no tolerance yet' not in said, (
+        f'a missing counter was reported as a missing tolerance too: {said}')
+    refused = err.getvalue()
+    assert 'unmeasured:' in refused, refused
+    assert policy.UNMEASURED_REMEDY in refused, (
+        'the refusal for a budget that measured nothing named no remedy: '
+        f'{refused}')
+
+
+def test_a_budget_with_no_tolerance_compares_against_the_recorded_count(tmp):
+    """A null tolerance leaves zero headroom, and the run says which state
+    it is in rather than reading a movement as nothing.
+
+    With no tolerance the budget IS the recorded count, so a count one above
+    it is over and the refusal has to carry both numbers — the measured
+    count and the budget it was measured against. That is the arithmetic the
+    reported line exists for: reading the null as a percentage that happens
+    to be large passes every measurement the repository will ever take.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = recorded_document()
+    document['tolerance_pct'] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    assert policy.load(artifact)['tolerance_pct'] is None, (
+        'the rendering did not carry a null tolerance, so this control '
+        'would be measuring a document the artefact cannot hold')
+    for measured, expected in (
+            ({name: 1000 for name in names}, 0),
+            (dict({name: 1000 for name in names}, **{names[0]: 1001}), 1)):
+        measurements = Path(tmp) / f'at-{measured[names[0]]}.json'
+        measurements.write_text(json.dumps(measured_report(measured)),
+                                encoding='utf-8')
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(measurements)])
+        assert code == expected, (measured[names[0]], out.getvalue())
+        said = out.getvalue()
+        assert ('the journey budget names perf-instructions but no tolerance '
+                'yet' in said), said
+        assert 'zero headroom' in said, said
+        assert 'names no counter yet' not in said, (
+            f'a missing tolerance was reported as a missing counter too: '
+            f'{said}')
+        if not expected:
+            continue
+        refused = err.getvalue()
+        assert 'over:' in refused, refused
+        assert '1001' in refused and '1000.0' in refused, (
+            'the refusal must name the measured count and the zero-headroom '
+            f'budget it was measured against: {refused}')
+
+
+def test_a_recorded_journey_the_set_no_longer_has_is_reported(tmp):
+    """A count recorded for a journey nothing runs is reported, not compared.
+
+    The name is not in the journey set, so nothing measures it and nothing
+    compares it, and a run that said nothing about it would leave a rule in
+    the artefact that reads like one being enforced. The next tighten drops
+    it; until then the report has to name it.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    gone = 'a-journey-nobody-runs'
+    document = recorded_document()
+    document['journeys'][gone] = 5000
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    assert policy.stale(policy.load(artifact), names) == [gone], (
+        'the rendering did not carry the stale journey, so this control '
+        'would be measuring a document the artefact cannot hold')
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(measured_report(
+        {name: 1000 for name in names})), encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    assert code == 0, spoken.getvalue()
+    said = spoken.getvalue()
+    assert (f'recorded but the journey set no longer has them: {gone}'
+            in said), said
+    # A journey recorded and measured is not either of the two states this
+    # report can name, and printing it under one of them is a reader sent
+    # to fix a budget that is fine.
+    assert 'unrecorded, reported and passing' not in said, said
 
 
 def main():

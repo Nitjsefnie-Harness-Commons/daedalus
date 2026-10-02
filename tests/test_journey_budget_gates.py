@@ -18,15 +18,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
+    IDENTITY,
     PER_RUN,
     ROOT,
     _report_file,
     budget_document,
     fixture_shas,
     journeys,
+    measured_report,
     measurements_file,
     recorded_document,
     recorded_maps,
+    summary_file,
 )
 
 
@@ -152,6 +155,78 @@ def test_only_the_main_tighten_may_write_the_artefact(tmp):
         f'was: {commit[0]}')
 
 
+def test_a_gate_nothing_was_recorded_for_says_so_in_the_summary(tmp):
+    """The never-recorded refusal reaches the surface a reader actually has.
+
+    It exits 1 with its remedy on stderr, and stderr is collapsed by default
+    — so the step summary is the only place the run left anything. It has to
+    name WHICH gate was never recorded, say that no count was compared, and
+    carry the remedy; a summary that says none of those reads as a run that
+    found nothing wrong.
+    """
+    policy = _journey_contract.policy()
+    document = recorded_document()
+    document.pop('toolchain')
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(measured_report(
+        {name: 1000 for name in journeys().NAMES})), encoding='utf-8')
+    with summary_file(tmp) as summary:
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(measurements),
+                                '--summary'])
+        said = summary.read_text(encoding='utf-8')
+    assert code == 1, 'a gate nothing was recorded for is not a pass'
+    assert 'the journey budget records no toolchain yet.' in said, said
+    assert 'No count was compared.' in said, said
+    assert policy.TOOLCHAIN_REMEDY in said, said
+    # The table of what WOULD have been compared, so a reader can see that
+    # the run had counts and declined to compare them rather than having
+    # none to begin with.
+    assert 'What would have been compared:' in said, said
+    assert journeys().NAMES[0] in said, said
+
+
+def test_a_gate_that_moved_says_so_in_the_summary_of_a_plain_check(tmp):
+    """The moved-gate outcome succeeds, so its words have one home.
+
+    The exit status is 0 because the tree did not regress, which leaves the
+    summary as the whole of the account: the changed field's two values, the
+    statement that no count was compared, and the re-baseline remedy. The
+    tighten half of the same outcome already says it tightened nothing, so
+    a plain check must not claim it — it is not tightening.
+    """
+    policy = _journey_contract.policy()
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(measured_report(
+        {name: 1000 for name in journeys().NAMES},
+        toolchain=dict(IDENTITY, valgrind_version='valgrind-3.25.0'))),
+        encoding='utf-8')
+    with summary_file(tmp) as summary:
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(measurements),
+                                '--summary'])
+        said = summary.read_text(encoding='utf-8')
+    assert code == 0, 'a recorded gate that moved is not a regression'
+    assert artifact.read_bytes() == before, (
+        'a run that compared no count wrote the artefact anyway')
+    assert '**toolchain changed, re-baseline.**' in said, said
+    assert 'No count was compared.' in said, said
+    assert ('| valgrind_version | `valgrind-3.24.0` | `valgrind-3.25.0` |'
+            in said), (
+        'the summary must carry BOTH values of the field that moved, or a '
+        f'reader is told to re-baseline without being told what moved: {said}')
+    assert policy.TOOLCHAIN_REMEDY in said, said
+    assert 'nothing was tightened' not in said, (
+        f'a check that was not a tighten reported one: {said}')
+
+
 # ─── which way a recorded number may move ──────────────────────────────────
 
 
@@ -209,6 +284,71 @@ def test_the_tighten_command_is_the_one_the_implementation_uses(tmp):
                         '--tighten']) == 0
     written = json.loads(artifact.read_text(encoding='utf-8'))
     assert written['journeys'] == {name: 800 for name in names}, written
+
+
+def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
+    """A journey this run measured nothing keeps the count it was recorded
+    with, rather than being written down as something it did not cost.
+
+    `tightened` walks the RECORDED journeys, so a journey the counter
+    refused is a name in the mapping with no count beside it, and it has to
+    be skipped: the neighbours are followed down while it stays where it was
+    recorded. A comparison that treated the missing measurement as a value
+    would land a budget of zero beside a saving, which is the exact
+    measurement the next run cannot reproduce.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(
+        measured_report({names[0]: 800, names[1]: 1000})),
+        encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements),
+                            '--tighten'])
+    assert code == 0, spoken.getvalue()
+    assert 'tightened the journey budget' in spoken.getvalue(), (
+        spoken.getvalue())
+    written = json.loads(artifact.read_text(encoding='utf-8'))['journeys']
+    assert written == {names[0]: 800, names[1]: 1000, names[2]: 1000}, (
+        f'{names[2]} was measured by nothing and must keep the count it was '
+        f'recorded with: {written}')
+
+
+def test_a_tighten_that_lowered_nothing_says_so_and_writes_nothing(tmp):
+    """The no-op tighten is a reported outcome, not a silent empty diff.
+
+    A run where no journey measured below what it was recorded with has
+    nothing to follow down, and it must say exactly that: CI commits whatever
+    a tighten wrote, so a step that printed nothing and wrote nothing leaves
+    a maintainer deciding whether the job ran at all — and a step that
+    printed the tightening line would commit a rewritten artefact for a
+    mapping identical to the one committed.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(
+        measured_report({name: 1000 for name in names})), encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements),
+                            '--tighten'])
+    assert code == 0, spoken.getvalue()
+    said = spoken.getvalue()
+    assert 'no journey measured below its recorded count' in said, said
+    assert 'tightened the journey budget' not in said, (
+        f'a run that lowered nothing reported a tightening: {said}')
+    assert artifact.read_bytes() == before, (
+        'a tighten that lowered nothing still rewrote the artefact')
 
 
 # ─── what a refusal says ───────────────────────────────────────────────────
@@ -345,6 +485,63 @@ def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
     # journey produced, so the artefact is untouched.
     assert json.loads(artifact.read_text(encoding='utf-8'))['journeys'] == {
         name: 1000 for name in names}
+
+
+def _decoder_says(source):
+    """What the decoder itself says about this file, read the same way.
+
+    The command prints the exception's text, so the expectation is computed
+    from the same decode rather than spelled out beside it: a literal here
+    could drift from the one the command prints and the control would then
+    pass against a refusal that changed.
+    """
+    try:
+        json.loads(source.read_bytes().decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        return str(error)
+    raise AssertionError(f'{source.name} is readable after all')
+
+
+def test_an_input_the_run_cannot_read_is_refused_in_its_own_words(tmp):
+    """Every failure with no verdict of its own is one sentence and exit 1.
+
+    A budget that is not there and a measurement file the decoder rejects
+    are the two the job meets in practice — a step that points at an upload
+    which never arrived, and a truncated one. Neither may reach the reader as
+    a traceback or as a bare status: the message has to carry the cause, and
+    the cause is the whole of what a red step can tell the person who has to
+    fix it.
+    """
+    policy = _journey_contract.policy()
+    absent = Path(tmp) / 'no-such-budget.json'
+    spoken = io.StringIO()
+    with contextlib.redirect_stderr(spoken):
+        code = policy.main(['check', '--artifact', str(absent)])
+    assert code == 1, 'a budget that is not there is not a pass'
+    said = spoken.getvalue()
+    assert 'cannot read the journey budget' in said, said
+    # The message names the file it could not read. Its NAME and not its
+    # path: a checkout's absolute path is spelled with a separator this
+    # repository does not write down, so asserting one here would make the
+    # control a test of the runner's filesystem rather than of the refusal.
+    assert absent.name in said, said
+    assert 'Traceback' not in said, said
+
+    broken = Path(tmp) / 'broken-counts.json'
+    broken.write_text('{not json', encoding='utf-8')
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    spoken = io.StringIO()
+    with contextlib.redirect_stderr(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(broken), '--tighten'])
+    assert code == 1, 'a measurement file the decoder rejects is not a pass'
+    assert spoken.getvalue().strip() == _decoder_says(broken), (
+        "the refusal must be the decoder's own sentence about that file, "
+        f'not a generic one: {spoken.getvalue()}')
+    assert artifact.read_bytes() == before, (
+        'a run that could not read its measurement wrote the artefact anyway')
 
 
 # ─── the shape a recorded sha is taken over ──────────────────────────────────
