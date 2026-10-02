@@ -47,7 +47,9 @@ def _claim_job(workflow):
     jobs = jobs_mapping(workflow)
     assert jobs is not None and set(jobs) == {'claim'}, (
         'claim.yml must declare exactly one job named claim')
-    return complete_job_mapping(workflow, 'claim')
+    job = complete_job_mapping(workflow, 'claim')
+    assert job is not None, 'claim.yml must declare claim as a job mapping'
+    return job
 
 
 def _claim_step(workflow):
@@ -100,7 +102,8 @@ def test_claim_pins_the_current_release(tmp):
     assert uses == f'Nitjsefnie-Actions/claim@{CLAIM_COMMIT}', (
         'claim must pin the current release by its commit')
     line = re.search(r'^\s*-\s+uses:.*$', workflow, re.MULTILINE)
-    assert line and line.group().endswith(f'# v{CLAIM_RELEASE}'), (
+    assert line and re.search(
+        rf'#\s+v{re.escape(CLAIM_RELEASE)}\b', line.group()), (
         f'claim must name v{CLAIM_RELEASE} in the comment on the pin, so the '
         'two cannot drift apart silently')
 
