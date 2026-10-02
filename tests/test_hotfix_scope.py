@@ -580,6 +580,36 @@ def test_a_file_scope_naming_a_host_is_refused_at_store_time(tmp):
     assert outcome['stored'] == [{'id': 'plain', 'match': FILE_SCOPE}], outcome
 
 
+# The other arm of the same condition: a host position naming no host.
+UNUSABLE_HOST_SCOPES = (
+    '*:///*', 'https:///search', 'http://*shop.example.com/*',
+    'https://shop..example.com/*', 'https://-shop.example.com/*',
+)
+
+
+def test_a_scope_naming_no_usable_host_is_refused_at_store_time(tmp):
+    """An empty host position and an unmatchable one are the same refusal.
+
+    A `file:` pattern is the one scheme that REQUIRES an empty host; every
+    other needs a host it can compile, and each below names none.
+    """
+    del tmp
+    for match in UNUSABLE_HOST_SCOPES:
+        outcome = run_hotfix_case({
+            'documents': [SITE], 'ask': False,
+            'store': [
+                {'id': 'bad', 'fixId': 'bad', 'code': FIX, 'match': match},
+                {'id': 'ok', 'fixId': 'ok', 'code': FIX, 'match': FILE_SCOPE},
+            ],
+        })
+        posted = {row['id']: row for row in outcome['posted']}
+        assert posted['bad']['error'], (match, outcome)
+        assert posted['bad']['result'] is None, (match, outcome)
+        assert posted['ok']['error'] is None, (match, outcome)
+        assert outcome['stored'] == [
+            {'id': 'ok', 'match': FILE_SCOPE}], (match, outcome)
+
+
 # A scope that is not a string cannot be parsed and cannot be compared; the
 # four shapes below are the ones a record can plausibly carry out of the
 # store's own hands, and `true` is the sharpest — the branch spent ruling 9
