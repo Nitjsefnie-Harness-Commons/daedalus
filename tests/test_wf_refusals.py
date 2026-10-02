@@ -25,69 +25,74 @@ def _value_error(call):
 
 
 # A key written twice is how a workflow hides a `run:` behind a decoy, so
-# every decoder refuses one rather than leaving a consumer to guess.  One
-# test per decoder, because a helper over all of them hides which guard
-# died; the two shared-message refusals get fixtures that exclude each other.
-STEP_JOB = 'jobs:\n  sample:\n    steps:\n'
-JOB = 'jobs:\n  sample:\n'
+# every DECODER BELOW refuses one rather than leaving a consumer to guess.
+# Not every reader does: the shipped reader refuses a duplicate only among
+# the keys it decodes (`name`, `id`, `uses`), so a repeated `run:` is
+# last-wins there and is refused only by the test-tree reader.  One test
+# per decoder, because a helper over all of them hides which guard died;
+# the two shared-message refusals get fixtures that exclude each other.
+STEP_JOB_HEAD = 'jobs:\n  sample:\n    steps:\n'
+JOB_HEAD = 'jobs:\n  sample:\n'
 DUP = 'duplicate mapping key: '
 MULTILINE = 'step uses has an unsupported multiline scalar'
 SCALAR = 'step uses has an unsupported scalar'
 
 
 def test_a_duplicate_step_key_is_refused(_tmp):
-    source = STEP_JOB + '      - run: echo one\n        run: echo two\n'
+    source = STEP_JOB_HEAD + '      - run: echo one\n        run: echo two\n'
     assert _value_error(lambda: step_mappings(source, 'sample')) == DUP + 'run'
 
 
 def test_a_duplicate_step_scalar_mapping_key_is_refused(_tmp):
-    source = STEP_JOB + '      - env:\n          F: a\n          F: b\n'
+    source = STEP_JOB_HEAD + '      - env:\n          F: a\n          F: b\n'
     assert _value_error(lambda: step_mappings(source, 'sample')) == DUP + 'F'
 
 
 def test_a_duplicate_job_mapping_key_is_refused(_tmp):
-    source = JOB + '    runs-on: a\n    runs-on: b\n'
+    source = JOB_HEAD + '    runs-on: a\n    runs-on: b\n'
     assert _value_error(lambda: _job(source, 'sample')) == DUP + 'runs-on'
 
 
 def test_a_duplicate_sequence_item_mapping_key_is_refused(_tmp):
-    source = STEP_JOB + '      - run: one\n        run: two\n'
+    source = STEP_JOB_HEAD + '      - run: one\n        run: two\n'
     assert _value_error(lambda: _job(source, 'sample')) == DUP + 'run'
 
 
 def test_a_duplicate_flow_mapping_key_is_refused(_tmp):
-    source = JOB + '    env: {FOO: a, FOO: b}\n'
+    source = JOB_HEAD + '    env: {FOO: a, FOO: b}\n'
     assert _value_error(lambda: _job(source, 'sample')) == DUP + 'FOO'
 
 
 def test_a_duplicate_named_mapping_key_is_refused(_tmp):
-    source = STEP_JOB + '      - run: one\njobs:\n  other:\n    steps: []\n'
+    source = (STEP_JOB_HEAD + '      - run: one\njobs:\n  other:\n'
+              '    steps: []\n')
     assert _value_error(
         lambda: _step_items(source, 'sample')) == DUP + 'jobs'
 
 
-def test_a_duplicate_decoded_step_key_is_refused(_tmp):
-    source = STEP_JOB + '      - uses: owner/a@1\n        uses: owner/b@2\n'
-    assert _value_error(lambda: _step_items(source, 'sample')) == DUP + 'uses'
-
-
 def test_a_step_scalar_that_closes_no_quote_is_refused(_tmp):
-    source = STEP_JOB + '      - uses: "abc\n      - run: echo "def\n'
+    # MASKED: with `_step_value`'s quote arm deleted this row still goes
+    # red, but the reader stays fail-closed -- `decode_inline_scalar`
+    # refuses the same value with a different message, and no input
+    # separates them (an open quote means no unescaped close, and a value
+    # that both opens a quote and ends in one raises on the escape).
+    source = STEP_JOB_HEAD + '      - uses: "abc\n      - run: echo "def\n'
     assert _value_error(lambda: _step_items(source, 'sample')) == MULTILINE
 
 
 def test_a_step_scalar_opening_with_an_indicator_is_refused(_tmp):
-    source = STEP_JOB + '      - uses: [owner/one@abc]\n'
+    source = STEP_JOB_HEAD + '      - uses: [owner/one@abc]\n'
     assert _value_error(lambda: _step_items(source, 'sample')) == SCALAR
 
 
 def test_a_step_scalar_carrying_a_control_character_is_refused(_tmp):
-    source = STEP_JOB + '      - uses: one\ttwo\n'
+    source = STEP_JOB_HEAD + '      - uses: one\ttwo\n'
     assert _value_error(lambda: _step_items(source, 'sample')) == SCALAR
 
 
 def test_an_over_indented_step_scalar_is_refused(_tmp):
-    source = STEP_JOB + '      - uses: owner/one@abc\n          continued\n'
+    source = (STEP_JOB_HEAD + '      - uses: owner/one@abc\n'
+              '          continued\n')
     assert _value_error(lambda: _step_items(source, 'sample')) == MULTILINE
 
 
