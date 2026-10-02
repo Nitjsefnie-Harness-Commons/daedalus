@@ -94,8 +94,6 @@
     "tests/test_version_contract_quote_duplicates.py": 4,
     "tests/test_wfjobs.py": 3,
     "tests/test_worker_runtime.py": 8,
-    "tests/test_workflow_eslint.py": 4,
-    "tests/test_workflow_spellings.py": 6,
     "tests/test_workflow_yaml_uses.py": 1
   },
   "js_coverage_baseline": {

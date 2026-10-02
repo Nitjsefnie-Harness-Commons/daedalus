@@ -258,9 +258,6 @@ UNCONSOLIDATED_NAMES = {
         'this runs one shipped worker program and parses its JSON, where '
         'the shared _run boots the recorded boundary harness against a '
         'named scenario and an optional background path',
-    ('tests/test_workflow_eslint.py', '_run'):
-        'this returns one named step run block through the bounded reader, '
-        'where the shared _run boots a node scenario',
     ('tests/test_workflow_job_timeouts.py', '_planted'):
         'this copies the real workflow minus the aggregate job bound, where '
         'the owner reverts one converted site in a scratch tree',
