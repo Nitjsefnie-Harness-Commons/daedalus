@@ -44,6 +44,12 @@ from _unconsolidated_names import UNCONSOLIDATED_NAMES  # noqa: E402
 
 ROOT = _util.ROOT
 
+# A scrubbed env is a security boundary, so the coverage guard
+# refuses one it cannot trace: it must be bound once, at module
+# scope, to the declaration, and never mutated. Same idiom as
+# `tests/test_coverage_config.py`.
+_ENV = _util.child_coverage('scrub')
+
 # The residue table each limb's site needs a row in: the join the two
 # guards cannot make, since the fixture rule has no table to excuse one.
 RESIDUE_TABLES = {
@@ -132,15 +138,17 @@ def test_every_name_carries_sorted_owners_within_the_tests_tree(tmp):
 def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     """No reserved name is re-implemented without a row in its own table.
 
-    WHAT THIS ADDS, MEASURED AND STATED. Against this tree its sites are
-    set-equal to `reimplementations` union `js_reimplementations`, each
-    difference in both directions empty, and the reason is structural
-    rather than incidental. `tests/_wffixtures.py` IS a `tests/_*.py`
-    module, so the three fixture names that are definitions are already
-    in the python limb, and the two that are not (`BLOCK_NEEDS`,
-    `BLOCK_OUTPUTS`) are `Assign` binds, which `definitions` never
-    reports; while it remains a shared helper the union adds nothing
-    HERE.
+    WHAT THIS ADDS, MEASURED AND STATED. Its sites are the union of the
+    two limbs' sites rather than one rule's half, and the reason is
+    structural rather than incidental. `tests/_wffixtures.py` IS a
+    `tests/_*.py` module, so the three fixture names that are definitions
+    are already in the python limb, and the two that are not
+    (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are `Assign` binds, which
+    `definitions` never reports; while it remains a shared helper the
+    union adds nothing HERE. `residue_sites()` reads the same
+    recognisers the union is built from -- `definitions`, `scan` and
+    `js_declarations` at `JS_FLOOR` -- so the set it judges and the set
+    the reserved artifact states are one set by construction.
 
     `len(residue_sites())` is not that set's size, and both are worth
     knowing. The tables are keyed `(path, name)` and two modules declare
@@ -225,7 +233,10 @@ def _boundary_repo(tmp):
     repo = Path(tmp) / 'branch'
     (repo / 'tests').mkdir(parents=True)
     probe = repo / 'tests' / 'probe.py'
-    scrub = _util.child_coverage('scrub')
+
+    def git(*argv):
+        return subprocess.run(('git', *argv), cwd=repo, check=True, env=_ENV,
+                              capture_output=True, text=True)
 
     def body(twin, added, edited):
         return (f'def twin(v):\n    return 1\n{twin}'
@@ -234,18 +245,26 @@ def _boundary_repo(tmp):
 
     def commit(name, text):
         probe.write_text(text, encoding='utf-8')
-        for argv in (['git', 'add', '-A'], ['git', 'commit', '-qm', name]):
-            subprocess.run(argv, cwd=repo, check=True, env=scrub)
+        git('add', '-A')
+        git('commit', '-qm', name)
 
-    for argv in (['git', 'init', '-q'],
-                 ['git', 'config', 'user.email', 't@example.invalid'],
-                 ['git', 'config', 'user.name', 'T']):
-        subprocess.run(argv, cwd=repo, check=True, env=scrub)
+    git('init', '-q')
+    # The ambient identity a scratch checkout would otherwise inherit:
+    # `git commit` signs under `commit.gpgsign` and runs whatever
+    # `core.hooksPath` points at, and neither belongs to this fixture.
+    for key, value in (('user.email', 't@example.invalid'),
+                       ('user.name', 'T'),
+                       ('commit.gpgsign', 'false'),
+                       ('core.hooksPath', '')):
+        git('config', key, value)
     commit('base', body('', '', '1'))
-    subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True, env=scrub)
+    # The base is its commit rather than a branch named `main`: naming one
+    # is what `init.defaultBranch` decides, and a runner or a developer
+    # who sets that key would fail on a branch that already exists.
+    base = git('rev-parse', 'HEAD').stdout.strip()
     commit('branch', body('def twin(v):\n    return 1\n\n',
                           'def added(v):\n    return 2\n\n', '3'))
-    return repo
+    return repo, base
 
 
 def test_the_boundary_compares_counts_not_names(tmp):
@@ -258,10 +277,10 @@ def test_the_boundary_compares_counts_not_names(tmp):
     untouched and `edited` is one declaration whose body the branch
     rewrote, which is an edit rather than an authorship.
     """
-    repo = _boundary_repo(tmp)
+    repo, base = _boundary_repo(tmp)
     table = {('tests/probe.py', name): 'a row'
              for name in ('twin', 'pair', 'added', 'edited')}
-    found = introduced_rows(table, python_digests, repo, bases=('main',))
+    found = introduced_rows(table, python_digests, repo, bases=(base,))
     assert found.reason is None, found.reason
     assert found.introduced == [('tests/probe.py', 'added'),
                                 ('tests/probe.py', 'twin')], (
