@@ -5,7 +5,7 @@ Both decisions below are written once here and read from here by
 and keeps or drops each site on the second, so a copy there would narrow
 that control's population with nothing to report it. The first also has a
 second reader in that same suite, on one planted fixture a tree walk
-cannot express and it reads at two assertions. Either way the hole would
+cannot express, which it reads at two assertions. Either way the hole would
 be silent in the shrinking direction.
 
 The figures the two rules were tuned against — 139 dropped sites narrowed to
