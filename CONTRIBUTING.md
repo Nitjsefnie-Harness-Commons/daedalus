@@ -176,21 +176,20 @@ coverage run does not reach is the extension options page,
 `extension/options.js`, at 0 of 51 code lines — a reach the run measures
 and the tree cannot, so the leading figure is attributed to the coverage
 step summary that run prints. The code-line count beside it is the tree's,
-counted off the file by `scripts/ci/js_lines.py` and reported per module by
-`scripts/ci/js_module_coverage.py`. Nothing in the tree checks that figure
-against this paragraph, so move the file's code-line count and this line is
-simply out of date until someone reads it; the suite that read it back and
-failed on a mismatch went with the test-volume cut in #1483. The covered
-count and the total
-the number is measured over are deliberately not restated here: the
-first is a measurement of one run, the second is a function of every
-shipped JavaScript file in the tree, and that run's own coverage step
-summary is where both belong. The percentage the total would give is left
-out for the same reason, a denominator that wide going stale in the window
-between two pull requests that each ship JavaScript: a figure copied into
-this file is one nothing checks inside that window. That is the true state
-of the tests, not a shortfall in the measurement — the fix is tests, not
-tooling.
+counted off the file by `scripts/ci/js_lines.py` and rendered in that same
+summary by `scripts/ci/js_coverage.py`'s per-file table. Nothing in the tree
+checks that figure against this paragraph, so move the file's code-line count
+and this line is simply out of date until someone reads it; the suite that
+read it back and failed on a mismatch went with the test-volume cut in
+#1483. The covered count and the total the number is measured over are
+deliberately not restated here: the first is a measurement of one run, the
+second is a function of every shipped JavaScript file in the tree, and that
+run's own coverage step summary is where both belong. The percentage the
+total would give is left out for the same reason, a denominator that wide
+going stale in the window between two pull requests that each ship
+JavaScript: a figure copied into this file is one nothing checks inside that
+window. That is the true state of the tests, not a shortfall in the
+measurement — the fix is tests, not tooling.
 
 The matrix is not ceremony. This code reads paths and decodes bytes, so Windows
 path spellings, the `/var` → `/private/var` aliasing macOS applies to temp

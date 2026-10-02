@@ -26,8 +26,8 @@ from _package_layout import (  # noqa: E402
 
 ROOT = _util.ROOT
 
-# Spelled as escapes so this file stays ASCII.
-FULLWIDTH_TIMEOUT = 'ｔｉｍｅｏｕｔ'
+# Spelled as escapes so the fullwidth glyphs stay one reviewable token.
+FULLWIDTH_TIMEOUT = '\uff54\uff49\uff4d\uff45\uff4f\uff55\uff54'
 FULLWIDTH_BOUND = (
     'import subprocess\n\n\ndef probe():\n'
     f'    subprocess.run(["git", "status"], {FULLWIDTH_TIMEOUT}=30)\n')
