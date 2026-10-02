@@ -22,7 +22,6 @@ import subprocess
 import sys
 import threading
 import time
-import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -319,36 +318,15 @@ def test_mcp_lifespan_closes_loop_clients(tmp):
 
     mod.mcp.streamable_http_app = capture_app
 
-    class FakeConfig:
-        def __init__(self, app, **_settings):
-            self.app = app
-
-    class FakeServer:
-        def __init__(self, config):
-            self.config = config
-
-        def run(self, sockets=None):
-            for server_socket in sockets or ():
-                server_socket.close()
-
-    fake_uvicorn = types.ModuleType('uvicorn')
-    fake_uvicorn.Config = FakeConfig
-    fake_uvicorn.Server = FakeServer
-    previous_uvicorn = sys.modules.get('uvicorn')
-    sys.modules['uvicorn'] = fake_uvicorn
-    out = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(out):
-            mod._serve()
-    finally:
-        mod.mcp.streamable_http_app = original_factory
-        if previous_uvicorn is None:
-            sys.modules.pop('uvicorn', None)
-        else:
-            sys.modules['uvicorn'] = previous_uvicorn
+    # The shared fake stands where Config, Server and the HTTP protocol
+    # class stand; this suite only needs its sockets closed on the way out.
+    handed, banner, _built = _mcp_load._serve_with_fake_uvicorn(mod)
+    for server_socket in handed:
+        server_socket.close()
+    mod.mcp.streamable_http_app = original_factory
 
     assert not mod.startup_error, mod.startup_error
-    assert f'127.0.0.1:{mod.bound_port}' in out.getvalue(), out.getvalue()
+    assert f'127.0.0.1:{mod.bound_port}' in banner, banner
     app = app_box['value']
 
     async def drive_lifespan():

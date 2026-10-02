@@ -17,7 +17,9 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import time
+import types
 
 import _daedalus_env
 import _util
@@ -38,6 +40,93 @@ BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
 # was reading a copy of another suite's environment, which is the defect this
 # module exists to end.
 os.environ.update(BRIDGE_ENV)
+
+
+class _FakeUvicornServer:
+    """Stands where uvicorn.Server stands, minus the OS behind it.
+
+    `handed` and `built` are class state so the front end can be subclassed
+    the way it subclasses the real one: `_serve` derives its own Server from
+    whatever `uvicorn.Server` names, and a lambda is not a base class.
+    """
+    handed = []
+    built = []
+
+    def __init__(self, config):
+        self.config = config
+        self.server_state = types.SimpleNamespace(default_headers=[])
+        type(self).built.append(self)
+
+    async def on_tick(self, counter):
+        del counter
+        return False
+
+    def run(self, sockets=None):
+        type(self).handed.extend(sockets or ())
+
+
+class _FakeConfig:
+    """Stands where uvicorn.Config stands, for the members `_serve` reads.
+
+    `load()` is what resolves `http` into a protocol class on the real
+    Config, so the fake does the same; `date_header` and `encoded_headers`
+    are the two the tick reads to rebuild the cached headers.
+    """
+
+    def __init__(self, app, **settings):
+        self.app = app
+        self.settings = settings
+        self.date_header = True
+        self.encoded_headers = [(b'server', b'uvicorn')]
+        self.loaded = False
+        self.http_protocol_class = _FakeProtocol
+
+    def load(self):
+        self.loaded = True
+
+
+class _FakeProtocol:
+    """Stands where uvicorn's HTTP protocol class stands."""
+
+    def __init__(self, config=None, server_state=None, app_state=None,
+                 _loop=None):
+        self.config = config
+        self.server_state = server_state
+        self.app_state = app_state
+        self.connections = 0
+
+    def connection_made(self, transport):
+        self.connections += 1
+
+
+def _serve_with_fake_uvicorn(mod):
+    """Run _serve to completion without its real front end.
+
+    The fake stands where uvicorn.Config, uvicorn.Server and the HTTP
+    protocol class stand, and records the sockets it was handed instead of
+    serving them; the caller closes any real socket in that list. The
+    bound-port banner is captured and returned beside `handed`, so the
+    suite's streams stay verdict-only. `built` is the Server instances the
+    front end constructed, so a caller can tell a derived class from the
+    base it was derived from.
+    """
+    handed, built, banner = [], [], io.StringIO()
+    names = {'Config': _FakeConfig,
+             'Server': type('Server', (_FakeUvicornServer,),
+                            {'handed': handed, 'built': built})}
+    previous = sys.modules.get('uvicorn')
+    fake = types.ModuleType('uvicorn')
+    fake.__dict__.update(names)
+    sys.modules['uvicorn'] = fake
+    try:
+        with contextlib.redirect_stdout(banner):
+            mod._serve()
+    finally:
+        if previous is None:
+            sys.modules.pop('uvicorn', None)
+        else:
+            sys.modules['uvicorn'] = previous
+    return handed, banner.getvalue(), built
 
 
 def _need_deps():
