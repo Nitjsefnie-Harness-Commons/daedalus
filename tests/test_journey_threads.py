@@ -316,7 +316,13 @@ def test_rendering_of_runs_a_journey_on_the_main_thread(tmp):
 
     @contextlib.contextmanager
     def bridge(_directory, env=None, await_mcp=False):
-        del env, await_mcp
+        # The double fails on what it does not model. `await_mcp=True` is
+        # what makes a count comparable (see `rendering_of`), and a
+        # `rendering_of` that stopped passing it would leave this suite
+        # green; `env` carries the planted journey's own token, so a bridge
+        # spawned under another credential is refused here too.
+        assert await_mcp is True, await_mcp
+        assert env == {'DAEDALUS_TOKEN': 'planted', 'TOKEN': ''}, env
         yield 'http://127.0.0.1:1', None
 
     with _journey_contract.planting(
