@@ -173,6 +173,48 @@ def test_a_check_with_no_measurement_file_measures_here(tmp):
         f'reads it: {written}')
 
 
+def test_a_rebaseline_keeps_the_bounds_and_keeps_a_dropped_journey_dropped(
+        tmp):
+    """What a re-baseline may move: the counts, and nothing else.
+
+    Every tolerance — the default and a journey's own — is a bound a person
+    set from a measured spread, so a command that carried the counts and
+    dropped them would widen every budget by a number nobody measured. And a
+    journey sized representatively and still inseparable from the shared
+    baseline is dropped DELIBERATELY, on a measurement that still counted it:
+    a re-baseline that filled the null back in would quietly reinstate a
+    budget the maintainer decided does not separate, and the next run would
+    compare a journey the artefact says nothing about.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped, widened = names[0], names[1]
+    document = recorded_document(tolerance_pct=0.5,
+                                 tolerances={widened: 25.0})
+    document['journeys'][dropped] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    report = _journey_contract.fixture_report()
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(report), encoding='utf-8')
+    spoken = io.StringIO()
+    with contextlib.redirect_stdout(spoken):
+        code = policy.main(['rebaseline', '--artifact', str(artifact),
+                            '--measurements', str(measurements)])
+    assert code == 0, spoken.getvalue()
+    written = policy.load(artifact)
+    # The measurement DID count the dropped journey, which is what makes the
+    # null a decision rather than an absence of data.
+    assert report['counters']['valgrind-callgrind']['journeys'][dropped], (
+        'the fixture no longer counts the dropped journey, so this control '
+        'is not testing that a count was declined')
+    assert written['journeys'][dropped] is None, written['journeys']
+    assert written['tolerance_pct'] == 0.5, written['tolerance_pct']
+    assert written['tolerances'] == {widened: 25.0}, written.get('tolerances')
+    assert written['journeys'][widened] == 950, written['journeys']
+    assert policy.unrecorded(written, names) == [dropped], written['journeys']
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeycli_')

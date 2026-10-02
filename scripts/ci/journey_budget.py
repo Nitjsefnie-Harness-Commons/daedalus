@@ -73,6 +73,7 @@ COUNTERS = journey_artifact.COUNTERS
 load = journey_artifact.load
 render = journey_artifact.render
 budget_of = journey_artifact.budget_of
+tolerance_of = journey_artifact.tolerance_of
 exclusion_diff = journey_artifact.exclusion_diff
 map_diff = journey_artifact.map_diff
 sha_diff = journey_artifact.sha_diff

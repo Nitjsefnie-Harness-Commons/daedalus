@@ -440,6 +440,19 @@ def artifact_shapes():
          '64 lowercase hex characters'),
         (over('counter', 'wall-clock'), 'unknown counter'),
         (over('tolerance_pct', -1), 'must be a nonnegative number'),
+        # The three shapes `tolerance_pct` refuses, and each refusal has to
+        # name the JOURNEY: a per-journey bound is seven numbers in one
+        # document, so "must be a nonnegative number" without the name is a
+        # question a reader cannot answer from the document.
+        (over('tolerances', 'wide'), 'tolerances must be an object'),
+        (over('tolerances', {'no-such-journey': 1.0}),
+         'tolerances names a journey with no count'),
+        (over('tolerances', {name: -0.5}),
+         f'a journey tolerance must be a nonnegative number: {name} = -0.5'),
+        (over('tolerances', {name: 'wide'}),
+         f'a journey tolerance must be a nonnegative number: {name} = '),
+        (over('tolerances', {name: True}),
+         f'a journey tolerance must be a nonnegative number: {name} = True'),
         (over('journeys', []), 'journeys must be an object'),
         (over('journeys', {name: 'many'}),
          'a recorded count must be a nonnegative integer'),

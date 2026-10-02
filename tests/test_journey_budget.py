@@ -366,6 +366,99 @@ def test_a_budget_with_no_tolerance_compares_against_the_recorded_count(tmp):
             f'budget it was measured against: {refused}')
 
 
+def test_a_journey_may_be_held_to_a_tolerance_of_its_own(tmp):
+    """One tolerance cannot be tight for one journey and meaningful for
+    another, so a journey may name a tolerance and the default still holds
+    every journey that does not.
+
+    Both halves are driven through the command rather than through
+    `budget_of`, because a field the document carries and the gate never
+    reads is a document that says something the verdict above it does not.
+    So the journey with a value of its own is measured at its own limit and
+    one above it, and the journey without one at the default's limit and one
+    above it: a gate that ignored either value would pass all four.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    own, defaulted = names[0], names[1]
+    # Both percentages are eighths, so `1000 * (1 + pct/100)` is a number
+    # the boundary can be stated in exactly rather than a float the control
+    # would have to round to find the edge of.
+    document = recorded_document(tolerance_pct=12.5, tolerances={own: 25.0})
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    carried = policy.load(artifact)
+    assert carried['tolerances'] == {own: 25.0}, (
+        'the rendering did not carry the per-journey tolerance, so this '
+        f'control would be measuring a document the artefact cannot hold: '
+        f'{carried.get("tolerances")}')
+    assert policy.tolerance_of(carried, own) == 25.0, carried
+    assert policy.tolerance_of(carried, defaulted) == 12.5, carried
+    assert policy.budget_of(carried, own) == 1250.0, carried
+    assert policy.budget_of(carried, defaulted) == 1125.0, carried
+    for name, inside, outside in ((own, 1250, 1251),
+                                  (defaulted, 1125, 1126)):
+        for measured, expected in ((inside, 0), (outside, 1)):
+            counts = {journey: 1 for journey in names}
+            counts[name] = measured
+            report = Path(tmp) / f'{name}-{measured}.json'
+            report.write_text(json.dumps(measured_report(counts)),
+                              encoding='utf-8')
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(err):
+                code = policy.main(['check', '--artifact', str(artifact),
+                                    '--measurements', str(report)])
+            assert code == expected, (
+                f'{name} at {measured} against a tolerance of '
+                f'{policy.tolerance_of(carried, name)}%: {out.getvalue()} '
+                f'{err.getvalue()}')
+
+
+def test_a_journey_the_budget_does_not_hold_is_compared_against_nothing(tmp):
+    """A journey sized representatively and still inseparable from the shared
+    baseline keeps its shape sha and drops its recorded count.
+
+    The two states it must not be confused with are both refusals of a
+    different kind, and this control holds the line between them: the count
+    is `null`, so the journey is REPORTED as unrecorded and NOTHING is
+    compared against it — even though the measurement carries a count for
+    it, and even a count far above the default tolerance. A null that fell
+    through to a comparison would either invent a budget out of nothing or
+    red a run over a journey the budget does not hold.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped = names[0]
+    document = recorded_document()
+    document['journeys'][dropped] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    assert policy.unrecorded(policy.load(artifact), names) == [dropped], (
+        'the rendering did not carry the null count, so this control would '
+        'be measuring a document the artefact cannot hold')
+    # A count ten times any tolerance the artefact names, so a null that were
+    # compared would be an unmistakable over-budget rather than a rounding
+    # argument.
+    counts = {name: 1000 for name in names if name != dropped}
+    counts[dropped] = 10 ** 9
+    report = Path(tmp) / 'counts.json'
+    report.write_text(json.dumps(measured_report(counts)), encoding='utf-8')
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(report)])
+    assert code == 0, (
+        f'a journey the budget does not hold was compared anyway: '
+        f'{out.getvalue()} {err.getvalue()}')
+    said = out.getvalue()
+    assert f'unrecorded, reported and passing: {dropped}' in said, said
+    refused = err.getvalue()
+    assert 'over:' not in refused and 'unmeasured:' not in refused, (
+        f'a journey recorded at null was compared against something: '
+        f'{refused}')
+
+
 def test_a_recorded_journey_the_set_no_longer_has_is_reported(tmp):
     """A count recorded for a journey nothing runs is reported, not compared.
 

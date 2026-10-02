@@ -38,7 +38,18 @@ def document_from(report, recorded):
 
     The tolerance is the one field that stays. It is the bound a person
     set, and a re-baseline moves the counts under it rather than moving the
-    bound with them.
+    bound with them. A journey's OWN tolerance is the same bound for one
+    journey, and stays for the same reason — narrowed to the journeys this
+    document carries, because a tolerance for a journey the set no longer
+    has is a rule nothing enforces, which is the same fate a stale count
+    has.
+
+    A journey recorded at `null` stays at `null`. That is not an absence of
+    data: the measurement this reads DOES count the journey, and the null
+    says the budget deliberately does not hold it because its own work is
+    not separable from the background it shares. Re-adding the count would
+    reinstate a budget a person decided against, silently, on the next
+    re-baseline of anything at all.
     """
     counter = report.get('selected_counter')
     counts = journey_counters.counts_of(report, counter)
@@ -52,6 +63,8 @@ def document_from(report, recorded):
                 'nothing to record and a budget without it compares '
                 'nothing')
         journeys[name] = measured
+    for name in _dropped(recorded, names):
+        journeys[name] = None
     shas = {name: _agreed_sha(report, name) for name in names}
     toolchain = report.get('toolchain') or {}
     if not journey_artifact.recorded_toolchain({'toolchain': toolchain}):
@@ -67,6 +80,7 @@ def document_from(report, recorded):
     measured = {'schema_version': journey_artifact.SCHEMA_VERSION,
                 'counter': counter,
                 'tolerance_pct': recorded.get('tolerance_pct'),
+                'tolerances': _carried_tolerances(recorded, names),
                 'toolchain': toolchain,
                 'excluded_threads': exclusions,
                 # `None` rather than absent: every schema field is spelled
@@ -83,6 +97,35 @@ def document_from(report, recorded):
     # pylint: disable-next=protected-access
     return journey_artifact._validated(
         {field: measured[field] for field in journey_artifact.FIELDS})
+
+
+def _dropped(recorded, names):
+    """The journeys this document deliberately does not hold a count for.
+
+    A name the artefact records at `null` is a journey the budget does not
+    compare, and the measurement in hand counts it anyway — that is the
+    whole of the difference between a dropped journey and a journey the
+    measurement failed on, which the refusal above already covers. So the
+    null is carried forward rather than filled from a number the person who
+    wrote it declined.
+    """
+    journeys = recorded.get('journeys') or {}
+    return [name for name in names
+            if name in journeys and journeys[name] is None]
+
+
+def _carried_tolerances(recorded, names):
+    """The recorded per-journey tolerances, for the journeys that are here.
+
+    Absent stays absent, as everywhere else in the document: a re-baseline
+    of an artefact that names no per-journey tolerance writes no block, so
+    the canonical rendering of every artefact recorded before the field
+    still round-trips.
+    """
+    own = recorded.get('tolerances')
+    if own is None:
+        return None
+    return {name: value for name, value in own.items() if name in names}
 
 
 def _agreed_sha(report, name):

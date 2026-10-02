@@ -123,6 +123,59 @@ def test_the_verdict_table_pins_every_row_it_renders(tmp):
         '`perf-instructions` |'), rows[names[2]]
 
 
+def test_the_table_and_the_gate_are_held_to_the_same_number(tmp):
+    """The summary's budget cell and the verdict above it are one number.
+
+    A second copy of the arithmetic in `journey_report.py` is the one drift
+    nothing else in the tree can see: the counts are right in the log and on
+    disk, the module's own `budget_of` is right, and the table under the
+    verdict is a number a second implementation produced. So the cell is
+    compared with the gate's own number, the gate is driven to both sides of
+    that same number, and the module is read for a tolerance of its own at
+    all — which is what a second copy would have to mention.
+    """
+    del tmp
+    summaries = _journey_contract.summaries()
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    own, defaulted = names[0], names[1]
+    document = budget_document(tolerance_pct=10, tolerances={own: 40})
+    counts = {name: 0 for name in names}
+    counts[own] = 1400
+    counts[defaulted] = 1100
+    found = policy.violations(counts, document, names)
+    assert not any(found.values()), found
+    rows = {line.split('|')[1].strip(): line
+            for line in summaries.verdict_lines(document, counts, found)
+            if line.startswith('|') and not line.startswith('|---')}
+    assert rows[own] == f'| {own} | 1400 | 1400 | 0 | within budget |', (
+        rows[own])
+    assert rows[defaulted] == (
+        f'| {defaulted} | 1100 | 1100 | 0 | within budget |'), (
+            rows[defaulted])
+    for name in (own, defaulted):
+        limit = policy.budget_of(document, name)
+        assert f'| {limit:.0f} |' in rows[name], (name, limit, rows[name])
+        # One instruction either side of the number the table printed, driven
+        # through the gate: the table said `within budget` at it, and the gate
+        # has to agree at both ends of the boundary.
+        for measured, expected in ((limit, False), (limit + 1, True)):
+            over = policy.violations(dict(counts, **{name: measured}),
+                                     document, names)['over']
+            assert (name in over) is expected, (name, measured, over)
+
+    source = (Path(_journey_contract.ROOT) / 'scripts' / 'ci'
+              / 'journey_report.py').read_text(encoding='utf-8')
+    # The two FIELD names, not the word: the remedies below say in prose that
+    # a re-baseline leaves the recorded tolerance alone, and that sentence is
+    # not a second copy of anything. A second copy has to read a value.
+    named = [line for line in source.splitlines()
+             if 'tolerance_pct' in line or 'tolerances' in line]
+    assert not named, (
+        'journey_report.py reads a tolerance of its own rather than the one '
+        f'the gate compares against: {named}')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeyreport_')
