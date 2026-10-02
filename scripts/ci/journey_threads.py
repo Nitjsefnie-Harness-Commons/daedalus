@@ -23,6 +23,24 @@ instructions, a longer request thread about a million, uvicorn's serve
 thread tens of millions, the front end's import billions. Each band clears
 the next by a factor of ten.
 
+A total can place a BACKGROUND thread and settle nothing else. Measured on
+this box: a main thread plus two workers wrote three files headed
+`thread: 1`, `thread: 2`, `thread: 3` — per-pid sequence numbers, not the
+OS thread ids, for a process whose native tid was 1416293 — so nothing in a
+profile says which worker is which. And the two populations a band is asked
+to tell apart OVERLAP in cost: the front end's import is billions, while
+`mcp-exec`'s own round trip measured 1,311,350,558. A ceiling above the
+round trip puts the real import above it too, so no pair of bands
+separates them (issue 1461).
+
+So the exclusion is not made accurate by a better classifier. A journey
+performs its OWN work on its main thread, where `thread == 1` counts it
+whatever it costs, and the one thing a journey must not count — the front
+end's import — is loaded on a worker of its own, where a band can name it.
+A journey that later moves its work onto a worker has it excluded, which is
+why `tests/test_journey_threads.py` asserts the placement rather than
+trusting it.
+
 Anything this cannot read is a REFUSAL naming the thread and its count,
 never a silent inclusion. A mis-sorted profile that quietly sums the thread
 the gate exists to exclude is the worst failure this harness has, and it is
@@ -107,10 +125,14 @@ def role_of(ir, thread):
 
     The main thread is read FIRST and whatever its size, because it is the
     thread the process started on and a large total on it is still the main
-    thread's work. That is why the front end's import must not run there:
-    a journey that loaded it on its main thread would have the import
-    classified as `main` and counted, which is the whole asymmetry the
-    journeys avoid by loading it on a thread of their own and waiting.
+    thread's work. That is the whole of this classifier's accuracy: every
+    journey runs its own work there, so it counts whatever it costs, and the
+    one thing a journey must not count is loaded on a worker of its own.
+
+    For a background thread the total is the only evidence there is — no
+    header names the worker — and it decides only whether the thread is
+    harness work. It cannot establish that a background thread IS a
+    journey's own work, so no work that matters is put there.
     """
     if thread == 1:
         return MAIN
