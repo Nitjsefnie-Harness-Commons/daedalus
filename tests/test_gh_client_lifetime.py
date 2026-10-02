@@ -112,7 +112,7 @@ def _client():
 
 
 def _watcher_child(tmp):
-    """The watcher `ci_watch.py` is: arm the pipe, then go on polling."""
+    """What `ci_watch.py` does at the top of `main`, in two lines."""
     path = os.path.join(tmp, 'watched_child.py')
     with open(path, 'w', encoding='utf-8') as handle:
         handle.write(CHILD.format(skill=str(SKILL), armed=ARMED, save=SAVE))
@@ -120,7 +120,6 @@ def _watcher_child(tmp):
 
 
 def _still_open(descriptor):
-    """Whether this process still holds `descriptor` open."""
     try:
         os.fstat(descriptor)
     except (OSError, ValueError):
@@ -159,7 +158,6 @@ def _probe_agrees_with_the_pipe():
 
 
 def _ended(child):
-    """The child's exit code, killing it first if it is still running."""
     if child.poll() is None:
         child.kill()
     return child.wait(timeout=LIFETIME)

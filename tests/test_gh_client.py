@@ -151,11 +151,12 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
 
     # The reason the parser reads line by line, and the only one of its
     # two fixtures that names it: a re-translated ending carries TWO
-    # `\r`s, so the line after the status line is a blank one where a
-    # reader that split on the blank-line byte pair would have cut the
-    # block in half. The single `\r` above is an ordinary CRLF response
-    # and the two splits agree on it, so it cannot tell the readers
-    # apart; this one can, and this is what fails if they are confused.
+    # `\r`s, and a reader that ends a line at a lone `\r` as well as at
+    # `\n` reads that doubled one as a blank line of its own - which ends
+    # the header block there and puts the header lines in the body. The
+    # single `\r` above is an ordinary CRLF response, where the two
+    # readers agree, so it cannot tell them apart; this one can, and
+    # this is what fails if they are confused.
     doubled = 'HTTP/2.0 200 OK\r\r\nx-ratelimit-remaining: 4999\r\r\n\r\r\n'
     doubled += '{"data": {}}'
     assert client._parse(doubled) == (
