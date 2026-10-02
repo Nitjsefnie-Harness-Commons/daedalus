@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -156,13 +157,9 @@ def test_a_clear_of_an_entry_already_gone_is_a_discard(tmp):
             raise FileNotFoundError(2, 'No such file or directory', path)
 
     said = io.StringIO()
-    real_shutil = plant.shutil
-    try:
-        plant.shutil = _RacedRemoval
-        with contextlib.redirect_stdout(said):
-            status = plant.clear(str(target), str(store))
-    finally:
-        plant.shutil = real_shutil
+    with mock.patch.object(plant, 'shutil', _RacedRemoval), \
+            contextlib.redirect_stdout(said):
+        status = plant.clear(str(target), str(store))
     assert status == 0, status
     assert not entry.exists(), 'the entry survived the removal'
     # The post-condition is the entry's absence, so a store entry that is
