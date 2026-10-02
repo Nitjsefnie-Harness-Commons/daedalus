@@ -242,6 +242,13 @@ def test_a_retry_after_the_reader_cannot_count_falls_to_the_reset(tmp):
     pause that carries no instant, so the waiter falls back to its plain
     minute. Pinning that says the date is not refused, rather than
     refusing an answer the API called a retry.
+
+    The third arm is the other header and the near miss both ways: a
+    `x-ratelimit-reset` the reader cannot turn into a moment is not an
+    instant, and with no `Retry-After` beside it there is nothing left to
+    report - so the answer is a failure, not a pause at a moment nobody
+    named. `float()` on that value would raise rather than answer, which
+    is the loud way to be wrong about a header.
     """
     client = _client()
     dated = 'Wed, 21 Oct 2026 07:28:00 GMT'
@@ -255,6 +262,10 @@ def test_a_retry_after_the_reader_cannot_count_falls_to_the_reset(tmp):
         'headers': {'Retry-After': dated},
         'body': {'message': 'forbidden'}})
     assert alone.resume_at is None, alone.resume_at
+    _undelivered(client, tmp, {
+        'status': 200, 'exit': 1, 'stderr': '',
+        'headers': {'x-ratelimit-reset': dated},
+        'body': {'message': 'forbidden'}})
 
 
 def test_a_reset_on_its_own_is_not_evidence(tmp):
