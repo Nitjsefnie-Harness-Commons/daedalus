@@ -513,13 +513,15 @@ exact-match rule.
 `issue_comment`, so an immediate read returns empty `assignees` for a claim
 that is about to succeed. That empty read is a race, not evidence - never
 re-post on the strength of it. Check on your next natural touch of the issue.
-A declined claim - a closed issue, a pull request, an inexact body carrying a
-command word, or a mismatched number - answers on the issue and fails the run.
-Reaching the cap for your role - which limits how many open issues you are
-assigned at once - is answered too, with the role, the cap and your count,
-though that run still succeeds. A body with no command word is skipped by the
-trigger filter before the action runs, and a bot's comment is refused without
-answering - the two silences that remain.
+An attempt is a line that STARTS with a command word - a word inside a URL, a
+path or a sentence is a mention, and gets nothing at all. A declined attempt - a
+closed issue, a pull request, an inexact body whose line does start with one, or
+a mismatched number - answers on the issue and fails the run. Reaching the cap for
+your role - which limits how many open issues you are assigned at once - is
+answered too, with the role, the cap and your count, though that run still
+succeeds. Three silences remain: a body with no command word anywhere, and a
+bot's comment, are both skipped before the action runs, and a body that merely
+mentions a command word mid-line starts a run that ends quietly.
 
 **A claim lapses on its assignment age, not on your silence.** The holder's
 clock runs from when they were assigned, so a claim can expire while its holder
