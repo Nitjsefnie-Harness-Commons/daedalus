@@ -255,14 +255,14 @@ command, and like a word inside a sentence, a URL or a path it gets nothing at
 all.
 
 A decline is loud, not silent: a mismatched number, a closed issue, a pull
-request, and a body whose line begins with a command word properly — as
-`/claim`, `/claim 1479` or `/claim this one` — each get an answer on the issue
-and fail the run. An issue somebody already holds is answered with the holder
-named, and reaching the cap for your role is answered too, naming the role, the
-cap and your count, though that run still succeeds. Some comments get no answer
-at all: a body with no command word anywhere, and a bot's comment, are both
-skipped before the action runs, and a body that merely mentions a command word
-mid-line starts a run that ends quietly. Re-read the issue afterwards and
+request, and a body whose line begins with a command word properly but says
+more than the command — `/claim this one` — each get an answer on the issue and
+fail the run. An issue somebody already holds is answered with the holder
+named, and reaching the cap for your role is answered too, naming the role,
+the cap and your count, though that run still succeeds. Some comments get no
+answer at all: a body with no command word anywhere, and a bot's comment, are
+both skipped before the action runs, and a body that merely mentions a command
+word mid-line starts a run that ends quietly. Re-read the issue afterwards and
 confirm your login is in `assignees`: a posted comment is not a claim.
 
 A claim you take this way also ages out: held longer than seven days, it
