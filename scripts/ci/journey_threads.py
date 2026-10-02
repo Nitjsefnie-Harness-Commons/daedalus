@@ -15,12 +15,13 @@ process it belongs to, so the ONE identity in a profile that is neither a
 number nor a symbol is which PROGRAM a thread ran in.
 
 That is the discriminator, and it is read FIRST because it is the only one
-that cannot be wrong in the direction that matters. A journey's own work is
-every thread of the harness process, and no exclusion list may ever reach
-one — so `main` and `request` are the journey's process and are structurally
-outside the table below rather than kept out of it by a signature happening
-to match. Everything in another process is background by construction: the
-bridge's own server loop, its MCP front end, its protocol threads.
+that cannot be wrong in the direction that matters. A journey's own work runs
+in the harness process, and no exclusion list may reach a thread of it — the
+artefact's validator refuses `main` and `request` by name — so those two roles
+are structurally outside the table below rather than kept out of it by a
+signature happening to match. Everything in another process is background by
+construction: the bridge's own server loop, its MCP front end, its protocol
+threads, and anything else the journey itself started.
 
 WHAT A SYMBOL CANNOT DO, measured on the real profiles in
 `tests/_journey_profile_fixtures.py` (CPython 3.13.14, valgrind 3.24.0,
@@ -88,10 +89,22 @@ process's thread 1, which is read by POSITION and first — and
 it.
 
 What each journey stops counting is in `EXCLUDED`, and `main` and `request`
-are in no list: they are the journey's own work by construction, so no
-journey can exclude either. The two roles a journey can exclude are both
-background by construction too, so an exclusion cannot remove a journey's work
-whatever the profile says:
+are in no list: they are the journey's own work by construction, and
+`journey_artifact`'s validator refuses either by name, so no document can
+state the opposite. The two roles a journey CAN exclude are both background by
+construction too, so for the work a journey runs inside its own process the
+rule holds structurally rather than by measurement.
+
+It holds for that work and not beyond it. A journey's own work running in a
+SUBPROCESS it spawned carries no `_journeys.py` on its command line, so it is
+classified background and dropped along with the bridge's — silently, with
+`failure=None` and nothing in the report naming it. No journey reaches this
+today: they reach the outside world only through `_util.bridge()`. Nor is an
+unrecognised process refused, and refusing one is what would fix it: the
+`ldconfig` grandchild is present in EVERY real profile, is neither the harness
+nor the bridge, and a refusal for it would reject the very profiles that show
+the classifier works. Naming it is left to the pull request's Known
+Limitations rather than claimed here as a rule that holds.
 
 - Every journey's profile carries the bridge's one-off MCP bootstrap import —
   the bridge starts its own front-end listener whatever the journey asks of
@@ -304,11 +317,14 @@ def _expected(roles):
 
     Two of the four roles have no symbol and the sentence has to survive
     them: `main` is read from a thread's position and `request` is what no
-    signature claims, and either can be named in an exclusion list, because
-    the artefact's validator admits every role and nothing else refuses
-    that. Indexing the signature table on a role it does not hold would turn
-    a refusal into a `KeyError` — an unhandled state where the gate wanted
-    to say a sentence.
+    signature claims. `uvicorn-serve` is the third, and it is the only one of
+    the three that reaches here through a RECORDED document — the validator
+    refuses `main` and `request` in an exclusion list, so no list names
+    either. The case stays covered by planting the table entry directly,
+    which is what a documented-state change would otherwise retire silently.
+    Indexing the signature table on a role it does
+    not hold would turn a refusal into a `KeyError` — an unhandled state
+    where the gate wanted to say a sentence.
     """
     return ', '.join(
         f'{role}: {SIGNATURES[role]}' if role in SIGNATURES
@@ -347,10 +363,10 @@ def total_for(rows, journey, unread=None):
 
 
 # What each journey stops counting, per journey. The rule every entry obeys
-# is the module docstring's: an exclusion list may never cover work the
-# journey itself caused — and under process classification that rule is
-# structural rather than measured, because a journey's own work is `request`
-# or `main` and neither of them is in this table.
+# is the module docstring's, and `journey_artifact` enforces the half of it
+# about the work a journey runs in its own process: `main` and `request` are
+# named by no list here and refused by that validator, which is what makes
+# the rule structural rather than measured.
 EXCLUDED = {
     'command-round-trip': (IMPORT, SERVE),
     'dashboard-fanout': (IMPORT, SERVE),
