@@ -471,6 +471,83 @@ def test_naming_this_repositories_own_gate_prints_identically(tmp):
         assert got == plain, (spelled, got)
 
 
+# ---- the two refusals that are the invocation's rather than a gate's
+
+def _exited_invocation(mod, clock, argv):
+    """(exit code, stdout, stderr) for an invocation that may END rather
+    than return.
+
+    `_run_main` above turns a `SystemExit` into a failure, because every
+    exit-3 path it was written for returns a code. These two do not:
+    one of them is argparse's own refusal reaching this tool's exit, and
+    the exit IS the answer under assertion. Nothing is stubbed here, so
+    a refusal that stopped being one would reach the network rather than
+    pass - the frozen clock is what keeps that a bounded failure.
+    """
+    out, err = io.StringIO(), io.StringIO()
+    with _frozen_wait_clock(mod, clock), \
+            contextlib.redirect_stdout(out), \
+            contextlib.redirect_stderr(err):
+        try:
+            code = mod.main(argv)
+        except SystemExit as refusal:
+            code = refusal.code
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_a_flag_this_tool_does_not_have_is_a_rejected_invocation(tmp):
+    """The refusal argparse itself produces, on this tool's exit.
+
+    Every other refusal in this file is one `ci_wait.py` writes, so none
+    of them can tell `RefusingParser` from argparse's own: a stock
+    parser prints the same usage block and the same `error:` line and
+    exits 2, which this tool's own contract spends on a TIMEOUT. A caller
+    reading that exit would wait out a bound for an invocation that was
+    never accepted, and would be told the wait expired when nothing was
+    ever asked.
+
+    Asserted on the refusal's own words rather than on the status alone:
+    the usage block printed first says the invocation was not read, and
+    the `error:` line says which of its arguments was not recognised.
+    """
+    del tmp
+    mod = _ci_wait()
+    argv = ['a' * 40, '--no-such-flag']
+    code, text, err = _exited_invocation(mod, _Clock(), argv)
+    assert code == 3, (code, err)
+    assert err.startswith('usage: '), err
+    assert 'error: unrecognized arguments: --no-such-flag' in err, err
+    assert text == '', text
+
+
+def test_a_failed_query_refuses_at_once_with_its_reason(tmp):
+    """The other exit-3 limb, and the only one nothing in this file
+    reaches.
+
+    A query that failed is `gh_client`'s to raise and this tool neither
+    wraps nor retries it, so without a control the whole handler could
+    go and the exception would escape as a traceback whose exit status is
+    1 - a number this tool has spent on an UNACCEPTABLE verdict, so a
+    caller would read a failed read as a red head.
+
+    The message is the assertion, not the status: `query failed:` alone
+    tells a caller nothing about which read failed or why, and the reason
+    the query gave is the part they can act on. Read through `--once`, so
+    the stubbed read is the only thing on the path.
+    """
+    del tmp
+    mod = _ci_wait()
+
+    def _refuse(repo, sha):
+        raise mod.gh_client.QueryError('gh: not found (exit 1)')
+
+    setattr(mod, 'ci_on', _refuse)
+    code, text, err = _exited_invocation(mod, _Clock(), ['a' * 40, '--once'])
+    assert code == 3, (code, err)
+    assert err == 'query failed: gh: not found (exit 1)\n', err
+    assert text == '', text
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='ciwaitreq_')
 
