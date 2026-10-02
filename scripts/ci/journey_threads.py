@@ -83,10 +83,11 @@ BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
 # entry obeys is the module docstring's: an exclusion list may never cover
 # work the journey itself caused. NO control enforces it — settling it takes
 # a measurement, not a structural check — and the measurement discharging it
-# is the per-journey thread table at
-# `.superpowers/sdd/plan/thread-table.md`, which names for each journey its
-# own request thread, the role that thread falls in, its Ir and whether it
-# is kept.
+# is a per-journey thread table: for each journey, the thread carrying its
+# own request work, the role that thread falls in, its Ir against the band's
+# threshold, and whether it is kept. Nothing in the tree reproduces that
+# table, so the entries below are evidence-backed rather than checked, and
+# re-measuring it is what would re-open the question.
 #
 # The import applies to every journey, not only the ones that call a tool:
 # the bridge each spawns starts its own MCP listener whatever the journey
