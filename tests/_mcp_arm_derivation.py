@@ -191,8 +191,9 @@ def _bound_raisers(tree):
     plain assignment, an annotated one, or a walrus, which are the three
     forms a binding of a name takes here — and a store of anything else
     takes a name back out, so the LAST store of a name is what says what it
-    holds. The point is fixed rather than reached in one pass because a
-    store may name an alias another store makes further down."""
+    holds. The point is fixed rather than reached in one pass, and each pass
+    carries the last one's answer into the next, because a store may name an
+    alias a LATER store makes."""
     partials = _partial_factories(tree)
     stores = sorted((node for node in ast.walk(tree)
                      if isinstance(node, (ast.Assign, ast.AnnAssign,
@@ -200,7 +201,7 @@ def _bound_raisers(tree):
                     key=lambda node: (node.lineno, node.col_offset))
     bound = set(REFUSAL_RAISERS)
     for _ in range(len(stores) + 1):
-        settled = set(REFUSAL_RAISERS)
+        settled = set(bound)
         for store in stores:
             targets = store.targets if isinstance(store, ast.Assign) \
                 else [store.target]
