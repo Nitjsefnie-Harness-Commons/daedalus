@@ -618,7 +618,11 @@ def test_real_publisher_step_noop_reports_unchanged(tmp):
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert 'changed=false' in output.read_text(encoding='utf-8')
     assert _git(repo, 'diff', '--name-only').stdout == ''
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='ciratchets_')
+
+
 if __name__ == '__main__':
     raise SystemExit(main())
