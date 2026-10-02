@@ -707,6 +707,7 @@
 !/tests/test_sweep_launch_scan.py
 !/tests/test_tab_registry.py
 !/tests/test_teardown_retry.py
+!/tests/test_tree_analyser_helpers.py
 !/tests/test_type_errors.py
 !/tests/test_unresolved_routes.py
 !/tests/test_upload_races.py
