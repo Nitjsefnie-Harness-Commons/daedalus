@@ -85,7 +85,7 @@ def test_store_hotfix_carries_a_scope_out_and_hands_the_record_back(_tmp):
 
     assert composition.bridge.calls == [
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)', match=scope),
+                                code='console.log(1)', match=scope, wait=True),
     ]
 
     composition.bridge.calls.clear()
@@ -93,7 +93,7 @@ def test_store_hotfix_carries_a_scope_out_and_hands_the_record_back(_tmp):
 
     assert composition.bridge.calls == [
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)'),
+                                code='console.log(1)', wait=True),
     ]
 
     record = {'version': '1.0', 'fixes': [
@@ -136,7 +136,7 @@ def test_store_hotfix_forwards_the_empty_pattern_it_cannot_swallow(_tmp):
 
     assert composition.bridge.calls == [
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)', match=''),
+                                code='console.log(1)', match='', wait=True),
     ]
 
     # The anti-vacuity half: the same field forwards a real pattern and
@@ -149,9 +149,9 @@ def test_store_hotfix_forwards_the_empty_pattern_it_cannot_swallow(_tmp):
 
     assert composition.bridge.calls == [
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)', match=SCOPE),
+                                code='console.log(1)', match=SCOPE, wait=True),
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)'),
+                                code='console.log(1)', wait=True),
     ], composition.bridge.calls
 
 
@@ -172,7 +172,8 @@ def test_store_hotfix_carries_a_clear_out_and_refuses_a_contradiction(_tmp):
 
     assert composition.bridge.calls == [
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)', clearScope=True),
+                                code='console.log(1)', clearScope=True,
+                                wait=True),
     ]
 
     composition.bridge.calls.clear()
@@ -180,7 +181,7 @@ def test_store_hotfix_carries_a_clear_out_and_refuses_a_contradiction(_tmp):
 
     assert composition.bridge.calls == [
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)'),
+                                code='console.log(1)', wait=True),
     ], composition.bridge.calls
 
     refused = False
@@ -199,7 +200,7 @@ def test_store_hotfix_carries_a_clear_out_and_refuses_a_contradiction(_tmp):
 
     assert composition.bridge.calls == [
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
-                                code='console.log(1)', match=SCOPE),
+                                code='console.log(1)', match=SCOPE, wait=True),
     ], composition.bridge.calls
 
 
