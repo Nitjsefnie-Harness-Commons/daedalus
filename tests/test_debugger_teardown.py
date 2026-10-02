@@ -266,6 +266,38 @@ def test_a_refused_detach_on_a_transient_release_is_survived_and_traced(tmp):
         outcome
 
 
+def test_a_detach_that_throws_is_survived_and_traced(tmp):
+    """The synchronous throw, which a rejected detach never reaches.
+
+    `chrome.debugger.detach` returns a promise, but the CALL can fail before
+    it returns one, and every other `detach` double in the tree is declared
+    `async` — which converts a `throw` into a rejection and leaves only the
+    `.then` handler above exercised. This case drives the throw out of the
+    same release site, so the two controls together are what tell the two
+    handlers apart: delete the `try`/`catch` pair and this promise never
+    settles, while the rejected case stays green.
+
+    A refusal that is recorded and never settled is the worse defect, so
+    the later claim is the observation: it is free to run rather than
+    waiting forever on a promise nobody settles.
+    """
+    del tmp
+    outcome = run_attachment_case({
+        'detachThrows': True,
+        'actions': [
+            {'claim': {'tabId': 7}},
+            {'settle': 2},
+            {'release': 0},
+            {'claim': {'tabId': 7}},
+            {'settle': 8},
+        ]})
+    assert outcome['detachCalls'] == [7], outcome
+    assert outcome['unhandled'] == [], outcome
+    assert any('detach threw' in line for line in outcome['refused']), outcome
+    assert outcome['attachCalls'] == [7, 7], outcome
+    assert outcome['live'] == [7], outcome
+
+
 def test_a_claim_arriving_after_a_refused_detach_still_works(tmp):
     """The settling is unconditional, and this is what that buys.
 
