@@ -7,8 +7,9 @@ the floor directly, which is the only way its detection is banked. The
 import closure is what makes the set of modules the floor scans closed,
 and the registration-driven pass drives it over the real tree, beside the
 closure limits it cannot exercise: those are the shapes `daedalus_mcp`
-never presents, carried as synthetic compositions in `test_mcp_tools.py`
-and enumerated arm by arm in `test_mcp_import_refusals.py`. They are not
+never presents, carried as synthetic compositions in
+`test_mcp_closure_limits.py` and enumerated arm by arm in
+`test_mcp_import_refusals.py`. They are not
 the shapes `_mcp_import_closure` declares ACCEPTED — a value reached
 through a call's result, a tracked module or the operation handed as a
 call argument, a value computed at runtime — which no control pins, because
