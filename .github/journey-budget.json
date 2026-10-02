@@ -23,8 +23,8 @@
     "mcp-exec": "0fee0549d2cfba78242e570358e085a555002d0e8b8511d6f8957475325013d9"
   },
   "journeys": {
-    "command-round-trip": 779890807,
-    "dashboard-fanout": 774774545,
-    "mcp-exec": 1019367946
+    "command-round-trip": 778012795,
+    "dashboard-fanout": 773017471,
+    "mcp-exec": 987968095
   }
 }
