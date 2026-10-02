@@ -6,8 +6,8 @@ registration-driven pass in test_mcp_tools.py never sees a gap. These drive
 the floor directly, which is the only way its detection is banked. The
 import closure is what makes the set of modules the floor scans closed,
 and the registration-driven pass drives it over the real tree, beside the
-closure limits it cannot exercise: those are the shapes `daedalus_mcp`
-never presents, carried as synthetic compositions in
+closure limit it cannot exercise: that is the shape `daedalus_mcp`
+never presents, carried as a synthetic composition in
 `test_mcp_closure_limits.py` and enumerated arm by arm in
 `test_mcp_import_refusals.py`. They are not
 the shapes `_mcp_import_closure` declares ACCEPTED — a value reached

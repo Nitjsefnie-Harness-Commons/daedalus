@@ -49,7 +49,7 @@ under-reaches. An arm with no near miss says so in its row.
 
 The dead-code barrier kinds are the same question asked of POSITIONS, and
 `test_mcp_tools.py` carries the real-tree walk while
-`test_mcp_closure_limits.py` carries the three limits it cannot exercise.
+`test_mcp_closure_limits.py` carries the one limit it cannot exercise.
 """
 import sys
 from pathlib import Path

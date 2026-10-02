@@ -1,10 +1,36 @@
 #!/usr/bin/env python3
-"""The three import-closure limits the real `daedalus_mcp` tree cannot show.
+"""The one import-closure limit the real `daedalus_mcp` tree cannot show.
 
 The refusal pass in `test_mcp_tools.py` walks the real tree, so it can only
 witness a closure property the tree actually presents. Each shape below is
 one it does not present, driven on a synthetic composition instead, and the
 arms of the walk are enumerated in `test_mcp_import_refusals.py`.
+
+This file carried three such shapes and now carries one. Each of the other
+two was removed because a mutant that kills its case here ALSO reds a case
+in `test_mcp_import_refusals.py`, so the file was not the only place the
+defect showed and the shape was breadth rather than cover. The mutants, so
+the measurement can be repeated:
+
+- the dead-code barrier: `dead_nodes` returning an empty set reds this
+  file's barrier case and `test_mcp_import_refusals.py`'s
+  `test_every_dead_code_barrier_kind_marks_the_tail_behind_it`, which drives
+  all five barrier kinds and the fall-through near miss on one tree where
+  this file drove one kind on a second tree saying the same thing.
+- a constant program reaching a code-evaluating builtin: dropping the arm in
+  `_import_targets`, forcing `is_builtin` to answer True, and making
+  `may_be_code_eval` answer True for any callee each red this file's
+  program case and a case in `test_mcp_import_refusals.py` — the arm itself
+  as a table row, the `bool` index rows, and the near-miss rows beside them.
+  Its other side, a name the module has bound to a tool, is what
+  `NEAR_MISSES`' "a builtin that evaluates nothing" row and the real tree's
+  own `server.py` answer.
+
+The case below is the one that stayed, and it stayed on a measurement rather
+than on a preference: dropping the lambda arm from `static_value` reds it
+and leaves `test_mcp_import_refusals.py` 10/10 and `test_mcp_tools.py`
+21/21. Nothing else on this tree catches a call's callee being read as a
+VALUE.
 """
 import sys
 from pathlib import Path
@@ -12,22 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
 import _util  # noqa: E402
-from _mcp_import_fixtures import (  # noqa: E402
-    _assert_scan_refusal, _write_tree)
-
-
-# Two of the three cases below close shapes the real tree does not exercise,
-# so the pass above cannot witness them: nothing in `daedalus_mcp` hands a
-# program to a code-evaluating builtin, and no callee is read out of a
-# nullary lambda's return. Each of those two states a REFUSAL and a SILENCE
-# — a constant program reaching `eval`/`exec`/`compile` is refused while the
-# same name bound to a tool is not, a nullary lambda callee resolves while a
-# lambda with a required parameter refuses — which is what keeps a rule that
-# over-reaches from passing. The third is a MEMBERSHIP rather than such a
-# pair, and it is on the real tree: the barrier case pins that the call
-# before a barrier contributes its module and the call behind it does not.
-# The arms of the walk the real tree cannot present at all are enumerated in
-# `test_mcp_import_refusals.py`.
+from _mcp_import_fixtures import _write_tree  # noqa: E402
 
 
 def _composition_names(_tmp, tree):
@@ -37,48 +48,6 @@ def _composition_names(_tmp, tree):
     scanned = _mcp_import_closure.composition_scan_set(
         Path(_tmp) / 'composition.py', _tmp)
     return {path.relative_to(Path(_tmp)).as_posix() for path in scanned}
-
-
-def test_a_program_handed_to_a_code_evaluating_builtin_is_refused(_tmp):
-    """A constant string reaching `eval`/`exec`/`compile` is a PROGRAM, and
-    the walk either resolves it or refuses it — never silence.
-
-    The other side is the same name bound to a tool, which is what
-    `server.py` does with the `exec` its own tool module exports: a
-    different function, so the scan set is READ and answered, not merely
-    not an exception. Reading it is the whole point: a composition that
-    raised some other arm's refusal would answer here too.
-    """
-    for name in ('eval', 'exec', 'compile'):
-        program = f'\n\ndef load(x):\n    return {name}("importlib")(x)\n'
-        _assert_scan_refusal(_tmp, program, 4, 'code-evaluating')
-    assert _composition_names(_tmp, {
-        'composition.py': '\neval_tools = {"exec": print}\n'
-                          'exec = eval_tools["exec"]\n'
-                          '\n\ndef load():\n    return exec("code")\n'
-    }) == {'composition.py'}
-
-
-def test_a_position_behind_a_barrier_is_out_of_the_scan_set(_tmp):
-    """A statement the runtime cannot reach contributes no module, and the
-    one before it still does.
-
-    Both halves ride in one tree, so a rule that stopped marking the tail
-    would add `pkg.leaf` and one that over-reached would drop `pkg.before`.
-    Every barrier kind and that shared near miss are enumerated in
-    `test_mcp_import_refusals.py`; this is the real tree's own suite, and
-    `raise` is the kind the composition above reaches.
-    """
-    assert _composition_names(_tmp, {
-        'composition.py': '\nimport importlib\n'
-                          '\n\ndef load():\n'
-                          '    importlib.import_module("pkg.before")\n'
-                          '    raise RuntimeError("before the call")\n'
-                          '    return importlib.import_module("pkg.leaf")\n',
-        'pkg/__init__.py': '',
-        'pkg/before.py': 'before = True\n',
-        'pkg/leaf.py': 'leaf = True\n'}) == {
-            'composition.py', 'pkg/__init__.py', 'pkg/before.py'}
 
 
 def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
