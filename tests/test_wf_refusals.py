@@ -18,7 +18,6 @@ from workflow_yaml import (  # noqa: E402
 
 
 def _value_error(call):
-    """Return the refusal a call raised, or None when it returned."""
     try:
         call()
     except ValueError as error:
