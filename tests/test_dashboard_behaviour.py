@@ -118,7 +118,7 @@ def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(_tmp):
 
 # The stale port is what the harness above fires, so every handler in it
 # returns at its first line. These fire the port that IS live, and a realm
-# whose `chrome.runtime.connect` refuses the way a revoked context does.
+# whose `chrome.runtime.connect` refuses as a revoked context does.
 _KEEPALIVE_LIFECYCLE_HARNESS = _dashnode.DashboardNodeHarness(
     r"""
 phase('dashboard harness started');
@@ -182,6 +182,12 @@ function realm(invalidated) {
 function armed(collection, delay) {
   return collection.filter((item) => item.delay === delay);
 }
+// Fire what a handler armed, and report an absence rather than throwing on
+// it: a relay that armed nothing is the defect, so it reaches the
+// assertion as a value rather than ending the child.
+function fire(collection, delay) {
+  for (const item of armed(collection, delay)) item.callback();
+}
 phase('dashboard module import started');
 const live = realm(false);
 phase('dashboard module imported');
@@ -192,14 +198,14 @@ const afterDisconnect = { intervalCleared: live.intervals[0].cleared,
   proactiveCleared: armed(live.timers, 4 * 60 * 1000)[0].cleared,
   retries: armed(live.timers, 500).length };
 // Only the retry the disconnect armed reconnects, so firing it is the test.
-armed(live.timers, 500)[0].callback();
+fire(live.timers, 500);
 live.intervals[live.intervals.length - 1].callback();
 const afterRetry = { ports: live.ports.length,
   firstPortPings: livePort.messages.length,
-  secondPortPings: live.ports[1].messages.length };
+  secondPortPings: live.ports.length > 1 ? live.ports[1].messages.length : 0 };
 const dead = realm(true);
 const backoff = armed(dead.timers, 5000);
-backoff[0].callback();
+fire(dead.timers, 5000);
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
   afterDisconnect, afterRetry,
@@ -217,11 +223,11 @@ def test_a_live_keepalive_disconnect_reconnects_and_a_dead_one_backs_off(_tmp):
         'afterDisconnect': {
             'intervalCleared': True, 'proactiveCleared': True, 'retries': 1},
         # A second port exists and the ping lands on IT: the retired port's
-        # interval is gone, so a listener that kept the old one would ping a
-        # port nobody holds open.
+        # interval is gone, so a listener that kept the old one pings a port
+        # nobody holds open.
         'afterRetry': {
             'ports': 2, 'firstPortPings': 0, 'secondPortPings': 1},
-        # No port at all, and firing the backoff armed another -- the proof the
+        # No port at all, and firing the backoff armed another -- proof the
         # retry ran connectKeepAlive again.
         'invalidated': {'ports': 0, 'before': 1, 'after': 2},
     }, actual
