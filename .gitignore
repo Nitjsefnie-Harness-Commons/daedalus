@@ -472,6 +472,7 @@
 !/tests/test_checkout_pin.py
 !/tests/test_child_coverage.py
 !/tests/test_ci_gate.py
+!/tests/test_ci_lint_tool_refusals.py
 !/tests/test_ci_lint_tools.py
 !/tests/test_ci_pip_cache.py
 !/tests/test_ci_ratchets.py
@@ -531,6 +532,7 @@
 !/tests/test_coverage_scope_bindings.py
 !/tests/test_coverage_source_readers.py
 !/tests/test_coverage_suites.py
+!/tests/test_coverage_suites_launch.py
 !/tests/test_coverage_unfollowable_forms.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_app_shell.py
