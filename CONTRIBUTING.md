@@ -259,11 +259,12 @@ kind. Re-read the issue afterwards and confirm your login is in `assignees`: a
 posted comment is not a claim.
 
 A claim you take this way also ages out: held longer than seven days, it
-expires, and the next `/claim` takes it over — or someone with write access
-releases it instead. Expiry is judged while a comment is being answered, never
-on a schedule, so nothing is removed until somebody writes on that issue; and
-only an assignment this action made can expire, so one a maintainer added by
-hand never does.
+expires, and another commenter's `/claim` takes it over — or someone with write
+access releases it instead. Your own `/claim` on an issue you still hold tells
+you so and changes nothing, whatever its age. Expiry is judged while a comment
+is being answered, never on a schedule, so nothing is removed until somebody
+writes on that issue; and only an assignment this action made can expire, so
+one a maintainer added by hand never does.
 
 Release an issue you stop working, before the merge that closes it — the claim
 action acts on open issues only, so a stale assignment on a closed one can no
