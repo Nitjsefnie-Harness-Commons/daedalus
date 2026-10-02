@@ -81,15 +81,21 @@ sha_diff = journey_artifact.sha_diff
 _validated = journey_artifact._validated  # noqa: SLF001
 
 # What each gate says when it refuses lives in the module that renders a
-# run's prose. The four below are the ones THIS module prints, beside the
-# row that reports them. The recorded-gate remedies are not re-bound here:
-# they travel with the gate they belong to, out of `journey_gates`, which is
-# what prints them — and a binding nothing reads is a second name for a
-# string that can move without anything noticing.
+# run's prose, bound back here because this is the policy surface the suites
+# reach them through — `test_journey_budget_gates.py` reads a recorded
+# gate's remedy from HERE rather than loading a second module to find it.
+#
+# `SIGNATURES_REMEDY` is deliberately absent: nothing read it, in this
+# module or in any suite. Its gate prints the remedy out of
+# `journey_gates`, where the gate itself is built, and a binding here was a
+# second name for a string that could move without anything noticing.
 OVER_REMEDY = journey_report.OVER_REMEDY
 SHAPE_REMEDY = journey_report.SHAPE_REMEDY
 UNMEASURED_REMEDY = journey_report.UNMEASURED_REMEDY
 UNRESOLVED_REMEDY = journey_report.UNRESOLVED_REMEDY
+TOOLCHAIN_REMEDY = journey_report.TOOLCHAIN_REMEDY
+SHA_REMEDY = journey_report.SHA_REMEDY
+THREADS_REMEDY = journey_report.THREADS_REMEDY
 REMEDY_FOR = journey_report.REMEDY_FOR
 
 # What DECIDES lives in `journey_gates.py` — the recorded comparisons, the
@@ -313,13 +319,19 @@ def main(argv=None):
             # reports it; stderr is collapsed by default, and the summary
             # is the only place a reader of an unmeasured journey can act
             # from.
-            if found['unmeasured']:
-                journey_counters.write_summary([UNMEASURED_REMEDY])
-            if found.get('unresolved'):
-                journey_counters.write_summary([UNRESOLVED_REMEDY])
-            if found['over']:
-                journey_counters.write_summary(
-                    journey_report.rebaseline_lines())
+            #
+            # In the order `found` iterates, which is the order the report
+            # below prints them in. Three hand-written `if`s each naming a
+            # kind were free to disagree with it, and a reader comparing the
+            # summary against the log had two orders to hold in their head.
+            for kind in found:
+                if not found[kind]:
+                    continue
+                if kind == 'over':
+                    journey_counters.write_summary(
+                        journey_report.rebaseline_lines())
+                elif kind in REMEDY_FOR:
+                    journey_counters.write_summary([REMEDY_FOR[kind]])
         for kind, detail in found.items():
             if detail:
                 print(f'{kind}: {detail}', file=sys.stderr)
