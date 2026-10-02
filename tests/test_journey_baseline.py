@@ -92,25 +92,52 @@ def test_the_baseline_is_read_through_each_journeys_own_exclusions(tmp):
 
 
 def test_a_journey_whose_own_work_is_under_the_bridge_refuses_and_says_so(tmp):
-    """A negative residual is a refusal naming both numbers, never a clamp.
+    """A negative residual refuses THAT JOURNEY, and names its four numbers.
 
-    Clamping to zero would report a journey as costing nothing when what
-    it measured is that its own work is smaller than the run-to-run
-    wobble of the threads it shares — the exact condition the baseline
-    exists to surface. The four numbers are the journey's kept total,
-    the startup, the bridge total and the residual, and the sentence
+    Clamping to zero would report a journey as costing nothing when what it
+    measured is that its own work is smaller than the run-to-run wobble of
+    the threads it shares — the exact condition the baseline exists to
+    surface. So the four numbers the sentence depends on are the journey's
+    kept total, the startup, the bridge total and the residual, and it
     carries each of them.
+
+    And it refuses ONE journey, which is the other half of this: the six
+    beside it separated fine, and a counter that marked itself unavailable
+    over the one that did not threw away every count in the run. The counter
+    stays available, the separable journeys keep their rows, and only the
+    refused one is absent from them.
     """
     del tmp
     counters = _journey_contract.counters()
-    _report, row = _measured(
-        counters, _profile_counter(counters, 1_000, 3_000, request=1_000,
-                                   imported=3_000, served=3_000))
-    assert row['available'] is False, row
-    assert 'journeys' not in row, row
-    why = row['why']
-    assert 'command-round-trip' in why, why
-    for number in ('2000', '7000', '4000', '9000'):
+    names = _journey_contract.journeys().NAMES
+    # One journey under the background it shares; the rest well clear of it,
+    # so the run has both a refusal and a count to show it lost neither.
+    tiny = names[0]
+
+    def answering(name, root, workdir):
+        del root, workdir
+        if name == counters.STARTUP_NAME:
+            return {'rows': _journey_contract.bridge_profile(main=7_000),
+                    'unread': None}, None
+        return {'rows': _journey_contract.bridge_profile(
+            main=1_000 if name == counters.BRIDGE_NAME else (
+                2_000 if name == tiny else 100_000),
+            request=1_000, imported=3_000, served=3_000),
+            'unread': None}, None
+
+    _report, row = _measured(counters, answering)
+    assert row['available'] is True, row
+    assert row['refused'].keys() == {tiny}, row['refused']
+    assert tiny not in row['journeys'], row['journeys']
+    assert sorted(row['journeys']) == sorted(
+        name for name in names if name != tiny), row['journeys']
+    assert all(value is not None
+               for value in row['journeys'].values()), row['journeys']
+    why = row['refused'][tiny]
+    assert tiny in why, why
+    # The kept total, the startup, the bridge total this journey's own
+    # exclusion list leaves, and the negative residual between them.
+    for number in ('3000', '7000', '2000', '6000'):
         assert number in why, (number, why)
 
 

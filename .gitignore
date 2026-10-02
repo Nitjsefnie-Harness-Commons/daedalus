@@ -242,6 +242,7 @@
 !/scripts/ci/journey_gates.py
 !/scripts/ci/journey_rebaseline.py
 !/scripts/ci/journey_report.py
+!/scripts/ci/journey_residual.py
 !/scripts/ci/journey_threads.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
