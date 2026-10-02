@@ -351,17 +351,17 @@ def test_every_measured_child_runs_with_the_two_settings_a_count_depends_on(
     """
     del tmp
     counters = _journey_contract.counters()
-    assert counters.MEASURED_ENV == {'PYTHONHASHSEED': '0',
-                                     'PYTHONDONTWRITEBYTECODE': '1'}, (
-        counters.MEASURED_ENV)
+    env = _journey_contract.counters().journey_child_env.MEASURED_ENV
+    assert env == {'PYTHONHASHSEED': '0',
+                   'PYTHONDONTWRITEBYTECODE': '1'}, env
     program = ('import json, os, sys;'
                ' json.dump({name: os.environ.get(name)'
                ' for name in sys.argv[1:]}, sys.stdout)')
     code, out, err = counters._run(
-        [sys.executable, '-c', program, *sorted(counters.MEASURED_ENV)])
+        [sys.executable, '-c', program, *sorted(env)])
     assert code == 0, err
     seen = json.loads(out)
-    assert seen == counters.MEASURED_ENV, seen
+    assert seen == env, seen
     # And the value has to be one the interpreter acts on: seed 0 is a fixed
     # hash order, not merely a variable that is set.
     seen_order = []
