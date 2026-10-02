@@ -72,7 +72,7 @@ def document_from(report, recorded, restore=(), drop=()):
                 'nothing')
         journeys[name] = measured
     _restored(_dropped(recorded, names), restore, report, counter)
-    _dropped_now(drop, names, report, counter, journeys)
+    _dropped_now(drop, names, report, counter)
     shas = {name: _agreed_sha(report, name) for name in names}
     toolchain = report.get('toolchain') or {}
     if not journey_artifact.recorded_toolchain({'toolchain': toolchain}):
@@ -163,8 +163,8 @@ def _measured_row(report, counter, name):
     return (entry.get('journeys') or {}).get(name) or {}
 
 
-def _dropped_now(drop, names, report, counter, journeys):
-    """Write the `null` for every journey `--drop` names, and nothing else.
+def _dropped_now(drop, names, report, counter):
+    """Settle every journey `--drop` names, and write nothing.
 
     The mirror of `--restore`, and the ruling is symmetric: a `null` is the
     one value in the artefact that says the budget does not hold a journey,
@@ -188,7 +188,12 @@ def _dropped_now(drop, names, report, counter, journeys):
                 'cannot be dropped: the flag is for one whose own work is '
                 'smaller than the background it shares, and this one is not '
                 'it')
-        journeys[name] = None
+    # The null is already written: the counts loop above left it at whatever
+    # a journey with no measured row reads as, which is `None`, because a
+    # journey `--drop` names is exempt from its refusal. So this function
+    # decides only whether to object — which is what `_restored` does, and
+    # for the same reason: two writers for one value is one writer too many,
+    # and the second is the one nothing exercises.
 
 
 def _dropped(recorded, names):
