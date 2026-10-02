@@ -545,8 +545,7 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     Three cost arms this control accepts on purpose. Each had a row in the
     sweep scan suite asserting the refusal rather than the miss; that
     suite went with cut 6 (#1483), so each arm below is declared and no
-    longer asserted.
-    (i) It scans the files the caller names, so a bound on
+    longer asserted. (i) It scans the files the caller names, so a bound on
     the sweep's own grandchildren — bounded individually in
     `tests/_mutation_sweep.py` — is outside it: a bound on one child is
     a backstop, only a bound on the aggregate a margin. (ii) The scan

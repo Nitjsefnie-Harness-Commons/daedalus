@@ -38,7 +38,7 @@ def test_a_bare_name_launcher_is_still_a_launcher(tmp):
     """
     del tmp
     assert _scan_of(f'run(["-c", "{PROGRAM}"], timeout=120)\n',
-                 head='from subprocess import run\n') == (
+                    head='from subprocess import run\n') == (
         [(HERE, 2)], [(HERE, 2)])
 
 
@@ -58,7 +58,7 @@ def test_a_scope_is_fully_bound_before_any_call_in_it_is_judged(tmp):
     """
     del tmp
     assert _scan_of(f'if True:\n    p = ["-c", "{PROGRAM}"]\n'
-                 'subprocess.run(p, timeout=120)\n') == (
+                    'subprocess.run(p, timeout=120)\n') == (
         [(HERE, 4)], [(HERE, 4)])
 
 
