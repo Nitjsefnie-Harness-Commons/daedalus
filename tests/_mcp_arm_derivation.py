@@ -79,12 +79,13 @@ def arm_sites(source, name):
                for child in ast.iter_child_nodes(node)}
     found = []
     for node in ast.walk(tree):
-        raisable = isinstance(node, ast.Raise) or (
-            isinstance(node, ast.Call)
-            and not isinstance(parents.get(node), ast.Raise)
-            and _reaches_raiser(node.func, bound))
-        if raisable:
-            found.append((_owning_scope(node, parents, name), node.lineno))
+        if not isinstance(node, (ast.Raise, ast.Call)):
+            continue
+        if isinstance(node, ast.Call) and (
+                isinstance(parents.get(node), ast.Raise)
+                or not _reaches_raiser(node.func, bound)):
+            continue
+        found.append((_owning_scope(node, parents, name), node.lineno))
     return found
 
 
