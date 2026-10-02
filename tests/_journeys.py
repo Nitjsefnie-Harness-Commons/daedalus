@@ -125,7 +125,8 @@ def _load_front_end(base):
     `mcp-bootstrap` thread finishes before the journey's first request — and
     the client's copy is excluded the other way round, by having already
     paid it. Neither excludes the CALL: the `exec` round trip below is the
-    work, and it runs on this thread either way.
+    work, and it runs on the journey's main thread, which counts whatever
+    it costs.
 
     The load has to be off the main thread for it to be excludable at all.
     A main thread is read as the main thread whatever its size, so an import
@@ -158,28 +159,23 @@ def mcp_exec(base, docroot):
     result is then read back through the `result` tool, which is the read an
     unwaited send leaves behind.
 
-    The round trip runs on a worker of its own, and that placement is part
-    of what this journey measures, not an accident. `journey_threads`
-    reads `thread == 1` FIRST and whatever its size, so whatever sits on
-    the journey's main thread is counted; a non-main slot is instead read
-    by its total against the `front-end-import` band. The front end's
-    client construction and its requests cost more than that band, so
-    running them on the main thread counted roughly three hundred million
-    instructions the recorded baseline does not contain — measured, not
-    argued: this journey on the main thread reads 1,311,350,558 and on a
-    worker 1,004,587,107, against a recorded 1,019,367,946.
-
-    The honest reading of that gap is in the lead's hands and is written up
-    in the report: the work here is the journey's own, it is cheaper than
-    the journey it replaced, and on a worker it is EXCLUDED as though it
-    were the front end's import. Keeping the baseline's footing is what
-    makes this count comparable, and the durable fix is in
-    `scripts/ci/journey_threads.py`, which decides exclusion by a thread's
-    total precisely because callgrind gives it no name.
+    The round trip runs on the journey's MAIN thread, and that placement
+    is part of what this journey measures, not an accident.
+    `journey_threads` reads `thread == 1` FIRST and whatever its total, so
+    the round trip is counted wherever the journey puts it; a non-main
+    slot is instead read by its total against the `front-end-import` band,
+    and this journey's own work measured 1,311,350,558 — inside that band
+    — so a worker carried roughly three hundred million instructions of it
+    straight out of the count. The import above is the one thing here that
+    must NOT be counted, and a main thread is read as counted whatever its
+    size, which is why `_load_front_end` keeps it on a worker of its own.
     """
     del docroot
     mod = _load_front_end(base)
-    box = {}
+    # The token is a ContextVar the tools read per request; this is what
+    # daedalus_mcp.auth.BearerAuth does, and the journey does not pass
+    # through the auth middleware to have it set for it.
+    mod._token.set(_mcp_load.TOK)
 
     async def round_trip():
         sent = await mod.exec(tab_id=MCP_TAB, cmd_id=MCP_COMMAND_ID,
@@ -193,22 +189,7 @@ def mcp_exec(base, docroot):
         assert status == 200, status
         return await mod.result(tab_id=MCP_TAB)
 
-    def on_worker():
-        # The token is a ContextVar and a thread starts with a fresh
-        # context: this is what daedalus_mcp.auth.BearerAuth does per
-        # request, and without it the tools answer "no token in context".
-        mod._token.set(_mcp_load.TOK)
-        try:
-            box['read'] = asyncio.run(round_trip())
-        except Exception as exc:  # pylint: disable=broad-except
-            box['error'] = exc
-
-    worker = threading.Thread(target=on_worker, name='journey-round-trip')
-    worker.start()
-    worker.join()
-    if 'error' in box:
-        raise box['error']
-    read = box['read']
+    read = asyncio.run(round_trip())
     assert read.get('value') == MCP_RESULT, read
     assert read.get('error') is None, read
     return {

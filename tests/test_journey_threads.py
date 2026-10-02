@@ -3,7 +3,9 @@
 refusals that happen when a profile is not the shape the gate reads.
 A mis-sorted profile summed as a whole tree is the one failure here
 that produces a plausible number."""
+import contextvars
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -54,6 +56,45 @@ def test_a_thread_below_every_band_is_a_refusal_naming_it(tmp):
     assert failure is not None, 'a profile this shape must not be summed'
     assert '400' in failure and 'thread 4' in failure, failure
     assert kept is None
+
+
+def test_a_worker_is_read_by_its_total_down_to_the_last_rung(tmp):
+    """The ladder `role_of` reads a background thread by, rung by rung.
+
+    Each rung is asserted at its own boundary rather than by one value from
+    the middle of a band, because a `>=` written as `>` moves a boundary by
+    one instruction and a value in the middle cannot see it. The last rung
+    is the one with no role at all: a thread under `REQUEST_FROM` never
+    entered the interpreter, so it has no rung to sit in and `classify`
+    refuses the profile instead of including it quietly.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    role_of = threads.role_of
+    assert role_of(threads.REQUEST_FROM - 1, 7) is None
+    assert role_of(threads.REQUEST_FROM, 7) == threads.REQUEST
+    assert role_of(threads.SERVE_FROM, 7) == threads.SERVE
+    assert role_of(threads.IMPORT_FROM, 7) == threads.IMPORT
+
+
+def test_the_main_thread_is_main_at_any_size(tmp):
+    """The property the whole exclusion rests on, with the contrast it needs.
+
+    `role_of` reads thread 1 first and whatever its total, so a journey's own
+    work counts by construction and a worker's total never decides whether
+    the work counts. The totals ABOVE the import band are the ones that
+    matter: `mcp-exec`'s round trip measured 1,311,350,558, which a
+    size-ordered classifier reads as the front end's import — and the same
+    call on a non-main thread still reads it that way, which is the whole of
+    issue 1461.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    for total in (999, threads.REQUEST_FROM, threads.SERVE_FROM,
+                  threads.IMPORT_FROM - 1, threads.IMPORT_FROM,
+                  1_311_350_558, 3_800_000_000):
+        assert threads.role_of(total, 1) == threads.MAIN, total
+    assert threads.role_of(1_311_350_558, 2) == threads.IMPORT
 
 
 def test_two_threads_in_one_band_cannot_be_told_apart(tmp):
@@ -134,6 +175,95 @@ def test_a_profile_missing_any_of_its_header_lines_is_named(tmp):
         kept, _excluded, failure = thread_classifier.total_for(
             [], 'mcp-exec', unread)
         assert kept is None and failure is unread, (kept, failure)
+
+
+def test_every_journey_says_which_roles_it_stops_counting(tmp):
+    """`EXCLUDED` covers every name, and no entry excludes nothing.
+
+    Nothing else asserts the coverage: the artefact refuses an empty list and
+    `journey_rebaseline` refuses a measurement missing one, so a journey
+    added to `_journeys.NAMES` and forgotten here is discovered by a CI run
+    rather than by this suite. Every role is also checked to be one
+    `role_of` can return, because a name that is not a role excludes nothing
+    while looking like it excludes something.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    for name in _journey_contract.journeys().NAMES:
+        assert name in threads.EXCLUDED, name
+        roles = threads.excluded_for(name)
+        assert roles, name
+        assert set(roles) <= set(threads.ROLES), (name, roles)
+
+
+def test_the_mcp_round_trip_runs_on_the_journeys_main_thread(tmp):
+    """The placement issue 1461 turns on, recorded rather than read.
+
+    `rendering_of` calls a journey on the main thread and `role_of` reads
+    thread 1 as `MAIN` whatever its total, so the round trip counts wherever
+    the journey puts it — provided the journey puts it there. The stand-in
+    front end records the thread each tool call was made from, and the
+    stand-in post answers the command the journey sends, because which
+    thread reaches the round trip is the only property under test here.
+    """
+    del tmp
+    journeys = _journey_contract.journeys()
+    seen = []
+
+    class FrontEnd:
+        """The two tools `mcp_exec` calls, and the thread each ran on."""
+
+        _token = contextvars.ContextVar('journey_thread_test', default='')
+
+        async def exec(self, **sent):
+            del sent
+            seen.append(('exec', threading.current_thread()))
+            return {'command': {'id': journeys.MCP_COMMAND_ID,
+                                '_did': 'journey-did'}}
+
+        async def result(self, **read):
+            del read
+            seen.append(('result', threading.current_thread()))
+            return {'id': journeys.MCP_COMMAND_ID,
+                    'tabId': journeys.MCP_TAB,
+                    'value': journeys.MCP_RESULT, 'error': None}
+
+    def load(_base):
+        return FrontEnd()
+
+    def post(_url, _body):
+        return 200, b'{}'
+
+    with _journey_contract.planting(journeys, _load_front_end=load), \
+            _journey_contract.planting(journeys._util, post_json=post):
+        rendering = journeys.mcp_exec('http://127.0.0.1:1', None)
+    assert rendering['journey'] == 'mcp-exec', rendering
+    assert [name for name, _thread in seen] == ['exec', 'result'], seen
+    assert all(thread is threading.main_thread()
+               for _name, thread in seen), [name for name, thread in seen]
+
+
+def test_the_mcp_front_end_is_loaded_off_the_journeys_main_thread(tmp):
+    """The one thing this journey must NOT count, kept off the main thread.
+
+    A main thread is read as `MAIN` whatever its total, so an import on one
+    is the journey's own work by every rule the bands apply. Loading it on a
+    worker of its own and waiting for it is the whole of the asymmetry, and
+    it costs the count nothing: the module the tool call reaches is the same
+    one either way.
+    """
+    del tmp
+    journeys = _journey_contract.journeys()
+    loaded = []
+
+    def load(_base):
+        loaded.append(threading.current_thread())
+        return 'front end'
+
+    with _journey_contract.planting(journeys._mcp_load, _load_mcp=load):
+        front = journeys._load_front_end('http://127.0.0.1:1')
+    assert front == 'front end', front
+    assert loaded and loaded[0] is not threading.main_thread(), loaded
 
 
 def main():
