@@ -290,14 +290,24 @@ def excluded_for(journey):
 
 
 def _expected(roles):
-    """The symbols each missing role is read from, named.
+    """What each missing role is read from, named.
 
     A signature that matched nothing is a misspelled or uninstalled symbol
     far more often than it is a thread that did not run, so the refusal
-    says which symbol it was looking for. A role with no signature of its
-    own cannot be missing, so every name here has one.
+    says which symbol it was looking for.
+
+    Two of the four roles have no symbol and the sentence has to survive
+    them: `main` is read from a thread's position and `request` is what no
+    signature claims, and either can be named in an exclusion list, because
+    the artefact's validator admits every role and nothing else refuses
+    that. Indexing the signature table on a role it does not hold would
+    turn a refusal into a `KeyError` — an unhandled state where the gate
+    wanted to say a sentence.
     """
-    return ', '.join(f'{role}: {SIGNATURES[role]}' for role in roles)
+    return ', '.join(
+        f'{role}: {SIGNATURES[role]}' if role in SIGNATURES
+        else f'{role}: read from the thread itself, never from a symbol'
+        for role in roles)
 
 
 def total_for(rows, journey, unread=None):
