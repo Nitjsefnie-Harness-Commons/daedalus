@@ -28,13 +28,12 @@ over a control tree that is only a string.
 
 A RAISER is the OBJECT a call reaches, not the letters it is written with.
 `REFUSAL_RAISERS` names the ones the analysers spell out, and to those this
-adds every name one is BOUND to — by a store of another, resolved to a fixed
-point so a chain of stores is a chain rather than an accident of order — and
-every `functools.partial` built from one, which raises the refusal it wraps
-wherever it is called from. An ATTRIBUTE is matched on its own name whatever
-its base, because the analysers hand their raiser to `self` and the property
-is the attribute the call names. A store of something else takes a name back
-out, so the last store of a name is the one that says what it holds.
+adds every name one is BOUND to — by a store of another, in any of the three
+forms a binding takes, resolved to a fixed point so a chain of stores is a
+chain rather than an accident of order — and every `functools.partial` built
+from one, which raises the refusal it wraps wherever it is called from. An
+ATTRIBUTE is matched on its own name whatever its base, because the analysers
+hand their raiser to `self` and the property is the attribute the call names.
 
 The message is not read at all: an arm whose detail is assembled, passed by
 keyword, forwarded through a local, produced by a helper or raised as an
@@ -188,14 +187,16 @@ def _reachable(name, known):
 def _bound_raisers(tree):
     """The names this module binds a refusal raiser to, at a fixed point.
 
-    A store of something already known to raise a refusal binds one, and a
-    store of anything else takes a name back out — so the LAST store of a
-    name is what says what it holds, in the order the module writes them.
-    The point is fixed rather than reached in one pass because a store may
-    name an alias another store makes further down."""
+    A store of something already known to raise a refusal binds one — a
+    plain assignment, an annotated one, or a walrus, which are the three
+    forms a binding of a name takes here — and a store of anything else
+    takes a name back out, so the LAST store of a name is what says what it
+    holds. The point is fixed rather than reached in one pass because a
+    store may name an alias another store makes further down."""
     partials = _partial_factories(tree)
     stores = sorted((node for node in ast.walk(tree)
-                     if isinstance(node, (ast.Assign, ast.AnnAssign))),
+                     if isinstance(node, (ast.Assign, ast.AnnAssign,
+                                          ast.NamedExpr))),
                     key=lambda node: (node.lineno, node.col_offset))
     bound = set(REFUSAL_RAISERS)
     for _ in range(len(stores) + 1):
@@ -220,8 +221,7 @@ def _bound_raisers(tree):
 def _holds_raiser(value, bound, partials):
     """Whether a stored value RAISES a refusal: a raiser itself, an alias of
     one, or a `functools.partial` wrapping one."""
-    if isinstance(value, ast.Call) \
-            and _partial_factory(value.func) in partials:
+    if isinstance(value, ast.Call) and _key(value.func) in partials:
         return bool(value.args) and _reaches_raiser(value.args[0], bound)
     return _reaches_raiser(value, bound)
 
@@ -235,21 +235,21 @@ def _reaches_raiser(node, bound):
     return False
 
 
-def _partial_factory(node):
-    """The module a `partial` attribute is read off, or None."""
-    if isinstance(node, ast.Attribute) and node.attr == 'partial' \
-            and isinstance(node.value, ast.Name):
-        return node.value.id
-    return None
-
-
 def _partial_factories(tree):
-    """The names this module reaches `functools.partial` through: an
-    `import functools [as f]`, and nothing else — a `partial` read off a
-    name the module never bound that module to is a function of its own."""
-    return {alias.asname or alias.name for node in ast.walk(tree)
-            if isinstance(node, ast.Import) for alias in node.names
-            if alias.name == 'functools'}
+    """The call keys that BUILD a `functools.partial` in this module, read
+    off its own imports: `f.partial` for an `import functools [as f]`, and
+    the bare name for a `from functools import partial [as p]`. Nothing
+    else is one — a `partial` this module never imported is a function of
+    its own, whatever it is called."""
+    keys = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            keys.update(f'{alias.asname or alias.name}.partial'
+                        for alias in node.names if alias.name == 'functools')
+        elif isinstance(node, ast.ImportFrom) and node.module == 'functools':
+            keys.update(alias.asname or alias.name for alias in node.names
+                        if alias.name == 'partial')
+    return keys
 
 
 def _key(node):
