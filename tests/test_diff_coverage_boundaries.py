@@ -131,7 +131,7 @@ def test_added_lines_split_only_on_git_newlines(tmp):
 def test_configured_omissions_do_not_demand_coverage(tmp):
     del tmp
     added = {
-        '.claude/skills/changing-daedalus/plant.py': {1},
+        '.claude/skills/changing-daedalus/watch_all.py': {1},
         '.venv/lib/helper.py': {1},
         'build/lib/helper.py': {1},
         'dist/helper.py': {1},
@@ -186,18 +186,25 @@ def test_omissions_follow_current_config_and_keep_other_source(tmp):
 def test_omission_near_misses_stay_in_the_complaint(tmp):
     del tmp
     added = {
+        '.claude/skills/changing-daedalus/watch_all.py': {1},
+        '.claude/skills/changing-daedalus/watch_all_helper.py': {1},
+        '.claude/skills/changing-daedalus/ci_watch_helper.py': {1},
         '.claude/yes.py': {1},
         '.claude2/foo.py': {1},
-        'x.claude/foo.py': {1},
+        'build2/foo.py': {1},
         'pkg/helper.py': {1},
     }
     with contextlib.chdir(ROOT):
         missing = diff_coverage.unmeasured_sources({}, added)
     body = diff_coverage.render([], 0, 0, missing)
     assert 'Unmeasured changed source files:' in body, body
-    for path in ('.claude2/foo.py', 'x.claude/foo.py', 'pkg/helper.py'):
+    for path in (
+            '.claude/skills/changing-daedalus/watch_all_helper.py',
+            '.claude/skills/changing-daedalus/ci_watch_helper.py',
+            '.claude/yes.py', '.claude2/foo.py', 'build2/foo.py',
+            'pkg/helper.py'):
         assert f'- `{path}`' in body, body
-    assert '`.claude/yes.py`' not in body, body
+    assert '`.claude/skills/changing-daedalus/watch_all.py`' not in body, body
 
 
 def test_decode_git_path_keeps_a_final_unmatched_backslash(tmp):

@@ -83,11 +83,16 @@ omit = [
     "*/site-packages/*",
     # Untracked third-party JavaScript dependencies can ship Python files.
     "node_modules/*",
-    # Agent tooling that ships beside the skill documenting it. These drive
+    # The untracked watchers beside the changing-daedalus skill. They drive
     # `gh` against GitHub rather than exercising anything this repository
     # distributes, so measuring them makes the floor track the coverage of the
-    # tools instead of the coverage of the product.
-    ".claude/*",
+    # tools instead of the coverage of the product. The tracked Python the
+    # skill ships IS measured, like any other source here: it is repository
+    # content, and an omission here would report a change to it as adding no
+    # measured lines when it added hundreds.
+    ".claude/skills/changing-daedalus/watch_all.py",
+    ".claude/skills/changing-daedalus/ci_watch.py",
+    ".claude/skills/changing-daedalus/pr_comment_watch.py",
 ]
 
 [tool.coverage.paths]
