@@ -6,10 +6,11 @@ name: claim
 #
 # `/claim` assigns the commenter to an unassigned open issue. `/unclaim` and
 # `/release` are the same command under two names — either removes only the
-# commenter's own assignment, and a hand-made one goes with it. Another
-# holder's assignment is removed only once it has expired, on this action's own
-# `/release` by an actor with write access, and only when this action made it.
-# Two names because the reference implementation this was modelled on calls it
+# commenter's own assignment, and a hand-made one goes with it. Someone else's
+# assignment comes off only once it has expired, and only when this action made
+# it: by their own `/release`, by any other commenter's `/claim` up to that
+# commenter's own cap, or by a `/release` from an actor with write access. Two
+# names because the reference implementation this was modelled on calls it
 # `/release` and people arrive expecting that word.
 #
 # The action handles the attacker-controlled comment body without
