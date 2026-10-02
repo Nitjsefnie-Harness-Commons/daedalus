@@ -1248,11 +1248,12 @@ jobs:
   # renames it.
   journey-budget:
     runs-on: ubuntu-latest
-    # Headroom, not a prediction. Measured on main, the three journeys then
-    # in the registry finished this job in 5m13s against the 45 minutes this
-    # ceiling allowed; two of the four added since carry multi-megabyte
-    # result bodies and neither has been timed on its own, so the raise buys
-    # room for a case nobody has measured rather than an estimate of it.
+    # Headroom over a measured run, not a figure derived from one. All
+    # seven journeys finished this job in 9m06s (run 36968752929); the
+    # three-journey run on main took 5m13s against the 45 minutes it was
+    # allowed. Seven journeys therefore cost less than twice what three
+    # cost, so 60 is several times what the measured run needs — room for
+    # a slower runner, which is what a ceiling is for.
     timeout-minutes: 60
     env:
       # How many rounds the measurement takes. One is the steady state:
