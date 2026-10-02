@@ -603,6 +603,7 @@
 !/tests/test_journey_budget_cli.py
 !/tests/test_journey_budget_gates.py
 !/tests/test_journey_counters.py
+!/tests/test_journey_placement.py
 !/tests/test_journey_threads.py
 !/tests/test_journey_tighten.py
 !/tests/test_js_coverage.py
