@@ -614,6 +614,7 @@
 !/tests/test_mcp_entry_point.py
 !/tests/test_mcp_guard_floor.py
 !/tests/test_mcp_hotfix_scope.py
+!/tests/test_mcp_import_refusals.py
 !/tests/test_mcp_live_tools.py
 !/tests/test_mcp_poll_matching.py
 !/tests/test_mcp_poll_pause.py
