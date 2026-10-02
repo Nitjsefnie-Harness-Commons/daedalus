@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _yamlread import (  # noqa: E402
+    job_mapping, step_scalar, step_scalars, top_level_mapping)
 from _yamlsteps import complete_job_mapping, step_mappings  # noqa: E402
 _job = complete_job_mapping
 
@@ -94,6 +96,42 @@ def test_an_over_indented_step_scalar_is_refused(_tmp):
     source = (STEP_JOB_HEAD + '      - uses: owner/one@abc\n'
               '          continued\n')
     assert _value_error(lambda: _step_items(source, 'sample')) == MULTILINE
+
+
+# The same class in `_yamlread`, the reader `_yamlsteps` is built on.  A
+# combined plant of all six of its duplicate-key sites left exactly one
+# surviving test noticing, and that test does not name a duplicate key,
+# so these five are the only rows pinning five of the six sites.
+def test_a_duplicate_top_level_mapping_key_is_refused(_tmp):
+    source = JOB_HEAD + '    steps: []\njobs:\n  other:\n    steps: []\n'
+    assert _value_error(
+        lambda: top_level_mapping(source, 'jobs')) == DUP + 'jobs'
+
+
+def test_a_duplicate_key_in_a_nested_scalar_mapping_is_refused(_tmp):
+    source = JOB_HEAD + '    env:\n      F: a\n      F: b\n'
+    assert _value_error(
+        lambda: job_mapping(source, 'sample', 'env')) == DUP + 'F'
+
+
+def test_a_step_scalar_written_twice_in_one_step_is_refused(_tmp):
+    source = STEP_JOB_HEAD + '      - if: a\n        if: b\n'
+    assert _value_error(
+        lambda: step_scalars(source, 'sample', 'if')) == DUP + 'if'
+
+
+def test_a_step_name_field_written_twice_is_refused(_tmp):
+    source = (STEP_JOB_HEAD + '      - name: a\n        name: b\n'
+              '        if: x\n')
+    assert _value_error(
+        lambda: step_scalar(source, 'sample', 'a', 'if')) == DUP + 'name'
+
+
+def test_a_step_scalar_written_inline_and_nested_is_refused(_tmp):
+    source = (STEP_JOB_HEAD + '      - if: a\n        name: x\n'
+              '        if:\n          b\n')
+    assert _value_error(
+        lambda: step_scalar(source, 'sample', 'x', 'if')) == DUP + 'if'
 
 
 def main():
