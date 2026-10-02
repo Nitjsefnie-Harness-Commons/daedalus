@@ -597,12 +597,13 @@ def test_the_eslint_job_pins_exact_versions_behind_a_failing_gate(tmp):
     del tmp
     workflow = _tests_yml()
     env = job_mapping(workflow, 'eslint', 'env')
-    assert sorted(env) == sorted(var for var, _ in _ESLINT_PINS), sorted(env)
-    for var, package in _ESLINT_PINS:
-        assert _EXACT_PIN.fullmatch(env[var]), (var, package, env[var])
     install = step_scalar(workflow, 'eslint', _ESLINT_INSTALL, 'run')
     gate = step_scalar(workflow, 'eslint', _ESLINT_GATE, 'run')
     lint = step_scalar(workflow, 'eslint', 'eslint', 'run')
+    assert env and install and gate and lint, 'an eslint step is gone'
+    assert sorted(env) == sorted(var for var, _ in _ESLINT_PINS), sorted(env)
+    for var, package in _ESLINT_PINS:
+        assert _EXACT_PIN.fullmatch(env[var]), (var, package, env[var])
     assert '--no-save --no-package-lock' in install, install
     assert '--no-save' not in lint, 'the lint step installs'
     for var, package in _ESLINT_PINS:
