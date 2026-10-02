@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The workflow-reader suites import no sibling suite module.
 
-The reader is split three ways — the structural walk, its scalar layer, and
-the pin — and the split creates no boundary while one suite reaches another
-for a helper: running the scalar suite then imports both other suites, and a
-change to one lands in every run. Each suite is imported in a fresh
-subprocess, and only its own name may land in `sys.modules`.
+The reader was split three ways, and a split creates no boundary while one
+suite reaches another for a helper: running the scalar suite then imports
+both other suites, and a change to one lands in every run. Each suite is
+imported in a fresh subprocess, and only its own name may land in
+`sys.modules`.
 """
 import ast
 import json
@@ -21,8 +21,8 @@ from _helper_binds import scan  # noqa: E402
 ROOT = _util.ROOT
 TESTS = ROOT / 'tests'
 
-# The three suites of the workflow checkout reader split.
-SUITES = ('test_checkout_pin.py', 'test_wfcheckout.py', 'test_wfscalars.py')
+# The one suite left of the workflow checkout reader split.
+SUITES = ('test_checkout_pin.py',)
 
 # The module the shared fixtures are imported FROM, as a module name
 # rather than a path: an import is settled by its source, and this one

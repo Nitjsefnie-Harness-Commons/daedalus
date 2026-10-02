@@ -119,7 +119,6 @@
     "_assert_step_trace": {"python": ["tests/_overlap.py"]},
     "_assert_unlaunchable_binary_is_a_refusal": {"python": ["tests/_actionlint.py"]},
     "_assert_writer_inventory": {"python": ["tests/_workflow_cache_boundary.py"]},
-    "_assert_yaml_refusal": {"python": ["tests/_wfassert.py"]},
     "_assertion_site": {"python": ["tests/_util.py"]},
     "_assigned": {"python": ["tests/_js_functions.py"]},
     "_assignment_target_lines": {"python": ["tests/_coverage_guard.py"]},
