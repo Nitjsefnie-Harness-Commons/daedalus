@@ -16,8 +16,7 @@ from _journey_contract import (  # noqa: E402
     _util,
     budget_document,
     counter_facts,
-    journeys,
-    planting,
+    journeys, launch_refusal, planting,
     measurements_file,
     probe,
 )
@@ -99,9 +98,8 @@ def test_a_journey_record_is_read_behind_its_marker(tmp):
     for rather than taken from the last line."""
     del tmp
     counters = _journey_contract.counters()
-    assert counters.journey_record('noise\n' + counters.MARKER
-                                   + '{"journey": "x", "sha256": "y"}\n'
-                                   ) == {'journey': 'x', 'sha256': 'y'}
+    record = 'noise\n' + counters.MARKER + '{"journey": "x", "sha256": "y"}\n'
+    assert counters.journey_record(record) == {'journey': 'x', 'sha256': 'y'}
     assert counters.journey_record('the bridge said something\n') is None
     assert counters.journey_record('') is None
     assert counters.child_argv('mcp-exec', '/r')[0] == sys.executable
@@ -121,8 +119,7 @@ def test_the_measurement_carries_the_median_the_check_compares(tmp):
         return 1000 + len(seen), None
 
     # `syscalls`, because a counter the probe would not use is reported
-    # unavailable without being run, and this is about what happens once
-    # one has been chosen.
+    # unavailable without being run; this is about what happens after.
     with planting(counters,
                   shapes=lambda names, root, rounds: (
                       {name: ['shape-' + name] for name in names}, None),
@@ -270,8 +267,7 @@ def test_a_counter_that_will_not_start_is_reported_before_it_is_run(tmp):
 def test_perf_counts_are_read_from_both_of_the_shapes_it_prints(tmp):
     """perf prints two renderings and counts under either, never by status.
 
-    perf exits 0 whether or not it was permitted to count, so a returncode
-    is not evidence and the text is the only thing read.
+    perf exits 0 whether or not it counted, so its text is the only evidence.
     """
     del tmp
     counters = _journey_contract.counters()
@@ -313,13 +309,11 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
                                             subject='excluded threads')):
         assert lines, 'a block that renders to nothing is a block nobody reads'
         assert any(line.strip() for line in lines)
-    # The two subjects must not be able to read the same: a summary that
-    # said "toolchain changed" for a set of threads would be a reader sent
-    # to the wrong remedy.
-    moved = summaries.toolchain_lines(document, measurement,
-                                      {'mcp-exec': (['front-end-import'], [])},
-                                      gate.THREADS_REMEDY,
-                                      subject='excluded threads')
+    # The two subjects must not read the same: a summary that said "toolchain
+    # changed" for a set of threads sends the reader to the wrong remedy.
+    moved = summaries.toolchain_lines(
+        document, measurement, {'mcp-exec': (['front-end-import'], [])},
+        gate.THREADS_REMEDY, subject='excluded threads')
     assert 'excluded threads changed, re-baseline' in moved[2], moved[2]
     assert 'toolchain' not in moved[2], moved[2]
 
@@ -421,8 +415,8 @@ def _profile(directory, name, slot, thread, ir):
     reader that sums it expects."""
     path = Path(directory) / f'callgrind.{name}.{slot}'
     path.write_text(
-        'version: 1\ncreator: callgrind-3.24.0\npid: 4242\n'
-        f'cmd: python3 tests/_journeys.py --journey {name}\npart: 1\n'
+        'version: 1\ncreator: callgrind-3.24.0\npid: 4242\npart: 1\n'
+        f'cmd: python3 tests/_journeys.py --journey {name}\n'
         f'events: Ir\nthread: {thread}\n1 {ir}\n\nsummary: {ir}\n',
         encoding='utf-8')
     return path
@@ -430,7 +424,11 @@ def _profile(directory, name, slot, thread, ir):
 
 def test_a_child_that_cannot_start_is_an_answer_not_an_exception(tmp):
     """A launch that never happened is data, not an exception: a `perf`
-    missing from a runner's PATH is a state the counters report."""
+    missing from a runner's PATH is a state the counters report.
+
+    The refusal is the platform's own, so it is compared with the platform's
+    own answer for the same argv; a Windows refusal names no program at all.
+    """
     del tmp
     counters = _journey_contract.counters()
     code, out, err = counters._run(
@@ -444,9 +442,9 @@ def test_a_child_that_cannot_start_is_an_answer_not_an_exception(tmp):
     code, out, err = counters._run([absent])
     assert code is None, code
     assert out == '', out
-    assert os.path.basename(absent) in err, (
-        'a launch that never happened must name the program that did not '
-        f'launch: {err}')
+    assert err == launch_refusal([absent]), (
+        'a launch that never happened must report the refusal the platform '
+        f'gave it verbatim, not a normalised one: {err!r}')
 
 
 def test_the_probe_says_what_each_tool_is_and_which_counter_gates(tmp):
@@ -572,7 +570,12 @@ def test_the_shape_is_a_plain_run_of_each_journey(tmp):
 def test_a_callgrind_round_counts_the_last_one_not_the_sum_of_them(tmp):
     """Every round writes into the same workdir under the same prefix, so
     a round that did not clear the previous round's files would report a
-    count that grows with the round number."""
+    count that grows with the round number.
+
+    The out-file argument is asserted whole and built from the workdir this
+    test hands the module, which is how the module builds it: a `Path`
+    interpolated plainly, so the platform spells the separator.
+    """
     counters = _journey_contract.counters()
     _profile(tmp, 'mcp-exec', 9, 1, 5_000_000)
     asked = []
@@ -587,12 +590,12 @@ def test_a_callgrind_round_counts_the_last_one_not_the_sum_of_them(tmp):
                   _run=answering):
         kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
     assert why is None, why
-    assert kept == 900, (
-        f'the previous round was summed into this one: {kept}')
+    assert kept == 900, f'the previous round was summed into this one: {kept}'
     assert asked[0][:2] == ['/usr/bin/valgrind', '--tool=callgrind'], asked
+    tail = Path(tmp) / 'callgrind.mcp-exec.%p'
     out_file = next(part for part in asked[0] if '--callgrind-out-file='
                     in part)
-    assert out_file.endswith('/callgrind.mcp-exec.%p'), out_file
+    assert out_file == f'--callgrind-out-file={tail}', out_file
 
 
 def test_a_callgrind_child_that_failed_is_reported_in_its_own_words(tmp):
@@ -675,8 +678,7 @@ def test_a_strace_run_that_wrote_no_readable_summary_is_refused(tmp):
         value, why = counters._syscalls('mcp-exec', ROOT, tmp)
     assert value is None, value
     assert why['returncode'] == 0, why
-    assert 'strace.mcp-exec.txt' in why['stderr'], (
-        f'a summary that cannot be read must name the file: {why}')
+    assert 'strace.mcp-exec.txt' in why['stderr'], why
     summary.rmdir()
     summary.write_text(
         ' 0.00    0.000000           0        12       0 futex\n'
