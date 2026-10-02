@@ -348,6 +348,131 @@ def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
     assert written['tolerances'] == {}, written.get('tolerances')
 
 
+
+
+
+def _drop_matrix(tmp, name):
+    """Every artefact state against every flag shape, and what each said.
+
+    Two states the artefact can be in about a journey (holds a count, holds
+    `null`) crossed with what the measurement could do (separated it, could
+    not) and the three flag shapes that reach either. Returned rather than
+    asserted here, because the cells are the FIXTURE and the two controls
+    below are what assert over them — a table of eight outcomes belongs in
+    one place and not in eight tests.
+    """
+    def report_unresolved():
+        report = _journey_contract.fixture_report()
+        entry = report['counters']['valgrind-callgrind']
+        entry['journeys'].pop(name)
+        entry['refused'] = {
+            name: f'the {name} journey measured [2000] net [-9000]'}
+        return report
+
+    def report_resolved():
+        return _journey_contract.fixture_report()
+
+    rows = []
+    for state in ('a count', 'null'):
+        document = recorded_document()
+        if state == 'null':
+            document['journeys'][name] = None
+        written = _journey_contract.policy().render(document)
+        for outcome, report in (('separates', report_resolved()),
+                                ('cannot separate', report_unresolved())):
+            for flags in (['--restore', name], ['--drop', name],
+                          ['--restore', name, '--drop', name]):
+                artifact = Path(tmp) / 'matrix.json'
+                artifact.write_bytes(written)
+                measurements = Path(tmp) / 'matrix-counts.json'
+                measurements.write_text(json.dumps(report), encoding='utf-8')
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), \
+                        contextlib.redirect_stderr(err):
+                    code = _journey_contract.policy().main(
+                        ['rebaseline', '--artifact', str(artifact),
+                         '--measurements', str(measurements), *flags])
+                rows.append((state, outcome, flags, code,
+                             err.getvalue().strip() or out.getvalue().strip()))
+    return rows
+
+
+def test_every_refusal_in_the_matrix_says_something_the_run_established(tmp):
+    """Eight cells, and every refusal checks out against the run's own facts.
+
+    The matrix is the whole surface of the two flags over the two artefact
+    states, so each refusal is read here: a residual where the run has one,
+    no residual where it does not, and no remedy offered that cannot run.
+    """
+    name = journeys().NAMES[0]
+    resolved = (_journey_contract.fixture_report()['counters']
+                ['valgrind-callgrind']['journeys'][name]['median'])
+    for state, outcome, flags, code, said in _drop_matrix(tmp, name):
+        shape = ' '.join(flags[:1] + ['+drop'] if len(flags) > 2 else flags)
+        where = f'{state} + {outcome} + {shape}'
+        if code == 0:
+            continue
+        assert 'None instructions' not in said, (
+            f'{where}: the refusal names a residual the run does not '
+            f'have: {said}')
+        # A residual belongs in a refusal ABOUT separability. One that is
+        # about the artefact's state instead has no residual to quote, and
+        # asking it for one would be asking for the same falsehood.
+        about_separation = ('separates it by' in said
+                            or 'cannot be dropped' in said
+                            or 'the budget holds no count for' in said)
+        if about_separation:
+            separable = outcome == 'separates'
+            did = 'separated' if separable else 'could not separate'
+            assert (str(resolved) in said) is separable, (
+                f'{where}: the run {did} {name}, and the refusal quotes the '
+                f'wrong residual: {said}')
+
+
+def test_a_restore_and_a_drop_do_not_refuse_each_other(tmp):
+    """Two flags about one journey, and the pair must not refuse itself.
+
+    The recorded-null refusal decides which journeys need a `--restore`
+    decision, and `--drop` names one of them — so the list it is handed is
+    "recorded at null AND not being dropped" while the message beside it says
+    "the budget already holds a count for". Those are different sets, and a
+    one-line subtraction put the wrong one in a function whose name said the
+    other: a journey being dropped and held at null at once was reported as
+    holding a COUNT, and `--restore X --drop X` together was refused on the
+    very artefact it is meant for.
+
+    What has to hold, precisely: on the state a drop exists for — the
+    artefact recording the journey at `null` and the run unable to separate it
+    — the pair must do what `--drop` alone does. The other cells legitimately
+    refuse, and the control below checks every sentence in them.
+    """
+    name = journeys().NAMES[0]
+    both = ['--restore', name, '--drop', name]
+    rows = [(state, outcome, code, said)
+            for state, outcome, flags, code, said in _drop_matrix(tmp, name)
+            if flags == both]
+    droppable = [(said, code) for state, outcome, code, said in rows
+                 if state == 'null' and outcome == 'cannot separate']
+    assert droppable, 'the matrix lost the one cell this control is about'
+    for said, code in droppable:
+        assert code == 0, (
+            f'--restore and --drop together refused against an artefact '
+            f'holding {name} at null and a run that cannot separate it, so '
+            f'the pair refuses the flag that works there: {said}')
+        assert 'already holds a count for' not in said, (
+            f'the refusal names the state backwards — the artefact holds '
+            f'{name} at null, and a null is not a count: {said}')
+    # And the pair never succeeds where the two flags contradict: restoring a
+    # count and dropping it are not one request.
+    for state, outcome, code, said in rows:
+        if state == 'null' and outcome == 'cannot separate':
+            continue
+        assert code != 0, (
+            f'--restore and --drop together recorded {name} against an '
+            f'artefact holding it as {state} and a run that {outcome}, which '
+            f'are two contradictory requests: {said}')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeyrebaseline__')

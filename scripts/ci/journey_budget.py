@@ -260,13 +260,26 @@ def main(argv=None):
                       'recording it', file=sys.stderr)
                 print(OVER_REMEDY, file=sys.stderr)
                 return 1
-            if found.get('unresolved'):
-                refused = ', '.join(sorted(found['unresolved']))
-                print(f'the run could not resolve {refused}, so nothing is '
-                      'tightened: lowering the journeys it did measure would '
-                      'land a budget the next check refuses over the ones it '
-                      'could not', file=sys.stderr)
-                print(UNRESOLVED_REMEDY, file=sys.stderr)
+            # BOTH kinds a journey can be missing for, because the
+            # argument is the same and only one of them was guarded. A
+            # journey the run REFUSED and a journey the counter never
+            # counted are different findings with different remedies — so
+            # each keeps its own sentence — and neither may be the reason a
+            # write lands a budget the next check refuses.
+            for kind, because, remedy in (
+                    ('unresolved',
+                     'the run could not resolve', UNRESOLVED_REMEDY),
+                    ('unmeasured',
+                     f'the run counted no journey under '
+                     f'{counter or "no counter"} for', UNMEASURED_REMEDY)):
+                if not found.get(kind):
+                    continue
+                refused = ', '.join(sorted(found[kind]))
+                print(f'{because} {refused}, so nothing is tightened: '
+                      'lowering the journeys it did measure would land a '
+                      'budget the next check refuses over the ones it could '
+                      'not', file=sys.stderr)
+                print(remedy, file=sys.stderr)
                 return 1
             recorded = document['journeys']
             updated = tightened(counts, document, names)

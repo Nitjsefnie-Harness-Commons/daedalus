@@ -319,19 +319,30 @@ def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps(measured_report(followed)),
                             encoding='utf-8')
-    spoken = io.StringIO()
-    with contextlib.redirect_stdout(spoken):
+    # The PROPERTY is about `tightened`, and it is driven there: the command
+    # no longer reaches it on this measurement, because a budget the next
+    # check refuses is not one the tighten may write. Reading the property
+    # off a command that no longer calls the function left a fixture
+    # documenting a path nothing takes.
+    assert policy.tightened(followed, recorded, names) == dict(
+        followed, **{unmeasured: kept}), (
+        f'{unmeasured} was measured by nothing and must keep the count it '
+        f'was recorded with while every journey beside it was followed '
+        f'down: {policy.tightened(followed, recorded, names)}')
+    spoken, refused = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(spoken), \
+            contextlib.redirect_stderr(refused):
         code = policy.main(['check', '--artifact', str(artifact),
                             '--measurements', str(measurements),
                             '--tighten'])
-    assert code == 0, spoken.getvalue()
-    assert 'tightened the journey budget' in spoken.getvalue(), (
+    assert code != 0, (
+        'the tighten followed the measured journeys down beside one it could '
+        f'not measure, and reported success: {spoken.getvalue()}')
+    assert 'tightened the journey budget' not in spoken.getvalue(), (
         spoken.getvalue())
-    written = json.loads(artifact.read_text(encoding='utf-8'))['journeys']
-    assert written == dict(followed, **{unmeasured: kept}), (
-        f'{unmeasured} was measured by nothing and must keep the count it '
-        'was recorded with while every journey beside it was followed '
-        f'down: {written}')
+    assert json.loads(artifact.read_text(
+        encoding='utf-8'))['journeys'] == recorded['journeys'], (
+        'a refused tighten wrote the artefact anyway')
 
 
 def test_a_tighten_that_lowered_nothing_says_so_and_writes_nothing(tmp):
