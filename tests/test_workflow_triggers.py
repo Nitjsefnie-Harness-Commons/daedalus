@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Trigger-policy contracts for the workflows in .github/.
+"""Trigger and gate-condition contracts for the workflows in .github/.
 
-These tests read workflow trigger blocks through the bounded reader and keep
-the paired-event policy contracts together as the set grows.
+The trigger blocks read through the bounded reader, and the shipped jobs'
+own gate conditions and step handles are pinned beside them.
 """
 import sys
 import fnmatch
@@ -221,10 +221,9 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
             triggers['push'], name).get('paths-ignore', []), triggers['push']
         assert not _workflow_path_filters(triggers['pull_request'], name)
 
-        # The behaviour, not just the spelling: a run of a data file alone
-        # must not wake the expensive gates, while a run that carries it
-        # beside a real source change must. A pull request is unfiltered,
-        # so the data file alone reaches these jobs there.
+        # The run set, not the spelling: a data file alone never wakes these
+        # gates on push, and pull_request is unfiltered, so it reaches them
+        # there.
         for target in (threshold, data_file):
             if target is None:
                 continue
@@ -380,7 +379,7 @@ def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
 
 
 def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
-    """A coverage gate runs only on a measurement that finished."""
+    """A coverage gate runs only on a measurement that succeeded."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
