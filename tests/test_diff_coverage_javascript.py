@@ -92,7 +92,7 @@ def _coverage_file(path):
             os.environ['COVERAGE_FILE'] = previous
 
 
-def _entries(root):
+def _tree_paths(root):
     """Every path under `root`, relative and sorted.
 
     One recursive walk rather than `os.listdir`, because a data file written
@@ -382,12 +382,12 @@ def test_the_reporter_never_opens_the_configured_data_file(tmp):
     # Every fixture is written before the walk, and _run_main chdirs into tmp,
     # so any entry appearing after this line is something the run left behind
     # — wherever it chose to put it, not only at the configured name.
-    before = _entries(tmp)
+    before = _tree_paths(tmp)
     with _coverage_file(data_file):
         status, out = _run_main(tmp, *args, '--diff', str(diff))
     assert status == 0, (status, out)
     assert not data_file.exists(), data_file
-    after = _entries(tmp)
+    after = _tree_paths(tmp)
     assert after == before, set(after).symmetric_difference(before)
 
 
