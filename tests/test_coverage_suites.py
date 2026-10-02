@@ -681,7 +681,7 @@ def test_a_suite_that_could_not_start_is_grouped_not_fatal(tmp):
     outcome = _launch.run_main(
         tmp, suites=('test_alpha.py', 'test_beta.py'),
         scripts={'test_alpha': {'error': FileNotFoundError('no python')}})
-    _launch.assert_launch_failed(outcome, 'test_alpha.py')
+    _launch.assert_launch_failed(outcome, 'test_alpha.py', _FAILURE_MARKER)
     assert ('::group::tests/test_beta.py\nmeasured\n::endgroup::\n'
             in outcome.stdout), outcome.stdout
 
