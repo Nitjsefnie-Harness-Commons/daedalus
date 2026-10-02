@@ -134,10 +134,11 @@ class Signals:
 class Signal:
     """One signal by the two attributes the teardown reads off it.
 
-    `os.killpg` is handed the object and one refusal writes `sig.name`
-    beside it, so name and number are the whole of what a stand-in has to
-    carry -- and carrying them itself is the point, because the members of
-    the interpreter's own `signal` module are not available on every cell.
+    The stand-in for `os` above is handed the object, and one refusal in the
+    subject writes `sig.name` beside it, so name and number are the whole of
+    what a stand-in has to carry -- and carrying them itself is the point,
+    because the members of the interpreter's own `signal` module are not
+    available on every cell.
     """
 
     def __init__(self, name, number):
