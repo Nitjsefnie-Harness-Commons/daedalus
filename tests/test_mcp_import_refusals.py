@@ -207,13 +207,18 @@ def test_every_refusal_arm_is_refused_with_its_own_message(_tmp):
     """Each arm refuses, naming its own site and its own fixed phrase.
 
     The phrase is the part of the message that does not interpolate the
-    node, so a refusal raised by a neighbouring arm cannot satisfy it.
+    node, so a refusal raised by a neighbouring arm cannot satisfy it. The
+    failures are COLLECTED rather than raised at the first one, because a
+    planted arm has to name every row it silenced, and a run that stops at
+    the first cannot say which of them it reached.
     """
+    quiet = []
     for label, _site, phrase, line, source in ARMS:
         try:
             _assert_scan_refusal(_tmp, source, line, phrase)
         except AssertionError as refused:
-            raise AssertionError(f'{label}: {refused}') from refused
+            quiet.append(f'{label}: {refused}')
+    assert not quiet, '; '.join(quiet)
 
 
 def test_every_refusal_arm_has_a_near_miss_the_walk_leaves_alone(_tmp):
@@ -222,11 +227,16 @@ def test_every_refusal_arm_has_a_near_miss_the_walk_leaves_alone(_tmp):
     The `_scan_verdict` answer is READ rather than merely not an
     exception: a composition that raised some other arm's refusal would
     answer `refused` here, which is the failure this row exists to catch.
+    The failures are collected, for the same reason the refusal case
+    collects them.
     """
+    reached = []
     for label, beside, source in NEAR_MISSES:
         verdict, detail = _scan_verdict(_tmp, {'composition.py': source})
-        assert verdict == 'clean', (f'{label}: the near miss of {beside} '
-                                    f'was {verdict}: {detail}')
+        if verdict != 'clean':
+            reached.append(
+                f'{label} (near miss of {beside}) was {verdict}: {detail}')
+    assert not reached, '; '.join(reached)
 
 
 def test_a_callee_the_fold_cannot_read_is_refused_where_it_reads_one(_tmp):
@@ -255,14 +265,17 @@ def test_every_dead_code_barrier_kind_marks_the_tail_behind_it(_tmp):
     adds `pkg/leaf.py` and a rule that over-reached drops
     `pkg/before.py`; the assertion reads the whole set, not a membership.
     """
+    over = []
     for label, source in BARRIERS:
         verdict, detail = _scan_verdict(
             _tmp, {'composition.py': source, **BARRIER_TREE})
-        assert (verdict, detail) == ('clean', BARRIER_NAMES), (label, detail)
+        if (verdict, detail) != ('clean', BARRIER_NAMES):
+            over.append(f'{label}: {verdict} {detail}')
     verdict, detail = _scan_verdict(
         _tmp, {'composition.py': BARRIER_NEAR_MISS, **BARRIER_TREE})
-    assert (verdict, detail) == (
-        'clean', sorted(BARRIER_NAMES + ['pkg/leaf.py'])), detail
+    if (verdict, detail) != ('clean', sorted(BARRIER_NAMES + ['pkg/leaf.py'])):
+        over.append(f'a fall-through if: {verdict} {detail}')
+    assert not over, '; '.join(over)
 
 
 def _spelled_detail(node):
