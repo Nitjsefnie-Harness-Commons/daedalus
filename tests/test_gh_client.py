@@ -310,6 +310,12 @@ def test_a_suite_with_no_run_is_no_run_and_its_checks_are_still_read(tmp):
     does belong to a run. A reader that dropped the suite from the run
     list AND from the checks would report an empty answer and look like
     a head nothing ran on.
+
+    The third row is the near miss the first two cannot see. A suite
+    whose `workflowRun` is there but carries nothing is a run the reader
+    cannot read, and it must be stepped over rather than grouped: a
+    reader that only asked whether the field was ABSENT would group it,
+    find no run in it, and have nothing to collapse the suite into.
     """
     client, fake = _client(tmp, runs_page([]))
     verdict = {'databaseId': 7, 'name': 'gate freshness',
@@ -318,6 +324,14 @@ def test_a_suite_with_no_run_is_no_run_and_its_checks_are_still_read(tmp):
                'detailsUrl': 'https://github.com/o/r/runs/7'}
     fake.write_answers({RUNS_QUERY: runs_page([
         suite(7, workflow=None, check_runs=[verdict])])})
+    with fake.activate():
+        runs, checks = client.ci_state('o', 'r', SHA)
+    assert runs == [], runs
+    assert [check['name'] for check in checks] == ['gate freshness'], checks
+
+    empty = suite(7, workflow=11, check_runs=[verdict])
+    empty['workflowRun'] = {}
+    fake.write_answers({RUNS_QUERY: runs_page([empty])})
     with fake.activate():
         runs, checks = client.ci_state('o', 'r', SHA)
     assert runs == [], runs
