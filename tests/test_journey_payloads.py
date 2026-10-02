@@ -32,6 +32,7 @@ import ast
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
@@ -392,6 +393,132 @@ def test_the_command_ttl_default_is_the_one_the_documentation_states(tmp):
     assert set(documented) == {str(_product_default())}, (
         f'AGENTS.md states the default as {sorted(set(documented))} and the '
         f'product ships with {_product_default()}')
+
+
+def _session_frames(events):
+    """The frames a run of this shape publishes, oldest first.
+
+    Every `/sync-tabs` publishes a `tab-synced` and the `/register` on top
+    of them publishes the `tab-updated` this journey reads its way to, so a
+    session of `FANOUT_EVENTS` events arrives as exactly that many frames and
+    the wanted one is LAST. That ordering is the journey's own determinism:
+    everything is published before the subscription opens, so the drain's
+    first pass delivers all of it.
+    """
+    journeys = _journeys_module('_journeys')
+    synced = {'type': 'tab-synced', 'kind': 'event',
+              'count': journeys.FANOUT_TABS}
+    return ([dict(synced) for _ in range(events - 1)]
+            + [{'type': 'tab-updated', 'kind': 'event',
+                'count': journeys.FANOUT_TABS,
+                'tabId': journeys.DASHBOARD_TAB}])
+
+
+def _fanout_fakes(events, served):
+    """The bridge the fan-out journey meets: a post, a stream, and a reader.
+
+    `served` is how many of those frames the reader will actually get, so a
+    control can hand the journey a session whose events went missing without
+    editing the journey — which is the shape the TTL removes, and the one the
+    assertion below exists to notice.
+    """
+    journeys = _journeys_module('_journeys')
+    frame_queue = _session_frames(events)[:served]
+    closed = []
+
+    class _Response:
+        """A response the fake closes on behalf of the journey."""
+
+        def close(self):
+            closed.append(True)
+
+    def post_json(url, body):
+        del body
+        assert url.endswith(('/sync-tabs', '/register')), url
+        return 200, {'ok': True, 'count': journeys.FANOUT_TABS}
+
+    def stream_response(_base, _token, _tab):
+        return _Response(), _Response()
+
+    def next_stream_data(_response, timeout=30):
+        assert timeout == 30, timeout
+        if not frame_queue:
+            raise AssertionError('the fake has no frames left')
+        return frame_queue.pop(0)
+
+    return (post_json, stream_response, next_stream_data, closed)
+
+
+def _drive_dashboard_fanout(events, served):
+    """Run the journey's own body against the fakes, and hand back what it
+    returned or the refusal it raised."""
+    journeys = _journeys_module('_journeys')
+    posts, stream, next_data, closed = _fanout_fakes(events, served)
+    # Planted ON the journeys module, beside `_util`: the bridge helper is
+    # reached as the module attribute the journeys module imported, so a
+    # second copy loaded here would be planted in the wrong place and the
+    # journey would go to the network.
+    bridge = SimpleNamespace(stream_response=stream, next_stream_data=next_data)
+    try:
+        with _journey_contract.planting(journeys._util, post_json=posts), \
+                _journey_contract.planting(journeys, _bridge=bridge):
+            return journeys.dashboard_fanout('http://127.0.0.1:1', None)
+    finally:
+        del closed
+
+
+def test_the_fan_out_reads_every_event_and_notices_one_that_never_arrived(tmp):
+    """The session's length is read as an exact count, and the reader's
+    bound is the session's length.
+
+    Three things about this journey were unasserted because nothing ran it:
+    the sync count was compared with `<=` instead of `==`, `FANOUT_EVENTS`
+    dropped the registration from its sum, and `_read_all` could drop the
+    frame it read for. A control that only reads the module's constants
+    catches none of them — this drives the journey's own body over a fake
+    bridge, so each one has to survive a session that is the right shape and
+    fail one that is not.
+
+    The frames are the journey's: `FANOUT_EVENTS` of them, the wanted one
+    last, each carrying the count a `tab-synced` event carries. Nothing here
+    is a journey run — the browser and the bridge are not here — but the
+    reading is the journey's own code rather than a restatement of it.
+    """
+    del tmp
+    journeys = _journeys_module('_journeys')
+    # The bound is the session plus the one frame that ends the read, so
+    # deriving it from the syncs alone cannot run out one event early.
+    assert journeys.FANOUT_EVENTS == (journeys.FANOUT_HEARTBEATS
+                                      + journeys.FANOUT_REGISTRATIONS), (
+        f'the session is {journeys.FANOUT_EVENTS} events and the two '
+        f'publishing passes are {journeys.FANOUT_HEARTBEATS} and '
+        f'{journeys.FANOUT_REGISTRATIONS}')
+    assert journeys.FANOUT_MAX_FRAMES == journeys.FANOUT_EVENTS + 1, (
+        journeys.FANOUT_MAX_FRAMES)
+
+    rendered = _drive_dashboard_fanout(journeys.FANOUT_EVENTS,
+                                       journeys.FANOUT_EVENTS)
+    assert rendered['journey'] == 'dashboard-fanout', rendered
+    assert rendered['synced']['count'] == journeys.FANOUT_TABS, rendered
+    assert rendered['events'][-1] == 'tab-updated', rendered
+    assert rendered['events'].count('tab-synced') \
+        == journeys.FANOUT_HEARTBEATS, rendered['events']
+
+    # One event short of the syncs, and the journey says so rather than
+    # measuring a session that never happened. The wanted frame still
+    # arrives — this is a session whose events went missing, not one the
+    # reader walked past — so what has to notice is the count.
+    try:
+        _drive_dashboard_fanout(journeys.FANOUT_EVENTS - 1,
+                                journeys.FANOUT_EVENTS - 1)
+    except AssertionError as refusal:
+        assert str(journeys.FANOUT_HEARTBEATS - 1) in str(refusal), refusal
+        assert 'were still in the queue' in str(refusal), refusal
+    else:
+        raise AssertionError(
+            'a session that lost an event was read as a complete one, so '
+            'the count is a count of what arrived rather than of what the '
+            'journey published')
 
 
 def main():
