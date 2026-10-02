@@ -58,7 +58,6 @@
     "tests/test_cmdqueue_injectors.py": 22,
     "tests/test_command_queue_unit.py": 5,
     "tests/test_coverage_comment_boundary.py": 1,
-    "tests/test_coverage_memo.py": 2,
     "tests/test_coverage_suites.py": 1,
     "tests/test_dashboard_behaviour.py": 12,
     "tests/test_dashboard_harness.py": 9,
