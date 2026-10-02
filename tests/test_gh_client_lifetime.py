@@ -179,9 +179,9 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
     a reader that merged the caller's over this process's own would hand
     every child this process's variables, which is the opposite of what
     a caller that named one asked for. So the read-back is two-sided and
-    the environment it names is minimal: passing this process's own and
-    reading back the one name added to it would say nothing, because
-    the reader that merged carries that name too.
+    the environment it names is one name short of this process's:
+    passing this process's own and reading back the one name added to it
+    would say nothing, because the reader that merged carries that too.
     """
     client = _client()
     report = [sys.executable, '-c', REPORT]
@@ -211,15 +211,21 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
         assert not _still_open(handed), handed
 
     # Two names read back from one child, and the second is the one the
-    # docstring above is about. `PATH` is in this process's environment
-    # on every platform this suite runs on, and the child is started
-    # with an absolute interpreter, so it never needs to look one up.
+    # docstring above is about: `PATH` is this process's own, and is the
+    # one name the scoped environment leaves out. Everything else rides
+    # along, so the child is a plausible one on a platform whose own
+    # variables its tooling needs. It is started with an absolute
+    # interpreter, so the name it lacks is one it never looks up.
+    assert 'PATH' in os.environ
+    scoped = {name: value for name, value in os.environ.items()
+              if name != 'PATH'}
+    scoped['DAEDALUS_MARK'] = 'set'
     probe = ('import os,sys; sys.stdout.write('
              'os.environ.get("DAEDALUS_MARK", "unset") + "|" + ('
              '"inherited" if "PATH" in os.environ else "clean"))')
     marked, write_fd = client.spawn_watched(
         [sys.executable, '-c', probe],
-        env={'DAEDALUS_MARK': 'set'},
+        env=scoped,
         stdout=subprocess.PIPE, text=True)
     try:
         assert marked.communicate(timeout=LIFETIME)[0] == 'set|clean'
