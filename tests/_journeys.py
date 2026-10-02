@@ -242,6 +242,113 @@ def screenshot(base, docroot):
     }
 
 
+def _cdp_response():
+    """A `Runtime.evaluate` answer shaped like the one a page produces.
+
+    One entry per matched node, each carrying the handful of fields a
+    remote object reports. This is the size difference the journey
+    exists for: a CDP result is an order of magnitude past the two-key
+    body the eval journeys post, so the parse, the credential pop, the
+    re-serialisation and both writes are measured on a body of a
+    realistic size rather than on a token.
+
+    Built by a fixed formula over the index — never a clock, a uuid or
+    `random` — because a counter measured over moving inputs is a
+    counter over the harness.
+    """
+    nodes = []
+    for index in range(CDP_NODES):
+        node = f'node-{index:04d}'
+        nodes.append({
+            'nodeId': index + 1,
+            'backendNodeId': 1000 + index,
+            'nodeType': 1,
+            'nodeName': node,
+            'localName': node,
+            'nodeValue': '',
+            'childNodeCount': index % 4,
+            'attributes': [f'class={node}-alpha', f'data-index={index}'],
+        })
+    return {'result': {
+        'type': 'object',
+        'subtype': 'array',
+        'className': 'Array',
+        'description': f'NodeList({CDP_NODES})',
+        'objectId': 'injected-1',
+        'preview': {'type': 'object', 'properties': nodes[:8],
+                    'overflow': True},
+    }, 'deep': {'nodes': nodes}}
+
+
+def cdp_result(base, docroot):
+    """A typed CDP command answered with a real protocol response.
+
+    The bridge dispatches nothing itself — `tab` only chooses the queue —
+    so `method` and `params` travel in the command body and the field
+    names matter to the rendering rather than to the route.
+    """
+    del docroot
+    status, raw = _bridge.put_command(base, {
+        'token': CDP_TOKEN,
+        'tab': CDP_TAB,
+        'id': CDP_ID,
+        'type': 'cdp',
+        'method': CDP_METHOD,
+        'params': CDP_PARAMS,
+    })
+    assert status == 200, (status, raw)
+    enqueued = json.loads(raw)
+
+    frame = _bridge.read_stream_data(base, CDP_TOKEN, CDP_TAB)
+    assert frame.get('type') == 'cdp', frame
+    assert frame.get('id') == CDP_ID, frame
+    assert frame.get('method') == CDP_METHOD, frame
+    assert frame.get('params') == CDP_PARAMS, frame
+
+    payload = _cdp_response()
+    status, raw = _util.post_json(base + '/result', {
+        'token': CDP_TOKEN,
+        'tabId': CDP_TAB,
+        'id': frame['id'],
+        'result': payload,
+        'error': None,
+        'ts': 1,
+        '_did': frame['_did'],
+    })
+    assert status == 200, (status, raw)
+
+    status, slot = _util.get_json(
+        base + '/result?token=' + CDP_TOKEN + '&delivery=' + frame['_did'])
+    assert status == 200, (status, slot)
+    assert slot.get('id') == CDP_ID, slot
+    assert slot.get('result') == payload, slot
+
+    # The rendering records the SHAPE of the body that came back, and its
+    # two ends rather than all two hundred nodes: enough that a per-entry
+    # change moves the number, without a record nobody can read a diff of.
+    stored = slot.get('result', {})
+    remote = stored.get('result', {})
+    nodes = stored.get('deep', {}).get('nodes', [])
+    return {
+        'journey': 'cdp-result',
+        'enqueued': {'ok': enqueued.get('ok'),
+                     'target': enqueued.get('target')},
+        'frame': {key: frame[key] for key in ('type', 'id', 'method', 'params')
+                  if key in frame},
+        'result': {
+            'id': slot.get('id'),
+            'tabId': slot.get('tabId'),
+            'error': slot.get('error'),
+            'type': remote.get('type'),
+            'className': remote.get('className'),
+            'description': remote.get('description'),
+            'nodes': len(nodes),
+            'first': nodes[0] if nodes else None,
+            'last': nodes[-1] if nodes else None,
+        },
+    }
+
+
 def _load_front_end(base):
     """The MCP front end, loaded on a thread of its own and waited for.
 
@@ -397,6 +504,7 @@ JOURNEYS = {
     'mcp-exec': (_mcp_load.TOK, mcp_exec),
     'dashboard-fanout': (DASHBOARD_TOKEN, dashboard_fanout),
     'screenshot': (SHOT_TOKEN, screenshot),
+    'cdp-result': (CDP_TOKEN, cdp_result),
 }
 NAMES = tuple(JOURNEYS)
 

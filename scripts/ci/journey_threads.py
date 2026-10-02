@@ -85,6 +85,7 @@ EXCLUDED = {
     'dashboard-fanout': (IMPORT, SERVE),
     'mcp-exec': (IMPORT,),
     'screenshot': (IMPORT, SERVE),
+    'cdp-result': (IMPORT, SERVE),
 }
 
 
