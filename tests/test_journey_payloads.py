@@ -362,6 +362,38 @@ def test_the_ceiling_the_session_is_measured_against_is_the_products(tmp):
         'constant, so the two sides have separate copies again')
 
 
+def test_the_command_ttl_default_is_the_one_the_documentation_states(tmp):
+    """The number is the PRODUCT's decision, and AGENTS.md is where it is
+    written down.
+
+    The control above pins that one place states it and everything else
+    reads it — a hoist, not a value. So the value itself was pinned by
+    nothing, and `CMD_TTL_DEFAULT = 90` became `= 3` with every suite still
+    green: the two sides would move together and agree, which is what a
+    control comparing a module to itself always does.
+
+    The oracle is the endpoint and directory reference, which says
+    `DAEDALUS_CMD_TTL` defaults to 90 — twice, and both must say it. A
+    control holding `90` as a literal would be a second copy that a rename
+    moves with the first; this one reads the published number back, so
+    changing the default without changing what the documentation says fails
+    here rather than at a real run — where a raised TTL delivers a stale
+    command and a lowered one drops a fresh one, and neither is visible in
+    the journey's own count.
+    """
+    del tmp
+    documented = re.findall(
+        r'DAEDALUS_CMD_TTL[^.]{0,40}?default (\d+)',
+        (_journey_contract.ROOT / 'AGENTS.md').read_text(
+            encoding='utf-8'))
+    assert documented, 'AGENTS.md no longer states the DAEDALUS_CMD_TTL '
+    'default, so the number the product ships has no published value to be '
+    'checked against'
+    assert set(documented) == {str(_product_default())}, (
+        f'AGENTS.md states the default as {sorted(set(documented))} and the '
+        f'product ships with {_product_default()}')
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeypayloads_')
