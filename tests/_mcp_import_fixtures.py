@@ -20,9 +20,9 @@ that read it, which is all of them once the synthetic-tree suites are gone.
 The refusal assertion is named for the assertion it makes rather than for
 what it generically is, because other test modules already bind that
 name, and a shared helper that adopted a name other modules bind is a
-re-implementation `test_helper_reimplementation.py` detects — generically
-over `UNCONSOLIDATED_NAMES`, so no count of the offenders is asserted
-anywhere.
+re-implementation `tests/test_reserved_test_names.py` detects —
+generically over `UNCONSOLIDATED_NAMES`, so no count of the offenders is
+asserted anywhere.
 """
 from pathlib import Path
 
