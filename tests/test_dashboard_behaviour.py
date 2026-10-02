@@ -116,6 +116,117 @@ def test_stale_keepalive_disconnect_cannot_clobber_replacement_port(_tmp):
     }, actual
 
 
+# The stale port is what the harness above fires, so every handler in it
+# returns at its first line. These fire the port that IS live, and a realm
+# whose `chrome.runtime.connect` refuses the way a revoked context does.
+_KEEPALIVE_LIFECYCLE_HARNESS = _dashnode.DashboardNodeHarness(
+    r"""
+phase('dashboard harness started');
+const fs = require('fs');
+const vm = require('vm');
+const contentSource = fs.readFileSync(process.argv[1], 'utf8');
+""" + event_target_stub() + r"""
+// One content-script realm with controllable timers and RETAINED disconnect
+// listeners. `invalidated` makes chrome.runtime.connect throw, which is what
+// a service worker answers with once its extension context is revoked.
+function realm(invalidated) {
+  const timers = [];
+  const intervals = [];
+  const ports = [];
+  let nextId = 0;
+  function scheduled(collection, callback, delay) {
+    const item = { id: ++nextId, callback, delay, cleared: false };
+    collection.push(item);
+    return item.id;
+  }
+  function cancel(collection, id) {
+    const item = collection.find((candidate) => candidate.id === id);
+    if (item) item.cleared = true;
+  }
+  const chrome = {
+    runtime: {
+      lastError: null,
+      onMessage: eventTarget([]),
+      sendMessage() {},
+      connect() {
+        if (invalidated) throw new Error('Extension context invalidated.');
+        const disconnectListeners = [];
+        const port = {
+          messages: [],
+          disconnectListeners,
+          postMessage(message) { port.messages.push(message); },
+          disconnect() {},
+          onDisconnect: eventTarget(disconnectListeners),
+        };
+        ports.push(port);
+        return port;
+      },
+      getManifest: () => ({ version: '0.18.0' }),
+    },
+  };
+  const context = vm.createContext(Object.assign({
+    window: { addEventListener() {}, postMessage() {} },
+    chrome,
+    navigator: { clipboard: { writeText: () => Promise.resolve() } },
+    location: { hostname: '' },
+    setTimeout: (callback, delay) => scheduled(timers, callback, delay),
+    clearTimeout: (id) => cancel(timers, id),
+    setInterval: (callback, delay) => scheduled(intervals, callback, delay),
+    clearInterval: (id) => cancel(intervals, id),
+    console: { log() {}, error() {} },
+  }, contentScriptPage()));
+  vm.runInContext(contentSource, context, { filename: process.argv[1] });
+  return { timers, intervals, ports };
+}
+
+function armed(collection, delay) {
+  return collection.filter((item) => item.delay === delay);
+}
+phase('dashboard module import started');
+const live = realm(false);
+phase('dashboard module imported');
+phase('dashboard call started');
+const livePort = live.ports[0];
+for (const listener of livePort.disconnectListeners) listener();
+const afterDisconnect = { intervalCleared: live.intervals[0].cleared,
+  proactiveCleared: armed(live.timers, 4 * 60 * 1000)[0].cleared,
+  retries: armed(live.timers, 500).length };
+// Only the retry the disconnect armed reconnects, so firing it is the test.
+armed(live.timers, 500)[0].callback();
+live.intervals[live.intervals.length - 1].callback();
+const afterRetry = { ports: live.ports.length,
+  firstPortPings: livePort.messages.length,
+  secondPortPings: live.ports[1].messages.length };
+const dead = realm(true);
+const backoff = armed(dead.timers, 5000);
+backoff[0].callback();
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({
+  afterDisconnect, afterRetry,
+  invalidated: { ports: dead.ports.length, before: backoff.length,
+    after: armed(dead.timers, 5000).length },
+}));
+phase('dashboard harness finished');
+""", bounded_steps=0, arguments=(ROOT / 'extension' / 'content.js',))
+
+
+def test_a_live_keepalive_disconnect_reconnects_and_a_dead_one_backs_off(_tmp):
+    result = _dashnode.run_dashboard_node(_KEEPALIVE_LIFECYCLE_HARNESS)
+    actual = json.loads(result.stdout)
+    assert actual == {
+        'afterDisconnect': {
+            'intervalCleared': True, 'proactiveCleared': True, 'retries': 1},
+        # A second port exists and the ping lands on IT: the retired port's
+        # interval is gone, so a listener that kept the old one would ping a
+        # port nobody holds open.
+        'afterRetry': {
+            'ports': 2, 'firstPortPings': 0, 'secondPortPings': 1},
+        # No port at all, and firing the backoff armed another -- the proof the
+        # retry ran connectKeepAlive again.
+        'invalidated': {'ports': 0, 'before': 1, 'after': 2},
+    }, actual
+
+
 _DASHBOARD_CONSUME_HARNESS = _dashnode.DashboardNodeHarness(
     r"""
 phase('dashboard harness started');

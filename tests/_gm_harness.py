@@ -59,28 +59,38 @@ function buildBackground(utilPath, gmPath, makeStorage) {
 // A content frame's chrome: a direct handle on the shared store (the pre-fix
 // content script's path) plus a sendMessage that routes gm-storage to the
 // shared background with sender.origin = this frame's own origin.
-function frameChrome(storage, background, origin) {
-  return {
-    runtime: {
-      lastError: null,
-      onMessage: { addListener() {} },
-      sendMessage(msg, callback) {
-        if (msg && msg.type === 'gm-storage') {
-          background.handle(msg, { origin }, (response) => {
-            if (callback) callback(response);
-          });
+// `deadWorker` refuses to answer at all, the two ways a worker that never
+// ran can present itself: Chrome's lastError, and a bare absent response.
+function frameChrome(storage, background, origin, deadWorker = 'none') {
+  const runtime = {
+    lastError: null,
+    onMessage: { addListener() {} },
+    sendMessage(msg, callback) {
+      if (msg && msg.type === 'gm-storage') {
+        if (deadWorker === 'lastError') {
+          runtime.lastError = { message: 'Could not establish connection.' };
+          try { if (callback) callback(undefined); }
+          finally { runtime.lastError = null; }
           return;
         }
-        if (callback) callback(undefined);
-      },
-      getManifest() { return { version: '0.26.1' }; },
-      connect() {
-        return { disconnect() {}, postMessage() {},
-                 onDisconnect: { addListener() {} } };
-      },
+        if (deadWorker === 'silent') {
+          if (callback) callback(undefined);
+          return;
+        }
+        background.handle(msg, { origin }, (response) => {
+          if (callback) callback(response);
+        });
+        return;
+      }
+      if (callback) callback(undefined);
     },
-    storage: { local: storage },
+    getManifest() { return { version: '0.26.1' }; },
+    connect() {
+      return { disconnect() {}, postMessage() {},
+               onDisconnect: { addListener() {} } };
+    },
   };
+  return { runtime, storage: { local: storage } };
 }
 
 """
@@ -379,6 +389,88 @@ Promise.all(settled).then(() => {
 """
 
 
+_DEAD_WORKER_HARNESS = _PRELUDE + r"""
+// A frame whose service worker never answers a gm-storage message. The store
+// itself works, so what the page sees is the relay's own dead-worker arm and
+// nothing else. Chrome reports an undelivered message through lastError; the
+// bare absent response is the same failure as the belt under it, and each
+// names itself in the message the page receives.
+const [contentPath, pagePath, utilPath, gmPath, deadWorker] =
+  process.argv.slice(1);
+
+const listeners = {};
+const messages = [];
+
+const windowObject = {
+  addEventListener(type, listener) {
+    (listeners[type] ||= []).push(listener);
+  },
+  postMessage(message) {
+    messages.push(message);
+  },
+};
+
+function makeStorage() {
+  return {
+    get(keys, callback) { callback({}); },
+    set(values, callback) { callback(); },
+    remove(keys, callback) { callback(); },
+  };
+}
+
+const background = buildBackground(utilPath, gmPath, makeStorage);
+const chrome = frameChrome(background.chrome.storage.local, background,
+  'https://storage-test.example.com', deadWorker);
+
+const context = Object.assign({
+  window: windowObject,
+  chrome,
+  navigator: { clipboard: { writeText: () => Promise.resolve() } },
+  location: { hostname: 'storage-test.example.com',
+              origin: 'https://storage-test.example.com' },
+  TextEncoder,
+  setInterval: () => 1,
+  clearInterval() {},
+  setTimeout: () => 1,
+  console: { log() {}, error() {} },
+}, contentScriptPage());
+vm.runInNewContext(
+  fs.readFileSync(contentPath, 'utf8'), context, { filename: contentPath });
+vm.runInNewContext(
+  fs.readFileSync(pagePath, 'utf8'), context, { filename: pagePath });
+
+function flushMessages() {
+  while (messages.length) {
+    const data = messages.shift();
+    for (const listener of listeners.message) {
+      listener({ source: windowObject, data });
+    }
+  }
+}
+
+const outcomes = {};
+const settled = [];
+for (const [name, call] of [
+  ['getValue', () => windowObject.GM.getValue('ordinary', 'fallback')],
+  ['setValue', () => windowObject.GM.setValue('ordinary', 'value')],
+  ['deleteValue', () => windowObject.GM.deleteValue('ordinary')],
+  ['listValues', () => windowObject.GM.listValues()],
+]) {
+  settled.push(call().then(
+    (value) => { outcomes[name] = { settled: 'resolved',
+      value: value ?? null }; },
+    (error) => { outcomes[name] = { settled: 'rejected',
+      error: String(error && error.message) }; },
+  ));
+}
+flushMessages();
+
+Promise.all(settled).then(() => {
+  process.stdout.write(JSON.stringify(outcomes), () => process.exit(0));
+});
+"""
+
+
 # The bound on the child `_run_node` launches. It is a hang detector and not
 # a health margin, and the reasoning for that verdict is here because a
 # shipped module is not a probe and a reader is entitled to the argument:
@@ -426,7 +518,7 @@ GM_CHILD_SLOWEST_S = max(GM_CHILD_SAMPLES_S)
 GM_CHILD_DEADLINE_S = round(GM_CHILD_SLOWEST_S * SITE_HANG_MULTIPLE)
 
 
-def _run_node(harness, content_path=None, with_page=False):
+def _run_node(harness, content_path=None, with_page=False, extra=()):
     node = shutil.which('node')
     assert node, 'node is required to execute the extension storage boundary'
     ext = ROOT / 'extension'
@@ -434,7 +526,7 @@ def _run_node(harness, content_path=None, with_page=False):
             str(content_path or (ext / 'content.js')),
             str(ext / 'page.js') if with_page else '',
             str(ext / 'worker' / 'util.js'),
-            str(ext / 'worker' / 'gm_storage.js')]
+            str(ext / 'worker' / 'gm_storage.js'), *extra]
     try:
         result = subprocess.run(
             argv, cwd=ROOT, capture_output=True, text=True,
@@ -452,3 +544,9 @@ def run_relay():
 
 def run_failure():
     return _run_node(_STORAGE_FAILURE_HARNESS, with_page=True)
+
+
+def run_dead_worker(dead_worker):
+    """GM outcomes over a service worker that never answers."""
+    return _run_node(_DEAD_WORKER_HARNESS, with_page=True,
+                     extra=(dead_worker,))

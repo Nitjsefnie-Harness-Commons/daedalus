@@ -24,7 +24,7 @@ _FETCH_RELAY_HARNESS = CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs');
 const vm = require('vm');
 
-const [contentPath, pagePath, responseText] = process.argv.slice(1);
+const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
 
 const backgroundResponse = JSON.parse(responseText);
 const listeners = {};
@@ -49,7 +49,17 @@ const chrome = {
     sendMessage(payload, callback) {
       sent.push(payload);
       // content.js asks for a hotfix replay at load with no callback at all.
-      if (typeof callback === 'function') callback(backgroundResponse);
+      if (typeof callback !== 'function') return;
+      if (mode === 'lastError') {
+        // Chrome's shape for an undelivered message: lastError set, and the
+        // callback invoked with no response at all.
+        chrome.runtime.lastError = { message: 'Could not establish'
+          + ' connection.' };
+        try { callback(undefined); }
+        finally { chrome.runtime.lastError = null; }
+        return;
+      }
+      callback(backgroundResponse);
     },
     getManifest() { return { version: '0.0.0' }; },
     connect() {
@@ -121,7 +131,7 @@ process.stdout.write(JSON.stringify({
 """
 
 
-def _run_fetch_relay_harness(background_response):
+def _run_fetch_relay_harness(background_response, mode='answer'):
     """Drive GM.xmlhttpRequest through content.js and page.js under Node."""
     node = shutil.which('node')
     assert node, 'node is required to execute the extension fetch relay'
@@ -129,7 +139,7 @@ def _run_fetch_relay_harness(background_response):
         node, ['-e', _FETCH_RELAY_HARNESS,
                str(ROOT / 'extension' / 'content.js'),
                str(ROOT / 'extension' / 'page.js'),
-               json.dumps(background_response)],
+               json.dumps(background_response), mode],
         ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
@@ -155,6 +165,21 @@ def test_a_fetch_timeout_reaches_ontimeout_and_not_onerror(tmp):
     failed = _run_fetch_relay_harness({'error': 'network unreachable'})
     assert failed['events'] == ['error:network unreachable'], failed
     assert failed['relayed'] == ['error'], failed
+
+
+def test_a_fetch_the_worker_never_answered_reaches_onerror(tmp):
+    """An undelivered request is an error, not a load with no body.
+
+    A sendMessage that never reached the service worker hands the callback no
+    response and reports it through lastError, so a relay reading only the
+    response object fell through to the success branch: the caller was told a
+    request it never made came back, with status and headers it never had.
+    """
+    del tmp
+    undelivered = _run_fetch_relay_harness(None, 'lastError')
+    assert undelivered['events'] == [
+        'error:Could not establish connection.'], undelivered
+    assert undelivered['relayed'] == ['error'], undelivered
 
 
 def test_a_redirected_fetch_reports_where_the_body_came_from(tmp):
@@ -484,6 +509,125 @@ def test_a_download_that_never_started_reaches_onerror(tmp):
     # And a real download is still a load.
     started = _run_download_relay_harness('ok')
     assert started['events'] == ['load'], started
+
+
+_FIRE_AND_FORGET_HARNESS = CONTENT_SCRIPT_PAGE + r"""
+const fs = require('fs');
+const vm = require('vm');
+
+// GM.openInTab and GM.notification are the page's fire-and-forget surface:
+// neither returns a promise, so the observable is what the service worker
+// actually received and the acknowledgement content.js posts back.
+const [contentPath, pagePath] = process.argv.slice(1);
+
+const listeners = {};
+const messages = [];
+const posted = [];
+const sent = [];
+
+const windowObject = {
+  addEventListener(type, listener) {
+    (listeners[type] ||= []).push(listener);
+  },
+  postMessage(message) {
+    posted.push(message);
+    messages.push(message);
+  },
+};
+
+const chrome = {
+  runtime: {
+    lastError: null,
+    onMessage: { addListener() {} },
+    getManifest() { return { version: '0.18.0' }; },
+    connect() {
+      return { disconnect() {}, postMessage() {},
+               onDisconnect: { addListener() {} } };
+    },
+    sendMessage(message, callback) {
+      sent.push(message);
+      // openInTab waits for its answer; notification is sent with no callback.
+      if (typeof callback === 'function') callback({ tabId: 3 });
+    },
+  },
+};
+
+const context = {
+  window: windowObject,
+  chrome,
+  navigator: { clipboard: { writeText: () => Promise.resolve() } },
+  location: { hostname: 'page-api.invalid' },
+  setInterval: () => 1,
+  clearInterval() {},
+  setTimeout: () => 1,
+  console: { log() {}, error() {} },
+  ...contentScriptPage(),
+};
+vm.runInNewContext(
+  fs.readFileSync(contentPath, 'utf8'), context, { filename: contentPath });
+vm.runInNewContext(
+  fs.readFileSync(pagePath, 'utf8'), context, { filename: pagePath });
+
+function flushMessages() {
+  while (messages.length) {
+    const data = messages.shift();
+    for (const listener of listeners.message) {
+      listener({ source: windowObject, data });
+    }
+  }
+}
+
+windowObject.GM.openInTab('about:blank', { active: false });
+flushMessages();
+windowObject.GM.notification(
+  { title: 'Run finished', text: 'Nothing failed.' });
+flushMessages();
+
+process.stdout.write(JSON.stringify({
+  sent: sent.filter((message) => message.type === 'openTab'
+    || message.type === 'notification'),
+  acknowledged: posted
+    .filter((m) => m.direction === 'daedalus-bg-to-page')
+    .map((m) => ({ handler: m.handler, error: m.error || null })),
+}), () => process.exit(0));
+"""
+
+
+def _run_fire_and_forget_harness():
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension page-API relay'
+    result = run_node_argv(
+        node, ['-e', _FIRE_AND_FORGET_HARNESS,
+               str(ROOT / 'extension' / 'content.js'),
+               str(ROOT / 'extension' / 'page.js')],
+        ROOT)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def test_the_fire_and_forget_page_apis_reach_the_worker_and_are_acked(tmp):
+    """GM.openInTab and GM.notification cross the relay with their payload.
+
+    Both are documented page APIs whose whole contract is out-and-acked: the
+    URL a tab was asked to open, the title and text of a notification, and an
+    acknowledgement carrying no error. `notification` sends no callback at
+    all, so it is the one arm where the relay must answer the page itself
+    rather than in a callback.
+    """
+    del tmp
+    actual = _run_fire_and_forget_harness()
+    assert actual == {
+        'sent': [
+            {'type': 'openTab', 'url': 'about:blank', 'active': False},
+            {'type': 'notification', 'title': 'Run finished',
+             'text': 'Nothing failed.'},
+        ],
+        'acknowledged': [
+            {'handler': 'openInTab', 'error': None},
+            {'handler': 'notification', 'error': None},
+        ],
+    }, actual
 
 
 def main():
