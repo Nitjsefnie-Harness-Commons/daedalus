@@ -190,8 +190,12 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
         seen['value'] = child.communicate(timeout=LIFETIME)[0]
         assert child.returncode == 0, child.returncode
     finally:
+        # The write end goes in the `finally` rather than after it: the
+        # row below reads descriptor numbers, and a write end this row
+        # leaked while failing would move them and turn the next row's
+        # result into a statement about this one.
+        os.close(write_fd)
         _ended(child)
-    os.close(write_fd)
 
     handed = int(seen['value'])
     assert handed > 0, seen['value']
@@ -212,8 +216,8 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
     try:
         assert marked.communicate(timeout=LIFETIME)[0] == 'set'
     finally:
+        os.close(write_fd)
         _ended(marked)
-    os.close(write_fd)
 
 
 def test_the_child_ends_when_the_write_end_closes_and_not_before(tmp):
@@ -276,14 +280,17 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
     absent = os.path.join(tmp, 'gh-that-was-never-installed')
     sentinel, read_fd, write_fd = _sentinel()
     try:
-        client.spawn_watched([absent])
-    except OSError as exc:
-        assert exc.errno == errno.ENOENT, exc
-    else:
-        raise AssertionError('a spawn of nothing returned a child')
-    assert not _still_open(read_fd), 'the failed spawn kept its read end'
-    assert not _still_open(write_fd), 'the failed spawn kept its write end'
-    os.close(sentinel)
+        try:
+            client.spawn_watched([absent])
+        except OSError as exc:
+            assert exc.errno == errno.ENOENT, exc
+        else:
+            raise AssertionError('a spawn of nothing returned a child')
+        assert not _still_open(read_fd), 'the failed spawn kept its read end'
+        assert not _still_open(write_fd), (
+            'the failed spawn kept its write end')
+    finally:
+        os.close(sentinel)
 
 
 def test_watch_parent_started_by_hand_leaves_the_process_alone(tmp):
