@@ -18,8 +18,14 @@ slow.
 """
 import contextlib
 import os
+import signal
 import subprocess
+import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
 
 # A process group that is neither the launcher's own nor one this process can
 # be holding, so a control that intends to signal it is signalling a stand-in
@@ -200,3 +206,18 @@ def swapped(module, **stand_ins):
         yield
     finally:
         module.__dict__.update(saved)
+
+
+def require_sigkill():
+    """End the control where `signal` has no escalation to name.
+
+    `kill_process_tree` reads `signal.SIGKILL` only on the POSIX route:
+    `_taskkill` answers on Windows before that line is reached, and Windows
+    has no `SIGKILL` for a stand-in `sys` to route to either. So the arms
+    this covers do not exist there, and the control that does exist for
+    Windows -- the `taskkill` route and its refusals -- runs on every cell.
+    """
+    if hasattr(signal, 'SIGKILL'):
+        return
+    _util.skip('signal.SIGKILL is POSIX-only, and the escalation arm is '
+               'reached only after _taskkill declines on Windows')
