@@ -23,7 +23,6 @@ import json
 import os
 import re
 import shutil
-import statistics
 import subprocess
 import sys
 import tempfile
@@ -33,7 +32,13 @@ from pathlib import Path
 # name, so a run from the repository root and a run from anywhere
 # else both resolve it.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import journey_residual  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
+
+# The residual arithmetic and the refusal it produces, in the leaf that
+# owns them. Bound here under its own name so a suite that reached `_row`
+# through this module still reaches the same function.
+_row = journey_residual.row
 
 ROOT = Path(__file__).resolve().parents[2]
 JOURNEYS = ROOT / 'tests' / '_journeys.py'
@@ -426,14 +431,27 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     if why is not None:
                         break
                     rows[name] = counted
+            refusals = {}
             if why is None:
                 verdicts = {}
                 for name in names:
-                    verdicts[name], why = _row(
+                    # A journey whose own work will not separate from the
+                    # background it shares refuses ITS OWN count and no
+                    # other: the six journeys beside it measured fine, and
+                    # refusing the whole counter over one of them discarded
+                    # every count in the run over the single case that is
+                    # already reported rather than hidden.
+                    verdict, row_why = _row(
                         name, rows[name], startup if childed else 0,
                         baselines[name] if childed else 0)
-                    if why is not None:
-                        break
+                    if row_why is not None:
+                        # ABSENT from `verdicts`, rather than present and
+                        # null: `counts_of` reads every entry's `median`,
+                        # so a refused journey left in the mapping is a
+                        # reader reaching `.get` through `None`.
+                        refusals[name] = row_why
+                        continue
+                    verdicts[name] = verdict
             if why is not None:
                 report['counters'][counter] = {
                     'available': False, 'why': why}
@@ -447,41 +465,12 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 # not, because the exclusion list the baseline is read
                 # through is the journey's own.
                 'bridge_only': baselines if childed else None,
-                'journeys': verdicts}
+                'journeys': verdicts,
+                # What was refused, and why — per journey, so a check can
+                # tell a journey it cannot measure from one the counter
+                # never counted.
+                'refused': refusals}
     return report
-
-
-def _row(name, raw_values, startup, bridge):
-    """One journey's row, or the refusal a negative residual gets.
-
-    Both numbers are reported because only one of them is the budget: a
-    journey's own total carries the interpreter start, the imports and the
-    whole bridge every child pays whatever is measured, and a ratchet on
-    that number would go red on a dependency bump rather than on a change
-    to the work.
-
-    A residual below zero is a REFUSAL naming every number in it, never a
-    clamp. A journey whose own work is smaller than the run-to-run wobble
-    of the threads it shares will produce one, and that is the answer:
-    clamping to zero would report it as costing nothing and absorb the
-    exact condition this subtraction exists to detect.
-    """
-    net = [value - startup - bridge for value in raw_values]
-    if any(value < 0 for value in net):
-        return None, (
-            f'the {name} journey measured {raw_values} instructions net '
-            f'{net}, against a startup-only baseline of {startup} and a '
-            f'bridge-only baseline of {bridge} read through its own '
-            f'exclusion list, so its own work is smaller than the fixed '
-            'background it shares and the run cannot separate them; that '
-            'is reported rather than clamped to zero, because a clamp '
-            'would absorb exactly this')
-    return {'raw': raw_values,
-            'net': net,
-            'min': min(net) if net else None,
-            'max': max(net) if net else None,
-            'median': statistics.median(net) if net else None,
-            'spread': max(net) - min(net) if net else None}, None
 
 
 def counts_of(report, counter):
