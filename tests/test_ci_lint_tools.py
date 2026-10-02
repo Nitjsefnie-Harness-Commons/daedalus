@@ -465,15 +465,20 @@ def _installer_and_transfer(outcomes):
     return installer, _Transfer(installer, name, outcomes), name
 
 
-def _http_error(code, phrase):
-    """A status answer as urllib raises one.
+def _http_error(installer, code, phrase):
+    """A status answer as urllib raises one, addressed at the installer's own
+    release base.
 
-    The headers are an empty `email.message.Message` because that is what
-    `HTTPError` declares, not a dict that happens to be accepted.
+    The host is derived from `RELEASE` rather than written here: a second copy
+    of one in a test is a deployment string the release scanner reads on every
+    leg, and no control below asserts on this URL — they assert on the call
+    count, the status and the bytes. The headers are an empty
+    `email.message.Message` because that is what `HTTPError` declares, not a
+    dict that happens to be accepted.
     """
     return urllib.error.HTTPError(
-        'https://example.invalid/asset', code, phrase, email.message.Message(),
-        None)
+        f'{installer.RELEASE}/v{installer.ACTIONLINT_VERSION}/not-the-asset',
+        code, phrase, email.message.Message(), None)
 
 
 def test_a_transient_transfer_failure_is_retried_and_the_next_attempt_serves(
@@ -590,8 +595,8 @@ def test_a_4xx_is_asked_once_and_propagates(tmp):
     so this is the half of the boundary where a second ask buys nothing.
     """
     del tmp
-    installer, transfer, name = _installer_and_transfer([
-        _http_error(404, 'Not Found')])
+    installer, transfer, name = _installer_and_transfer(
+        lambda i: [_http_error(i, 404, 'Not Found')])
     with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
         raised = None
         try:
@@ -615,8 +620,9 @@ def test_a_5xx_is_asked_again_and_the_next_attempt_serves(tmp):
     mutant too, so a control written on it does not pin the boundary the
     installer's comment states."""
     del tmp
-    installer, transfer, name = _installer_and_transfer([
-        _http_error(500, 'Internal Server Error'), b'the asset bytes'])
+    installer, transfer, name = _installer_and_transfer(
+        lambda i: [_http_error(i, 500, 'Internal Server Error'),
+                   b'the asset bytes'])
     with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
         payload = installer._fetch(name)
     assert payload == b'the asset bytes', payload
