@@ -60,6 +60,13 @@ MCP_RESULT = {'answer': 4, 'label': 'journey-mcp'}
 # back by the path that result carried.
 SHOT_TOKEN = 'journeyshot'
 SHOT_TAB = 'journeyshotab'
+# Chrome's own tab id, which is NOT the routing tab. The bridge strips
+# `tab` before publishing, so a sender that put its browser tab there
+# would arrive with nothing; keeping the two distinct is what makes the
+# rendering say which field actually travelled. It is a STRING because
+# `path_safety.unsafe_component` refuses a non-string, and POST /result
+# checks `tabId` with it — a bare int is answered 400.
+SHOT_CHROME_TAB = '1458'
 SHOT_ID = 'journey-shot-1'
 SHOT_FILE = 'capture.png'
 # A real 1x1 PNG rather than an empty body: the store base64-decodes and
@@ -90,9 +97,10 @@ CDP_NODES = 200
 NET_TOKEN = 'journeynet'
 NET_TAB = 'journeynettab'
 NET_ID = 'journey-net-1'
-# A few thousand requests, each carrying headers and a body. `DAEDALUS_MAX_
-# UNAUTHENTICATED_BODY` is 64 KiB, so a body this size can only be posted
-# with the credential in an Authorization header; the journey does that.
+# Two thousand requests, each carrying headers and a body: a 3.3 MB
+# envelope. The unauthenticated-body ceiling is 64 KiB, so a body this
+# size can only be posted with the credential in an Authorization header,
+# and the journey does that.
 NET_REQUESTS = 2000
 NET_BODY_CHARS = 1200
 
@@ -183,7 +191,7 @@ def screenshot(base, docroot):
         'type': 'screenshot',
         # `tab` is routing and is stripped before the command is published,
         # so the browser's own tab identifier travels under its own name.
-        'tabId': SHOT_TAB,
+        'tabId': SHOT_CHROME_TAB,
     })
     assert status == 200, (status, raw)
     enqueued = json.loads(raw)
@@ -191,6 +199,7 @@ def screenshot(base, docroot):
     frame = _bridge.read_stream_data(base, SHOT_TOKEN, SHOT_TAB)
     assert frame.get('type') == 'screenshot', frame
     assert frame.get('id') == SHOT_ID, frame
+    assert frame.get('tabId') == SHOT_CHROME_TAB, frame
     assert frame.get('_did') == enqueued.get('did'), (frame, enqueued)
 
     status, stored = _util.post_json(base + '/upload', {
@@ -204,7 +213,7 @@ def screenshot(base, docroot):
 
     status, raw = _util.post_json(base + '/result', {
         'token': SHOT_TOKEN,
-        'tabId': SHOT_TAB,
+        'tabId': SHOT_CHROME_TAB,
         'id': frame['id'],
         'result': {'path': stored['path'], 'size': stored['size']},
         'error': None,
@@ -213,9 +222,10 @@ def screenshot(base, docroot):
     })
     assert status == 200, (status, raw)
 
-    # `delivery=` needs no `tab=`: with none the store searches every target
-    # directory the token owns, which is how a caller that never knew the
-    # browser's tab id reads one delivery back.
+    # `delivery=` needs no `tab=`: with none the store searches every
+    # `deliveries/<token>_*` directory the token owns, which is the only
+    # way to read this back — the result was filed under a tab id the
+    # caller knows as a number, not as a name.
     status, slot = _util.get_json(
         base + '/result?token=' + SHOT_TOKEN
         + '&delivery=' + frame['_did'])
