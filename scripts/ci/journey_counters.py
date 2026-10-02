@@ -395,7 +395,14 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
             # Both fixed costs are measured ONCE per counter and reused by
             # every journey: each is the same work whatever is measured
             # beside it, so paying for them per journey would buy nothing.
+            # Both are read through `kept_for` rather than taken raw,
+            # because a counter that separates threads answers every name
+            # with rows and a bare count is what has to come off the top.
+            # The startup child excludes no role — it has no bridge and no
+            # background to drop — so it keeps its whole profile.
             startup, why = run(STARTUP_NAME, root, workdir)
+            if why is None:
+                startup, why = kept_for(startup, STARTUP_NAME)
             bridge = None
             if why is None:
                 bridge, why = run(BRIDGE_NAME, root, workdir)
