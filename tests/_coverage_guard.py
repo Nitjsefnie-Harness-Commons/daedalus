@@ -81,7 +81,8 @@ _MUTATING_METHODS = frozenset({
 })
 _CHDIR = frozenset({'chdir', 'fchdir'})
 # Keep launches as module::function, so an edit above a site does not churn
-# the list; each is a tree [tool.coverage.paths] maps back (pyproject.toml).
+# the list. Each is either a COPIED tree under the `*/tree` component
+# [tool.coverage.paths] maps back, or the checkout itself (pyproject.toml).
 _KEEP_ALLOWLIST = frozenset({
     # A synthetic COVERAGE_PROCESS_START is the variable under test.
     'tests/_coverage_suite_fixture.py::coverage_tree',

@@ -136,6 +136,40 @@ def test_clear_discards_the_entry_it_names(tmp):
     assert target.read_bytes() == _COMMITTED
 
 
+def test_a_clear_of_an_entry_already_gone_is_a_discard(tmp):
+    # The race the removal encodes is between this caller's `isdir` check
+    # and the `rmtree` that follows it, so the removal below is the one
+    # the check lost to: the entry is really taken, and the tool is told
+    # it was already gone.
+    plant = _util.load(PLANT, 'plant_clear_race')
+    target = _committed_repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert plant.save(str(target), str(store)) == 0
+    entry = _only_entry(store)
+
+    class _RacedRemoval:
+        @staticmethod
+        def rmtree(path):
+            shutil.rmtree(path)
+            raise FileNotFoundError(2, 'No such file or directory', path)
+
+    said = io.StringIO()
+    real_shutil = plant.shutil
+    try:
+        plant.shutil = _RacedRemoval
+        with contextlib.redirect_stdout(said):
+            status = plant.clear(str(target), str(store))
+    finally:
+        plant.shutil = real_shutil
+    assert status == 0, status
+    assert not entry.exists(), 'the entry survived the removal'
+    # The post-condition is the entry's absence, so a store entry that is
+    # gone is a discard and never a refusal that names what is there.
+    assert said.getvalue().startswith('discarded '), said.getvalue()
+
+
 # Read-only on BOTH platforms - Windows has no execute bit and honours
 # only this flag. The polarity below is pinned to it by its own test.
 RECORDED_MODE = 0o400
@@ -398,6 +432,31 @@ def test_restore_refuses_a_store_whose_mode_record_is_gone(tmp):
     assert str(target) in _say(out), _say(out)
     assert target.read_bytes() == _FIXED, 'a refused restore wrote anyway'
     assert (entry / 'bytes').is_file(), 'a refused restore dropped the copy'
+
+
+def test_a_restore_onto_a_directory_refuses_and_leaves_no_temp_behind(tmp):
+    target = _committed_repo(tmp)
+    store = Path(tmp) / 'store'
+    saved = _run_plant('save', str(target), '--store', str(store))
+    assert saved.returncode == 0, _say(saved)
+    # A path that has become a directory: `os.replace` cannot install a
+    # file over one, so the publish fails with its temp already written.
+    target.unlink()
+    target.mkdir()
+
+    refused = _run_plant('restore', str(target), '--store', str(store))
+    assert refused.returncode != 0, _say(refused)
+    said = _say(refused)
+    assert 'Traceback' not in said, said
+    assert refused.stdout == '', said
+    assert f'cannot restore {target}' in said, said
+    assert target.is_dir(), 'a refused restore published anyway'
+    # The stored copy is what the refusal sends the operator back to.
+    assert (_only_entry(store) / 'bytes').is_file(), said
+    # The temp the failed publish wrote is gone with it: a temp left in
+    # the target's directory is litter a plant cycle leaves behind.
+    assert not list(target.parent.glob('.target.py.*.tmp')), (
+        sorted(p.name for p in target.parent.iterdir()))
 
 
 def test_restore_leaves_another_pending_plant_alone(tmp):

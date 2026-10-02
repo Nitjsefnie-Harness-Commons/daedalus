@@ -8,6 +8,8 @@ signal a reader has, so every claim below is parsed by its own label:
 this suite names each temp dir after its test function, so a substring
 pin over a whole line is satisfied by the path.
 """
+import contextlib
+import io
 import os
 import shutil
 import stat
@@ -339,6 +341,175 @@ def test_a_restore_that_cannot_remove_the_entry_says_it_is_still_there(
     assert f'the stored copy at {entry} could not be removed' in refusal, (
         refusal)
     assert entry.is_dir()
+
+
+def _an_environment_holding_no_git(directory):
+    """This process's environment, with a PATH that has no `git` in it.
+
+    A child launched with it cannot exec `git` at all, and that is a
+    `FileNotFoundError` out of the launch rather than a non-zero exit.
+    """
+    without = Path(directory) / 'no-git'
+    without.mkdir()
+    environment = dict(os.environ)
+    environment['PATH'] = str(without)
+    return environment
+
+
+def test_save_reports_unknown_when_git_cannot_be_launched(tmp):
+    target = _committed_repo(tmp)
+    target.write_bytes(_FIXED)
+    real = _run_plant('save', str(target), '--store', str(Path(tmp) / 'a'))
+    assert real.returncode == 0, _say(real)
+    # The control: this path with the real PATH is dirty, so the
+    # 'unknown' below is the PATH and not the path itself.
+    assert _reported_state(real.stdout) == 'dirty', _say(real)
+
+    blind = _run_plant('save', str(target), '--store', str(Path(tmp) / 'b'),
+                       environment=_an_environment_holding_no_git(tmp))
+    assert blind.returncode == 0, _say(blind)
+    assert _reported_state(blind.stdout) == 'unknown', _say(blind)
+
+
+def _a_git_that_answers_rev_parse_and_refuses_status(directory):
+    """A `git` on PATH that answers one subcommand and fails the other.
+
+    The log is what proves which of the two refusals the report came
+    from: without it an `unknown` reads the same whether the work tree
+    could not be entered or its status could not be read.
+    """
+    bin_dir = Path(directory) / 'bin'
+    bin_dir.mkdir()
+    log = Path(directory) / 'git.log'
+    script = bin_dir / 'git'
+    script.write_text(
+        '#!/bin/sh\n'
+        'case "$*" in\n'
+        '*rev-parse*)\n'
+        '  echo "rev-parse answered true" >> "$DAEDALUS_FAKE_GIT_LOG"\n'
+        '  echo true; exit 0 ;;\n'
+        '*status*)\n'
+        '  echo "status refused" >> "$DAEDALUS_FAKE_GIT_LOG"\n'
+        '  exit 1 ;;\n'
+        'esac\n'
+        'echo "unexpected call: $*" >> "$DAEDALUS_FAKE_GIT_LOG"\n'
+        'exit 2\n', encoding='utf-8')
+    script.chmod(0o755)
+    environment = dict(os.environ)
+    environment['PATH'] = str(bin_dir) + os.pathsep + environment['PATH']
+    environment['DAEDALUS_FAKE_GIT_LOG'] = str(log)
+    return environment, log
+
+
+def test_save_reports_unknown_when_git_cannot_report_a_status(tmp):
+    if sys.platform.startswith('win'):
+        _util.skip('a POSIX shell script is what stands in for git here')
+    target = _committed_repo(tmp)
+    target.write_bytes(_FIXED)
+    store = Path(tmp) / 'store'
+    real = _run_plant('save', str(target), '--store', str(Path(tmp) / 'a'))
+    assert real.returncode == 0, _say(real)
+    assert _reported_state(real.stdout) == 'dirty', _say(real)
+
+    environment, log = _a_git_that_answers_rev_parse_and_refuses_status(tmp)
+    saved = _run_plant('save', str(target), '--store', str(store),
+                       environment=environment)
+    assert saved.returncode == 0, _say(saved)
+    assert _reported_state(saved.stdout) == 'unknown', _say(saved)
+    # Both calls, in that order, and the one that failed is the status:
+    # an 'unknown' from a refused `rev-parse` is a different line, and
+    # this is what tells the two apart.
+    assert log.read_text(encoding='utf-8') == (
+        'rev-parse answered true\nstatus refused\n'), log.read_text()
+
+
+def test_a_publish_that_cannot_clean_up_its_temp_reports_the_publish(tmp):
+    # In-process, because only the code under test can be handed two
+    # refusals at once: `os.replace` fails the publish and `os.unlink`
+    # fails the cleanup that follows it, and the operator acts on the
+    # first of the two. The cleanup's own refusal must not become the
+    # one reported.
+    plant = _util.load(PLANT, 'plant_publish_cleanup')
+    target = Path(tmp) / 'target.py'
+    target.write_bytes(_FIXED)
+    store = Path(tmp) / 'store'
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert plant.save(str(target), str(store)) == 0
+    target.write_bytes(_PLANTED)
+
+    publish_error = 'the publish was refused'
+    cleanup_error = 'the temp could not be removed'
+    cleaned = []
+
+    def refusing_replace(*args, **kwargs):
+        raise OSError(publish_error)
+
+    def refusing_unlink(path, *args, **kwargs):
+        cleaned.append(path)
+        raise OSError(cleanup_error)
+
+    said = io.StringIO()
+    real_replace, real_unlink = os.replace, os.unlink
+    try:
+        os.replace = refusing_replace
+        os.unlink = refusing_unlink
+        with contextlib.redirect_stderr(said):
+            status = plant.restore(str(target), str(store))
+    finally:
+        os.replace, os.unlink = real_replace, real_unlink
+    assert status == 1, status
+    refusal = said.getvalue()
+    assert publish_error in refusal, refusal
+    assert cleanup_error not in refusal, refusal
+    # And the cleanup did run, once: a pass over a refusal that was
+    # never attempted would satisfy the two assertions above.
+    assert len(cleaned) == 1, cleaned
+
+
+def test_clear_of_a_path_with_no_stored_copy_says_there_is_nothing(tmp):
+    target = _committed_repo(tmp)
+    store = Path(tmp) / 'store'
+    refused = _run_plant('clear', str(target), '--store', str(store))
+    assert refused.returncode != 0, _say(refused)
+    said = _say(refused)
+    assert 'Traceback' not in said, said
+    # Nothing announced a discard that did not happen.
+    assert refused.stdout == '', said
+    assert f'no stored copy of {target}' in said, said
+    assert 'nothing to clear' in said, said
+    # And the refusal left nothing in the store for the next save.
+    assert _run_plant('save', str(target), '--store',
+                      str(store)).returncode == 0
+
+
+def _entry_replaced_by_a_symlink(store):
+    """The entry's own name, pointing at the directory it used to be."""
+    entry = _only_entry(store)
+    elsewhere = entry.parent / 'moved'
+    shutil.move(str(entry), str(elsewhere))
+    os.symlink(str(elsewhere), str(entry))
+    return entry, elsewhere
+
+
+def test_a_clear_whose_entry_is_a_symlink_says_it_is_still_there(tmp):
+    if sys.platform.startswith('win'):
+        _util.skip('creating a symlink needs a privilege Windows withholds')
+    target, store = _saved_then_planted(tmp)
+    entry, elsewhere = _entry_replaced_by_a_symlink(store)
+
+    cleared = _run_plant('clear', str(target), '--store', str(store))
+    assert cleared.returncode != 0, _say(cleared)
+    said = _say(cleared)
+    assert 'Traceback' not in said, said
+    assert cleared.stdout == '', said
+    refusal = cleared.stderr.strip()
+    assert f'the stored copy at {entry} could not be removed' in refusal, (
+        refusal)
+    assert 'still there' in refusal, refusal
+    # What the refusal protects: the directory behind the link is not
+    # the entry, and a removal that followed the name would take it.
+    assert entry.is_symlink(), entry
+    assert (elsewhere / 'bytes').is_file(), elsewhere
 
 
 def test_the_save_line_is_exactly_the_shape_the_suite_parses(tmp):

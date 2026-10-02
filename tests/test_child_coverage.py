@@ -71,7 +71,11 @@ def test_child_coverage_rejects_a_leaking_scrub_result(tmp):
 
 
 def test_child_coverage_keep_requires_a_mapped_tree(tmp):
-    """A keep outside the '*/tree' anchor fails where it is declared."""
+    """A keep outside a mapped tree fails where it is declared.
+
+    Two cwds are mapped and both are accepted: the checkout itself, and
+    a tree under the `*/tree` component [tool.coverage.paths] carries.
+    """
     for cwd in (None, Path(tmp) / 'unmapped-runner',
                 Path(tmp) / 'tree' / '..' / 'unmapped-runner'):
         try:
