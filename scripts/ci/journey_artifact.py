@@ -30,9 +30,15 @@ ARTIFACT = ROOT / '.github' / 'journey-budget.json'
 # signatures below replaced it as the table a count is classified under —
 # and it stays in the schema only so a document recorded before that change
 # still loads until it is re-recorded.
-FIELDS = ('schema_version', 'counter', 'tolerance_pct', 'toolchain',
-          'excluded_threads', 'thread_bands', 'thread_signatures', 'shas',
-          'journeys')
+# `tolerances` is the per-journey override of `tolerance_pct`, beside the
+# counts rather than inside them: a journey's own work differs by orders of
+# magnitude across the set, so one number cannot be tight for a large one and
+# meaningful for a small one, and a count that is absent must stay absent for
+# a journey the budget does not hold. Every other per-journey attribute is a
+# sibling mapping for the same reason.
+FIELDS = ('schema_version', 'counter', 'tolerance_pct', 'tolerances',
+          'toolchain', 'excluded_threads', 'thread_bands',
+          'thread_signatures', 'shas', 'journeys')
 
 # A sha is a content hash, not a magnitude: it says what a journey RENDERED,
 # not how much it cost, so it is comparable across machines and across
@@ -53,9 +59,7 @@ def _validated(value):
     if counter is not None and counter not in COUNTERS:
         raise ValueError(f'unknown counter: {counter}')
     tolerance = value.get('tolerance_pct')
-    if tolerance is not None and (not isinstance(tolerance, (int, float))
-                                  or isinstance(tolerance, bool)
-                                  or tolerance < 0):
+    if tolerance is not None and not _is_a_tolerance(tolerance):
         raise ValueError('tolerance_pct must be a nonnegative number: '
                          f'{tolerance}')
     toolchain = value.get('toolchain')
@@ -73,6 +77,7 @@ def _validated(value):
     journeys = value.get('journeys')
     if not isinstance(journeys, dict):
         raise ValueError('journeys must be an object')
+    _validated_tolerances(value.get('tolerances'), journeys)
     _validated_exclusions(value.get('excluded_threads'), journeys)
     _validated_bands(value.get('thread_bands'))
     _validated_signatures(value.get('thread_signatures'))
@@ -84,6 +89,45 @@ def _validated(value):
                 or recorded < 0:
             raise ValueError(
                 f'a recorded count must be a nonnegative integer: {name}')
+    return value
+
+
+def _is_a_tolerance(value):
+    """Whether this may be a tolerance, in percent.
+
+    `bool` is excluded explicitly because it is an `int`: a tolerance
+    recorded as `true` would be a budget one percent wide, said in the one
+    spelling a reader would not read as a number at all.
+    """
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and value >= 0)
+
+
+def _validated_tolerances(value, journeys):
+    """The tolerance each journey is held to in place of the default.
+
+    One number cannot be tight for a journey whose own work is an order of
+    magnitude larger than another's and meaningful for the small one, so a
+    journey may name the bound it is held to and every journey that names
+    none keeps the document's `tolerance_pct`. The value is a bound a person
+    set from a measured spread, so the same three shapes the default refuses
+    are refused here too — named, with the journey they were recorded for.
+
+    A name the journeys map does not carry is refused for the reason the
+    other per-journey maps refuse one: a tolerance nothing will ever be read
+    against is a number in the artefact that no run can act on.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError('tolerances must be an object')
+    for name, tolerance in value.items():
+        if name not in journeys:
+            raise ValueError(
+                f'tolerances names a journey with no count: {name}')
+        if not _is_a_tolerance(tolerance):
+            raise ValueError('a journey tolerance must be a nonnegative '
+                             f'number: {name} = {tolerance!r}')
     return value
 
 
@@ -254,8 +298,8 @@ def render(document):
     # Absent stays absent: a rendering that invented a block would fail
     # the canonical-rendering control for every artefact recorded before it.
     blocks = ''
-    for field in ('excluded_threads', 'thread_bands', 'thread_signatures',
-                  'shas'):
+    for field in ('tolerances', 'excluded_threads', 'thread_bands',
+                  'thread_signatures', 'shas'):
         if document.get(field) is None:
             continue
         rows = ',\n'.join(
@@ -278,6 +322,20 @@ def render(document):
             '}\n').encode('utf-8')
 
 
+def tolerance_of(document, name):
+    """The percent `name` is held to: its own, or the document's default.
+
+    The override is a lookup and the default is the fallback, so this is the
+    only place the two meet — and both the gate and the summary reach it,
+    because two copies of this arithmetic would drift into a table
+    disagreeing with the verdict above it.
+    """
+    own = (document.get('tolerances') or {}).get(name)
+    if own is not None:
+        return own
+    return document.get('tolerance_pct') or 0.0
+
+
 def budget_of(document, name):
     """The count `name` may reach: its record plus the tolerance.
 
@@ -289,8 +347,7 @@ def budget_of(document, name):
     recorded = document['journeys'].get(name)
     if recorded is None:
         return None
-    tolerance = document.get('tolerance_pct') or 0.0
-    return recorded * (1 + tolerance / 100.0)
+    return recorded * (1 + tolerance_of(document, name) / 100.0)
 
 
 def recorded_toolchain(document):
