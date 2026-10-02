@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """The one per-suite bound both launchers read, and what it does on expiry.
 
-`scripts/ci/suite_bound.py` is the subject here. The controls drive the
-real launchers over real planted suites rather than importing its
-functions: a guard written against a fixture shows what the guard thinks,
-and only a launcher that really ran says whether the bound held.
+`scripts/ci/suite_bound.py` is the subject here. Most of the controls
+drive the real launchers over real planted suites rather than importing
+its functions: a guard written against a fixture shows what the guard
+thinks, and only a launcher that really ran says whether the bound held.
+
+The teardown's arms are the exception, and they are called out where they
+are: no launcher ever takes them, so they are reached through stand-ins
+that record what the subject actually signalled or ran.
 """
 import ast
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +25,8 @@ from _coverage_suite_fixture import (  # noqa: E402
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
     records, settle_gone)
 from _repo import ROOT, iter_tree_files  # noqa: E402
+from _suite_bound_stubs import (  # noqa: E402
+    GROUP, TINY_BOUND_S, Child, Clock, Platform, Signals, Spawns, swapped)
 
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                          'suite_bound_under_test')
@@ -492,6 +499,201 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
             readers.append(relative)
     assert definitions == ['scripts/ci/suite_bound.py'], definitions
     assert readers == ['scripts/ci/suite_bound.py'], readers
+
+
+# The arms no launcher reaches. Most controls above drive a real launcher;
+# these ask what the teardown does when the tree misbehaves, which no CI run
+# takes because on a healthy runner nothing misbehaves. Each asserts on what
+# was SIGNALLED or RECORDED, never only on the string the subject returned --
+# that string is its own account of the event, and a branch that rendered it
+# without sending anything satisfies it just as well.
+
+
+def test_a_process_group_that_cannot_be_looked_up_is_named_for_that(tmp):
+    """Both refusals are outcomes; neither may leave the record empty."""
+    del tmp
+    for error, expected in (
+            (ProcessLookupError(),
+             'process group was already gone before cleanup'),
+            (OSError('the group table is unreadable'),
+             'process-group lookup failed: the group table is unreadable')):
+        child = Child()
+        signals = Signals(lookup_error=error)
+        with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals):
+            record = SUITE_BOUND.kill_process_tree(child)
+        assert record == expected, (record, error)
+        assert signals.sent == [], signals.sent
+        assert child.killed == 0, 'nothing was signalled, so nothing was hit'
+
+
+def test_a_child_in_the_launchers_own_group_is_killed_on_its_own(tmp):
+    """Signalling that group would signal the launcher, so only the child."""
+    del tmp
+    for kill_error, expected in (
+            (None, 'child shares the launcher group; '
+                   'only the direct child was killed'),
+            (OSError('the kill was refused'),
+             'child shares the launcher group; '
+             'direct kill failed: the kill was refused')):
+        child = Child(kill_error=kill_error)
+        signals = Signals(group=os.getpgrp())
+        with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals):
+            record = SUITE_BOUND.kill_process_tree(child)
+        assert child.killed == 1, 'the attempt is what the record is about'
+        assert signals.sent == [], signals.sent
+        assert record == expected, (record, kill_error)
+
+
+def test_a_request_that_never_went_out_is_the_whole_record(tmp):
+    """Nothing was signalled, so nothing after the request may be claimed."""
+    del tmp
+    for error, expected in (
+            (ProcessLookupError(),
+             f'process group {GROUP} was already gone'),
+            (OSError('denied'), 'process-group SIGTERM failed: denied')):
+        child = Child()
+        signals = Signals(killpg_errors={signal.SIGTERM: error})
+        with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals):
+            record = SUITE_BOUND.kill_process_tree(child)
+        assert signals.sent == [(GROUP, signal.SIGTERM)], signals.sent
+        assert child.waits == [], 'the grace window was never entered'
+        assert record == expected, (record, error)
+
+
+def test_a_suite_that_ignored_the_request_reports_the_escalation_it_lost(tmp):
+    """The grace ran out, and the escalation did not go out either."""
+    del tmp
+    clock = Clock()
+    signals = Signals(killpg_errors={signal.SIGKILL: ProcessLookupError()})
+    with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals, time=clock):
+        record = SUITE_BOUND.kill_process_tree(Child())
+    assert [sig for _group, sig in signals.sent] == [
+        signal.SIGTERM, signal.SIGKILL], signals.sent
+    # Evidence the window was entered at all, which is the subject's own
+    # loop and not elapsed time: `Clock` advances only when it sleeps.
+    assert clock.slept >= SUITE_BOUND.CLEANUP_TIMEOUT_S, clock.slept
+    assert record == (f'process group {GROUP} was already gone after '
+                      f'{SUITE_BOUND.CLEANUP_TIMEOUT_S} s of grace'), record
+
+
+def test_a_tree_kill_that_fails_outright_names_what_it_was_given(tmp):
+    """A cleanup failure must not replace the expiry the caller reports."""
+    del tmp
+    boom = RuntimeError('the signal machinery is wedged')
+    signals = Signals(killpg_errors={signal.SIGTERM: boom})
+    with swapped(SUITE_BOUND, sys=Platform('linux'), os=signals):
+        record = SUITE_BOUND.kill_process_tree(Child())
+    assert signals.sent == [(GROUP, signal.SIGTERM)], signals.sent
+    assert record == f'process-tree kill raised {boom!r}', record
+
+
+def test_the_windows_route_is_one_forced_taskkill_of_the_whole_tree(tmp):
+    """The dispatch and the command it builds, not the platform's answer.
+
+    This runs on every cell, so what it proves is that a Windows platform
+    sends exactly this argv with exactly this bound. Only a `windows-latest`
+    cell proves that a real `taskkill` ends a real tree.
+    """
+    del tmp
+    child = Child()
+    spawns = Spawns(child=child, returncode=0)
+    with swapped(SUITE_BOUND, sys=Platform('win32'), subprocess=spawns):
+        record = SUITE_BOUND.kill_process_tree(child)
+    assert len(spawns.runs) == 1, 'one forced call, never a graceful one'
+    argv, keywords = spawns.runs[0]
+    assert argv == ['taskkill', '/F', '/T', '/PID', str(child.pid)], argv
+    assert keywords['timeout'] == SUITE_BOUND.CLEANUP_TIMEOUT_S, keywords
+    assert keywords['check'] is False, keywords
+    assert child.killed == 0, 'the tree is ended by pid, not from here'
+    assert 'force-killed the tree' in record, record
+
+
+def test_a_taskkill_that_failed_is_reported_for_its_own_reason(tmp):
+    """Three ways it fails, and each is named rather than merged."""
+    del tmp
+    for run_error, returncode, expected, ran in (
+            (subprocess.TimeoutExpired('taskkill', 10), 0,
+             f'gave up after {SUITE_BOUND.CLEANUP_TIMEOUT_S}s', True),
+            (OSError('taskkill is not on this path'), 0,
+             'could not run: taskkill is not on this path', False),
+            (None, 128, 'taskkill /F exited 128', True)):
+        spawns = Spawns(run_error=run_error, returncode=returncode)
+        with swapped(SUITE_BOUND, sys=Platform('win32'), subprocess=spawns):
+            record = SUITE_BOUND.kill_process_tree(Child())
+        assert spawns.runs[0][0][0] == 'taskkill', spawns.runs
+        assert expected in record, (record, expected)
+        # A `taskkill` that could not be launched leaves the tree's fate
+        # unknown rather than known-still-running, and the two say so.
+        assert ('may still be running' in record) is ran, record
+
+
+def test_a_suite_that_overruns_is_stopped_then_reaped_and_both_are_named(tmp):
+    """The bound expired: the tree is ended, then the child is collected."""
+    child = Child(wait_errors=[
+        subprocess.TimeoutExpired('suite', TINY_BOUND_S)])
+    spawns = Spawns(child=child)
+    clock = Clock()
+    signals = Signals()
+    argv = [sys.executable, 'suite.py']
+    with swapped(SUITE_BOUND, sys=Platform('linux'), subprocess=spawns,
+                 os=signals, time=clock):
+        returncode, cleanup = SUITE_BOUND.launch_suite(
+            argv, cwd=tmp, output_path=Path(tmp) / 'suite.out',
+            timeout=TINY_BOUND_S)
+    assert spawns.spawns[0][0] == argv, spawns.spawns
+    assert spawns.spawns[0][1]['start_new_session'] is True, spawns.spawns
+    assert [sig for _group, sig in signals.sent] == [
+        signal.SIGTERM, signal.SIGKILL], signals.sent
+    assert clock.slept >= SUITE_BOUND.CLEANUP_TIMEOUT_S, clock.slept
+    assert child.waits == [TINY_BOUND_S, SUITE_BOUND.CLEANUP_TIMEOUT_S], (
+        child.waits)
+    assert 'ignored the request' in cleanup, cleanup
+    assert cleanup.endswith('; process reaped'), cleanup
+    assert returncode == child.returncode, (returncode, child.returncode)
+
+
+def test_a_reap_that_did_not_happen_is_named_by_why(tmp):
+    """The bounded reap is bounded, and each of its refusals is recorded."""
+    for second, expected in (
+            (subprocess.TimeoutExpired('suite', 10),
+             '; bounded reap timed out'),
+            (OSError('the child could not be collected'),
+             '; bounded reap failed: the child could not be collected')):
+        child = Child(wait_errors=[
+            subprocess.TimeoutExpired('suite', TINY_BOUND_S), second])
+        with swapped(SUITE_BOUND, sys=Platform('linux'),
+                     subprocess=Spawns(child=child), os=Signals(),
+                     time=Clock()):
+            returncode, cleanup = SUITE_BOUND.launch_suite(
+                [sys.executable, 'suite.py'], cwd=tmp,
+                output_path=Path(tmp) / 'suite.out', timeout=TINY_BOUND_S)
+        assert child.waits == [TINY_BOUND_S, SUITE_BOUND.CLEANUP_TIMEOUT_S]
+        assert cleanup.endswith(expected), cleanup
+        assert '; process reaped' not in cleanup, cleanup
+        assert returncode is None, returncode
+
+
+def test_an_interrupt_around_the_launch_still_ends_and_reaps_the_child(tmp):
+    """The spawn is inside the guard, so the teardown has to run anyway."""
+    child = Child(running=True, stops_after=1, wait_errors=[
+        KeyboardInterrupt, OSError('the child could not be collected')])
+    spawns = Spawns(child=child)
+    clock = Clock()
+    signals = Signals()
+    interrupted = None
+    with swapped(SUITE_BOUND, sys=Platform('linux'), subprocess=spawns,
+                 os=signals, time=clock):
+        try:
+            SUITE_BOUND.launch_suite(
+                [sys.executable, 'suite.py'], cwd=tmp,
+                output_path=Path(tmp) / 'suite.out', timeout=TINY_BOUND_S)
+        except KeyboardInterrupt:
+            interrupted = 're-raised'
+    assert interrupted == 're-raised', 'the interrupt was swallowed'
+    assert signals.sent == [(GROUP, signal.SIGTERM),
+                            (GROUP, signal.SIGKILL)], signals.sent
+    assert child.waits == [TINY_BOUND_S, SUITE_BOUND.CLEANUP_TIMEOUT_S], (
+        child.waits)
 
 
 if __name__ == '__main__':
