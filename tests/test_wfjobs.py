@@ -447,8 +447,12 @@ def test_a_bare_empty_needs_is_refused_as_not_a_list_of_names(tmp):
     assert 'needs is not a list of job names' in message, message
 
 
-def _needs_of(spelling):
-    """`_job_needs` on the shipped suites job with one `needs:` spelling."""
+def _planted_needs(spelling):
+    """`_job_needs` on the shipped suites job with one `needs:` spelling.
+
+    Named for the planting, and not `_needs_of`: test_aggregate_needs.py
+    keeps a different helper under that name, over its own decoder.
+    """
     return _job_needs(_replaced(BLOCK_NEEDS, spelling), 'suites')
 
 
@@ -465,7 +469,6 @@ def _refuses_needs(spelling):
         raise AssertionError(
             f'{spelling!r} accepted: {accepted}') from accepted
     assert 'not a list of job names' in message, spelling
-    return message
 
 
 def test_one_needs_dependency_reads_the_same_in_all_three_shapes(tmp):
@@ -478,7 +481,7 @@ def test_one_needs_dependency_reads_the_same_in_all_three_shapes(tmp):
     for spelling in ('    needs: changes\n',
                      '    needs:\n      - changes\n',
                      '    needs: [changes]\n'):
-        assert _needs_of(spelling) == ['changes'], spelling
+        assert _planted_needs(spelling) == ['changes'], spelling
 
 
 def test_a_needs_flow_sequence_names_the_same_jobs_in_order(tmp):
@@ -492,7 +495,7 @@ def test_a_needs_flow_sequence_names_the_same_jobs_in_order(tmp):
     flow = ('    needs: [changes, pycodestyle, pylint, pyright,'
             ' eslint, actionlint]\n')
     assert _job_needs(_tests_yml(), 'suites') == expected, 'shipped block'
-    assert _needs_of(flow) == expected, flow
+    assert _planted_needs(flow) == expected, flow
 
 
 def test_a_needs_mapping_is_refused_as_not_a_list_of_names(tmp):
