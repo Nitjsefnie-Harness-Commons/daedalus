@@ -43,6 +43,10 @@ class Launches:
     path from. A stem it does not name writes `output` and passes. `error`
     raises out of the launch instead, which is the one failure the runner
     reports as a suite it could not even start.
+
+    The record names the directory `launched_from` rather than repeating the
+    launcher's own `cwd` parameter: this call DOCUMENTS what a launch was
+    handed, and nothing here starts a process.
     """
 
     def __init__(self, scripts=None, output=MEASURED):
@@ -53,7 +57,7 @@ class Launches:
     def __call__(self, argv, *, cwd, output_path, timeout):
         target = Path(output_path)
         self.calls.append(SimpleNamespace(
-            suite=target.stem, argv=list(argv), cwd=cwd,
+            suite=target.stem, argv=list(argv), launched_from=cwd,
             timeout=timeout, platform=sys.platform))
         script = self.scripts.get(target.stem, {})
         if 'error' in script:

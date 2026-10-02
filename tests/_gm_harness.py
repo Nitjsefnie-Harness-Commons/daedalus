@@ -410,15 +410,13 @@ const windowObject = {
   },
 };
 
-function makeStorage() {
-  return {
-    get(keys, callback) { callback({}); },
-    set(values, callback) { callback(); },
-    remove(keys, callback) { callback(); },
-  };
-}
-
-const background = buildBackground(utilPath, gmPath, makeStorage);
+// The store itself works, so a third `makeStorage` would be a copy of a
+// double this harness is not the subject of: the dead worker is.
+const background = buildBackground(utilPath, gmPath, () => ({
+  get(keys, callback) { callback({}); },
+  set(values, callback) { callback(); },
+  remove(keys, callback) { callback(); },
+}));
 const chrome = frameChrome(background.chrome.storage.local, background,
   'https://storage-test.example.com', deadWorker);
 

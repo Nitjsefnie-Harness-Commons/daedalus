@@ -273,11 +273,21 @@ def kill_process_tree(pid, cleanup_timeout):
         return f'process-group kill failed: {error}'
 
 
+def taskkill_argv(pid):
+    """The exact argv a Windows tree kill sends.
+
+    The tree's one spelling of it, and a function rather than a constant so a
+    control that asserts what a launcher sent names the same builder instead of
+    writing a second copy of these four flags beside the assertion.
+    """
+    return ['taskkill', '/F', '/T', '/PID', str(pid)]
+
+
 def _taskkill(pid, cleanup_timeout):
     """Kill the tree the way Windows can: by pid, with the tree flag."""
     try:
         result = subprocess.run(
-            ['taskkill', '/F', '/T', '/PID', str(pid)],
+            taskkill_argv(pid),
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, check=False, timeout=cleanup_timeout)
     except subprocess.TimeoutExpired:
