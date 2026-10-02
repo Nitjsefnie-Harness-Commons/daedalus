@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
@@ -405,6 +406,287 @@ def test_a_perf_run_that_printed_no_count_says_so(tmp):
         value, why = counters._syscalls('mcp-exec', ROOT, tmp)
     assert value is None, value
     assert 'no summary to read a total from' in why['stderr'], why
+
+
+# ─── the probe, and the children every counter launches ──────────────────
+
+
+def _toolbox(**present):
+    """`shutil` as the probe finds it: the named tools, and nothing else."""
+    return SimpleNamespace(which=present.get)
+
+
+def _profile(directory, name, slot, thread, ir):
+    """The out-file valgrind leaves for one thread, in the shape the
+    reader that sums it expects."""
+    path = Path(directory) / f'callgrind.{name}.{slot}'
+    path.write_text(
+        'version: 1\ncreator: callgrind-3.24.0\npid: 4242\n'
+        f'cmd: python3 tests/_journeys.py --journey {name}\npart: 1\n'
+        f'events: Ir\nthread: {thread}\n1 {ir}\n\nsummary: {ir}\n',
+        encoding='utf-8')
+    return path
+
+
+def test_a_child_that_cannot_start_is_an_answer_not_an_exception(tmp):
+    """A launch that never happened is data, not an exception: a `perf`
+    missing from a runner's PATH is a state the counters report."""
+    del tmp
+    counters = _journey_contract.counters()
+    code, out, err = counters._run(
+        [sys.executable, '-c', 'import sys; sys.stderr.write("e")'])
+    assert (code, out, err) == (0, '', 'e'), (code, out, err)
+    code, _out, _err = counters._run(
+        [sys.executable, '-c', 'raise SystemExit(3)'])
+    assert code == 3, ('the returncode every counter refuses on must be '
+                       "the child's own, not a normalised zero")
+    absent = str(ROOT / 'tests' / 'no-counter-binary-here')
+    code, out, err = counters._run([absent])
+    assert code is None, code
+    assert out == '', out
+    assert os.path.basename(absent) in err, (
+        'a launch that never happened must name the program that did not '
+        f'launch: {err}')
+
+
+def test_the_probe_says_what_each_tool_is_and_which_counter_gates(tmp):
+    """Every tool the probe finds is measured, never assumed, and each is
+    asked with the arguments that decide what it can do."""
+    del tmp
+    counters = _journey_contract.counters()
+    asked = []
+
+    def answering(argv):
+        asked.append(list(argv))
+        if argv[1] == 'stat':
+            return 0, '', '7,,instructions:u,4242,100.00,\n'
+        if argv[1] == '--version':
+            return 0, 'valgrind-3.24.0\n', ''
+        return 0, '', ''
+
+    with planting(counters,
+                  shutil=_toolbox(perf='/usr/bin/perf',
+                                  valgrind='/usr/bin/valgrind',
+                                  strace='/usr/bin/strace'),
+                  _run=answering):
+        found = counters.facts()
+    assert found['perf_path'] == '/usr/bin/perf', found
+    assert found['perf_stat'] == {
+        'event': 'instructions:u', 'returncode': 0, 'counts': True,
+        'stderr': '7,,instructions:u,4242,100.00,'}, found['perf_stat']
+    assert found['valgrind_path'] == '/usr/bin/valgrind', found
+    assert found['valgrind_version'] == 'valgrind-3.24.0', found
+    assert found['strace_path'] == '/usr/bin/strace', found
+    assert found['strace_usable'] is True, found
+    assert found['python'] == sys.version, found
+    assert found['selected'] == 'perf-instructions', found
+    assert [argv[1] for argv in asked] == ['stat', '--version', '-c'], asked
+
+
+def test_a_probe_that_finds_no_tool_gates_on_nothing_and_says_so(tmp):
+    """Each absent tool is reported absent in its own field rather than
+    defaulted to something that measures, and a runner with none of the
+    three has no gate candidate — a state the job still passes in."""
+    del tmp
+    counters = _journey_contract.counters()
+    asked = []
+
+    def launched(argv):
+        asked.append(argv)
+
+    with planting(counters, shutil=_toolbox(), _run=launched):
+        found = counters.facts()
+    assert asked == [], 'a tool the probe never found was launched anyway'
+    assert found['perf_path'] is None, found
+    assert found['perf_stat'] is None, found
+    assert found['valgrind_path'] is None, found
+    assert found['valgrind_version'] is None, found
+    assert found['strace_path'] is None, found
+    assert found['strace_usable'] is False, found
+    assert found['selected'] is None, found
+    assert isinstance(found['perf_event_paranoid'], (int, type(None))), found
+
+
+def test_every_probe_answer_is_read_from_what_the_tool_printed(tmp):
+    """perf exits 0 whether or not it counted, so its own stderr is what
+    is read; a silent valgrind and a failed strace are each reported as
+    what the tool did, not as what the probe hoped for."""
+    del tmp
+    counters = _journey_contract.counters()
+
+    def answering(argv):
+        if argv[1] == '-c':
+            return 1, '', 'strace: -c failed\n'
+        return 0, '\n', 'not permitted\n'
+
+    with planting(counters,
+                  shutil=_toolbox(perf='/usr/bin/perf',
+                                  valgrind='/usr/bin/valgrind',
+                                  strace='/usr/bin/strace'),
+                  _run=answering):
+        found = counters.facts()
+    assert found['perf_stat']['returncode'] == 0, found['perf_stat']
+    assert found['perf_stat']['counts'] is False, (
+        'perf reported no count and the probe still counted with it')
+    assert 'not permitted' in found['perf_stat']['stderr'], found['perf_stat']
+    assert found['valgrind_version'] is None, (
+        'a valgrind that printed no version is no version, not an empty one')
+    assert found['strace_usable'] is False, found
+    assert found['selected'] == 'valgrind-callgrind', found
+
+
+def test_the_shape_is_a_plain_run_of_each_journey(tmp):
+    """The shape is settled in the cheapest child there is, so every
+    journey is run plainly and the record is read from wherever in the
+    stream it landed. A journey that printed none is refused by name: a
+    shape nobody can read is not a count of zero."""
+    del tmp
+    counters = _journey_contract.counters()
+    names = journeys().NAMES
+    shas = {name: name[::-1] * 4 for name in names}
+    asked = []
+
+    def answering(argv):
+        asked.append(list(argv))
+        name = argv[argv.index('--journey') + 1]
+        return 0, (f'the bridge said something\n{counters.MARKER}'
+                   f'{{"sha256": "{shas[name]}"}}\n'), ''
+
+    with planting(counters, _run=answering):
+        seen, failure = counters.shapes(names, ROOT, 2)
+    assert failure is None, failure
+    assert seen == {name: [shas[name], shas[name]] for name in names}, seen
+    assert len(asked) == 2 * len(names), asked
+    assert all(Path(argv[1]).name == '_journeys.py' for argv in asked), asked
+    assert all(argv[-1] == str(ROOT) for argv in asked), asked
+    loud = 'the bridge refused, and said so at length: ' + 'x' * 500
+    with planting(counters, _run=lambda argv: (1, '', loud)):
+        seen, failure = counters.shapes(names, ROOT, 1)
+    assert seen is None, seen
+    assert failure == (f'the {names[0]} journey printed no record '
+                       f'(returncode 1): {loud[-400:]}'), (
+        'a refusal must name the journey and carry the tail of what it '
+        f'said: {failure}')
+
+
+def test_a_callgrind_round_counts_the_last_one_not_the_sum_of_them(tmp):
+    """Every round writes into the same workdir under the same prefix, so
+    a round that did not clear the previous round's files would report a
+    count that grows with the round number."""
+    counters = _journey_contract.counters()
+    _profile(tmp, 'mcp-exec', 9, 1, 5_000_000)
+    asked = []
+
+    def answering(argv):
+        asked.append(list(argv))
+        _profile(tmp, 'mcp-exec', 0, 1, 900)
+        _profile(tmp, 'mcp-exec', 1, 2, 2_000_000_000)
+        return 0, '', ''
+
+    with planting(counters, shutil=_toolbox(valgrind='/usr/bin/valgrind'),
+                  _run=answering):
+        kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
+    assert why is None, why
+    assert kept == 900, (
+        f'the previous round was summed into this one: {kept}')
+    assert asked[0][:2] == ['/usr/bin/valgrind', '--tool=callgrind'], asked
+    out_file = next(part for part in asked[0] if '--callgrind-out-file='
+                    in part)
+    assert out_file.endswith('/callgrind.mcp-exec.%p'), out_file
+
+
+def test_a_callgrind_child_that_failed_is_reported_in_its_own_words(tmp):
+    """A counter that will not run reports the returncode and what the
+    tool said, because a refusal naming nothing is one a maintainer
+    cannot act on."""
+    counters = _journey_contract.counters()
+    loud = 'valgrind could not start, and said so at length: ' + 'y' * 500
+    with planting(counters, shutil=_toolbox(valgrind='/usr/bin/valgrind'),
+                  _run=lambda argv: (255, '', loud)):
+        kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
+    assert kept is None, kept
+    assert why == {'returncode': 255, 'stderr': loud[-400:]}, why
+
+
+def test_a_profile_the_gate_cannot_read_comes_back_as_a_sentence(tmp):
+    """The two refusals are told apart by their shape: a child that would
+    not run carries a returncode, and a profile this gate cannot read
+    carries a sentence, because there is no returncode to report."""
+    counters = _journey_contract.counters()
+    _profile(tmp, 'mcp-exec', 0, 1, 900)
+    with planting(counters, shutil=_toolbox(valgrind='/usr/bin/valgrind'),
+                  _run=lambda argv: (0, '', '')):
+        kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
+    assert kept is None, kept
+    assert isinstance(why, str), why
+    assert "'front-end-import'" in why, (
+        'the sentence must name the role the profile has no thread for: '
+        f'{why}')
+
+
+def test_a_perf_run_that_failed_and_one_that_counted_are_told_apart(tmp):
+    """`-x,` is what makes perf's output machine-readable, so the run
+    that counted is read out of that line rather than out of a status."""
+    counters = _journey_contract.counters()
+    asked = []
+
+    def failed(argv):
+        asked.append(list(argv))
+        return 255, '', 'perf: no permission'
+
+    def counted(argv):
+        asked.append(list(argv))
+        return 0, '', '4242,,instructions:u,100.00,\n'
+
+    with planting(counters, shutil=_toolbox(perf='/usr/bin/perf'),
+                  _run=failed):
+        value, why = counters._perf('mcp-exec', ROOT, Path(tmp))
+    assert value is None, value
+    assert why == {'returncode': 255, 'stderr': 'perf: no permission'}, why
+    assert asked[0][:6] == ['/usr/bin/perf', 'stat', '-e', 'instructions:u',
+                            '-x,', '--'], asked
+    with planting(counters, shutil=_toolbox(perf='/usr/bin/perf'),
+                  _run=counted):
+        value, why = counters._perf('mcp-exec', ROOT, Path(tmp))
+    assert (value, why) == (4242, None), (value, why)
+
+
+def test_a_strace_run_that_wrote_no_readable_summary_is_refused(tmp):
+    """Three refusals, each naming what was wrong: the tool would not
+    run, the summary cannot be read, and no total in it. The middle one is
+    a directory, which is the one a root run can reach too."""
+    counters = _journey_contract.counters()
+    asked = []
+
+    def failed(argv):
+        asked.append(list(argv))
+        return 1, '', 'strace: cannot start'
+
+    with planting(counters, shutil=_toolbox(strace='/usr/bin/strace'),
+                  _run=failed):
+        value, why = counters._syscalls('mcp-exec', ROOT, tmp)
+    assert value is None, value
+    assert why == {'returncode': 1, 'stderr': 'strace: cannot start'}, why
+    assert '-o' in asked[0] and '--' in asked[0], asked[0]
+    summary = Path(tmp) / 'strace.mcp-exec.txt'
+    summary.mkdir()
+    with planting(counters, shutil=_toolbox(strace='/usr/bin/strace'),
+                  _run=lambda argv: (0, '', '')):
+        value, why = counters._syscalls('mcp-exec', ROOT, tmp)
+    assert value is None, value
+    assert why['returncode'] == 0, why
+    assert 'strace.mcp-exec.txt' in why['stderr'], (
+        f'a summary that cannot be read must name the file: {why}')
+    summary.rmdir()
+    summary.write_text(
+        ' 0.00    0.000000           0        12       0 futex\n'
+        ' 0.00    0.000123          61        2       1 poll\n'
+        '100.00    0.000123          54        14      1 total\n',
+        encoding='utf-8')
+    with planting(counters, shutil=_toolbox(strace='/usr/bin/strace'),
+                  _run=lambda argv: (0, '', '')):
+        value, why = counters._syscalls('mcp-exec', ROOT, tmp)
+    assert (value, why) == (14, None), (value, why)
 
 
 def main():
