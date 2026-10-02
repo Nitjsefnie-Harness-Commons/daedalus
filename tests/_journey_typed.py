@@ -89,6 +89,18 @@ def screenshot(base, docroot):
     mints `<ms>_<counter>.<fmt>` from a clock and a per-process counter, so
     the `path` the result would carry — and the read-back keyed on it —
     would be a different string on every run.
+
+    ITS RECORDED BUDGET IS AN ORDER OF MAGNITUDE ABOVE `command-round-trip`'s,
+    and that is a constant rather than a defect. This journey excludes the
+    front end's import and nothing else, so the bridge's uvicorn serve loop
+    is counted alongside its own work: measured here at 87 million
+    instructions against 6.6 million on the request thread doing the
+    capture, the loop is the larger share of the total. Excluding the serve
+    band instead is what the budget must not do — its own thread measured
+    6,603,084, only 1.51x below `SERVE_FROM`, so a 51% growth would have
+    reclassified that thread as the serve loop and dropped it, and the
+    recorded count would have fallen as the journey got slower (issue 1461,
+    bridge side).
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -432,6 +444,14 @@ def segment_relay(base, docroot):
     is what authorizes a write. The `sig` is `secrets.token_urlsafe(32)` and
     is not deterministic, so it is excluded from the rendering and only `ok`
     is recorded.
+
+    ITS RECORDED BUDGET IS AN ORDER OF MAGNITUDE ABOVE `command-round-trip`'s,
+    and for the same reason `screenshot`'s is: only the front end's import
+    is excluded, so the bridge's uvicorn serve loop is counted as the
+    constant it is, beside a request thread too small here to separate from
+    it. The alternative — excluding the serve band, as `command-round-trip`
+    does — would drop this journey's own work on any growth that lifted it
+    to `SERVE_FROM`, which is the same hazard (issue 1461, bridge side).
     """
     status, minted = _util.post_json(base + '/segment-job', {
         'token': SEG_TOKEN, 'job': SEG_JOB,
