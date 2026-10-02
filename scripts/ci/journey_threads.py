@@ -38,13 +38,15 @@ The same overlap arrives from the BRIDGE side, and there the remedy is the
 mirror image. A request thread answering a multi-megabyte result runs to
 billions of instructions, which is the import band, where the bridge's own
 one-off MCP bootstrap import also sits. So for the large journeys the band
-the exclusion would drop is the band holding the journey's own work, and
-excluding it drops the work the journey exists to measure — the bridge-side
-face of issue 1461. `EXCLUDED` therefore records, per journey, the constant
-each one keeps rather than the work it would lose, and `classify` refuses a
-profile only where the ambiguity actually costs something: two threads in a
-band the journey EXCLUDES. Two threads in a band it does not exclude is two
-threads of counted work.
+an exclusion would COVER is the band holding the journey's own work — and
+covering it does not drop that work quietly: the bridge's constant thread
+in the band is there beside it, so `classify` finds two threads in an
+excluded band and refuses, the count comes back unavailable and the gate
+fails. That is the bridge-side face of issue 1461. `EXCLUDED` therefore
+records, per journey, the constant each one keeps rather than the work it
+would cover, and `classify` refuses a profile only where the ambiguity
+actually costs something: two threads in a band the journey EXCLUDES. Two
+threads in a band it does not exclude is two threads of counted work.
 
 Anything this cannot read is a REFUSAL naming the thread and its count,
 never a silent inclusion. A mis-sorted profile that quietly sums the thread
@@ -79,7 +81,12 @@ BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
 
 # What each journey stops counting, per journey, and why. The rule every
 # entry obeys is the module docstring's: an exclusion list may never cover
-# work the journey itself caused.
+# work the journey itself caused. NO control enforces it — settling it takes
+# a measurement, not a structural check — and the measurement discharging it
+# is the per-journey thread table at
+# `.superpowers/sdd/plan/thread-table.md`, which names for each journey its
+# own request thread, the role that thread falls in, its Ir and whether it
+# is kept.
 #
 # The import applies to every journey, not only the ones that call a tool:
 # the bridge each spawns starts its own MCP listener whatever the journey
@@ -92,14 +99,21 @@ BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
 # Three of the four journeys this branch adds exclude the import ALONE, and
 # that is what keeps the rule above true for them: no band their own request
 # thread can reach is one they exclude, so the work counts in whatever band
-# it lands and growth moves the count instead of dropping a thread into a
-# hole. It is a narrow rule, not a safe default. `screenshot` measured
-# 6,603,084 on its own request thread, 1.51x below `SERVE_FROM`, and
-# excluding the serve band would have lost that thread outright on a 51%
-# growth — the recorded count falling while the journey got slower. So the
-# test is whether a journey's own work can CROSS a floor into a band it
-# excludes, never what it measures today: a thread already past every floor
-# above it cannot cross one.
+# it lands and growth moves the count instead of leaving a thread the gate
+# cannot place. It is a narrow rule, not a safe default, and `screenshot`
+# shows what the serve band instead would rest on. Its own request thread
+# measured 6,603,084 instructions — on a developer box running about 12.7%
+# hot against the runner that records the budgets and on a different
+# toolchain (valgrind 3.24.0 against 3.22.0, CPython 3.13.14 against
+# 3.13.15), so that figure is this machine's and not the runner's. On
+# growth it would cross into the band the bridge's constant serve loop
+# already occupies, and `classify` would find two threads in an excluded
+# band: a REFUSAL, `kept=None` and the gate exiting 1. Loud, but resting on
+# the companion happening to be there — thread layout, not a property of the
+# journey. The import alone makes the count robust instead and removes the
+# dependence outright. So the test is whether a journey's own work can CROSS
+# a floor into a band it excludes, never what it measures today: a thread
+# already past every floor above it cannot cross one.
 #
 # `net-capture` is the fourth and is past them all. Its own request thread
 # runs to 2.12 billion instructions, which IS the import band, where the

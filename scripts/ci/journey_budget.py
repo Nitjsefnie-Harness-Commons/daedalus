@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ratchet the work three real user journeys cost, in an instruction count.
+"""Ratchet the work seven real user journeys cost, in an instruction count.
 
 The mutable policy state is `.github/journey-budget.json`: which counter the
 budget is denominated in, how far over it a journey may run, and one
