@@ -26,14 +26,17 @@ def _out(result):
     return result.stdout.decode('utf-8', 'replace')
 
 
-def _run_plant(*args):
+def _run_plant(*args, environment=None):
     # The helper's own bytes are the subject here, so the child keeps the
-    # collector and runs where the collector's `source` can see it.
+    # collector and runs where the collector's `source` can see it. A
+    # caller's `environment` replaces the child's variables wholesale - a
+    # PATH arrangement is the one that exists - and the collector's names
+    # have to survive into it either way.
     root = _util.ROOT
     return subprocess.run([sys.executable, str(PLANT), *args],
                           capture_output=True, text=True, timeout=60,
-                          cwd=root, env=_util.child_coverage('keep',
-                                                             cwd=root))
+                          cwd=root, env=_util.child_coverage(
+                              'keep', environment=environment, cwd=root))
 
 
 def _committed_repo(tmp, name='plantrepo'):
