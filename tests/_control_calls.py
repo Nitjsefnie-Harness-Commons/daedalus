@@ -9,11 +9,9 @@ WHAT A ROW COSTS. A row is answered before the body is looked at, so a
 `_PURE_IMPORTS` row naming a function in a `tests/_*.py` module exempts
 that function's body from ever being read — and every such row names
 one, which is exactly what the shared-helper path stopped trusting on
-sight. The exemption is sound only while no such body writes.
-`tests/test_shared_helper_calls.py`'s
-`test_a_pure_import_row_never_names_a_writer` drives every row's body
-through the guard and is what holds that up; the fact it establishes was
-previously only in a reviewer's transcript.
+sight. The exemption is sound only while no such body writes, and no
+control drives every row's body through the guard to keep it so: a row
+is a trust, not a proof.
 
 One class sits outside the tables: a callee imported out of a
 `tests/_*.py` module under the root the caller passed in.

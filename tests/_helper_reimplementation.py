@@ -1,11 +1,10 @@
 """The re-implementation recogniser, in both languages, over a source map.
 
-The rule it reads is stated in `test_helper_reimplementation.py`, beside the
-live-tree and allowance controls. This is the machinery both that suite and
-`test_helper_reimplementation_js.py` run, so neither imports the other: a
-suite that reaches a sibling suite's body re-executes the sibling's whole
-module inside itself, which is what `test_suite_import_boundaries.py` is
-about.
+The rule it reads is stated in `tests/test_reserved_test_names.py`, over
+the union `tests/_reserved_names.py` joins. This is the machinery both run,
+so neither imports the other: `run_tests.py` gives every suite its own
+process, and a suite that reaches a sibling suite's body re-executes that
+whole module inside itself.
 """
 import ast
 import subprocess

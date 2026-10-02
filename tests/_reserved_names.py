@@ -1,9 +1,9 @@
 """The union of the owner sets the two name-bound controls each read alone.
 
-`test_helper_reimplementation.py` owns every name a module under
-`tests/_*.py` binds at module-execution scope as a `def`, an `async def`
-or a `class`, plus every `function` it declares inside a string constant
-at or above `JS_FLOOR`. `test_wf_suite_boundaries.py` owns the
+The re-implementation limb is every name a module under `tests/_*.py`
+binds at module-execution scope as a `def`, an `async def` or a `class`,
+plus every `function` it declares inside a string constant at or above
+`JS_FLOOR`. `tests/test_wf_suite_boundaries.py` owns the
 module-level bindings of `tests/_wffixtures.py`, five names it hardcodes
 because the rule is stated over them rather than derived.
 
@@ -20,9 +20,8 @@ declaration a helper module makes, including one- and two-line ones, and
 `js_reimplementations` owns a name only at or above `JS_FLOOR`. The set
 stated here is the set the rule enforces, so the floor decides both
 sides: a one-line `function f` in a helper is not a name a module may
-not bind, and how many helper declarations sit below the floor is
-`test_helper_reimplementation_js.py`'s histogram to measure rather than
-a number to repeat here.
+not bind, and how many helper declarations sit below the floor is a
+figure to measure rather than a number to repeat here.
 
 THE FIXTURE LIMB IS A BIND, NOT A DEFINITION. Two of the five
 (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are assignments, so the re-implementation

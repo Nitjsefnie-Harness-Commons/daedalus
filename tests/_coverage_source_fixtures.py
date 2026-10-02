@@ -22,8 +22,6 @@ against, so tabling it would be the checker losing sight of where a
 control writes. It is neither tabled nor local, so
 `tests/_control_writes.py` reads this file and judges that body itself,
 with the kinds each call site hands it.
-`tests/test_shared_helper_calls.py` is the control that fails if that
-stops being what the guard does.
 """
 from pathlib import Path
 

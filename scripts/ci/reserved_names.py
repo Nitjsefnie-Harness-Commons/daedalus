@@ -54,10 +54,8 @@ def _derivation():
     inner limb loop -- each a function call over a module `sys.modules`
     has already memoised. Timed over seven rounds, the two shapes differ
     by less than the run-to-run spread of the validation itself, so this
-    is a tidiness fix and not a speed claim, and no count is given here
-    for the reason `test_helper_reimplementation.py` leaves its
-    population out: a count in prose is a claim somebody has to
-    reproduce.
+    is a tidiness fix and not a speed claim, and no count is given here:
+    a count in prose is a claim somebody has to reproduce.
     """
     global _DERIVATION
     if _DERIVATION is None:

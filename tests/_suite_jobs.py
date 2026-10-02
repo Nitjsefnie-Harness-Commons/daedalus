@@ -2,8 +2,7 @@
 
 Shared, because `run_tests.py` gives every suite its own process: a
 control that imported a sibling suite for this would re-execute that
-suite's whole body and read a private copy, which is the defect
-`tests/test_suite_import_boundaries.py` names. Every control that reads a
+suite's whole body and read a private copy. Every control that reads a
 door set reads it from here, across both files that own one —
 `tests/test_ci_lint_tools.py` and `tests/test_ci_tool_declarations.py` —
 so they cannot disagree about which jobs run suites.

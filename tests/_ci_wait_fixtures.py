@@ -7,7 +7,7 @@ need them: `test_ci_wait.py` and `test_ci_wait_gate.py` both classify runs
 through the verdict contract, and `test_ci_gate.py` asks the gate predicate
 what it answers. A
 helper declared in one and imported from the other is a suite importing a
-sibling suite, which `tests/test_suite_import_boundaries.py` refuses. A
+sibling suite, and `run_tests.py` gives each suite its own process. A
 `tests/_*.py` module is where a shared helper belongs; this is that module
 for these three.
 

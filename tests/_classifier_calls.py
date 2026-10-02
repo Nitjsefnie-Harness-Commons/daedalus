@@ -10,7 +10,7 @@ They are here so there is one copy of each to fix.
 already held by `tests/test_aggregate_gate.py` over a different body — a
 `gh` read answering the own-run query — so a shared helper that adopted it
 would have made that suite an offender of it
-(`test_helper_reimplementation.py`).
+(`tests/test_reserved_test_names.py`).
 
 `_event` is a byte-identical move under its own name: it is bound nowhere
 else in `tests/`.
