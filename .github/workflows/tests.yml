@@ -587,7 +587,7 @@ jobs:
           # Nothing here pushes, and a token left in .git/config
           # is reusable by every later step in the job.
           persist-credentials: false
-          # The branch-boundary controls in test_helper_reimplementation.py
+          # The branch-boundary controls in tests/test_reserved_test_names.py
           # read the MERGE BASE's own definitions, and a depth-1 checkout
           # resolves neither origin/main nor a local main, so both boundary
           # tests refuse there and the property every allowance row rests
@@ -1261,7 +1261,7 @@ jobs:
       # nothing. A higher value exists to derive a tolerance from a spread,
       # once, and is not what every run should pay for — three is how each
       # baseline's tolerance has been measured, on the per-journey number.
-      JOURNEY_ROUNDS: "1"
+      JOURNEY_ROUNDS: "3"
 
     steps:
       # actions/checkout v7.0.1
