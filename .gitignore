@@ -374,7 +374,6 @@
 !/tests/_mcp_tool_commands.py
 !/tests/_mcp_tools_helpers.py
 !/tests/_mcp_transport_probes.py
-!/tests/_mod_text.py
 !/tests/_mutation_sweep.py
 !/tests/_netcapture_harness.py
 !/tests/_node_harness_fixtures.py
@@ -423,7 +422,6 @@
 !/tests/_token_policy_cases.py
 !/tests/_unconsolidated_js_names.py
 !/tests/_unconsolidated_names.py
-!/tests/_unjudged_scan.py
 !/tests/_upload_fixture.py
 !/tests/_util.py
 !/tests/_version_contract.py
@@ -592,9 +590,6 @@
 !/tests/test_gm_transfers.py
 !/tests/test_harness_launch_bounds.py
 !/tests/test_helper_assertion_pins.py
-!/tests/test_helper_reimplementation.py
-!/tests/test_helper_reimplementation_js.py
-!/tests/test_helper_shadow_boundaries.py
 !/tests/test_hotfix_commands.py
 !/tests/test_hotfix_document_binding.py
 !/tests/test_hotfix_scope.py
@@ -678,8 +673,6 @@
 !/tests/test_segment_storage.py
 !/tests/test_segment_store.py
 !/tests/test_segment_write_retry.py
-!/tests/test_shared_helper_calls.py
-!/tests/test_source_anchors.py
 !/tests/test_speed_gate_jobs.py
 !/tests/test_speedharness.py
 !/tests/test_starvation_bounds.py
@@ -694,7 +687,6 @@
 !/tests/test_stream_service_legacy_ids.py
 !/tests/test_suite_bound.py
 !/tests/test_suite_bound_survivor.py
-!/tests/test_suite_import_boundaries.py
 !/tests/test_suite_runner.py
 !/tests/test_sweep_launch_scan.py
 !/tests/test_tab_registry.py
