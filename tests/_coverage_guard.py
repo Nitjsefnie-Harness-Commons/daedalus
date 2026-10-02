@@ -80,9 +80,8 @@ _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
 _CHDIR = frozenset({'chdir', 'fchdir'})
-# Keep launches as module::function, so an edit above a site does not
-# churn the list; each tree sits under the `*/tree` anchor that
-# [tool.coverage.paths] maps back onto the repository (pyproject.toml).
+# Keep launches as module::function, so an edit above a site does not churn
+# the list; each is a tree [tool.coverage.paths] maps back (pyproject.toml).
 _KEEP_ALLOWLIST = frozenset({
     # A synthetic COVERAGE_PROCESS_START is the variable under test.
     'tests/_coverage_suite_fixture.py::coverage_tree',
@@ -93,18 +92,20 @@ _KEEP_ALLOWLIST = frozenset({
     'tests/test_suite_runner.py::_runner_tree',
     # The runner-bound suite runs the copied runner so its lines are recorded.
     'tests/test_run_tests.py::_run_sandbox',
-    # The copied checker runs from the mapped copy so its lines count. The
-    # launcher moved into the shared version-contract helpers; the two tests
-    # below kept their own inline launches and stay in the suite.
+    # The copied checker runs from the mapped copy so its lines count; the
+    # launcher moved into the shared version-contract helpers, and the two
+    # tests below kept their own inline launches.
     'tests/_version_contract.py::_run_checker',
     'tests/test_version_contract.py::test_check_versions_detects_drift',
     'tests/test_version_contract.py::'
     'test_check_versions_sites_all_present_in_copy',
-    # ratchet_push.py IS the subject of these launch probes: its behaviour is
-    # pinned by running it against a real repository, so scrubbing the
-    # collector would report zero coverage of the one file the controls
-    # exist to measure.
+    # ratchet_push.py and plant.py ARE the subjects of these launches: each
+    # is run against a real repository, so scrubbing the collector would
+    # report zero coverage of the one file the controls exist to measure.
     'tests/test_ratchet_push.py::_drive_push',
+    'tests/_plant_fixture.py::_run_plant',
+    'tests/test_plant_restore.py::_states_while_restoring',
+    'tests/test_plant_restore.py::_link_sees_after_restore',
 })
 
 

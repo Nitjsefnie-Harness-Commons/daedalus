@@ -127,13 +127,15 @@ def child_coverage(mode, environment=None, cwd=None):
     the child's coverage is wanted. The guard in
     tests/test_coverage_environment.py reads the declaration syntactically.
 
-    A 'keep' must also prove at runtime that its tree is mapped: pyproject's
-    [tool.coverage.paths] maps repo = [".", "*/tree"] and nothing else, so
-    the launch's cwd is required and must have a `tree` component. A renamed
-    directory fails here rather than later in `coverage report`. It proves
-    the retention too: an environment the caller already scrubbed keeps
-    nothing, so a collector name this process carries must survive into the
-    child's.
+    A 'keep' must also prove at runtime that its tree is mapped. The
+    collector's `source = ["."]` resolves against the child's own cwd, so
+    the checkout is mapped by being itself and needs no alias at all; a
+    copied tree is mapped only under a `tree` component, which is the
+    anchor pyproject's [tool.coverage.paths] carries. So the launch's cwd
+    is required, and a renamed directory fails here rather than later in
+    `coverage report`. It proves the retention too: an environment the
+    caller already scrubbed keeps nothing, so a collector name this
+    process carries must survive into the child's.
     """
     if environment is None:
         environment = os.environ
@@ -152,10 +154,11 @@ def child_coverage(mode, environment=None, cwd=None):
             raise ValueError(
                 "child_coverage('keep') requires the launch's cwd")
         path = Path(cwd)
-        if '..' in path.parts or 'tree' not in path.resolve().parts:
+        resolved = path.resolve()
+        if ('..' in path.parts or 'tree' not in resolved.parts
+                and resolved != ROOT):
             raise ValueError(
-                "child_coverage('keep') outside a mapped '*/tree' tree: "
-                f'{cwd}')
+                f"child_coverage('keep') outside a mapped tree: {cwd}")
         kept = dict(environment.items())
         dropped = sorted(
             name for name in os.environ
