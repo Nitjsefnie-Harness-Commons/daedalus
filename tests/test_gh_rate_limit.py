@@ -376,6 +376,27 @@ def test_the_body_is_a_carrier_on_a_refusal_status_and_on_nothing_else(
             'body': body})
 
 
+def test_the_statuses_a_body_is_read_on_are_exactly_three(tmp):
+    """The SET and not three members of it. Every status in the negative
+    loop above is one the set does not name, so a status ADDED to it -
+    422, the next one a reader would reach for - is caught by none of
+    those rows: each of them reads the same body on the same call and
+    gets the same answer. `ACCEPTABLE` is pinned this way in
+    `test_ci_wait_published.py`, for the same reason: a widening is a
+    member this file's rows have no name for.
+
+    So the class the report left open BY NATURE - "no finite row set
+    proves every other status" - is true of a behavioural row set and
+    false of this one. `client` is loaded for its side effect: `gh_client`
+    does `from gh_rate_limit import exhausted`, so the set this reads is
+    the object the client itself is holding.
+    """
+    del tmp
+    _client()
+    assert sys.modules['gh_rate_limit'].REFUSAL_STATUSES == frozenset(
+        {200, 403, 429})
+
+
 def test_a_delivered_200_carrying_a_limit_name_is_not_a_pause(tmp):
     """`rateLimit` is the name of a REAL GraphQL extension, so a body that
     merely CONTAINS the two words is a body that will contain them on a
