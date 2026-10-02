@@ -169,6 +169,42 @@ def test_the_module_init_signature_is_the_installed_extensions_init_symbol(
             == classifier.IMPORT)
 
 
+def test_an_extension_that_is_not_installed_is_a_refusal_naming_it(tmp):
+    """The oracle's failure path, driven — a claim until something drives it.
+
+    `front_end_symbol` says an absent extension is a refusal and there is no
+    fallback to a literal. That is the whole guarantee the round exists to
+    make, and a guard branch nothing reaches is a finding: replacing the
+    `raise` with `return 'PyInit_pydantic_core'` leaves the rest of the
+    suite green, because every other control drives the success path.
+
+    Both ways it can fail are driven. An extension that cannot be imported
+    and one that resolves to no file are both answers the oracle has no
+    right to accept, and neither may produce a symbol.
+    """
+    del tmp
+    import importlib.util
+
+    def unimportable(_name):
+        raise ImportError(f'No module named {_name!r}')
+
+    def fileless(_name):
+        return importlib.util.ModuleSpec(_name, loader=None, origin=None)
+
+    for planted, why in ((unimportable, 'cannot be imported'),
+                         (fileless, 'resolves to no file')):
+        with _journey_contract.planting(
+                importlib.util, find_spec=planted):
+            try:
+                found = front_end_symbol()
+            except AssertionError as refusal:
+                assert FRONT_END_EXTENSION in str(refusal), (why, refusal)
+                continue
+        raise AssertionError(
+            f'an extension that {why} produced {found!r} instead of a '
+            f'refusal naming {FRONT_END_EXTENSION}')
+
+
 def test_the_installed_extensions_init_symbol_is_the_one_that_was_measured(
         tmp):
     """The oracle AND the measurement, which are two different claims.
@@ -316,6 +352,29 @@ def test_a_thread_with_no_signature_is_a_request_thread(tmp):
     assert classifier.role_of(9, frozenset()) == classifier.REQUEST
     for name in _journey_contract.journeys().NAMES:
         assert classifier.REQUEST not in classifier.excluded_for(name), name
+
+
+def test_a_refusal_names_a_role_that_has_no_symbol_of_its_own(tmp):
+    """`main` is read from a thread's position and never from a symbol.
+
+    The refusal names the symbol it was looking for, and for two of the four
+    roles there is no symbol: `main` is the main thread wherever it is, and
+    `request` is what no signature claims. A journey whose exclusion named
+    one of them is a table entry nothing else refuses — the artefact's
+    validator accepts any role in `ROLES` — so the sentence that would
+    describe the missing one has to have a case that is not an index into
+    the signature table.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    planted = {**threads.EXCLUDED, 'planted-journey': (threads.MAIN,)}
+    rows = [{'pid': 1, 'thread': 2, 'ir': 3_000_000,
+             'cmd': 'python3 server.py', 'names': frozenset()}]
+    with _journey_contract.planting(threads, EXCLUDED=planted):
+        kept, _excluded, failure = threads.total_for(rows, 'planted-journey')
+    assert kept is None, kept
+    assert threads.MAIN in failure, failure
+    assert 'never from a symbol' in failure, failure
 
 
 def test_a_thread_below_the_floor_is_a_refusal_naming_it(tmp):
