@@ -350,9 +350,6 @@ def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
             'the artefact the tighten refused is one the check accepts')
 
 
-
-
-
 def test_a_tighten_writes_nothing_the_check_refuses_over_a_missing_journey(
         tmp):
     """The same disagreement, one key over: a journey with no count at all.
