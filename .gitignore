@@ -521,7 +521,6 @@
 !/tests/test_command_queue_unit.py
 !/tests/test_config_boot_generation.py
 !/tests/test_control_writes.py
-!/tests/test_coverage_authority_scan.py
 !/tests/test_coverage_bindings.py
 !/tests/test_coverage_combine.py
 !/tests/test_coverage_comment_boundary.py
@@ -529,12 +528,9 @@
 !/tests/test_coverage_comment_workflow.py
 !/tests/test_coverage_config.py
 !/tests/test_coverage_environment.py
-!/tests/test_coverage_memo.py
 !/tests/test_coverage_name_bindings.py
-!/tests/test_coverage_prose.py
 !/tests/test_coverage_root_provenance.py
 !/tests/test_coverage_scope_bindings.py
-!/tests/test_coverage_source_readers.py
 !/tests/test_coverage_suites.py
 !/tests/test_coverage_suites_launch.py
 !/tests/test_coverage_unfollowable_forms.py
@@ -596,7 +592,6 @@
 !/tests/test_gm_segment_job.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
-!/tests/test_harness_launch_bounds.py
 !/tests/test_helper_assertion_pins.py
 !/tests/test_hotfix_commands.py
 !/tests/test_hotfix_document_binding.py
@@ -704,7 +699,6 @@
 !/tests/test_suite_bound.py
 !/tests/test_suite_bound_survivor.py
 !/tests/test_suite_runner.py
-!/tests/test_sweep_launch_scan.py
 !/tests/test_tab_registry.py
 !/tests/test_teardown_retry.py
 !/tests/test_tree_analyser_helpers.py
