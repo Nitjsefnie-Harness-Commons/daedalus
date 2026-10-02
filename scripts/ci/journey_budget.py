@@ -73,6 +73,7 @@ COUNTERS = journey_artifact.COUNTERS
 load = journey_artifact.load
 render = journey_artifact.render
 budget_of = journey_artifact.budget_of
+budget_for = journey_artifact.budget_for
 tolerance_of = journey_artifact.tolerance_of
 exclusion_diff = journey_artifact.exclusion_diff
 map_diff = journey_artifact.map_diff
@@ -288,7 +289,8 @@ def main(argv=None):
             recorded = document['journeys']
             updated = tightened(counts, document, names)
             if updated is None:
-                print('no journey measured below its recorded count')
+                print('no journey measured a drop wider than its own '
+                      'tolerance')
                 return 0
             # Counted against the mapping as it was, before the rebind on the
             # next line: `document['journeys']` IS `updated` from there on,

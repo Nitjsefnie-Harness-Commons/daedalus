@@ -24,6 +24,7 @@ import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 # One name, one owner: the comparisons are bound from the module that
 # defines them so a suite reads them through one import.
 budget_of = journey_artifact.budget_of
+budget_for = journey_artifact.budget_for
 sha_diff = journey_artifact.sha_diff
 map_diff = journey_artifact.map_diff
 exclusion_diff = journey_artifact.exclusion_diff
@@ -122,11 +123,19 @@ def violations(counts, document, names, refused=()):
 def tightened(counts, document, names):
     """Return a lowered journey mapping, or ``None`` when unchanged.
 
-    Only ever downward: a journey that measured cheaper is recorded at what
-    it cost, and one whose journey name is gone is dropped rather than kept
-    as a rule nothing enforces. The caller refuses a measurement with a
-    rise in it, but the property is here rather than only there — this is
-    what a second caller reaches without that guard in front of it.
+    Only ever downward, and only by a drop WIDER than the journey's own
+    tolerance. A drop inside the band is the journey's run-to-run spread on
+    unchanged code, and recording it moves the band down by exactly the
+    spread: the next unchanged run measures the count this one found the
+    old record already holding and is over the budget the tighten left
+    behind (issue 1484). Past the band the new ceiling still sits below the
+    count the previous run measured, so that run passes against it, which
+    is the whole property a tighten has to keep.
+
+    One whose journey name is gone is dropped rather than kept as a rule
+    nothing enforces. The caller refuses a measurement with a rise in it,
+    but the property is here rather than only there — this is what a second
+    caller reaches without that guard in front of it.
     """
     updated = dict(document['journeys'])
     for name, recorded in document['journeys'].items():
@@ -136,7 +145,8 @@ def tightened(counts, document, names):
         measured = counts.get(name)
         if measured is None or recorded is None:
             continue
-        if measured < recorded:
+        if measured < recorded and budget_for(
+                document, name, measured) < recorded:
             updated[name] = measured
     return updated if updated != document['journeys'] else None
 
