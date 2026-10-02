@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Execute CI invariants that GitHub otherwise fails silently.
 
-These tests parse workflow configuration and evaluate job conditions to
-check permissions, dependencies, release gates and action pins.
-"""
-# 699 of the 700-line ceiling in scripts/ci/size_baseline.py; the split
-# seam when it closes is the ten-row actionlint/zizmor cluster below.
+They parse workflow configuration and evaluate job conditions."""
+# 698 of the 700-line ceiling in scripts/ci/size_baseline.py; two lines of
+# room, and the split seam is the ten-row actionlint/zizmor cluster below.
 import fnmatch
 import os
 import re
