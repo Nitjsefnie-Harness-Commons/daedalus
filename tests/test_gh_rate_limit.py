@@ -444,13 +444,26 @@ def test_a_report_naming_no_instant_is_a_pause_with_no_instant(tmp):
     else, so the common case is a pause with no moment in it at all, and
     the waiter's plain minute is the answer. A reader that demanded an
     instant before agreeing it was a refusal would answer the only shape
-    GitHub has been observed to send as an ordinary failure."""
+    GitHub has been observed to send as an ordinary failure.
+
+    The `retryAfter` beside it is a string rather than a count, which is
+    the same reason in a second shape: a body is data, so the reader may
+    not assume a number is there even when the key is. Adding a string to
+    a clock is a `TypeError` out of the middle of a throttled answer, and
+    the whole point of this module is that such an answer is a WAIT.
+    """
     client = _client()
     refusal = _paused(client, tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
         'body': {'data': {'repository': None},
                  'errors': [{'type': 'RATE_LIMIT'}]}})
     assert refusal.resume_at is None, refusal.resume_at
+    counted = _paused(client, tmp, {
+        'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
+        'body': {'data': {'repository': None},
+                 'errors': [{'type': 'RATE_LIMIT',
+                             'extensions': {'retryAfter': '45'}}]}})
+    assert counted.resume_at is None, counted.resume_at
 
 
 def test_every_spelling_of_the_report_is_read_and_a_lookalike_is_not(tmp):
