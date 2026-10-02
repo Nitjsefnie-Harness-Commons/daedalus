@@ -29,12 +29,17 @@ import threading
 import time
 from pathlib import Path
 
+# Its own siblings, and the repository root above them: the command TTL's
+# default is read from `daedalus_bridge.env_config`, and this module is
+# imported by suites that put `tests/` on the path without the root.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 import _bridge  # noqa: E402
 import _fanout  # noqa: E402
 import _journey_typed  # noqa: E402
 import _mcp_load  # noqa: E402
 import _util  # noqa: E402
+from daedalus_bridge.env_config import CMD_TTL_DEFAULT  # noqa: E402
 
 # The journey whose own bridge spawn carries this credential. A bridge refuses
 # a data root a second process holds, and each journey is measured in its own
@@ -100,6 +105,15 @@ FANOUT_HEARTBEATS = 20
 # publishes a `tab-updated` of its own, and that is the event this journey
 # has always read its way to.
 FANOUT_REGISTRATIONS = 1
+# `CMD_TTL_DEFAULT`, imported at the top of this file, is the command TTL's
+# default read from the product rather than written out here. It is a product
+# constant and this module does not set it — a harness that bought its own
+# headroom by overriding one would be measuring a bridge configured unlike
+# every other — so its default is the ceiling the budget below is measured
+# against. A literal here would drift apart from it the moment the default
+# moves, in a number that now chooses between two sentences rather than
+# decorating one.
+
 # The frames a run of this shape publishes, and how far past them the read
 # will step before calling a shape it has never seen a failure. Every event
 # above is published BEFORE the subscription opens, so the first pass of the
@@ -356,17 +370,23 @@ def dashboard_fanout(base, docroot):
     # numbers that decide it — the window the loop actually took, and the
     # default it has to fit inside — rather than a sentence saying which one
     # of them it was.
+    # ONE clock read, because the printed figure and the branch that decides
+    # between two sentences used to be two reads: at the boundary this run
+    # could print `89.9s` and then say it was over. The two numbers the
+    # reader needs are the window the loop actually took and the ceiling it
+    # has to fit inside, and both come from here.
+    elapsed = time.monotonic() - started
     assert len(syncs) == FANOUT_HEARTBEATS, (
         f'only {len(syncs)} of the {FANOUT_HEARTBEATS} syncs this session '
         'published were still in the queue when the window attached. Every '
-        'event is published before the subscription opens, so the only thing '
-        f'that removes one in between is `DAEDALUS_CMD_TTL`, and publishing '
-        f'the session took {time.monotonic() - started:.1f}s against a '
-        'default of 90s'
-        + (' — OVER the ceiling, so that is the cause.'
-           if time.monotonic() - started > 90 else
-           ' — inside it, so something else took these and this message no '
-           'longer knows what.')
+        'event is published before the subscription opens, and '
+        '`DAEDALUS_CMD_TTL` is the mechanism DESIGNED to remove one in '
+        f'between — publishing the session took {elapsed:.1f}s against a '
+        f'ceiling of {CMD_TTL_DEFAULT:g}s'
+        + (' — over it, so that is the cause.'
+           if elapsed > CMD_TTL_DEFAULT else
+           ' — inside it, so the designed mechanism did not do this and '
+           'this message no longer knows what did.')
         + ' Shorten the session rather than raise the TTL: this journey does '
         'not set it, and a session sized to an infrastructure ceiling is the '
         'padding this journey was resized to remove. Saw: '

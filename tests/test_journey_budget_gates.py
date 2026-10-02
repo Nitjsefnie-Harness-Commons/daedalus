@@ -378,7 +378,10 @@ def test_a_count_over_budget_is_a_violation_carrying_its_remedy(tmp):
     assert not any(policy.violations(counts, document, names).values())
     over = dict(counts, **{names[0]: 1200})
     found = policy.violations(over, document, names)
-    assert sorted(found) == ['over', 'unmeasured']
+    # Three kinds, and the third is a journey this run could not
+    # resolve against a count the budget holds — which is a failure,
+    # not an absence. See the two controls above.
+    assert sorted(found) == ['over', 'unmeasured', 'unresolved']
     assert found['over'] == {names[0]: (1200, 1100.0)}, found['over']
     assert policy.REMEDY_FOR['over'] == policy.OVER_REMEDY
     assert 'never raised by hand' in policy.REMEDY_FOR['over']

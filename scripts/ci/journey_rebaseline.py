@@ -27,7 +27,7 @@ import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 
-def document_from(report, recorded, restore=()):
+def document_from(report, recorded, restore=(), drop=()):
     """The artefact this measurement justifies, as a validated document.
 
     Counts, shas, toolchain and excluded threads all come from `report`
@@ -61,13 +61,18 @@ def document_from(report, recorded, restore=()):
     journeys = {}
     for name in names:
         measured = counts.get(name)
-        if measured is None:
+        if measured is None and name not in set(drop):
+            # A journey `--drop` names is exempt: its own absence of a count
+            # is what it is being dropped for, and refusing here would make
+            # the ruling's second clause unreachable — a run that cannot
+            # separate a journey produces no measurement to drop it out of.
             raise ValueError(
                 f'the measurement carries no count for {name}, so there is '
                 'nothing to record and a budget without it compares '
                 'nothing')
         journeys[name] = measured
-    _restored(_dropped(recorded, names), restore, report, counter, journeys)
+    _restored(_dropped(recorded, names), restore, report, counter)
+    _dropped_now(drop, names, report, counter, journeys)
     shas = {name: _agreed_sha(report, name) for name in names}
     toolchain = report.get('toolchain') or {}
     if not journey_artifact.recorded_toolchain({'toolchain': toolchain}):
@@ -102,35 +107,88 @@ def document_from(report, recorded, restore=()):
         {field: measured[field] for field in journey_artifact.FIELDS})
 
 
-def _restored(dropped, restore, report, counter, journeys):
+def _restored(dropped, restore, report, counter):
     """Settle the journeys the recorded budget holds no count for.
 
-    `dropped` is every journey recorded at `null`; this measurement
-    separates all of them, or the refusal above would have fired first. So
-    every one of them needs a decision, and this is where it is refused
-    rather than taken.
+    `dropped` is every journey recorded at `null`; a measurement that could
+    not separate one of them carries no count for it, and the refusal above
+    would have fired first. So every one that IS here is separable, every one
+    needs a decision, and this is where it is refused rather than taken.
+
+    Nothing here writes: restoring is the counts loop above having already
+    assigned every name, so this decides only whether to object.
 
     The residual is named because it is the evidence: "unrecorded" says the
     budget holds no count and nothing about whether that is still true, and
     the number is what says it is no longer.
     """
-    named = set(restore)
-    unknown = sorted(named - set(dropped))
-    if unknown:
-        raise ValueError(
-            f'--restore names a journey the budget holds a count for, so '
-            f'there is nothing there to restore: {unknown[0]}')
+    _named_journeys(restore, dropped, '--restore')
     for name in dropped:
-        if name in named:
+        if name in set(restore):
             continue
-        row = ((report.get('counters') or {}).get(counter) or {}).get(
-            'journeys', {}).get(name) or {}
+        row = _measured_row(report, counter, name)
         raise ValueError(
             f'the budget holds no count for {name} and this measurement '
             f'separates it by {row.get("median")} instructions (spread '
             f'{row.get("spread")}), so the recorded null is a decision the '
             f'measurement no longer supports: pass --restore {name} to '
-            'record it, or drop the journey again on purpose')
+            'record it again')
+
+
+def _named_journeys(named, allowed, flag):
+    """Every name on `flag` that the artefact's state does not allow.
+
+    Two failures, two sentences, because they are told apart by nothing
+    else and the likelier one was getting the rarer one's explanation: a
+    name this journey set does not have at all, against a name it has and
+    already holds a count for. A misspelling is the first.
+    """
+    names = journey_counters.journey_names()
+    for name in sorted(set(named)):
+        if name not in names:
+            raise ValueError(
+                f'{flag} names {name}, which no journey is called, so there '
+                'is nothing there to act on: a journey set is '
+                f'{sorted(names)}')
+    unknown = sorted(set(named) - set(allowed))
+    if unknown:
+        raise ValueError(
+            f'{flag} names {unknown[0]}, which the budget already holds a '
+            'count for, so there is nothing there to restore or drop')
+
+
+def _measured_row(report, counter, name):
+    """One journey's measured row, or `{}` where the run refused one."""
+    entry = (report.get('counters') or {}).get(counter) or {}
+    return (entry.get('journeys') or {}).get(name) or {}
+
+
+def _dropped_now(drop, names, report, counter, journeys):
+    """Write the `null` for every journey `--drop` names, and nothing else.
+
+    The mirror of `--restore`, and the ruling is symmetric: a `null` is the
+    one value in the artefact that says the budget does not hold a journey,
+    so it is written only when a person names that journey and never as a
+    side effect of re-recording the rest.
+
+    It REFUSES a journey this measurement can separate. A positive residual
+    is a journey whose own work the run measured above the background it
+    shares — the opposite of the case a drop exists for — and dropping it
+    would remove the one journey a person most wants the gate to hold. The
+    run is the evidence, so the refusal names what the run measured.
+    """
+    _named_journeys(drop, names, '--drop')
+    for name in sorted(set(drop)):
+        row = _measured_row(report, counter, name)
+        if row:
+            raise ValueError(
+                f'--drop names {name} and this measurement separates it by '
+                f'{row.get("median")} instructions (spread '
+                f'{row.get("spread")}), so a journey the run CAN resolve '
+                'cannot be dropped: the flag is for one whose own work is '
+                'smaller than the background it shares, and this one is not '
+                'it')
+        journeys[name] = None
 
 
 def _dropped(recorded, names):
@@ -177,7 +235,7 @@ def _agreed_sha(report, name):
     return seen[0]
 
 
-def run(measurements, artifact, remedy=None, restore=()):
+def run(measurements, artifact, remedy=None, restore=(), drop=()):
     """Write the artefact from one measurement file; the exit is the verdict.
 
     Every refusal writes nothing, so a failed re-baseline leaves the
@@ -199,11 +257,28 @@ def run(measurements, artifact, remedy=None, restore=()):
         return 1
     try:
         document = document_from(report, journey_artifact.load(artifact),
-                                 restore=restore)
+                                 restore=restore, drop=drop)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 1
     Path(artifact).write_bytes(journey_artifact.render(document))
     print(f'wrote {len(document["journeys"])} journeys to {artifact} from '
           f'{source}, denominated in {document["counter"]}')
+    # What it stopped holding, and why — the two numbers the pull-request
+    # body has to carry for a dropped journey, printed where the person who
+    # ran the command is looking rather than left to be reconstructed from
+    # the measurement file.
+    for name, row in sorted(_refused_rows(report).items()):
+        print(f'dropped {name}: {row or "this run could not separate it"}')
     return 0
+
+
+def _refused_rows(report):
+    """The journeys the measurement refused, and the sentence for each.
+
+    Whatever counter the run selected is the one the artefact is
+    denominated in, so its refusals are the ones that decided what the
+    artefact holds.
+    """
+    entry = (report.get('counters') or {}).get(report.get('selected_counter'))
+    return dict((entry or {}).get('refused') or {})
