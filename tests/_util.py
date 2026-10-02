@@ -134,13 +134,14 @@ def child_coverage(mode, environment=None, cwd=None):
     anchor pyproject's [tool.coverage.paths] carries. So the launch's cwd
     is required, and a renamed directory fails here rather than later in
     `coverage report`. What that proves is the cwd and nothing else: the
-    program the child runs is not an argument here, so a keep at the
-    checkout of a program that sits outside it is accepted here and
-    records whatever paths that program reaches. Every site the guard's
-    keep allowlist names runs a program under the tree it names, so no
-    launch in this tree is that shape. It proves the retention too: an
-    environment the caller already scrubbed keeps nothing, so a collector
-    name this process carries must survive into the child's.
+    program a child runs is not an argument here, so a launch whose
+    program sits outside the tree it names passes this check too. While
+    `source` is the cwd the recorded set is bounded by it either way, so
+    that shape costs nothing today; it would matter if `source` were
+    ever anything else, which is why it is said here. It proves the
+    retention too: an environment the caller already scrubbed keeps
+    nothing, so a collector name this process carries must survive into
+    the child's.
     """
     if environment is None:
         environment = os.environ
