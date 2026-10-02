@@ -15,9 +15,19 @@ child process, with git's own `url.<base>.insteadOf` pointing its remote at
 a local bare repository, and every state is a real git state: a
 `pre-receive` refusal, a non-fast-forward rejection from a concurrent push, a
 remote that cannot answer, and a commit with nothing to commit.
+
+The script is copied INTO the tree and the copy is what runs, because that
+is the only shape the collector can see. `source = ["."]` resolves against
+the child's working directory, so a script left at its repository path and
+run from a temporary tree is measured under a `source` that excludes it, and
+`tests/_suite_runner.py::_runner_tree` copies for the same reason. The tree
+root is the checkout here, so the copy sits at `scripts/ci/ratchet_push.py`
+inside it and `[tool.coverage.paths]`'s `*/tree` maps that back onto the
+repository's own file.
 """
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -60,10 +70,17 @@ def _push_repo(base, remote_at=None):
     # repository, which is what `child_coverage('keep')' proves at
     # runtime before it retains the collector.
     root = Path(base) / 'tree'
-    work, bare = root / 'work', root / 'bare.git'
+    # The tree ROOT is the checkout, so the copied script stands where the
+    # collector's `source = ["."]` — resolved against the child's cwd —
+    # can see it, and `paths: repo = [".", "*/tree"]` maps that path back
+    # onto `scripts/ci/ratchet_push.py`. A copy anywhere else is measured
+    # under a path the report cannot resolve, or not measured at all.
+    work, bare = root, root / 'bare.git'
+    subject = root / 'scripts' / 'ci' / 'ratchet_push.py'
+    subject.parent.mkdir(parents=True)
+    shutil.copy2(PUSH, subject)
     bare.mkdir(parents=True)
     _git(bare, 'init', '--quiet', '--bare', '-b', 'main')
-    work.mkdir()
     _git(work, 'init', '--quiet', '-b', 'main')
     _git(work, 'config', 'user.email', 'tests@example.invalid')
     _git(work, 'config', 'user.name', 'Tests')
@@ -96,7 +113,7 @@ def _drive_push(work, refuse, change=True):
     recorded file was already committed by an earlier step.
     """
     if refuse:
-        hook = work.parent / 'bare.git' / 'hooks' / 'pre-receive'
+        hook = work / 'bare.git' / 'hooks' / 'pre-receive'
         hook.write_text('#!/bin/sh\nexit 1\n', encoding='utf-8')
         hook.chmod(0o755)
     # The change is left UNCOMMITTED: staging and committing it is the
@@ -108,9 +125,11 @@ def _drive_push(work, refuse, change=True):
     # The declaration is at the launch rather than at a name: this helper
     # gives every test its own HOME and its own summary path, and a
     # module-level environment could carry neither.
+    # The COPY, not `PUSH`: it stands where the collector can see it, and
+    # `paths` maps that path back onto the repository's own file.
     return subprocess.run(
-        [sys.executable, str(PUSH), 'ratcheted.json',
-         'ci: tighten the journey budget'],
+        [sys.executable, str(work / 'scripts' / 'ci' / 'ratchet_push.py'),
+         'ratcheted.json', 'ci: tighten the journey budget'],
         cwd=str(work), capture_output=True, text=True,
         env=_util.child_coverage('keep', dict(
             os.environ,
