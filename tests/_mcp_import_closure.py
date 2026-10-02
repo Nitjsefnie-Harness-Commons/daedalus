@@ -44,10 +44,9 @@ this file. Beside them are three shapes the walk ACCEPTED as declared
 limits and follows no further: a value reached through a call's result, a
 tracked module or the operation handed as a call ARGUMENT (`use(sys)`), and
 a value COMPUTED at runtime — an interpolated f-string, a subscript that
-selects one (`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`), a starred
-argument. No control pins those three, and one should not: pinning a
-declared limit forbids closing it. Any accepted shape leaves the closure
-quietly short.
+selects one, a starred argument. No control pins those three, and one
+should not: pinning a declared limit forbids closing it. Any accepted shape
+leaves the closure quietly short.
 """
 import ast
 from pathlib import Path
