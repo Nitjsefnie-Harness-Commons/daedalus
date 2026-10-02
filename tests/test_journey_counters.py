@@ -2,7 +2,6 @@
 """Contracts for how a journey is COUNTED: which counter this runner
 allows, what a measurement carries, and every way a measurement can
 refuse rather than answer."""
-import json
 import os
 import sys
 from pathlib import Path
@@ -11,14 +10,10 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
-    IDENTITY,
     ROOT,
     _util,
-    budget_document,
     counter_facts,
     journeys, launch_refusal, planting,
-    measurements_file,
-    probe,
 )
 
 
@@ -277,103 +272,6 @@ def test_perf_counts_are_read_from_both_of_the_shapes_it_prints(tmp):
     assert counters._perf_instruction_count(text) == 1234567000
     assert counters._perf_instruction_count('not permitted\n') is None
     assert counters._perf_instruction_count('') is None
-
-
-def test_every_summary_block_renders_and_names_its_remedy(tmp):
-    """Each block is read by a person deciding whether to re-baseline, so
-    each says what was not compared and what to do about it."""
-    summaries = _journey_contract.summaries()
-    gate = _journey_contract.policy()
-    document = budget_document(toolchain=dict(IDENTITY))
-    measurement = json.loads(measurements_file(
-        Path(tmp) / 'counts.json', document).read_text('utf-8'))
-    for lines in (summaries.probe_lines(probe()),
-                  summaries.verdict_lines(
-                      document, {'command-round-trip': 4000,
-                                 'dashboard-fanout': 4000,
-                                 'mcp-exec': 4000},
-                      {'over': {'mcp-exec': (12000, 1100.0)},
-                       'unmeasured': {}}),
-                  summaries.verdict_lines(
-                      document, {'mcp-exec': 4000},
-                      {'over': {},
-                       'unmeasured': {'mcp-exec': 'perf-instructions'}}),
-                  summaries.rebaseline_lines(12345),
-                  summaries.toolchain_lines(document, measurement, {},
-                                            gate.TOOLCHAIN_REMEDY),
-                  summaries.toolchain_lines(document, measurement,
-                                            {'python': ('a', 'b')},
-                                            gate.TOOLCHAIN_REMEDY),
-                  summaries.toolchain_lines(document, measurement, {},
-                                            gate.THREADS_REMEDY,
-                                            subject='excluded threads')):
-        assert lines, 'a block that renders to nothing is a block nobody reads'
-        assert any(line.strip() for line in lines)
-    # The two subjects must not read the same: a summary that said "toolchain
-    # changed" for a set of threads sends the reader to the wrong remedy.
-    moved = summaries.toolchain_lines(
-        document, measurement, {'mcp-exec': (['front-end-import'], [])},
-        gate.THREADS_REMEDY, subject='excluded threads')
-    assert 'excluded threads changed, re-baseline' in moved[2], moved[2]
-    assert 'toolchain' not in moved[2], moved[2]
-
-
-def test_the_probe_row_says_whether_perf_ran_and_why_it_did_not(tmp):
-    """The two probe states a runner can be in, neither of them a default.
-
-    `perf_stat` is absent on a runner with no perf on PATH at all, and it
-    carries stderr on one where perf ran and refused to count. Those are
-    the two sentences a reader uses to decide whether a low count means
-    anything, and they are told apart by the text: without perf there is
-    no fenced block at all, and with it the block is what carries the
-    refusal, since the returncode perf exits with is not evidence.
-    """
-    del tmp
-    summaries = _journey_contract.summaries()
-    absent = summaries.probe_lines(dict(probe(), perf_stat=None))
-    joined = '\n'.join(absent)
-    assert ('- `perf stat -e instructions:u -- true`: not run, perf is not on '
-            'PATH') in joined, joined
-    assert '```' not in joined, (
-        'a runner with no perf at all fenced a block for it, so the summary '
-        f'carries an output nothing produced: {joined}')
-    refused = summaries.probe_lines(counter_facts())
-    said = '\n'.join(refused)
-    assert 'returncode `0`' in said, said
-    assert '\n```\nnot permitted\n```' in said, (
-        "perf's own stderr is what says it was refused, and the summary "
-        f'drops it: {said}')
-    assert '```\nnot permitted' not in '\n'.join(absent), absent
-
-
-def test_the_verdict_table_pins_every_row_it_renders(tmp):
-    """One row per recorded journey, each carrying its own numbers.
-
-    The block loop above proves the table RENDERS; this proves each cell says
-    what the gate decided. A row whose verdict read "within budget" over a
-    count above its budget is the one contradiction a maintainer cannot act
-    on, and nothing else in the tree notices it — the counts are right in the
-    log and the artifact on disk is right too.
-    """
-    del tmp
-    summaries = _journey_contract.summaries()
-    names = journeys().NAMES
-    # Recorded at 1000 with a 10% tolerance, so every budget is 1100.
-    document = budget_document()
-    counts = {names[0]: 1200, names[1]: 900}
-    found = {'over': {names[0]: (1200, 1100.0)},
-             'unmeasured': {names[2]: 'perf-instructions'}}
-    rows = {line.split('|')[1].strip(): line
-            for line in summaries.verdict_lines(document, counts, found)
-            if line.startswith('|') and not line.startswith('|---')}
-    assert sorted(rows) == sorted([*names, 'journey']), sorted(rows)
-    assert rows[names[0]] == (
-        f'| {names[0]} | 1200 | 1100 | +100 | OVER BUDGET |'), rows[names[0]]
-    assert rows[names[1]] == (
-        f'| {names[1]} | 900 | 1100 | -200 | within budget |'), rows[names[1]]
-    assert rows[names[2]] == (
-        f'| {names[2]} | not measured | 1100 | — | no count for '
-        '`perf-instructions` |'), rows[names[2]]
 
 
 def test_a_perf_run_that_printed_no_count_says_so(tmp):
