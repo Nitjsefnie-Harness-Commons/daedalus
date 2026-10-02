@@ -33,6 +33,7 @@ def await_mcp_ready(proc, drained, observations, timeout=MCP_READY_TIMEOUT):
     try:
         return _child_ready.await_state(proc, drained, timeout)
     except RuntimeError as refused:
+        waited = time.monotonic() - started
         raise RuntimeError(
-            f'{refused}; ' + observations(proc, drained,
-                                          time.monotonic() - started)) from None
+            f'{refused}; '
+            + observations(proc, drained, waited)) from None

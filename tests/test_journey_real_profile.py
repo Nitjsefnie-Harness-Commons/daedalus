@@ -145,7 +145,8 @@ def test_the_journeys_own_mcp_client_thread_is_its_work_and_is_counted(tmp):
     assert all(row['pid'] != carried[0]['pid'] for row in dropped), dropped
 
 
-def test_the_front_ends_symbol_is_declared_two_ways_on_the_same_kind_of_thread(tmp):
+def test_the_front_ends_symbol_is_declared_two_ways_on_one_kind_of_thread(
+        tmp):
     """The reader's own claim, shown on the two runs it is a claim about.
 
     The same symbol, on the same thread of the same bridge in both runs, and

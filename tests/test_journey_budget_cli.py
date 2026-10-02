@@ -324,8 +324,8 @@ def test_the_summary_remedies_come_in_the_report_s_order(tmp):
     unresolved, unmeasured = names[0], names[1]
     entry['journeys'].pop(unresolved)
     entry['journeys'].pop(unmeasured)
-    entry['refused'] = {unresolved: 'its own work is smaller than the '
-                                     'background it shares'}
+    entry['refused'] = {
+        unresolved: 'its own work is smaller than the background it shares'}
     counts.write_text(json.dumps(report), encoding='utf-8')
     with summary_file(tmp, 'every-kind.md') as summary:
         out, err = io.StringIO(), io.StringIO()

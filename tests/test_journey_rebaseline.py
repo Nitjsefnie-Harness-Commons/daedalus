@@ -470,7 +470,6 @@ def test_a_restore_and_a_drop_do_not_refuse_each_other(tmp):
             f'are two contradictory requests: {said}')
 
 
-
 def test_a_dropped_journey_carries_no_bound_with_it(tmp):
     """`--drop` takes the journey's OWN tolerance with it.
 

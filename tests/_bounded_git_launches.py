@@ -9,6 +9,35 @@ sides read the same string, so a finding about a live site names
 the key in the form this table writes.
 """
 BOUNDED_GIT_LAUNCHES = {
+    # A `Condition.wait_for` is bounded and is not a launch: the analyser
+    # reads any call carrying a `timeout=` as one, and this is what a wait
+    # for a line the child printed looks like from outside. The bound is the
+    # caller's own deadline — which is the property this wave replaced a poll
+    # for — and no process is behind it, so there is nothing to hang.
+    ('tests/test_child_ready.py',
+     'test_a_child_that_never_prints_wakes_the_wait_when_it_exits',
+     'proc.wait(timeout)', 1):
+         'the reap of a `python3 -c` this control started itself; there is'
+         ' no git launch here and no process beyond that one',
+    ('tests/test_child_ready.py',
+     'test_a_wait_on_a_child_nobody_is_relaying_is_a_refusal_naming_it',
+     'proc.wait(timeout)', 1):
+         'the reap of a `python3 -c` this control started itself; there is'
+         ' no git launch here and no process beyond that one',
+    ('tests/test_child_ready.py',
+     'test_the_announcement_wait_blocks_on_a_line_and_not_on_a_tick',
+     'proc.wait(timeout)', 1):
+         'the reap of a `python3 -c` this control started itself; there is'
+         ' no git launch here and no process beyond that one',
+    ('tests/test_child_ready.py',
+     'test_the_front_end_wait_blocks_on_a_line_and_not_on_a_tick',
+     'proc.wait(timeout)', 1):
+         'the reap of a `python3 -c` this control started itself; there is'
+         ' no git launch here and no process beyond that one',
+    ('tests/_child_ready.py', 'wait_for',
+     'self.condition.wait_for(timeout)', 1):
+         'the readiness wait blocking on the drain thread; the bound is '
+         'the caller\'s deadline and there is no child behind it',
     # Every reason says what the call is and why it cannot hang a git
     # launch; a receiver the analyser cannot prove is reported rather
     # than passed, and this table is that report's disposition.
@@ -310,6 +339,10 @@ BOUNDED_GIT_LAUNCHES = {
          ' same process',
     ('tests/_util.py', '_startup_observations', 'thread.join(timeout)', 1):
          'a thread join on a thread this helper started',
+    ('tests/_util.py', 'bridge', 'get(timeout)', 1):
+         'the one `/health` request the fixture makes before it yields; the'
+         ' bound is the same startup bound the announcement wait carries,'
+         ' and no process is behind it',
     ('tests/_util.py', 'bridge', 'await_listening_line(timeout)', 1):
          'a helper waiting for a port line; the caller bounds it',
     ('tests/_util.py', 'get', 'request()', 1):

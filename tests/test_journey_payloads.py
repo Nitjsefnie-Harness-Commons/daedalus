@@ -387,9 +387,10 @@ def test_the_command_ttl_default_is_the_one_the_documentation_states(tmp):
         r'DAEDALUS_CMD_TTL[^.]{0,40}?default (\d+)',
         (_journey_contract.ROOT / 'AGENTS.md').read_text(
             encoding='utf-8'))
-    assert documented, 'AGENTS.md no longer states the DAEDALUS_CMD_TTL '
-    'default, so the number the product ships has no published value to be '
-    'checked against'
+    assert documented, (
+        'AGENTS.md no longer states the DAEDALUS_CMD_TTL default, so the '
+        'number the product ships has no published value to be checked '
+        'against')
     assert set(documented) == {str(_product_default())}, (
         f'AGENTS.md states the default as {sorted(set(documented))} and the '
         f'product ships with {_product_default()}')
@@ -458,7 +459,8 @@ def _drive_dashboard_fanout(events, served):
     # reached as the module attribute the journeys module imported, so a
     # second copy loaded here would be planted in the wrong place and the
     # journey would go to the network.
-    bridge = SimpleNamespace(stream_response=stream, next_stream_data=next_data)
+    bridge = SimpleNamespace(stream_response=stream,
+                             next_stream_data=next_data)
     try:
         with _journey_contract.planting(journeys._util, post_json=posts), \
                 _journey_contract.planting(journeys, _bridge=bridge):
