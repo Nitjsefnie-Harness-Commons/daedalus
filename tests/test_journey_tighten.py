@@ -14,8 +14,6 @@ import io
 import json
 import os
 import re
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
@@ -23,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _journey_contract  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
-from _ratchet_fixture import _git  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _journey_contract import (  # noqa: E402
     IDENTITY,
