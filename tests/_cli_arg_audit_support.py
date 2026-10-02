@@ -24,14 +24,16 @@ the range-and-tuple exemption is removed.
 What these controls cannot see is the other direction. A guard operand ADDED
 to the resolver fires nothing here: the completeness assertion holding the
 condition set derived from the resolver's AST against a ledger's rows went
-with the deleted ledger. Two additions measured here both leave this suite
-31/31 — a NamedExpr arm on frame_read deciding nothing the fallthrough did
-not, and the `key is not None` conjunct dropped from _subscript_read — and
-neither widens acceptance, the first inert and the second turning one accept
-into a refuse. Two samples are not a rule for every addition. One blind spot
-survives the deletion: frame_read's attribute arm has no control of its own,
-the two tests dying with the whole arm removed both dying with only the
-member test inside it removed."""
+with the deleted ledger. Two resolver mutations measured here both leave
+tests/test_cli_arg_audit.py 31/31 — a NamedExpr arm ADDED to frame_read,
+deciding nothing the fallthrough did not, and the `key is not None` conjunct
+dropped from _subscript_read. The first is inert; the second is equivalent on
+every reachable state rather than caught, because constant_string's range is
+{str, None} and namespace_key is a non-empty str at every call site. Two
+samples are not a rule for every addition. One blind spot survives the
+deletion: no control DISTINGUISHES frame_read's attribute arm from the member
+test inside it — the two tests that die with the whole arm removed both die
+among twenty-four when only the member test goes."""
 import argparse
 import builtins
 import contextlib

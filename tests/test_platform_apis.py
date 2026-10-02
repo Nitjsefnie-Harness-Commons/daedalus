@@ -51,10 +51,7 @@ POSIX_ONLY_MEMBERS = {
 #
 # A capability probe counts as asking: `hasattr(signal, 'alarm')` is the same
 # question asked portably, so a control that asks it before reaching for the
-# alarm is the distinguished form rather than the condemned one — it does not
-# run where the capability is absent, and a regression in the arithmetic it
-# watches goes red wherever it does run, because the guarantee is a
-# fixed-point over a finite name space and never varied by platform. What
+# alarm is the distinguished form rather than the condemned one. What
 # is refused is the reach with nothing said, which is the shape that put four
 # matrix legs red.
 # A platform IDENTITY question — which platform is this — is about every
