@@ -1,12 +1,12 @@
 """What the bounded-launch control reads, and which sites of that it keeps.
 
-Both decisions below have two consumers, so each is written once here and
-read from here by both. `tests/test_repo_layout.py` walks the whole tracked
-tree on the first and keeps or drops each site on the second, so a copy
-there would narrow that control's population with nothing to report it.
-`tests/test_harness_launch_bounds.py` reads the first on two planted
-fixtures it cannot express as a tree walk. Either way the hole would be
-silent in the shrinking direction.
+Both decisions below are written once here and read from here by
+`tests/test_repo_layout.py`: it walks the whole tracked tree on the first
+and keeps or drops each site on the second, so a copy there would narrow
+that control's population with nothing to report it. The first also has a
+second reader on two planted fixtures a tree walk cannot express, in that
+same suite. Either way the hole would be silent in the shrinking
+direction.
 
 The figures the two rules were tuned against — 139 dropped sites narrowed to
 55, then 70 — were measured before #1408 and none has been re-measured
@@ -34,11 +34,12 @@ def in_launch_population(name, source):
     stdlib does not take, so `timout=30` is a site, and PEP 3131 normalises
     a fullwidth `timeout` to the ASCII spelling in `ast.keyword.arg` from a
     file whose own text never spells it. Both fixtures are in
-    `tests/test_harness_launch_bounds.py`, and the cost of the walk
-    over the whole tree is paid in the analyser.
+    `tests/test_repo_layout.py`'s
+    `test_a_normalised_identifier_bound_is_still_read`, and the cost of the
+    walk over the whole tree is paid in the analyser.
 
-    `source` is still the second argument because both consumers already
-    read the file to hand it over, and a parameter nothing reads is a
+    `source` is still the second argument because every reader already
+    reads the file to hand it over, and a parameter nothing reads is a
     signature that lies about what the control costs.
     """
     del source
