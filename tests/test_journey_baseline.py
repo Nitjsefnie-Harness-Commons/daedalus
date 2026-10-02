@@ -2,12 +2,10 @@
 """What the FIXED BACKGROUND costs, and that each journey's own work is
 what is left of its count.
 
-Split out of `test_journey_counters.py`, which owns the counting these
-four drive and was at its size ceiling. They came out with the concept
-they are about: one bridge measured once, read once per journey through
-that journey's own exclusion list, and subtracted from every raw total —
-with a journey whose own work is smaller than the constant it shares
-refusing rather than reporting a clamped zero.
+One bridge measured once, read once per journey through that journey's own
+exclusion list, and subtracted from every raw total — with a journey whose
+own work is smaller than the constant it shares refusing rather than
+reporting a clamped zero.
 """
 import contextlib
 import io

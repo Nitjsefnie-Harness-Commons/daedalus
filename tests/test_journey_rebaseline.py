@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """What the re-baseline WRITES, and the artefact states its two flags act on.
 
-Split out of `test_journey_budget_cli.py`, which was at its size ceiling,
-along the boundary that file's own docstring draws: a subcommand each.
-This half is `rebaseline` — `--restore`, `--drop`, and every artefact state
-and measurement outcome the pair is given together — driven through the
-real command and its real refusals.
-
-A PURE SPLIT: every control below is the one that was in the CLI suite,
-with the fixture it uses beside it, unchanged.
+`rebaseline` — `--restore`, `--drop`, and every artefact state and
+measurement outcome the pair is given together — driven through the real
+command and its real refusals.
 """
 import contextlib
 import io
@@ -358,8 +353,8 @@ def _drop_matrix(tmp, name):
     `null`) crossed with what the measurement could do (separated it, could
     not) and the three flag shapes that reach either. Returned rather than
     asserted here, because the cells are the FIXTURE and the two controls
-    below are what assert over them — a table of eight outcomes belongs in
-    one place and not in eight tests.
+    below are what assert over them — a table of twelve outcomes belongs in
+    one place and not in twelve tests.
     """
     def report_unresolved():
         report = _journey_contract.fixture_report()
@@ -398,11 +393,16 @@ def _drop_matrix(tmp, name):
 
 
 def test_every_refusal_in_the_matrix_says_something_the_run_established(tmp):
-    """Eight cells, and every refusal checks out against the run's own facts.
+    """Twelve cells, and every refusal checks out against the run's own facts.
 
-    The matrix is the whole surface of the two flags over the two artefact
-    states, so each refusal is read here: a residual where the run has one,
-    no residual where it does not, and no remedy offered that cannot run.
+    Both artefact states crossed with both outcomes: a residual where the
+    run has one, no residual where it does not, no remedy that cannot run.
+
+    One refusal no cell reaches is the recorded null the measurement now
+    separates: every flag shape above either restores that journey or drops
+    it. `test_a_rebaseline_refuses_to_silently_restore_a_dropped_journey`
+    reads that one, and `about_separation` admits its sentence so a cell
+    added later is read by the same rule.
     """
     name = journeys().NAMES[0]
     resolved = (_journey_contract.fixture_report()['counters']

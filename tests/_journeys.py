@@ -62,22 +62,11 @@ MCP_COMMAND_ID = 'journey-mcp-1'
 MCP_CODE = '2 + 2'
 MCP_RESULT = {'answer': 4, 'label': 'journey-mcp'}
 
-# The startup-only measurement: the same interpreter and the same imports as a
-# journey child, with no bridge and no journey. Every instruction counter is
-# reported net of this one, so interpreter startup and import cost are not
-# part of what the ratchet compares.
+# `journey_counters`' own two constants; the reasoning that makes the
+# subtraction necessary is beside the constants there. Both are pseudo-
+# journeys: neither is in `NAMES`, neither produces a shape sha, and no count
+# is recorded for either.
 STARTUP_ONLY = 'startup-only'
-
-# The bridge-only measurement, and the fixed background it stands for: the
-# real bridge, spawned exactly as a journey spawns it, with no journey's work
-# at all. `startup-only` removes the HARNESS child's interpreter and imports
-# but runs no bridge, so every journey's number still carries the bridge
-# child's own ~800M Ir — which on `screenshot` is 99% of what is measured.
-# `journey_counters` measures this ONCE per counter and reads it through each
-# journey's own exclusion list, so what is left is the journey's own work.
-#
-# It is a pseudo-journey in the way `STARTUP_ONLY` is: it is not in `NAMES`,
-# it produces no shape sha, and no count is ever recorded for it.
 BRIDGE_ONLY = 'bridge-only'
 BRIDGE_TOKEN = 'journeybase'
 
@@ -304,10 +293,8 @@ def dashboard_fanout(base, docroot):
     started = time.monotonic()
     # /register is update-only, so the registry has to hold the tab before it
     # can publish anything, and every sync above publishes an event of its
-    # own. The extension re-syncs every 30 seconds for as long as the browser
-    # is open, so a session is a RUN of syncs rather than one: this journey
-    # takes the ten minutes a panel is kept open while a task is driven
-    # through it, which is FANOUT_HEARTBEATS syncs of FANOUT_TABS tabs.
+    # own — which is why a session is a RUN of syncs rather than one, sized
+    # by the two counts whose basis is stated above.
     for _ in range(FANOUT_HEARTBEATS):
         status, body = _util.post_json(base + '/sync-tabs', {
             'token': DASHBOARD_TOKEN, 'tabs': tabs,
@@ -337,12 +324,9 @@ def dashboard_fanout(base, docroot):
     # budget, and it is the one thing that could make this journey fail
     # on a slow runner.
     #
-    # Neither side of it moves for this journey. The TTL is a product
-    # constant with its own documented default and this journey does not
-    # raise it: a harness that bought its own headroom by overriding a
-    # product setting would be measuring a bridge configured differently
-    # from every other one. And the event count is not cut to fit the TTL
-    # either, because a session sized to an infrastructure ceiling rather
+    # Neither side of it moves for this journey: the TTL keeps its product
+    # default for the reason stated above, and the event count is not cut to
+    # fit it, because a session sized to an infrastructure ceiling rather
     # than to a product basis is the padding error this journey was resized
     # to remove. So the ceiling is left visible and the shortfall is named
     # in the assertion below, and whether it holds is a measurement.
@@ -439,15 +423,7 @@ def bridge_env(token):
 
 
 def _against_a_fresh_bridge(token, run):
-    with tempfile.TemporaryDirectory(prefix='journey_') as directory:
-        with _util.bridge(directory, env=bridge_env(token),
-                          await_mcp=True) as fixture:
-            base, docroot = fixture
-            return run(base, docroot)
-
-
-def rendering_of(name):
-    """Run one journey against a fresh bridge and return its rendering.
+    """`run(base, docroot)` against a bridge this call spawns and tears down.
 
     `await_mcp=True` is what makes the count comparable: the bridge's
     `mcp-bootstrap` thread imports the front end beside the journey and
@@ -456,6 +432,15 @@ def rendering_of(name):
     happened to run alongside. The wait puts the import wholly inside every
     round or wholly outside all of them.
     """
+    with tempfile.TemporaryDirectory(prefix='journey_') as directory:
+        with _util.bridge(directory, env=bridge_env(token),
+                          await_mcp=True) as fixture:
+            base, docroot = fixture
+            return run(base, docroot)
+
+
+def rendering_of(name):
+    """Run one journey against a fresh bridge and return its rendering."""
     return _against_a_fresh_bridge(*JOURNEYS[name])
 
 

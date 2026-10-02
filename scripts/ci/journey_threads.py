@@ -13,14 +13,13 @@ one file can hold several short-lived threads — a probe with four equal
 threads and one long one produced five files for six threads. The files
 still partition the process's cost, so the total is unchanged.
 
-A role used to be read from a thread's INSTRUCTION TOTAL against fixed
-bands. It is read from what the thread EXECUTED instead, because a total is
-a cost proxy for identity and the two populations the bands were asked to
-tell apart overlap in cost: `command-round-trip`'s own per-connection
-request thread measures 3,548,079 Ir, 2.82x under the serve floor, so the
-day that work grows past it the thread reads as the background it excludes
-and the journey's own work silently leaves the count (issue 1466). No
-threshold fixes that, because the overlap is in the populations.
+A role is read from what the thread EXECUTED, never from its instruction
+total: a total is a cost proxy for identity, and the two populations a
+band has to tell apart overlap in cost — `command-round-trip`'s own
+per-connection request thread measured 3,548,079 Ir, 2.82x under the serve
+floor, so the day that work grows past it the thread reads as the background
+it excludes and the journey's own work silently leaves the count (issue
+1466). No threshold fixes that, because the overlap is in the populations.
 
 There is no Python-level identity in a callgrind profile to read either —
 zero `.py`, zero `uvicorn`, zero `asyncio` names anywhere, because CPython
@@ -63,10 +62,8 @@ table is per journey and unchanged:
 
 - Every journey's profile carries the bridge's one-off MCP bootstrap
   import — the bridge starts its own front-end listener whatever the
-  journey asks of it — and all but one journey excludes it. Which one is
-  not written down here: it is the journey that keeps the serve thread
-  instead, which is the last bullet, and
-  `tests/test_journey_threads.py` pins that shape rather than the name.
+  journey asks of it — and all but one journey excludes it, the last
+  bullet naming the one that does not.
 - `command-round-trip` and `dashboard-fanout` also exclude the serve
   thread: they exercise the bridge's HTTP surface and none of the front
   end's event loop, so the loop's idle tick is not their work.
@@ -149,10 +146,9 @@ MODULE_INIT_SIGNATURE = ('PyInit__pydantic_core',)
 
 # The table that puts a thread in a role, by role, so the artefact records
 # the one a recorded count was classified under and a run that read a
-# profile by different symbols compares nothing. It replaced the `Ir` bands
-# this module used to carry, for the reason the docstring gives. MAIN is
-# absent: it is read from a thread's POSITION. `request` is absent: it is
-# the residual, claimed by no signature.
+# profile by different symbols compares nothing. MAIN is absent: it is read
+# from a thread's POSITION. `request` is absent: it is the residual, claimed
+# by no signature.
 SIGNATURES = {SERVE: sorted(EVENT_LOOP_SIGNATURE),
               IMPORT: sorted(MODULE_INIT_SIGNATURE)}
 
@@ -343,14 +339,11 @@ def total_for(rows, journey, unread=None):
     return kept, excluded, None
 
 
-# What each journey stops counting, per journey, and why. The rule every
-# entry obeys is the module docstring's: an exclusion list may never cover
-# work the journey itself caused. Under identity classification that rule
-# is structural rather than measured — a journey's own work is `request` or
-# `main`, neither of which any journey excludes — so the table below is
-# about the two background roles and the docstring's bullet list says which
-# is which. `request` appears in no entry, and
-# `tests/test_journey_threads.py` pins that rather than trusting it.
+# What each journey stops counting, per journey. The rule every entry
+# obeys is the module docstring's: an exclusion list may never cover work
+# the journey itself caused — and under identity classification that rule
+# is structural rather than measured, because a journey's own work is
+# `request` or `main` and neither of them is in this table.
 EXCLUDED = {
     'command-round-trip': (IMPORT, SERVE),
     'dashboard-fanout': (IMPORT, SERVE),
