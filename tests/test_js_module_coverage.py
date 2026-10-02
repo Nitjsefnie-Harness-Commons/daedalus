@@ -318,14 +318,20 @@ def test_main_tighten_says_nothing_was_lowered_and_writes_nothing(tmp):
 
 
 def test_main_reports_a_thresholds_document_it_could_not_read(tmp):
-    """An unreadable record is refused by what it says, not by a traceback."""
+    """An unreadable record is refused by what it says, not by a traceback.
+
+    The path is asserted as `repr()` because the refusal interpolates the
+    `OSError`, and an `OSError` spells its filename quoted and escaped: on
+    Windows every backslash in it appears twice, so the raw spelling is not
+    in the message at all.
+    """
     policy = _policy()
     absent = Path(tmp) / 'no-such-thresholds.json'
     status, stdout, stderr = _main(
         policy, [str(Path(tmp) / 'absent'), '--thresholds', str(absent)])
     assert status == 1
     assert stdout == '', stdout
-    assert str(absent) in stderr, stderr
+    assert repr(str(absent)) in stderr, stderr
     assert 'cannot read thresholds' in stderr, stderr
     assert 'Traceback' not in stderr, stderr
 
