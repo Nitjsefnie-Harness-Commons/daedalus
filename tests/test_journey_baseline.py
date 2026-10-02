@@ -24,7 +24,7 @@ from _journey_contract import (  # noqa: E402
 
 
 def _profile_counter(counters, journey_main, bridge_main, request=2_000,
-                     imported=3_000, served=5_000, startup=7_000):
+                     imported=3_000, served=5_000, startup=None):
     """A counter that answers every name the way the callgrind leaf does.
 
     Every name, `startup-only` included, gets rows the real
@@ -33,7 +33,18 @@ def _profile_counter(counters, journey_main, bridge_main, request=2_000,
     always returned for that name, which is the whole of what the control
     below exists to pin. The startup child is one thread that started and
     left — it has no bridge, so there is nothing for it to exclude.
+
+    `startup` defaults to HALF the bridge-only child's own main thread, and
+    that default is the point: `startup-only` is the same interpreter
+    running the same module with no bridge, so it cannot cost more than a
+    child that went on to start one. A fixture that gave it more is a
+    profile no counter can produce — measured on the preserved runs it kept
+    1,028,521,011 instructions against the bridge-only child's
+    1,176,058,614 — and an impossible profile is a subtraction nothing
+    constrains, which is how subtracting the startup twice survived.
     """
+    startup = bridge_main // 2 if startup is None else startup
+
     def answering(name, root, workdir):
         del root, workdir
         if name == counters.STARTUP_NAME:
@@ -71,18 +82,23 @@ def test_the_baseline_is_read_through_each_journeys_own_exclusions(tmp):
     del tmp
     counters = _journey_contract.counters()
     report, row = _measured(
-        counters, _profile_counter(counters, 100_000, 1_000))
-    assert row['bridge_only'] == {'command-round-trip': 3_000,
-                                  'dashboard-fanout': 3_000,
-                                  'mcp-exec': 8_000,
-                                  'screenshot': 8_000,
-                                  'segment-relay': 8_000,
-                                  'cdp-result': 8_000,
-                                  'net-capture': 6_000}, row
-    assert row['startup_only'] == 7_000, row
-    # 107,000 is mcp-exec's own kept total: 7,000 of startup and the
-    # 8,000 of bridge it shares with the front end's import come off.
-    assert row['journeys']['mcp-exec']['net'] == [92_000], row
+        counters, _profile_counter(counters, 1_000_000, 90_000))
+    assert row['bridge_only'] == {'command-round-trip': 92_000,
+                                  'dashboard-fanout': 92_000,
+                                  'mcp-exec': 97_000,
+                                  'screenshot': 97_000,
+                                  'segment-relay': 97_000,
+                                  'cdp-result': 97_000,
+                                  'net-capture': 95_000}, row
+    assert row['startup_only'] == 45_000, row
+    # 107,000 is mcp-exec's own KEPT total — its own two threads, the
+    # bridge's serve threads still in it — and the 8,000 the bridge-only
+    # child keeps through mcp-exec's own list comes off it ONCE. The
+    # 4,500 of the startup-only child is not subtracted as well: that child
+    # is inside the 8,000's own baseline, so subtracting it again would
+    # take the interpreter's start off twice.
+    assert row['journeys']['mcp-exec']['raw'] == [1_007_000], row
+    assert row['journeys']['mcp-exec']['net'] == [910_000], row
     # The baseline is not a journey, so it is in neither recorded map: a
     # report naming it there is a check that refuses on every run.
     assert 'bridge-only' not in report['shas'], report['shas']
@@ -108,8 +124,12 @@ def test_a_journey_whose_own_work_is_under_the_bridge_refuses_and_says_so(tmp):
     del tmp
     counters = _journey_contract.counters()
     names = _journey_contract.journeys().NAMES
-    # One journey under the background it shares; the rest well clear of it,
-    # so the run has both a refusal and a count to show it lost neither.
+    # One journey whose own work is smaller than the bridge-only child's;
+    # the rest well clear of it, so the run has both a refusal and a count
+    # to show it lost neither. The shape is the one measured on real
+    # profiles: `command-round-trip`'s harness child cost 1,125,085,258
+    # instructions and `bridge-only`'s cost 1,176,058,614, so the baseline
+    # was the larger of the two and the residual came out negative.
     tiny = names[0]
 
     def answering(name, root, workdir):
@@ -117,10 +137,14 @@ def test_a_journey_whose_own_work_is_under_the_bridge_refuses_and_says_so(tmp):
         if name == counters.STARTUP_NAME:
             return {'rows': _journey_contract.bridge_profile(main=7_000),
                     'unread': None}, None
+        if name == counters.BRIDGE_NAME:
+            main, request = 100_000, 1_000
+        elif name == tiny:
+            main, request = 1_000, 0
+        else:
+            main, request = 200_000, 1_000
         return {'rows': _journey_contract.bridge_profile(
-            main=1_000 if name == counters.BRIDGE_NAME else (
-                2_000 if name == tiny else 100_000),
-            request=1_000, imported=3_000, served=3_000),
+            main=main, request=request, imported=3_000, served=3_000),
             'unread': None}, None
 
     _report, row = _measured(counters, answering)
@@ -133,10 +157,14 @@ def test_a_journey_whose_own_work_is_under_the_bridge_refuses_and_says_so(tmp):
                for value in row['journeys'].values()), row['journeys']
     why = row['refused'][tiny]
     assert tiny in why, why
-    # The kept total, the startup, the bridge total this journey's own
-    # exclusion list leaves, and the negative residual between them.
-    for number in ('3000', '7000', '2000', '6000'):
+    # The kept total, the bridge total this journey's own exclusion list
+    # leaves, and the negative residual between them. The startup-only
+    # child is NOT among them: it is inside the baseline, and naming it
+    # beside the total it is not subtracted from would be a sentence
+    # describing the arithmetic this change removed.
+    for number in ('1000', '101000', '-100000'):
         assert number in why, (number, why)
+    assert 'startup-only' not in why, why
 
 
 def test_a_counter_that_cannot_count_a_child_subtracts_neither_baseline(tmp):
@@ -147,10 +175,11 @@ def test_a_counter_that_cannot_count_a_child_subtracts_neither_baseline(tmp):
     del tmp
     counters = _journey_contract.counters()
     _report, row = _measured(
-        counters, _profile_counter(counters, 100_000, 1_000), childed=False)
+        counters, _profile_counter(counters, 1_000_000, 90_000),
+        childed=False)
     assert row['startup_only'] is None, row
     assert row['bridge_only'] is None, row
-    assert row['journeys']['mcp-exec']['net'] == [107_000], row
+    assert row['journeys']['mcp-exec']['net'] == [1_007_000], row
 
 
 def test_bridge_only_spawns_the_bridge_and_is_not_a_journey(tmp):
@@ -225,10 +254,13 @@ def test_the_startup_baseline_is_read_through_the_same_reader(tmp):
             main={counters.STARTUP_NAME: 7_000,
                   counters.BRIDGE_NAME: 30_000}.get(name, 100_000),
             request=2_000, imported=3_000, served=5_000)
+        # Two processes, because the classifier reads the PROCESS before it
+        # reads a symbol: a fixture that gave the bridge's threads the
+        # harness's command line would make them the journey's own work.
         for slot, row in enumerate(profile):
             _journey_contract.callgrind_profile(
                 str(directory), name, slot, row['thread'], row['ir'],
-                sorted(row['names']))
+                sorted(row['names']), pid=row['pid'], cmd=row['cmd'])
         return 0, '', ''
 
     with planting(counters,
@@ -250,7 +282,9 @@ def test_the_startup_baseline_is_read_through_the_same_reader(tmp):
     # 7,000.
     assert row['startup_only'] == 17_000, row
     assert row['bridge_only']['mcp-exec'] == 37_000, row
-    assert row['journeys']['mcp-exec']['net'] == [53_000], row
+    # Once, not twice: the bridge-only child's own 37,000 already contains
+    # the interpreter start the 17,000 measured.
+    assert row['journeys']['mcp-exec']['net'] == [70_000], row
 
 
 def main():

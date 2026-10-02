@@ -1,0 +1,27 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2906217
+cmd:  ldconfig -p
+part: 1
+thread: 1
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 313808
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 1396291
+fn=(2) 0x000000000000a240
+cfn=(8) 0x0000000000053f20
+cfn=(26) 0x0000000000052120
+cfn=(82) 0x0000000000009110
+cfn=(508) 0x0000000000052e00
+cfn=(1062) 0x000000000000a420
+cfn=(2263) 0x000000000004cae0'2
+cfn=(2213) 0x000000000004c920'2

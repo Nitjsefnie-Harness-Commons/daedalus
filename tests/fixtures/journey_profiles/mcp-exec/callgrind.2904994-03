@@ -1,0 +1,28 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2904994
+cmd:  python3 server.py
+part: 1
+thread: 3
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 955026815
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 74728
+fn=(896) 0x00000000049683d0
+cfn=(898) free
+fn=(812) 0x0000000000189700
+cfn=(814) malloc
+fn=(884) 0x00000000049683d8
+fn=(1150) 0x0000000000189710
+cfn=(1645) _Py_Dealloc'2
+fn=(4285) method_vectorcall'2
+cfn=(3277) _PyFunction_Vectorcall'2

@@ -1,0 +1,41 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2904725
+cmd:  python3 tests/_journeys.py --journey mcp-exec --root .
+part: 1
+thread: 3
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 1208313406
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 3820164240
+fn=(36312) s_traverse
+cfn=(2750) visit_reachable
+cfn=(2722) visit_decref
+fn=(36286) s_new
+cfn=(9668) PyType_GetSlot
+cfn=(1678) PyType_GenericAlloc
+cfn=(3351) PyObject_CallOneArg'2
+fn=(45640) PyInit__queue
+fn=(45729) once_cell::imp::initialize_or_wait'2
+cfn=(45731) once_cell::imp::OnceCell<T>::initialize::{{closure}}'2
+fn=(45714) PyInit__rust_notify
+fn=(46464) PyInit__rust
+cfn=(47316) PyInit__openssl
+fn=(33280) PyInit__pydantic_core
+fn=(35208) PyInit__decimal
+fn=(50146) PyInit_mmap
+fn=(45594) PyInit__pickle
+fn=(48306) PyInit__brotli
+fn=(35580) PyInit__uuid
+fn=(47330) PyInit__cffi_backend
+cfn=(45682) PyInit__multiprocessing
+cfn=(35622) PyInit__zoneinfo

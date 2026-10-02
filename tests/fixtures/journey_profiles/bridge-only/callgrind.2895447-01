@@ -1,0 +1,70 @@
+# callgrind format
+version: 1
+creator: callgrind-3.24.0
+pid: 2895447
+cmd:  python3 server.py
+part: 1
+thread: 1
+
+
+desc: I1 cache: 
+desc: D1 cache: 
+desc: LL cache: 
+
+desc: Timerange: Basic block 0 - 946465405
+desc: Trigger: Program termination
+
+positions: line
+events: Ir
+summary: 446940136
+fn=(9680) 0x0000000000004dd0
+fn=(9686) PyInit_binascii
+cfn=(3210) PyModuleDef_Init
+fn=(9864) binascii_traverse
+cfn=(3238) PyModule_GetState
+cfn=(2764) visit_reachable
+cfn=(2736) visit_decref
+fn=(9970) PyInit__ssl
+fn=(8420) PyInit__socket
+fn=(18412) PyInit__bisect
+fn=(8566) PyInit_math
+fn=(10374) PyInit_zlib
+fn=(11166) PyInit_fcntl
+fn=(18232) PyInit__blake2
+fn=(18716) PyInit__ctypes
+fn=(11246) PyInit__hashlib
+fn=(9164) PyInit__datetime
+fn=(10640) PyInit__json
+fn=(11222) PyInit__uuid
+cfn=(11419) OPENSSL_init_crypto'2
+cfn=(11301) CRYPTO_THREAD_run_once'2
+fn=(11293) 0x000000000026fde0'2
+fn=(10420) PyInit__bz2
+fn=(8466) PyInit__collections
+cfn=(18560) PyInit_unicodedata
+cfn=(18432) PyInit__random
+cfn=(11184) PyInit__posixsubprocess
+cfn=(11130) PyInit__locale
+cfn=(11102) PyInit_grp
+cfn=(11088) PyInit_pwd
+cfn=(10768) PyInit__typing
+cfn=(10468) PyInit__lzma
+cfn=(9796) PyInit__struct
+cfn=(9698) PyInit__string
+cfn=(9240) PyInit__sre
+cfn=(9020) PyInit_array
+cfn=(8748) PyInit__functools
+cfn=(8588) PyInit_select
+cfn=(8462) PyInit__operator
+cfn=(8456) PyInit_itertools
+cfn=(6536) PyInit_errno
+cfn=(6308) PyInit__stat
+cfn=(5964) PyInit__abc
+cfn=(5936) PyInit__signal
+cfn=(5720) PyInit__codecs
+cfn=(4948) PyInit_time
+cfn=(4710) PyInit_posix
+cfn=(4654) PyInit__io
+cfn=(3754) PyInit__weakref
+cfn=(3692) PyInit__thread
+cfn=(3208) PyInit__imp
