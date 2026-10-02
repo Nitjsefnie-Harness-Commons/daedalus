@@ -156,6 +156,22 @@ def test_a_request_thread_is_a_request_thread_at_any_size(tmp):
         assert classifier.role_of(7, empty) == classifier.REQUEST, total
     assert classifier.role_of(7, empty) != classifier.SERVE
     assert classifier.role_of(7, empty) != classifier.IMPORT
+    # The whole path as well, because a band put back anywhere — in the
+    # role, in the reader, in the sum — is the defect and not a spelling of
+    # it. The import thread is beside this one so the profile is one a
+    # journey could have excluded something from.
+    for total in (3_548_079, 90_000_000_000):
+        rows = [{'pid': 1, 'thread': 1, 'ir': 4_000_000,
+                 'cmd': 'python3 server.py', 'names': empty},
+                {'pid': 1, 'thread': 2, 'ir': 3_800_000_000,
+                 'cmd': 'python3 server.py',
+                 'names': frozenset(
+                     classifier.SIGNATURES[classifier.IMPORT])},
+                {'pid': 1, 'thread': 3, 'ir': total,
+                 'cmd': 'python3 server.py', 'names': empty}]
+        roles, failure = classifier.classify(rows, (classifier.IMPORT,))
+        assert failure is None, (total, failure)
+        assert roles[(1, 3)] == classifier.REQUEST, (total, roles)
 
 
 def test_a_thread_with_no_signature_is_a_request_thread(tmp):
