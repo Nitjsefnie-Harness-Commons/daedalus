@@ -1,21 +1,19 @@
 """Which of a profiler's threads are background work no journey did.
 
 Callgrind reports no thread NAME, and that is a property of the toolchain
-rather than a gap in the arguments: CPython 3.13 does not put a
-`threading.Thread(name=...)` on the OS thread — both a main thread and a
-named one read `python3` from `/proc/<pid>/task/<tid>/comm` — and
-callgrind's only thread option is `--separate-threads`, whose output files
-carry a sequence number and nothing else. So a thread is identified by what
-it IS, read from the profile it wrote.
+rather than a gap in the arguments: CPython 3.13 puts neither a main thread
+nor a `threading.Thread(name=...)` under its name on the OS thread — both
+read `python3` from `/proc/<pid>/task/<tid>/comm` — and callgrind's only
+thread option is `--separate-threads`, whose files carry a sequence number
+and nothing else. So a thread is identified by what it IS, read from the
+profile it wrote.
 
-A slot is not a thread either. Callgrind reuses a slot when a thread exits,
-so one file can hold several short-lived threads: a probe with four equal
-threads and one long one produced five files for six threads, the reuse
-holding two of the equal ones. The SUM does not depend on that — the files
-partition the process's cost and the total is unchanged — so nothing here
-reads a slot as a thread. A role is assigned from a slot's whole cost
-whatever else shares it, which is why the request band is wide and the two
-background bands are not.
+A slot is not a thread either: callgrind reuses one when a thread exits, so
+one file can hold several short-lived threads — a probe with four equal
+threads and one long one produced five files for six threads. The files
+still partition the process's cost, so the total is unchanged; a role is
+assigned from a slot's whole cost whatever else shares it, which is why the
+request band is wide and the two background bands are not.
 
 The bands are what the measurements say. On a journey with the front end
 already paid for: a per-connection request thread is tens of thousands of
@@ -28,32 +26,25 @@ this box: a main thread plus two workers wrote three files headed
 `thread: 1`, `thread: 2`, `thread: 3` — per-pid sequence numbers, not the
 OS thread ids, for a process whose native tid was 1416293 — so nothing in a
 profile says which worker is which. And the two populations a band is asked
-to tell apart OVERLAP in cost: the front end's import is billions, while
-`mcp-exec`'s own round trip measured 1,311,350,558. A ceiling above the
-round trip puts the real import above it too, so no pair of bands
-separates them (issue 1461).
+to tell apart OVERLAP in cost, across runs though not in any one of them:
+the front end's import is billions, while `mcp-exec`'s own round trip
+measured 1,311,350,558, so a ceiling above the round trip puts the real
+import above it too and no pair of bands separates the two (issue 1461).
 
-So the exclusion is not made accurate by a better classifier. A journey
-performs its OWN work on its main thread, where `thread == 1` counts it
-whatever it costs, and the one thing a journey must not count — the front
-end's import — is loaded on a worker of its own, where a band can name it.
-A journey that later moves its work onto a worker has it excluded, which is
-why `tests/test_journey_threads.py` asserts the placement rather than
-trusting it.
+So the exclusion is not made accurate by a better classifier: the remedy for
+a profile is where the work runs, and `role_of` below says which that is.
 
 The same overlap arrives from the BRIDGE side, and there the remedy is the
-mirror image. A bridge request thread answering a multi-megabyte result
-runs to billions of instructions, which is the import band, while the
-bridge's own one-off MCP bootstrap import sits in the same band; a request
-answering a few hundred kilobytes runs to tens of millions, which is the
-serve band, alongside uvicorn's serve loop. So for the large journeys the
-band the exclusion would drop is the band holding the journey's own work,
-and excluding it drops the work the journey exists to measure — the
-bridge-side face of issue 1461. `EXCLUDED` therefore records, per journey,
-the constant each one keeps rather than the work it would lose, and
-`classify` refuses a profile only where the ambiguity actually costs
-something: two threads in a band the journey EXCLUDES. Two threads in a
-band it does not exclude is two threads of counted work.
+mirror image. A request thread answering a multi-megabyte result runs to
+billions of instructions, which is the import band, where the bridge's own
+one-off MCP bootstrap import also sits. So for the large journeys the band
+the exclusion would drop is the band holding the journey's own work, and
+excluding it drops the work the journey exists to measure — the bridge-side
+face of issue 1461. `EXCLUDED` therefore records, per journey, the constant
+each one keeps rather than the work it would lose, and `classify` refuses a
+profile only where the ambiguity actually costs something: two threads in a
+band the journey EXCLUDES. Two threads in a band it does not exclude is two
+threads of counted work.
 
 Anything this cannot read is a REFUSAL naming the thread and its count,
 never a silent inclusion. A mis-sorted profile that quietly sums the thread
@@ -67,8 +58,8 @@ PID = re.compile(r'^pid:\s+(\d+)\s*$', re.M)
 THREAD = re.compile(r'^thread:\s+(\d+)\s*$', re.M)
 CMD = re.compile(r'^cmd:\s*(.*)$', re.M)
 
-# Ir bands, in instructions. The lower bound on the request band is the one
-# that can be checked: a thread that ran fewer than this never entered the
+# Ir bands, in instructions. The request band's lower bound is the one that
+# can be checked: a thread that ran fewer than this never entered the
 # interpreter, so a profile carrying one is not the shape this gate reads.
 IMPORT_FROM = 1_000_000_000
 SERVE_FROM = 10_000_000
@@ -80,24 +71,15 @@ REQUEST = 'request'
 MAIN = 'main'
 ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 
-# The bands as data, because they are part of what a recorded count MEANS and
-# not only how this run reads a profile: a run that moves one of them changes
-# which thread a count excluded, so the artefact records them and a run
-# whose bands differ from the recorded ones compares nothing. MAIN is absent
-# because it is read from a thread's POSITION, not from a size.
+# The bands as data, because a run that moves one of them changes which
+# thread a count excluded, so the artefact records them and a run whose
+# bands differ from the recorded ones compares nothing. MAIN is absent: it
+# is read from a thread's POSITION, not from a size.
 BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
 
-# What each journey stops counting, per journey, and why.
-#
-# THE RULE AN ENTRY MUST OBEY: a journey's exclusion list may never cover
-# work the journey itself caused. A total is the only evidence there is
-# about a background thread, and the bridge's fixed background and a large
-# request overlap in cost, so a band is not a verdict on whose work it is
-# — which means an excluded band that happens to hold the journey's own
-# request thread drops the work the journey exists to measure. That is the
-# same defect as issue 1461, on the bridge side, and the cure is the same:
-# put the work where the count can see it, and count a constant rather
-# than exclude a whole band.
+# What each journey stops counting, per journey, and why. The rule every
+# entry obeys is the module docstring's: an exclusion list may never cover
+# work the journey itself caused.
 #
 # The import applies to every journey, not only the ones that call a tool:
 # the bridge each spawns starts its own MCP listener whatever the journey
@@ -130,13 +112,11 @@ EXCLUDED = {
 def read(directory, prefix):
     """`(rows, failure)` — every thread's total, from the out files.
 
-    A file carrying a `summary:` but no `pid:` or no `cmd:` is a profile
-    this reader has not been written for, and it is NAMED rather than
-    crashed on. Dereferencing a search that found nothing ends the whole
-    measurement in an `AttributeError`, which says nothing about which file
-    was wrong — the same reason the other three refusals carry the thread
-    and its count. A file with no summary at all is not a failure: it is
-    the empty one a process that cost nothing writes.
+    A file carrying a `summary:` but no `pid:` or no `cmd:` is a profile this
+    reader has not been written for, and it is NAMED rather than crashed on:
+    dereferencing a search that found nothing would end the measurement in an
+    `AttributeError` naming no file. A file with no summary at all is not a
+    failure — it is the empty one a process that cost nothing writes.
     """
     rows = []
     for path in sorted(directory.glob(prefix + '.*')):
@@ -169,13 +149,16 @@ def role_of(ir, thread):
     The main thread is read FIRST and whatever its size, because it is the
     thread the process started on and a large total on it is still the main
     thread's work. That is the whole of this classifier's accuracy: every
-    journey runs its own work there, so it counts whatever it costs, and the
-    one thing a journey must not count is loaded on a worker of its own.
+    journey performs its OWN work there, so it counts whatever it costs, and
+    the one thing a journey must not count — the front end's import — is
+    loaded on a worker of its own, where a band can name it. A journey that
+    later moves its work onto a worker has it excluded, which is why
+    `tests/test_journey_threads.py` asserts the placement rather than
+    trusting it.
 
     For a background thread the total is the only evidence there is — no
     header names the worker — and it decides only whether the thread is
-    harness work. It cannot establish that a background thread IS a
-    journey's own work, so no work that matters is put there.
+    harness work, so nothing that matters is put there.
     """
     if thread == 1:
         return MAIN
@@ -198,11 +181,10 @@ def classify(rows, excluded=()):
     two-threads-in-one-band refusal below. Two threads in a band the
     journey EXCLUDES is a genuine ambiguity: the gate has to pick which of
     them is the background it is dropping, and nothing in the profile says
-    which — so it refuses rather than pick. Two threads in a band the
-    journey does NOT exclude is not an ambiguity at all: every thread in
-    it is counted, and two of them is two threads of work. Refusing there
-    would refuse a profile for holding more work than one thread's worth,
-    which is the normal condition of the large journeys.
+    which. Two threads in a band it does NOT exclude is not an ambiguity at
+    all — every thread in it is counted, and refusing there would refuse a
+    profile for holding more work than one thread's worth, which is the
+    normal condition of the large journeys.
     """
     roles = {}
     for row in rows:
@@ -227,7 +209,6 @@ def classify(rows, excluded=()):
 
 
 def excluded_for(journey):
-    """The roles this journey does not count, from the table above."""
     return EXCLUDED.get(journey, ())
 
 
