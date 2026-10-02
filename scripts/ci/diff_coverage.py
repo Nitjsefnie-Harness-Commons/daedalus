@@ -202,6 +202,9 @@ def _analyzer():
     executable statements and borrows the repository config's omit patterns. So
     it is given `data_file=None`, coverage.py's no-disk data, and no open can
     collide with the file the measuring collector already holds (issue 1471).
+    That is all it buys: `_init_data` still runs `ensure_dir_for_file` on the
+    configured path before it consults `_no_disk`, so a named path under
+    directories that do not exist has those created.
     """
     return Coverage(config_file=True, data_file=None)
 

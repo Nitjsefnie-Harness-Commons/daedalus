@@ -92,6 +92,17 @@ def _coverage_file(path):
             os.environ['COVERAGE_FILE'] = previous
 
 
+def _entries(root):
+    """Every path under `root`, relative and sorted.
+
+    One recursive walk rather than `os.listdir`, because a data file written
+    into a subdirectory this run created is the same defect as one written
+    beside the fixtures, and only the walk sees both.
+    """
+    return sorted(str(path.relative_to(root))
+                  for path in Path(root).rglob('*'))
+
+
 def _both_reports(tmp):
     """Write one report per language and return their CLI arguments."""
     coverage_xml = _written_file(tmp, 'coverage.xml', _PYTHON_XML)
@@ -353,7 +364,10 @@ def test_the_reporter_never_opens_the_configured_data_file(tmp):
     with it, which is how the windows-latest coverage leg died with
     WinError 32. The name here points at a path that does not exist, and
     what is asserted is the contract rather than the symptom: the run
-    leaves it alone, on every platform.
+    leaves it alone, on every platform. The named path alone would not
+    be enough — a fix that redirected the data file to some other name
+    would satisfy it and still be the same collision — so the run's own
+    working directory is required to gain no entry either.
     """
     package = Path(tmp) / 'pkg'
     package.mkdir()
@@ -364,10 +378,17 @@ def test_the_reporter_never_opens_the_configured_data_file(tmp):
                          '@@ -0,0 +1 @@\n'
                          '+one = 1\n')
     data_file = Path(tmp) / 'configured-coverage-data'
+    args = _both_reports(tmp)
+    # Every fixture is written before the walk, and _run_main chdirs into tmp,
+    # so any entry appearing after this line is something the run left behind
+    # — wherever it chose to put it, not only at the configured name.
+    before = _entries(tmp)
     with _coverage_file(data_file):
-        status, out = _run_main(tmp, *_both_reports(tmp), '--diff', str(diff))
+        status, out = _run_main(tmp, *args, '--diff', str(diff))
     assert status == 0, (status, out)
     assert not data_file.exists(), data_file
+    after = _entries(tmp)
+    assert after == before, set(after).symmetric_difference(before)
 
 
 if __name__ == '__main__':
