@@ -58,7 +58,27 @@ LIFETIME = 60
 # it writes: a second line would sit in a pipe this suite never drains.
 ARMED = 'watching'
 
-CHILD = '''import sys, time
+# The environment name that tells the child to record what it measured
+# before it ends. `_exit_at_eof` ends the process with `os._exit`, which
+# runs no atexit hook and therefore no coverage save, so without this the
+# three lines it exists to cover read as never run. The wrapper saves and
+# then calls the real `os._exit`, so the process still ends exactly the
+# way the module says it does - what is measured is the same ending, not
+# a different one.
+SAVE = 'DAEDALUS_SAVE_BEFORE_EXIT'
+
+CHILD = '''import os, sys, time
+if os.environ.get({save!r}):
+    import coverage
+    _measure = coverage.Coverage()
+    _measure.start()
+    _ending_process = os._exit
+
+    def _exit(code):
+        _measure.stop()
+        _measure.save()
+        _ending_process(code)
+    os._exit = _exit
 sys.path.insert(0, {skill!r})
 import gh_client
 gh_client.watch_parent()
@@ -78,7 +98,7 @@ def _watcher_child(tmp):
     """The watcher `ci_watch.py` is: arm the pipe, then go on polling."""
     path = os.path.join(tmp, 'watched_child.py')
     with open(path, 'w', encoding='utf-8') as handle:
-        handle.write(CHILD.format(skill=str(SKILL), armed=ARMED))
+        handle.write(CHILD.format(skill=str(SKILL), armed=ARMED, save=SAVE))
     return path
 
 
@@ -91,19 +111,34 @@ def _still_open(descriptor):
     return True
 
 
-def _second_free():
-    """The higher of the next two descriptors this process would be given.
+def _sentinel():
+    """A descriptor, and the two the next `os.pipe` will hand out.
 
-    The pair rather than the lowest free one, because a leaked write end
-    sits exactly where the read end was: `os.pipe` hands out the two
-    lowest free descriptors, `spawn_watched` closes the read one and -
-    unless the path it is there to cover is the one taken - the write
-    one, so a leak shows up as the SECOND moving and the first does not.
+    `os.pipe` allocates the two lowest free descriptors, so a descriptor
+    held open immediately before the call names the pair exactly. That
+    is what lets a row below read whether `spawn_watched` gave both ends
+    back without knowing what numbers they were: the numbers are the
+    sentinel and the two after it, on every platform whose descriptors
+    are allocated lowest-first, and both POSIX and the Windows CRT are.
+    """
+    held = os.open(os.devnull, os.O_RDONLY)
+    return held, held + 1, held + 2
+
+
+def _probe_agrees_with_the_pipe():
+    """Whether the check above can tell a closed descriptor from an open one.
+
+    Without this, a row asserting `not _still_open(n)` passes just as
+    happily when `n` was never open at all - which is what a reader
+    would be told by a suite whose own arithmetic was wrong. A pipe this
+    process holds and then closes answers both ways, here, before any
+    row leans on the answer.
     """
     read_fd, write_fd = os.pipe()
+    assert _still_open(write_fd), write_fd
     os.close(read_fd)
     os.close(write_fd)
-    return write_fd
+    assert not _still_open(write_fd), write_fd
 
 
 def _ended(child):
@@ -184,6 +219,7 @@ def test_the_child_ends_when_the_write_end_closes_and_not_before(tmp):
     client = _client()
     child, write_fd = client.spawn_watched(
         [sys.executable, _watcher_child(tmp)],
+        env=dict(os.environ, **{SAVE: '1'}),
         stdout=subprocess.PIPE, text=True)
     closed = False
     try:
@@ -211,30 +247,26 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
     exist, and every one of those is a descriptor the watcher runs for
     hours never gives back.
 
-    The near miss is the spawn that works, and it is the same probe
-    taken on both sides of the failure: a leaked write end shows up as
-    the second free descriptor moving, because the read end beside it
-    was closed either way.
+    Both ends of that pipe are read back by number, from a descriptor
+    held open across the call so the numbers are known: the read end is
+    what the success path closes too, and it is here as the near miss -
+    a row that checked only the write end would pass a module that gave
+    neither back, which is the leak that would keep a child alive
+    forever.
     """
     client = _client()
+    _probe_agrees_with_the_pipe()
     absent = os.path.join(tmp, 'gh-that-was-never-installed')
-    before = _second_free()
+    sentinel, read_fd, write_fd = _sentinel()
     try:
         client.spawn_watched([absent])
     except OSError as exc:
         assert exc.errno == errno.ENOENT, exc
     else:
         raise AssertionError('a spawn of nothing returned a child')
-    assert _second_free() == before, 'the failed spawn kept a descriptor'
-
-    child, write_fd = client.spawn_watched(
-        [sys.executable, '-c', 'pass'])
-    try:
-        assert child.wait(timeout=LIFETIME) == 0
-    finally:
-        _ended(child)
-    os.close(write_fd)
-    assert _second_free() == before
+    assert not _still_open(read_fd), 'the failed spawn kept its read end'
+    assert not _still_open(write_fd), 'the failed spawn kept its write end'
+    os.close(sentinel)
 
 
 def test_watch_parent_started_by_hand_leaves_the_process_alone(tmp):
