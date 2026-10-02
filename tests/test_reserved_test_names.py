@@ -43,9 +43,8 @@ ROOT = _util.ROOT
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'reserved_names.py'
 ARTIFACT = ROOT / '.github' / 'reserved-test-names.json'
 
-# The residue table each limb's site would need a row in. This is the
-# join the two guards cannot make: the workflow-fixture rule has no table
-# at all, so a fixture name is excused by neither.
+# The residue table each limb's site needs a row in: the join the two
+# guards cannot make, since the fixture rule has no table to excuse one.
 RESIDUE_TABLES = {
     _reserved_names.PYTHON: UNCONSOLIDATED_NAMES,
     _reserved_names.JAVASCRIPT: UNCONSOLIDATED_JS_NAMES,
@@ -80,16 +79,22 @@ _FIXTURES = (
     '    return call(*args)\n')
 
 
+# The two owner modules every generator run needs, as the mapping
+# `_fixture_checkout` and `_planted_tree` both take. Read-only to both.
+_OWNER_TREE = {'tests/_owner.py': _OWNER,
+               'tests/_wffixtures.py': _FIXTURES}
+
+
 def _planted_tree(modules):
     """A source map carrying the two owner modules, plus what is planted.
 
-    A planted site is the liveness every absence assertion in this suite
-    needs: a recogniser that stopped reading the tree reports nothing
-    collides, and nothing collides is what a healthy tree looks like.
-    The extras arrive as one mapping rather than unpacked, because a
-    `**`-unpacked call is a launch the launch audit cannot place.
+    A planted site is the liveness every absence assertion here needs: a
+    recogniser that stopped reading reports nothing collides, and nothing
+    collides is what a healthy tree looks like. The extras arrive as one
+    mapping rather than unpacked, because a `**`-unpacked call is a launch
+    the launch audit cannot place.
     """
-    sources = {'tests/_owner.py': _OWNER, 'tests/_wffixtures.py': _FIXTURES}
+    sources = dict(_OWNER_TREE)
     sources.update(modules)
     return sources
 
@@ -128,31 +133,26 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     """No reserved name is re-implemented without a row in its own table.
 
     WHAT THIS ADDS, MEASURED AND STATED. Against this tree its sites are
-    set-equal to `reimplementations` union `js_reimplementations` -- a
-    set of 192, and each difference in both directions empty -- and the
-    reason is structural rather than incidental.
-    `tests/_wffixtures.py` IS a `tests/_*.py` module, so the three
-    fixture names that are definitions are already in the python limb,
-    and the two that are not (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are
-    `Assign` binds, which `definitions` never reports. While the fixture
-    module remains a shared helper, the union therefore adds nothing
+    set-equal to `reimplementations` union `js_reimplementations`, each
+    difference in both directions empty, and the reason is structural
+    rather than incidental. `tests/_wffixtures.py` IS a `tests/_*.py`
+    module, so the three fixture names that are definitions are already
+    in the python limb, and the two that are not (`BLOCK_NEEDS`,
+    `BLOCK_OUTPUTS`) are `Assign` binds, which `definitions` never
+    reports; while it remains a shared helper the union adds nothing
     HERE.
 
     `len(residue_sites())` is not that set's size, and both are worth
-    knowing. The residue tables are keyed `(path, name)`, and two
-    modules declare a reserved JavaScript name more than once, so the
-    list carries three rows the set does not:
-    `tests/_gm_harness.py::makeStorage` twice and
-    `tests/test_gm_transfers.py::flushMessages` three times. The equality is
-    about the set, because that is what the tables key on; the count is
-    about the list, because that is what a refusal prints.
+    knowing. The tables are keyed `(path, name)` and two modules declare
+    a reserved JavaScript name more than once, so the list carries three
+    rows the set does not: `tests/_gm_harness.py::makeStorage` twice and
+    `tests/test_gm_transfers.py::flushMessages` three times. The equality
+    is about the set, because that is what the tables key on; the count
+    is about the list, because that is what a refusal prints.
 
     It is kept rather than deleted for the day that stops being true: a
     fixture module that is not a shared helper puts its names in the
     union and nowhere else, and this is the statement that would notice.
-    The fixture limb beside it is the half that is not a restatement
-    today, and the single entry point both of them make is the other
-    half of the issue's ask.
     """
     del tmp
     unallowed = sorted(
@@ -162,6 +162,30 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     assert not unallowed, (
         'reserved names re-implemented with no row in the matching residue '
         'table:\n' + '\n'.join(unallowed))
+
+
+def test_no_allowance_row_names_a_dead_site(tmp):
+    """A row claims one LIVE site; both halves of that must hold.
+
+    Both tables: a control that reads one of a pair is a half-control. A
+    stale row is a refusal, and a row with no reason is worse, because
+    nothing tells a reader which of the two it is looking at.
+    """
+    del tmp
+    for limb, table in sorted(RESIDUE_TABLES.items()):
+        live = {(s.path, s.name)
+                for s in _reserved_names.residue_sites() if s.limb == limb}
+        assert live, f'the {limb} residue reader derived no site at all'
+        stale = sorted(k for k in table if k not in live)
+        assert not stale, f'{limb} rows name no live site: {stale}'
+        silent = sorted(k for k in table if not table[k].strip())
+        assert not silent, f'{limb} rows carry no justification: {silent}'
+    # The oracle is live: the reader finds a site planted in a synthetic
+    # tree, so "no stale row" is not a green over a reader that read nothing.
+    planted = _planted_tree({'tests/test_planted.py':
+                             'def _placed_helper(value):\n    return value\n'})
+    seen = [s.name for s in _reserved_names.residue_sites(planted)]
+    assert '_placed_helper' in seen, seen
 
 
 def test_an_allowance_row_may_not_name_a_branch_added_declaration(tmp):
@@ -188,11 +212,11 @@ def test_an_allowance_row_may_not_name_a_branch_added_declaration(tmp):
 def test_no_workflow_fixture_name_is_bound_outside_its_module(tmp):
     """The fixture limb has no residue table, so nothing excuses a shadow.
 
-    Every one of them is read from `tests/_wffixtures.py` rather than from
-    the names the boundary rule hardcodes, so a fixture added there is
-    covered by this statement on the day it is added — and a bind the
-    boundary rule's own walk cannot see is caught here, because `scan`
-    reads the walrus, the `for` target and the `except ... as` too.
+    Every one is read from `tests/_wffixtures.py` rather than from names
+    the boundary rule hardcodes, so a fixture added there is covered on the
+    day it is added -- and a bind that rule's own walk cannot see is caught
+    here, because `scan` reads the walrus, the `for` target and
+    `except ... as` too.
     """
     del tmp
     found = [f'{site.path}::{site.name}'
@@ -265,11 +289,11 @@ def test_a_planted_fixture_collision_is_reported(tmp):
 def test_an_anchor_refuses_an_ambiguous_position(tmp):
     """A plant must name one place, or it is a coin toss.
 
-    The anchors disagree about a second occurrence, and the disagreement
-    is the property: two of them refuse it, and `first_call_line` takes
-    the EARLIER line, which is a promise about order that the name alone
-    does not make. Each refusal carries its own `else`, because an anchor
-    that accepted the position is a different defect from a wrong message.
+    The anchors disagree about a second occurrence and that disagreement
+    is the property: two refuse it, and `first_call_line` takes the EARLIER
+    line, a promise about order the name alone does not make. Each carries
+    its own `else`: accepting the position is a defect apart from a wrong
+    message.
     """
     del tmp
     two = ('def _helper(tmp):\n    seed(tmp)\n    seed(tmp)\n'
@@ -295,9 +319,9 @@ def test_this_suite_binds_no_reserved_name(tmp):
     """Self-application: the suite is measured by the union it derives.
 
     A `tests/` module is bound by the same rules as any other, so a name
-    this file binds that a `tests/_*.py` module already owns is a
-    collision this suite created. The entry point and no other name is
-    exempt, the guard the recogniser already applies.
+    this file binds that a `tests/_*.py` module already owns is a collision
+    it created -- and only the entry point is exempt, the guard the
+    recogniser already applies.
     """
     del tmp
     path = 'tests/test_reserved_test_names.py'
@@ -369,11 +393,8 @@ def test_the_generator_writes_exactly_a_fresh_derivation_gives(tmp):
     and a missing one is created rather than refused.
     """
     policy = _contract()
-    tree = _fixture_checkout(tmp, {
-        'tests/_owner.py': _OWNER,
-        'tests/_wffixtures.py': _FIXTURES,
-        'tests/test_suite.py': 'def test_one():\n    pass\n',
-    }, 'generated')
+    extra = {'tests/test_suite.py': 'def test_one():\n    pass\n'}
+    tree = _fixture_checkout(tmp, {**_OWNER_TREE, **extra}, 'generated')
     artifact = tree / '.github' / 'reserved-test-names.json'
     result = _run_generator(tree, artifact, '--tighten')
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -404,10 +425,7 @@ def _live_sources_of(tree):
 
 def test_a_noop_tighten_writes_nothing(tmp):
     policy = _contract()
-    tree = _fixture_checkout(tmp, {
-        'tests/_owner.py': _OWNER,
-        'tests/_wffixtures.py': _FIXTURES,
-    }, 'noop')
+    tree = _fixture_checkout(tmp, _OWNER_TREE, 'noop')
     artifact = tree / '.github' / 'reserved-test-names.json'
     first = _run_generator(tree, artifact, '--tighten')
     assert first.returncode == 0, (first.stdout, first.stderr)
@@ -438,10 +456,7 @@ def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
     """
     policy = _contract()
     import thresholds  # the contract put scripts/ci on the path
-    tree = _fixture_checkout(tmp, {
-        'tests/_owner.py': _OWNER,
-        'tests/_wffixtures.py': _FIXTURES,
-    }, 'atomic')
+    tree = _fixture_checkout(tmp, _OWNER_TREE, 'atomic')
     target = Path(tmp) / 'reserved.json'
     modes = ['--tree', str(tree), '--artifact', str(target)]
     # Drifted, so `--tighten` takes the write path rather than reporting
@@ -461,10 +476,7 @@ def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
 
 def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
     policy = _contract()
-    tree = _fixture_checkout(tmp, {
-        'tests/_owner.py': _OWNER,
-        'tests/_wffixtures.py': _FIXTURES,
-    }, 'drift')
+    tree = _fixture_checkout(tmp, _OWNER_TREE, 'drift')
     artifact = tree / '.github' / 'reserved-test-names.json'
     assert _run_generator(tree, artifact, '--tighten').returncode == 0
     derived = policy.load(artifact)
@@ -525,10 +537,7 @@ def test_a_document_that_is_not_the_generated_form_is_refused_by_name(tmp):
     assert 'Traceback' not in result.stderr
     # A tree that is not a checkout, and a committed set that is not
     # there: both refuse with one line rather than a traceback.
-    tree = _fixture_checkout(tmp, {
-        'tests/_owner.py': _OWNER,
-        'tests/_wffixtures.py': _FIXTURES,
-    }, 'absent')
+    tree = _fixture_checkout(tmp, _OWNER_TREE, 'absent')
     result = _run_generator(tree, tree / '.github' / 'absent.json')
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert result.stderr.startswith(
@@ -538,12 +547,11 @@ def test_a_document_that_is_not_the_generated_form_is_refused_by_name(tmp):
 def test_a_tree_carrying_the_script_alone_refuses_by_name(tmp):
     """The one refusal path the import direction creates, pinned.
 
-    The script reaches out of its own directory for the derivation, so a
+    The script reaches into its own directory for the derivation, so a
     checkout carrying the script and its tests but not
-    `tests/_reserved_names.py` is a shape an operator produces by copying
-    one file. An import at module scope would traceback before `main`
-    could refuse, so the other four refusals this suite pins would have
-    been the only ones that refused.
+    `tests/_reserved_names.py` is a shape an operator makes by copying one
+    file. A module-scope import would traceback before `main` could refuse,
+    leaving the other four refusals here the only ones refusing.
     """
     bare = _fixture_checkout(tmp, {
         'scripts/ci/reserved_names.py': POLICY_SOURCE.read_text(
@@ -564,12 +572,11 @@ def test_a_tree_carrying_the_script_alone_refuses_by_name(tmp):
 def test_a_derivation_that_raises_on_import_refuses_by_name(tmp):
     """Which `ImportError` the refusal tuple means, stated rather than left.
 
-    The tuple catches `ImportError`, not only the absence of the module,
-    so a `tests/_reserved_names.py` that raises on its own import is a
-    one-line refusal naming the error rather than a traceback. That is
-    the wider reading this pins as intended; a narrower one would be
-    `ModuleNotFoundError`, and the two are told apart by whether the
-    file is there at all.
+    The tuple catches `ImportError`, not only the absent module, so a
+    `tests/_reserved_names.py` raising on its own import is a one-line
+    refusal naming the error rather than a traceback. That is the wider
+    reading this pins; a narrower one would be `ModuleNotFoundError`, and
+    the two differ by whether the file is there at all.
     """
     broken = _fixture_checkout(tmp, {
         'scripts/ci/reserved_names.py': POLICY_SOURCE.read_text(
@@ -592,8 +599,7 @@ def _generator(policy, argv):
     """(status, stdout, stderr) for one `main` run, captured in-process.
 
     The real-CLI tests below prove the shipped command; this reaches
-    `main`'s own body, which a child process recording no coverage would
-    otherwise leave dark.
+    `main`'s own body, which a coverage-recording child leaves dark.
     """
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -642,10 +648,7 @@ def test_the_generator_reads_the_tracked_tree_it_is_pointed_at(tmp):
     not part of the set the committed document states.
     """
     policy = _contract()
-    tree = _fixture_checkout(tmp, {
-        'tests/_owner.py': _OWNER,
-        'tests/_wffixtures.py': _FIXTURES,
-    }, 'tracked')
+    tree = _fixture_checkout(tmp, _OWNER_TREE, 'tracked')
     (tree / 'tests' / 'test_scratch.py').write_text(
         'def test_scratch():\n    pass\n', encoding='utf-8')
     derived = policy.document(policy.tracked_sources(tree))
