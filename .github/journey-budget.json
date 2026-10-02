@@ -31,12 +31,12 @@
     "segment-relay": "8e6bc610743d21359bde55048c8d96f0676c318c91f70f58cca591c3647e5142"
   },
   "journeys": {
-    "cdp-result": 892250078,
-    "command-round-trip": 777220350,
-    "dashboard-fanout": 771749103,
-    "mcp-exec": 1287399636,
+    "cdp-result": 891241052,
+    "command-round-trip": 775706062,
+    "dashboard-fanout": 771084913,
+    "mcp-exec": 1286651626,
     "net-capture": 7419354916,
-    "screenshot": 840281720,
-    "segment-relay": 834936173
+    "screenshot": 838948085,
+    "segment-relay": 834741374
   }
 }
