@@ -19,9 +19,10 @@ It reaches that by counting: how many declarations the head binds that
 name to at that path, against how many the merge base bound it to. A
 digest of each body would read an EDIT to a declaration the base already
 carries as an authorship of it, and a path list cannot tell a site the
-branch wrote from one it did not, and this branch edits fifteen of the
-twenty-seven files the JavaScript residue lives in, so a path-scoped
-boundary would forbid recording rows for sites that predate it.
+branch wrote from one it did not. A path-scoped boundary would forbid
+recording rows for sites that PREDATE the branch: twenty-eight files
+carry a JavaScript residue row today, and a branch that edits any one of
+them could not then add a row for a site its own edit did not create.
 
 A checkout that cannot answer says WHICH WAY in `reason`, and the
 two are not interchangeable. `UNREADABLE` is a REFUSAL the caller must
