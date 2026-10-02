@@ -86,7 +86,7 @@ SHAPE_REMEDY = journey_report.SHAPE_REMEDY
 UNMEASURED_REMEDY = journey_report.UNMEASURED_REMEDY
 TOOLCHAIN_REMEDY = journey_report.TOOLCHAIN_REMEDY
 SHA_REMEDY = journey_report.SHA_REMEDY
-BANDS_REMEDY = journey_report.BANDS_REMEDY
+SIGNATURES_REMEDY = journey_report.SIGNATURES_REMEDY
 THREADS_REMEDY = journey_report.THREADS_REMEDY
 REMEDY_FOR = journey_report.REMEDY_FOR
 
@@ -353,12 +353,12 @@ def _recorded_gates(report):
     """Every way a count is only comparable against what was recorded.
 
     Four, on the same terms: a different toolchain, a different set of
-    excluded threads, different band thresholds, and a different journey
-    rendering are four different quantities, and a count measured against
-    any of them says nothing about the code. A gate whose value has never
-    been recorded is the same refusal — there is nothing to have differed
-    from, and falling through to comparing would compare a count against a
-    question that was never asked.
+    excluded threads, a different table of signatures the roles were read
+    by, and a different journey rendering are four different quantities, and
+    a count measured against any of them says nothing about the code. A
+    gate whose value has never been recorded is the same refusal — there is
+    nothing to have differed from, and falling through to comparing would
+    compare a count against a question that was never asked.
     """
     def _recorded(field):
         """The recorded map, or None when it is absent or holds nothing.
@@ -385,9 +385,9 @@ def _recorded_gates(report):
          'recorded': _recorded('excluded_threads'),
          'measured': lambda measured: measured.get('excluded_threads'),
          'differs': exclusion_diff},
-        {'subject': 'thread bands', 'remedy': BANDS_REMEDY,
-         'recorded': _recorded('thread_bands'),
-         'measured': lambda measured: journey_threads.BANDS,
+        {'subject': 'thread signatures', 'remedy': SIGNATURES_REMEDY,
+         'recorded': _recorded('thread_signatures'),
+         'measured': lambda measured: journey_threads.SIGNATURES,
          'differs': map_diff},
         {'subject': 'journey shas', 'remedy': SHA_REMEDY,
          'recorded': _recorded('shas'),

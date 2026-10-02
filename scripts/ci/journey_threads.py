@@ -11,50 +11,63 @@ profile it wrote.
 A slot is not a thread either: callgrind reuses one when a thread exits, so
 one file can hold several short-lived threads — a probe with four equal
 threads and one long one produced five files for six threads. The files
-still partition the process's cost, so the total is unchanged; a role is
-assigned from a slot's whole cost whatever else shares it, which is why the
-request band is wide and the two background bands are not.
+still partition the process's cost, so the total is unchanged.
 
-The bands are what the measurements say. On a journey with the front end
-already paid for: a per-connection request thread is tens of thousands of
-instructions, a longer request thread about a million, uvicorn's serve
-thread tens of millions, the front end's import billions. Each band clears
-the next by a factor of ten.
+A role used to be read from a thread's INSTRUCTION TOTAL against fixed
+bands. It is read from what the thread EXECUTED instead, because a total is
+a cost proxy for identity and the two populations the bands were asked to
+tell apart overlap in cost: `command-round-trip`'s own per-connection
+request thread measures 3,548,079 Ir, 2.82x under the serve floor, so the
+day that work grows past it the thread reads as the background it excludes
+and the journey's own work silently leaves the count (issue 1466). No
+threshold fixes that, because the overlap is in the populations.
 
-A total can place a BACKGROUND thread and settle nothing else. Measured on
-this box: a main thread plus two workers wrote three files headed
-`thread: 1`, `thread: 2`, `thread: 3` — per-pid sequence numbers, not the
-OS thread ids, for a process whose native tid was 1416293 — so nothing in a
-profile says which worker is which. And the two populations a band is asked
-to tell apart OVERLAP in cost, across runs though not in any one of them:
-the front end's import is billions, while `mcp-exec`'s own round trip
-measured 1,311,350,558, so a ceiling above the round trip puts the real
-import above it too and no pair of bands separates the two (issue 1461).
+There is no Python-level identity in a callgrind profile to read either —
+zero `.py`, zero `uvicorn`, zero `asyncio` names anywhere, because CPython
+runs every thread through the same C entry points. What IS available is
+CPython's own C symbol set, and it separates the populations cleanly.
+Measured on this box, CPython 3.13.14 under valgrind 3.24.0 with
+`--separate-threads=yes`: two threads in one process, an asyncio tick loop
+and a blocking socket worker, share 89 of their 280 and 484 distinct
+names. Unique to the loop thread and to nothing else: `TaskObj_dealloc`,
+`TaskObj_finalize`, `TaskStepMethWrapper_dealloc`, `FutureIter_iternext`,
+`FutureObj_dealloc`, `FutureObj_finalize`, `PyGen_am_send`. Unique to the
+importing worker: `import_find_and_load`, `_PyImport_RunModInitFunc`.
+`PyInit_<name>` belongs to C extension modules and the front end is pure
+Python, so the import is read from the machinery that executes a module
+body rather than from a per-module initialiser.
 
-So the exclusion is not made accurate by a better classifier: the remedy for
-a profile is where the work runs, and `role_of` below says which that is.
+A slot's whole cost is still assigned from one role, so a signature says
+what the slot spent its life on, not which of the threads that shared it
+was which. Nothing rests on that today — a journey's own work runs on the
+main thread, which is read by POSITION and first — and
+`tests/test_journey_threads.py` asserts the placement rather than trusting
+it.
 
-The same overlap arrives from the BRIDGE side, and there the remedy is the
-mirror image. A request thread answering a multi-megabyte result runs to
-billions of instructions, which is the import band, where the bridge's own
-one-off MCP bootstrap import also sits. So for the large journeys the band
-an exclusion would COVER is the band holding the journey's own work — and
-covering it does not drop that work quietly: the bridge's constant thread
-in the band sits there beside it, so for as long as it does `classify`
-finds two threads in an excluded band and refuses, the count comes back
-unavailable and the gate fails. That is loud, but it rests on the companion
-being there — thread layout, not a property of the journey — so the journeys
-below take an exclusion that does not depend on it. That is the bridge-side
-face of issue 1461. `EXCLUDED` therefore
-records, per journey, the constant each one keeps rather than the work it
-would cover, and `classify` refuses a profile only where the ambiguity
-actually costs something: two threads in a band the journey EXCLUDES. Two
-threads in a band it does not exclude is two threads of counted work.
+What each journey stops counting is in `EXCLUDED`, and `request` is in no
+list: a request thread's role no longer depends on how big it got, so no
+journey can exclude one. That is the whole of the fix, and the rest of the
+table is per journey and unchanged:
+
+- Every journey's profile carries the bridge's one-off MCP bootstrap
+  import — the bridge starts its own front-end listener whatever the
+  journey asks of it — and every journey except `net-capture` excludes it.
+- `command-round-trip` and `dashboard-fanout` also exclude the serve
+  thread: they exercise the bridge's HTTP surface and none of the front
+  end's event loop, so the loop's idle tick is not their work.
+- `mcp-exec` calls that loop, so its tick stays in as the named residual.
+- `net-capture` is the one that keeps the import. Its own request thread
+  measured 2.12 billion instructions and USED to land in the import band,
+  beside the bootstrap import, so excluding the import there would have
+  dropped the very work the journey exists to measure. Identity
+  classification removes that reason, and the list is left as it was: it
+  is the one the recorded counts were measured under, and the roles it
+  names are now settled by signature, so nothing forces it either way.
 
 Anything this cannot read is a REFUSAL naming the thread and its count,
-never a silent inclusion. A mis-sorted profile that quietly sums the thread
-the gate exists to exclude is the worst failure this harness has, and it is
-invisible in the number it produces.
+never a silent inclusion. A mis-sorted profile that quietly sums the
+thread the gate exists to exclude is the worst failure this harness has,
+and it is invisible in the number it produces.
 """
 import re
 
@@ -62,12 +75,18 @@ SUMMARY = re.compile(r'^summary:\s+(\d+)\s*$', re.M)
 PID = re.compile(r'^pid:\s+(\d+)\s*$', re.M)
 THREAD = re.compile(r'^thread:\s+(\d+)\s*$', re.M)
 CMD = re.compile(r'^cmd:\s*(.*)$', re.M)
+# `fn=(<id>) <name>` declares a symbol; a bare `fn=(<id>)` repeats one
+# declared earlier in the same file and names nothing, so it is not matched.
+FN = re.compile(r'^fn=\(\d+\)[ \t]+(\S.*?)[ \t]*$', re.M)
+# Callgrind writes a clone of a symbol as the symbol followed by `'N`. A
+# clone is the same function, so it is the same signature member.
+CLONE = re.compile(r"'\d+$")
 
-# Ir bands, in instructions. The request band's lower bound is the one that
-# can be checked: a thread that ran fewer than this never entered the
-# interpreter, so a profile carrying one is not the shape this gate reads.
-IMPORT_FROM = 1_000_000_000
-SERVE_FROM = 10_000_000
+# Ir floor for the SHAPE of a profile, and nothing else: a thread that ran
+# fewer instructions than this never entered the interpreter, so a profile
+# carrying one is not the shape this gate reads. It decides no role, and it
+# is not recorded — a run's shape is not a quantity a count was taken
+# against.
 REQUEST_FROM = 1_000
 
 IMPORT = 'front-end-import'
@@ -76,70 +95,56 @@ REQUEST = 'request'
 MAIN = 'main'
 ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 
-# The bands as data, because a run that moves one of them changes which
-# thread a count excluded, so the artefact records them and a run whose
-# bands differ from the recorded ones compares nothing. MAIN is absent: it
-# is read from a thread's POSITION, not from a size.
-BANDS = {IMPORT: IMPORT_FROM, SERVE: SERVE_FROM, REQUEST: REQUEST_FROM}
+# What a CPython asyncio event loop is MADE of: the task and future
+# objects it steps, the wrapper it resumes a coroutine through, and the
+# generator send that drives one. Measured as exclusive to a loop-running
+# thread — see the module docstring.
+EVENT_LOOP_SIGNATURE = (
+    'FutureIter_iternext',
+    'FutureObj_dealloc',
+    'FutureObj_finalize',
+    'PyGen_am_send',
+    'TaskObj_dealloc',
+    'TaskObj_finalize',
+    'TaskStepMethWrapper_dealloc',
+)
 
-# What each journey stops counting, per journey, and why. The rule every
-# entry obeys is the module docstring's: an exclusion list may never cover
-# work the journey itself caused. NO control enforces it — settling it takes
-# a measurement, not a structural check — and the measurement discharging it
-# is a per-journey thread table: for each journey, the thread carrying its
-# own request work, the role that thread falls in, its Ir against the band's
-# threshold, and whether it is kept. Nothing in the tree reproduces that
-# table, so the entries below are evidence-backed rather than checked, and
-# re-measuring it is what would re-open the question.
-#
-# The import applies to every journey, not only the ones that call a tool:
-# the bridge each spawns starts its own MCP listener whatever the journey
-# asks of it, so the bootstrap import thread is real in all of them.
-#
-# The non-MCP journeys exercise the bridge's HTTP surface and nothing of
-# the front end's event loop, so the loop's idle tick is not their work.
-# `mcp-exec` calls that loop, so its tick stays in as the named residual.
-#
-# Three of the four journeys this branch adds exclude the import ALONE, and
-# that is what keeps the rule above true for them: no band their own request
-# thread can reach is one they exclude, so the work counts in whatever band
-# it lands and growth moves the count instead of leaving a thread the gate
-# cannot place. It is a narrow rule, not a safe default, and `screenshot`
-# shows what the serve band instead would rest on. Its own request thread
-# measured 6,603,084 instructions — on a developer box running about 12.7%
-# hot against the runner that records the budgets and on a different
-# toolchain (valgrind 3.24.0 against 3.22.0, CPython 3.13.14 against
-# 3.13.15), so that figure is this machine's and not the runner's. On
-# growth it would cross into the band the bridge's constant serve loop
-# already occupies, and `classify` would find two threads in an excluded
-# band: a REFUSAL, `kept=None` and the gate exiting 1. Loud, but resting on
-# the companion happening to be there — thread layout, not a property of the
-# journey. The import alone makes the count robust instead and removes the
-# dependence outright. So the test is whether a journey's own work can CROSS
-# a floor into a band it excludes, never what it measures today: a thread
-# already past every floor above it cannot cross one.
-#
-# `net-capture` is the fourth and is past them all. Its own request thread
-# runs to 2.12 billion instructions, which IS the import band, where the
-# bridge's one-off MCP bootstrap import also sits: excluding the import there
-# would drop the very work the journey exists to measure, so it excludes the
-# serve band instead and keeps the import — the same trade `cdp-result`
-# makes from the other side. The recorded budget for each says so in its
-# journey's docstring, because a multi-billion figure for one journey
-# otherwise reads as a bug.
-EXCLUDED = {
-    'command-round-trip': (IMPORT, SERVE),
-    'dashboard-fanout': (IMPORT, SERVE),
-    'mcp-exec': (IMPORT,),
-    'screenshot': (IMPORT,),
-    'segment-relay': (IMPORT,),
-    'cdp-result': (IMPORT,),
-    'net-capture': (SERVE,),
-}
+# What executing a module body is made of: the import finding and loading a
+# module, and the machinery that runs an initialiser. The front end's
+# basenames cannot be named here — `daedalus_mcp/*.py` is pure Python and
+# has no `PyInit_<name>` of its own — so the signature is the machinery
+# `mcp_bootstrap` reaches it through.
+MODULE_INIT_SIGNATURE = (
+    '_PyImport_RunModInitFunc',
+    'import_find_and_load',
+)
+
+# The table that puts a thread in a role, by role, so the artefact records
+# the one a recorded count was classified under and a run that read a
+# profile by different symbols compares nothing. It replaced the `Ir` bands
+# this module used to carry, for the reason the docstring gives. MAIN is
+# absent: it is read from a thread's POSITION. `request` is absent: it is
+# the residual, claimed by no signature.
+SIGNATURES = {SERVE: sorted(EVENT_LOOP_SIGNATURE),
+              IMPORT: sorted(MODULE_INIT_SIGNATURE)}
+
+
+def _carries(names, signature):
+    """Every member of `signature` among `names`, clones folded onto the
+    symbol they are a clone of. All of them, not one: a thread that touched
+    a member once is not the thread the signature describes."""
+    seen = {CLONE.sub('', name) for name in names}
+    return all(member in seen for member in signature)
 
 
 def read(directory, prefix):
-    """`(rows, failure)` — every thread's total, from the out files.
+    """`(rows, failure)` — every thread's total and names, from the out
+    files.
+
+    `names` is the set of symbols the file's `fn=` lines DECLARE. A line
+    carrying an id and no name repeats a name declared earlier and adds
+    nothing, and the id is left out rather than turned into a name of its
+    own.
 
     A file carrying a `summary:` but no `pid:` or no `cmd:` is a profile this
     reader has not been written for, and it is NAMED rather than crashed on:
@@ -168,36 +173,43 @@ def read(directory, prefix):
         rows.append({'pid': int(pid.group(1)),
                      'thread': int(thread.group(1)),
                      'ir': int(found.group(1)),
-                     'cmd': cmd.group(1).strip()})
+                     'cmd': cmd.group(1).strip(),
+                     'names': frozenset(FN.findall(text))})
     return rows, None
 
 
-def role_of(ir, thread):
-    """The role one thread's own total puts it in, or None if it fits none.
+def role_of(thread, names):
+    """The role one thread's own executed symbols put it in.
 
-    The main thread is read FIRST and whatever its size, because it is the
-    thread the process started on and a large total on it is still the main
-    thread's work. That is the whole of this classifier's accuracy: every
-    journey performs its OWN work there, so it counts whatever it costs, and
-    the one thing a journey must not count — the front end's import — is
-    loaded on a worker of its own, where a band can name it. A journey that
-    later moves its work onto a worker has it excluded, which is why
-    `tests/test_journey_threads.py` asserts the placement rather than
-    trusting it.
+    The main thread is read FIRST and whatever its size and whatever it
+    executed, because it is the thread the process started on and a large
+    total on it is still the main thread's work. That is the whole of this
+    classifier's accuracy: every journey performs its OWN work there, so it
+    counts whatever it costs.
 
-    For a background thread the total is the only evidence there is — no
-    header names the worker — and it decides only whether the thread is
-    harness work, so nothing that matters is put there.
+    The two background roles are then read from identity, and the order is
+    the precedence: a thread carrying BOTH signatures is the event loop. The
+    loop's family is exclusive to a thread running a loop, while module
+    execution is a property of any thread that imported anything, so the
+    loop is the more specific claim and the only one of the two that is
+    unambiguous.
+
+    A thread no signature claims is `request`, and that is stated rather than
+    left to the ladder's absence: it is a worker doing the journey's own
+    work, `request` is excluded by no journey, and it counts. There is no
+    size left to fall back to, which is the defect being removed — a role
+    must not be bought with a threshold when the thing that decides it is
+    what the thread ran.
+
+    `tests/test_journey_threads.py` pins every one of those four steps.
     """
     if thread == 1:
         return MAIN
-    if ir >= IMPORT_FROM:
-        return IMPORT
-    if ir >= SERVE_FROM:
+    if _carries(names, EVENT_LOOP_SIGNATURE):
         return SERVE
-    if ir >= REQUEST_FROM:
-        return REQUEST
-    return None
+    if _carries(names, MODULE_INIT_SIGNATURE):
+        return IMPORT
+    return REQUEST
 
 
 def classify(rows, excluded=()):
@@ -207,23 +219,27 @@ def classify(rows, excluded=()):
     what could not be read, or None.
 
     `excluded` is the journey's exclusion list, and it decides only the
-    two-threads-in-one-band refusal below. Two threads in a band the
-    journey EXCLUDES is a genuine ambiguity: the gate has to pick which of
-    them is the background it is dropping, and nothing in the profile says
-    which. Two threads in a band it does NOT exclude is not an ambiguity at
-    all — every thread in it is counted, and refusing there would refuse a
-    profile for holding more work than one thread's worth, which is the
-    normal condition of the large journeys.
+    two-threads-in-one-role refusal below. Two threads of a role the journey
+    EXCLUDES is a genuine ambiguity: the gate has to pick which of them is
+    the background it is dropping, and nothing in the profile says which.
+    Two threads of a role it does NOT exclude is not an ambiguity at all —
+    every one of them is counted, and refusing there would refuse a profile
+    for holding more work than one thread's worth, which is the normal
+    condition of the large journeys.
     """
     roles = {}
     for row in rows:
-        found = role_of(row['ir'], row['thread'])
-        if found is None:
+        # The floor is a shape check and is asked BEFORE the role is read,
+        # so a profile this gate cannot have been written for is refused
+        # whatever its symbols say rather than classified off them.
+        if row['ir'] < REQUEST_FROM:
             return {}, (f'thread {row["thread"]} of pid {row["pid"]} ran '
                         f'{row["ir"]} instructions, which is below the '
-                        f'{REQUEST_FROM} the request band starts at, so this '
-                        'profile is not the shape the journey budget reads')
-        roles[(row['pid'], row['thread'])] = found
+                        f'{REQUEST_FROM} a thread that entered the '
+                        'interpreter starts at, so this profile is not the '
+                        'shape the journey budget reads')
+        roles[(row['pid'], row['thread'])] = role_of(
+            row['thread'], row['names'])
     for pid in {pid for pid, _thread in roles}:
         for role in (IMPORT, SERVE):
             if role not in excluded:
@@ -231,9 +247,10 @@ def classify(rows, excluded=()):
             slots = sorted(thread for (owner, thread), name in roles.items()
                            if owner == pid and name == role)
             if len(slots) > 1:
-                return {}, (f'pid {pid} has {len(slots)} threads in the '
-                            f'excluded {role} band ({slots}), so which of '
-                            'them is the one the gate excludes cannot be told')
+                return {}, (f'pid {pid} has {len(slots)} threads carrying '
+                            f'the excluded {role} signature ({slots}), so '
+                            'which of them is the one the gate excludes '
+                            'cannot be told')
     return roles, None
 
 
@@ -248,7 +265,10 @@ def total_for(rows, journey, unread=None):
     read at all arrives as `unread` and is passed straight through, and a
     journey that should have a background thread and does not is a failure:
     the exclusion is part of what the count means, and a profile without
-    the thread is a profile this gate has not read.
+    the thread is a profile this gate has not read. That second refusal is
+    MORE load-bearing now that roles come from symbols — a classifier that
+    stopped recognising the serve loop no longer mislabels that thread, it
+    stops finding it at all, and this is what says so.
     """
     if unread is not None:
         return None, excluded_for(journey), unread
@@ -261,10 +281,29 @@ def total_for(rows, journey, unread=None):
     if missing:
         return None, excluded, (
             f'the {journey} journey excludes {missing} and no thread in this '
-            'profile is one, so the count would be measuring something this '
-            'journey never ran')
+            'profile carries the signature for one, so the count would be '
+            'measuring something this journey never ran')
     kept = 0
     for row in rows:
         if roles[(row['pid'], row['thread'])] not in excluded:
             kept += row['ir']
     return kept, excluded, None
+
+
+# What each journey stops counting, per journey, and why. The rule every
+# entry obeys is the module docstring's: an exclusion list may never cover
+# work the journey itself caused. Under identity classification that rule
+# is structural rather than measured — a journey's own work is `request` or
+# `main`, neither of which any journey excludes — so the table below is
+# about the two background roles and the docstring's bullet list says which
+# is which. `request` appears in no entry, and
+# `tests/test_journey_threads.py` pins that rather than trusting it.
+EXCLUDED = {
+    'command-round-trip': (IMPORT, SERVE),
+    'dashboard-fanout': (IMPORT, SERVE),
+    'mcp-exec': (IMPORT,),
+    'screenshot': (IMPORT,),
+    'segment-relay': (IMPORT,),
+    'cdp-result': (IMPORT,),
+    'net-capture': (SERVE,),
+}

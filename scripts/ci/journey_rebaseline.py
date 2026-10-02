@@ -30,8 +30,8 @@ import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 def document_from(report, recorded):
     """The artefact this measurement justifies, as a validated document.
 
-    Counts, shas, toolchain, excluded threads and bands all come from
-    `report` and none of them from `recorded`: they describe ONE run, and
+    Counts, shas, toolchain and excluded threads all come from `report`
+    and none of them from `recorded`: they describe ONE run, and
     taking any of them from the document being replaced describes two —
     and a check compares all of them or none, so such a document can never
     match anything and every later run refuses it.
@@ -69,7 +69,13 @@ def document_from(report, recorded):
                 'tolerance_pct': recorded.get('tolerance_pct'),
                 'toolchain': toolchain,
                 'excluded_threads': exclusions,
-                'thread_bands': dict(journey_threads.BANDS),
+                # `None` rather than absent: every schema field is spelled
+                # here so a document that omitted one would be refused, and
+                # a null band table is what drops the field from the
+                # rendered document on the next re-baseline. The signatures
+                # replace it as the table a count is classified under.
+                'thread_bands': None,
+                'thread_signatures': dict(journey_threads.SIGNATURES),
                 'shas': shas, 'journeys': journeys}
     # The field list is the SCHEMA'S, not a literal beside it: a document
     # that omitted a field would be one the next run refuses, with a

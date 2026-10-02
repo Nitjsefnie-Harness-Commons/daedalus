@@ -198,7 +198,15 @@ def test_a_re_baseline_writes_what_the_next_run_accepts(tmp):
     assert written['toolchain'] == report['toolchain'], written['toolchain']
     assert written['shas'] == {name: seen[0] for name, seen
                                in report['shas'].items()}, written['shas']
-    assert written['thread_bands'] == report['thread_bands'], written
+    # The signatures come from the classifier and not from the report, so a
+    # re-baseline records the table the NEXT run will classify by; the band
+    # table it replaced is dropped rather than carried forward as a field
+    # nothing reads.
+    threads = _journey_contract.threads()
+    assert written['thread_signatures'] == {
+        role: list(names) for role, names in threads.SIGNATURES.items()}, \
+        written['thread_signatures']
+    assert written.get('thread_bands') is None, written.get('thread_bands')
     assert policy.render(written) == artifact.read_bytes(), (
         'the artefact on disk is not what render() writes for it, so the '
         'command wrote bytes the canonical-rendering control will refuse')

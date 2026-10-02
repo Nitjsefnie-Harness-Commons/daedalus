@@ -35,9 +35,9 @@ import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
 REBASELINE_COMMAND = (
     '`python3 scripts/ci/journey_budget.py rebaseline --measurements '
     '<counts.json>` writes the whole artefact from one measurement: the '
-    'counts, their shas, the toolchain, the threads excluded and the bands '
-    'applied all from that same run, with the recorded tolerance left where '
-    'you put it.')
+    'counts, their shas, the toolchain, the threads excluded and the '
+    'signature table that classified them all from that same run, with the '
+    'recorded tolerance left where you put it.')
 OVER_REMEDY = (
     'A journey over its budget is a regression in what a user waits for: '
     'the recorded count is never raised by hand, and no entry is ever added '
@@ -68,10 +68,11 @@ SHA_REMEDY = (
     'against it. Re-baseline from a measured run: '
     + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
     'other change to the artefact.')
-BANDS_REMEDY = (
-    'The `Ir` band thresholds decide which thread a count excluded, so a '
-    'run whose bands differ from the recorded ones is measuring a different '
-    'quantity whatever it reads. Re-baseline from a measured run: '
+SIGNATURES_REMEDY = (
+    'The function names that put a thread in an excluded role are the table '
+    'this run classified by, so a run whose signatures differ from the '
+    'recorded ones is measuring a different quantity whatever it reads. '
+    'Re-baseline from a measured run: '
     + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
     'other change to the artefact.')
 THREADS_REMEDY = (
@@ -180,8 +181,9 @@ def rebaseline_lines(run_id=None):
     The run id is the workflow's own substitution, so the line a reader
     copies is the line that works: `gh run download` fetches the
     measurement this job measured, and the command writes the artefact from
-    it — this run's counts, shas, toolchain, exclusions and bands
-    together, with the recorded tolerance left where a person put it.
+    it — this run's counts, shas, toolchain, exclusions and signature
+    table together, with the recorded tolerance left where a person put
+    it.
     """
     run = run_id or os.environ.get('GITHUB_RUN_ID') or '<run-id>'
     return ['A journey is over its budget, so raising the recorded counts is '
