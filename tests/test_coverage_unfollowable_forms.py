@@ -180,10 +180,9 @@ def _opaque_callee_cases():
     these and every other name in this file leaves every row of every
     table in this file green. What they defend against is the mistake
     that happened, a gate tuned to the committed rows, because that
-    gate must be written against these rows too. The runtime probes in
-    test_coverage_decorated_launch.py are what reject it: a gate has to
-    list `asyncio.to_thread`, `ExitStack.callback` and
-    `weakref.finalize` as well, and those three appear in no table here.
+    gate must be written against these rows too. A gate has to list
+    `asyncio.to_thread`, `ExitStack.callback` and `weakref.finalize` as
+    well, and those three appear in no table here.
     """
     return (
         ('single letter', """import subprocess
