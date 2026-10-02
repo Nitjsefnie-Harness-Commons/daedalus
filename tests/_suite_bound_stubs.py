@@ -131,6 +131,47 @@ class Signals:
             raise self.killpg_errors[sig]
 
 
+class Signal:
+    """One signal by the two attributes the teardown reads off it.
+
+    `os.killpg` is handed the object and one refusal writes `sig.name`
+    beside it, so name and number are the whole of what a stand-in has to
+    carry -- and carrying them itself is the point, because the members of
+    the interpreter's own `signal` module are not available on every cell.
+    """
+
+    def __init__(self, name, number):
+        self.name = name
+        self.number = number
+
+    def __repr__(self):
+        return f'Signal({self.name!r}, {self.number})'
+
+
+class Escalation:
+    """`signal` as the bounded teardown reads it, on every cell.
+
+    `_ask_and_insist` names exactly two signals, and reads both off its own
+    `signal` global rather than off a name the arm looks up. Standing that
+    global in is what makes the escalation arm reachable everywhere: read
+    from the interpreter's module instead, it is unreachable on a
+    windows-latest cell, which has no `SIGKILL` to name. There the read
+    raised inside the arm, `kill_process_tree`'s broad guard turned the
+    whole record into that exception, and the escalation never went out --
+    so a control asserting two signals was given one, on the cells where it
+    mattered most.
+
+    `SIGTERM` is the real member because `signal.SIGTERM` is defined on
+    every platform this repository runs, and a control that can name the
+    actual request should. `SIGKILL` cannot be: no interpreter this project
+    targets has both, and the arms it covers do not exist on the one that
+    has not. The existing POSIX-keyed control in `test_suite_bound.py` still
+    pins the escalation against the real member wherever one exists.
+    """
+    SIGTERM = signal.SIGTERM
+    SIGKILL = Signal('SIGKILL', 9)
+
+
 class Clock:
     """`time` as the subject sees it, advancing only when it sleeps.
 
