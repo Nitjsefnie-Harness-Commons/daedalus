@@ -491,6 +491,149 @@ def test_a_drop_or_restore_naming_no_such_journey_is_a_typo_not_a_state(tmp):
     del policy
 
 
+def test_a_refused_journey_reaches_the_summary_with_its_remedy(tmp):
+    """The remedy for a refused residual is where a reader learns `--drop`.
+
+    stderr is collapsed by default, so the step summary is the only place a
+    person finds out what to do about a run this gate refuses — and for this
+    kind that remedy names a command nothing else mentions. Removing the line
+    that writes it is invisible from the exit status, which is why it needs a
+    control rather than a glance.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    refused = names[0]
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    counts = Path(tmp) / 'counts.json'
+    counts.write_text(json.dumps(_with_a_refused_residual(names, refused)),
+                      encoding='utf-8')
+    with summary_file(tmp, 'refused.md') as summary:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(counts), '--summary'])
+        said = summary.read_text(encoding='utf-8')
+    assert code == 1, out.getvalue()
+    # The table row says the journey could not be resolved; the REMEDY is
+    # what the line that writes it adds, and nothing else on the summary
+    # names `--drop`. Asserting the word "unresolved" here would be
+    # asserting a string no output prints.
+    assert 'could not resolve it' in said, (
+        'the refused journey is absent from the step summary, so the reader '
+        f'never learns what kind of refusal it was: {said}')
+    assert policy.UNRESOLVED_REMEDY in said, (
+        'the summary names the refusal and no remedy for it: ' + said)
+    assert '--drop' in said, (
+        'the remedy for this refusal is the only place any reader learns the '
+        f'command exists, and it is not in the summary: {said}')
+
+
+def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
+    """`check` and `check --tighten` must agree about the same measurement.
+
+    Probed before this control existed: a run whose measurement refused one
+    journey tightened the other six to 1000 → 10 and printed "tightened the
+    journey budget", and the `check` run after it exited 1 on `unresolved` —
+    the same measurement, read twice, with the two readers disagreeing about
+    whether the artefact it wrote is a valid one.
+
+    The argument is the one the `over` refusal already makes: a budget the
+    next check cannot accept should not be written by a command that reports
+    success. An unresolved journey is not a RISE, and the arithmetic is
+    right to skip its row — that part of the counter-argument holds. It is
+    the WRITE that has to give.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    refused = names[0]
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    counts = Path(tmp) / 'counts.json'
+    # A journey that MEASURED CHEAPER than recorded, so without the refusal
+    # this write is a real one: the reviewer measured `command-round-trip
+    # 1000 -> 10` and the artefact changing under it.
+    report = _with_a_refused_residual(names, refused)
+    report['counters']['perf-instructions']['journeys'][names[1]] = {
+        'min': 10, 'max': 10, 'median': 10, 'spread': 0, 'raw': 10}
+    counts.write_text(json.dumps(report), encoding='utf-8')
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(counts), '--tighten'])
+    assert code != 0, (
+        'a tighten wrote a budget the next check refuses, and reported '
+        f'success: {out.getvalue()}')
+    assert artifact.read_bytes() == before, (
+        'a refused tighten wrote the artefact anyway')
+    said = err.getvalue()
+    assert refused in said, (
+        f'the refusal does not name the journey it is about: {said}')
+    assert 'nothing is tightened' in said or 'tightened nothing' in said, said
+
+    # And the check on that same artefact still refuses, so the two readers
+    # agree rather than one having gone quiet.
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()):
+        assert policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(counts)]) == 1, (
+            'the artefact the tighten refused is one the check accepts')
+
+
+def test_a_drop_succeeds_against_an_artefact_that_already_dropped_it(tmp):
+    """`--drop` has to work in the state it creates.
+
+    The artefact now records the journey at `null` and the next re-baseline
+    runs against exactly that file — so this is the second invocation of the
+    command, not a first one over an artefact that holds every count. A flag
+    swept only against the state before it is a flag whose second use is
+    untested, and that is where it was broken: the recorded-null refusal ran
+    first and named a measurement separating the journey it could not
+    separate, offered a remedy that could not succeed, and printed `None`
+    where a number belongs.
+
+    So the artefact starts at `null` here, the measurement is one that cannot
+    separate the journey, and the flag is asked to do the one thing it
+    exists for.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped = names[0]
+    document = recorded_document()
+    document['journeys'][dropped] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    report = _unresolved(dropped)
+
+    code, _out, err = _rebaseline_over(tmp, artifact, report,
+                                       '--drop', dropped)
+    assert code == 0, (
+        f'--drop refused against an artefact that already holds {dropped} at '
+        f'null, so the second re-baseline of any dropped journey fails: {err}')
+    written = policy.load(artifact)
+    assert written['journeys'][dropped] is None, written['journeys']
+    assert dropped in written['shas'], written['shas']
+
+    # And the refusal that DOES fire must not say anything the run did not
+    # establish. A journey this run resolved has a residual; one it refused
+    # has none, and a sentence that prints `None` where a number belongs is
+    # a sentence nobody can act on. Both are driven here, from the same
+    # already-dropped artefact, so the arm that fires is the one a real
+    # second re-baseline would reach.
+    resolved = Path(tmp) / 'resolved.json'
+    resolved.write_bytes(policy.render(recorded_document()))
+    code, _out, err = _rebaseline_over(
+        tmp, resolved, _separable(), '--drop', dropped)
+    assert code != 0, (
+        '--drop recorded a null for a journey this run resolved, so the '
+        'refusal it should have raised is not the one raising')
+    assert 'None instructions' not in err, (
+        f'the refusal names a residual it does not have: {err}')
+    assert '950' in err, (
+        f'the refusal does not name the residual it does have: {err}')
+
+
 def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
     """A bound for a journey the journey set no longer has goes with it.
 
