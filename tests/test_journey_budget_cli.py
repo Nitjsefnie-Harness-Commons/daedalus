@@ -173,6 +173,90 @@ def test_a_check_with_no_measurement_file_measures_here(tmp):
         f'reads it: {written}')
 
 
+def _with_a_refused_residual(names, refused):
+    """A measurement that resolved every journey but `refused`.
+
+    The refusal carries the journey's own numbers, so what `check` reports
+    is the sentence the counter produced rather than a flag it inferred.
+    """
+    report = measured_report({name: 1000 for name in names})
+    entry = report['counters']['perf-instructions']
+    entry['journeys'].pop(refused)
+    entry['refused'] = {
+        refused: f'the {refused} journey measured [2000] instructions net '
+                 '[-9000] against a startup-only baseline of 7000 and a '
+                 'bridge-only baseline of 4000, so its own work is smaller '
+                 'than the fixed background it shares'}
+    return report
+
+
+def test_a_refused_residual_fails_the_check_when_a_count_is_recorded(tmp):
+    """A count the run could not compute is never a pass.
+
+    The journey is absent from the measured counts, so a check that only
+    asked "is this count over budget?" would find no count, compare
+    nothing and report a green — which is the exact false green the
+    unmeasured gate exists against, arriving through the other door. So a
+    refused residual on a journey the budget DOES hold a count is a named
+    failure, and the run's own sentence is what it reports.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    refused = names[0]
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    counts = Path(tmp) / 'counts.json'
+    counts.write_text(json.dumps(_with_a_refused_residual(names, refused)),
+                      encoding='utf-8')
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(counts)])
+    assert code == 1, (
+        'a journey whose residual was refused passed the check against a '
+        f'recorded count, having measured none: {out.getvalue()} '
+        f'{err.getvalue()}')
+    said = err.getvalue()
+    assert refused in said, said
+    assert '-9000' in said, (
+        f'the refusal must carry the run\'s own numbers, which are what a '
+        f'reader needs and what the pull-request body has to quote: {said}')
+    assert 'unmeasured' not in said, (
+        f'a refused residual reported as an unmeasured one, which reads as '
+        f'the counter missing rather than the journey unresolvable: {said}')
+
+
+def test_a_refused_residual_reports_unrecorded_when_no_count_is_held(tmp):
+    """A dropped journey is measured, refused, and passes — loudly.
+
+    The budget deliberately holds no count for it, so there is nothing to be
+    over budget against and nothing to compare. The journey still RAN and
+    still rendered, so a crash or a shape change still surfaces through its
+    sha; what it does not do is go quietly, and the run says its name on
+    stdout the way every other unrecorded journey is announced.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    refused = names[0]
+    document = recorded_document()
+    document['journeys'][refused] = None
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    counts = Path(tmp) / 'counts.json'
+    counts.write_text(json.dumps(_with_a_refused_residual(names, refused)),
+                      encoding='utf-8')
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(counts)])
+    assert code == 0, (
+        'a journey the budget does not hold failed a check it is not part '
+        f'of: {out.getvalue()} {err.getvalue()}')
+    assert f'unrecorded, reported and passing: {refused}' in out.getvalue(), (
+        f'the journey did not go quietly: {out.getvalue()}')
+    assert err.getvalue() == '', err.getvalue()
+
+
 def _dropped_document(tmp, dropped, widened, **over):
     """A written artefact whose budget holds no count for `dropped`."""
     document = recorded_document(tolerance_pct=0.5,
@@ -291,6 +375,120 @@ def test_a_restore_flag_records_only_the_journey_it_names(tmp):
     written = policy.load(artifact)
     assert written['journeys'][dropped] == 950, written['journeys']
     assert policy.unrecorded(written, names) == [], written['journeys']
+
+
+def _separable():
+    """A measurement that resolved every journey."""
+    return _journey_contract.fixture_report()
+
+
+def _unresolved(name):
+    """The same measurement, with `name` the one journey it could not do.
+
+    A refused residual rather than a missing journey: the journey still ran,
+    still rendered, and still has a sha — only the count was withheld,
+    which is what makes it a drop's case and not a shape failure's.
+    """
+    report = _journey_contract.fixture_report()
+    entry = report['counters']['valgrind-callgrind']
+    entry['journeys'].pop(name)
+    entry['refused'] = {
+        name: f'the {name} journey measured [2000] instructions net [-9000] '
+              'against a startup-only baseline of 7000 and a bridge-only '
+              'baseline of 4000, so its own work is smaller than the fixed '
+              'background it shares and the run cannot separate them'}
+    return report
+
+
+def test_a_drop_writes_the_null_only_when_the_flag_names_the_journey(tmp):
+    """The `null` is an explicit decision, never a side effect.
+
+    A routine re-baseline must not write one: it is the one value in the
+    artefact that says the budget does not hold a journey, and a command
+    that produced it as a byproduct would remove a journey from the budget
+    on the next re-baseline of anything at all.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped = names[0]
+    document = recorded_document()
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+
+    code, _out, err = _rebaseline_over(tmp, artifact, _unresolved(dropped))
+    assert code != 0, (
+        'a run that could not resolve one journey re-baselined the rest and '
+        f'wrote a budget comparing journeys it never measured: {err}')
+
+    code, _out, err = _rebaseline_over(
+        tmp, artifact, _separable(), '--drop', names[1])
+    assert code != 0, (
+        f'--drop {names[1]} wrote a null for a journey the run resolved, '
+        f'so the flag is not what decides: {err}')
+    assert policy.load(artifact)['journeys'][dropped] == 1000, (
+        'a refused re-baseline wrote the artefact anyway')
+
+    code, out, err = _rebaseline_over(tmp, artifact, _unresolved(dropped),
+                                      '--drop', dropped)
+    assert code == 0, err
+    written = policy.load(artifact)
+    assert written['journeys'][dropped] is None, written['journeys']
+    assert policy.unrecorded(written, names) == [dropped], written['journeys']
+    assert dropped in out, (
+        f'the command said nothing about what it dropped: {out}')
+    # The journey still ran: its sha is what says so.
+    assert dropped in written['shas'], written['shas']
+
+
+def test_a_drop_refuses_a_journey_the_measurement_can_separate(tmp):
+    """`--drop` cannot be used to dodge a regression.
+
+    A separable, positive residual is a journey whose own work the run
+    measured above the background it shares — the opposite of the case a
+    drop exists for. Dropping it would remove the one journey a person most
+    wants the gate to hold, and it is a refusal rather than a warning
+    because the flag is the only thing standing between a count and its
+    deletion.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    dropped = names[0]
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    before = artifact.read_bytes()
+    report = _separable()
+    code, _out, err = _rebaseline_over(tmp, artifact, report,
+                                       '--drop', dropped)
+    median = (report['counters']['valgrind-callgrind']
+              ['journeys'][dropped]['median'])
+    assert code != 0, (
+        f'--drop removed a journey whose own work this run measured at '
+        f'{median} instructions, so it can drop a journey that regressed')
+    assert dropped in err, err
+    assert 'separat' in err, err
+    assert artifact.read_bytes() == before, (
+        'a refused re-baseline wrote the artefact anyway')
+
+
+def test_a_drop_or_restore_naming_no_such_journey_is_a_typo_not_a_state(tmp):
+    """A name no journey carries is its own failure, with its own words.
+
+    The likeliest thing that goes wrong with a per-journey flag is a
+    misspelling, and it used to be reported as "the budget already holds a
+    count for it" — true of nothing, because nothing is called that. The
+    two are told apart by the journey set, so the refusal names it.
+    """
+    policy = _journey_contract.policy()
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    for flag in ('--drop', '--restore'):
+        code, _out, err = _rebaseline_over(tmp, artifact, _separable(),
+                                           flag, 'command-rond-trip')
+        assert code != 0, f'{flag} on a misspelled name was accepted'
+        assert 'command-rond-trip' in err, err
+        assert 'no journey is called' in err, (
+            f'{flag} reported a misspelling as a state of the budget: {err}')
+    del policy
 
 
 def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):

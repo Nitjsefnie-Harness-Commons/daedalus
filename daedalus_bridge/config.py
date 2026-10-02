@@ -2,7 +2,8 @@
 import os
 import pathlib
 
-from daedalus_bridge.env_config import env_int, env_positive_float
+from daedalus_bridge.env_config import (CMD_TTL_DEFAULT, env_int,
+                                        env_positive_float)
 
 
 if 'DAEDALUS_DIR' not in os.environ:
@@ -80,4 +81,4 @@ MAX_SEGMENT_JOB_SIZE = env_int(
 
 # Command files expire when no SSE reader claims them. Queue lifecycle:
 # daedalus_bridge.command_queue; TTL consumers: stream delivery and GC.
-CMD_TTL = env_positive_float('DAEDALUS_CMD_TTL', 90)
+CMD_TTL = env_positive_float('DAEDALUS_CMD_TTL', CMD_TTL_DEFAULT)

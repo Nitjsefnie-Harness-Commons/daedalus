@@ -80,7 +80,18 @@ THREADS_REMEDY = (
     'excluded the same threads. Re-baseline from a measured run: '
     + REBASELINE_COMMAND + ' It is a reviewed commit, and so is every '
     'other change to the artefact.')
-REMEDY_FOR = {'over': OVER_REMEDY, 'unmeasured': UNMEASURED_REMEDY}
+UNRESOLVED_REMEDY = (
+    'A journey the run could not resolve is a journey the budget holds a '
+    'count for and this run could not produce one, which is never a pass. '
+    'The residual was negative: the journey\'s own work is smaller than the '
+    'fixed background every child shares, so the two cannot be told apart '
+    'in this measurement. If the journey is representatively sized and still '
+    'inseparable, `python3 scripts/ci/journey_budget.py rebaseline '
+    '--measurements <counts.json> --drop <journey>` records no count for it, '
+    'and the decision is then visible in the artefact rather than in a red '
+    'nobody can act from.')
+REMEDY_FOR = {'over': OVER_REMEDY, 'unmeasured': UNMEASURED_REMEDY,
+              'unresolved': UNRESOLVED_REMEDY}
 
 
 def probe_lines(found):
@@ -124,6 +135,7 @@ def verdict_lines(document, counts, found):
     """
     over = found['over']
     unmeasured = found['unmeasured']
+    unresolved = found.get('unresolved') or {}
     lines = ['### Journey budget', '',
              '| journey | count | budget | delta | verdict |',
              '|---|---|---|---|---|']
@@ -139,6 +151,9 @@ def verdict_lines(document, counts, found):
         measured = counts.get(name)
         if limit is None:
             verdict = 'not recorded yet'
+            measured = None
+        elif name in unresolved:
+            verdict = 'this run could not resolve it'
             measured = None
         elif name in unmeasured:
             verdict = f'no count for `{unmeasured[name]}`'
