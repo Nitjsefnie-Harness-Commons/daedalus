@@ -583,6 +583,7 @@
 !/tests/test_gate_freshness_ratchet.py
 !/tests/test_gate_freshness_run.py
 !/tests/test_gh_client.py
+!/tests/test_gh_client_lifetime.py
 !/tests/test_gh_rate_limit.py
 !/tests/test_ghexpr.py
 !/tests/test_gitignore_control.py
