@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin the claim action caller's permissions, prefilter and runner shape."""
+"""Pin the claim action caller's prefilter, scope, release and policy."""
 import re
 import sys
 from pathlib import Path
@@ -7,58 +7,129 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _wfjobs import jobs_mapping  # noqa: E402
-from _yamlsteps import workflow_mapping  # noqa: E402
+from _yamlsteps import (  # noqa: E402
+    complete_job_mapping,
+    step_mappings,
+    workflow_mapping,
+)
+
+# The current claim release, pinned by the commit it names.
+CLAIM_RELEASE = '2.0.1'
+CLAIM_COMMIT = '8abff4f2f27d59b984528cb736f64b9391952a25'
+
+# The policy claim's reference block passes: per-role caps on concurrent
+# claims, and the days an idle claim survives.
+CLAIM_POLICY = {
+    'max-claims': 'read=2, triage=4, write=6, maintain=10, admin=-1',
+    'expire': '7',
+}
+
+# The prefilter, as the operator's semantics: a bot never starts a runner,
+# and a body carrying a command word is a candidate. The closed-issue and
+# pull-request checks are the action's, not this job's.
+CLAIM_PREFILTER = (
+    "github.event.comment.user.type != 'Bot' "
+    "&& (contains(github.event.comment.body, '/claim') "
+    "|| contains(github.event.comment.body, '/unclaim') "
+    "|| contains(github.event.comment.body, '/release'))"
+)
 
 
-def test_the_claim_workflow_keeps_its_least_privilege_shape(tmp):
-    del tmp
-    workflow = (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
+def _claim_workflow():
+    """Return the tracked claim workflow's text and its complete decoding."""
+    text = (_util.ROOT / '.github' / 'workflows' / 'claim.yml').read_text(
         encoding='utf-8')
-    decoded = workflow_mapping(workflow)
+    return text, workflow_mapping(text)
+
+
+def _claim_job(workflow):
+    """Return claim.yml's one job, decoded whole."""
+    jobs = jobs_mapping(workflow)
+    assert jobs is not None and set(jobs) == {'claim'}, (
+        'claim.yml must declare exactly one job named claim')
+    return complete_job_mapping(workflow, 'claim')
+
+
+def _claim_step(workflow):
+    """Return claim.yml's one action step, decoded whole."""
+    steps = step_mappings(workflow, 'claim')
+    assert steps is not None and len(steps) == 1, (
+        'claim.yml must have exactly one action step')
+    return steps[0]
+
+
+def test_the_claim_trigger_is_a_new_issue_comment(tmp):
+    del tmp
+    _workflow, decoded = _claim_workflow()
     assert decoded.get('on') == {
         'issue_comment': {'types': ['created']},
     }, 'claim must run only for newly created issue comments'
-    assert decoded.get('permissions') == {'issues': 'write'}, (
-        'claim token must grant exactly issues: write')
-    jobs = jobs_mapping(workflow)
-    assert jobs is not None and set(jobs) == {'claim'}
-    job = jobs['claim']
-    assert 'permissions' not in job, (
-        'claim job must inherit workflow permissions without an override')
-    assert isinstance(decoded.get('concurrency'), dict), (
-        'claim concurrency must be a mapping')
+
+
+def test_the_claim_prefilter_matches_the_operator_semantics(tmp):
+    del tmp
+    workflow, _decoded = _claim_workflow()
+    condition = _claim_job(workflow).get('if')
+    assert isinstance(condition, str), 'claim must declare an if scalar'
+    assert ' '.join(condition.split()) == CLAIM_PREFILTER, (
+        'claim if must match the reference prefilter exactly: a bot never '
+        'starts a runner, a body carrying a command word is a candidate, and '
+        'the closed-issue and pull-request checks belong to the action, which '
+        'declines them loudly instead of the job skipping the run')
+
+
+def test_claim_scopes_its_permission_to_the_job(tmp):
+    del tmp
+    workflow, decoded = _claim_workflow()
+    job = _claim_job(workflow)
+    assert 'permissions' not in decoded, (
+        'claim must declare no workflow-level permissions block, or the job '
+        'scope that replaces it is decorative')
+    effective = job.get('permissions', decoded.get('permissions'))
+    assert effective == {'issues': 'write'}, (
+        "claim's effective scope must be exactly issues: write, declared on "
+        'the job that uses it')
+    assert 'permissions' in job, (
+        'claim must declare the scope on the job, not inherit it')
+
+
+def test_claim_pins_the_current_release(tmp):
+    del tmp
+    workflow, _decoded = _claim_workflow()
+    uses = _claim_step(workflow).get('uses')
+    assert uses == f'Nitjsefnie-Actions/claim@{CLAIM_COMMIT}', (
+        'claim must pin the current release by its commit')
+    line = re.search(r'^\s*-\s+uses:.*$', workflow, re.MULTILINE)
+    assert line and line.group().endswith(f'# v{CLAIM_RELEASE}'), (
+        f'claim must name v{CLAIM_RELEASE} in the comment on the pin, so the '
+        'two cannot drift apart silently')
+
+
+def test_claim_passes_the_reference_claim_policy(tmp):
+    del tmp
+    workflow, _decoded = _claim_workflow()
+    assert _claim_step(workflow).get('with') == CLAIM_POLICY, (
+        'claim must pass the reference per-role caps and expiry, so one '
+        'account cannot hold unlimited claims and an idle claim cannot '
+        'outlive the issue it was taken for')
+
+
+def test_claim_keeps_its_serialization_and_runner_shape(tmp):
+    del tmp
+    workflow, decoded = _claim_workflow()
     assert decoded.get('concurrency') == {
         'group': 'claim-${{ github.event.issue.number }}',
         'cancel-in-progress': 'false',
         'queue': 'max',
     }, ('claim concurrency must serialize per issue, never cancel a run, and '
         'queue a pending one instead of replacing it')
-    condition = job.get('if')
-    assert isinstance(condition, str), 'claim must declare an if scalar'
-    expected_condition = (
-        'github.event.issue.pull_request == null '
-        "&& github.event.issue.state == 'open' "
-        "&& github.event.comment.user.type != 'Bot' "
-        "&& (contains(github.event.comment.body, '/claim') "
-        "|| contains(github.event.comment.body, '/unclaim') "
-        "|| contains(github.event.comment.body, '/release'))"
-    )
-    assert ' '.join(condition.split()) == expected_condition, (
-        'claim if must exactly match the guarded command prefilter')
-    assert not re.search(r'^\s*(?:-\s+)?run:', workflow, re.MULTILINE), (
-        'claim.yml must not contain a run block')
-    _, marker, steps = workflow.partition('    steps:\n')
-    assert marker, 'claim.yml must declare steps'
-    entries = [line for line in steps.splitlines() if line.strip()]
-    assert len(entries) == 1, 'claim.yml must have exactly one action step'
-    assert re.fullmatch(
-        r'      - uses: Nitjsefnie-Actions/claim@[0-9a-fA-F]{40}'
-        r'  # v[0-9]+\.[0-9]+\.[0-9]+', entries[0]), (
-            'claim action must use a full SHA pin with a version comment')
+    job = _claim_job(workflow)
     assert job.get('runs-on') == 'ubuntu-latest', (
         'claim must remain a runner job')
     assert job.get('timeout-minutes') == '5', (
         'claim runner must keep its five-minute timeout')
+    assert not re.search(r'^\s*(?:-\s+)?run:', workflow, re.MULTILINE), (
+        'claim.yml must not contain a run block')
 
 
 if __name__ == '__main__':
