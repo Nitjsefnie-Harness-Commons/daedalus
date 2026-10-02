@@ -8,6 +8,9 @@ noticing. Not a suite itself — `run_tests.py` only loads `test_*.py`.
 """
 import contextlib
 import json
+
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -229,6 +232,30 @@ def counter_facts():
     found['perf_stat'] = {'event': 'instructions:u', 'returncode': 0,
                           'counts': False, 'stderr': 'not permitted'}
     return found
+
+
+def launch_refusal(argv):
+    """`str()` of the `OSError` this platform raises for an `argv` that
+    cannot start, or None where the `argv` started.
+
+    The expectation for a refusal that is the OS's own words rather than a
+    sentence this repository wrote, computed by asking the platform the same
+    question the module under test asks: POSIX spells a missing program
+    `No such file or directory: '<program>'`, while Windows answers
+    `[WinError 2] The system cannot find the file specified` and names no
+    program at all -- `subprocess` reports the winerror there, never the
+    `argv`, so a control that asserts the basename it launched is asserting a
+    spelling only a POSIX refusal carries.
+
+    None rather than an assertion, so the caller that launches successfully
+    reads its own failure: a control with nothing to compare against must not
+    pass because both sides are None.
+    """
+    try:
+        subprocess.run(argv, capture_output=True, text=True, check=False)
+    except OSError as error:
+        return str(error)
+    return None
 
 
 @contextlib.contextmanager
