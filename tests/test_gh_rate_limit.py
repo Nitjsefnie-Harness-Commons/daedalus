@@ -74,14 +74,19 @@ def _clock(moment=FROZEN):
     exhausted`, so the reader it obeys is the object registered under that
     name, and a fresh load of the file would be a different object whose
     patch nothing the client calls would ever read.
+
+    `setattr` for the two assignments: the module was executed from a
+    path rather than imported under its own name, so `time` is as
+    dynamic as the module object carries it, and a checker reading the
+    object as a typed namespace would be reading a file it never saw.
     """
     mod = sys.modules['gh_rate_limit']
     real = mod.time
-    mod.time = _Held(moment)
+    setattr(mod, 'time', _Held(moment))
     try:
         yield mod
     finally:
-        mod.time = real
+        setattr(mod, 'time', real)
 
 
 def _client():
