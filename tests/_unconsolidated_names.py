@@ -170,7 +170,7 @@ UNCONSOLIDATED_NAMES = {
         'this compiles each named synthetic case and asserts exactly one '
         'binding verdict at its marker, where the owner takes a zero-argument '
         'scan and returns the SystemExit text',
-        ('tests/test_dashboard_harness.py', '_harness_failure'):
+    ('tests/test_dashboard_harness.py', '_harness_failure'):
         'this drives the shipped retry entry with bounded steps, where the '
         'owner reads a relay harness failure under a plan',
     ('tests/test_dashboard_tab_events.py', '_run'):
