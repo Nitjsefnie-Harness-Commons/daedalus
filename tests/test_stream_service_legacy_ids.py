@@ -265,6 +265,38 @@ def test_an_id_the_drain_did_not_mint_is_kept_only_when_it_is_one(tmp):
     assert frames[2].get('_did', '').startswith('legacy-'), frames
 
 
+def test_the_generation_table_drops_its_oldest_names_past_the_bound(_tmp):
+    """Past the bound the oldest names go, and enough of them.
+
+    A name evicted here is one whose generation a consumer's ledger may
+    still hold, so its next redelivery arrives stamped as though the drain
+    had never vacated it. That residual is disclosed in the module's own
+    docstring, and this is what keeps the disclosure true: the eviction
+    takes the FIRST names recorded and takes enough to get back to the
+    bound, so a table that dropped a different set, or dropped one per
+    call, would fail an assertion on which names survived.
+    """
+    ids = _load_service('stream_service_legacy_trim').legacy_ids
+    bound = ids._GENERATION_LIMIT
+    saved = dict(ids._generations)
+    try:
+        ids._generations.clear()
+        for index in range(bound + 3):
+            ids._generations[f'tok_{index:05d}.json'] = 1
+        newest = f'tok_{bound + 2:05d}.json'
+        ids.vacated(newest)
+        survivors = list(ids._generations)
+        oldest = [f'tok_{index:05d}.json' for index in range(3)]
+        assert len(survivors) == bound, len(survivors)
+        kept = [name for name in oldest if name in survivors]
+        assert not kept, (kept, survivors[:3])
+        assert survivors[0] == 'tok_00003.json', survivors[0]
+        assert survivors[-1] == newest and ids._generation(newest) == 2
+    finally:
+        ids._generations.clear()
+        ids._generations.update(saved)
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='streamlegacyids_')

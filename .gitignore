@@ -304,6 +304,7 @@
 !/tests/_coverage_comment_steps.py
 !/tests/_coverage_comment_workflow.py
 !/tests/_coverage_guard.py
+!/tests/_coverage_launch_stubs.py
 !/tests/_coverage_memo.py
 !/tests/_coverage_mutation_specs.py
 !/tests/_coverage_scopes.py

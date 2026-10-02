@@ -268,6 +268,68 @@ def test_main_reports_a_clean_tree_on_stdout_only(tmp):
     assert stderr == ''
 
 
+def _tighten(policy, target, counts):
+    """`--tighten` against a thresholds document of the caller's own."""
+    setattr(policy, 'tracked_uncovered_counts',
+            lambda *a, **kw: counts)
+    return _main(policy, [str(target.parent / 'absent'), '--tighten',
+                          '--thresholds', str(target)])
+
+
+def test_main_tighten_writes_what_it_measured_and_says_so(tmp):
+    """`--tighten` rewrites the record from the counts it was handed.
+
+    The document written is the caller's own, in a temporary tree: the
+    repository's `.github/ci-thresholds.json` is never this gate's output,
+    and a control that pointed `--thresholds` at it would make a unit test
+    an editor of the policy it is asserting about.
+    """
+    policy, thresholds = _policy(), _thresholds()
+    target = Path(tmp) / 'thresholds.json'
+    data = _document()
+    data[MEMBER] = {'tabs.js': 9, 'done.js': 4}
+    thresholds.write(target, data)
+    status, stdout, stderr = _tighten(
+        policy, target, {'tabs.js': 3, 'done.js': 0})
+    assert status == 0, (stdout, stderr)
+    assert stdout == 'tightened the per-module coverage baseline\n', stdout
+    assert stderr == '', stderr
+    assert thresholds.load(target)[MEMBER] == {'tabs.js': 3}, stderr
+
+
+def test_main_tighten_says_nothing_was_lowered_and_writes_nothing(tmp):
+    """A record with nothing to lower is reported, and left exactly as it was.
+
+    The bytes are compared rather than the parsed document: a `--tighten`
+    that rewrote the file with an identical document would still move the
+    mtime, and a ratchet whose output is committed does not want that.
+    """
+    policy, thresholds = _policy(), _thresholds()
+    target = Path(tmp) / 'thresholds.json'
+    data = _document()
+    data[MEMBER] = {'tabs.js': 9}
+    thresholds.write(target, data)
+    before = target.read_bytes()
+    status, stdout, stderr = _tighten(policy, target, {'tabs.js': 9})
+    assert status == 0, (stdout, stderr)
+    assert stdout == 'no file lost an uncovered line\n', stdout
+    assert stderr == '', stderr
+    assert target.read_bytes() == before
+
+
+def test_main_reports_a_thresholds_document_it_could_not_read(tmp):
+    """An unreadable record is refused by what it says, not by a traceback."""
+    policy = _policy()
+    absent = Path(tmp) / 'no-such-thresholds.json'
+    status, stdout, stderr = _main(
+        policy, [str(Path(tmp) / 'absent'), '--thresholds', str(absent)])
+    assert status == 1
+    assert stdout == '', stdout
+    assert str(absent) in stderr, stderr
+    assert 'cannot read thresholds' in stderr, stderr
+    assert 'Traceback' not in stderr, stderr
+
+
 def _js_repo(tmp, name, sources, baseline):
     """A tracked repository named by one hand-written V8 dump."""
     thresholds = _thresholds()
