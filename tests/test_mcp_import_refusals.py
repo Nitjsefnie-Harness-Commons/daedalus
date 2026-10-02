@@ -210,8 +210,10 @@ def test_every_refusal_arm_is_refused_with_its_own_message(_tmp):
     node, so a refusal raised by a neighbouring arm cannot satisfy it.
     """
     for label, _site, phrase, line, source in ARMS:
-        _assert_scan_refusal(_tmp, source, line, phrase)
-        del label
+        try:
+            _assert_scan_refusal(_tmp, source, line, phrase)
+        except AssertionError as refused:
+            raise AssertionError(f'{label}: {refused}') from refused
 
 
 def test_every_refusal_arm_has_a_near_miss_the_walk_leaves_alone(_tmp):
@@ -371,16 +373,15 @@ def test_a_scanned_composition_is_read_from_disk_on_every_call(_tmp):
 
     `_scan_verdict` and `_assert_scan_refusal` both write `composition.py`
     into the one directory a case is handed, so a stale file from an
-    earlier case would answer for a later one. This reads the file back to
-    say the write happened, which is the property both readers rest on.
+    earlier case would answer for a later one. The composition here draws
+    no refusal, so the case reads the file back and the walk's own answer
+    without claiming any arm.
     """
     _write_tree(Path(_tmp), {'composition.py': 'FIRST = 1\n'})
     assert (Path(_tmp) / 'composition.py').read_text(
         encoding='utf-8') == 'FIRST = 1\n'
-    verdict, _detail = _scan_verdict(
-        _tmp, {'composition.py': '\nimport sys\n\n\ndef load():\n'
-                                 '    leak = sys\n'})
-    assert verdict == 'refused'
+    tree = {'composition.py': '\nSPELLING = "importlib"\n'}
+    assert _scan_verdict(_tmp, tree) == ('clean', ['composition.py'])
     assert _mcp_import_closure.dotted_module(
         Path(_tmp) / 'composition.py', _tmp) == 'composition'
 
