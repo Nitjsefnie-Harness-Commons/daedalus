@@ -95,12 +95,18 @@ def screenshot(base, docroot):
     front end's import and nothing else, so the bridge's uvicorn serve loop
     is counted alongside its own work: measured here at 87 million
     instructions against 6.6 million on the request thread doing the
-    capture, the loop is the larger share of the total. Excluding the serve
-    band instead is what the budget must not do — its own thread measured
-    6,603,084, only 1.51x below `SERVE_FROM`, so a 51% growth would have
-    reclassified that thread as the serve loop and dropped it, and the
-    recorded count would have fallen as the journey got slower (issue 1461,
-    bridge side).
+    capture, the loop is the larger share of the total. Both figures are a
+    developer box's, about 12.7% hot against the runner that records the
+    budgets and on a different toolchain, so they are not the runner's.
+
+    Excluding the serve band instead is what the budget must not do. Its own
+    thread measured 6,603,084, only 1.51x below `SERVE_FROM`, so a 51% growth
+    would have reclassified that thread as the serve loop — where the
+    bridge's constant loop already sits. Two threads in one excluded band is
+    a refusal rather than a drop: `kept=None`, the counter unavailable, the
+    gate exiting 1. Loud, but resting on the companion's presence instead of
+    on this journey; the import alone makes the count robust and removes the
+    dependence outright (issue 1461, bridge side).
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -450,8 +456,13 @@ def segment_relay(base, docroot):
     is excluded, so the bridge's uvicorn serve loop is counted as the
     constant it is, beside a request thread too small here to separate from
     it. The alternative — excluding the serve band, as `command-round-trip`
-    does — would drop this journey's own work on any growth that lifted it
-    to `SERVE_FROM`, which is the same hazard (issue 1461, bridge side).
+    does — would put this journey's own work, on any growth that lifted it
+    to `SERVE_FROM`, into the band the bridge's constant serve loop already
+    occupies. Two threads in one excluded band is the refusal `classify`
+    exists to make, not a silent drop: the count comes back unavailable and
+    the gate exits 1. Loud, but resting on the companion's presence rather
+    than on this journey, so the import alone is the robust list (issue
+    1461, bridge side).
     """
     status, minted = _util.post_json(base + '/segment-job', {
         'token': SEG_TOKEN, 'job': SEG_JOB,
