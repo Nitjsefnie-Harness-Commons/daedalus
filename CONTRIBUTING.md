@@ -250,14 +250,23 @@ The body must be exactly the command after trimming — `/claim`, `/unclaim` or
 `#` prefix, which must match the issue the comment is posted on. A decline is
 loud, not silent: "I'll `/claim` this one", a mismatched number, a closed
 issue, and a pull request each get an answer on the issue and fail the run,
-and an issue somebody already holds is answered with the holder named. Two
-silences remain: a body with no command word is skipped by the trigger filter
-before the action runs, and a bot's comment is refused without an answer so
-the action never answers its own kind. Re-read the issue afterwards and
-confirm your login is in `assignees`: a posted comment is not a claim.
+and an issue somebody already holds is answered with the holder named.
+Reaching the cap for your role is answered too, naming the role, the cap and
+your count, though that run still succeeds. Two silences remain: a body with no
+command word is skipped by the trigger filter before the action runs, and a
+bot's comment is refused without an answer so the action never answers its own
+kind. Re-read the issue afterwards and confirm your login is in `assignees`: a
+posted comment is not a claim.
 
-Release an issue you stop working, before the merge that closes it — the
-workflow acts on open issues only, so a stale assignment on a closed one can no
+A claim you take this way also ages out: held longer than seven days, it
+expires, and the next `/claim` takes it over — or someone with write access
+releases it instead. Expiry is judged while a comment is being answered, never
+on a schedule, so nothing is removed until somebody writes on that issue; and
+only an assignment this action made can expire, so one a maintainer added by
+hand never does.
+
+Release an issue you stop working, before the merge that closes it — the claim
+action acts on open issues only, so a stale assignment on a closed one can no
 longer be removed.
 
 ## Pull requests

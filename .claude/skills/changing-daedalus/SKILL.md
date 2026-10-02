@@ -517,7 +517,16 @@ A declined claim - a closed issue, a pull request, an inexact body carrying a
 command word, or a mismatched number - answers on the issue and fails the
 run; a body with no command word is skipped by the trigger filter before the
 action runs, and a bot's comment is refused without answering - the two
-silences that remain.
+silences that remain. Your role caps how many you may hold at once, and
+reaching it is answered on the issue naming the role, the cap and your count
+rather than ignored.
+
+**A claim you go quiet on ages out.** Held longer than seven days it expires,
+the next `/claim` on that issue takes it over, and someone with write access may
+release it instead. Expiry is judged inside the run that answers a comment, not
+on a schedule, and only an assignment the action made itself can expire - one a
+maintainer added by hand never does. Return to a claim or release it rather
+than assuming it is still yours.
 
 **Declare an absorbed issue in the pull request body the moment it is
 absorbed.** A branch that takes on work filed under a second issue - a finding
@@ -530,10 +539,10 @@ reading as free work, and the collision surfaces only as two branches carrying
 the same fix.
 
 **Release an issue your merge did not finish**, and note what remains in the
-same comment. The ordering is load-bearing: `claim.yml` gates unclaim on the
-issue being open, so an issue a merge keyword closed can never be unassigned
-again. A pull request that does not finish its issue must therefore not carry a
-closing keyword for it.
+same comment. The ordering is load-bearing: the claim action refuses every
+command on a closed issue, so an issue a merge keyword closed can never be
+unassigned again. A pull request that does not finish its issue must therefore
+not carry a closing keyword for it.
 
 **Read the whole comment thread before designing anything.** The body is the
 filing; the thread is what happened since. One issue here proposes claiming
