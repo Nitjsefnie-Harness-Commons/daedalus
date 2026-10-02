@@ -8,21 +8,37 @@ covers one root. The MCP front end sets the same flag on its own socket.
 On Windows both listeners take SO_EXCLUSIVEADDRUSE instead; on every other
 platform the SO_REUSEADDR bind is kept byte-for-byte, because POSIX needs
 it for a quick restart through TIME_WAIT.
+
+The rest of this suite covers the MCP front end's serve loop. Its
+`Server` subclass arms no timer while nothing is asked of it, so the work
+uvicorn's 0.1 s loop used to do — refreshing the cached `Date` header, and
+consulting `limit_max_requests` and `callback_notify` — runs per request
+instead, and a refusal from the auth middleware or from uvicorn's own
+parser reads that cached list too. The controls pin where the refresh
+lands, when it lands relative to the app, and that the loop it replaced
+armed nothing.
 """
 import asyncio
-import contextlib
-import io
 import socket
 import sys
-import time
 import types
-from email.utils import parsedate_to_datetime
+from email.utils import formatdate
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _daedalus_env  # noqa: E402
 import _mcp_load  # noqa: E402
 import _util  # noqa: E402
+
+# A fixed instant, so a Date assertion compares bytes instead of carrying a
+# margin. 2001-09-09T01:46:40Z, far enough from any plausible boundary
+# that a header read back in local time cannot land on the same second.
+FROZEN = 1000000000.0
+
+
+def _frozen_date(at):
+    """The header value the front end must emit for a frozen clock."""
+    return formatdate(at, usegmt=True).encode()
 
 
 class _StubSocket:
@@ -72,56 +88,6 @@ def _exclusive_events():
 def _reuse_events(port):
     return [('setsockopt', socket.SOL_SOCKET, socket.SO_REUSEADDR, 1),
             ('bind', ('127.0.0.1', port))]
-
-
-class _FakeUvicornServer:
-    """Stands where uvicorn.Server stands, minus the OS behind it.
-
-    `handed` and `built` are class state so the front end can be subclassed
-    the way it subclasses the real one: `_serve` derives its own Server from
-    whatever `uvicorn.Server` names, and a lambda is not a base class.
-    """
-    handed = []
-    built = []
-
-    def __init__(self, config):
-        self.config = config
-        type(self).built.append(self)
-
-    def run(self, sockets=None):
-        type(self).handed.extend(sockets or ())
-
-
-def _serve_with_fake_uvicorn(mod):
-    """Run _serve to completion without its real front end.
-
-    The fake stands where uvicorn.Config and uvicorn.Server stand in the
-    real _serve, and records the sockets it was handed instead of serving
-    them; the caller closes any real socket in that list. The bound-port
-    banner `_serve` prints is captured and returned beside `handed`, so the
-    suite's streams stay verdict-only. `built` is the Server instances the
-    front end constructed, so a caller can tell a derived class from the
-    base it was derived from.
-    """
-    handed = []
-    built = []
-    banner = io.StringIO()
-    fake = types.ModuleType('uvicorn')
-    fake.Config = lambda app, **settings: types.SimpleNamespace(
-        app=app, settings=settings)
-    fake.Server = type('Server', (_FakeUvicornServer,),
-                       {'handed': handed, 'built': built})
-    previous = sys.modules.get('uvicorn')
-    sys.modules['uvicorn'] = fake
-    try:
-        with contextlib.redirect_stdout(banner):
-            mod._serve()
-    finally:
-        if previous is None:
-            sys.modules.pop('uvicorn', None)
-        else:
-            sys.modules['uvicorn'] = previous
-    return handed, banner.getvalue(), built
 
 
 def _load_server(tmp):
@@ -204,7 +170,7 @@ def test_the_windows_mcp_arm_excludes_the_port(tmp):
     created = []
     mod.socket = _StubSocketModule(created)
     mod.WIN32 = True
-    handed, banner, _built = _serve_with_fake_uvicorn(mod)
+    handed, banner, _built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     assert '[MCP] streamable-http on 127.0.0.1:59981' in banner, banner
     assert handed == [created[0]], (handed, created)
@@ -220,7 +186,7 @@ def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
     mod.WIN32 = False
-    handed, banner, _built = _serve_with_fake_uvicorn(mod)
+    handed, banner, _built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     assert f'127.0.0.1:{mod.bound_port}' in banner, banner
     assert len(handed) == 1, handed
@@ -257,65 +223,55 @@ def test_the_armed_mcp_platform_value_matches_the_host(tmp):
     assert mod.WIN32 == expected, (mod.WIN32, sys.platform)
 
 
-def _load_front_end():
-    """Load the MCP front end with the real uvicorn importable."""
+def _idle_front_end():
+    """The MCP front end module, loaded with the real uvicorn importable."""
     _mcp_load._need_deps()
     return _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
 
 
 def _spin(turns):
     """Advance the running loop `turns` times without waiting on wall time.
-
     Every wait in these tests is a hand-off the loop already schedules — an
-    Event the loop is about to deliver, a coroutine's first step — so a fixed
-    number of turns says "the loop had every chance" and never "the machine
-    was fast enough".
-    """
+    Event the loop is about to deliver, a coroutine's first step — so a
+    fixed number of turns says "the loop had every chance" and never "the
+    machine was fast enough"."""
     async def spin():
         for _ in range(turns):
             await asyncio.sleep(0)
     return spin()
 
 
-def _send_http(app, headers=()):
-    """Drive one HTTP request through an ASGI app to completion."""
+def _send_http(app, headers=(), path='/mcp'):
+    """Drive one HTTP request through an ASGI app, returning what it sent."""
+    sent = []
+    scope = {
+        'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1',
+        'method': 'POST', 'scheme': 'http', 'path': path,
+        'raw_path': path.encode(), 'query_string': b'', 'root_path': '',
+        'headers': [(b'content-length', b'0')] + list(headers),
+    }
+
     async def receive():
         return {'type': 'http.request', 'body': b'', 'more_body': False}
 
-    async def send(_message):
-        return None
+    async def send(message):
+        sent.append(message)
 
-    scope = {
-        'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1',
-        'method': 'POST', 'scheme': 'http', 'path': '/mcp',
-        'raw_path': b'/mcp', 'query_string': b'', 'root_path': '',
-        'headers': [(b'content-length', b'0')] + list(headers),
-    }
-    return app(scope, receive, send)
+    async def drive():
+        await app(scope, receive, send)
+        return sent
 
-
-def _stack_of(app):
-    """The middleware classes around `app`, outermost first."""
-    names = []
-    node = app.build_middleware_stack()
-    while node is not None:
-        names.append(type(node).__name__)
-        node = getattr(node, 'app', None)
-    return names
+    return drive()
 
 
 def _armed_timer_delays(build):
     """Run `build(armed)` on a loop that records every timer it arms.
 
-    A poll loop needs wall time to reach its first tick, so asserting that a
-    tick never *happened* cannot tell the two apart. What separates them is
-    the thing the loop arms before it waits: `await wait_for(x, 0.1)` arms a
-    timeout the moment it is entered, and a loop that waits on an Event arms
-    none. `call_at` is the recording point because it is the primitive both
-    spellings go through — `wait_for` arms through it since 3.12 — and
-    `call_soon`, which schedules no timer, does not touch it. Recorded on
-    the loop itself, so the assertion is on a property and never on how fast
-    the machine was. Returns the coroutine's result beside the recording.
+    `await wait_for(x, 0.1)` arms a timeout the moment it is entered and a
+    wait on an Event arms none; `call_at` is where both spellings go
+    through, and `call_soon` touches neither. Recorded on the loop itself,
+    so the assertion is on a property and never on how fast the machine
+    was. Returns the coroutine's result beside the recording.
     """
     loop = asyncio.new_event_loop()
     armed = []
@@ -332,22 +288,55 @@ def _armed_timer_delays(build):
         loop.close()
 
 
-def test_serve_hands_uvicorn_a_derived_server(tmp):
-    """`_serve` must hand `run` a subclass, not uvicorn's own Server.
+class _WaitCounter:
+    """Stands where the serve loop's Event stands, counting its waits.
 
-    Watching `run` be called with the bound socket passes on a tree that
-    polls ten times a second forever, so the derived class itself is the
-    thing pinned here: issue 1444 is the base class's serve loop, and the
-    fake base carries neither of the two members the derived one owns.
+    A loop that wakes itself calls `wait` again on every wake, and a loop
+    that spins on `sleep(0)` never calls it at all. Counting the waits
+    tells those apart without a clock, and without depending on the
+    recorder below being honest.
     """
+
+    def __init__(self, event):
+        self._event = event
+        self.waits = 0
+
+    def clear(self):
+        return self._event.clear()
+
+    def set(self):
+        return self._event.set()
+
+    def wait(self):
+        self.waits += 1
+        return self._event.wait()
+
+
+def _freeze_the_front_end_clock(mod, at=FROZEN):
+    """Pin the front end's clock so a Date assertion needs no margin.
+    `daedalus_mcp.server` reads `time.time()` and nothing else out of the
+    `time` module, so replacing the module is enough. The header is then
+    compared byte for byte against `formatdate(at, usegmt=True)`, which is
+    what makes `usegmt=False` observable: under `TZ=UTC` a local-time
+    rendering of the same instant is byte-identical to the GMT one."""
+    mod.time = types.SimpleNamespace(time=lambda: at)
+    return at
+
+
+def test_serve_hands_uvicorn_a_derived_server(tmp):
+    """`_serve` must hand `run` a subclass, not uvicorn's own Server. Watching
+    `run` be called with the bound socket passes on a tree that polls ten
+    times a second forever, so the derived class itself is the thing pinned
+    here: issue 1444 is the base class's serve loop, and the fake base
+    carries neither of the two members the derived one owns."""
     del tmp
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59983)
-    handed, _banner, built = _serve_with_fake_uvicorn(mod)
+    handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     assert len(built) == 1, built
     derived = type(built[0])
-    assert issubclass(derived, _FakeUvicornServer), derived
+    assert issubclass(derived, _mcp_load._FakeUvicornServer), derived
     assert hasattr(derived, 'main_loop'), derived
     assert hasattr(derived, 'request_tick'), derived
     assert len(handed) == 1, handed
@@ -371,119 +360,184 @@ def _config_with_probe_headers():
                           headers=[('x-probe', '1')])
 
 
-def test_the_serve_loop_arms_no_timer_while_it_is_idle(tmp):
-    """The serve loop parks no timer, and returns when it is told to.
-
-    Stock uvicorn's `main_loop` wakes every 0.1 s and calls `on_tick` on
-    each wake, which is ~3M instructions a second on an idle bridge for the
-    life of the process (issue 1444). What separates the two loops is not
-    whether a tick happened — a poll needs wall time to reach its first,
-    so that assertion survives a poll — but what the loop arms before it
-    waits. Here it parks no timer at all, and it is still awaiting when
-    `should_exit` is set and finished once it is.
-    """
+def test_the_serve_loop_parks_on_one_wait_and_arms_no_timer(tmp):
+    """No timer while idle, one wait, and a return on either exit. Stock
+    uvicorn's main_loop wakes every 0.1 s and calls on_tick on each wake. A
+    poll needs wall time to reach its first tick, so counting ticks cannot
+    separate the two loops; what the loop does while it waits can. A re-
+    waiting loop counts more than one wait, a sleep(0) spin counts none,
+    and either costs more than the poll it replaced. The exit arrives after
+    entry in the first drive and before it in the second: Server.__init__
+    reaches the setter, so the clear at entry would swallow an exit set
+    before it."""
     del tmp
-    mod = _load_front_end()
-    server = _idle_server(mod)
-    ticks = []
+    mod = _idle_front_end()
 
-    async def counting(counter):
-        ticks.append(counter)
-        return False
-
-    server.on_tick = counting
-
-    async def drive(armed):
+    async def drive_after(armed):
+        server = _idle_server(mod)
+        counter = _WaitCounter(server._wake)
+        server._wake = counter
         task = asyncio.ensure_future(server.main_loop())
         await _spin(4)
-        assert not task.done(), 'the loop returned while should_exit was False'
-        idle_armed = list(armed)
+        assert not task.done(), 'the loop returned before should_exit'
+        idle = list(armed)
         server.should_exit = True
         await _spin(4)
-        return idle_armed, task.done()
+        return idle, counter.waits, task.done()
 
-    (idle_armed, finished), _armed = _armed_timer_delays(drive)
-    assert idle_armed == [], (
-        'the loop armed a timer while idle', idle_armed)
-    assert ticks == [], ticks
-    assert finished, 'the loop did not return once should_exit was set'
+    async def drive_first(_armed):
+        server = _idle_server(mod)
+        server.should_exit = True
+        task = asyncio.ensure_future(server.main_loop())
+        await _spin(4)
+        return task.done()
+
+    (idle, waits, after), _armed = _armed_timer_delays(drive_after)
+    assert idle == [], ('the loop armed a timer while idle', idle)
+    assert waits == 1, waits
+    assert after, 'the loop did not return once should_exit was set'
+    first, _armed = _armed_timer_delays(drive_first)
+    assert first, 'the loop waited on an exit that was already set'
+
+
+def test_the_timer_recorder_sees_a_timer_when_one_is_armed(tmp):
+    """The recorder's own positive control: arm one and be seen. Without this
+    the idle assertion would pass just as happily against a recorder that
+    records nothing at all, which is the one failure mode no other control
+    here can reach."""
+    del tmp
+
+    async def drive(_armed):
+        await asyncio.sleep(0.1)
+
+    _result, armed = _armed_timer_delays(drive)
+    assert armed == [0.1], armed
 
 
 def test_a_request_refreshes_the_date_header_the_cycle_already_holds(tmp):
     """A served request re-derives the Date on the list the cycle captured.
-
     uvicorn's HTTP protocols read `server_state.default_headers` at
     RequestReceived and concatenate the object they got when the response
     starts, so a refresh that rebinds the attribute never reaches the
     response being written. `captured` below is that object, taken before
-    the request the way a cycle takes it.
-    """
+    the request the way a cycle takes it."""
     del tmp
     from starlette.applications import Starlette
-    mod = _load_front_end()
+    mod = _idle_front_end()
+    frozen = _freeze_the_front_end_clock(mod)
     server = _idle_server(mod, _config_with_probe_headers())
-    holder = {'server': server}
     app = Starlette()
-    app.add_middleware(mod._TickMiddleware, holder=holder)
+    app.state.server = server
+    app.add_middleware(mod._TickMiddleware)
     server.server_state.default_headers[:] = [(b'server', b'stale')]
     captured = server.server_state.default_headers
 
-    async def drive():
-        before = time.time()
-        await _send_http(app)
-        return before, time.time()
-
-    before, after = asyncio.run(drive())
+    asyncio.run(_send_http(app))
     assert server.server_state.default_headers is captured, (
         'the refresh rebound the attribute instead of updating it')
     headers = dict(captured)
     assert set(headers) == {b'date', b'server', b'x-probe'}, headers
     assert headers[b'server'] == b'uvicorn', headers
     assert headers[b'x-probe'] == b'1', headers
-    sent = parsedate_to_datetime(headers[b'date'].decode()).timestamp()
-    assert before - 5 <= sent <= after + 5, (headers, before, after)
+    assert headers[b'date'] == _frozen_date(frozen), headers
+
+
+def test_the_tick_runs_before_the_app_reads_the_headers(tmp):
+    """The refresh lands ahead of the app, not behind it. The response is
+    assembled from the cached list as the app sends its start message, so a
+    tick after the app hands back the staleness the in-place refresh exists
+    to remove. The app below reads the list at the moment it is called and
+    answers with what it saw — which is the only subject that can tell the
+    two orders apart."""
+    del tmp
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    mod = _idle_front_end()
+    frozen = _freeze_the_front_end_clock(mod)
+    server = _idle_server(mod, _config_with_probe_headers())
+    seen = []
+
+    async def endpoint(_request):
+        seen.append(dict(server.server_state.default_headers))
+        return PlainTextResponse('ok')
+
+    app = Starlette(routes=[Route('/probe', endpoint, methods=['POST'])])
+    app.state.server = server
+    app.add_middleware(mod._TickMiddleware)
+    server.server_state.default_headers[:] = [(b'server', b'stale')]
+
+    asyncio.run(_send_http(app, path='/probe'))
+    assert len(seen) == 1, seen
+    assert seen[0][b'date'] == _frozen_date(frozen), seen
 
 
 def test_the_request_tick_keeps_the_list_the_cycles_captured(tmp):
     """Eleven ticks in, the bound list is still the one the cycles hold.
-
     uvicorn's own `on_tick` REBINDS `server_state.default_headers` on every
     tenth counter. Nothing rebinding it here is not enough: the rebind
     inside `on_tick` orphans the object every in-flight cycle captured, and
-    their dates freeze at whatever that rebind wrote.
-    """
+    their dates freeze at whatever that rebind wrote."""
     del tmp
-    mod = _load_front_end()
+    mod = _idle_front_end()
+    frozen = _freeze_the_front_end_clock(mod)
     server = _idle_server(mod, _config_with_probe_headers())
     captured = server.server_state.default_headers
 
     async def drive():
-        before = time.time()
         for _ in range(12):
             await server.request_tick()
-        return before, time.time()
 
-    before, after = asyncio.run(drive())
+    asyncio.run(drive())
     assert server.server_state.default_headers is captured, (
         'a tick rebound the list the in-flight cycles hold')
     headers = dict(captured)
     assert set(headers) == {b'date', b'server', b'x-probe'}, headers
-    sent = parsedate_to_datetime(headers[b'date'].decode()).timestamp()
-    assert before - 5 <= sent <= after + 5, (headers, before, after)
+    assert headers[b'date'] == _frozen_date(frozen), headers
+
+
+def test_a_connection_refreshes_the_headers_a_parser_refusal_answers(tmp):
+    """A connection refreshes before uvicorn's parser can refuse a request. A
+    malformed request line is answered by the protocol itself, from
+    `server_state.default_headers` read live, and never reaches the
+    middleware at all. Without this the refusal's Date is as old as the
+    last request, which is the whole idle window."""
+    del tmp
+    _mcp_load._need_deps()
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59985)
+    handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
+    assert not mod.startup_error, mod.startup_error
+    server = built[0]
+    frozen = _freeze_the_front_end_clock(mod)
+    protocol = server.config.http_protocol_class
+    assert issubclass(protocol, _mcp_load._FakeProtocol), protocol
+    assert protocol is not _mcp_load._FakeProtocol, protocol
+    server.server_state.default_headers[:] = [(b'server', b'stale')]
+    captured = server.server_state.default_headers
+
+    connection = protocol(
+        config=server.config, server_state=server.server_state)
+    transport = type('T', (), {
+        'get_extra_info': lambda _s, _n, default=None: default})()
+    connection.connection_made(transport)
+
+    assert connection.connections == 1, connection.connections
+    assert server.server_state.default_headers is captured
+    headers = dict(captured)
+    assert headers[b'date'] == _frozen_date(frozen), headers
+    handed[0].close()
 
 
 def test_the_serve_loop_honours_the_max_requests_limit(tmp):
-    """`limit_max_requests` still ends the serve, now per request.
-
-    uvicorn decides it inside `on_tick`, so a request tick that stopped
-    consulting `on_tick` would silently drop the limit. The request that
-    takes the served total to the limit is the one that sets `should_exit`,
-    and the ones after it keep it set.
-    """
+    """`limit_max_requests` still ends the serve, now per request. uvicorn
+    decides it inside `on_tick`, so a request tick that stopped consulting
+    `on_tick` would silently drop the limit. The request that takes the
+    served total to the limit is the one that sets `should_exit`, and the
+    ones after it keep it set."""
     del tmp
     import uvicorn
     from starlette.applications import Starlette
-    mod = _load_front_end()
+    mod = _idle_front_end()
     config = uvicorn.Config(
         Starlette(), log_level='warning', limit_max_requests=2,
         limit_max_requests_jitter=0)
@@ -503,15 +557,13 @@ def test_the_serve_loop_honours_the_max_requests_limit(tmp):
 
 def test_the_serve_loop_runs_the_configured_callback_notify(tmp):
     """`callback_notify` still fires, on uvicorn's own once-per-ten gate.
-
     `on_tick` only reaches the callback on a counter divisible by ten, so
     the counter the request tick advances is load-bearing: a tick that
-    passed a constant would either never notify or notify on every request.
-    """
+    passed a constant would either never notify or notify on every request."""
     del tmp
     import uvicorn
     from starlette.applications import Starlette
-    mod = _load_front_end()
+    mod = _idle_front_end()
     notified = []
 
     async def callback_notify():
@@ -532,14 +584,13 @@ def test_the_serve_loop_runs_the_configured_callback_notify(tmp):
 
 
 def test_startup_populates_the_headers_a_below_asgi_refusal_sends(tmp):
-    """`startup` fills the cache before any request can be answered.
-
-    A request uvicorn refuses below ASGI never reaches the middleware, so
-    the cached headers it answers with have to be in place from startup.
-    """
+    """`startup` fills the cache before any request can be answered. A request
+    uvicorn refuses below ASGI never reaches the middleware, so the cached
+    headers it answers with have to be in place from startup."""
     del tmp
     import uvicorn
-    mod = _load_front_end()
+    mod = _idle_front_end()
+    frozen = _freeze_the_front_end_clock(mod)
     server = _idle_server(mod, _config_with_probe_headers())
     server.server_state.default_headers[:] = []
     reached = []
@@ -556,21 +607,18 @@ def test_startup_populates_the_headers_a_below_asgi_refusal_sends(tmp):
     assert reached == [None], reached
     headers = dict(server.server_state.default_headers)
     assert set(headers) == {b'date', b'server', b'x-probe'}, headers
-    sent = parsedate_to_datetime(headers[b'date'].decode()).timestamp()
-    assert abs(sent - time.time()) < 5, headers
+    assert headers[b'date'] == _frozen_date(frozen), headers
 
 
 def test_the_tick_middleware_skips_a_non_http_scope(tmp):
-    """Only an HTTP request ticks; a lifespan event must not.
-
-    Starlette routes every scope type through the middleware stack, so the
-    lifespan startup and shutdown this app runs on every boot would each
-    tick — refreshing the Date for no request and advancing the counter the
-    max-requests limit reads.
-    """
+    """Only an HTTP request ticks; a lifespan event must not. Starlette routes
+    every scope type through the middleware stack, so the lifespan startup
+    and shutdown this app runs on every boot would each tick — refreshing
+    the Date for no request and advancing the counter the max-requests
+    limit reads."""
     del tmp
     from starlette.applications import Starlette
-    mod = _load_front_end()
+    mod = _idle_front_end()
     server = _idle_server(mod, _config_with_probe_headers())
     calls = []
 
@@ -578,9 +626,9 @@ def test_the_tick_middleware_skips_a_non_http_scope(tmp):
         calls.append(1)
 
     server.request_tick = spy
-    holder = {'server': server}
     app = Starlette()
-    app.add_middleware(mod._TickMiddleware, holder=holder)
+    app.state.server = server
+    app.add_middleware(mod._TickMiddleware)
     down = []
 
     async def receive():
@@ -595,30 +643,50 @@ def test_the_tick_middleware_skips_a_non_http_scope(tmp):
     assert 'lifespan.startup.complete' in down, down
 
 
-def test_the_tick_middleware_sits_inside_the_bearer_auth_middleware(tmp):
-    """A request refused on auth must cost no per-request work.
-
-    The tick is the only thing this front end does per request, and the
-    refusals most of its traffic draws are auth refusals. The order is read
-    off the stack `_serve` actually built, and confirmed by driving one
-    refused request through it.
-    """
+def test_the_tick_middleware_sits_outside_the_bearer_auth_middleware(tmp):
+    """The tick is on the outside of the auth middleware, and must be. A
+    refusal is a response, and a response's Date comes from the cached list
+    the tick refreshes. Read off the stack `_serve` actually built, not off
+    the order the two are added in."""
     del tmp
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59984)
-    handed, _banner, built = _serve_with_fake_uvicorn(mod)
+    handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
+    assert not mod.startup_error, mod.startup_error
+    names, node = [], built[0].config.app.build_middleware_stack()
+    while node is not None:
+        names.append(type(node).__name__)
+        node = getattr(node, 'app', None)
+    assert names.index('_TickMiddleware') < names.index('BearerAuth'), names
+    handed[0].close()
+
+
+def test_a_refused_request_still_refreshes_the_date_header(tmp):
+    """A request refused on auth answers with the Date it just refreshed. The
+    clock moves between building the app and driving the refusal, so a tick
+    that does not run on the refused path leaves the previous instant's
+    date on the list the response is assembled from. That is the whole of
+    the regression: the refusal's Date was as old as the last request the
+    front end accepted."""
+    del tmp
+    _mcp_load._need_deps()
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59986)
+    handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     app = built[0].config.app
-    names = _stack_of(app)
-    assert names.index('BearerAuth') < names.index('_TickMiddleware'), names
-    calls = []
+    server = built[0]
+    stale = _freeze_the_front_end_clock(mod)
+    server.server_state.default_headers[:] = [(b'server', b'stale')]
+    captured = server.server_state.default_headers
+    fresh = _freeze_the_front_end_clock(mod, FROZEN + 3600)
 
-    async def spy():
-        calls.append(1)
+    sent = asyncio.run(_send_http(app))
 
-    built[0].request_tick = spy
-    asyncio.run(_send_http(app))
-    assert calls == [], calls
+    assert sent and sent[0]['status'] == 401, sent
+    assert server.server_state.default_headers is captured
+    headers = dict(captured)
+    assert headers[b'date'] == _frozen_date(fresh), headers
+    assert headers[b'date'] != _frozen_date(stale), headers
     handed[0].close()
 
 
