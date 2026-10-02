@@ -40,10 +40,11 @@ in the same process: 305 shared names of 2,124 and 593, and 28 `PyInit_`
 initialisers on the front-end thread against 2 on the other. The front
 end's own `daedalus_mcp/*.py` files are pure Python and have no
 `PyInit_<name>` of their own, but `mcp==2.2.0` pulls pydantic v2 and
-`pydantic_core` is a compiled extension, so `PyInit_pydantic_core` is
-initialised on the thread that imported the front end and on no other
-thread in that profile — nor on the main thread, nor on the one that
-imported the unrelated module.
+`pydantic_core` is a compiled extension whose leaf name is
+`_pydantic_core`, so CPython's init macro names it `PyInit__pydantic_core`
+— two underscores — and that is what the thread that imported the front end
+initialised, and what no other thread in that profile did: neither the main
+thread nor the one that imported the unrelated module.
 
 The signature has to name the front end rather than imports in general,
 because imports in general is every request thread: see the constant.
@@ -62,7 +63,10 @@ table is per journey and unchanged:
 
 - Every journey's profile carries the bridge's one-off MCP bootstrap
   import — the bridge starts its own front-end listener whatever the
-  journey asks of it — and every journey except `net-capture` excludes it.
+  journey asks of it — and all but one journey excludes it. Which one is
+  not written down here: it is the journey that keeps the serve thread
+  instead, which is the last bullet, and
+  `tests/test_journey_threads.py` pins that shape rather than the name.
 - `command-round-trip` and `dashboard-fanout` also exclude the serve
   thread: they exercise the bridge's HTTP surface and none of the front
   end's event loop, so the loop's idle tick is not their work.
@@ -124,10 +128,14 @@ EVENT_LOOP_SIGNATURE = (
 #
 # It has to name the front end, not imports. The front end's own modules are
 # pure Python and have no `PyInit_<name>`, but `mcp==2.2.0` pulls pydantic
-# v2, whose compiled core is a C extension: `PyInit_pydantic_core` is
-# initialised on the thread that imported `daedalus_mcp.server` and on no
-# other thread in a profile of that import beside a thread that imported
-# one unrelated stdlib module.
+# v2, whose compiled core is a C extension. Its leaf name is
+# `_pydantic_core`, so the init symbol CPython exports is
+# `PyInit__pydantic_core` — TWO underscores, which is the whole difference
+# between a signature that matches the front end's thread and one that
+# matches nothing and leaves `front-end-import` unreachable.
+# `tests/test_journey_threads.py` derives the expected spelling from the
+# installed `.so` rather than holding a copy of it, because this comment is
+# not a control and a copy in the test would have been agreed with.
 #
 # The narrower of the two directions is the safe one. A signature of the
 # import MACHINERY instead — `import_find_and_load` and
@@ -137,7 +145,7 @@ EVENT_LOOP_SIGNATURE = (
 # issue 1466's own shape through the new door. A thread that missed a
 # signature is a thread that is COUNTED, which is a number that moved
 # rather than a number that lost work.
-MODULE_INIT_SIGNATURE = ('PyInit_pydantic_core',)
+MODULE_INIT_SIGNATURE = ('PyInit__pydantic_core',)
 
 # The table that puts a thread in a role, by role, so the artefact records
 # the one a recorded count was classified under and a run that read a
@@ -281,6 +289,17 @@ def excluded_for(journey):
     return EXCLUDED.get(journey, ())
 
 
+def _expected(roles):
+    """The symbols each missing role is read from, named.
+
+    A signature that matched nothing is a misspelled or uninstalled symbol
+    far more often than it is a thread that did not run, so the refusal
+    says which symbol it was looking for. A role with no signature of its
+    own cannot be missing, so every name here has one.
+    """
+    return ', '.join(f'{role}: {SIGNATURES[role]}' for role in roles)
+
+
 def total_for(rows, journey, unread=None):
     """`(kept, excluded, failure)` — the sum over the threads that count.
 
@@ -304,8 +323,9 @@ def total_for(rows, journey, unread=None):
     if missing:
         return None, excluded, (
             f'the {journey} journey excludes {missing} and no thread in this '
-            'profile carries the signature for one, so the count would be '
-            'measuring something this journey never ran')
+            f'profile carries the signature for one ({_expected(missing)}), '
+            'so the count would be measuring something this journey never '
+            'ran')
     kept = 0
     for row in rows:
         if roles[(row['pid'], row['thread'])] not in excluded:

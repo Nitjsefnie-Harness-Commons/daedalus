@@ -380,10 +380,10 @@ def net_capture(base, docroot):
     work the journey exists to measure, and the bridge's own one-off
     bootstrap import counts alongside it (issue 1461, bridge side). That
     coupling is gone: the request thread is a `request` thread whatever it
-    costs, and `front-end-import` now names a thread that imported the
-    FRONT END — told by a symbol only `mcp`'s own dependency tree
-    initialises, never by the import machinery any importing thread
-    carries — so the two can no longer be the same thread (issue 1466).
+    costs, and `front-end-import` is a role no importing request thread
+    can claim: its signature is the init symbol of the compiled core that
+    `mcp==2.2.0` pulls and the bridge's own request path never loads, so
+    the two can no longer be the same thread (issue 1466).
     The list is left as it was because it is the one the recorded count
     was measured under, and the constant is still counted so the per-byte
     work is counted beside it.
