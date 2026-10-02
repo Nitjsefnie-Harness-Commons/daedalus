@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import os
+import socket
 import sys
 import time
 import types
@@ -127,6 +128,23 @@ def _serve_with_fake_uvicorn(mod):
         else:
             sys.modules['uvicorn'] = previous
     return handed, banner.getvalue(), built
+
+
+def _refusal_date(port):
+    """The Date one parser-level refusal answers with, over a new socket."""
+    sock = socket.create_connection(('127.0.0.1', port), timeout=10)
+    try:
+        sock.sendall(b'NOT-A-REQUEST\r\n\r\n')
+        raw = b''
+        while b'\r\n\r\n' not in raw:
+            raw += sock.recv(4096)
+    finally:
+        sock.close()
+    assert raw.startswith(b'HTTP/1.1 400'), raw[:120]
+    for line in raw.split(b'\r\n'):
+        if line[:5].lower() == b'date:':
+            return line.split(b':', 1)[1].strip()
+    raise AssertionError(f'the refusal carried no Date: {raw[:200]!r}')
 
 
 def _need_deps():
