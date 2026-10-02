@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
+    ARTIFACT,
     IDENTITY,
     PER_RUN,
     ROOT,
@@ -296,15 +297,28 @@ def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
     recorded. A comparison that treated the missing measurement as a value
     would land a budget of zero beside a saving, which is the exact
     measurement the next run cannot reproduce.
+
+    WHICH journey is the unmeasured one, and what the neighbours are followed
+    down TO, are chosen here and read out of the tree's own recorded map. A
+    control that indexed a journey set by position and spelled the recorded
+    count beside its assertion named two things the journey set may change:
+    it went stale the first time the set grew.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(recorded_document()))
+    recorded = recorded_document(journeys=policy.load(ARTIFACT)['journeys'])
+    unmeasured, measured = names[0], names[1:]
+    kept = recorded['journeys'][unmeasured]
+    followed = {name: recorded['journeys'][name] - 1 for name in measured}
+    assert kept not in followed.values(), (
+        f'the count {unmeasured} keeps is one a measured journey is followed '
+        'down to, so "left alone" and "followed down" are the same value and '
+        'this control cannot tell them apart')
+    artifact.write_bytes(policy.render(recorded))
     measurements = Path(tmp) / 'counts.json'
-    measurements.write_text(json.dumps(
-        measured_report({names[0]: 800, names[1]: 1000})),
-        encoding='utf-8')
+    measurements.write_text(json.dumps(measured_report(followed)),
+                            encoding='utf-8')
     spoken = io.StringIO()
     with contextlib.redirect_stdout(spoken):
         code = policy.main(['check', '--artifact', str(artifact),
@@ -314,9 +328,10 @@ def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
     assert 'tightened the journey budget' in spoken.getvalue(), (
         spoken.getvalue())
     written = json.loads(artifact.read_text(encoding='utf-8'))['journeys']
-    assert written == {names[0]: 800, names[1]: 1000, names[2]: 1000}, (
-        f'{names[2]} was measured by nothing and must keep the count it was '
-        f'recorded with: {written}')
+    assert written == dict(followed, **{unmeasured: kept}), (
+        f'{unmeasured} was measured by nothing and must keep the count it '
+        'was recorded with while every journey beside it was followed '
+        f'down: {written}')
 
 
 def test_a_tighten_that_lowered_nothing_says_so_and_writes_nothing(tmp):
