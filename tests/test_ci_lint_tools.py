@@ -37,6 +37,10 @@ planted in a workflow the door walk then has to classify. Every workflow
 is read now: `_door_jobs` globs `*.yml` and `*.yaml`, so no workflow is
 one this file does not look at, and the bound on what the walk can see is
 stated in `tests/_suite_jobs.py` where it lives.
+
+The installer's eleven REFUSALS are driven here through
+`tests/_lint_tool_refusals.py`, which stands in at the boundaries those
+paths cross and carries the reasoning each one is written to enforce.
 """
 import email.message
 import hashlib
@@ -57,6 +61,10 @@ from _lint_tool_mechanisms import (  # noqa: E402
 from _lint_tool_roles import (  # noqa: E402
     BOTH_ON, GUARDED_ON, REQUIRED_ON, _PREAMBLE, _derive_tool_roles,
     _tool_roles)
+from _lint_tool_refusals import (  # noqa: E402
+    no_wheel, oversize_wheel, recorded_missing,
+    recorded_outside_the_tool_dir, resolved_outside_the_tool_dir,
+    too_many_wheels, unreadable_requirements, unreadable_wheel)
 from _suite_jobs import NAMES, _door_jobs, _runner_doors  # noqa: E402
 from _wfgraph import _tests_yml  # noqa: E402
 
@@ -630,6 +638,50 @@ def test_a_5xx_is_asked_again_and_the_next_attempt_serves(tmp):
         f'a 500 was asked for {len(transfer.calls)} times and not retried; a '
         'server failing is the transfer failing, which is what the retry is '
         'for')
+
+
+def test_a_requirements_file_the_installer_cannot_read_is_refused(tmp):
+    """The pin is read out of a file; a file that cannot be read is refused."""
+    del tmp
+    unreadable_requirements()
+
+
+def test_a_download_that_brought_no_wheel_is_refused(tmp):
+    """An sdist is not a wheel, and the refusal names it and the pin."""
+    no_wheel(Path(tmp))
+
+
+def test_a_download_that_brought_two_wheels_is_refused(tmp):
+    """One pin must name one wheel; both names and the count are stated."""
+    too_many_wheels(Path(tmp))
+
+
+def test_a_wheel_over_the_transfer_ceiling_is_refused(tmp):
+    """The ceiling is decided on the file's real size, before it is opened."""
+    oversize_wheel(Path(tmp))
+
+
+def test_a_download_that_is_not_a_zip_is_refused(tmp):
+    """A file at a wheel's name that is not an archive is refused by name."""
+    unreadable_wheel(Path(tmp))
+
+
+def test_a_tool_that_resolved_outside_the_tool_dir_is_not_the_installed_one(
+        tmp):
+    """Both answers of the comparison `_record` refuses on, asserted."""
+    resolved_outside_the_tool_dir(tmp)
+
+
+def test_a_tool_resolved_from_outside_the_tool_dir_is_refused(tmp):
+    """The refusal names the tool, the directory, and the path that was
+    found."""
+    recorded_outside_the_tool_dir(tmp)
+
+
+def test_a_tool_that_does_not_resolve_is_refused(tmp):
+    """Neither binary answering is a failure, named one by one."""
+    del tmp
+    recorded_missing()
 
 
 def main():
