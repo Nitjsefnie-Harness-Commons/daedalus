@@ -343,9 +343,6 @@ def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
     assert written['tolerances'] == {}, written.get('tolerances')
 
 
-
-
-
 def _drop_matrix(tmp, name):
     """Every artefact state against every flag shape, and what each said.
 
