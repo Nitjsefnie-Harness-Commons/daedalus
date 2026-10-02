@@ -165,8 +165,8 @@ def _graphql_refusal(payload):
         reset = rate.get('resetAt') or extensions.get('resetAt')
         if reset:
             try:
-                # `Z` is normalised for the 3.11 floor pyproject declares,
-                # from which `fromisoformat` reads a trailing Z itself.
+                # Redundant since the 3.11 floor pyproject declares:
+                # `fromisoformat` reads a trailing Z from 3.11 onward.
                 iso = str(reset).replace('Z', '+00:00')
                 stamp = datetime.fromisoformat(iso)
                 return True, stamp.timestamp()
