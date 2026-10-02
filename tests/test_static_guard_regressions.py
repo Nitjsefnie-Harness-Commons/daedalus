@@ -559,11 +559,12 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
 
     The routes between those three were enumerated in `_DECLARED_MISSES`,
     the deleted sweep scan suite's own table, so a widening was one
-    visible edit. That table, and the roughly 28 program-binding routes
-    beside it, went with cut 6 (#1483) and nothing asserts them now. The
-    analyser's own behaviour is pinned where it survives, in
-    `tests/test_tree_analyser_helpers.py`: the bare-name launcher and the
-    two passes of a scope's body. A row in a table like that one can only
+    visible edit. That table, and the 25 program-binding routes beside
+    it, went with cut 6 (#1483) and nothing asserts them now. Four of the
+    analyser's own behaviours are pinned where they survive, in
+    `tests/test_tree_analyser_helpers.py`: a bare-name launcher, the two
+    passes of a scope's body, the binding in force at a launch's line, and
+    each scope node's own program. A row in a table like that one can only
     red when the analyser IMPROVES; it is a claim, not a control, and
     with the table gone a new row is a claim with nothing behind it.
     """
