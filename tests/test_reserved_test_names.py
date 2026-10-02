@@ -244,6 +244,18 @@ def _boundary_repo(tmp):
                 f'def pair(v):\n    return 1\n{added}'
                 f'def edited(v):\n    return {edited}\n')
 
+    def js_body(carried, retouched):
+        return ('HARNESS = r"""\n'
+                'function carried(l) {\n'
+                '  const seen = [];\n'
+                '  return seen;\n'
+                '}\n' + carried
+                + 'function retouched(l) {\n'
+                '  const a = [];\n' + retouched
+                + '  return a;\n'
+                '}\n'
+                '"""\n')
+
     def commit(name, text):
         probe.write_text(text, encoding='utf-8')
         git('add', '-A')
@@ -258,13 +270,17 @@ def _boundary_repo(tmp):
                        ('commit.gpgsign', 'false'),
                        ('core.hooksPath', '')):
         git('config', key, value)
-    commit('base', body('', '', '1'))
+    commit('base', body('', '', '1') + js_body('', ''))
     # The base is its commit rather than a branch named `main`: naming one
     # is what `init.defaultBranch` decides, and a runner or a developer
     # who sets that key would fail on a branch that already exists.
     base = git('rev-parse', 'HEAD').stdout.strip()
-    commit('branch', body('def twin(v):\n    return 1\n\n',
-                          'def added(v):\n    return 2\n\n', '3'))
+    second_twin = 'def twin(v):\n    return 1\n\n'
+    second_added = 'def added(v):\n    return 2\n\n'
+    second_carried = ('function carried(l) {\n  const seen = [];\n'
+                      '  return seen;\n}\n')
+    commit('branch', body(second_twin, second_added, '3')
+           + js_body(second_carried, '  const b = [];\n'))
     return repo, base
 
 
@@ -288,6 +304,18 @@ def test_the_boundary_compares_counts_not_names(tmp):
         'the boundary did not compare COUNTS: a new name and a second '
         f'byte-identical copy are introduced, an edit is not: '
         f'{found.introduced}')
+    # The JavaScript side reads digests, and its claim is that the digest
+    # is a COUNTER rather than a set: a second copy carries a digest the
+    # base already has, so a set would make the copy free. `retouched` is
+    # the other half -- one declaration the branch EDITED, which a digest
+    # on the name rather than the body would wrongly call an authorship.
+    found_js = introduced_rows(
+        {('tests/probe.py', n): 'a row' for n in ('carried', 'retouched')},
+        js_digests, repo, bases=(base,))
+    assert found_js.reason is None, found_js.reason
+    assert found_js.introduced == [('tests/probe.py', 'carried')], (
+        'the JavaScript digest must count, not collect: a second identical '
+        f'copy is introduced and an edited body is not: {found_js.introduced}')
 
 
 # Every declaration form `js_declarations` admits, spelling one name.
@@ -371,6 +399,10 @@ def test_the_artifact_suite_binds_no_reserved_name(tmp):
     tree = ast.parse(other.read_text(encoding='utf-8'), path)
     entry = _entry_points(tree)
     bound = {name for name in definitions(tree) if name not in entry}
+    # A suite gutted of its controls binds nothing, and nothing colliding
+    # is what a healthy tree looks like -- so the reader is proved live
+    # first, or the row below passes a file with no controls at all.
+    assert bound, f'{path} binds nothing, so it proves nothing'
     derived = _reserved_names.reserved()
     collisions = sorted(bound & set(derived))
     assert not collisions, (
