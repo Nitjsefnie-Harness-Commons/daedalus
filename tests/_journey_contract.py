@@ -384,6 +384,10 @@ def artifact_shapes():
         (over('thread_bands', {'no-such-band': 1}), 'unknown thread band'),
         (over('thread_bands', {'front-end-import': 0}),
          'a thread band must be a positive integer'),
+        # `main` is read from a thread's POSITION, so a threshold for it is
+        # a claim about a role no total can put a thread in.
+        (over('thread_bands', {'main': 1_000}),
+         'a thread band cannot be a role read from position: main'),
         (over('thread_signatures', 'big'),
          'thread_signatures must be an object'),
         (over('thread_signatures', {'request': ['a_symbol']}),

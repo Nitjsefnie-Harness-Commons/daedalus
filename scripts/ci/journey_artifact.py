@@ -141,6 +141,15 @@ def _validated_bands(value):
     if not isinstance(value, dict):
         raise ValueError('thread_bands must be an object')
     for role, threshold in value.items():
+        if role == journey_threads.MAIN:
+            # `main` is read from a thread's POSITION, so a threshold for
+            # it is a claim about a role no instruction count can put a
+            # thread in. Refusing it is this field refusing to record a
+            # number that decides nothing, which is why the field does not
+            # decide anything.
+            raise ValueError(
+                'a thread band cannot be a role read from position: '
+                f'{role}')
         if role not in journey_threads.ROLES:
             raise ValueError(f'unknown thread band: {role}')
         if not isinstance(threshold, int) or isinstance(threshold, bool) \
