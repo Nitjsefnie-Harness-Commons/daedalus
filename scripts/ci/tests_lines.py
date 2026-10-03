@@ -6,11 +6,11 @@ The count is the text lines of every tracked file under ``tests/``, summed
 The mutable policy state is the ``tests_line_baseline`` member of
 ``.github/ci-thresholds.json``, one tree-wide integer.
 
-A recorded number is never raised by hand and no entry is ever added by
-hand either: the test tree pays for growth by deleting elsewhere under
-``tests/``. A drop is what the tighten exists to record, so --tighten only
-ever follows the number down, and a run that found the tree at or under
-budget writes nothing at all.
+A recorded number is never raised by hand and no command raises one: the
+test tree pays for growth by deleting elsewhere under ``tests/``. A drop is
+what the tighten exists to record, so --tighten only ever follows the
+number down, and a run that found the tree at or under budget writes
+nothing at all.
 
   python3 scripts/ci/tests_lines.py
   python3 scripts/ci/tests_lines.py --tighten
