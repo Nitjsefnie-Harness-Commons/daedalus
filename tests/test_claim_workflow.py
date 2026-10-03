@@ -14,8 +14,8 @@ from _yamlsteps import (  # noqa: E402
 )
 
 # The current claim release, pinned by the commit it names.
-CLAIM_RELEASE = '2.0.1'
-CLAIM_COMMIT = '8abff4f2f27d59b984528cb736f64b9391952a25'
+CLAIM_RELEASE = '2.0.3'
+CLAIM_COMMIT = '0c79a0325d8ab789a60c2eeaf751690d2875c39c'
 
 # The policy claim's reference block passes: per-role caps on concurrent
 # claims, and the days an idle claim survives.
@@ -90,9 +90,11 @@ def test_claim_scopes_its_permission_to_the_job(tmp):
     assert 'permissions' in job, (
         'claim must declare the scope on the job, not inherit it')
     effective = job.get('permissions')
-    assert effective == {'issues': 'write'}, (
-        "claim's effective scope must be exactly issues: write, which the two "
-        'assertions above leave on the job')
+    assert effective == {'issues': 'write', 'pull-requests': 'write'}, (
+        "claim's effective scope must be exactly issues: write plus "
+        'pull-requests: write, which the two assertions above leave on the '
+        'job: a /claim on a pull request must read it and answer on its '
+        'conversation, and GitHub refuses both to an issues-only token')
 
 
 def test_claim_pins_the_current_release(tmp):
