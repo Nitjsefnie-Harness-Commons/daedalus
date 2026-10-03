@@ -385,7 +385,7 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
                 {_key_for(installer, WINDOWS_X64):
                  hashlib.sha256(payload).hexdigest()}), \
             mock.patch.object(installer, 'TOOL_DIR', tools), \
-            mock.patch.object(installer, '_fetch',
+            mock.patch.object(installer.actionlint_asset, 'fetch',
                               return_value=payload), \
             _installing(installer, [(wheel_member(WINDOWS_X64, tool),
                                      EXECUTABLE)]), \
@@ -669,7 +669,8 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
                 'PATH': '/usr/bin:/bin'}), \
             _pinned_to(installer, payload), \
             mock.patch.object(installer, 'TOOL_DIR', tools), \
-            mock.patch.object(installer, '_fetch', return_value=payload), \
+            mock.patch.object(installer.actionlint_asset, 'fetch',
+                              return_value=payload), \
             _installing(installer, [(member, EXECUTABLE)]):
         assert installer.main() == 0
         landed = tools / member

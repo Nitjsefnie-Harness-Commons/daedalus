@@ -422,7 +422,10 @@ def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
     """Every attempt failing raises the LAST failure, and asks no more than
     the count allows. Two properties because they are the two halves of one
     loop exit: the bound stops the asking, and the bare `raise` propagates
-    the object the final attempt threw rather than a new one."""
+    the object the final attempt threw rather than a new one. The pause is
+    RECORDED here rather than stubbed out, because this is the one row that
+    reaches the attempt after which there is no retry left, and the whole
+    point of that row is that nothing follows it."""
     del tmp
     installer = _util.load(INSTALLER_SOURCE, 'lint_installer_retry')
     asset = _asset_module(installer)
@@ -430,8 +433,9 @@ def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
     failures = [urllib.error.URLError(TimeoutError(f'attempt {n}'))
                 for n in range(1, asset.DOWNLOAD_ATTEMPTS + 1)]
     transfer = _Transfer(installer, name, failures)
+    waits = []
     with (mock.patch.object(asset.urllib.request, 'urlopen', transfer),
-          mock.patch.object(asset.time, 'sleep', lambda seconds: None)):
+          mock.patch.object(asset.time, 'sleep', waits.append)):
         raised = None
         try:
             asset.fetch(name)
@@ -449,6 +453,11 @@ def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
         f'the transfer was asked {len(transfer.calls)} times and failed '
         f'every time, against DOWNLOAD_ATTEMPTS='
         f'{asset.DOWNLOAD_ATTEMPTS}')
+    assert waits == [2, 4], (
+        f'the recorded pauses were {waits} on a transfer that then failed '
+        'for good; the attempt that raises is not followed by another, and '
+        'waiting after it would put the longest pause on the path that has '
+        'already given up')
 
 
 def test_a_digest_mismatch_is_refused_on_the_transfer_it_fetched(tmp):
@@ -565,21 +574,35 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     wall-clock bound passes on a fast runner and fails a loaded one, which
     is the intermittency it would be written against.
 
-    Three properties, one run, because one run is where the SEQUENCE
-    lives: a pause between attempts at all, a header winning a window
-    below the ceiling, and the ceiling binding one above it. The two
-    headers straddle it on purpose — 6 is above the 2 s the first attempt
-    would have grown to and below the 10 s ceiling, so a path that ignores
-    the header records 2 where 6 is wanted, and 900 is above the ceiling,
-    so a path that never clamps records 900 where 10 is. Two entries and
-    not three: the third attempt served, and a pause after the attempt
-    that succeeded is waiting for nothing.
+    Three runs, because `DOWNLOAD_ATTEMPTS` gives each of them two gaps
+    and the three things worth pinning do not fit in two.
+
+    The first carries a header on both failures, which pins the header
+    limbs: 6 is above the 2 s the first attempt would have grown to and
+    below the 10 s ceiling, so a path that ignores the header records 2
+    where 6 is wanted, and 900 is above the ceiling, so a path that never
+    clamps records 900 where 10 is. Two entries and not three: the third
+    attempt served, and a pause after the attempt that succeeded is
+    waiting for nothing.
+
+    The second carries none, and that is what makes the module's own
+    growth reachable — every header-bearing sample hides it behind the
+    `max` that applies the header. It records `[2, 4]`, where a flat wait
+    records `[2, 2]` and a shifted exponent `[2, 8]`.
+
+    The third is the one header this code cannot read. `Retry-After` is
+    delay-seconds or an HTTP-date, and the date is the same window in a
+    form there is no clock here to compare, so it falls back to the
+    backoff. A parse that raised instead would take the retry with it, and
+    nothing else here would notice.
     """
     del tmp
-    _, transfer, name, asset = _installer_and_transfer(lambda i: [
-        _http_error(i, 503, 'Service Unavailable', retry_after=6),
-        _http_error(i, 503, 'Service Unavailable', retry_after=900),
-        b'the asset bytes'])
+    installer, transfer, name, asset = _installer_and_transfer(
+        lambda i: [
+            _http_error(i, 503, 'Service Unavailable', retry_after=6),
+            _http_error(i, 503, 'Service Unavailable',
+                        retry_after=900),
+            b'the asset bytes'])
     waits = []
     with (mock.patch.object(asset.urllib.request, 'urlopen', transfer),
           mock.patch.object(asset.time, 'sleep', waits.append)):
@@ -587,10 +610,35 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     assert payload == b'the asset bytes', payload
     assert waits == [6, 10], (
         f'the recorded pauses were {waits}, where the two failing statuses '
-        'carried Retry-After 6 and 900. The wait grows with the attempt, a '
-        'header below the ceiling REPLACES that growth rather than adding to '
-        'it, the ceiling binds a header above it, and nothing is recorded '
-        'after the attempt that served.')
+        'carried Retry-After 6 and 900. A header below the ceiling REPLACES '
+        'the growing backoff rather than adding to it, the ceiling binds a '
+        'header above it, and nothing is recorded after the attempt that '
+        'served.')
+    plain = _Transfer(installer, name, [
+        _http_error(installer, 503, 'Service Unavailable'),
+        _http_error(installer, 503, 'Service Unavailable'),
+        b'the asset bytes'])
+    bare = []
+    with (mock.patch.object(asset.urllib.request, 'urlopen', plain),
+          mock.patch.object(asset.time, 'sleep', bare.append)):
+        asset.fetch(name)
+    assert bare == [2, 4], (
+        f'the pauses with no Retry-After on either failure were {bare}; the '
+        "wait is the module's own and it grows with the attempt, so a flat "
+        'wait or a shifted exponent shows here and nowhere else')
+    dated = _Transfer(installer, name, [
+        _http_error(installer, 503, 'Service Unavailable',
+                    retry_after='Wed, 21 Oct 2015 07:28:00 GMT'),
+        b'the asset bytes'])
+    fell_back = []
+    with (mock.patch.object(asset.urllib.request, 'urlopen', dated),
+          mock.patch.object(asset.time, 'sleep', fell_back.append)):
+        asset.fetch(name)
+    assert fell_back == [2], (
+        f'the pause was {fell_back} where the status carried an HTTP-date '
+        'rather than delay-seconds; there is no clock here to compare a date '
+        'against, so it falls back to the backoff instead of being read as a '
+        'number nobody could have checked')
 
 
 def main():
