@@ -413,7 +413,6 @@ def test_the_serve_loop_parks_on_one_wait_and_arms_no_timer(tmp):
 
 def test_the_timer_recorder_sees_a_timer_when_one_is_armed(tmp):
     """The recorder's own positive control: arm one and be seen. Without it
-        the idle assertion passes against a recorder that records nothing.
         the idle assertion passes against a recorder that records nothing."""
     del tmp
 
@@ -425,10 +424,9 @@ def test_the_timer_recorder_sees_a_timer_when_one_is_armed(tmp):
 
 
 def test_a_request_refreshes_the_date_header_the_cycle_already_holds(tmp):
-    """A served request re-derives the Date on the list the cycle captured.
-        captured below is that object, taken the way a cycle takes it: the
+    """A served request re-derives the Date on the list the cycle captured
+        below is that object, taken the way a cycle takes it: the
         protocols concatenate what they got when the response starts, so a
-        refresh that rebinds never reaches it.
         refresh that rebinds never reaches it."""
     del tmp
     from starlette.applications import Starlette
@@ -484,7 +482,6 @@ def test_the_tick_runs_before_the_app_reads_the_headers(tmp):
 def test_the_request_tick_keeps_the_list_the_cycles_captured(tmp):
     """Eleven ticks in, the bound list is still the one the cycles hold.
         uvicorn's own on_tick REBINDS default_headers on every tenth
-        counter, orphaning the object every in-flight cycle captured.
         counter, orphaning the object every in-flight cycle captured."""
     del tmp
     mod = _idle_front_end()
@@ -507,7 +504,6 @@ def test_the_request_tick_keeps_the_list_the_cycles_captured(tmp):
 def test_a_connection_refreshes_the_headers_a_parser_refusal_answers(tmp):
     """A connection refreshes before uvicorn's parser can refuse a request.
         A malformed request line is answered by the protocol itself, from
-        the cached list read live, never reaching the middleware at all.
         the cached list read live, never reaching the middleware at all."""
     del tmp
     _mcp_load._need_deps()
@@ -619,7 +615,6 @@ def test_startup_populates_the_headers_a_below_asgi_refusal_sends(tmp):
 
 def test_the_tick_middleware_skips_a_non_http_scope(tmp):
     """Only an HTTP request ticks. Starlette routes every scope type through
-        the stack, so the lifespan startup and shutdown would each tick.
         the stack, so the lifespan startup and shutdown would each tick."""
     del tmp
     from starlette.applications import Starlette
@@ -650,8 +645,7 @@ def test_the_tick_middleware_skips_a_non_http_scope(tmp):
 
 def test_the_tick_middleware_sits_outside_the_bearer_auth_middleware(tmp):
     """The tick is on the outside of the auth middleware, and must be. Read
-    off the stack `_serve` built, not off the order the two are added in.
-    in."""
+    off the stack `_serve` built, not off the order the two are added in."""
     del tmp
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
@@ -668,7 +662,6 @@ def test_the_tick_middleware_sits_outside_the_bearer_auth_middleware(tmp):
 def test_a_refused_request_still_refreshes_the_date_header(tmp):
     """A request refused on auth answers with the Date it just refreshed. The
         clock moves between building the app and driving the refusal, so a
-        tick that does not run there leaves the previous instant's date.
         tick that does not run there leaves the previous instant's date."""
     del tmp
     _mcp_load._need_deps()
