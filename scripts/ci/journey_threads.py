@@ -160,12 +160,21 @@ JOURNEY_PROCESS = '_journeys.py'
 
 IMPORT = 'front-end-import'
 # What this names today is every background thread of the bridge that did not
-# initialise the front end — its `ThreadingHTTPServer` loop, its gc loop and
-# its uvicorn protocol threads alike — so the string is historical: it is
-# what `.github/journey-budget.json` records under `excluded_threads` and
-# `thread_bands`, and renaming a recorded role would refuse that artefact
-# until it is re-recorded. The role it names is read from the PROCESS, so
-# what it covers changed without the name having to.
+# initialise the front end, and among them three populations the measured
+# profiles tell apart: the accept loop, the front end's event-loop tick, and
+# the per-connection request threads. Three rounds of every journey on one
+# runner (callgrind, `PYTHONHASHSEED=0 PYTHONDONTWRITEBYTECODE=1`, head
+# `cbdd9458`) measured them at 563,112,124 in every journey child against
+# 562,687,477 in the idle `bridge-only` child; 58,596,915 / 58,604,775 /
+# 58,602,219 against 23,893,735 / 23,901,336 / 23,907,507; and 2,102,241,356 /
+# 2,103,073,257 / 2,102,279,390, absent from the two journeys that open no
+# connection. Only the tick is proportional to how long the journey ran,
+# which is why a journey whose own work is not the bridge's keeps this role
+# out of its list.
+# The string is historical: it is what `.github/journey-budget.json` records
+# under `excluded_threads` and `thread_bands`, and renaming a recorded role
+# would refuse that artefact until it is re-recorded. The role it names is
+# read from the PROCESS, so what it covers changed without the name having to.
 SERVE = 'uvicorn-serve'
 REQUEST = 'request'
 MAIN = 'main'
@@ -266,6 +275,21 @@ def role_of(row):
     process, and `bridge-serve` outside it. That is stated rather than left
     to the ladder's absence: no size falls back to it any more, so a role is
     never bought with a threshold — that was the defect issue 1466 removed.
+
+    One role covers three of the bridge's populations and no symbol separates
+    them. The per-connection handler path is pure Python on both sides —
+    `socketserver.py` and `http/server.py` — and this runner's CPython
+    resolves no Python frame into these profiles, so the request thread
+    declares no symbol of its own. The cheap candidate was tried and
+    REFUTED, not merely found missing: `socket/recv.c` and `socket/send.c`
+    appear on the tick thread and on the import thread as well as on the
+    request slot, in every journey. Widened to any function present on the
+    request slot and absent from the bridge's other three threads it returns
+    41 names, and the same search on the tick returns 230 — every one an
+    unresolved PLT stub (`0x00000000048cb620` and its neighbours). A
+    relocation slot is not a function and differs between runs, so it cannot
+    be a signature. `PyInit__pydantic_core` remains the one, and it names the
+    import thread only.
 
     `tests/test_journey_threads.py` pins every one of those steps.
     """
@@ -375,5 +399,8 @@ EXCLUDED = {
     'screenshot': (IMPORT,),
     'segment-relay': (IMPORT,),
     'cdp-result': (IMPORT,),
-    'net-capture': (IMPORT, SERVE),
+    # The bridge's per-connection request work here IS the per-byte handling
+    # of the capture this journey exists to measure, and dropping `serve`
+    # from a list that holds `front-end-import` stops dropping it.
+    'net-capture': (IMPORT,),
 }
