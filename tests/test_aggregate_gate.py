@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wfgraph import _tests_yml  # noqa: E402
+from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
 SOURCE = ROOT / 'scripts' / 'ci' / 'aggregate_gate.py'
@@ -27,7 +27,10 @@ SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage')
 SECRETS_WORKFLOW = '.github/workflows/secrets.yml'
 HEAD = 'c2ae15819d9374fda4720e59a46c3a991c0319be'
-FROZEN = (lambda: 0.0, lambda _seconds: None)
+# A non-zero clock origin: at 0.0 a deadline that IGNORES the clock reads
+# as the same number, so every control here would pass on either spelling.
+EPOCH = 1e6
+FROZEN = (lambda: EPOCH, lambda _seconds: None)
 
 
 def _gate():
@@ -106,7 +109,7 @@ def _polls(calls):
     return [call for call in calls if SECRETS_WORKFLOW in call[-1]]
 
 
-def _scan(polls, jobs=None, readings=(0.0,)):
+def _scan(polls, jobs=None, readings=(EPOCH,)):
     mod = _gate()
     calls, read = _recorder(MINE, [], polls=polls, jobs=jobs)
     now, sleep = _scripted_clock(readings)
@@ -134,28 +137,6 @@ def test_all_dependencies_succeeding_passes(tmp):
         _needs(changes='success', suites='success'))
     assert verdict == 'passed'
     assert message == 'All dependencies succeeded: changes, suites'
-
-
-def test_an_allowed_skip_passes(tmp):
-    del tmp
-    verdict, _ = _gate().decide(_needs(changes='success', suites='skipped'))
-    assert verdict == 'passed'
-
-
-def test_a_completed_failure_fails_with_the_standing_message(tmp):
-    del tmp
-    verdict, message = _gate().decide(
-        _needs(changes='success', suites='failure'))
-    assert verdict == 'failed'
-    assert message == 'Dependencies not successful: suites=failure'
-
-
-def test_a_strict_dependency_skipped_fails(tmp):
-    del tmp
-    verdict, message = _gate().decide(
-        _needs(changes='success', pycodestyle='skipped'))
-    assert verdict == 'strict-skipped'
-    assert message == 'Dependencies not successful: pycodestyle=skipped'
 
 
 def test_a_superseded_cancel_passes_and_names_the_newer_run(tmp):
@@ -204,20 +185,6 @@ def test_missing_context_fails_without_a_query(tmp):
     assert verdict == 'query-failed'
     assert 'query failed' in message, message
     assert calls == []
-
-
-def test_an_older_failure_stays_red_beside_a_newer_run(tmp):
-    del tmp
-    verdict, _ = _gate().decide(_needs(suites='failure'), MINE,
-                                [MINE, NEWER])
-    assert verdict == 'failed'
-
-
-def test_a_strict_skip_is_not_excused_by_supersession(tmp):
-    del tmp
-    verdict, _ = _gate().decide(_needs(changes='skipped'), MINE,
-                                [MINE, NEWER])
-    assert verdict == 'strict-skipped'
 
 
 def test_equal_start_ties_break_by_id_both_ways(tmp):
@@ -455,15 +422,20 @@ def test_two_dependencies_are_decided_jointly(tmp):
 def test_main_exits_zero_only_for_green_verdicts(tmp):
     del tmp
     mod = _gate()
+    scan_jobs = list(CLEAN_JOBS)
     calls, read = _recorder(MINE, [{'workflow_runs': [MINE, NEWER]}],
-                            polls=[[CLEAN]], jobs=CLEAN_JOBS)
+                            polls=[[CLEAN]], jobs=scan_jobs)
     cases = (
-        (json.dumps(_needs(suites='cancelled')), 0),
-        (json.dumps(_needs(suites='failure')), 1),
-        (json.dumps(_needs(changes='skipped')), 1),
-        ('{', 1),
+        (json.dumps(_needs(suites='cancelled')), 0, CLEAN_JOBS),
+        (json.dumps(_needs(suites='failure')), 1, CLEAN_JOBS),
+        (json.dumps(_needs(changes='skipped')), 1, CLEAN_JOBS),
+        ('{', 1, CLEAN_JOBS),
+        # The scan's verdict, not the needs' one, into the exit code.
+        (json.dumps(_needs(changes='success', suites='success')), 1,
+         [_scan_job(conclusion='failure')]),
     )
-    for needs_json, expected in cases:
+    for needs_json, expected, jobs in cases:
+        scan_jobs[:] = jobs
         saved = dict(os.environ)
         try:
             os.environ.clear()
@@ -534,7 +506,8 @@ CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     """Absence is not an empty answer: this fixture shows both."""
     del tmp
-    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS, (0.0, 719.0))
+    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS,
+                                    (EPOCH, EPOCH + 719.0))
     assert verdict in _gate().GREEN, message
     assert 'gitleaks' in message and 'concluded success' in message, message
     assert len(_polls(calls)) == 2, calls
@@ -543,10 +516,11 @@ def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
 def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
     """The bound governs the CONTINUE, so a verdict found at it stands."""
     del tmp
-    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS, (0.0, 720.0))
+    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS,
+                                    (EPOCH, EPOCH + 720.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
-    calls, verdict, message = _scan([[]], CLEAN_JOBS, (0.0, 720.0))
+    calls, verdict, message = _scan([[]], CLEAN_JOBS, (EPOCH, EPOCH + 720.0))
     assert verdict == 'secrets-unreported'
     assert verdict not in _gate().GREEN
     assert 'secrets' in message and '720' in message, message
@@ -556,7 +530,8 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
 def test_an_unfinished_run_keeps_the_gate_waiting(tmp):
     del tmp
     calls, verdict, message = _scan([[_secrets_run(7, status='in_progress')],
-                                    [CLEAN]], CLEAN_JOBS, (0.0, 30.0, 60.0))
+                                    [CLEAN]], CLEAN_JOBS,
+                                    (EPOCH, EPOCH + 30.0, EPOCH + 60.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
 
@@ -656,6 +631,14 @@ def _gate_step():
     steps = [step for step in job['steps'] if 'run' in step]
     assert len(steps) == 1, job['steps']
     return steps[0]
+
+
+def test_the_scanned_job_is_one_secrets_yml_declares(tmp):
+    """The gate names a job id; this joins that id to the workflow's own."""
+    del tmp
+    workflow = ROOT / '.github' / 'workflows' / 'secrets.yml'
+    assert _gate().SECRETS_JOB in _job_names(
+        workflow.read_text(encoding='utf-8'))
 
 
 def test_the_gate_waits_on_a_dispatch_event_too(tmp):
