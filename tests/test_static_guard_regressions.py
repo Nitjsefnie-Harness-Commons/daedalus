@@ -531,21 +531,19 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     `extend`. A `for` target binds the iterated expression and a match
     capture binds the whole match subject, both over-approximations of
     the value they will really hold, and both fail toward finding a
-    launch rather than past one. The list was read off this docstring by
-    the sweep scan suite, which sliced the two lists apart on these two
-    headings and failed if they overlapped; that disjointness check went
-    with cut 6 (#1483), so the heading is a contract nothing enforces and
-    the words under it are the whole of it.
+    launch rather than past one. The list is read off this docstring by
+    `tests/test_sweep_launch_scan.py`, which slices the two lists apart
+    on these two headings and fails if they overlap, so the heading is
+    part of the contract and not only the words under it.
 
     Binding forms it does NOT read: `with ... as`, `except ... as`,
     `except* ... as`, an `import` binding, a comprehension target, a
     parameter default, and any target that is not a bare name — a tuple
     unpacking, a subscript, a class attribute.
 
-    Three cost arms this control accepts on purpose. Each had a row in the
-    sweep scan suite asserting the refusal rather than the miss; that
-    suite went with cut 6 (#1483), so each arm below is declared and no
-    longer asserted. (i) It scans the files the caller names, so a bound on
+    Three cost arms this control accepts on purpose, each with a row in
+    `tests/test_sweep_launch_scan.py` asserting the refusal rather than
+    the miss. (i) It scans the files the caller names, so a bound on
     the sweep's own grandchildren — bounded individually in
     `tests/_mutation_sweep.py` — is outside it: a bound on one child is
     a backstop, only a bound on the aggregate a margin. (ii) The scan
@@ -557,17 +555,10 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     refuses a ping. A false red on a correct suite is the worse failure
     for a control this wide, so each is declared, not closed.
 
-    The routes between those three were enumerated in `_DECLARED_MISSES`,
-    the deleted sweep scan suite's own table, so a widening was one
-    visible edit. That table, and the 25 program-binding routes beside
-    it, went with cut 6 (#1483) and nothing asserts them now. What IS
-    pinned is in `tests/test_tree_analyser_helpers.py`, one row each: the
-    launcher spellings and the binding forms the two lists above name, the
-    two passes of a scope's body, the binding in force at a launch's line,
-    each scope node's own program, and the line a deadline is stamped
-    with. A row in a table like that one can only red when the analyser
-    IMPROVES; it is a claim, not a control, and with the table gone a new
-    row is a claim with nothing behind it.
+    The routes between those three are enumerated in
+    `tests/test_sweep_launch_scan.py` and frozen in `_DECLARED_MISSES`,
+    so a widening is one visible edit. A row there can only red when the
+    analyser IMPROVES; it is a claim, not a control.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
