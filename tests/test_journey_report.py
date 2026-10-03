@@ -238,6 +238,11 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
     missing output produces this refusal -- and the name is cross-checked
     against the job, so a step renamed in one place and not the other is
     red rather than a remedy pointing at nothing.
+
+    The last two samples of the same escaping property live here rather
+    than in their own tests, and are named so a maintainer hunting for them
+    finds them by the input they pin: the journey NAME column at
+    `dashboard | fanout`, and the toolchain row at `journey | shas`.
     """
     del tmp
     summaries = _journey_contract.summaries()
@@ -283,9 +288,10 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
     # escaped pipes agrees with the correct rendering here and with the
     # corrupt one everywhere except where the reason carried a backslash --
     # the input this fixture is built around -- so the count is blind to
-    # exactly the defect it stands in for, and a literal is not. It also
-    # restates no column count, so a table that legitimately grows a
-    # column leaves this assertion green.
+    # exactly the defect it stands in for, and a literal is not. The
+    # robustness is in the row this test SELECTS, not in this assertion:
+    # a whole-row literal carries the column count, so a table that grows a
+    # column means restating it here.
     assert row == (
         r'| command-round-trip | not measured | 1100 | — | no count for '
         r'`perf-instructions`: returncode 1: warn \\\| and '
@@ -303,11 +309,29 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
     lines = summaries.verdict_lines(
         piped_document, {piped: 900}, {'over': {}, 'unmeasured': {}})
     # Anchored on the separator rather than a line number or a column count,
-    # so a table that legitimately grows a column leaves this green.
+    # so the SELECTION survives a table that legitimately grows one -- the
+    # literal below is what has to be restated when it does.
     separator = next(line for line in lines if line.startswith('|---'))
     rows = lines[lines.index(separator) + 1:]
     assert rows == [
         r'| dashboard \| fanout | 900 | 1100 | -200 | within budget |'], rows
+
+    # The toolchain table is the third table a caller value reaches, and every
+    # one of its three cells is a value the measurement supplied: the field
+    # names come out of `sha_diff`, which reads them from the artefact, and
+    # both sides are shas and thread names no check validates. All three are
+    # escaped through the reason's own scheme, and one whole-row literal is
+    # what says so -- it is red if any of the three is left raw, so the row
+    # does not need a control per cell.
+    moved = summaries.toolchain_lines(
+        budget_document(counter=None), {},
+        {'journey | shas': ('\\old', ['new | pipe'])},
+        gate.TOOLCHAIN_REMEDY, subject='journey shas')
+    separator = next(line for line in moved if line.startswith('|---'))
+    row = moved[moved.index(separator) + 1]
+    assert row == (
+        r'| journey \| shas | \\old | '
+        r"['new \| pipe'] |"), row
 
     remedy = gate.UNMEASURED_REMEDY
     assert 'DAEDALUS_CALLGRIND_BOUNDARY' in remedy, remedy
