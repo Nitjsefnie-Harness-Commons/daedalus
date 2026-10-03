@@ -21,11 +21,7 @@ from _source_anchors import (  # noqa: E402
     the_call_line)
 from _repo import ROOT  # noqa: E402
 
-# Every expectation below reads this name; every site that hands the guard a
-# path or a planted source spells the literal instead. The guard resolves an
-# argument through `ast.Constant` only, so a name at one of those sites leaves
-# the target unproved and this suite's own self-scan row reds. The two
-# spellings are one boundary, not a half-finished conversion.
+# The guard resolves a path argument literally; only expectations read these.
 _PLANT_LEAF = 'test_coverage_environment.py'
 _PLANT_TARGET = 'tests/' + _PLANT_LEAF
 _DECLARATION_LINE = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
