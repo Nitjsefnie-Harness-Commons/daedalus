@@ -22,8 +22,10 @@ the tree is what a branch carries, so a branch runs the tests it brings.
   eslint.config.js          eslint's configuration
   pyproject.toml            [tool.coverage.*] -- what coverage measures
   run_tests.py              which suites the suites job runs
-  requirements-dev.txt      the tools the gates install and run
-  requirements-test.txt     the tools the gates install and run
+  requirements-dev.txt      the manifests the gates install and run; so are
+  requirements-test.txt     requirements-pip-audit.txt (the vulnerability
+  requirements-zizmor.txt   gate's own tool) and requirements-zizmor.txt (the
+                            release step's hash-pinned analyzer)
 
   .github/ci-thresholds.json  and
   .github/journey-budget.json  the recorded counts two gates compare against.
@@ -102,6 +104,8 @@ GATE_PATTERNS = (
     'run_tests.py',
     'requirements-dev.txt',
     'requirements-test.txt',
+    'requirements-pip-audit.txt',
+    'requirements-zizmor.txt',
 )
 
 _HEX40 = frozenset('0123456789abcdef')
@@ -229,11 +233,9 @@ def merge_base(read, repository, gate, head):
         payload = _one(read, _api(target))
     except QueryError as error:
         return None, [(target, f'failed: {error}')]
-    sha = None
-    if isinstance(payload, dict):
-        base = payload.get('merge_base_commit')
-        if isinstance(base, dict):
-            sha = base.get('sha')
+    base = (payload.get('merge_base_commit')
+            if isinstance(payload, dict) else None)
+    sha = base.get('sha') if isinstance(base, dict) else None
     if _hex40(sha):
         return sha, [(target, f'merge base {sha}')]
     return None, [(target, f'merge base {sha!r} is not 40 hex')]
@@ -290,11 +292,10 @@ def _existing_check_ids(read, repository, head_sha):
     """The ids of this check already on `head_sha`, filtered server-side."""
     listing = _api(
         f'repos/{repository}/commits/{head_sha}/check-runs'
-        f'?filter=all&per_page=100',
-        '--method', 'GET', '--paginate', '--jq',
-        (f'.check_runs[] | select(.name == "{NAME}" and '
-         f'.external_id == "{EXTERNAL_ID}" and '
-         f'.app.slug == "{APP_SLUG}") | .id'))
+        '?filter=all&per_page=100', '--method', 'GET', '--paginate',
+        '--jq', (f'.check_runs[] | select(.name == "{NAME}" and '
+                 f'.external_id == "{EXTERNAL_ID}" and '
+                 f'.app.slug == "{APP_SLUG}") | .id'))
     try:
         raw = read(listing)
     except QueryError:
@@ -355,8 +356,7 @@ def select_heads(pulls):
 
 def required_calls(head_count, gate_count):
     """Worst-case `gh api` calls: enumeration plus per-head work."""
-    return (len(GATE_PATTERNS)
-            + head_count * (PER_HEAD_OVERHEAD + gate_count))
+    return len(GATE_PATTERNS) + head_count * (PER_HEAD_OVERHEAD + gate_count)
 
 
 def process(read, repository, heads, gates, details_url, call_budget=None,
