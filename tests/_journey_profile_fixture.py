@@ -26,9 +26,9 @@ WHAT AN EXCERPT KEEPS, cut mechanically so it can be cut again and compared:
     are exercised on real text rather than on a line someone composed.
 
 The costs in the headers are the real ones, so a control that sums an excerpt
-is summing the real shape: the harness child's main thread in
-`command-round-trip` measured 1,125,085,258 instructions and the bridge's
-front-end thread measured 3,858,453,424.
+is summing the real shape. They are not, and are not meant to be, what the
+same journey measures today: these runs predate the counted-boundary helper,
+and every counted child now zeroes its counters before it does any work.
 
 ONE THING IS EDITED, and it is a `cmd:` line: the interpreter prefix and the
 bridge's absolute checkout path are spelled `python3` and `server.py`. Which
