@@ -130,7 +130,9 @@ def _run(argv):
     The environment is `journey_child_env.MEASURED_ENV` over the inherited
     one, and it reaches every child the counter traces -- the interpreter
     under valgrind or perf and, through it, the bridge that interpreter
-    starts. `journey_child_env` says what those two settings are for.
+    starts. `journey_child_env` says what those two settings are for, and
+    carries the third: the compiled boundary helper a counted child zeroes
+    its counters at, whose path only the job that compiled it knows.
     """
     environment = {**os.environ, **journey_child_env.MEASURED_ENV}
     try:
@@ -298,6 +300,12 @@ def shapes(names, root, rounds):
 # ─── the counters ──────────────────────────────────────────────────────────
 
 def _callgrind(name, root, workdir):
+    # The one counter whose window is opened by a client request rather than
+    # by the toolchain; `journey_child_env` says why it cannot be taken
+    # without the helper.
+    refusal = journey_child_env.boundary_refusal()
+    if refusal is not None:
+        return None, refusal
     prefix = f'callgrind.{name}'
     # Every round writes into the same workdir under the same prefix, so the
     # previous round's files are still there and would be summed into this
