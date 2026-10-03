@@ -225,10 +225,10 @@ def _pause_seconds(attempt, why):
 
     The growth is this module's own. A `Retry-After` the failing status
     carried REPLACES it rather than adding to it, because the server
-    knows when it will answer and this code does not — an ask scheduled
-    before the server asked to be asked is the same mistake the wait was
-    added to stop. The ceiling is applied last so it binds whichever of
-    the two is larger.
+    knows when it will answer and this code does not; asking sooner than
+    the server asked to be asked is the mistake the wait exists to stop.
+    The ceiling is applied last so it binds whichever of the two is
+    larger.
     """
     window = RETRY_BACKOFF_SECONDS * 2 ** attempt
     told = _retry_after_seconds(why)
