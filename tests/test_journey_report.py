@@ -266,6 +266,21 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
         {'over': {}, 'unmeasured': {unmeasured: 'perf-instructions'}}, tool)
         if line.startswith(f'| {unmeasured} '))
     assert 'returncode 255' in row and 'perf: no permission' in row, row
+    # And the tool's own stderr verbatim, which is what `journey_counters`
+    # records: it carries a newline and a pipe. The cell this renders into is
+    # one line of one table, so a newline would split the row out of it and
+    # an unescaped pipe would add a phantom column.
+    noisy = {'returncode': 255,
+             'stderr': 'valgrind: load failed\nat 0x400000 | perf'}
+    row = next(line for line in summaries.verdict_lines(
+        document, counts,
+        {'over': {}, 'unmeasured': {unmeasured: 'perf-instructions'}}, noisy)
+        if line.startswith(f'| {unmeasured} '))
+    assert '\n' not in row, (
+        f'the reason split the row out of the table it renders into: {row!r}')
+    assert 'load failed' in row and 'perf' in row, row
+    assert row.count('|') - row.count(r'\|') == 6, (
+        f'the reason added a phantom column to the row: {row!r}')
 
     remedy = gate.UNMEASURED_REMEDY
     assert 'DAEDALUS_CALLGRIND_BOUNDARY' in remedy, remedy
@@ -279,6 +294,37 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
     assert step in declared, (
         'the remedy sends the reader to a step the job does not declare: '
         f'{sorted(declared)}')
+
+
+def test_an_unresolved_row_carries_the_refusal_the_gate_gave(tmp):
+    """A journey the run REFUSED is reported under its own sentence.
+
+    `journey_gates` fills `unresolved[name]` with the refusal the run
+    produced, and the table rendered a bare "this run could not resolve
+    it" without ever reading it: the sentence was computed, carried, and
+    dropped at the last step, so a reader of a failed run learned THAT a
+    journey was unresolved and nothing about WHY. The reason is rendered
+    into the row.
+
+    This control fails for the opposite reason to the one above: that case
+    is about a reason rendered UNSAFE, this one about a reason not
+    rendered at all, and neither can stand in for the other.
+    """
+    del tmp
+    summaries = _journey_contract.summaries()
+    names = journeys().NAMES
+    unresolved = names[0]
+    document = budget_document()
+    counts = {name: 1000 for name in names}
+    del counts[unresolved]
+    refusal = 'the journey measured [2000] net [-9000]'
+    row = next(line for line in summaries.verdict_lines(
+        document, counts,
+        {'over': {}, 'unmeasured': {}, 'unresolved': {unresolved: refusal}})
+        if line.startswith(f'| {unresolved} '))
+    assert 'could not resolve' in row, row
+    assert refusal in row, (
+        f'the gate named no reason on the row a reader meets: {row}')
 
 
 def main():

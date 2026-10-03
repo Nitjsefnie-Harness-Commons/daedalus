@@ -11,10 +11,11 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
+    BOUNDARY_ENV,
     ROOT,
     _util,
     boundary_set, counter_facts,
-    journeys, launch_refusal, planting,
+    environment, journeys, launch_refusal, planting,
 )
 
 
@@ -572,6 +573,31 @@ def test_a_callgrind_child_that_failed_is_reported_in_its_own_words(tmp):
         kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
     assert kept is None, kept
     assert why == {'returncode': 255, 'stderr': loud[-400:]}, why
+
+
+def test_a_refused_callgrind_refuses_before_it_clears_the_workdir(tmp):
+    """The refusal has to land BEFORE the loop that unlinks stale entries.
+
+    `_callgrind` unlinks the previous round's `callgrind.<name>.*` entries
+    before it counts anything, and `unlink()` refuses anything that is not
+    a file. A run the boundary refuses never reaches that loop at all, so
+    the two statements are ORDERED: were they swapped, a run refused for a
+    missing boundary would instead raise `IsADirectoryError` out of the
+    unlink — an unhandled crash, carrying no diagnosis, on the reader path
+    whose whole point is a legible sentence.
+
+    The entry here is a DIRECTORY precisely because a plain file would be
+    unlinked and the ordering would never be read, and the boundary is
+    explicitly unset rather than left to whatever the ambient value is.
+    """
+    counters = _journey_contract.counters()
+    (Path(tmp) / 'callgrind.mcp-exec.9999').mkdir()
+    with environment(BOUNDARY_ENV, None):
+        kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
+    assert kept is None, kept
+    assert isinstance(why, str) and BOUNDARY_ENV in why, (
+        'a refusing counter must return its refusal sentence without ever '
+        f'reaching the unlink loop: {why!r}')
 
 
 def test_a_profile_the_gate_cannot_read_comes_back_as_a_sentence(tmp):

@@ -133,13 +133,20 @@ def _reason(why):
     sentence of its own when the refusal is one, and a returncode with the
     tool's own stderr when the tool is what would not run. Neither is
     rendered with `str()` — a cell holding `{...}` is a cell naming nothing.
+
+    The cell is ONE line of ONE table, so the reason is made safe for it:
+    a newline the tool wrote splits the row out of the table and a pipe adds
+    a phantom column. `journey_counters` records that stderr verbatim, so
+    both arrive on exactly the failure path this reason exists to explain.
     """
     if not why:
         return ''
     if isinstance(why, str):
-        return why.strip()
-    return (f'returncode {why.get("returncode")}: '
-            f'{(why.get("stderr") or "").strip()}').strip()
+        text = why
+    else:
+        text = (f'returncode {why.get("returncode")}: '
+                f'{why.get("stderr") or ""}')
+    return ' '.join(text.split()).replace('|', r'\|')
 
 
 def verdict_lines(document, counts, found, why=None):
@@ -180,6 +187,12 @@ def verdict_lines(document, counts, found, why=None):
             measured = None
         elif name in unresolved:
             verdict = 'this run could not resolve it'
+            # `journey_gates` fills this with the refusal the run produced,
+            # so the row a reader of a failed run meets says WHICH step to
+            # look at rather than only that the journey went unresolved.
+            refused = _reason(unresolved[name])
+            if refused:
+                verdict = f'{verdict}: {refused}'
             measured = None
         elif name in unmeasured:
             verdict = f'no count for `{unmeasured[name]}`'
