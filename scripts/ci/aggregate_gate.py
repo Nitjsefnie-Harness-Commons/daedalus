@@ -40,7 +40,11 @@ POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
 # runs in carries timeout-minutes 20, leaving 8 minutes to report.
 DEFAULT_POLL_BOUND_S = 720.0
 POLL_INTERVAL_S = 20.0
-MAX_POLL_BOUND_S = 86400.0
+# A bound at or over the job's own 20-minute ceiling is a wait the runner
+# cuts off mid-verdict, so the module refuses it rather than accept a
+# number that can no longer report: the gap the job's timeout exists for
+# is not something a configured bound may spend.
+MAX_POLL_BOUND_S = 900.0
 STRICT = frozenset(
     {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
 ALLOWED = frozenset({'success', 'skipped'})
@@ -289,7 +293,8 @@ def poll_bound():
 
     A value that is not a finite number inside the range is refused rather
     than clamped: a wait that never expires is the failure it exists to
-    prevent, and `float('inf')` passes a `<= 0` test.
+    prevent, `float('inf')` passes a `<= 0` test, and a bound past the job's
+    ceiling is a wait the runner ends before it can report.
     """
     raw = os.environ.get(POLL_BOUND_ENV)
     if raw is None:
