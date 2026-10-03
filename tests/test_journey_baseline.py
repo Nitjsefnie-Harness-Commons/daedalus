@@ -73,11 +73,12 @@ def test_the_baseline_is_read_through_each_journeys_own_exclusions(tmp):
     """One measured profile, and a different answer per journey.
 
     Every journey's exclusion list is its own, so the constant subtracted
-    is the journey's too: `command-round-trip` keeps neither background
-    thread, `mcp-exec` keeps the serve loop, and `net-capture` keeps the
-    import instead. Reading the baseline once with one journey's list and
-    handing that number to the rest would net a journey a thread it
-    excluded, which is the defect this whole measurement is for.
+    is the journey's too: the journeys that keep neither background thread
+    and the ones that keep the serve loop beside the bootstrap read one
+    profile to two different answers. Reading the baseline once with one
+    journey's list and handing that number to the rest would net a journey
+    a thread it excluded, which is the defect this whole measurement is
+    for.
     """
     del tmp
     counters = _journey_contract.counters()
@@ -89,7 +90,7 @@ def test_the_baseline_is_read_through_each_journeys_own_exclusions(tmp):
                                   'screenshot': 97_000,
                                   'segment-relay': 97_000,
                                   'cdp-result': 97_000,
-                                  'net-capture': 95_000}, row
+                                  'net-capture': 92_000}, row
     assert row['startup_only'] == 45_000, row
     # 107,000 is mcp-exec's own KEPT total — its own two threads, the
     # bridge's serve threads still in it — and the 8,000 the bridge-only
@@ -111,8 +112,7 @@ def test_a_baselines_refusal_is_not_swallowed_by_the_next_journey(tmp):
 
     The baseline is read once per journey through that journey's OWN
     exclusion list, so a bridge-only profile that never ran the server loop
-    refuses every journey excluding one — `command-round-trip`,
-    `dashboard-fanout` and `net-capture` — and answers the rest.
+    refuses every journey whose own list excludes one, and answers the rest.
     `command-round-trip` is first in the real set, so the loop that reads
     them stops at its refusal. Carrying on lets the next journey's `None`
     erase it, and a half-filled baseline is then subtracted from counts

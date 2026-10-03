@@ -288,16 +288,14 @@ def cdp_result(base, docroot):
 
     ITS RECORDED BUDGET IS NEAR A BILLION INSTRUCTIONS, and that is not a
     defect to go looking for. The bridge's constant serve loop is counted
-    alongside this journey's own work, and the front end's import IS
-    excluded, which is what a reader comparing this journey with
-    `net-capture` will find the asymmetry in: the two journeys swapped which
-    constant they keep. Same rule either way — a journey's exclusion list may
-    never cover work the journey itself caused — and the same deal of
+    alongside this journey's own work and the front end's bootstrap import
+    is not, which is the rule every journey runs under — an exclusion list
+    may never cover work the journey itself caused — and the same deal of
     counting a constant rather than dropping it. Under size bands this
     journey's request thread was itself barred from the serve role by
     sitting at 47 million, above the floor that role started at; a role now
-    comes from what the thread executed, so that bar is gone (issue 1466)
-    and the list is the one the recorded count was measured under.
+    comes from the process the thread ran in, so that bar is gone (issue
+    1466).
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -448,10 +446,11 @@ def net_capture(base, docroot):
     costs, and `front-end-import` is a role no importing request thread
     can claim: its signature is the init symbol of the compiled core that
     `mcp==2.2.0` pulls and the bridge's own request path never loads, so
-    the two can no longer be the same thread (issue 1466).
-    The list is left as it was because it is the one the recorded count
-    was measured under, and the constant is still counted so the per-byte
-    work is counted beside it.
+    the two can no longer be the same thread (issue 1466). The import is
+    excluded here as it is everywhere else — a thread of another process,
+    whose own cost does not repeat between runs of an unchanged tree
+    (issue 1495) — and the constant still counted is the bridge's serve
+    loop, so the per-byte work is counted beside it.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
