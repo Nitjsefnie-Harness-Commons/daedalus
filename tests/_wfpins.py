@@ -346,7 +346,6 @@ def assert_ci_tool_pins_live_in_a_watched_manifest():
 # and the control below are the only things that read them.
 _ESLINT_INSTALL = 'Install eslint (pinned, no package.json, no build step)'
 _ESLINT_GATE = "Check the pins against the registries' latest majors"
-# Each pin's env var and the package it installs, in install order.
 _ESLINT_PINS = (
     ('ESLINT_VERSION', 'eslint'),
     ('ESLINT_JS_VERSION', '@eslint/js'),
