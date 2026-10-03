@@ -6,10 +6,11 @@ cut off at is this module's, because this is what asked for the bytes.
 Naming the asset, checking the digest, unpacking and recording what was
 installed are the installer's separate questions.
 
-`RELEASE`, `ACTIONLINT_VERSION` and `MAX_TRANSFER` are written down by the
-installer, which hands them over on import rather than being imported
-back — that would be a cycle, and a pin written down twice drifts. The
-same import puts this module on `sys.path`.
+`RELEASE`, `ACTIONLINT_VERSION` and `MAX_TRANSFER` are written down by
+the installer, which puts this directory on `sys.path` and then imports
+this module, and hands the three over on the way in rather than being
+imported back — that direction would be a cycle, and a pin written down
+twice drifts.
 """
 import http.client
 import ssl
@@ -53,7 +54,9 @@ TRANSIENT_ERRORS = (OSError, http.client.HTTPException)
 # reported, and that the wait must not become the failure. The ceiling
 # bounds the header, not this module's own wait — 2 s then 4 s never
 # reaches it — because the header is the one input here a server sets to
-# whatever it likes.
+# whatever it likes. What 10 buys is that the worst case stays a fraction
+# of the tightest `timeout-minutes` any job gives the installer: two gaps
+# at it is 20 s of that job's 1200 s.
 RETRY_BACKOFF_SECONDS = 2
 RETRY_BACKOFF_CAP_SECONDS = 10
 
@@ -79,10 +82,10 @@ def _retry_after_seconds(why):
 
     `Retry-After` is delay-seconds or an HTTP-date, and only the first
     is used: a date is the same window in a form this code has no clock
-    to compare, so it falls back to the backoff rather than becoming a
-    number nobody here could have checked. A bare OSError carries no
-    headers, and a value that is not a non-negative integer is no delay
-    this can honour.
+    to compare it against, so it falls back to the backoff rather than
+    becoming a number nobody here could have checked. A bare OSError
+    carries no headers, and a value that is not a non-negative integer
+    is no delay this can honour.
     """
     headers = getattr(why, 'headers', None)
     told = headers.get('Retry-After') if headers is not None else None
