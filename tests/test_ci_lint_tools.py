@@ -423,9 +423,8 @@ def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
     the count allows. Two properties because they are the two halves of one
     loop exit: the bound stops the asking, and the bare `raise` propagates
     the object the final attempt threw rather than a new one. The pause is
-    RECORDED here rather than stubbed out, because this is the one row that
-    reaches the attempt after which there is no retry left, and the whole
-    point of that row is that nothing follows it."""
+    recorded rather than stubbed out here because this is the one row that
+    reaches the attempt with no retry left to wait for."""
     del tmp
     installer = _util.load(INSTALLER_SOURCE, 'lint_installer_retry')
     asset = _asset_module(installer)
@@ -571,8 +570,7 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
 
     `time.sleep` is stood in for and recorded, so the subject is the value
     passed to it and never how long the machine took to give it back — a
-    wall-clock bound passes on a fast runner and fails a loaded one, which
-    is the intermittency it would be written against.
+    wall-clock bound passes on a fast runner and fails a loaded one.
 
     Three runs, because `DOWNLOAD_ATTEMPTS` gives each of them two gaps
     and the three things worth pinning do not fit in two.
@@ -585,16 +583,13 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     attempt served, and a pause after the attempt that succeeded is
     waiting for nothing.
 
-    The second carries none, and that is what makes the module's own
-    growth reachable — every header-bearing sample hides it behind the
-    `max` that applies the header. It records `[2, 4]`, where a flat wait
-    records `[2, 2]` and a shifted exponent `[2, 8]`.
+    The second carries none, which is what makes the module's own growth
+    reachable: every header-bearing sample hides it behind the `max` that
+    applies the header. It records `[2, 4]`, where a flat wait records
+    `[2, 2]` and a shifted exponent `[2, 8]`.
 
-    The third is the one header this code cannot read. `Retry-After` is
-    delay-seconds or an HTTP-date, and the date is the same window in a
-    form there is no clock here to compare, so it falls back to the
-    backoff. A parse that raised instead would take the retry with it, and
-    nothing else here would notice.
+    The third is the one header the module cannot read, and a parse that
+    raised instead of falling back would take the retry with it.
     """
     del tmp
     installer, transfer, name, asset = _installer_and_transfer(
