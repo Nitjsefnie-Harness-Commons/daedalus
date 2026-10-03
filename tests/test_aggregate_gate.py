@@ -25,7 +25,6 @@ CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
 STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
 SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage')
-SECRETS_WORKFLOW = '.github/workflows/secrets.yml'
 HEAD = 'c2ae15819d9374fda4720e59a46c3a991c0319be'
 # A non-zero clock origin: at 0.0 a deadline that IGNORES the clock reads
 # as the same number, so every control here would pass on either spelling.
@@ -70,7 +69,10 @@ def _recorder(own, pages, polls=None, jobs=None):
             found = jobs if not isinstance(jobs, dict) else (
                 jobs.get(rid) or [])
             return json.dumps({'jobs': found})
-        if SECRETS_WORKFLOW in target:
+        # Dispatch on the query's SHAPE, not on a constant: this held a
+        # second copy of the module's selector, and nothing caught the two
+        # when they diverged.
+        if 'head_sha=' in target:
             page = remaining.pop(0) if len(remaining) > 1 else remaining[0]
             return json.dumps({'workflow_runs': page})
         if '/actions/workflows/' in target:
@@ -106,7 +108,7 @@ def _scripted_clock(readings):
 
 
 def _polls(calls):
-    return [call for call in calls if SECRETS_WORKFLOW in call[-1]]
+    return [call for call in calls if 'head_sha=' in call[-1]]
 
 
 def _drive_scan(polls, jobs=None, readings=(EPOCH,)):
@@ -545,9 +547,10 @@ def test_the_jobs_verdict_is_read_and_not_the_runs_conclusion(tmp):
 def test_both_secrets_queries_carry_the_head_sha_and_the_workflow(tmp):
     """A query whose arguments are dropped reads some other run entirely."""
     del tmp
+    mod = _gate()
     calls, _verdict, _message = _drive_scan([[CLEAN]], CLEAN_JOBS)
     assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
-            f'repos/o/r/actions/workflows/{SECRETS_WORKFLOW}/runs'
+            f'repos/o/r/actions/workflows/{mod.SECRETS_WORKFLOW}/runs'
             f'?head_sha={HEAD}&per_page=100'] in calls
     assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
             f'repos/o/r/actions/runs/{CLEAN["id"]}/jobs?per_page=100'] in calls
@@ -630,14 +633,26 @@ def _gate_step():
     return steps[0]
 
 
-def test_the_scanned_job_is_the_name_secrets_yml_emits(tmp):
+def _named_workflow(mod):
+    """The file the module's workflow constant names, which must exist.
+
+    This is the one thing the module cannot supply for itself: a constant
+    holding a PATH passes every control that builds its expectation from
+    that same constant, and the actions API answers such a selector
+    `Not Found`. Only the filesystem says no.
+    """
+    path = ROOT / '.github' / 'workflows' / mod.SECRETS_WORKFLOW
+    assert path.is_file(), f'{mod.SECRETS_WORKFLOW} names no workflow file'
+    return path
+
+
+def test_the_scanned_job_is_the_name_the_named_workflow_emits(tmp):
     """The gate matches `jobs[].name`: the display name where the workflow
     declares one, the job id where it does not. Pinning the id alone left
     the two ends agreeing by coincidence."""
     del tmp
     mod = _gate()
-    source = (ROOT / '.github' / 'workflows' / 'secrets.yml').read_text(
-        encoding='utf-8')
+    source = _named_workflow(mod).read_text(encoding='utf-8')
     assert mod.SECRETS_JOB in _job_names(source)
     job = complete_job_mapping(source, mod.SECRETS_JOB) or {}
     assert job.get('name') in (None, mod.SECRETS_JOB), job.get('name')
