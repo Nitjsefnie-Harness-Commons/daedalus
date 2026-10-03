@@ -257,6 +257,7 @@
 !/scripts/ci/reserved_names.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/suite_bound.py
+!/scripts/ci/tests_lines.py
 !/scripts/ci/thresholds.py
 !/scripts/ci/type_error_baseline.py
 !/scripts/ci/workflow_yaml.py
