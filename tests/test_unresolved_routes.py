@@ -21,7 +21,13 @@ from _source_anchors import (  # noqa: E402
     the_call_line)
 from _repo import ROOT  # noqa: E402
 
-_PLANT_TARGET = 'tests/test_coverage_environment.py'
+# Every expectation below reads this name; every site that hands the guard a
+# path or a planted source spells the literal instead. The guard resolves an
+# argument through `ast.Constant` only, so a name at one of those sites leaves
+# the target unproved and this suite's own self-scan row reds. The two
+# spellings are one boundary, not a half-finished conversion.
+_PLANT_LEAF = 'test_coverage_environment.py'
+_PLANT_TARGET = 'tests/' + _PLANT_LEAF
 _DECLARATION_LINE = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
 _CONTAINER_PRELUDE = (
     "def _real_module_copy(tmp, relative):\n"
@@ -130,7 +136,7 @@ def test_a_path_replace_is_not_the_pure_string_replace(tmp):
     helper.write_bytes(text.encode('utf-8'))
     violations = control_write_violations(control, root)
     assert (f'tests/_coverage_source_fixtures.py:{line}: '
-            "(root / 'tests' / 'test_coverage_environment.py').replace is "
+            f"(root / 'tests' / '{_PLANT_LEAF}').replace is "
             'not a modelled call') in violations, violations
     helper.write_bytes(original)
     assert control_write_violations(control, root) == []
@@ -202,7 +208,7 @@ def test_a_starred_argument_does_not_make_path_replace_pure(tmp):
     helper.write_bytes(text.encode('utf-8'))
     violations = control_write_violations(control, root)
     assert (f'tests/_coverage_source_fixtures.py:{line}: '
-            "(root / 'tests' / 'test_coverage_environment.py').replace is "
+            f"(root / 'tests' / '{_PLANT_LEAF}').replace is "
             'not a modelled call') in violations, violations
     helper.write_bytes(original)
     assert control_write_violations(control, root) == []
