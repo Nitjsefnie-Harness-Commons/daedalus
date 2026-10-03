@@ -15,13 +15,6 @@ accepted edge: runs group by branch name, so a fork pull request
 reusing a branch name from another fork or the base repository is
 superseded by whatever newer run shares that name, even one testing
 different commits — a rare, accepted false green.
-
-The same verdict also requires the `secrets` workflow's gitleaks job on
-this head SHA. That job is in no `needs:` set and no required context of
-this repository, so `needs:` cannot reach it — a workflow-scoped poll is
-the only route, and it runs on every event, because a `workflow_dispatch`
-of `tests` publishes its check run on the SHA it ran against and GitHub
-reads required contexts off the check runs on the pull request head.
 """
 import json
 import os
@@ -42,8 +35,9 @@ DEFAULT_POLL_BOUND_S = 720.0
 POLL_INTERVAL_S = 20.0
 # A bound at or over the job's own 20-minute ceiling is a wait the runner
 # cuts off mid-verdict, so the module refuses it rather than accept a
-# number that can no longer report: the gap the job's timeout exists for
-# is not something a configured bound may spend.
+# number that can no longer report. 900 s is where the stop sits: the
+# bound plus the 120 s read ceiling of both queries still lands under the
+# 1200 s ceiling the job carries.
 MAX_POLL_BOUND_S = 900.0
 STRICT = frozenset(
     {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
@@ -226,7 +220,8 @@ def scan_jobs(repository, run_id, read):
 
 
 def _runs_page(read, argv, field):
-    """Concatenate one paginated collection, or None when gh cannot answer."""
+    # None here means the transport refused, which is what keeps an
+    # unreadable query from reading as a repository with no runs.
     items = []
     try:
         for chunk in _decode(read(argv)):
@@ -293,8 +288,8 @@ def poll_bound():
 
     A value that is not a finite number inside the range is refused rather
     than clamped: a wait that never expires is the failure it exists to
-    prevent, `float('inf')` passes a `<= 0` test, and a bound past the job's
-    ceiling is a wait the runner ends before it can report.
+    prevent, and a bound past the job's ceiling is a wait the runner ends
+    before it can report.
     """
     raw = os.environ.get(POLL_BOUND_ENV)
     if raw is None:
