@@ -614,6 +614,14 @@ def test_real_publisher_step_noop_reports_unchanged(tmp):
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert 'changed=false' in output.read_text(encoding='utf-8')
     assert _git(repo, 'diff', '--name-only').stdout == ''
+    # The noop holds at equality and at a budget below the seeded tree alike,
+    # so only the check itself says which one the fixture is sitting at.
+    budget = subprocess.run(
+        [sys.executable, str(repo / 'scripts' / 'ci' / 'tests_lines.py'),
+         '--thresholds', str(repo / '.github' / 'ci-thresholds.json')],
+        cwd=str(repo), capture_output=True, text=True, timeout=60,
+        env=_util.child_coverage('scrub'))
+    assert budget.returncode == 0, (budget.stdout, budget.stderr)
 
 
 def main():
