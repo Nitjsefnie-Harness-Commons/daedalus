@@ -35,6 +35,7 @@ from _wfpins import (  # noqa: E402
     assert_ci_tool_pins_live_in_a_watched_manifest,
     assert_every_dependabot_group_family_covers_version_updates,
     assert_every_dependabot_group_has_a_security_mirror,
+    assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate,
     assert_the_pip_install_reader_refuses_what_it_cannot_model,
     assert_the_zizmor_manifest_is_hash_pinned)
 from _repo import ROOT  # noqa: E402
@@ -518,7 +519,8 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     identities = [step.get('name') or step.get('uses', '').partition('@')[0]
                   for step in steps]
     assert identities == [
-        'actions/checkout', 'actions/setup-python',
+        'actions/checkout',
+        'actions/setup-python',
         'Build the wheel and the sdist',
         'Check both artifacts render',
         'Install it with no checkout in reach and run its entry point',
@@ -568,57 +570,10 @@ def test_one_action_family_is_pinned_to_one_version(tmp):
                         for sha, where in sorted(by_sha.items())))
 
 
-# The eslint job pins three npm packages in its own env block, installs
-# them with --no-save, and compares each against its registry's latest
-# major. No other module in the tree names those variables, so this table
-# and the control below are the only things that read them.
-_ESLINT_INSTALL = 'Install eslint (pinned, no package.json, no build step)'
-_ESLINT_GATE = "Check the pins against the registries' latest majors"
-# Each pin's env var and the package it installs, in install order.
-_ESLINT_PINS = (
-    ('ESLINT_VERSION', 'eslint'), ('ESLINT_JS_VERSION', '@eslint/js'),
-    ('GLOBALS_VERSION', 'globals'),
-)
-_EXACT_PIN = re.compile(r'\d+\.\d+\.\d+\Z')
-
-
 def test_the_eslint_job_pins_exact_versions_behind_a_failing_gate(tmp):
-    """Three exact pins ride one install, and the gate between reds.
-
-    The fail-closed half is the one whose absence turns a red into a
-    green. A renamed or deleted env pin resolves empty, and an empty pin
-    makes the integer comparison error inside its own `if`, which reads
-    as "not stale" -- so without the `drift` branch the job passes on a
-    pin it never saw. Setting the flag is not the claim: each flag's own
-    `-ne 0` block has to reach `exit 1`, and each is pinned to that.
-    """
+    """Three exact pins ride one install, and the gate between reds."""
     del tmp
-    workflow = _tests_yml()
-    env = job_mapping(workflow, 'eslint', 'env')
-    install = step_scalar(workflow, 'eslint', _ESLINT_INSTALL, 'run')
-    gate = step_scalar(workflow, 'eslint', _ESLINT_GATE, 'run')
-    lint = step_scalar(workflow, 'eslint', 'eslint', 'run')
-    assert env and install and gate and lint, 'an eslint step is gone'
-    assert sorted(env) == sorted(var for var, _ in _ESLINT_PINS), sorted(env)
-    for var, package in _ESLINT_PINS:
-        assert _EXACT_PIN.fullmatch(env[var]), (var, package, env[var])
-    assert '--no-save --no-package-lock' in install, install
-    assert '--no-save' not in lint, 'the lint step installs'
-    for var, package in _ESLINT_PINS:
-        assert f'"{package}@${{{var}}}"' in install, (package, var, install)
-        assert f'"{var}:{package}"' in gate, (package, var, gate)
-    assert 'if [ -z "${pinned}" ]' in gate, gate
-    assert '    drift=1\n' in gate, gate
-    for flag in ('drift', 'stale'):
-        block = re.search(rf'\$\{{{flag}\}}.*-ne 0.*\n(.*\n)*?fi\n', gate)
-        assert block and '  exit 1\n' in block.group(0), (
-            f'{flag} has no -ne 0 block of its own ending in exit 1')
-    assert "git ls-files '*.js' ':!:examples/*'" in lint, lint
-    at = {match.group(1): offset for offset, line in
-          enumerate(_job_section(workflow, 'eslint'))
-          if (match := re.match(r'      - name: (.+)$', line))}
-    order = (at[_ESLINT_INSTALL], at[_ESLINT_GATE], at['eslint'])
-    assert order == tuple(sorted(order)), order
+    assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate()
 
 
 def test_dependabot_groups_an_action_used_under_more_than_one_path(tmp):
