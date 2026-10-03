@@ -330,6 +330,31 @@ def boundary_set(path='/cgzero.so'):
     return environment(BOUNDARY_ENV, path)
 
 
+class _Spawned(Exception):
+    """Raised by the bridge spy the instant the harness reaches for it.
+
+    It stops `main()` AT the spawn, so a boundary that failed to refuse
+    reads as this rather than as whatever the journey body does with a
+    base URL nothing ever served.
+    """
+
+
+def _bridge_spy(spawned):
+    """`_util.bridge` as a recorder: it records that it was asked to, and
+    stops the run there.
+
+    A bare `append` standing in for it would raise `TypeError` on the
+    keyword the real call passes, so a boundary that failed to refuse
+    would read as a crash in the double rather than as the refusal that
+    did not happen — a red naming the wrong conjunct.
+    """
+    def bridge(*_args, **_kwargs):
+        spawned.append(True)
+        raise _Spawned
+
+    return bridge
+
+
 def boundary_probe(boundary, loader, establish, call=None):
     """One counted-boundary setting, driven, and everything it produced.
 
@@ -350,9 +375,11 @@ def boundary_probe(boundary, loader, establish, call=None):
         with contextlib.ExitStack() as stack:
             stack.enter_context(environment(BOUNDARY_ENV, boundary))
             stack.enter_context(planting(ctypes, CDLL=loader))
-            stack.enter_context(planting(_util, bridge=spawned.append))
+            stack.enter_context(planting(_util, bridge=_bridge_spy(spawned)))
             try:
                 (call or establish)()
+            except _Spawned:
+                pass
             except SystemExit as refusal:
                 return refusal.code, said.getvalue(), spawned
     return 0, said.getvalue(), spawned
