@@ -684,7 +684,7 @@ def _skill_decisions(path=SKILL_SOURCE):
         'command': ('python3 scripts/ci/tests_lines.py --tighten'
                     in paragraph),
         'growth': 'pays for growth by deleting' in paragraph,
-        'merge_ref': 'MERGE ref' in paragraph,
+        'merge_ref': 'merge ref' in paragraph,
         'reads_skill': 'tests/test_ci_thresholds.py' in paragraph,
     }
 
@@ -707,11 +707,12 @@ def test_skill_mutations_are_caught_independently(tmp):
          'python3 .github/ci-thresholds.json --tighten'),
         ('growth', 'pays for growth by deleting',
          'pays for growth by re-baselining'),
-        ('merge_ref', 'MERGE\nref', 'HEAD\nref'),
+        ('merge_ref', 'its MERGE ref', 'its HEAD ref'),
         ('reads_skill', 'tests/test_ci_thresholds.py',
          'tests/test_ci_thresholds_absent.py'),
     )
     for name, old, new in mutations:
+        assert _skill_decisions()[name], name
         path = Path(tmp) / f'{name}.md'
         path.write_text(source.replace(old, new), encoding='utf-8')
         assert not _skill_decisions(path)[name], name
