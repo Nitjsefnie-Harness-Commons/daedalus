@@ -44,7 +44,6 @@
     "tests/_wfjobs.py": 4,
     "tests/_wfscalars.py": 57,
     "tests/_yamlread.py": 2,
-    "tests/test_aggregate_gate.py": 6,
     "tests/test_atomic_file.py": 4,
     "tests/test_bridge_requests.py": 3,
     "tests/test_bridge_startup.py": 1,
