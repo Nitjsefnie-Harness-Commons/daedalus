@@ -7,9 +7,12 @@ rules a local `def` is judged by, and reports a violation inside it
 against the helper's own path. A table row still decides first, so an
 import the guard cannot locate, parse or follow stays refused.
 
-Every fixture here plants a real `tests/_*.py` file under the root the
-guard is handed, so each leg is driven through the same resolution the
-migrated controls use rather than through a source string passed inline.
+Every fixture for an IMPORTED callee plants a real `tests/_*.py` file under
+the root the guard is handed, so each leg is driven through the same
+resolution the migrated controls use rather than through a source string
+passed inline. The last two rows judge a source of their own instead,
+because what they pin is the local write contract and no import sits
+between it and the caller.
 """
 import sys
 from pathlib import Path
