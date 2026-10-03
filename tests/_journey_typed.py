@@ -440,26 +440,24 @@ def net_capture(base, docroot):
     reading the capture buffer back and digesting it field by field, net of
     the fixed background — and the bridge's own handling of the capture
     beside it. Of a 2,674,843,640 median over three rounds, the bridge's
-    per-connection request slot is 2,102,279,390, the median of those same
-    three: 78.6%. That is the per-byte handling the journey exists to
-    measure, so `serve` is left out of the exclusion list here while
-    `front-end-import` stays in it. The import is a thread of another process
-    whose cost does not repeat between runs of an unchanged tree (issue
-    1495), and it can be told from a request thread running to billions at
-    all because a role comes from the process a thread ran in and its
-    signature is the init symbol of the compiled core that `mcp==2.2.0`
-    pulls, which the bridge's own request path never loads (issue 1466).
-    Dropping `serve` from a list that holds `front-end-import` stops
-    dropping the request work as well.
+    per-connection request slot is 2,102,507,000: 78.6%. That is the
+    per-byte handling the journey exists to measure, so `serve` is left out
+    of the exclusion list here while `front-end-import` stays in it. The
+    import is a thread of another process whose cost does not repeat between
+    runs of an unchanged tree (issue 1495), and it can be told from a
+    request thread running to billions at all because a role comes from the
+    process a thread ran in and its signature is the init symbol of the
+    compiled core that `mcp==2.2.0` pulls, which the bridge's own request
+    path never loads (issue 1466). Dropping `serve` from a list that holds
+    `front-end-import` stops dropping the request work as well.
 
     `role_of` puts every other thread of the bridge in the one role this
     list does not exclude, so the front end's event-loop tick rides along as
-    a named residual — the ruling `mcp-exec`'s exclusion rests on
-    (`journey_threads`: "`mcp-exec` calls that loop, so its tick stays in as
-    the named residual"). Against the idle `bridge-only` child that residual
-    measures 34,694,712 to 34,703,439 instructions over three rounds, 1.297%
-    of the count, and it grows with how long the journey ran. So this count
-    does carry a wall-clock term, named here rather than implied away.
+    a named residual — the ruling `mcp-exec`'s exclusion rests on, its case
+    (a). Against the idle `bridge-only` child that residual measures
+    34,694,712 to 34,703,439 instructions over three rounds, 1.297% of the
+    count, and it grows with how long the journey ran. So this count does
+    carry a wall-clock term, named here rather than implied away.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
