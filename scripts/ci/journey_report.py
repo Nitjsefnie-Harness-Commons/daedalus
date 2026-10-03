@@ -290,8 +290,11 @@ def too_few_rounds_lines(rounds):
     different one, and a reader told the wrong fact goes looking in the
     wrong place: that line says a recorded gate moved, so this run's counts
     described something other than what was recorded and the runner image is
-    where to look. This one says the run measured every journey correctly
-    and measured it once.
+    where to look. This one is about how many draws the run reports, and the
+    guard that reaches it takes a round count that is ABSENT, zero or
+    non-integral as readily as a single draw — so `rounds_reading` says what
+    the report carried, and nothing here claims a run measured every journey
+    correctly when it says nothing at all about that.
     """
     return [f'**This run measured {rounds_reading(rounds)}, and one draw is '
             'not a record: nothing was tightened.**', '',
