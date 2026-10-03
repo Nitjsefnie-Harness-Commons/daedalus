@@ -278,7 +278,7 @@ def test_the_tighten_command_is_the_one_the_implementation_uses(tmp):
     artifact.write_bytes(payload)
     measurements = Path(tmp) / 'counts.json'
     measurements.write_text(json.dumps({
-        'rounds': 1, 'python': sys.version, **recorded_maps(),
+        'rounds': 3, 'python': sys.version, **recorded_maps(),
         'counters': {'perf-instructions': {
             'available': True, 'startup_only': 0,
             'journeys': {name: {'min': 800, 'max': 800, 'median': 800,
