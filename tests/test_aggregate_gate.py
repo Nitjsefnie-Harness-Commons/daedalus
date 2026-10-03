@@ -245,7 +245,7 @@ def test_the_queries_target_the_own_run_and_this_workflow(tmp):
     assert ['gh', 'api', '-H', 'Cache-Control: no-cache',
             'repos/o/r/actions/runs/1'] in calls
     assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
-            'repos/o/r/actions/workflows/.github/workflows/tests.yml/runs'
+            'repos/o/r/actions/workflows/tests.yml/runs'
             '?branch=fix%2Fx&per_page=100'] in calls
 
 
@@ -633,26 +633,29 @@ def _gate_step():
     return steps[0]
 
 
-def _named_workflow(mod):
-    """The file the module's workflow constant names, which must exist.
+def _named_workflow(mod, constant):
+    """The file one of the module's workflow selectors must name.
 
-    This is the one thing the module cannot supply for itself: a constant
-    holding a PATH passes every control that builds its expectation from
-    that same constant, and the actions API answers such a selector
-    `Not Found`. Only the filesystem says no.
+    A constant holding a PATH passes every control that builds its
+    expectation from that same constant, and the actions API answers such
+    a selector `Not Found`. Only the filesystem says no.
     """
-    path = ROOT / '.github' / 'workflows' / mod.SECRETS_WORKFLOW
-    assert path.is_file(), f'{mod.SECRETS_WORKFLOW} names no workflow file'
+    name = getattr(mod, constant)
+    path = ROOT / '.github' / 'workflows' / name
+    assert path.is_file(), f'{name} names no workflow file'
     return path
 
 
-def test_the_scanned_job_is_the_name_the_named_workflow_emits(tmp):
-    """The gate matches `jobs[].name`: the display name where the workflow
+def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
+    """Both selectors, one control: each names a file this tree ships, and
+    the gate matches `jobs[].name` — the display name where the workflow
     declares one, the job id where it does not. Pinning the id alone left
     the two ends agreeing by coincidence."""
     del tmp
     mod = _gate()
-    source = _named_workflow(mod).read_text(encoding='utf-8')
+    assert _named_workflow(mod, 'WORKFLOW').is_file()
+    source = _named_workflow(mod, 'SECRETS_WORKFLOW').read_text(
+        encoding='utf-8')
     assert mod.SECRETS_JOB in _job_names(source)
     job = complete_job_mapping(source, mod.SECRETS_JOB) or {}
     assert job.get('name') in (None, mod.SECRETS_JOB), job.get('name')
