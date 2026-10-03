@@ -10,10 +10,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ghexpr import sole_context_path  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wfgraph import _job_if_expression  # noqa: E402
 from _workflows import (  # noqa: E402
     _event_option_keys, _workflow_path_filters, _workflow_triggers)
 from _yamlread import step_scalar  # noqa: E402
+from _yamlsteps import workflow_mapping  # noqa: E402
 
 
 def _assert_no_workflow_gates_one_commit_twice(workflows):
@@ -487,6 +490,45 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
              'tighten')):
         actual = step_scalar(tests_yml, job, step, 'id')
         assert actual == expected, f'{job}/{step}: {actual!r}'
+
+
+def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
+    """One score, from one ref, published only where it means something.
+
+    A `workflow_dispatch` names any branch, so without the guard a run from
+    one publishes that branch as the repository's score, and a fork's
+    schedule publishes at all. The two conjuncts below are true together on
+    exactly one context — upstream, on its default branch — and the group
+    cancels the run a re-dispatch supersedes instead of racing it.
+    """
+    del tmp
+    scorecard = (ROOT / '.github' / 'workflows' / 'scorecard.yml').read_text(
+        encoding='utf-8')
+    concurrency = workflow_mapping(scorecard).get('concurrency')
+    assert concurrency == {
+        'group': 'scorecard-${{ github.ref }}',
+        'cancel-in-progress': 'true',
+    }, f'scorecard concurrency: {concurrency!r}'
+
+    condition = _job_if_expression(scorecard, 'analysis')
+    assert condition is not None, (
+        'the analysis job has no if:, so a dispatch on another branch '
+        'publishes that branch as the repository score')
+    guard = ' '.join(condition.split())
+    assert guard.startswith('${{') and guard.endswith('}}'), condition
+    conjuncts = guard[3:-2].split('&&')
+    assert len(conjuncts) == 2, f'the guard is not two conjuncts: {guard!r}'
+    fork, ref = (part.strip() for part in conjuncts)
+
+    assert fork.startswith('!'), f'the fork flag is not negated: {fork!r}'
+    assert sole_context_path(fork[1:]) == (
+        'github', 'event', 'repository', 'fork'), fork
+    subject, operator, expected = ref.partition('==')
+    assert operator == '==', f'the ref is not compared: {ref!r}'
+    assert sole_context_path(subject.strip()) == ('github', 'ref'), ref
+    assert expected.strip() == (
+        "format('refs/heads/{0}',"
+        " github.event.repository.default_branch)"), ref
 
 
 def main():
