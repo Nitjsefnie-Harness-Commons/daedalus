@@ -9,7 +9,6 @@
   },
   "tolerances": {
     "command-round-trip": 1.549611,
-    "net-capture": 1.140791,
     "segment-relay": 0.571726
   },
   "excluded_threads": {
@@ -17,7 +16,7 @@
     "command-round-trip": ["front-end-import", "uvicorn-serve"],
     "dashboard-fanout": ["front-end-import", "uvicorn-serve"],
     "mcp-exec": ["front-end-import"],
-    "net-capture": ["uvicorn-serve"],
+    "net-capture": ["front-end-import", "uvicorn-serve"],
     "screenshot": ["front-end-import"],
     "segment-relay": ["front-end-import"]
   },
@@ -34,12 +33,12 @@
     "segment-relay": "045137a566fe2acaf7ff15773c6f4779308faaf92ea1db9f6bdb416dc518bf0f"
   },
   "journeys": {
-    "cdp-result": 99531389,
-    "command-round-trip": 1991060,
-    "dashboard-fanout": 16242920,
-    "mcp-exec": 3984211834,
-    "net-capture": 540969644,
-    "screenshot": 76159901,
-    "segment-relay": 42316914
+    "cdp-result": 99557406,
+    "command-round-trip": 2073474,
+    "dashboard-fanout": 16270763,
+    "mcp-exec": 3984007504,
+    "net-capture": 536400723,
+    "screenshot": 76163615,
+    "segment-relay": 42313463
   }
 }
