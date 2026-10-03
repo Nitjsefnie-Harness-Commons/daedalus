@@ -16,8 +16,10 @@ the same one: the mechanisms and the controls that hold them to the tree
 are read separately on purpose. Nothing here reads a control name;
 everything here answers one question about one tree.
 """
+import email.message
 import re
 import sys
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -241,3 +243,115 @@ def _mechanism_residue(sources=None):
     stale = sorted((name, sorted(tools - skipped))
                    for name, tools in shares if tools - skipped)
     return residue, overlap, stale
+
+
+def _asset_module(installer):
+    """The module that asks for the asset, where the retry window lives.
+
+    The installer names the asset and installs what comes back; this is
+    the module that reaches for it, so the controls that stand in for a
+    transfer patch and read it through here rather than naming it.
+    """
+    return installer.actionlint_asset
+
+
+class _Fetched:
+    """What the transfer hands back: a context manager over one payload.
+
+    One bounded read is the only shape modelled, because `read` is where the
+    size bound is enforced in the code under test. A second read is a call the
+    installer does not make, so it is refused rather than answered.
+    """
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.reads = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size):
+        self.reads += 1
+        assert self.reads == 1, (
+            f'the installer read the response {self.reads} times; this '
+            'models one bounded read and refuses to answer a second')
+        return self.payload[:size]
+
+
+class _Transfer:
+    """A recording stand-in for the one network call `fetch` makes.
+
+    It answers the outcomes it was given, in order, and refuses everything
+    else: an ask past the last outcome, a URL other than the one `fetch`
+    builds for that asset, an altered timeout, an unmodelled keyword. Each
+    refusal is an assertion, so a call shape this does not model fails the
+    control rather than being quietly satisfied.
+    """
+
+    def __init__(self, installer, name, outcomes):
+        self.expected = (f'{installer.RELEASE}/v'
+                         f'{installer.ACTIONLINT_VERSION}/{name}')
+        self.timeout = _asset_module(installer).DOWNLOAD_TIMEOUT
+        self.outcomes = list(outcomes)
+        self.calls = []
+
+    def __call__(self, url, timeout=None, **rest):
+        assert not rest, (
+            f'the installer passed {sorted(rest)} to the fetch, which this '
+            'stand-in does not model')
+        assert timeout == self.timeout, (
+            f'the installer passed timeout={timeout!r} where '
+            f'DOWNLOAD_TIMEOUT is {self.timeout}')
+        assert url == self.expected, (
+            f'the installer asked for {url!r} where the asset it was given '
+            f'names {self.expected!r}')
+        self.calls.append(url)
+        assert self.outcomes, (
+            f'the installer asked for the asset {len(self.calls)} times and '
+            f'this stand-in was given {len(self.calls) - 1} outcomes, so the '
+            'last ask is one it cannot answer')
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return _Fetched(outcome)
+
+
+def _installer_and_transfer(outcomes):
+    """The installer, its asset module, a stand-in for the transfer, and
+    the asset it fetches.
+
+    The asset module comes out with them because every control that stands
+    in for a transfer has to reach it: the network call, the pause and
+    the attempt count are all its, not the installer's.
+
+    `outcomes` is a list, or a callable handed the installer so a payload can
+    be sized from a constant the test only learns at run time."""
+    installer = _util.load(INSTALLER_SOURCE, 'lint_installer_retry')
+    name = installer._asset_name()[0]
+    if callable(outcomes):
+        outcomes = outcomes(installer)
+    return (installer, _Transfer(installer, name, outcomes), name,
+            _asset_module(installer))
+
+
+def _http_error(installer, code, phrase, retry_after=None):
+    """A status answer as urllib raises one, addressed at the installer's own
+    release base.
+
+    The host is derived from `RELEASE` rather than written here: a second copy
+    of one in a test is a deployment string the release scanner reads on every
+    leg, and no control below asserts on this URL — they assert on the call
+    count, the status and the bytes. The headers are an empty
+    `email.message.Message` because that is what `HTTPError` declares, not a
+    dict that happens to be accepted, unless a caller names a `retry_after`
+    for the control that reads one back off a failing status.
+    """
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers['Retry-After'] = str(retry_after)
+    return urllib.error.HTTPError(
+        f'{installer.RELEASE}/v{installer.ACTIONLINT_VERSION}/not-the-asset',
+        code, phrase, headers, None)
