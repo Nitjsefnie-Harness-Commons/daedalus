@@ -435,22 +435,24 @@ def net_capture(base, docroot):
     `DAEDALUS_MAX_UNAUTHENTICATED_BODY` (64 KiB by default), and anything
     larger with no header is answered 401 without being read. A real capture
     is megabytes, so the same trap holds for any real PNG.
-    ITS RECORDED BUDGET IS DOMINATED BY A CONSTANT, so a reader who sees a
-    multi-billion figure for one journey is not looking at an error. The
-    request thread this journey puts to work runs to billions of
-    instructions, which under size bands landed in the import band — so the
-    front end's import could not be excluded here without excluding the very
-    work the journey exists to measure, and the bridge's own one-off
-    bootstrap import counts alongside it (issue 1461, bridge side). That
-    coupling is gone: the request thread is a `request` thread whatever it
-    costs, and `front-end-import` is a role no importing request thread
-    can claim: its signature is the init symbol of the compiled core that
-    `mcp==2.2.0` pulls and the bridge's own request path never loads, so
-    the two can no longer be the same thread (issue 1466). The import is
-    excluded here as it is everywhere else — a thread of another process,
-    whose own cost does not repeat between runs of an unchanged tree
-    (issue 1495) — and the constant still counted is the bridge's serve
-    loop, so the per-byte work is counted beside it.
+    What its recorded budget holds is this journey's own side of the work:
+    reading the capture buffer back and digesting it field by field, net of
+    the fixed background. No constant sits in that number.
+    The thread carrying that read-back runs to billions of instructions,
+    which under size bands landed in the import band beside the bridge's
+    own one-off bootstrap, so excluding the import then would have dropped
+    the work the journey exists to measure (issue 1461, bridge side). That
+    coupling is gone: a role comes from the process a thread ran in, and
+    `front-end-import` is a role no importing request thread can claim —
+    its signature is the init symbol of the compiled core that `mcp==2.2.0`
+    pulls and the bridge's own request path never loads (issue 1466). The
+    import is excluded here as it is everywhere else, a thread of another
+    process whose own cost does not repeat between runs of an unchanged tree
+    (issue 1495), and the serve role is excluded beside it: `role_of` reads
+    every bridge thread as one of the two roles this list names, so no
+    thread of the bridge is counted here at all — the bridge's own handling
+    of the capture is in neither the count nor the fixed background
+    subtracted from it.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
