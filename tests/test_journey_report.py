@@ -11,8 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
+from _yamlsteps import complete_job_mapping  # noqa: E402
 from _journey_contract import (  # noqa: E402
     IDENTITY,
+    ROOT,
     _util,
     budget_document,
     counter_facts,
@@ -117,6 +119,16 @@ def test_the_verdict_table_pins_every_row_it_renders(tmp):
     assert rows[names[2]] == (
         f'| {names[2]} | not measured | 1100 | — | no count for '
         '`perf-instructions` |'), rows[names[2]]
+    # The same row once the counter's own reason is threaded in, so the cell
+    # is pinned in both states rather than the reason only being absent.
+    rows = {line.split('|')[1].strip(): line
+            for line in summaries.verdict_lines(
+                document, counts, found, 'the probe did not find it usable')
+            if line.startswith('|') and not line.startswith('|---')}
+    assert rows[names[2]] == (
+        f'| {names[2]} | not measured | 1100 | — | no count for '
+        '`perf-instructions`: the probe did not find it usable |'), (
+            rows[names[2]])
 
 
 def test_the_table_and_the_gate_are_held_to_the_same_number(tmp):
@@ -210,6 +222,63 @@ def test_the_table_never_reads_a_refused_journey_as_within_budget(tmp):
         {'over': {}, 'unmeasured': {}, 'unresolved': {}})
         if line.startswith(f'| {refused} '))
     assert 'within budget' not in row, row
+
+
+def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
+    """The counter's own sentence has to reach a reader of a failed run.
+
+    `boundary_refusal()` exists because "the refusal is what a reader of a
+    failed run gets and it has to name the variable that was missing", and
+    the row reporting an unmeasured journey named only the counter: the
+    sentence survived inside the uploaded `journey-counts.json` and nowhere
+    a person reads. So the reason is rendered into the row.
+
+    The remedy beside it has to name the step that FAILED. It named the
+    probe step, which succeeded, while the build step is the one whose
+    missing output produces this refusal -- and the name is cross-checked
+    against the job, so a step renamed in one place and not the other is
+    red rather than a remedy pointing at nothing.
+    """
+    del tmp
+    summaries = _journey_contract.summaries()
+    gate = _journey_contract.policy()
+    names = journeys().NAMES
+    document = budget_document()
+    counts = {name: 1000 for name in names}
+    unmeasured = names[0]
+    del counts[unmeasured]
+    refusal = ('DAEDALUS_CALLGRIND_BOUNDARY names no compiled boundary '
+               'helper, so a counted child would keep its interpreter '
+               'startup in the recorded count')
+    row = next(line for line in summaries.verdict_lines(
+        document, counts,
+        {'over': {}, 'unmeasured': {unmeasured: 'valgrind-callgrind'}},
+        refusal)
+        if line.startswith(f'| {unmeasured} '))
+    assert 'valgrind-callgrind' in row, row
+    assert refusal in row, (
+        f'the counter named no reason on the row a reader meets: {row}')
+    # The other shape a counter reports its reason in: a tool that would not
+    # run carries a returncode and its own stderr rather than a sentence.
+    tool = {'returncode': 255, 'stderr': 'perf: no permission'}
+    row = next(line for line in summaries.verdict_lines(
+        document, counts,
+        {'over': {}, 'unmeasured': {unmeasured: 'perf-instructions'}}, tool)
+        if line.startswith(f'| {unmeasured} '))
+    assert 'returncode 255' in row and 'perf: no permission' in row, row
+
+    remedy = gate.UNMEASURED_REMEDY
+    assert 'DAEDALUS_CALLGRIND_BOUNDARY' in remedy, remedy
+    step = 'Build the counted-boundary helper'
+    assert step in remedy, remedy
+    job = complete_job_mapping(
+        (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+            encoding='utf-8'), 'journey-budget')
+    assert job is not None, 'the journey-budget job is not in tests.yml'
+    declared = {one.get('name') for one in job['steps'] if one.get('name')}
+    assert step in declared, (
+        'the remedy sends the reader to a step the job does not declare: '
+        f'{sorted(declared)}')
 
 
 def main():
