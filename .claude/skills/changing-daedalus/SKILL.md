@@ -207,6 +207,19 @@ entry whose file has no type error left. An entry naming a file that is gone
 is removed by hand. `tests/test_type_errors.py` gates the policy and reads
 this paragraph the same way.
 
+**`.github/ci-thresholds.json`'s `tests_line_baseline` holds the test tree's
+own size on the same terms.** It records the text lines of every tracked file
+under `tests/`, summed, as one tree-wide number rather than a row per file —
+the subject is the directory, so there is no path to key on. A number is
+never raised by hand, and there is no command that raises one: the test tree
+pays for growth by deleting as many lines elsewhere under `tests/` as the
+change added. The remedy for a refusal is therefore a deletion, not a
+re-baseline, and the fall is recorded with
+`python3 scripts/ci/tests_lines.py --tighten`. A pull request is checked on
+its MERGE ref, so a branch that net-adds lines goes red on merge however few
+it adds at its head. `tests/test_ci_thresholds.py` gates the policy and
+reads this paragraph the same way.
+
 **The same file's `js_coverage_baseline` holds the per-module JavaScript
 coverage policy on the same terms.** It records how many uncovered
 executable lines each tracked JavaScript file still carries, counted from
