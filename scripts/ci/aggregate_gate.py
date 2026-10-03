@@ -15,22 +15,39 @@ accepted edge: runs group by branch name, so a fork pull request
 reusing a branch name from another fork or the base repository is
 superseded by whatever newer run shares that name, even one testing
 different commits — a rare, accepted false green.
+
+The same verdict also requires the `secrets` workflow's gitleaks job on
+this head SHA. That job is in no `needs:` set and no required context of
+this repository, so `needs:` cannot reach it — a workflow-scoped poll is
+the only route, and it runs on every event, because a `workflow_dispatch`
+of `tests` publishes its check run on the SHA it ran against and GitHub
+reads required contexts off the check runs on the pull request head.
 """
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from urllib.parse import quote
 
 WORKFLOW = '.github/workflows/tests.yml'
+SECRETS_WORKFLOW = '.github/workflows/secrets.yml'
+SECRETS_JOB = 'gitleaks'
+POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
+# The gitleaks job's own 10-minute backstop plus queueing; the job this
+# runs in carries timeout-minutes 20, leaving 8 minutes to report.
+DEFAULT_POLL_BOUND_S = 720.0
+POLL_INTERVAL_S = 20.0
+MAX_POLL_BOUND_S = 86400.0
 STRICT = frozenset(
     {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
 ALLOWED = frozenset({'success', 'skipped'})
 CANCELLED = 'cancelled'
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 REPOSITORY = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z')
+HEAD_SHA = re.compile(r'[0-9a-f]{40}\Z')
 
 PASSED = 'passed'
 FAILED = 'failed'
@@ -38,6 +55,10 @@ STRICT_SKIPPED = 'strict-skipped'
 CANCEL_SUPERSEDED = 'cancelled-superseded'
 CANCEL_DELIBERATE = 'cancelled-deliberate'
 QUERY_FAILED = 'query-failed'
+SCAN_MISSING = 'secrets-missing'
+SCAN_FAILED = 'secrets-failed'
+SCAN_QUERY_FAILED = 'secrets-query-failed'
+SCAN_UNREPORTED = 'secrets-unreported'
 GREEN = frozenset({PASSED, CANCEL_SUPERSEDED})
 
 
@@ -133,9 +154,7 @@ def _decode(payload):
 
 
 def own_run(repository, run_id, read):
-    if not (REPOSITORY.fullmatch(repository or '')
-            and str(run_id or '').isascii()
-            and str(run_id or '').isdigit()):
+    if not (REPOSITORY.fullmatch(repository or '') and _is_run_id(run_id)):
         return None
     try:
         chunks = _decode(read([
@@ -145,6 +164,11 @@ def own_run(repository, run_id, read):
         return None
     return (chunks[0] if len(chunks) == 1 and isinstance(chunks[0], dict)
             else None)
+
+
+def _is_run_id(run_id):
+    return (str(run_id or '').isascii()
+            and str(run_id or '').isdigit())
 
 
 def branch_runs(repository, branch, read):
@@ -171,6 +195,114 @@ def evaluate(needs, repository, run_id, branch, read):
     return decide(needs, mine, runs)
 
 
+def scan_runs(repository, head_sha, read):
+    """The `secrets` workflow's runs on one head SHA; None when unanswerable.
+
+    Workflow-scoped by construction: the path is the query's own subject,
+    so no other workflow's run can answer this gate whatever it is named.
+    """
+    if not (REPOSITORY.fullmatch(repository or '')
+            and HEAD_SHA.fullmatch(str(head_sha or ''))):
+        return None
+    return _runs_page(read, [
+        'gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+        f'repos/{repository}/actions/workflows/{SECRETS_WORKFLOW}/runs'
+        f'?head_sha={quote(str(head_sha), safe="")}&per_page=100'],
+        'workflow_runs')
+
+
+def scan_jobs(repository, run_id, read):
+    """The jobs of one workflow run; None when the read is unanswerable."""
+    if not (REPOSITORY.fullmatch(repository or '') and _is_run_id(run_id)):
+        return None
+    return _runs_page(read, [
+        'gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+        f'repos/{repository}/actions/runs/{run_id}/jobs?per_page=100'],
+        'jobs')
+
+
+def _runs_page(read, argv, field):
+    """Concatenate one paginated collection, or None when gh cannot answer."""
+    items = []
+    try:
+        for chunk in _decode(read(argv)):
+            if isinstance(chunk, dict):
+                items.extend(chunk.get(field) or [])
+    except QueryError:
+        return None
+    return items
+
+
+def _judge_scan(repository, run, read):
+    """Rule on one completed run's gitleaks JOB, which is what the verdict
+    is: a run's own conclusion summarises its jobs and is not one of them.
+    """
+    where = (f'run {run.get("id")} of {SECRETS_WORKFLOW} '
+             f'({run.get("html_url") or "?"})')
+    jobs = scan_jobs(repository, run.get('id'), read)
+    if jobs is None:
+        return SCAN_QUERY_FAILED, (
+            f'the jobs of {where} could not be read, so the secret scan '
+            'could not be judged')
+    found = [job for job in jobs if job.get('name') == SECRETS_JOB]
+    if not found:
+        return SCAN_MISSING, (
+            f'{where} has no job named {SECRETS_JOB}; its jobs were: '
+            + (', '.join(sorted(str(job.get('name')) for job in jobs))
+               or 'none at all'))
+    conclusion = found[0].get('conclusion')
+    if conclusion == 'success':
+        return PASSED, f'the {SECRETS_JOB} job of {where} concluded success'
+    return SCAN_FAILED, (
+        f'the {SECRETS_JOB} job of {where} concluded '
+        f'{conclusion or "nothing at all"}, and a scan that did not run '
+        'cleanly is not a clean scan')
+
+
+def require_secret_scan(repository, head_sha, bound, read, clock, sleep):
+    """Wait for the `secrets` run on this SHA, then rule on its scan job.
+
+    Newest run on the SHA wins, and the comparison never leaves the SHA: a
+    re-push cancels the older run through secrets.yml's own concurrency
+    group, so the cross-branch rule the cancelled-dependency case needs
+    would excuse exactly that deliberate cancel.
+    """
+    deadline = clock() + bound
+    while True:
+        runs = scan_runs(repository, head_sha, read)
+        if runs is None:
+            return SCAN_QUERY_FAILED, (
+                f'the {SECRETS_WORKFLOW} runs on {head_sha or "(no head sha)"}'
+                ' could not be read, so the secret scan could not be judged')
+        run = max(runs, key=_started_key, default=None)
+        if run is not None and run.get('status') == 'completed':
+            return _judge_scan(repository, run, read)
+        if clock() >= deadline:
+            return SCAN_UNREPORTED, (
+                f'no completed {SECRETS_WORKFLOW} run reported on {head_sha} '
+                f'within {bound:g} s, so the secret scan never concluded')
+        sleep(POLL_INTERVAL_S)
+
+
+def poll_bound():
+    """The seconds the scan wait may take, from the environment or not.
+
+    A value that is not a finite number inside the range is refused rather
+    than clamped: a wait that never expires is the failure it exists to
+    prevent, and `float('inf')` passes a `<= 0` test.
+    """
+    raw = os.environ.get(POLL_BOUND_ENV)
+    if raw is None:
+        return DEFAULT_POLL_BOUND_S
+    try:
+        bound = float(raw)
+    except ValueError as exc:
+        raise QueryError(f'{POLL_BOUND_ENV} is not a number: {raw!r}') from exc
+    if not 0 < bound <= MAX_POLL_BOUND_S:
+        raise QueryError(f'{POLL_BOUND_ENV} is out of range: {raw!r}')
+    return bound
+
+
 def gh_read(argv):
     try:
         proc = subprocess.run(
@@ -183,6 +315,18 @@ def gh_read(argv):
     return proc.stdout
 
 
+def _secret_scan():
+    """The scan verdict, and every way refusing to know one fails closed."""
+    try:
+        bound = poll_bound()
+    except QueryError as exc:
+        return SCAN_QUERY_FAILED, str(exc)
+    return require_secret_scan(
+        os.environ.get('REPOSITORY', ''),
+        os.environ.get('SECRETS_HEAD_SHA', ''), bound, gh_read,
+        time.monotonic, time.sleep)
+
+
 def main():
     try:
         needs = json.loads(os.environ['NEEDS_JSON'])
@@ -193,6 +337,13 @@ def main():
         needs, os.environ.get('REPOSITORY', ''),
         os.environ.get('RUN_ID', ''), os.environ.get('HEAD_BRANCH', ''),
         gh_read)
+    if verdict in GREEN:
+        # Only once the dependencies are green: the aggregate is red
+        # either way, and a failing suites job must not also spend the
+        # scan's whole bound waiting for a scan.
+        scan, detail = _secret_scan()
+        message = f'{message}; {detail}'
+        verdict = PASSED if scan in GREEN else scan
     print(message, file=sys.stdout if verdict in GREEN else sys.stderr)
     return 0 if verdict in GREEN else 1
 
