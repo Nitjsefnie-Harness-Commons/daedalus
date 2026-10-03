@@ -45,7 +45,7 @@ dependencies = []
 mcp = [
     "httpx==0.28.1",
     "mcp==2.2.0",
-    "starlette==1.6.0",
+    "starlette==1.7.0",
     "httptools==0.8.0",
 ]
 
