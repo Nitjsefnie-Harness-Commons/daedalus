@@ -1341,8 +1341,14 @@ jobs:
       # a spread, once.
       - name: Measure the journeys
         id: measure
+        # Step-level, not job-level: `os.environ` is what every counted
+        # child inherits, and this flag is for the parent that reads the
+        # profiles afterwards. It records each counted thread's own total
+        # beside the sum, so a run whose counts moved can say which thread
+        # moved them.
         env:
           PYTHONDONTWRITEBYTECODE: "1"
+          DAEDALUS_JOURNEY_THREAD_ROWS: "1"
           COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py measure --root . \
