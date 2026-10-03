@@ -613,7 +613,7 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
     package is read, this suite and the module holding the search keys
     included, and exactly one occurrence is spared: a key's own top-level
     declaration, in the module that declares it. The rows pinning that
-    exemption are the five in
+    exemption are the eight in
     test_only_the_key_holders_own_top_level_declaration_is_exempt below.
     """
     from _coverage_authority_scan import (
