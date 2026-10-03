@@ -7,6 +7,12 @@
     "valgrind_version": "valgrind-3.22.0",
     "runner_image": "ubuntu24 20260927.320.1"
   },
+  "tolerances": {
+    "cdp-result": 0.858957,
+    "command-round-trip": 3.222567,
+    "screenshot": 1.102415,
+    "segment-relay": 2.037501
+  },
   "excluded_threads": {
     "cdp-result": ["front-end-import"],
     "command-round-trip": ["front-end-import", "uvicorn-serve"],
