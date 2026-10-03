@@ -304,11 +304,20 @@ def test_a_merge_base_that_is_not_forty_lowercase_hex_is_unreadable(tmp):
 
 
 def test_an_absent_merge_base_field_is_unreadable(tmp):
+    """An absent field and a payload that is not an object are the same
+    unreadable verdict. A non-dict payload has no `.get`, so the guard that
+    reads as a shape failure is what keeps this a published RED instead of an
+    `AttributeError` that ends the run."""
     del tmp
     m = _mod()
     mb, _ = m.merge_base(lambda _a: _encode({'status': 'ahead'}),
                          'o/r', G1, _head())
     assert mb is None
+    for shape in ([], 'text', 12345, None, True):
+        def read(_argv, shape=shape):
+            return _encode(shape)
+        mb, _ = m.merge_base(read, 'o/r', G1, _head())
+        assert mb is None, shape
 
 
 def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
