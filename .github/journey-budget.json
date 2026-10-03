@@ -16,7 +16,7 @@
     "command-round-trip": ["front-end-import", "uvicorn-serve"],
     "dashboard-fanout": ["front-end-import", "uvicorn-serve"],
     "mcp-exec": ["front-end-import"],
-    "net-capture": ["front-end-import", "uvicorn-serve"],
+    "net-capture": ["front-end-import"],
     "screenshot": ["front-end-import"],
     "segment-relay": ["front-end-import"]
   },
@@ -33,12 +33,12 @@
     "segment-relay": "045137a566fe2acaf7ff15773c6f4779308faaf92ea1db9f6bdb416dc518bf0f"
   },
   "journeys": {
-    "cdp-result": 99557406,
-    "command-round-trip": 2073474,
-    "dashboard-fanout": 16270763,
-    "mcp-exec": 3984007504,
-    "net-capture": 536400723,
-    "screenshot": 76163615,
-    "segment-relay": 42313463
+    "cdp-result": 99225180,
+    "command-round-trip": 1937158,
+    "dashboard-fanout": 16248229,
+    "mcp-exec": 3983675412,
+    "net-capture": 2672689227,
+    "screenshot": 75863572,
+    "segment-relay": 41997307
   }
 }
