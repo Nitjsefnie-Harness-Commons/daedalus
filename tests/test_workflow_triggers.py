@@ -13,6 +13,7 @@ import _util  # noqa: E402
 from _ghexpr import sole_context_path  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_if_expression  # noqa: E402
+from _wfjobs import jobs_mapping  # noqa: E402
 from _workflows import (  # noqa: E402
     _event_option_keys, _workflow_path_filters, _workflow_triggers)
 from _yamlread import step_scalar  # noqa: E402
@@ -496,19 +497,20 @@ def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
     """One score, from one ref, published only where it means something.
 
     A `workflow_dispatch` names any branch, so without the guard a run from
-    one publishes that branch as the repository's score, and a fork's
-    schedule publishes at all. The two conjuncts below are true together on
-    exactly one context — upstream, on its default branch — and the group
-    cancels the run a re-dispatch supersedes instead of racing it.
+    one publishes that branch's score as the repository's, and a fork's
+    schedule publishes at all. A guard on `analysis` says nothing about a
+    second job publishing beside it, so the job set is pinned with it.
+
+    This is a structural pin, not an evaluation: the shared expression
+    reader admits a call only with no arguments, so it refuses `format(...)`
+    outright and the guard is never run under the contexts that would
+    decide it. Each limb below is recognised by its decoded shape rather
+    than by its position, pinned, and a limb of any other shape fails
+    instead of passing unread.
     """
     del tmp
     scorecard = (ROOT / '.github' / 'workflows' / 'scorecard.yml').read_text(
         encoding='utf-8')
-    concurrency = workflow_mapping(scorecard).get('concurrency')
-    assert concurrency == {
-        'group': 'scorecard-${{ github.ref }}',
-        'cancel-in-progress': 'true',
-    }, f'scorecard concurrency: {concurrency!r}'
 
     condition = _job_if_expression(scorecard, 'analysis')
     assert condition is not None, (
@@ -518,17 +520,33 @@ def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
     assert guard.startswith('${{') and guard.endswith('}}'), condition
     conjuncts = guard[3:-2].split('&&')
     assert len(conjuncts) == 2, f'the guard is not two conjuncts: {guard!r}'
-    fork, ref = (part.strip() for part in conjuncts)
-
-    assert fork.startswith('!'), f'the fork flag is not negated: {fork!r}'
-    assert sole_context_path(fork[1:]) == (
-        'github', 'event', 'repository', 'fork'), fork
-    subject, operator, expected = ref.partition('==')
-    assert operator == '==', f'the ref is not compared: {ref!r}'
-    assert sole_context_path(subject.strip()) == ('github', 'ref'), ref
-    assert expected.strip() == (
+    fork = ref = None
+    for conjunct in (part.strip() for part in conjuncts):
+        negated = conjunct.startswith('!')
+        subject, operator, expected = conjunct.partition('==')
+        operand = sole_context_path(subject[1:] if negated else subject)
+        if negated and not operator and operand == (
+                'github', 'event', 'repository', 'fork'):
+            fork = conjunct
+        elif operator == '==' and operand == ('github', 'ref'):
+            ref = expected.strip()
+        else:
+            raise AssertionError(f'unread guard limb: {conjunct!r}')
+    assert fork is not None, f'no limb negates the fork flag: {guard!r}'
+    assert ref == (
         "format('refs/heads/{0}',"
-        " github.event.repository.default_branch)"), ref
+        " github.event.repository.default_branch)"), (
+        f'the ref limb compares against {ref!r}')
+
+    assert tuple(jobs_mapping(scorecard)) == ('analysis',), (
+        f'scorecard also publishes from {sorted(jobs_mapping(scorecard))}, '
+        f'and that job carries none of the guard above')
+
+    concurrency = workflow_mapping(scorecard).get('concurrency')
+    assert concurrency == {
+        'group': 'scorecard-${{ github.ref }}',
+        'cancel-in-progress': 'true',
+    }, f'scorecard concurrency: {concurrency!r}'
 
 
 def main():
