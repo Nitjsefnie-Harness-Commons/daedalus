@@ -676,13 +676,18 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
     # count is the budget gate's question, not this one: a per-journey
     # tolerance is recorded only for a journey whose own draws exceed the
     # default.
-    assert 'net-capture' not in document['tolerances'], (
-        f'net-capture is held to {document["tolerances"]["net-capture"]}% '
+    # `tolerances` is absent when no journey carries an entry, which is the
+    # state this artefact is recorded in, so it is read as the empty block
+    # `journey_rebaseline._carried_tolerances` calls absent rather than
+    # indexed: both the validator and `tolerance_of` accept the absence and
+    # only this read did not.
+    own = document.get('tolerances') or {}
+    assert 'net-capture' not in own, (
+        f'net-capture is held to {own["net-capture"]}% '
         'while the draws that decided its entry span 0.0017%, so the bound '
-        'is read from a measurement this artefact does not carry: '
-        f'{document["tolerances"]}')
+        f'is read from a measurement this artefact does not carry: {own}')
     assert artifact.tolerance_of(document, 'net-capture') == \
-        document['tolerance_pct'], document['tolerances']
+        document['tolerance_pct'], own
 
 
 def main():
