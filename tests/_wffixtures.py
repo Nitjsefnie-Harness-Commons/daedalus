@@ -289,10 +289,9 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
     tail of what the tool wrote each time.
     """
     body = _audit_step('Audit dependencies')
-    refusals = [text for kind, text in _audit_announcements(body)
-                if kind == 'refusal']
-    announcing = [text for kind, text in _audit_announcements(body)
-                  if kind == 'retry']
+    announcements = _audit_announcements(body)
+    refusals = [text for kind, text in announcements if kind == 'refusal']
+    announcing = [text for kind, text in announcements if kind == 'retry']
     assert len(set(refusals)) == len(refusals), (
         f'two outcomes refuse in the same words: {refusals}')
     assert len(announcing) == 1, (
