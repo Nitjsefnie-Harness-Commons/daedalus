@@ -153,8 +153,9 @@ jobs:
         #     attempt backs off further;
         #   * three retries exhausted exits 1 saying so, with the output.
         #
-        # Every arm above is pinned by a fixture in tests/test_ci_workflows.py,
-        # which runs this block rather than reading it.
+        # Every arm above is pinned by a fixture in tests/_wffixtures.py,
+        # which runs this block rather than reading it, and asserts on what it
+        # printed as well as on how many times it ran and what it exited with.
         run: |
           for attempt in 1 2 3; do
             if pip-audit \
@@ -168,9 +169,15 @@ jobs:
               exit 0
             fi
 
-            if grep -qE '4[0-9][0-9] Client Error' audit.out &&
-               ! grep -qE '429' audit.out; then
-              echo "pip-audit reported findings:" >&2
+            # A 4xx the index is not going to answer differently on the next
+            # attempt, so it is reported rather than retried. The 429 exception
+            # is scoped to the SAME LINE the 4xx test matched: a whole-file
+            # search reads a 429 somewhere else in the output — an advisory
+            # version, an unrelated service line — as this one being
+            # retryable, and retries the 4xx three times instead.
+            if grep -E '4[0-9][0-9] Client Error' audit.out |
+               grep -qv '429'; then
+              echo "pip-audit got a 4xx from the index it will not repeat:" >&2
               cat audit.out >&2
               exit 1
             fi
