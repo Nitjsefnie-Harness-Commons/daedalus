@@ -63,7 +63,9 @@ def test_a_planted_unbounded_job_is_named_in_the_real_workflow(tmp):
     assert len(violations) == 1, violations
     assert 'aggregate' in violations[0], violations
     assert 'tests.yml:' in violations[0], violations
-    assert load(_REAL).jobs['aggregate']['timeout-minutes'] == '5'
+    # That the real job DECLARES one is the point of this row; the
+    # value is the workflow's business, not this suite's.
+    assert load(_REAL).jobs['aggregate']['timeout-minutes']
 
 
 def test_a_planted_unbounded_job_in_a_second_extension_is_named(tmp):
@@ -386,16 +388,23 @@ def test_an_unclassifiable_workflow_is_refused_not_passed(tmp):
 
 
 def _planted(tmp):
-    """Copy the real workflow, minus the aggregate job's bound, into `tmp`."""
+    """Copy the real workflow, minus the aggregate job's bound, into `tmp`.
+
+    The bound is READ from the real workflow rather than written here: two
+    branches have now moved that literal, and a copy of it turns each move
+    into a dozen failures in this file. The spelling comes from the reader
+    too, so an inline comment or a quoted scalar still plants.
+    """
     root = Path(tmp) / '.github' / 'workflows'
     root.mkdir(parents=True, exist_ok=True)
     source = _REAL.read_text(encoding='utf-8')
-    section = source[source.index('  aggregate:\n'):]
-    bound = '\n    timeout-minutes: 5\n'
+    head, section = source.split('  aggregate:\n', 1)
+    value = bound_source(load(_REAL), 'aggregate')
+    bound = f'\n    timeout-minutes: {value}\n'
     assert section.count(bound) == 1, 'the planted target moved'
     (root / 'tests.yml').write_text(
-        source[:source.index('  aggregate:\n')]
-        + section.replace(bound, '\n', 1), encoding='utf-8')
+        head + '  aggregate:\n' + section.replace(bound, '\n', 1),
+        encoding='utf-8')
     return root
 
 

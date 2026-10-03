@@ -109,7 +109,7 @@ def _polls(calls):
     return [call for call in calls if SECRETS_WORKFLOW in call[-1]]
 
 
-def _scan(polls, jobs=None, readings=(EPOCH,)):
+def _drive_scan(polls, jobs=None, readings=(EPOCH,)):
     mod = _gate()
     calls, read = _recorder(MINE, [], polls=polls, jobs=jobs)
     now, sleep = _scripted_clock(readings)
@@ -501,8 +501,8 @@ def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     # The middle poll is 600 s in — inside the bound, past its half — and
     # carries no run: the wait must not fire on it. This discriminates at
     # the scale of the poll interval, not to sub-second resolution.
-    calls, verdict, message = _scan([[], [], [CLEAN]], CLEAN_JOBS,
-                                    (EPOCH, EPOCH + 600.0, EPOCH + 719.0))
+    calls, verdict, message = _drive_scan(
+        [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0, EPOCH + 719.0))
     assert verdict in _gate().GREEN, message
     assert 'gitleaks' in message and 'concluded success' in message, message
     assert len(_polls(calls)) == 3, calls
@@ -511,11 +511,12 @@ def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
 def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
     """The bound governs the CONTINUE, so a verdict found at it stands."""
     del tmp
-    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS,
-                                    (EPOCH, EPOCH + 720.0))
+    calls, verdict, message = _drive_scan(
+        [[], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 720.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
-    calls, verdict, message = _scan([[]], CLEAN_JOBS, (EPOCH, EPOCH + 720.0))
+    calls, verdict, message = _drive_scan(
+        [[]], CLEAN_JOBS, (EPOCH, EPOCH + 720.0))
     assert verdict == 'secrets-unreported'
     assert verdict not in _gate().GREEN
     assert 'secrets' in message and '720' in message, message
@@ -524,9 +525,9 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
 
 def test_an_unfinished_run_keeps_the_gate_waiting(tmp):
     del tmp
-    calls, verdict, message = _scan([[_secrets_run(7, status='in_progress')],
-                                    [CLEAN]], CLEAN_JOBS,
-                                    (EPOCH, EPOCH + 30.0, EPOCH + 60.0))
+    running = _secrets_run(7, status='in_progress')
+    calls, verdict, message = _drive_scan(
+        [[running], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 30.0, EPOCH + 60.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
 
@@ -534,7 +535,8 @@ def test_an_unfinished_run_keeps_the_gate_waiting(tmp):
 def test_the_jobs_verdict_is_read_and_not_the_runs_conclusion(tmp):
     """A green run over a red job is the shape this gate exists for."""
     del tmp
-    _, verdict, message = _scan([[CLEAN]], [_scan_job(conclusion='failure')])
+    _, verdict, message = _drive_scan(
+        [[CLEAN]], [_scan_job(conclusion='failure')])
     assert verdict == 'secrets-failed'
     assert verdict not in _gate().GREEN
     assert 'failure' in message and CLEAN['html_url'] in message, message
@@ -543,7 +545,7 @@ def test_the_jobs_verdict_is_read_and_not_the_runs_conclusion(tmp):
 def test_both_secrets_queries_carry_the_head_sha_and_the_workflow(tmp):
     """A query whose arguments are dropped reads some other run entirely."""
     del tmp
-    calls, _verdict, _message = _scan([[CLEAN]], CLEAN_JOBS)
+    calls, _verdict, _message = _drive_scan([[CLEAN]], CLEAN_JOBS)
     assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
             f'repos/o/r/actions/workflows/{SECRETS_WORKFLOW}/runs'
             f'?head_sha={HEAD}&per_page=100'] in calls
@@ -553,12 +555,12 @@ def test_both_secrets_queries_carry_the_head_sha_and_the_workflow(tmp):
 
 def test_every_scan_the_gate_cannot_read_clean_is_red_and_says_why(tmp):
     del tmp
-    _, absent, missing = _scan([[CLEAN]], [_scan_job(name='setup')])
+    _, absent, missing = _drive_scan([[CLEAN]], [_scan_job(name='setup')])
     assert absent == 'secrets-missing', absent
     assert 'setup' in missing and str(CLEAN['id']) in missing, missing
     for state in ('skipped', 'cancelled', 'timed_out', 'neutral', None):
-        _, verdict, message = _scan([[CLEAN]],
-                                    [dict(_scan_job(), conclusion=state)])
+        _, verdict, message = _drive_scan(
+            [[CLEAN]], [dict(_scan_job(), conclusion=state)])
         assert verdict == 'secrets-failed', (state, verdict)
         assert verdict not in _gate().GREEN
         assert 'gitleaks' in message, message
@@ -568,7 +570,7 @@ def test_the_newest_run_on_the_sha_is_the_one_judged(tmp):
     del tmp
     runs = [_secrets_run(1), _secrets_run(2, started='2026-09-07T11:05:00Z')]
     jobs = {1: [_scan_job(conclusion='failure')], 2: [_scan_job()]}
-    _, verdict, message = _scan([runs], jobs)
+    _, verdict, message = _drive_scan([runs], jobs)
     assert verdict in _gate().GREEN, message
 
 
