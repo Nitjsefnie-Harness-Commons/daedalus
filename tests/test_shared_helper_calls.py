@@ -624,17 +624,27 @@ def test_an_omitted_default_seeds_its_own_expression(tmp):
 
 
 def test_a_spread_argument_seeds_nothing(tmp):
-    """(p) A `*[]` shifts every later positional at runtime, not in the AST."""
+    """(p) A spread argument hides the call's real shape, either way.
+
+    A `*[]` shifts every later positional at runtime, not in the AST, and a
+    `**`-unpacked keyword hides the mode the open is judged on. Both halves
+    of `has_spread` are pinned here; dropping either one leaves one of the
+    three refusals unraised.
+    """
     root = Path(tmp)
     source = root / 'seed-shift.py'
     source.write_text(
         "def _copy(a, b, c=None):\n"
         "    Path(b).write_text('planted')\n"
         "def test_control(tmp):\n"
-        "    _copy(*[], tmp, ROOT)\n",
+        "    _copy(*[], tmp, ROOT)\n"
+        "    open(ROOT / 'unsafe.py', **{'mode': 'w'})\n"
+        "    (ROOT / 'unsafe.py').open(**{'mode': 'w'})\n",
         encoding='utf-8')
     assert control_write_violations(source, root) == [
-        'seed-shift.py:2: write_text target path is not control-owned'
+        'seed-shift.py:2: write_text target path is not control-owned',
+        'seed-shift.py:5: open mode is unresolved',
+        'seed-shift.py:6: Path.open mode is unresolved',
     ]
 
 
