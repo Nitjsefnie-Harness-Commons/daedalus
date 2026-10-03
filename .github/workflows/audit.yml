@@ -169,12 +169,10 @@ jobs:
               exit 0
             fi
 
-            # A 4xx the index is not going to answer differently on the next
-            # attempt, so it is reported rather than retried. The 429 exception
-            # is scoped to the SAME LINE the 4xx test matched: a whole-file
-            # search reads a 429 somewhere else in the output — an advisory
-            # version, an unrelated service line — as this one being
-            # retryable, and retries the 4xx three times instead.
+            # The 429 exception is scoped to the SAME LINE the 4xx test
+            # matched: a whole-file search reads a 429 somewhere else in the
+            # output — an advisory version, an unrelated service line — as this
+            # one being retryable, and retries the 4xx three times instead.
             if grep -E '4[0-9][0-9] Client Error' audit.out |
                grep -qv '429'; then
               echo "pip-audit got a 4xx from the index it will not repeat:" >&2

@@ -32,7 +32,8 @@ from _repo import ROOT
 from _wfgraph import _tests_yml
 from _yamlsteps import complete_job_mapping
 
-# tests/test_ci_workflows.py is at its 700-line ceiling; machinery goes here.
+# Machinery goes here, not in tests/test_ci_workflows.py: its line ceiling is
+# the size gate's to own, and a number restated in a comment goes stale.
 # Two names for one word today, and two facts: the binary a run resolves
 # on PATH, and the job whose env carries the pin.
 _ACTIONLINT = 'actionlint'
@@ -46,7 +47,6 @@ _SHELLCHECK_ABSENT = 'shellcheck-absent'
 _NO_WORKFLOWS = 'no-workflows'
 _UNLAUNCHABLE = 'actionlint-unlaunchable'
 
-# Appended to a real workflow; three variables and two arguments is its SC2183.
 # Appended to a real workflow. The finding is chosen per platform, because
 # the two doors are expected to catch different kinds and a fixture that
 # planted one kind everywhere would be asserting a contract the Windows door
