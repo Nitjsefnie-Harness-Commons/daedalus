@@ -1,4 +1,11 @@
-# TRANSIENT — issue 1495 profiling. Delete before the go.
+# TRANSIENT — issue 1495, second profiling round. Delete before the go.
+# Every journey, not just net-capture: the recorded `journey-counts`
+# artifacts cannot answer how much of a journey's work the bridge's own
+# request threads carry, because `journey_threads.role_of` reads every
+# thread of a non-journey process that lacks the front end's init symbol
+# as `uvicorn-serve`, and every journey but `mcp-exec` excludes that
+# role — so those threads are in neither the journey's kept total nor the
+# `bridge-only` baseline it is subtracted against.
 name: journey profiles (transient)
 
 on:
@@ -13,7 +20,7 @@ permissions:
 jobs:
   profiles:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     env:
       PYTHONHASHSEED: '0'
       PYTHONDONTWRITEBYTECODE: '1'
@@ -37,12 +44,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
 
-      - name: Profile the net-capture journey and its baseline, five rounds each
+      - name: Profile every journey and the baseline, three rounds each
         run: |
           set -eu
           mkdir -p "${RUNNER_TEMP}/profiles"
-          for round in 1 2 3 4 5; do
-            for name in net-capture bridge-only; do
+          for round in 1 2 3; do
+            for name in net-capture screenshot cdp-result command-round-trip \
+                        segment-relay dashboard-fanout mcp-exec bridge-only; do
               out="${RUNNER_TEMP}/profiles/${name}.${round}"
               mkdir -p "$out"
               echo "=== ${name} round ${round}"
