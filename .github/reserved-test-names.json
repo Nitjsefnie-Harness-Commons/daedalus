@@ -321,6 +321,7 @@
     "_escaped_names": {"python": ["tests/_control_paths.py"]},
     "_escapee": {"python": ["tests/_cli_dispatch.py"]},
     "_escapes": {"python": ["tests/_coverage_scopes.py"]},
+    "_establish_counted_boundary": {"python": ["tests/_journeys.py"]},
     "_evaluate": {"python": ["tests/_ghexpr.py"]},
     "_evaluation_scopes": {"python": ["tests/_coverage_scopes.py"]},
     "_event": {"python": ["tests/_classifier_calls.py"]},
