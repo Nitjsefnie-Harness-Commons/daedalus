@@ -48,7 +48,6 @@ import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def enabled():
-    """Whether the per-thread rows are recorded, true only for `'1'`."""
     return os.environ.get('DAEDALUS_JOURNEY_THREAD_ROWS') == '1'
 
 

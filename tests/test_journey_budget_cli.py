@@ -599,7 +599,6 @@ def _shipped_budget(tmp):
 
 
 def _shipped_measurement(document, rounds):
-    """The shipped journeys measured, every one of them a half lower."""
     report = measured_report(
         {name: seen // 2 for name, seen in document['journeys'].items()},
         rounds=rounds, toolchain=document['toolchain'],
