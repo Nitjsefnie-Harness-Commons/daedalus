@@ -3,7 +3,7 @@
 
 They parse workflow configuration and evaluate job conditions."""
 # 698 of the 700-line ceiling in scripts/ci/size_baseline.py; two lines of
-# room, and the split seam is the ten-row actionlint/zizmor cluster below.
+# room, and assertion bodies live in _actionlint.py and _wffixtures.py.
 import fnmatch
 import os
 import re
@@ -23,10 +23,17 @@ from _actionlint import (  # noqa: E402
                          assert_integration_platform_scoped,
                          assert_lint_covered,
                          assert_lint_step_covers_both_extensions,
+                         assert_ci_tool_pins_live_in_a_watched_manifest,
+                         assert_every_dependabot_group_has_a_security_mirror,
                          assert_other_version_is_refused,
                          assert_planted_finding_matches_its_door,
-                         assert_pin_read_from_the_job, planted_finding_marker)
-from _wffixtures import _refuses  # noqa: E402
+                         assert_pin_read_from_the_job,
+                         assert_the_audit_retry_is_narrow_and_ordered,
+                         assert_the_zizmor_manifest_is_hash_pinned,
+                         planted_finding_marker)
+from _wffixtures import (  # noqa: E402
+    _refuses, assert_the_audit_covers_every_dependency_surface,
+    assert_the_cache_release_step_is_shaped_as_declared)
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _job_section, _tests_yml)
@@ -231,19 +238,7 @@ def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
     condition cannot hide behind a lookalike; the step's own comment says
     why it exists."""
     del tmp
-    steps = complete_job_mapping(_tests_yml(), 'actionlint')['steps']
-    matches = [
-        (index, step) for index, step in enumerate(steps)
-        if step.get('name')
-        == 'Verify the actions/cache release annotations upstream']
-    assert len(matches) == 1, matches
-    index, step = matches[0]
-    assert step.get('run') == 'python3 scripts/ci/cache_action_releases.py', (
-        step)
-    assert step.get('if') == '${{ !cancelled() }}', step
-    assert step.get('env') == {'GH_TOKEN': '${{ github.token }}'}, step
-    zizmor = [i for i, s in enumerate(steps) if s.get('name') == 'zizmor']
-    assert zizmor and index > zizmor[0], (index, zizmor)
+    assert_the_cache_release_step_is_shaped_as_declared()
 
 
 def test_the_tracked_workflows_pass_actionlint(tmp):
@@ -306,7 +301,7 @@ def test_the_suite_lints_with_the_binary_the_job_installs(tmp):
 
 
 def test_the_audit_covers_every_python_dependency_surface(tmp):
-    """pip-audit is handed each requirements file and every declared extra.
+    """pip-audit is handed each unpinned requirements file and every extra.
 
     The published wheel declares no dependencies, so `pip-audit .` over this
     project collects zero packages — an audit that can never fire. What the
@@ -315,28 +310,30 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     would leave the gate green while going unchecked.
     """
     del tmp
-    workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
-        encoding='utf-8')
-    listed = subprocess.run(
-        ['git', '-C', str(ROOT), 'ls-files', '-z', 'requirements*.txt'],
-        capture_output=True, check=True)
-    requirement_files = [
-        os.fsdecode(path) for path in listed.stdout.split(b'\0') if path]
-    assert requirement_files, 'no requirements file is tracked'
-    for name in requirement_files:
-        assert f'--requirement {name}' in workflow, name
+    assert_the_audit_covers_every_dependency_surface()
 
-    # The extras are read out of pyproject.toml rather than listed, so a
-    # second extra cannot escape the audit by nobody remembering it here.
-    assert "['optional-dependencies'].values()" in workflow, workflow
-    generated = re.search(r'> (\S+-requirements\.txt)', workflow)
-    assert generated, 'the workflow generates no extras file'
-    assert f'--requirement {generated.group(1)}' in workflow, (
-        generated.group(1))
-    # An empty generated file narrows the gate in silence: pip-audit accepts
-    # it, the other surfaces still report clean, and the only third-party code
-    # that runs in production goes unaudited.
-    assert f'! -s {generated.group(1)}' in workflow, workflow
+
+def test_ci_tool_pins_are_visible_to_dependabot(tmp):
+    """Every CI-tool install resolves its pin from a `-r` manifest."""
+    del tmp
+    assert_ci_tool_pins_live_in_a_watched_manifest()
+
+
+def test_the_zizmor_manifest_is_hash_pinned(tmp):
+    """zizmor gates the gates, so the artifacts behind its pin are named."""
+    del tmp
+    assert_the_zizmor_manifest_is_hash_pinned()
+
+
+def test_every_dependabot_group_has_a_security_mirror(tmp):
+    """A security bump must not arrive one pull request per dependency."""
+    del tmp
+    assert_every_dependabot_group_has_a_security_mirror()
+
+
+def test_the_audit_retry_is_narrow_and_ordered(tmp):
+    """Every arm of the retry classifier, on its own executed fixture."""
+    assert_the_audit_retry_is_narrow_and_ordered(tmp)
 
 
 def test_an_audit_run_validates_the_threshold_document(tmp):
@@ -656,7 +653,9 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     ecosystems = {
         'pyproject.toml': 'pip',
         'requirements-dev.txt': 'pip',
+        'requirements-pip-audit.txt': 'pip',
         'requirements-test.txt': 'pip',
+        'requirements-zizmor.txt': 'pip',
         'package.json': 'npm',
         'Gemfile': 'bundler',
         'go.mod': 'gomod',

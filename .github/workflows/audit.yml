@@ -4,7 +4,7 @@ name: audit
 # to its full transitive tree and checks every resolved version against the
 # PyPI advisory database.
 #
-# THREE SURFACES, and none of them is the wheel. The published CLI declares
+# FOUR SURFACES, and none of them is the wheel. The published CLI declares
 # `dependencies = []` — stdlib only, deliberately — so `pip-audit .` over this
 # project collects zero packages and would be a gate that can never fire.
 # What this repository actually depends on is:
@@ -12,10 +12,19 @@ name: audit
 #   * the `mcp` extra in pyproject.toml, which the MCP server imports at
 #     runtime and is the only third-party code that executes in production;
 #   * requirements-dev.txt, the lint and type pins;
-#   * requirements-test.txt, the coverage pin.
+#   * requirements-test.txt, the coverage pin;
+#   * requirements-pip-audit.txt, this gate's own tool.
 #
-# The last two never ship, but they run in CI holding the repository token, so
-# a compromised one is a supply-chain problem even though no user installs it.
+# The last three never ship, but they run in CI holding the repository token,
+# so a compromised one is a supply-chain problem even though no user installs
+# it.
+#
+# ONE MANIFEST IS DELIBERATELY ABSENT. requirements-zizmor.txt is
+# hash-pinned, and pip's hash checking is a property of the whole resolution
+# rather than of one file, so a hashed manifest cannot share this one
+# invocation with the unpinned three: it would drag every other surface into
+# hash mode and fail on hashes they do not carry. It is installed by its own
+# step in tests.yml, which touches no other manifest.
 #
 # THE EXTRAS ARE DERIVED, NOT LISTED. The audit reads every extra out of
 # pyproject.toml rather than naming `mcp`, so adding a second extra cannot
@@ -80,9 +89,13 @@ jobs:
           cache: pip
 
       - name: Install pip-audit
+        # Pinned in a manifest at the repository root rather than in this
+        # `run:` block, because Dependabot's `pip` entry reads manifest files
+        # and never a workflow. See that manifest for why it is not
+        # hash-pinned, and this file's header for why it is audited below
+        # while requirements-zizmor.txt is not.
         run: |
-          python -m pip install --upgrade pip
-          pip install pip-audit==2.10.1
+          pip install -r requirements-pip-audit.txt
 
       - name: Collect the optional-dependency surface
         # Every extra, not the one this repo happens to have today.
@@ -109,7 +122,7 @@ jobs:
           fi
 
       - name: Audit dependencies
-        # All three surfaces in one invocation so a package constrained by
+        # All four surfaces in one invocation so a package constrained by
         # more than one of them is resolved once, consistently — the same way
         # an install would see it.
         #
@@ -117,14 +130,31 @@ jobs:
         # a comment naming the advisory, why it is not fixable, and what would
         # let it be removed.
         #
-        # THE RETRY IS NARROW ON PURPOSE. pip-audit resolves against PyPI and
-        # the advisory database over the network, and a reset connection
-        # produces the same exit status as a real finding. A blanket `retry 3`
-        # would therefore re-run a genuine vulnerability three times before
+        # THE RETRY IS NARROW ON PURPOSE, AND THE ORDER IS THE NARROWNESS.
+        # pip-audit resolves against PyPI and the advisory database over the
+        # network, and a transport failure produces the same exit status as a
+        # real finding, so something has to tell them apart. A blanket
+        # `retry 3` would re-run a genuine vulnerability three times before
         # reporting it, and — worse — a gate that goes red for reasons
-        # unrelated to its subject is one people learn to ignore. So this
-        # retries ONLY when the output carries a transport error, and reports
-        # anything else immediately and verbatim.
+        # unrelated to its subject is one people learn to ignore.
+        #
+        # So there are exactly five outcomes, and the block reaches all five:
+        #
+        #   * a clean run exits 0 and prints the output;
+        #   * a real finding matches neither test below and is reported
+        #     immediately and verbatim;
+        #   * a 4xx that is not a 429 is the index answering about THIS
+        #     request rather than about the network, so it is reported at
+        #     once. It is tested FIRST, which is what keeps the widening
+        #     narrow: every other 4xx leaves before the retry test is read,
+        #     and only a 429 — the one 4xx that means "come back later" —
+        #     falls through to it;
+        #   * a transport failure or a 5xx matches the retry test, and each
+        #     attempt backs off further;
+        #   * three retries exhausted exits 1 saying so, with the output.
+        #
+        # Every arm above is pinned by a fixture in tests/test_ci_workflows.py,
+        # which runs this block rather than reading it.
         run: |
           for attempt in 1 2 3; do
             if pip-audit \
@@ -132,13 +162,21 @@ jobs:
                  --requirement extras-requirements.txt \
                  --requirement requirements-dev.txt \
                  --requirement requirements-test.txt \
+                 --requirement requirements-pip-audit.txt \
                  > audit.out 2>&1; then
               cat audit.out
               exit 0
             fi
 
-            if grep -qiE 'connection (aborted|reset|error)|read timed out|temporary failure in name resolution' audit.out; then
-              echo "attempt $attempt: transport failure talking to PyPI, retrying"
+            if grep -qE '4[0-9][0-9] Client Error' audit.out &&
+               ! grep -qE '429' audit.out; then
+              echo "pip-audit reported findings:" >&2
+              cat audit.out >&2
+              exit 1
+            fi
+
+            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit.out; then
+              echo "attempt $attempt: index failure talking to PyPI, retrying"
               tail -n 5 audit.out
               sleep $(( attempt * 15 ))
               continue
