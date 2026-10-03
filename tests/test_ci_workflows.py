@@ -2,8 +2,8 @@
 """Execute CI invariants that GitHub otherwise fails silently.
 
 They parse workflow configuration and evaluate job conditions."""
-# 698 of the 700-line ceiling in scripts/ci/size_baseline.py; two lines of
-# room, and assertion bodies live in _actionlint.py and _wffixtures.py.
+# The line count is scripts/ci/size_baseline.py's to read; assertion bodies
+# live in the test helper modules beside this one.
 import fnmatch
 import os
 import re
@@ -23,17 +23,19 @@ from _actionlint import (  # noqa: E402
                          assert_integration_platform_scoped,
                          assert_lint_covered,
                          assert_lint_step_covers_both_extensions,
-                         assert_ci_tool_pins_live_in_a_watched_manifest,
-                         assert_every_dependabot_group_has_a_security_mirror,
                          assert_other_version_is_refused,
                          assert_planted_finding_matches_its_door,
                          assert_pin_read_from_the_job,
-                         assert_the_audit_retry_is_narrow_and_ordered,
-                         assert_the_zizmor_manifest_is_hash_pinned,
+                         assert_the_cache_release_step_is_shaped_as_declared,
                          planted_finding_marker)
 from _wffixtures import (  # noqa: E402
     _refuses, assert_the_audit_covers_every_dependency_surface,
-    assert_the_cache_release_step_is_shaped_as_declared)
+    assert_the_audit_retry_is_narrow_and_ordered)
+from _wfpins import (  # noqa: E402
+    assert_ci_tool_pins_live_in_a_watched_manifest,
+    assert_every_dependabot_group_family_covers_version_updates,
+    assert_every_dependabot_group_has_a_security_mirror,
+    assert_the_zizmor_manifest_is_hash_pinned)
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _job_section, _tests_yml)
@@ -234,9 +236,7 @@ def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):
 
 
 def test_actionlint_verifies_the_cache_release_annotations_upstream(tmp):
-    """Decoded scalars, not substrings, so a dropped env or a narrowed
-    condition cannot hide behind a lookalike; the step's own comment says
-    why it exists."""
+    """Decoded scalars, not substrings, so a dropped env cannot hide."""
     del tmp
     assert_the_cache_release_step_is_shaped_as_declared()
 
@@ -301,14 +301,7 @@ def test_the_suite_lints_with_the_binary_the_job_installs(tmp):
 
 
 def test_the_audit_covers_every_python_dependency_surface(tmp):
-    """pip-audit is handed each unpinned requirements file and every extra.
-
-    The published wheel declares no dependencies, so `pip-audit .` over this
-    project collects zero packages — an audit that can never fire. What the
-    repository actually depends on is spread across the requirements files and
-    the extras table, and a surface added to either without being added here
-    would leave the gate green while going unchecked.
-    """
+    """pip-audit is handed each unpinned requirements file and every extra."""
     del tmp
     assert_the_audit_covers_every_dependency_surface()
 
@@ -329,6 +322,12 @@ def test_every_dependabot_group_has_a_security_mirror(tmp):
     """A security bump must not arrive one pull request per dependency."""
     del tmp
     assert_every_dependabot_group_has_a_security_mirror()
+
+
+def test_every_dependabot_group_family_covers_version_updates(tmp):
+    """A version bump is grouped on its own axis, not only the security one."""
+    del tmp
+    assert_every_dependabot_group_family_covers_version_updates()
 
 
 def test_the_audit_retry_is_narrow_and_ordered(tmp):

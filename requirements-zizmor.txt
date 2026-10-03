@@ -7,21 +7,34 @@
 # into a step is a version nobody is ever told to move.
 #
 # WHAT THE HASH LIST IS. Every artifact the pinned release ships, not the
-# runner's subset — eleven lines for zizmor, being the ten py3-none-* wheels
-# and the sdist — so the file resolves on whichever platform lifts it.
+# runner's subset, so the file resolves on whichever platform lifts it.
 # Dependabot rewrites it the same way: it replaces the version and
 # regenerates the WHOLE artifact set from the release, so after a bump the
 # list is a superset of what any single runner needs and `--require-hashes`
-# selects the right artifact out of it. PyYAML below is the narrow case —
-# 6.0.3 ships many more artifacts than the one wheel the actionlint job's
-# ubuntu-latest CPython 3.13 runner resolves today, and the line below names
-# that wheel alone, because listing the whole set by hand is what makes a
-# hand-maintained hash list rot; the next Dependabot bump widens the line to
-# the release's full set, which `--require-hashes` also accepts and selects
-# from.
+# selects the right artifact out of it.
 #
-# zizmor declares no runtime dependencies, so PyYAML is the whole transitive
-# closure.
+# THE TWO COUNTS BELOW ARE READ BY tests/_actionlint.py, which requires each
+# pin to carry exactly as many hashes as its own line states. A hash short
+# of the stated count is an artifact no runner resolves and one leg of the
+# matrix fails on, with nothing red locally — so the count is checked here
+# rather than left to the runner that happens to need that artifact:
+#
+#     zizmor 11 hashes - the ten py3-none-* wheels and the sdist
+#     PyYAML 1 hash - the CPython 3.13 manylinux wheel the actionlint job's
+#       ubuntu-latest runner resolves today; 6.0.3 ships many more, because
+#       listing a whole set by hand is what makes a hand-maintained hash
+#       list rot, and the next Dependabot bump widens the line to the
+#       release's full set, which `--require-hashes` also selects from
+#
+# WHY PyYAML IS HERE AT ALL, WHICH IS NOT zizmor's DEPENDENCY. The 1.29.0
+# wheel declares no Requires-Dist at all and holds no .py file that imports
+# yaml, so zizmor's transitive closure is EMPTY and PyYAML is not part of
+# it. It is a separately hash-pinned extra this repository does not
+# currently import, carried for parity with the sibling repositories whose
+# actionlint jobs wrap a generator that does import yaml. This repository's
+# actionlint job is a Go binary unpacked from a tarball, so nothing here
+# needs it either way, and the line is kept because that parity is
+# deliberate rather than because anything resolves it.
 #
 # TO MOVE THE PIN BY HAND — the fallback when Dependabot cannot resolve a new
 # version's hashes and opens no pull request, leaving the pin where it is:
