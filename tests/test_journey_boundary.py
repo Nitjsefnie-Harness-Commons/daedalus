@@ -78,8 +78,13 @@ def test_the_boundary_is_the_first_statement_of_main(tmp):
     del tmp
     module = journeys()
     tree = ast.parse(Path(module.__file__).read_text(encoding='utf-8'))
-    main = next(node for node in tree.body
-                if isinstance(node, ast.FunctionDef) and node.name == 'main')
+    main = next((node for node in tree.body
+                 if isinstance(node, ast.FunctionDef)
+                 and node.name == 'main'), None)
+    assert main is not None, (
+        f'no `main` in {module.__file__}: the boundary placement is asserted '
+        'against it, and a bare StopIteration here reads as an error rather '
+        'than as the rename this is')
     statements = [node for node in main.body
                   if not (isinstance(node, ast.Expr)
                           and isinstance(node.value, ast.Constant)
