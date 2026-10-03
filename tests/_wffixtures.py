@@ -1,9 +1,11 @@
-"""Fixtures, and the assertion bodies, shared by the workflow-reading suites.
+"""The retry fixtures, the harness that runs audit.yml's block, and the
+control that drives them.
 
-The retry fixtures and the harness that runs audit.yml's own retry block
-live here because the matrix is data and the harness is a fixture; the two
-relocated assertion bodies are here because test_ci_workflows.py is at its
-700-line ceiling and _actionlint.py is at its own.
+The matrix is data and the harness is a fixture, and the control is here
+because it is the one assertion in the repository that exists to drive that
+matrix: it has no fixture of its own to place, and splitting it from the
+fixtures it reads leaves the two halves free to disagree about what an
+outcome is.
 """
 import os
 import re
@@ -11,9 +13,9 @@ import subprocess
 from pathlib import Path
 
 from _repo import ROOT
-from _yamlscalar import YAMLReadError
 from _wfgraph import _tests_yml
-from _yamlsteps import complete_job_mapping
+from _yamlread import step_scalar
+from _yamlscalar import YAMLReadError
 
 # Verbatim blocks from .github/workflows/tests.yml: the suites job's needs,
 # and the changes job's outputs.
@@ -85,12 +87,27 @@ def _probe_workflow(tmp, name, source):
 
 _AUDIT_RETRY_TIMEOUT = 120
 
+
+def _audit_step(name):
+    """One named step of audit.yml, decoded out of the workflow's own bytes."""
+    workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
+        encoding='utf-8')
+    return step_scalar(workflow, 'pip-audit', name, 'run')
+
 # One fixture per arm of audit.yml's retry block, with a value ON each
 # predicate and one just PAST it: a single-valued fixture set makes "retries
 # this" and "gives up on that" indistinguishable, so the boundary is unpinned
 # while the outcomes look pinned hard. The bare-ServiceError row and the
 # 401/403/404 rows are the ones a narrow classifier and a broad one disagree
 # on, and the multi-line report is the shape a real audit prints.
+#
+# The ORDER of the block's two tests is the narrowness it claims, and a row
+# that matches both arms is the only thing that pins it: one whose retry
+# predicate also matches while its refusal predicate does not, so a block
+# reading the retry test first runs it three times and a block reading the
+# refusal test first reports at once. The 429 rows pin the 429 EXCEPTION,
+# which is a different property — they discriminate what the exception
+# admits, not which test is read first.
 #
 # (label, what pip-audit wrote, how many times the block ran it, its exit).
 AUDIT_RETRY_FIXTURES = (
@@ -133,17 +150,30 @@ AUDIT_RETRY_FIXTURES = (
     ('a 403', 'HTTPError: 403 Client Error: Forbidden\n', 1, 1),
     ('a 401', 'HTTPError: 401 Client Error: Unauthorized\n', 1, 1),
     ('a 400', 'HTTPError: 400 Client Error: Bad Request\n', 1, 1),
+    # The row that pins the ORDER: a refusal the index will not repeat, on
+    # one line, beside a transport failure the block must retry.
+    ('a 404 reported beside a transport line',
+     'HTTPError: 404 Client Error: Not Found\n'
+     'ServiceError: pypi.org returned 502\n', 1, 1),
+    # The row that pins the 429 exception's SCOPE: the substring is there
+    # and it is not a status, on a line the 4xx test never matched.
+    ('a 404 reported beside a 429 that is not a status',
+     'HTTPError: 404 Client Error: Not Found\n'
+     'Fixed-by: 6.0.429\n'
+     'ConnectionError: connection reset by peer\n', 1, 1),
 )
 
 
-def audit_step_outcome(body, output, code=1, cwd=None):
+def audit_step_outcome(body, output, cwd, code=1):
     """Run audit.yml's own retry block over one pip-audit output.
 
     `pip-audit` and `sleep` become shell functions, so the block's OWN
     control flow answers: how many times it ran the tool, what it exited
-    with, and what it printed. `runs.log` counts invocations rather than
-    the block's own "retrying" line, so a retry it announced without taking
-    cannot pass for one it took.
+    with, what it printed, and how long it waited between attempts.
+    `runs.log` counts invocations rather than the block's own "retrying"
+    line, so a retry it announced without taking cannot pass for one it
+    took; `sleeps.log` records the argument of every sleep, so a backoff the
+    block printed without taking cannot pass for one it took either.
 
     The block arrives as a decoded `run:` scalar on a script this builds and
     is handed to bash through `-c`, never through `$( )`: macOS ships bash
@@ -152,7 +182,8 @@ def audit_step_outcome(body, output, code=1, cwd=None):
     root = Path(cwd)
     (root / 'fixture.out').write_text(output, encoding='utf-8')
     (root / 'runs.log').write_text('', encoding='utf-8')
-    script = ('sleep() { :; }\n'
+    (root / 'sleeps.log').write_text('', encoding='utf-8')
+    script = ('sleep() { echo "$1" >> sleeps.log; }\n'
               'pip-audit() { echo x >> runs.log; cat fixture.out;'
               ' return "$AUDIT_CODE"; }\n') + body
     result = subprocess.run(
@@ -160,7 +191,9 @@ def audit_step_outcome(body, output, code=1, cwd=None):
         timeout=_AUDIT_RETRY_TIMEOUT, cwd=cwd,
         env={**os.environ, 'AUDIT_CODE': str(code)})
     runs = len((root / 'runs.log').read_text(encoding='utf-8').split())
+    waits = (root / 'sleeps.log').read_text(encoding='utf-8').split()
     return {'runs': runs, 'code': result.returncode,
+            'sleeps': [int(value) for value in waits],
             'out': (result.stdout + result.stderr).strip()}
 
 
@@ -205,20 +238,52 @@ def assert_the_audit_covers_every_dependency_surface():
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
-def assert_the_cache_release_step_is_shaped_as_declared():
-    """Decoded scalars, not substrings, so a dropped env or a narrowed
-    condition cannot hide behind a lookalike; the step's own comment says
-    why it exists."""
-    steps = complete_job_mapping(_tests_yml(), 'actionlint')['steps']
-    matches = [
-        (index, step) for index, step in enumerate(steps)
-        if step.get('name')
-        == 'Verify the actions/cache release annotations upstream']
-    assert len(matches) == 1, matches
-    index, step = matches[0]
-    assert step.get('run') == 'python3 scripts/ci/cache_action_releases.py', (
-        step)
-    assert step.get('if') == '${{ !cancelled() }}', step
-    assert step.get('env') == {'GH_TOKEN': '${{ github.token }}'}, step
-    zizmor = [i for i, s in enumerate(steps) if s.get('name') == 'zizmor']
-    assert zizmor and index > zizmor[0], (index, zizmor)
+def _audit_refusals(body):
+    """The distinct texts the block can end on, read out of the block itself.
+
+    One per outcome that stops the job rather than trying again, so the
+    control can require each fixture to have printed exactly one of them and
+    no two outcomes to share a text. Reading them from the block rather than
+    writing them here is the half that keeps this from being a second
+    spelling of the workflow: a refusal renamed in the block moves with it.
+    """
+    return re.findall(r'^\s*echo "([^"]+)" >&2$', body, re.MULTILINE)
+
+
+def assert_the_audit_retry_is_narrow_and_ordered(tmp):
+    """One executed fixture per arm of audit.yml's own retry block.
+
+    Every predicate gets a value it accepts and one just past it, because a
+    single-valued set makes "retries this" and "gives up on that" look the
+    same while pinning neither. The block is RUN rather than read: only a run
+    can tell a 404 the index will not repeat out of a 502 beside it, and only
+    a run can tell which of the block's two tests was read first.
+
+    What it PRINTS is asserted too, because the harness collects it: how many
+    times the tool ran and what the block exited with are two of the three
+    facts a reader of this log actually gets, and the third is the one that
+    tells a genuine finding from an index error, a retried transport failure
+    from a backoff the block never took, and a refusal from a clean run.
+    """
+    body = _audit_step('Audit dependencies')
+    refusals = _audit_refusals(body)
+    assert len(set(refusals)) == len(refusals), (
+        f'two outcomes refuse in the same words: {refusals}')
+    for label, output, runs, code in AUDIT_RETRY_FIXTURES:
+        outcome = audit_step_outcome(body, output, cwd=tmp, code=code)
+        assert (outcome['runs'], outcome['code']) == (runs, code), (
+            f'{label}: {outcome}')
+        assert output.strip() in outcome['out'], (
+            f'{label}: the block ended without printing what the tool wrote: '
+            f'{outcome}')
+        printed = [marker for marker in refusals if marker in outcome['out']]
+        assert len(printed) == (0 if not code else 1), (
+            f'{label}: printed {printed}, and each outcome names itself once')
+        waits = outcome['sleeps']
+        assert len(waits) >= runs - 1, (
+            f'{label}: {runs} attempts, so every retry between them has to '
+            f'wait, and these are the waits it took: {outcome}')
+        assert all(0 < first < second
+                   for first, second in zip(waits, waits[1:])), (
+            f'{label}: each attempt must wait longer than the one before it, '
+            f'and these are the waits it took: {waits}')

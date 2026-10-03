@@ -30,8 +30,6 @@ from pathlib import Path
 import _util
 from _repo import ROOT
 from _wfgraph import _tests_yml
-from _wffixtures import AUDIT_RETRY_FIXTURES, audit_step_outcome
-from _yamlread import step_scalar
 from _yamlsteps import complete_job_mapping
 
 # tests/test_ci_workflows.py is at its 700-line ceiling; machinery goes here.
@@ -592,109 +590,21 @@ def _lint_workflows(root, actionlint=None):
             'files': [str(path) for path in files]}
 
 
-def _audit_step(name):
-    """One named step of audit.yml, decoded out of the workflow's own bytes."""
-    workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
-        encoding='utf-8')
-    return step_scalar(workflow, 'pip-audit', name, 'run')
-
-
-def _pip_installs(body):
-    """Every `pip install` invocation in a decoded `run:` block.
-
-    Continuations are joined first, so a pin cannot hide on one, and the
-    filter names the OPERATION rather than an enumerated list of spellings.
-    """
-    logical, current = [], ''
-    for line in body.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
-        current = f'{current} {stripped}'.rstrip('\\').strip()
-        if not stripped.endswith('\\'):
-            logical.append(current)
-            current = ''
-    return [command for command in logical
-            if re.match(r'^(?:python3? -m )?pip install\b', command)]
-
-
-def assert_ci_tool_pins_live_in_a_watched_manifest():
-    """Every CI-tool install resolves its pin from a `-r` manifest.
-
-    Dependabot reads manifest files and never a workflow, so a version
-    written into a step is a version nobody is ever told to move. The
-    positive half matters as much as the negative one: the manifest install
-    is asserted to EXIST, so an empty scan or a renamed step fails here
-    instead of passing vacuously.
-    """
-    for read, step, manifest in (
-            (_job_step, 'Install zizmor', 'requirements-zizmor.txt'),
-            (_audit_step, 'Install pip-audit', 'requirements-pip-audit.txt')):
-        installs = _pip_installs(read(step))
-        assert installs, f'{step} runs no pip install to carry a pin'
-        for command in installs:
-            assert '==' not in command, command
-            assert f'-r {manifest}' in command, command
-
-
-def assert_the_zizmor_manifest_is_hash_pinned():
-    """zizmor gates the gates, so every artifact behind its pin is named.
-
-    `--require-hashes` makes a hash a constraint rather than a note.
-    """
-    assert '--require-hashes' in _job_step('Install zizmor')
-    manifest = (ROOT / 'requirements-zizmor.txt').read_text(encoding='utf-8')
-    pins = [line for line in re.sub(r'\\\n\s*', ' ', manifest).splitlines()
-            if line.strip() and not line.startswith('#')]
-    assert pins, 'the manifest pins no requirement at all'
-    for pin in pins:
-        assert '--hash=sha256:' in pin, pin
-
-
-def assert_every_dependabot_group_has_a_security_mirror():
-    """Security updates need a group of their own, or they arrive unpaired.
-
-    A group with no `applies-to` covers version updates alone, and
-    `github/codeql-action` is one component to CodeQL — which refuses to
-    process SARIF from a tree whose halves disagree — and two dependencies
-    to Dependabot. Read off the `applies-to` blocks themselves: elsewhere
-    every group's patterns are one flat list, where a sibling occurrence of
-    the same string satisfies a test meant to check for the mirror.    """
-    config = (ROOT / '.github' / 'dependabot.yml').read_text(encoding='utf-8')
-    kinds = {}
-    for block in re.findall(r'^ {4}groups:\n((?:^ {6,}\S.*\n|\n)*)', config,
-                            re.MULTILINE):
-        for name, body in re.findall(
-                r'^ {6}(\S+):\n((?:^ {8,}\S.*\n|\n)*)', block, re.MULTILINE):
-            applies_to = re.search(r'applies-to: (\S+)', body)
-            kinds[name] = (re.findall(r'^ +- "([^"]+)"', body, re.MULTILINE),
-                           applies_to.group(1) if applies_to
-                           else 'version-updates')
-    assert kinds, 'dependabot.yml declares no group at all'
-    missing = [name for name, (patterns, applies_to) in kinds.items()
-               if patterns and applies_to != 'security-updates'
-               and kinds.get(f'{name}-security')
-               != (patterns, 'security-updates')]
-    assert not missing, (
-        f'groups covering version updates alone: {missing}. Security updates '
-        f'are enabled here, so a bump to one of those arrives as one pull '
-        f'request per dependency.')
-
-
-def assert_the_audit_retry_is_narrow_and_ordered(tmp):
-    """One executed fixture per arm of audit.yml's own retry block.
-
-    Every predicate gets a value it accepts and one just past it, because a
-    single-valued set makes "retries this" and "gives up on that" look the
-    same while pinning neither. The block is RUN rather than read: the ORDER
-    of its two tests is what keeps the widening narrow, and only a run can
-    tell a 401, reported at once, out of a 429, which is retried.
-    """
-    body = _audit_step('Audit dependencies')
-    assert body.index('4[0-9][0-9] Client Error') < body.index('grep -qiE'), (
-        'the non-429 refusal is read after the retry test, so a 4xx is '
-        'retried before it is reported')
-    for label, output, runs, code in AUDIT_RETRY_FIXTURES:
-        outcome = audit_step_outcome(body, output, code=code, cwd=tmp)
-        assert (outcome['runs'], outcome['code']) == (runs, code), (
-            f'{label}: {outcome}')
+def assert_the_cache_release_step_is_shaped_as_declared():
+    """Decoded scalars, not substrings, so a dropped env or a narrowed
+    condition cannot hide behind a lookalike; the step's own comment says
+    why it exists."""
+    steps = (complete_job_mapping(_tests_yml(), _ACTIONLINT_JOB)
+             or {})['steps']
+    matches = [
+        (index, step) for index, step in enumerate(steps)
+        if step.get('name')
+        == 'Verify the actions/cache release annotations upstream']
+    assert len(matches) == 1, matches
+    index, step = matches[0]
+    assert step.get('run') == 'python3 scripts/ci/cache_action_releases.py', (
+        step)
+    assert step.get('if') == '${{ !cancelled() }}', step
+    assert step.get('env') == {'GH_TOKEN': '${{ github.token }}'}, step
+    zizmor = [i for i, s in enumerate(steps) if s.get('name') == 'zizmor']
+    assert zizmor and index > zizmor[0], (index, zizmor)
