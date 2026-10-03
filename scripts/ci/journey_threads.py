@@ -108,19 +108,19 @@ Limitations rather than claimed here as a rule that holds.
 
 - Every journey's profile carries the bridge's one-off MCP bootstrap import —
   the bridge starts its own front-end listener whatever the journey asks of
-  it — and all but one journey excludes it, the last bullet naming the one
-  that does not.
+  it — and every journey excludes it. It is a thread of ANOTHER process, so
+  no journey's own work is behind it, and its cost is the one background
+  number that does not repeat: five rounds of identical code on one runner
+  measured it between 4,015,865,696 and 4,020,617,049 instructions, so a
+  journey keeping it moved 1.14% between runs of an unchanged tree (issue
+  1495). Size bands once made keeping it necessary, for a journey whose own
+  request thread measured 2.12 billion instructions and landed in the import
+  band beside it; the roles are now settled by the process a thread ran in,
+  so an importing request thread cannot claim the role at any size.
 - `command-round-trip` and `dashboard-fanout` also exclude `serve`: they
   exercise the bridge's HTTP surface and none of the front end's event loop,
   so the loop's idle tick is not their work.
 - `mcp-exec` calls that loop, so its tick stays in as the named residual.
-- `net-capture` is the one that keeps the import. Its own request thread
-  measured 2.12 billion instructions and USED to land in the import band,
-  beside the bootstrap import, so excluding the import there would have
-  dropped the very work the journey exists to measure. Identity
-  classification removes that reason, and the list is left as it was: it is
-  the one the recorded counts were measured under, and the roles it names are
-  now settled by the process a thread ran in, so nothing forces it either way.
 
 Anything this cannot read is a REFUSAL naming the thread and its count,
 never a silent inclusion. A mis-sorted profile that quietly sums the thread
@@ -374,5 +374,5 @@ EXCLUDED = {
     'screenshot': (IMPORT,),
     'segment-relay': (IMPORT,),
     'cdp-result': (IMPORT,),
-    'net-capture': (SERVE,),
+    'net-capture': (IMPORT, SERVE),
 }
