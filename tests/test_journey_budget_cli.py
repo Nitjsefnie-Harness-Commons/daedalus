@@ -7,7 +7,9 @@ this is the surface a workflow step calls, and the three are three subjects.
 The measurement itself is stubbed throughout — a journey costs what the
 machine it ran on costs, so a control that measured one would be asserting
 a number this repository must not write down, and a run whose counts vary
-per runner is a control that fails on one and passes on the next.
+per runner is a control that fails on one and passes on the next. The one
+control that reads the real artefact is a refusal, and it drives this CLI
+as the subprocess a workflow step drives.
 
 The `rebaseline` half of this command lives in `test_journey_rebaseline.py`;
 this is `probe`, `measure` and `check`.
@@ -15,6 +17,7 @@ this is `probe`, `measure` and `check`.
 import contextlib
 import io
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -581,6 +584,37 @@ def test_a_tighten_writes_nothing_the_check_refuses_over_a_missing_journey(
         assert policy.main(['check', '--artifact', str(artifact),
                             '--measurements', str(measurements)]) == 1, (
             'the artefact the tighten refused is one the check accepts')
+
+
+def test_a_single_draw_never_records_a_count(tmp):
+    """The defect, on the artefact this repository actually ships.
+
+    One draw measured 48% below the median of three on unchanged code is
+    what a `--rounds 1` run gets, and `tightened` only ever follows a
+    journey down, so writing it is the ratchet: every later run is then
+    measured against a baseline no second draw ever agreed with.
+    """
+    budget = Path(tmp) / 'journey-budget.json'
+    budget.write_bytes(
+        (ROOT / '.github' / 'journey-budget.json').read_bytes())
+    before = budget.read_bytes()
+    document = json.loads(before)
+    report = measured_report(
+        {name: seen // 2 for name, seen in document['journeys'].items()},
+        rounds=1, toolchain=document['toolchain'],
+        excluded_threads=document['excluded_threads'],
+        shas=document['shas'])
+    report['counters'] = {document['counter']:
+                          report['counters']['perf-instructions']}
+    counts = Path(tmp) / 'counts.json'
+    counts.write_text(json.dumps(report), encoding='utf-8')
+    done = subprocess.run(
+        [sys.executable, str(ROOT / 'scripts/ci/journey_budget.py'),
+         'check', '--artifact', str(budget), '--measurements', str(counts),
+         '--tighten'], capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    assert budget.read_bytes() == before, (
+        f'a single draw was written as a baseline: {done.stdout}')
 
 
 def main():
