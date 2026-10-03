@@ -506,11 +506,13 @@ CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     """Absence is not an empty answer: this fixture shows both."""
     del tmp
-    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS,
-                                    (EPOCH, EPOCH + 719.0))
+    # The middle poll is 600 s in — inside the bound, past its half — and
+    # carries no run: the wait must not fire on it.
+    calls, verdict, message = _scan([[], [], [CLEAN]], CLEAN_JOBS,
+                                    (EPOCH, EPOCH + 600.0, EPOCH + 719.0))
     assert verdict in _gate().GREEN, message
     assert 'gitleaks' in message and 'concluded success' in message, message
-    assert len(_polls(calls)) == 2, calls
+    assert len(_polls(calls)) == 3, calls
 
 
 def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
