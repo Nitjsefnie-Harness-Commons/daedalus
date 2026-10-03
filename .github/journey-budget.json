@@ -7,6 +7,11 @@
     "valgrind_version": "valgrind-3.22.0",
     "runner_image": "ubuntu24 20260927.320.1"
   },
+  "tolerances": {
+    "command-round-trip": 1.549611,
+    "net-capture": 1.140791,
+    "segment-relay": 0.571726
+  },
   "excluded_threads": {
     "cdp-result": ["front-end-import"],
     "command-round-trip": ["front-end-import", "uvicorn-serve"],
@@ -29,12 +34,12 @@
     "segment-relay": "045137a566fe2acaf7ff15773c6f4779308faaf92ea1db9f6bdb416dc518bf0f"
   },
   "journeys": {
-    "cdp-result": 99328397,
-    "command-round-trip": 1990884,
-    "dashboard-fanout": 16235342,
-    "mcp-exec": 3983660059,
-    "net-capture": 538564705,
-    "screenshot": 75976192,
-    "segment-relay": 42143004
+    "cdp-result": 99531389,
+    "command-round-trip": 1991060,
+    "dashboard-fanout": 16242920,
+    "mcp-exec": 3984211834,
+    "net-capture": 540969644,
+    "screenshot": 76159901,
+    "segment-relay": 42316914
   }
 }

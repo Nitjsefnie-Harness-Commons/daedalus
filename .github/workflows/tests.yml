@@ -1254,14 +1254,14 @@ jobs:
     # allowed. Seven journeys therefore cost less than twice what three
     # cost, so 60 is several times what the measured run needs — room for
     # a slower runner, which is what a ceiling is for.
-    timeout-minutes: 180
+    timeout-minutes: 60
     env:
       # How many rounds the measurement takes. One is the steady state:
       # these counts are deterministic, so a discarded warm-up round buys
       # nothing. A higher value exists to derive a tolerance from a spread,
       # once, and is not what every run should pay for — three is how each
       # baseline's tolerance has been measured, on the per-journey number.
-      JOURNEY_ROUNDS: "7"
+      JOURNEY_ROUNDS: "1"
 
     steps:
       # actions/checkout v7.0.1
