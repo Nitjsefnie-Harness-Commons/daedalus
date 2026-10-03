@@ -17,7 +17,9 @@ import re
 
 from _actionlint import _job_step
 from _repo import ROOT
+from _wfgraph import _job_section, _tests_yml
 from _wffixtures import _audit_step
+from _yamlread import job_mapping, step_scalar
 
 # The keys Dependabot's group schema accepts. Anything else inside a group is
 # a key this reader does not understand, and a reader that silently absorbed
@@ -336,6 +338,59 @@ def assert_ci_tool_pins_live_in_a_watched_manifest():
             assert f'-r {manifest}' in command, command
 
 
+# The eslint job pins three npm packages in its own env block, installs
+# them with --no-save, and compares each against its registry's latest
+# major. No other module in the tree names those variables, so this table
+# and the control below are the only things that read them.
+_ESLINT_INSTALL = 'Install eslint (pinned, no package.json, no build step)'
+_ESLINT_GATE = "Check the pins against the registries' latest majors"
+# Each pin's env var and the package it installs, in install order.
+_ESLINT_PINS = (
+    ('ESLINT_VERSION', 'eslint'),
+    ('ESLINT_JS_VERSION', '@eslint/js'),
+    ('GLOBALS_VERSION', 'globals'),
+)
+_EXACT_PIN = re.compile(r'\d+\.\d+\.\d+\Z')
+
+
+def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
+    """Three exact pins ride one install, and the gate between reds.
+
+    The fail-closed half is the one whose absence turns a red into a
+    green. A renamed or deleted env pin resolves empty, and an empty pin
+    makes the integer comparison error inside its own `if`, which reads
+    as "not stale" -- so without the `drift` branch the job passes on a
+    pin it never saw. Setting the flag is not the claim: each flag's own
+    `-ne 0` block has to reach `exit 1`, and each is pinned to that.
+    """
+    workflow = _tests_yml()
+    env = job_mapping(workflow, 'eslint', 'env')
+    install = step_scalar(workflow, 'eslint', _ESLINT_INSTALL, 'run')
+    gate = step_scalar(workflow, 'eslint', _ESLINT_GATE, 'run')
+    lint = step_scalar(workflow, 'eslint', 'eslint', 'run')
+    assert env and install and gate and lint, 'an eslint step is gone'
+    assert sorted(env) == sorted(var for var, _ in _ESLINT_PINS), sorted(env)
+    for var, package in _ESLINT_PINS:
+        assert _EXACT_PIN.fullmatch(env[var]), (var, package, env[var])
+    assert '--no-save --no-package-lock' in install, install
+    assert '--no-save' not in lint, 'the lint step installs'
+    for var, package in _ESLINT_PINS:
+        assert f'"{package}@${{{var}}}"' in install, (package, var, install)
+        assert f'"{var}:{package}"' in gate, (package, var, gate)
+    assert 'if [ -z "${pinned}" ]' in gate, gate
+    assert '    drift=1\n' in gate, gate
+    for flag in ('drift', 'stale'):
+        block = re.search(rf'\$\{{{flag}\}}.*-ne 0.*\n(.*\n)*?fi\n', gate)
+        assert block and '  exit 1\n' in block.group(0), (
+            f'{flag} has no -ne 0 block of its own ending in exit 1')
+    assert "git ls-files '*.js' ':!:examples/*'" in lint, lint
+    at = {match.group(1): offset for offset, line in
+          enumerate(_job_section(workflow, 'eslint'))
+          if (match := re.match(r'      - name: (.+)$', line))}
+    order = (at[_ESLINT_INSTALL], at[_ESLINT_GATE], at['eslint'])
+    assert order == tuple(sorted(order)), order
+
+
 # The requirement requirements-zizmor.txt is expected to carry, and how many
 # artifacts each one's full release set holds. A LITERAL here, not a number
 # read back out of the manifest's own prose: a control whose expectation is
@@ -388,6 +443,20 @@ def _manifest_pins(manifest):
             for run, number in pins]
 
 
+def _canonical_name(name):
+    """The requirement name the way pip resolves it.
+
+    `canonicalize_name` in `pip/_vendor/packaging/utils.py`, read in pip
+    26.2.1: lowercase the name, fold `_` and `.` onto `-`, then condense a
+    run of separators down to one. Spelled out here because this suite
+    imports no third-party package, and because the rule is three lines.
+    """
+    value = name.lower().replace('_', '-').replace('.', '-')
+    while '--' in value:
+        value = value.replace('--', '-')
+    return value
+
+
 def assert_the_zizmor_manifest_is_hash_pinned():
     """zizmor gates the gates, so every artifact behind its pin is named.
 
@@ -403,8 +472,12 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     `--require-hashes`, and the count is the same eleven either way. A
     digest is compared the way its consumer compares it, lowercased — pip
     lowercases every digest before `is_hash_allowed` sees it, so a value
-    differing only in case names the artifact beside it. One hash
-    short of the expected count is a broken install on one platform's runner
+    differing only in case names the artifact beside it. The NAME is compared
+    the way pip compares it too, and for the same reason: `_canonical_name`
+    folds the spellings pip resolves to one package, because a name read
+    byte-exactly is how one package ends up pinned twice under two names with
+    every count here still satisfied. One hash short of the expected count is
+    a broken install on one platform's runner
     and nothing else, so a control that only asks what a pin carries passes a
     manifest naming nine of zizmor's ten wheels and the job then fails on
     exactly one leg of the matrix with no local symptom. The other direction
@@ -419,6 +492,22 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     pins = _manifest_pins((ROOT / 'requirements-zizmor.txt').read_text(
         encoding='utf-8'))
     assert pins, 'the manifest pins no requirement at all'
+    # The reader's own rule, in both directions. The manifest surface cannot
+    # express the separator half — no spelling carrying `-`, `_` or `.`
+    # canonicalises to `zizmor`, so only the case half is reachable through a
+    # pin here, and a reader that folded nothing would pass every pin below.
+    for spellings, canonical in (
+            (('Zizmor', 'zizmor', 'ZIZMOR'), 'zizmor'),
+            (('ziz-mor', 'ziz_mor', 'ziz.mor', 'ziz..mor', 'ziz--mor'),
+             'ziz-mor')):
+        for spelling in spellings:
+            assert _canonical_name(spelling) == canonical, (
+                f'{spelling!r} canonicalises to '
+                f'{_canonical_name(spelling)!r}, not {canonical!r}')
+    for left, right in (('zizmor', 'ziz-mor'), ('zizmor', 'zizmor2')):
+        assert _canonical_name(left) != _canonical_name(right), (
+            f'{left!r} and {right!r} are two packages to pip, and folding '
+            f'them together would refuse a pin pip resolves')
     seen = {}
     listed = []
     for name, hashes, welded, number in pins:
@@ -428,13 +517,22 @@ def assert_the_zizmor_manifest_is_hash_pinned():
             f'is a second requirement welded onto this pin — so what the run '
             f'pins is ambiguous, and every hash behind it is counted against '
             f'{name}')
-        assert name in _EXPECTED_ARTIFACT_COUNTS, (
+        # Compared the way pip compares it, and for the same reason the digest
+        # below is: a name that differs only in spelling names the requirement
+        # the manifest already pins. Read byte-exactly, `Zizmor` beside
+        # `zizmor` is two requirements here and one to pip, and the assertion
+        # that fires names the second one unmonitored — which is the remedy
+        # that makes it green, one package pinned twice under two names and
+        # every count still satisfied.
+        canonical = _canonical_name(name)
+        assert canonical in _EXPECTED_ARTIFACT_COUNTS, (
             f'requirements-zizmor.txt:{number}: {name} is pinned and this '
             f'manifest is expected to carry '
             f'{sorted(_EXPECTED_ARTIFACT_COUNTS)}, so nothing checks it')
-        assert name not in seen, (
-            f'requirements-zizmor.txt:{number}: {name} is pinned twice, and '
-            f'the first pin at line {seen[name][0]} is never read')
+        assert canonical not in seen, (
+            f'requirements-zizmor.txt:{number}: {name} is pinned twice — pip '
+            f'resolves it as {canonical} either way — and the first pin at '
+            f'line {seen[canonical][0]} is never read')
         for token in hashes:
             # Compared the way pip compares it: `Hashes.__init__` lowercases
             # every digest it is given, and the digest of the bytes is
@@ -449,7 +547,7 @@ def assert_the_zizmor_manifest_is_hash_pinned():
                 f'--require-hashes, on the one matrix leg that lifts it, '
                 f'with nothing red here')
             listed.append(digest)
-        seen[name] = (number, len(hashes))
+        seen[canonical] = (number, len(hashes))
     missing = sorted(set(_EXPECTED_ARTIFACT_COUNTS) - set(seen))
     assert not missing, (
         f'the manifest does not pin {missing}, which it is expected to '
