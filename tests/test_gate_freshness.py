@@ -303,6 +303,12 @@ def test_a_merge_base_that_is_not_forty_lowercase_hex_is_unreadable(tmp):
         assert mb is None, bad
 
 
+def _encoded_read(payload):
+    def read(_argv):
+        return _encode(payload)
+    return read
+
+
 def test_an_absent_merge_base_field_is_unreadable(tmp):
     """An absent field and a payload that is not an object are the same
     unreadable verdict. A non-dict payload has no `.get`, so the guard that
@@ -314,9 +320,7 @@ def test_an_absent_merge_base_field_is_unreadable(tmp):
                          'o/r', G1, _head())
     assert mb is None
     for shape in ([], 'text', 12345, None, True):
-        def read(_argv, shape=shape):
-            return _encode(shape)
-        mb, _ = m.merge_base(read, 'o/r', G1, _head())
+        mb, _ = m.merge_base(_encoded_read(shape), 'o/r', G1, _head())
         assert mb is None, shape
 
 
