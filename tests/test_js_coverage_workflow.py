@@ -579,6 +579,9 @@ def test_javascript_gate_reads_floor_from_thresholds_file(tmp):
         'long_line_baseline': {},
         'type_error_baseline': {},
         'js_coverage_baseline': {},
+        # The gate only reads the coverage member, and this tree has no
+        # tests/ to measure; the budget itself is tests_lines.py's.
+        'tests_line_baseline': 1,
     }
     (work / '.github' / 'ci-thresholds.json').write_text(
         json.dumps(document), encoding='utf-8')

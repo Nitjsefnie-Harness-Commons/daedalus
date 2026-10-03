@@ -61,6 +61,7 @@ def _ratchet_document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
         'long_line_baseline': {},
         'type_error_baseline': {},
         'js_coverage_baseline': {},
+        'tests_line_baseline': 1706,
     }
 
 
@@ -89,6 +90,7 @@ PROMOTED_MODULES = (
     'scripts.ci.ratchet',
     'scripts.ci.size_baseline',
     'scripts.ci.thresholds',
+    'scripts.ci.tests_lines',
     'scripts.ci.type_error_baseline',
     'scripts.ci.workflow_yaml',
 )
@@ -422,7 +424,8 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
     assert ('no raise; no module shrank, no file lost an over-limit '
-            'line and no module lost an uncovered JavaScript line.'
+            'line, no module lost an uncovered JavaScript line and '
+            'tests/ lost no line.'
             ) in noop_summary.read_text(encoding='utf-8')
 
 
