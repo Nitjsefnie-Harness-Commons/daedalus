@@ -6,6 +6,7 @@ own gate conditions and step handles are pinned beside them.
 """
 import sys
 import fnmatch
+import re
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -493,6 +494,16 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
         assert actual == expected, f'{job}/{step}: {actual!r}'
 
 
+def _without_call_spacing(expression):
+    """Return an expression with whitespace at call punctuation removed.
+
+    Only `(`, `,` and `)` shed their neighbouring whitespace: it is call
+    spelling, and none of the three occurs inside a quoted argument, so a
+    format string's own whitespace survives and still reds.
+    """
+    return re.sub(r'\s*([(),])\s*', r'\1', expression)
+
+
 def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
     """One score, from one ref, published only where it means something.
 
@@ -527,7 +538,7 @@ def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
         else:
             raise AssertionError(f'unread guard limb: {conjunct!r}')
     assert fork is not None, f'no limb negates the fork flag: {guard!r}'
-    assert ref == (
+    assert _without_call_spacing(ref) == _without_call_spacing(
         "format('refs/heads/{0}',"
         " github.event.repository.default_branch)"), (
         f'the ref limb compares against {ref!r}')

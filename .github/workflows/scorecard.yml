@@ -20,8 +20,8 @@ concurrency:
 
 jobs:
   analysis:
-    # Only upstream's default branch may publish a score that reads as this
-    # repository's: a fork's run never can, and another branch's is not it.
+    # Only upstream's default branch may publish this repository's score: a
+    # fork's run files into the fork's store, another branch's under this name.
     if: ${{ !github.event.repository.fork && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
     name: Scorecard analysis
     runs-on: ubuntu-latest
