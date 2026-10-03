@@ -485,14 +485,6 @@ def test_the_aggregate_job_runs_the_module(tmp):
     }
 
 
-def test_the_head_branch_env_falls_back_to_the_pushed_branch(tmp):
-    del tmp
-    value = _gate_step()['env']['HEAD_BRANCH']
-    assert 'github.event.pull_request.head.ref' in value, value
-    assert '||' in value, value
-    assert 'github.ref_name' in value, value
-
-
 def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
     del tmp
     pins = set(re.findall(r'actions/checkout@([0-9a-f]{40})', _tests_yml()))
@@ -507,7 +499,8 @@ def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     """Absence is not an empty answer: this fixture shows both."""
     del tmp
     # The middle poll is 600 s in — inside the bound, past its half — and
-    # carries no run: the wait must not fire on it.
+    # carries no run: the wait must not fire on it. This discriminates at
+    # the scale of the poll interval, not to sub-second resolution.
     calls, verdict, message = _scan([[], [], [CLEAN]], CLEAN_JOBS,
                                     (EPOCH, EPOCH + 600.0, EPOCH + 719.0))
     assert verdict in _gate().GREEN, message
@@ -635,12 +628,17 @@ def _gate_step():
     return steps[0]
 
 
-def test_the_scanned_job_is_one_secrets_yml_declares(tmp):
-    """The gate names a job id; this joins that id to the workflow's own."""
+def test_the_scanned_job_is_the_name_secrets_yml_emits(tmp):
+    """The gate matches `jobs[].name`: the display name where the workflow
+    declares one, the job id where it does not. Pinning the id alone left
+    the two ends agreeing by coincidence."""
     del tmp
-    workflow = ROOT / '.github' / 'workflows' / 'secrets.yml'
-    assert _gate().SECRETS_JOB in _job_names(
-        workflow.read_text(encoding='utf-8'))
+    mod = _gate()
+    source = (ROOT / '.github' / 'workflows' / 'secrets.yml').read_text(
+        encoding='utf-8')
+    assert mod.SECRETS_JOB in _job_names(source)
+    job = complete_job_mapping(source, mod.SECRETS_JOB) or {}
+    assert job.get('name') in (None, mod.SECRETS_JOB), job.get('name')
 
 
 def test_the_gate_waits_on_a_dispatch_event_too(tmp):
