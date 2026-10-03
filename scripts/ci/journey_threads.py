@@ -31,12 +31,12 @@ module comes out of one invocation, the same argv
 `journey_counters._callgrind` runs:
 
     valgrind --tool=callgrind --trace-children=yes --separate-threads=yes \
-        --callgrind-out-file=cg.%p \
-        python3 tests/_journeys.py --journey <name> --root .
+        --callgrind-out-file=<workdir>/callgrind.<journey>.%p \
+        python3 tests/_journeys.py --journey <journey> --root <root>
 
-Each out file's `summary:` line is that thread's total, `read` returns them
-all and `role_of` names each one, so a per-thread number here is reproducible
-rather than cited:
+Each out file's `summary:` line is that thread's total,
+`read(<workdir>, 'callgrind.<journey>')` returns them all and `role_of` names
+each one, so a per-thread number here is reproducible rather than cited:
 
   - The seven `TaskObj_*`/`FutureObj_*` symbols an earlier reading took as
     exclusive to an event loop appear on NO background thread of any run.
