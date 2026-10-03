@@ -4,9 +4,8 @@
 Three helpers stay after cut 6 with no suite of their own left: the
 mutation-sweep launch scan, the coverage memo's materialised node list,
 and the shared source reader. Every kept suite that imports one exercises
-a rule ABOUT the guard, never a rule about the helper, so each of the
-three properties below is pinned here once rather than in a suite already
-at the tests ceiling.
+a rule ABOUT the guard, never the helper, so these are pinned here once
+rather than in a suite already at the ceiling.
 """
 import ast
 import sys
@@ -19,14 +18,26 @@ from _coverage_source_fixtures import _normalized_source  # noqa: E402
 from _sweep_launch_scan import sweep_launches  # noqa: E402
 
 HERE = 'tests/synthetic.py'
-# Spelled out rather than read off `_sweep_launch_scan.SWEEP_ENTRY`: a fixture
-# built from the subject's own constant cannot see that constant change.
+# Spelled out, not read off `_sweep_launch_scan.SWEEP_ENTRY`: a fixture built
+# from the subject's own constant cannot see that constant change.
 PROGRAM = ('suite.test_each_new_binding_and_match_arm_is_mutation_'
            'sensitive(tmp)')
 
 
 def _scan_of(body, head='import subprocess\n'):
     return sweep_launches(ast.parse(head + body), HERE)
+
+
+def _deadline_line(body):
+    """The 1-based line the deadline keyword sits on, base included."""
+    return 1 + body[:body.index('timeout')].count('\n') + 1
+
+
+def _bounded(label, body):
+    """A launch on the line the deadline keyword names, found with it."""
+    line = _deadline_line(body)
+    assert _scan_of(body) == ([(HERE, line)], [(HERE, line)]), (
+        label, _scan_of(body), line)
 
 
 def test_a_bare_name_launcher_is_still_a_launcher(tmp):
@@ -51,14 +62,12 @@ def test_a_scope_is_fully_bound_before_any_call_in_it_is_judged(tmp):
 
     `_sweep_scope_nodes` yields a scope's own statements in document order
     but expands their subtrees only afterwards. So a program bound INSIDE A
-    BRANCH — where real code puts one, and what the analyser's own docstring
-    names — is yielded after the launch standing beside it, and that ordering
-    holds only because the branch precedes the launch; put the launch first
-    and its statement is yielded first too. Either way one loop that binds
-    and judges as it goes can reach a launch before the name it runs has been
-    bound, and the deadline scan reports a bounded sweep launch as unbounded.
-    The first pass is what makes walk order irrelevant; collapsing the two
-    loops is a false green, not a simplification.
+    BRANCH — where real code puts one — is yielded after the launch beside
+    it, and that ordering holds only because the branch precedes the
+    launch. Either way one loop that binds and judges as it goes can reach
+    a launch before the name it runs has been bound, and the deadline scan
+    reports a bounded sweep launch as unbounded. The first pass is what
+    makes walk order irrelevant; collapsing the two loops is a false green.
     """
     del tmp
     assert _scan_of(f'if True:\n    p = ["-c", "{PROGRAM}"]\n'
@@ -128,6 +137,90 @@ def test_a_crlf_module_reads_back_normalised(tmp):
     target.write_bytes(b'import os\r\nSUBJECT = "a value"\r\n')
     assert b'\r\n' in target.read_bytes()
     assert _normalized_source(target) == 'import os\nSUBJECT = "a value"\n'
+
+
+def test_every_import_spelling_the_guard_names_is_a_launcher(tmp):
+    """The four spellings beside `import subprocess` reach the launchers.
+
+    The guard's own docstring names an alias, a star-import and a dotted
+    import as part of the population it enforces over every
+    `tests/test_*.py`. Each is a separate branch of `_run_spellings`: a
+    module alias binds `sp`, `import subprocess.run` binds `subprocess` and
+    reaches the same four, `import subprocess.run as sr` binds `sr` to the
+    FUNCTION itself, and a star-import binds all four at once. One
+    assertion per spelling, so one branch going dead does not hide behind
+    another's row.
+    """
+    del tmp
+    rows = (
+        ('import subprocess as sp\n', 'sp.{launcher}'),
+        ('import subprocess.run\n', 'subprocess.{launcher}'),
+        ('import subprocess.run as sr\n', 'sr'),
+        ('from subprocess import *\n', '{launcher}'),
+    )
+    for head, callee in rows:
+        name = callee.format(launcher='run')
+        assert _scan_of(f'{name}(["-c", "{PROGRAM}"], timeout=120)\n',
+                        head=head) == ([(HERE, 2)], [(HERE, 2)]), head
+
+
+def test_every_binding_form_the_guard_names_is_read(tmp):
+    """The nine forms the guard's docstring says the scan reads.
+
+    Each row is one form of `_sweep_bind` or `_captures`: `+=`, an
+    annotated `=`, a walrus, a `for`/`in` target, `append`, `extend`, and
+    the three capture slots a `match` offers — the mapping's `**rest`
+    among them, which `ast.walk` cannot reach because it is a plain string.
+    A capture binds the match SUBJECT, which is what the first capture row
+    reads: its pattern names only the second element.
+    """
+    del tmp
+    rows = (
+        ('+=', f'p = ["-c"]\np += ["-c", "{PROGRAM}"]\n'
+               'subprocess.run(p, timeout=120)\n'),
+        ('annotated', f'p: list = ["-c", "{PROGRAM}"]\n'
+                      'subprocess.run(p, timeout=120)\n'),
+        ('walrus', f'if p := ["-c", "{PROGRAM}"]:\n    pass\n'
+                   'subprocess.run(p, timeout=120)\n'),
+        ('for target', f'for p in [["-c", "{PROGRAM}"]]:\n'
+                       '    subprocess.run(p, timeout=120)\n'),
+        ('append', f'p = ["-c"]\np.append("{PROGRAM}")\n'
+                   'subprocess.run(p, timeout=120)\n'),
+        ('extend', f'p = ["-c"]\np.extend(["{PROGRAM}"])\n'
+                   'subprocess.run(p, timeout=120)\n'),
+        ('a sequence capture', f'match ["-c", "{PROGRAM}"]:\n'
+                               '    case ["-c", program]:\n'
+                               '        subprocess.run([program], '
+                               'timeout=120)\n'),
+        ('a star capture', f'match ["-c", "{PROGRAM}"]:\n'
+                           '    case ["-c", *rest]:\n'
+                           '        subprocess.run([rest], timeout=120)\n'),
+        ('a mapping rest capture', f'match {{"{PROGRAM}": rest}}:\n'
+                                   '    case {**rest}:\n'
+                                   '        subprocess.run([rest], '
+                                   'timeout=120)\n'),
+    )
+    for label, body in rows:
+        _bounded(label, body)
+
+
+def test_a_deadline_is_stamped_with_the_line_its_call_opens_on(tmp):
+    """The line a deadline is REPORTED at is the call's, not the keyword's.
+
+    On a call written across lines `ast.Call.lineno` is the line the call
+    opens on, so the keyword sits below it — the stated cost of the rule.
+    The finding it produces has to name the call a reader will look at, so
+    the two lines are asserted apart on purpose: they differ, and that
+    difference is the whole property.
+    """
+    del tmp
+    found = _scan_of('subprocess.run(\n    ["-c", '
+                     f'"{PROGRAM}"], timeout=120)\n')
+    assert found == ([(HERE, 2)], [(HERE, 2)]), found
+    assert found[1][0][1] != 3, (
+        'the fixture no longer separates the two lines, so it cannot tell '
+        'the call line from the keyword line: '
+        f'{found}')
 
 
 if __name__ == '__main__':
