@@ -24,26 +24,33 @@ from _wffixtures import _audit_step
 # one would take the group it belongs to out of the compared set.
 _GROUP_KEYS = ('applies-to', 'dependency-type', 'patterns')
 
-# The `pip install` OPERATION, however the shell spells it: an interpreter of
-# any version, under any path, a `pip` that carries one, and whatever
-# environment assignments or privilege prefix stand in front of it. Named as
-# one operation because a spelling this pattern does not know is a version
-# nobody is told to move, and a PREFIX is such a spelling —
+# The `pip` TOOL, as one token: `pip`, a versioned one, one under a path,
+# whatever stands in front of it. The boundaries keep a word that merely
+# carries the letters out — `mypip` is another tool, and `pip-audit` is a
+# different program sharing a prefix — and the tool is looked for wherever it
+# stands rather than under a prefix spelled out ahead of it, so an assignment,
+# a `sudo`, an interpreter or a path is not a shape this reader is taught
+# one at a time. That prefix axis is where the pattern used to grow:
 # `PIP_ROOT_USER_ACTION=ignore pip install` is the idiom GitHub's own pip
-# setup documentation leads with. So the pattern is anchored on the operation
-# and not on the start of the line: anchored on the line, a preceding
-# assignment hides the install and the guard passes with a pin sitting in the
-# step it was written to police. The tool and the verb are the operation, so
-# the OPTIONS between them are part of it too and the span takes any run of
-# them: `pip --disable-pip-version-check install` is the spelling pip's own
-# CLI reference documents for silencing its version-check warning, and a
-# `--user` in the same place is ordinary pip usage.
-_PIP_INSTALL = re.compile(
-    r'(?<![0-9A-Za-z._/-])'
-    r'(?:\S+=\S+[ \t]+)*'
-    r'(?:sudo(?:[ \t]+-\S+)*[ \t]+)?'
-    r'(?:\S*python[\d.]* -m )?(?:\S*/)?pip[\d.]*'
-    r'(?:[ \t]+-\S+)*[ \t]+install\b')
+# setup documentation leads with, and anchoring on the line instead hid the
+# install behind it.
+_PIP_TOOL = re.compile(
+    r'(?<![0-9A-Za-z._/-])(?:\S*/)?pip[\d.]*(?![0-9A-Za-z._/-])')
+
+# pip's own commands that install nothing. `install` is the verb this reader
+# polices, and `sync` is deliberately NOT here: it installs every requirement
+# in a file, so a `pip sync` reaching this reader is refused rather than read
+# as a `pip` that is not installing — the same miss, one command over. Naming
+# the rest is what tells a `pip` that is not installing from a token standing
+# in the verb's place that this reader cannot read, and the asymmetry is the
+# point: a name left out costs a loud red on a step that uses it, and a name
+# wrongly added can only make the reader pass over a command, which is the
+# direction that stays silent.
+_PIP_COMMANDS = frozenset({
+    'bundle', 'cache', 'check', 'completion', 'config', 'debug', 'download',
+    'freeze', 'hash', 'help', 'index', 'inspect', 'list', 'lock', 'search',
+    'show', 'uninstall', 'wheel',
+})
 
 
 class WorkflowPinError(Exception):
@@ -200,13 +207,22 @@ def _pip_installs(body):
     assertion about the command beside it — inside a `run: |` block a `#` is
     string content, not a shell comment the reader may skip.
 
-    The filter names the OPERATION rather than an enumerated list of
-    spellings: `python`, `python3` and `python3.13` are the same interpreter
-    with a version the reader must not have to know, `pip`/`pip3` are the
-    same tool for the same reason, an environment assignment or a `sudo` in
-    front changes neither, and the options a command carries between the tool
-    and the verb are still that command. Enumerating them is what made
-    `pip3 install` walk past a guard written for the operation.
+    What is modelled, and only this: the tool wherever it stands — `pip`,
+    `pip3.13`, `/usr/bin/pip3`, the `pip` of a `python3.13 -m`, and any of
+    them behind whatever a command line puts in front, whether that is an
+    assignment, a `sudo`, a path or a prefix this reader was never taught;
+    and, between the tool and the verb, options whose value is attached
+    (`--opt=v`) or absent (`-q`). The verb is one of pip's own commands, and
+    only `install` is returned.
+
+    Anything else is REFUSED rather than skipped. A token standing in the
+    verb's place that is neither one of those commands nor an option — the
+    value of a detached option, `pip --proxy http://p:8080 install` — is a
+    shape this reader does not model, and a reader that returned nothing for
+    it could not tell that shape from there being no install here to
+    police. So it fails by name instead. The direction is deliberate: a
+    command refused wrongly is loud and says which form was not recognised,
+    while one passed wrongly says nothing at all.
     """
     logical, current = [], ''
     for line in body.splitlines():
@@ -217,7 +233,80 @@ def _pip_installs(body):
         if not stripped.endswith('\\'):
             logical.append(current)
             current = ''
-    return [command for command in logical if _PIP_INSTALL.search(command)]
+    installs = []
+    for command in logical:
+        for tool in _PIP_TOOL.finditer(command):
+            tokens = command[tool.end():].split()
+            index = 0
+            while index < len(tokens) and tokens[index].startswith('-'):
+                index += 1
+            verb = tokens[index] if index < len(tokens) else None
+            if verb == 'install':
+                installs.append(command)
+                continue
+            assert verb is None or verb in _PIP_COMMANDS, (
+                f'{command!r}: {verb!r} stands where this reader expects a '
+                f'pip command or one of its options, so this is a shape it '
+                f'does not model — and it refuses the shape rather than '
+                f'passing over it, because a form it cannot read is an '
+                f'install it cannot police and an empty result cannot tell '
+                f'the two apart')
+    return installs
+
+
+def assert_the_pip_install_reader_refuses_what_it_cannot_model():
+    """The reader fails closed on a `pip` shape it cannot read.
+
+    The span that walks the options between the tool and the verb covers an
+    option with its value attached and an option that takes none. An option
+    whose value is a SEPARATE token — `pip --proxy http://p:8080 install`,
+    the same `pip` with one literal word standing where the verb belongs —
+    is outside every form this reader models, and a reader that simply did
+    not match it reported nothing while the install ran: a missed control and
+    a control that found nothing to check are one silence. So the unmodelled
+    form is refused by name, and a refusal on a legitimate command is the
+    loud of the two directions, which is the one worth it.
+
+    Both directions are checked here, because the refusal is worth little
+    while the shapes around it stop reading: a verb that is not an install
+    stays unread rather than refused, the tool under any prefix stays the
+    same tool, and the two steps this reader reads as they stand.
+    """
+    for command in (
+            'pip --proxy http://p:8080 install zizmor==9.9.9',
+            'pip --timeout 30 install zizmor==9.9.9',
+            'pip --retries 5 install zizmor==9.9.9',
+            'pip --cache-dir /tmp/pc install zizmor==9.9.9',
+            'pip --log /tmp/p.log install zizmor==9.9.9',
+            'pip --cert /tmp/c.pem install zizmor==9.9.9',
+            'pip --exists-action i install zizmor==9.9.9'):
+        try:
+            _pip_installs(command)
+        except AssertionError:
+            continue
+        raise AssertionError(
+            f'{command!r} installs, and this reader passed over it: an option '
+            f'whose value is a token of its own is not a form the span '
+            f'modelling the options carries')
+    for command in ('pip uninstall zizmor',
+                    'pip download --no-deps zizmor',
+                    'pip-audit --progress-spinner off zizmor',
+                    'pip list --outdated --format=json > install.json',
+                    'pip wheel --no-deps install',
+                    'mypip install zizmor'):
+        assert not _pip_installs(command), command
+    for command in ('uv pip install zizmor==9.9.9',
+                    'pip3.13 install zizmor==9.9.9',
+                    'pip --disable-pip-version-check install zizmor==9.9.9',
+                    'sudo -u runner pip install zizmor==9.9.9',
+                    'env A=1 B=2 pip install zizmor==9.9.9',
+                    'PIP_ROOT_USER_ACTION=ignore pip install zizmor==9.9.9',
+                    'python3.13 -m pip install zizmor==9.9.9',
+                    '/usr/bin/pip3 install zizmor==9.9.9'):
+        assert _pip_installs(command) == [command], command
+    for step in (_job_step('Install zizmor'),
+                 _audit_step('Install pip-audit')):
+        assert len(_pip_installs(step)) == 1, step
 
 
 def assert_ci_tool_pins_live_in_a_watched_manifest():
@@ -311,7 +400,10 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     BOTH directions, and the values are checked to be DISTINCT, because a
     count is satisfied by a token count rather than by a set: eleven tokens
     naming ten artifacts leave one artifact unresolvable under
-    `--require-hashes`, and the count is the same eleven either way. One hash
+    `--require-hashes`, and the count is the same eleven either way. A
+    digest is compared the way its consumer compares it, lowercased — pip
+    lowercases every digest before `is_hash_allowed` sees it, so a value
+    differing only in case names the artifact beside it. One hash
     short of the expected count is a broken install on one platform's runner
     and nothing else, so a control that only asks what a pin carries passes a
     manifest naming nine of zizmor's ten wheels and the job then fails on
@@ -344,14 +436,19 @@ def assert_the_zizmor_manifest_is_hash_pinned():
             f'requirements-zizmor.txt:{number}: {name} is pinned twice, and '
             f'the first pin at line {seen[name][0]} is never read')
         for token in hashes:
-            assert token not in listed, (
+            # Compared the way pip compares it: `Hashes.__init__` lowercases
+            # every digest it is given, and the digest of the bytes is
+            # lowercase by construction, so a value differing only in case
+            # names the artifact the manifest already names.
+            digest = token.partition(':')[2].lower()
+            assert digest not in listed, (
                 f'requirements-zizmor.txt:{number}: {token} is listed a '
                 f'second time, and repeating a value leaves the count this '
                 f'control checks exactly where it was while one artifact '
                 f'stakes its place — that artifact cannot resolve under '
                 f'--require-hashes, on the one matrix leg that lifts it, '
                 f'with nothing red here')
-            listed.append(token)
+            listed.append(digest)
         seen[name] = (number, len(hashes))
     missing = sorted(set(_EXPECTED_ARTIFACT_COUNTS) - set(seen))
     assert not missing, (

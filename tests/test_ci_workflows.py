@@ -35,6 +35,7 @@ from _wfpins import (  # noqa: E402
     assert_ci_tool_pins_live_in_a_watched_manifest,
     assert_every_dependabot_group_family_covers_version_updates,
     assert_every_dependabot_group_has_a_security_mirror,
+    assert_the_pip_install_reader_refuses_what_it_cannot_model,
     assert_the_zizmor_manifest_is_hash_pinned)
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
@@ -306,6 +307,11 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert_the_audit_covers_every_dependency_surface()
 
 
+def test_the_pip_install_reader_refuses_what_it_cannot_model(tmp):
+    del tmp
+    assert_the_pip_install_reader_refuses_what_it_cannot_model()
+
+
 def test_ci_tool_pins_are_visible_to_dependabot(tmp):
     """Every CI-tool install resolves its pin from a `-r` manifest."""
     del tmp
@@ -512,8 +518,7 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     identities = [step.get('name') or step.get('uses', '').partition('@')[0]
                   for step in steps]
     assert identities == [
-        'actions/checkout',
-        'actions/setup-python',
+        'actions/checkout', 'actions/setup-python',
         'Build the wheel and the sdist',
         'Check both artifacts render',
         'Install it with no checkout in reach and run its entry point',
@@ -571,8 +576,7 @@ _ESLINT_INSTALL = 'Install eslint (pinned, no package.json, no build step)'
 _ESLINT_GATE = "Check the pins against the registries' latest majors"
 # Each pin's env var and the package it installs, in install order.
 _ESLINT_PINS = (
-    ('ESLINT_VERSION', 'eslint'),
-    ('ESLINT_JS_VERSION', '@eslint/js'),
+    ('ESLINT_VERSION', 'eslint'), ('ESLINT_JS_VERSION', '@eslint/js'),
     ('GLOBALS_VERSION', 'globals'),
 )
 _EXACT_PIN = re.compile(r'\d+\.\d+\.\d+\Z')
