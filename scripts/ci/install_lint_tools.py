@@ -36,21 +36,19 @@ LINT_TOOLS_ENV. A control reads that variable back and requires each tool
 to resolve; a broken install is a failure there, never a skip.
 """
 import hashlib
-import http.client
 import io
 import os
 import platform
 import shutil
-import ssl
 import subprocess
 import sys
 import tarfile
 import tempfile
-import time
-import urllib.error
-import urllib.request
 import zipfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import actionlint_asset  # noqa: E402  pylint: disable=wrong-import-position
 
 ROOT = Path(__file__).resolve().parents[2]
 # What a suite may skip on, and therefore what a job reaching the suites
@@ -130,37 +128,19 @@ RELEASE = 'https://github.com/Nitjsefnie-OSC/actionlint/releases/download'
 # What the release calls each architecture, which is not what Python calls it.
 ARCHITECTURES = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64',
                  'arm64': 'arm64'}
-DOWNLOAD_TIMEOUT = 30
-# A connect or a read that fails is the network reaching the asset and not
-# the asset answering wrong — the digest check below is what covers that. A
-# verdict is never retried — the size refusal, the digest mismatch — and
-# what else is not worth a second ask is decided in `_worth_asking_again`.
-DOWNLOAD_ATTEMPTS = 3
-# The bound, and it is the attempt count: an attempt costs one timeout per
-# address each host in the redirect chain resolves to, summed over the hosts
-# rather than multiplied across them. Today's counts are a DNS answer and
-# change; the job's own `timeout-minutes` is the ceiling above this.
-# What `timeout` does not bound is in `_fetch`'s docstring.
-# What a retry can change. A body cut short mid-transfer raises
-# IncompleteRead, an HTTPException and not an OSError.
-TRANSIENT_ERRORS = (OSError, http.client.HTTPException)
-# The gap a retry leaves before it asks again, and the ceiling that gap
-# stops at. Asking back to back spends every attempt inside the same few
-# milliseconds, so a 503 the server would have cleared on its own is
-# asked again before it can clear — measured at 0.004 s across all three
-# attempts, against a Retry-After the server had already sent. The
-# ceiling is what keeps the wait from becoming the failure: it is a
-# fraction of the tightest `timeout-minutes` any job gives this script,
-# so the job's own bound stays the outer one and a header asking for
-# longer than that cannot park a runner past it.
-RETRY_BACKOFF_SECONDS = 2
-RETRY_BACKOFF_CAP_SECONDS = 10
 # A whole-process bound, because pip owns the wheel transfer below, so
-# the per-socket one above does not apply to it.
+# the per-socket bound `actionlint_asset` carries does not apply to it.
 WHEEL_TIMEOUT = 300
 MAX_TRANSFER = 64 * 1024 * 1024
 INSTALL_DIR = Path(os.environ.get('RUNNER_TEMP', tempfile.gettempdir()))
 TOOL_DIR = INSTALL_DIR / 'daedalus-lint-tools'
+# The three values `actionlint_asset` builds its ask from, handed over
+# rather than imported back: the definitions stay here, where the rest
+# of this module reads them, and a second copy of a pin is a pin that
+# drifts.
+actionlint_asset.RELEASE = RELEASE
+actionlint_asset.ACTIONLINT_VERSION = ACTIONLINT_VERSION
+actionlint_asset.MAX_TRANSFER = MAX_TRANSFER
 
 
 def _asset_name():
@@ -183,89 +163,6 @@ def _asset_name():
     name = (f'actionlint_{ACTIONLINT_VERSION}_{system.lower()}_'
             f'{ARCHITECTURES[machine]}.{suffix}')
     return name, key
-
-
-def _worth_asking_again(why):
-    """Whether a second ask could answer differently: a status of 500 or
-    above is the server failing rather than answering, and a certificate
-    that does not verify is the same failure in the handshake. It arrives
-    wrapped on the h.request() path and bare on the getresponse() and read()
-    path, which is why the test below falls back rather than reaching for
-    `reason` directly.
-    """
-    # Unwrapping an HTTPError rebinds `why` to its status message, a string,
-    # and this test then declines nothing — a 404 is asked again.
-    if isinstance(why, urllib.error.HTTPError):
-        return why.code >= 500
-    unwrapped = getattr(why, 'reason', why)
-    return not isinstance(unwrapped, ssl.SSLCertVerificationError)
-
-
-def _retry_after_seconds(why):
-    """The delay in seconds a failing status asked for, or None.
-
-    `Retry-After` is either delay-seconds or an HTTP-date, and only the
-    first is used: a date is the same window in a form this code has no
-    clock to compare it against, so it falls back to the backoff rather
-    than being turned into a number nobody here could have checked. A
-    bare OSError carries no headers at all, and a value that is not a
-    non-negative integer is no delay this can honour.
-    """
-    headers = getattr(why, 'headers', None)
-    told = headers.get('Retry-After') if headers is not None else None
-    try:
-        seconds = int(told)
-    except (TypeError, ValueError):
-        return None
-    return seconds if seconds >= 0 else None
-
-
-def _pause_seconds(attempt, why):
-    """How long to wait before the next ask, and whose number that is.
-
-    The growth is this module's own. A `Retry-After` the failing status
-    carried REPLACES it rather than adding to it, because the server
-    knows when it will answer and this code does not; asking sooner than
-    the server asked to be asked is the mistake the wait exists to stop.
-    The ceiling is applied last so it binds whichever of the two is
-    larger.
-    """
-    window = RETRY_BACKOFF_SECONDS * 2 ** attempt
-    told = _retry_after_seconds(why)
-    if told is not None:
-        window = max(window, told)
-    return min(window, RETRY_BACKOFF_CAP_SECONDS)
-
-
-def _fetch(name):
-    """The release asset's bytes, bounded in size, on a per-read timeout.
-
-    `timeout` bounds one socket operation, not the transfer, so a mirror
-    dribbling a byte a minute can hold the step for the whole download;
-    MAX_TRANSFER is the bound that is real.
-
-    The attempt is repeated while it fails transiently, and the last failure
-    propagates as it does without the retry, so the traceback naming `_fetch`
-    and `urlopen` is what a reader of a dead install step still gets. A retry
-    waits first, for the window `_pause_seconds` names, so the asks are
-    not three in the same few milliseconds.
-    """
-    url = f'{RELEASE}/v{ACTIONLINT_VERSION}/{name}'
-    for attempt in range(DOWNLOAD_ATTEMPTS):
-        try:
-            with urllib.request.urlopen(
-                    url, timeout=DOWNLOAD_TIMEOUT) as source:
-                payload = source.read(MAX_TRANSFER + 1)
-        except TRANSIENT_ERRORS as why:
-            if (attempt + 1 == DOWNLOAD_ATTEMPTS
-                    or not _worth_asking_again(why)):
-                raise
-            time.sleep(_pause_seconds(attempt, why))
-            continue
-        if len(payload) > MAX_TRANSFER:
-            raise SystemExit(
-                f'{url} served more than {MAX_TRANSFER} bytes')
-        return payload
 
 
 def _verify(payload, key):
@@ -307,7 +204,7 @@ def _extract(payload, destination):
 def install_actionlint():
     """Download, verify and unpack actionlint into the tool directory."""
     name, key = _asset_name()
-    payload = _fetch(name)
+    payload = actionlint_asset.fetch(name)
     _verify(payload, key)
     TOOL_DIR.mkdir(parents=True, exist_ok=True)
     target = _extract(payload, TOOL_DIR)
