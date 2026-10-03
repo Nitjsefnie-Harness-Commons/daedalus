@@ -3,9 +3,10 @@
 
 `tests/_sweep_launch_scan.py` stays after this cut — its own deletion kept
 surfacing refusals nothing else pinned — so nothing here covers the sweep
-scan. What is left is `_coverage_memo`'s materialised node list and the
-shared source reader. Every kept suite that imports either exercises a rule
-ABOUT the guard, never about the helper, so these two are pinned here once.
+scan. What is left is `_coverage_memo`'s materialised node list, the key its
+`analysed` memo is held under, and the shared source reader. Every kept
+suite that imports any of them exercises a rule ABOUT the guard, never
+about the helper, so these are pinned here once.
 
 It is a separate file rather than a fold into a neighbour because there is
 nowhere to fold them: their kept importers, the
@@ -52,6 +53,40 @@ def test_a_crlf_module_reads_back_normalised(tmp):
     target.write_bytes(b'import os\r\nSUBJECT = "a value"\r\n')
     assert b'\r\n' in target.read_bytes()
     assert _normalized_source(target) == 'import os\nSUBJECT = "a value"\n'
+
+
+def test_the_memo_key_carries_the_analyser_as_well_as_the_file(tmp):
+    """`analysed` serves a caller that swaps the guard that guard's verdict.
+
+    The key is the analyser, the path and the content together, so a second
+    guard over the same file is analysed in its own right rather than
+    handed the first one's answer. The order below is the one that matters:
+    the clean guard runs first and the refusing one second, so dropping the
+    analyser from the key hands the second an empty list and it PASSES
+    where the base refuses it — a bound site nobody reports, rather than a
+    false red a reader would have noticed.
+
+    Nothing in the kept tree calls two analysers over one source, so the
+    second guard is the only way this is observable at all.
+    """
+    del tmp
+    relative, source = 'tests/synthetic.py', 'import os\n'
+    ran = []
+
+    def clean(_relative, _source, keeps):
+        del keeps
+        ran.append('clean')
+        return []
+
+    def refusing(_relative, _source, keeps):
+        del keeps
+        ran.append('refusing')
+        return [f'{relative}:1 is refused']
+
+    assert _coverage_memo.analysed(clean, relative, source, []) == []
+    assert _coverage_memo.analysed(refusing, relative, source, []) == [
+        f'{relative}:1 is refused']
+    assert ran == ['clean', 'refusing'], ran
 
 
 if __name__ == '__main__':
