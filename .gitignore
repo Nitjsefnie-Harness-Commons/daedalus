@@ -230,6 +230,7 @@
 # ─── scripts/ci ───
 !/scripts/
 !/scripts/ci/
+!/scripts/ci/actionlint_asset.py
 !/scripts/ci/aggregate_gate.py
 !/scripts/ci/cache_action_releases.py
 !/scripts/ci/callgrind_boundary.c
