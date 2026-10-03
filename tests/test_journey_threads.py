@@ -591,12 +591,12 @@ def test_every_journey_drops_the_front_ends_bootstrap_import(tmp):
     4,020,617,049 instructions, so a journey that kept it carried that
     run-varying constant into its own count and moved 1.14% between runs of
     an unchanged tree (issue 1495). It used to be `net-capture` alone, kept
-    for a reason issue 1466 removed: under size bands that journey's own
-    request thread measured 2.12 billion instructions and landed in the
-    import band beside the bootstrap, so dropping the import there would
-    have dropped the work the journey exists to measure. Roles are decided
-    by the process a thread ran in now, so an importing request thread can
-    never claim the role.
+    for a reason issue 1466 removed: under size bands a thread that journey
+    put to work measured 2.12 billion instructions and landed in the import
+    band beside the bootstrap, so dropping the import there would have
+    dropped the work the journey exists to measure. Roles are decided by
+    the process a thread ran in now, so no importing request thread can
+    claim the role.
 
     Derived from `NAMES` through `excluded_for`, so a journey added to that
     list and given an entry that keeps the import fails here. A hand-written

@@ -113,10 +113,11 @@ Limitations rather than claimed here as a rule that holds.
   number that does not repeat: five rounds of identical code on one runner
   measured it between 4,015,865,696 and 4,020,617,049 instructions, so a
   journey keeping it moved 1.14% between runs of an unchanged tree (issue
-  1495). Size bands once made keeping it necessary, for a journey whose own
-  request thread measured 2.12 billion instructions and landed in the import
-  band beside it; the roles are now settled by the process a thread ran in,
-  so an importing request thread cannot claim the role at any size.
+  1495). Size bands once made keeping it necessary — a thread that journey
+  puts to work measured 2.12 billion instructions and landed in the import
+  band beside the bootstrap; the roles are now settled by the process a
+  thread ran in, so no importing request thread can claim the role at any
+  size.
 - `command-round-trip` and `dashboard-fanout` also exclude `serve`: they
   exercise the bridge's HTTP surface and none of the front end's event loop,
   so the loop's idle tick is not their work.
