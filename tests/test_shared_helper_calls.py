@@ -581,5 +581,43 @@ def test_a_violation_inside_a_helper_names_the_helper_not_the_control(tmp):
                for message in messages), messages
 
 
+# Two refusals of the local write contract whose only home was the
+# deleted dedicated `control_write_violations` suite.
+def test_refuses_a_foreign_absolute_literal(tmp):
+    """(n) A Windows drive path cannot become relative on a POSIX analyzer."""
+    root = Path(tmp)
+    source = root / 'foreign-absolute.py'
+    source.write_text(
+        "def test_control(tmp):\n"
+        "    target = Path(tmp) / 'C:\\\\outside'\n"
+        "    target.write_bytes(b'mutated')\n",
+        encoding='utf-8')
+    assert control_write_violations(source, root) == [
+        'foreign-absolute.py:3: write_bytes target path is not control-owned'
+    ]
+
+
+def test_an_omitted_default_seeds_its_own_expression(tmp):
+    """(o) A caller omitting a default seeds that parameter, not nothing."""
+    root = Path(tmp)
+    source = root / 'default-seed.py'
+    source.write_text(
+        "def _probe(tmp, name='scratch'):\n"
+        "    (Path(tmp) / name).write_bytes(b'x')\n"
+        "def test_a(tmp):\n"
+        "    _probe(tmp)\n",
+        encoding='utf-8')
+    assert control_write_violations(source, root) == []
+    source.write_text(
+        "def _probe(tmp, name=None):\n"
+        "    if name is not None:\n"
+        "        (Path(tmp) / name).write_bytes(b'x')\n"
+        "def test_a(tmp):\n"
+        "    _probe(tmp, ROOT)\n",
+        encoding='utf-8')
+    assert control_write_violations(source, root) == [
+        'default-seed.py:3: write_bytes target path is not control-owned']
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))

@@ -70,20 +70,19 @@ def test_controls_never_write_inside_the_repository(tmp):
 
 def test_an_unmodelled_write_primitive_is_refused_in_a_real_control(tmp):
     """Issue 295's copy: shutil.copyfile over a checkout path is refused."""
-    root, target = _real_module_copy(tmp, Path('tests/test_control_writes.py'))
-    needle = "    del tmp\n    violations = _violations(Path(__file__))\n"
+    root, target = _real_module_copy(
+        tmp, Path('tests/test_coverage_environment.py'))
+    needle = "    return control_write_violations(Path(__file__), ROOT)\n"
     text = _normalized_source(target)
     assert needle in text, 'the self-scan control shape changed'
-    line = text[:text.index(needle)].count('\n') + 2
+    line = text[:text.index(needle)].count('\n') + 1
     mutated = text.replace(
         needle,
-        "    del tmp\n"
-        "    shutil.copyfile(__file__, ROOT / '.probe.py')\n"
-        "    violations = _violations(Path(__file__))\n", 1)
+        "    shutil.copyfile(__file__, ROOT / '.probe.py')\n" + needle, 1)
     target.write_bytes(mutated.encode('utf-8'))
     violations = control_write_violations(target, root)
-    assert (f'tests/test_control_writes.py:{line}: shutil.copyfile is not '
-            'a modelled call') in violations, violations
+    assert (f'tests/test_coverage_environment.py:{line}: '
+            'shutil.copyfile is not a modelled call') in violations, violations
     target.write_bytes(text.encode('utf-8'))
     assert control_write_violations(target, root) == []
 
@@ -123,15 +122,15 @@ def test_a_path_replace_is_not_the_pure_string_replace(tmp):
     """
     root, control, helper = _control_and_helper_copy(tmp)
     original = helper.read_bytes()
-    plant = ("    (root / 'tests' / 'test_control_writes.py')"
+    plant = ("    (root / 'tests' / 'test_coverage_environment.py')"
              ".replace(ROOT / '.probe.py')")
     text, line = after_call(
         _normalized_source(helper), 'copy_test_tree', plant)
     helper.write_bytes(text.encode('utf-8'))
     violations = control_write_violations(control, root)
     assert (f'tests/_coverage_source_fixtures.py:{line}: '
-            "(root / 'tests' / 'test_control_writes.py').replace is not a "
-            'modelled call') in violations, violations
+            "(root / 'tests' / 'test_coverage_environment.py').replace is "
+            'not a modelled call') in violations, violations
     helper.write_bytes(original)
     assert control_write_violations(control, root) == []
 
@@ -195,15 +194,15 @@ def test_a_starred_argument_does_not_make_path_replace_pure(tmp):
     """`*[]` adds nothing at runtime and nothing to the positional count."""
     root, control, helper = _control_and_helper_copy(tmp)
     original = helper.read_bytes()
-    plant = ("    (root / 'tests' / 'test_control_writes.py')"
+    plant = ("    (root / 'tests' / 'test_coverage_environment.py')"
              ".replace(*[], ROOT / '.probe5.py')")
     text, line = after_call(
         _normalized_source(helper), 'copy_test_tree', plant)
     helper.write_bytes(text.encode('utf-8'))
     violations = control_write_violations(control, root)
     assert (f'tests/_coverage_source_fixtures.py:{line}: '
-            "(root / 'tests' / 'test_control_writes.py').replace is not a "
-            'modelled call') in violations, violations
+            "(root / 'tests' / 'test_coverage_environment.py').replace is "
+            'not a modelled call') in violations, violations
     helper.write_bytes(original)
     assert control_write_violations(control, root) == []
 
@@ -656,7 +655,7 @@ subprocess.run(['python3', 'child.py'])
 def test_a_decorated_class_is_not_a_readable_definition(tmp):
     """A class decorator may replace the value the class binds, too."""
     root, target, line = _planted_copy(
-        tmp, Path('tests/test_control_writes.py'),
+        tmp, Path('tests/test_coverage_environment.py'),
         "def _replace_class_with_copy(_class):\n"
         "    return shutil.copyfile\n"
         "\n"
@@ -670,14 +669,15 @@ def test_a_decorated_class_is_not_a_readable_definition(tmp):
         "    _DecoratedClassCopy(\n"
         "        source, ROOT / '.review-303-class-decorated-writer')\n")
     violations = control_write_violations(target, root)
-    assert (f'tests/test_control_writes.py:{line + 10}: _DecoratedClassCopy '
-            'callable is unresolved') in violations, violations
+    assert (
+        f'tests/test_coverage_environment.py:{line + 10}: '
+        '_DecoratedClassCopy callable is unresolved') in violations, violations
 
 
 def test_a_decorated_def_is_not_a_readable_definition(tmp):
     """A decorator may replace the value the def binds, so it proves none."""
     root, target, line = _planted_copy(
-        tmp, Path('tests/test_control_writes.py'),
+        tmp, Path('tests/test_coverage_environment.py'),
         "def _replace_with_copy(_function):\n"
         "    return shutil.copyfile\n"
         "\n"
@@ -690,8 +690,9 @@ def test_a_decorated_def_is_not_a_readable_definition(tmp):
         "    source.write_bytes(b'decorated-writer')\n"
         "    _decorated_copy(source, ROOT / '.review-303-decorated-writer')\n")
     violations = control_write_violations(target, root)
-    assert (f'tests/test_control_writes.py:{line + 10}: _decorated_copy '
-            'callable is unresolved') in violations, violations
+    assert (
+        f'tests/test_coverage_environment.py:{line + 10}: _decorated_copy '
+        'callable is unresolved') in violations, violations
 
 
 if __name__ == '__main__':

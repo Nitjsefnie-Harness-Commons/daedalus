@@ -7,12 +7,6 @@ launcher reverted to an unbounded one the control hangs and reports nothing.
 The bound lives in `tests/_outer_bound.py` because the mechanism that ends
 such a wait must itself sit OUTSIDE the call, run on every matrix leg, and be
 obliged to kill the child rather than merely stop waiting for it.
-
-The platform rule that used to be the second half of this suite — a
-POSIX-only API reached unguarded from a test module, the class that cost
-four matrix legs — is in `tests/test_platform_apis.py`. The two are
-unrelated subjects, and one suite holding both is what put this file over
-the size ceiling.
 """
 import ast
 import os
