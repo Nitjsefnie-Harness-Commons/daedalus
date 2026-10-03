@@ -623,18 +623,25 @@ def test_every_journey_drops_the_front_ends_bootstrap_import(tmp):
 
 
 def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
-    """The gate compares the table the measurement classified by.
+    """The committed `thread_signatures` IS the live table, by VALUE.
 
-    `excluded_threads` records the ROLES a journey leaves out while the
-    table that PUTS a thread in one of them is guarded nowhere, so a run
-    that read a profile by a different set of symbols would compare a count
-    taken under one classifier against counts taken under another.
+    The ROLES a journey leaves out are recorded and checked by NAME
+    elsewhere; the table that PUTS a thread in one of them was recorded and
+    never read back, so a run could classify a profile under one set of
+    symbols and compare the count against totals taken under another. The
+    literal asserted here stays derived from the installed extension.
     """
     del tmp
     threads = _journey_contract.threads()
     assert set(threads.SIGNATURES) == {threads.IMPORT}, threads.SIGNATURES
     assert threads.SIGNATURES == {
         threads.IMPORT: [front_end_symbol()]}, threads.SIGNATURES
+    recorded = _journey_contract.artifact().load()['thread_signatures']
+    assert recorded == dict(threads.SIGNATURES), (
+        f'thread_signatures is recorded as {recorded} and the table puts a '
+        f'thread in a role by {dict(threads.SIGNATURES)}, so this artefact '
+        'counts a different quantity from the table a run classified the '
+        'profile under')
 
 
 def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
@@ -659,15 +666,21 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
             f'{name} is recorded as {recorded.get(name)} and the table '
             f'excludes {applied}, so this artefact counts a different '
             'quantity from the table a run classified the profile under')
-    # No tolerance of its own, so `net-capture` rides `tolerance_pct`: the
-    # three CI draws of the count this branch re-recorded span 2,672,681,420
-    # to 2,672,726,671 instructions — 0.0017% (run 37096636089, artefact
-    # `journey-counts` 11265650340) — and a per-journey tolerance is
-    # recorded only for a journey whose own draws exceed the default.
+    # No tolerance of its own, so `net-capture` rides `tolerance_pct`, and
+    # what this arms is whether the journey CARRIES a tolerance, not how
+    # wide the count runs. The three draws that decided the entry span
+    # 2,672,681,420 to 2,672,726,671 instructions — 0.0017% (run
+    # 37096636089, artefact `journey-counts` 11265650340); a later draw
+    # (run 37100959875, artefact `journey-counts` 11266910571) measured
+    # 2,672,097,656, 0.022% low. Where a draw may sit from the recorded
+    # count is the budget gate's question, not this one: a per-journey
+    # tolerance is recorded only for a journey whose own draws exceed the
+    # default.
     assert 'net-capture' not in document['tolerances'], (
         f'net-capture is held to {document["tolerances"]["net-capture"]}% '
-        'while its own draws span 0.0017%, so the bound is read from a '
-        f'measurement this artefact does not carry: {document["tolerances"]}')
+        'while the draws that decided its entry span 0.0017%, so the bound '
+        'is read from a measurement this artefact does not carry: '
+        f'{document["tolerances"]}')
     assert artifact.tolerance_of(document, 'net-capture') == \
         document['tolerance_pct'], document['tolerances']
 
