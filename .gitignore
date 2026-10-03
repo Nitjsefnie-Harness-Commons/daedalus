@@ -617,6 +617,7 @@
 !/tests/test_journey_thread_rows.py
 !/tests/test_journey_threads.py
 !/tests/test_journey_tighten.py
+!/tests/test_journey_tighten_rounds.py
 !/tests/test_js_coverage.py
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
