@@ -13,28 +13,25 @@
 # list is a superset of what any single runner needs and `--require-hashes`
 # selects the right artifact out of it.
 #
-# THE TWO COUNTS BELOW ARE READ BY tests/_actionlint.py, which requires each
-# pin to carry exactly as many hashes as its own line states. A hash short
-# of the stated count is an artifact no runner resolves and one leg of the
-# matrix fails on, with nothing red locally — so the count is checked here
-# rather than left to the runner that happens to need that artifact:
+# THE COUNT BELOW IS WRITTEN DOWN IN tests/_wfpins.py as a literal, and that
+# is where it is checked. It is deliberately NOT read back out of this file:
+# a control that takes its own expectation from the artifact it checks goes
+# green the moment the artifact and the sentence describing it are edited
+# together, which is exactly the edit a bump makes. The test requires this
+# pin to carry exactly that many hashes, and requires the requirement to be
+# here at all. A hash short of the count is an artifact no runner resolves
+# and one leg of the matrix fails on, with nothing red locally — so the
+# count is checked here rather than left to the runner that needs it:
 #
 #     zizmor 11 hashes - the ten py3-none-* wheels and the sdist
-#     PyYAML 1 hash - the CPython 3.13 manylinux wheel the actionlint job's
-#       ubuntu-latest runner resolves today; 6.0.3 ships many more, because
-#       listing a whole set by hand is what makes a hand-maintained hash
-#       list rot, and the next Dependabot bump widens the line to the
-#       release's full set, which `--require-hashes` also selects from
 #
-# WHY PyYAML IS HERE AT ALL, WHICH IS NOT zizmor's DEPENDENCY. The 1.29.0
-# wheel declares no Requires-Dist at all and holds no .py file that imports
-# yaml, so zizmor's transitive closure is EMPTY and PyYAML is not part of
-# it. It is a separately hash-pinned extra this repository does not
-# currently import, carried for parity with the sibling repositories whose
-# actionlint jobs wrap a generator that does import yaml. This repository's
-# actionlint job is a Go binary unpacked from a tarball, so nothing here
-# needs it either way, and the line is kept because that parity is
-# deliberate rather than because anything resolves it.
+# NOTHING ELSE IS PINNED HERE. zizmor 1.29.0 declares no Requires-Dist at all
+# and holds no .py file that imports yaml, so its transitive closure is EMPTY
+# and this manifest carries one requirement: the actionlint job is a Go
+# binary unpacked from a tarball and needs no Python, and the suites that do
+# import yaml get PyYAML from requirements-test.txt, which is a separate
+# install. A pin nothing resolves is not a parity decision — it is one
+# artifact's hash set to keep correct by hand.
 #
 # TO MOVE THE PIN BY HAND — the fallback when Dependabot cannot resolve a new
 # version's hashes and opens no pull request, leaving the pin where it is:
@@ -54,5 +51,3 @@ zizmor==1.29.0 \
     --hash=sha256:8c759e68cd866375030ca39e19e2de47a056b7be7288c1620e2d5b4c274f631f \
     --hash=sha256:0fb85948ba5ffc7a8116eee36fe9cfc10167225c97bd2810e3378e66a9fd27c4 \
     --hash=sha256:60e34e83c67064e0036989c7c525d13413e897aa4c4f683f1efb2048cdb28a47
-PyYAML==6.0.3 \
-    --hash=sha256:0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6

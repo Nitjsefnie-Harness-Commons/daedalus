@@ -94,6 +94,7 @@ def _audit_step(name):
         encoding='utf-8')
     return step_scalar(workflow, 'pip-audit', name, 'run')
 
+
 # One fixture per arm of audit.yml's retry block, with a value ON each
 # predicate and one just PAST it: a single-valued fixture set makes "retries
 # this" and "gives up on that" indistinguishable, so the boundary is unpinned
@@ -150,6 +151,19 @@ AUDIT_RETRY_FIXTURES = (
     ('a 403', 'HTTPError: 403 Client Error: Forbidden\n', 1, 1),
     ('a 401', 'HTTPError: 401 Client Error: Unauthorized\n', 1, 1),
     ('a 400', 'HTTPError: 400 Client Error: Bad Request\n', 1, 1),
+    # The row longer than the retry arm's excerpt window, so that window is
+    # pinned too: on a report this size the excerpt's lines are printed once
+    # per attempt and everything above them only in the report the last one
+    # ends with. An unbounded `cat` there prints the whole report per
+    # attempt, and the shorter rows cannot tell the two apart.
+    ('a transport failure under a long report',
+     'Checking 12 packages\n'
+     'Resolving dependencies\n'
+     'Found 1 known vulnerability in test/pkg\n'
+     'Upgrade test/pkg to 1.2.3 to fix it.\n'
+     'Vulnerability ID: PYSEC-2026-1\n'
+     'Retrying the advisory feed\n'
+     'HTTPError: 503 Service Unavailable\n', 3, 1),
     # The row that pins the ORDER: a refusal the index will not repeat, on
     # one line, beside a transport failure the block must retry.
     ('a 404 reported beside a transport line',
@@ -238,16 +252,22 @@ def assert_the_audit_covers_every_dependency_surface():
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
-def _audit_refusals(body):
-    """The distinct texts the block can end on, read out of the block itself.
+def _audit_announcements(body):
+    """Every line the block names an outcome with, each tagged by its stream.
 
-    One per outcome that stops the job rather than trying again, so the
-    control can require each fixture to have printed exactly one of them and
-    no two outcomes to share a text. Reading them from the block rather than
-    writing them here is the half that keeps this from being a second
-    spelling of the workflow: a refusal renamed in the block moves with it.
+    A refusal names itself on stderr and ends the job; the retry arm names
+    itself on stdout with the tail of what the tool wrote, and that line is
+    the ONLY way a reader of the log learns a retry happened. Both are read
+    here, because a reader that took the stderr one alone reports the block as
+    covering its outcomes while the line the retry path prints — the one the
+    retry path prints at all — is asserted by nothing.
     """
-    return re.findall(r'^\s*echo "([^"]+)" >&2$', body, re.MULTILINE)
+    return ([('refusal', text)
+             for text in re.findall(r'^\s*echo "([^"]+)" >&2$', body,
+                                    re.MULTILINE)]
+            + [('retry', text)
+               for text in re.findall(r'^\s*echo "([^"]+)"$', body,
+                                      re.MULTILINE)])
 
 
 def assert_the_audit_retry_is_narrow_and_ordered(tmp):
@@ -260,15 +280,28 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
     a run can tell which of the block's two tests was read first.
 
     What it PRINTS is asserted too, because the harness collects it: how many
-    times the tool ran and what the block exited with are two of the three
-    facts a reader of this log actually gets, and the third is the one that
-    tells a genuine finding from an index error, a retried transport failure
-    from a backoff the block never took, and a refusal from a clean run.
+    times the tool ran and what the block exited with are two of the facts a
+    reader of this log actually gets, and the others are what tell a genuine
+    finding from an index error, a retried transport failure from a backoff
+    the block never took, and a refusal from a clean run. Every one of the
+    block's five outcomes is named by exactly the arm that owns it and by no
+    other — including the retry, which is announced per attempt and shows the
+    tail of what the tool wrote each time.
     """
     body = _audit_step('Audit dependencies')
-    refusals = _audit_refusals(body)
+    refusals = [text for kind, text in _audit_announcements(body)
+                if kind == 'refusal']
+    announcing = [text for kind, text in _audit_announcements(body)
+                  if kind == 'retry']
     assert len(set(refusals)) == len(refusals), (
         f'two outcomes refuse in the same words: {refusals}')
+    assert len(announcing) == 1, (
+        f'the block announces a retry in {len(announcing)} ways, so "the '
+        f'retry arm announced itself" names no single line: {announcing}')
+    marker = announcing[0]
+    assert marker not in refusals, (
+        f'the retry announcement is also a refusal text, so no output of the '
+        f'block tells the two apart: {marker!r}')
     for label, output, runs, code in AUDIT_RETRY_FIXTURES:
         outcome = audit_step_outcome(body, output, cwd=tmp, code=code)
         assert (outcome['runs'], outcome['code']) == (runs, code), (
@@ -276,9 +309,27 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
         assert output.strip() in outcome['out'], (
             f'{label}: the block ended without printing what the tool wrote: '
             f'{outcome}')
-        printed = [marker for marker in refusals if marker in outcome['out']]
+        printed = [text for text in refusals if text in outcome['out']]
         assert len(printed) == (0 if not code else 1), (
             f'{label}: printed {printed}, and each outcome names itself once')
+        expected = list(range(1, runs + 1)) if runs > 1 else []
+        announced = [attempt for attempt in range(1, runs + 1)
+                     if marker.replace('$attempt', str(attempt))
+                     in outcome['out']]
+        assert announced == expected, (
+            f'{label}: {runs} attempts, and the retry arm has to announce '
+            f'every one of them and no other arm announces anything; it '
+            f'announced {announced} of {expected}: {outcome}')
+        if runs > 1:
+            lines = output.strip().splitlines()
+            shown = outcome['out'].count
+            assert all(shown(line) >= runs for line in lines[-5:]), (
+                f'{label}: each attempt showed the reader the tail of what '
+                f'the tool wrote, so those lines appear once per attempt, '
+                f'not only in the report the last one ends with: {outcome}')
+            assert all(shown(line) <= 1 for line in lines[:-5]), (
+                f'{label}: the excerpt is bounded, so the lines above it '
+                f'reach the log only in the final report: {outcome}')
         waits = outcome['sleeps']
         assert len(waits) >= runs - 1, (
             f'{label}: {runs} attempts, so every retry between them has to '
