@@ -288,17 +288,18 @@ def environment(name, value):
 BOUNDARY_ENV = 'DAEDALUS_CALLGRIND_BOUNDARY'
 
 
-def boundary_loader(**symbol):
+def boundary_loader(*, fails=False, **symbol):
     """The journeys module's own `CDLL` name, and its two records.
 
     `served` is every path a load was asked for and `zeroed` every call of
     the zero symbol; they are separate records because a control pinning
     only the load passes against a module that loads the helper and then
     never asks it to zero anything. Naming the symbol makes the stub serve
-    it, `fails` makes the call raise -- one of the ways the boundary can be
-    unavailable -- and a symbol the caller does not name raises
-    `AttributeError` off the returned namespace, which is what a shared
-    object without it does.
+    it, and `fails` makes the call raise -- one of the ways the boundary can
+    be unavailable. It is its own keyword because it is not a symbol: in the
+    `**symbol` dict it read as one the stub served, and a symbol the caller
+    does not name raises `AttributeError` off the returned namespace, which
+    is what a shared object without it does.
     """
     served, zeroed = [], []
 
@@ -307,7 +308,7 @@ def boundary_loader(**symbol):
 
         def zero():
             zeroed.append(path)
-            if 'fails' in symbol:
+            if fails:
                 raise OSError('the client request would not issue')
 
         return SimpleNamespace(**{name: zero for name in symbol})

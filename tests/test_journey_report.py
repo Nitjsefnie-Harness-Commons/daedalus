@@ -270,11 +270,10 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
     # records. The wording is not a real tool's; the SHAPE is what this row
     # is for, and it carries all four of it: a newline, a bare pipe, a
     # backslash abutting one pipe, and two backslashes abutting another.
-    # The cell this renders into is one line of one table, so a newline
-    # would split the row out of it and an unescaped pipe would add a
-    # phantom column -- and a backslash the sanitiser does not account for
-    # leaves an EVEN run before a pipe, which the table grammar reads as a
-    # column boundary again, so the escape undoes itself.
+    # What the cell has to survive is that a renderer CONSUMES the escape:
+    # the source bytes and the text a reader sees are not the same bytes,
+    # so an unescaped pipe spends the cell and a backslash the tool wrote
+    # is one the display does not carry back.
     noisy = {'returncode': 1, 'stderr': 'warn \\| and \\\\| too | here\nend'}
     row = next(line for line in summaries.verdict_lines(
         document, counts,
@@ -293,13 +292,11 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
         r'\\\\\| too \| here end |'), row
 
     # A journey NAME is the other value interpolated into a row, and
-    # `journey_artifact` validates a key only as a key -- it bounds the
-    # recorded COUNT and never the name -- so a name carrying a pipe reaches
-    # this table carrying it. It is the FIRST cell, which is why an
-    # unescaped pipe is worse here than in the reason: it moves the count,
-    # the delta and the verdict each out of the column a reader reads them
-    # from. The same escape as the cell above, and a literal for the same
-    # reason.
+    # `journey_artifact` bounds a journey's recorded COUNT and never its
+    # name, so a name carrying a pipe reaches this table carrying it. It is
+    # the FIRST cell, which is why it matters more here than in the reason:
+    # an unescaped pipe moves the count, the delta and the verdict each out
+    # of the column a reader reads them from.
     piped = 'dashboard | fanout'
     piped_document = budget_document()
     piped_document['journeys'] = {piped: 1000}
@@ -344,7 +341,8 @@ def test_an_unresolved_row_carries_the_refusal_the_gate_gave(tmp):
     green, because today's refusals are minted from a journey name and two
     int lists and carry neither a pipe nor a newline. So the refusal here
     carries both -- no backslash, which is the one shape the sibling
-    control above owns, and the two controls stay disjoint.
+    control above owns, and the name column's own row pins a different
+    call site rather than a different shape.
     """
     del tmp
     summaries = _journey_contract.summaries()
