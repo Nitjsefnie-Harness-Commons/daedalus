@@ -2,6 +2,7 @@
 """Contracts for the shared CI threshold document reader and writer."""
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -11,12 +12,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _ratchet_fixture import _git  # noqa: E402
 
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 
 SCRIPT = ROOT / 'scripts' / 'ci' / 'thresholds.py'
+POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
 DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
 
 
@@ -75,6 +78,7 @@ def _assert_document_contract(path):
     modules = thresholds.js_coverage_baseline(data)
     assert modules == data['js_coverage_baseline']
     assert all(count > 0 for count in modules.values())
+    assert thresholds.tests_line_baseline(data) == data['tests_line_baseline']
     result = _check(path)
     assert result.returncode == 0, (result.stdout, result.stderr)
     return data
@@ -111,7 +115,7 @@ def test_required_and_unknown_fields_are_rejected(tmp):
     cases = []
     for key in ('schema_version', 'coverage', 'module_size_baseline',
                 'long_line_baseline', 'type_error_baseline',
-                'js_coverage_baseline'):
+                'js_coverage_baseline', 'tests_line_baseline'):
         value = _valid()
         del value[key]
         cases.append((value, f'missing field: {key}'))
@@ -305,6 +309,8 @@ def test_public_accessors_return_validated_data(tmp):
         == data['type_error_baseline']
     assert thresholds.js_coverage_baseline(data) \
         == data['js_coverage_baseline']
+    assert thresholds.tests_line_baseline(data) \
+        == data['tests_line_baseline']
     try:
         thresholds.coverage(data, 'ruby')
     except ValueError as error:
@@ -551,6 +557,103 @@ def test_restrictive_mode_selection_keeps_windows_destination_writable(tmp):
     windows_mode = _restrictive_mode('nt')
     assert windows_mode == 0o600
     assert windows_mode & stat.S_IWRITE
+
+
+def _line_budget_fixture(tmp, files, budget, name):
+    """A committed repository of ``files`` (rel -> bytes) with a document."""
+    repo = Path(tmp) / name
+    (repo / 'scripts' / 'ci').mkdir(parents=True)
+    for rel, content in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    for source in (POLICY_SOURCE, SCRIPT):
+        shutil.copy2(source, repo / 'scripts' / 'ci' / source.name)
+    candidate = _valid()
+    candidate['tests_line_baseline'] = budget
+    target = repo / '.github' / 'ci-thresholds.json'
+    target.parent.mkdir(parents=True)
+    _thresholds().write(target, candidate)
+    _git(repo, 'init', '-q')
+    _git(repo, 'config', 'user.email', 'tests@example.invalid')
+    _git(repo, 'config', 'user.name', 'Tests')
+    _git(repo, 'add', '.')
+    _git(repo, 'commit', '-qm', 'base')
+    return repo, target
+
+
+def _tests_files(first, second):
+    return {'tests/first.py': b'x = 1\n' * first,
+            'tests/second.py': b'x = 1\n' * second}
+
+
+def _run_lines_cli(repo, *args):
+    return subprocess.run(
+        [sys.executable, str(repo / 'scripts' / 'ci' / 'tests_lines.py'),
+         *args, '--thresholds', str(repo / '.github' / 'ci-thresholds.json')],
+        cwd=str(repo), capture_output=True, text=True, timeout=60)
+
+
+def test_tests_line_budget_is_a_positive_integer_that_round_trips(tmp):
+    """A document that loses the key on rewrite is worse than no key."""
+    thresholds = _thresholds()
+    data = thresholds.load(DATA_PATH)
+    assert data['tests_line_baseline'] > 0
+    target = Path(tmp) / 'round-trip.json'
+    thresholds.write(target, data)
+    assert thresholds.load(target)['tests_line_baseline'] \
+        == data['tests_line_baseline']
+    for value in (True, 0, -1, 1.5, '10'):
+        candidate = _valid()
+        candidate['tests_line_baseline'] = value
+        path = Path(tmp) / 'bad.json'
+        _write_json(path, candidate)
+        _assert_refused(path, 'tests_line_baseline')
+
+
+def test_tests_line_budget_fails_naming_both_numbers_when_tests_grew(tmp):
+    repo, _target = _line_budget_fixture(
+        tmp, _tests_files(5, 4), 8, 'grown')
+    done = _run_lines_cli(repo)
+    assert done.returncode != 0, (done.stdout, done.stderr)
+    assert '8' in done.stderr and '9' in done.stderr, done.stderr
+
+
+def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
+    repo, target = _line_budget_fixture(tmp, _tests_files(4, 3), 20, 'drop')
+    done = _run_lines_cli(repo, '--tighten')
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert _thresholds().tests_line_baseline(
+        _thresholds().load(target)) == 7
+    for budget in (7, 2):
+        other, other_target = _line_budget_fixture(
+            tmp, _tests_files(4, 3), budget, f'steady-{budget}')
+        before = other_target.read_bytes()
+        done = _run_lines_cli(other, '--tighten')
+        assert done.returncode == 0, (done.stdout, done.stderr)
+        assert other_target.read_bytes() == before
+
+
+def test_the_workflow_tightens_the_tests_budget_before_the_check(tmp):
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    tighten = workflow.index('python scripts/ci/tests_lines.py --tighten')
+    check = workflow.index('python scripts/ci/thresholds.py --check')
+    assert tighten < check
+
+
+def test_the_real_tests_tree_is_within_its_recorded_line_budget(tmp):
+    del tmp
+    thresholds = _thresholds()
+    recorded = thresholds.tests_line_baseline(thresholds.load(DATA_PATH))
+    policy = _util.load(POLICY_SOURCE, 'tests_lines_real_tree')
+    assert policy.tracked_test_lines() <= recorded, recorded
+    done = subprocess.run(
+        [sys.executable, str(POLICY_SOURCE),
+         '--thresholds', str(DATA_PATH)],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, (done.stdout, done.stderr)
 
 
 def main():
