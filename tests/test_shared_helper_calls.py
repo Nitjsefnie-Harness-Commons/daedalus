@@ -7,13 +7,13 @@ rules a local `def` is judged by, and reports a violation inside it
 against the helper's own path. A table row still decides first, so an
 import the guard cannot locate, parse or follow stays refused.
 
-A fixture that reaches the guard's resolution plants a real `tests/_*.py`
-file under the root it is handed, so each leg is driven through the same
-resolution the migrated controls use rather than through a source string
-passed inline. A row may also hand the guard a source of its own, with no
-helper behind it: what that row pins is then settled without an import,
-either by a table row that already names the callee or by the local write
-contract itself.
+A planted fixture that reaches the guard's resolution plants a real
+`tests/_*.py` file under the root it is handed, so each leg is driven
+through the same resolution the migrated controls use rather than through
+a source string passed inline. A row may also hand the guard a source of
+its own, with no helper behind it: what that row pins is then settled
+without an import, either by a table row that already names the callee or
+by the local write contract itself.
 """
 import sys
 from pathlib import Path
@@ -585,8 +585,8 @@ def test_a_violation_inside_a_helper_names_the_helper_not_the_control(tmp):
                for message in messages), messages
 
 
-# Two refusals of the local write contract whose only home was the
-# deleted dedicated `control_write_violations` suite.
+# Refusals of the local write contract and of the tables it consults,
+# restored here after the dedicated suite that was their only home went.
 def test_refuses_a_foreign_absolute_literal(tmp):
     """(n) A Windows drive path cannot become relative on a POSIX analyzer."""
     root = Path(tmp)
@@ -621,6 +621,67 @@ def test_an_omitted_default_seeds_its_own_expression(tmp):
         encoding='utf-8')
     assert control_write_violations(source, root) == [
         'default-seed.py:3: write_bytes target path is not control-owned']
+
+
+def test_a_spread_argument_seeds_nothing(tmp):
+    """(p) A `*[]` shifts every later positional at runtime, not in the AST."""
+    root = Path(tmp)
+    source = root / 'seed-shift.py'
+    source.write_text(
+        "def _copy(a, b, c=None):\n"
+        "    Path(b).write_text('planted')\n"
+        "def test_control(tmp):\n"
+        "    _copy(*[], tmp, ROOT)\n",
+        encoding='utf-8')
+    assert control_write_violations(source, root) == [
+        'seed-shift.py:2: write_text target path is not control-owned'
+    ]
+
+
+def test_a_starred_signature_or_extra_argument_seeds_nothing(tmp):
+    """(q) A call shape the signature cannot map is unseeded."""
+    root = Path(tmp)
+    source = root / 'call-shape.py'
+    source.write_text(
+        "def _star(root, *rest):\n"
+        "    Path(root).write_text('planted')\n"
+        "def _options(root, **options):\n"
+        "    Path(root).write_text('planted')\n"
+        "def _plain(root):\n"
+        "    Path(root).write_text('planted')\n"
+        "def test_control(tmp):\n"
+        "    _star(tmp, ROOT)\n"
+        "    _options(tmp)\n"
+        "    _plain(tmp, ROOT)\n",
+        encoding='utf-8')
+    assert control_write_violations(source, root) == [
+        'call-shape.py:2: write_text target path is not control-owned',
+        'call-shape.py:4: write_text target path is not control-owned',
+        'call-shape.py:6: write_text target path is not control-owned',
+    ]
+
+
+def test_refuses_what_the_pure_name_table_does_not_name(tmp):
+    """(r) A row added to a table widens the class it names.
+
+    A built-in the table does not name is refused as an unresolved
+    callable, and admitting one that can write turns that refusal into a
+    silent acceptance. `__import__` is the second: admitting it kills
+    this row and nothing else.
+    """
+    root = Path(tmp)
+    for name, expected in (('issubclass(int, str)',
+                            '3: issubclass callable is unresolved'),
+                           ("__import__('os')",
+                            '3: __import__ callable is unresolved')):
+        source = root / 'pure-name.py'
+        source.write_text(
+            "def test_control(tmp):\n"
+            "    del tmp\n"
+            f"    {name}\n",
+            encoding='utf-8')
+        assert control_write_violations(source, root) == [
+            f'pure-name.py:{expected}'], name
 
 
 if __name__ == '__main__':
