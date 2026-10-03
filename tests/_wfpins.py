@@ -33,12 +33,17 @@ _GROUP_KEYS = ('applies-to', 'dependency-type', 'patterns')
 # setup documentation leads with. So the pattern is anchored on the operation
 # and not on the start of the line: anchored on the line, a preceding
 # assignment hides the install and the guard passes with a pin sitting in the
-# step it was written to police.
+# step it was written to police. The tool and the verb are the operation, so
+# the OPTIONS between them are part of it too and the span takes any run of
+# them: `pip --disable-pip-version-check install` is the spelling pip's own
+# CLI reference documents for silencing its version-check warning, and a
+# `--user` in the same place is ordinary pip usage.
 _PIP_INSTALL = re.compile(
     r'(?<![0-9A-Za-z._/-])'
     r'(?:\S+=\S+[ \t]+)*'
     r'(?:sudo(?:[ \t]+-\S+)*[ \t]+)?'
-    r'(?:\S*python[\d.]* -m )?(?:\S*/)?pip[\d.]* install\b')
+    r'(?:\S*python[\d.]* -m )?(?:\S*/)?pip[\d.]*'
+    r'(?:[ \t]+-\S+)*[ \t]+install\b')
 
 
 class WorkflowPinError(Exception):
@@ -198,9 +203,10 @@ def _pip_installs(body):
     The filter names the OPERATION rather than an enumerated list of
     spellings: `python`, `python3` and `python3.13` are the same interpreter
     with a version the reader must not have to know, `pip`/`pip3` are the
-    same tool for the same reason, and an environment assignment or a `sudo`
-    in front changes neither. Enumerating them is what made `pip3 install`
-    walk past a guard written for the operation.
+    same tool for the same reason, an environment assignment or a `sudo` in
+    front changes neither, and the options a command carries between the tool
+    and the verb are still that command. Enumerating them is what made
+    `pip3 install` walk past a guard written for the operation.
     """
     logical, current = [], ''
     for line in body.splitlines():
@@ -255,12 +261,14 @@ def _manifest_pins(manifest):
     """Every pin in a hash-pinned manifest, as (name, hashes, welded, line).
 
     A pin is the run of lines a trailing backslash joins, and its requirement
-    is named by the FIRST token of that run's own first line. A token holding
-    a second `==` after it is a second requirement welded on by a dropped
-    continuation, and it is reported as the structural damage it is rather
-    than folded into the first name: after the join the name no longer
-    identifies what is pinned, and the joined line's hashes are then counted
-    against a requirement that does not own them.
+    is named by the FIRST token of that run's own first line. Every token of
+    the run is scanned for the damage, not only those after the first: a
+    dropped continuation welds a second requirement onto a later token, and a
+    second `==` inside the first token welds one onto the name itself.
+    Either way it is reported as the structural damage it is rather than
+    folded into the first name: after the join the name no longer identifies
+    what is pinned, and the joined line's hashes are then counted against a
+    requirement that does not own them.
     """
     pins, tokens, first = [], [], 0
     for number, line in enumerate(manifest.splitlines(), 1):
@@ -283,8 +291,10 @@ def _manifest_pins(manifest):
             f'requirements-zizmor.txt:{number}: {run[0]!r} pins no version, '
             f'so the hashes after it belong to no requirement')
     return [(run[0].split('==', 1)[0],
-             sum(token.startswith('--hash=sha256:') for token in run),
-             [token for token in run[1:] if '==' in token],
+             [token for token in run
+              if token.startswith('--hash=sha256:')],
+             [token for index, token in enumerate(run)
+              if token.count('==') > (1 if index == 0 else 0)],
              number)
             for run, number in pins]
 
@@ -298,13 +308,17 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     the pin while the install runs with no hash enforcement at all.
 
     The artifact count is checked against `_EXPECTED_ARTIFACT_COUNTS` in
-    BOTH directions. One hash short of it is a broken install on one
-    platform's runner and nothing else, so a control that only asks what a
-    pin carries passes a manifest naming nine of zizmor's ten wheels and the
-    job then fails on exactly one leg of the matrix with no local symptom.
-    The other direction is the vacuous half: a manifest that stopped pinning
-    a requirement is checked by nothing at all, which is the shape a
-    Dependabot group with no patterns had on the other side of this file.
+    BOTH directions, and the values are checked to be DISTINCT, because a
+    count is satisfied by a token count rather than by a set: eleven tokens
+    naming ten artifacts leave one artifact unresolvable under
+    `--require-hashes`, and the count is the same eleven either way. One hash
+    short of the expected count is a broken install on one platform's runner
+    and nothing else, so a control that only asks what a pin carries passes a
+    manifest naming nine of zizmor's ten wheels and the job then fails on
+    exactly one leg of the matrix with no local symptom. The other direction
+    is the vacuous half: a manifest that stopped pinning a requirement is
+    checked by nothing at all, which is the shape a Dependabot group with no
+    patterns had on the other side of this file.
     """
     installs = _pip_installs(_job_step('Install zizmor'))
     assert installs, 'the zizmor step runs no pip install to hash-check'
@@ -314,12 +328,14 @@ def assert_the_zizmor_manifest_is_hash_pinned():
         encoding='utf-8'))
     assert pins, 'the manifest pins no requirement at all'
     seen = {}
+    listed = []
     for name, hashes, welded, number in pins:
         assert not welded, (
-            f'requirements-zizmor.txt:{number}: {name} carries {welded} '
-            f'after its first line, so a dropped continuation has welded two '
-            f'requirements into one pin and {welded[0].split("==", 1)[0]} is '
-            f'counted against {name}')
+            f'requirements-zizmor.txt:{number}: {name} carries {welded}, and '
+            f'a token holding more `==` than its position in the run allows '
+            f'is a second requirement welded onto this pin — so what the run '
+            f'pins is ambiguous, and every hash behind it is counted against '
+            f'{name}')
         assert name in _EXPECTED_ARTIFACT_COUNTS, (
             f'requirements-zizmor.txt:{number}: {name} is pinned and this '
             f'manifest is expected to carry '
@@ -327,7 +343,16 @@ def assert_the_zizmor_manifest_is_hash_pinned():
         assert name not in seen, (
             f'requirements-zizmor.txt:{number}: {name} is pinned twice, and '
             f'the first pin at line {seen[name][0]} is never read')
-        seen[name] = (number, hashes)
+        for token in hashes:
+            assert token not in listed, (
+                f'requirements-zizmor.txt:{number}: {token} is listed a '
+                f'second time, and repeating a value leaves the count this '
+                f'control checks exactly where it was while one artifact '
+                f'stakes its place — that artifact cannot resolve under '
+                f'--require-hashes, on the one matrix leg that lifts it, '
+                f'with nothing red here')
+            listed.append(token)
+        seen[name] = (number, len(hashes))
     missing = sorted(set(_EXPECTED_ARTIFACT_COUNTS) - set(seen))
     assert not missing, (
         f'the manifest does not pin {missing}, which it is expected to '
