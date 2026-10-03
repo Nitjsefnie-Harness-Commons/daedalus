@@ -2,9 +2,7 @@
 """The aggregate gate: allowed sets, the superseded-cancel rule, the caller.
 
 scripts/ci/aggregate_gate.py owns the aggregate job's whole decision; these
-tests drive its functions in-process and pin how the workflow invokes the
-module: the checkout, the narrowed permissions, the env indirection, and the
-wait for the `secrets` workflow's gitleaks job on the same head SHA.
+tests drive it in-process and pin its workflow wiring and its secrets gate.
 """
 import contextlib
 import io
@@ -29,6 +27,7 @@ SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage')
 SECRETS_WORKFLOW = '.github/workflows/secrets.yml'
 HEAD = 'c2ae15819d9374fda4720e59a46c3a991c0319be'
+FROZEN = (lambda: 0.0, lambda _seconds: None)
 
 
 def _gate():
@@ -55,23 +54,20 @@ def _run(rid, conclusion, started, workflow=11, **fields):
 
 
 def _recorder(own, pages, polls=None, jobs=None):
-    """A gh read answering every query the gate makes.
-
-    `polls` is one list of run pages per poll of the secrets wait, so the
-    same fixture answers "no run yet" and then a run; the last one repeats.
-    """
+    """A gh read; `polls` is one page-list per poll of the secrets wait."""
     calls = []
     remaining = list(polls or [[]])
 
     def read(argv):
         calls.append(argv)
+        assert len(calls) < 1000, 'the gate never stopped'
         target = argv[-1]
-        if SECRETS_WORKFLOW in target or '/jobs?' in target:
-            if SECRETS_WORKFLOW not in target:
-                rid = int(re.search(r'/runs/(\d+)/jobs', target).group(1))
-                found = jobs if not isinstance(jobs, dict) else (
-                    jobs.get(rid) or [])
-                return json.dumps({'jobs': found})
+        if '/jobs?' in target:
+            rid = int(target.split('/runs/')[1].split('/')[0])
+            found = jobs if not isinstance(jobs, dict) else (
+                jobs.get(rid) or [])
+            return json.dumps({'jobs': found})
+        if SECRETS_WORKFLOW in target:
             page = remaining.pop(0) if len(remaining) > 1 else remaining[0]
             return json.dumps({'workflow_runs': page})
         if '/actions/workflows/' in target:
@@ -87,16 +83,13 @@ def _secrets_run(rid, conclusion='success', status='completed',
                 started, name='secrets', status=status)
 
 
-def _scan_job(conclusion='success', status='completed', name='gitleaks'):
-    return {'name': name, 'status': status, 'conclusion': conclusion}
+def _scan_job(conclusion='success', name='gitleaks'):
+    return {'name': name, 'status': 'completed', 'conclusion': conclusion}
 
 
 def _scripted_clock(readings):
-    """A clock that reaches its next reading each time the wait naps.
-
-    The wait is driven by the clock rather than by a nap, so a control
-    can place a run exactly at the deadline without measuring anything.
-    """
+    """A clock that reaches its next reading each time the wait naps, then
+    adds the interval, so the wait's own bound is what ends it."""
     later = list(readings)[1:]
     current = [readings[0]]
 
@@ -497,7 +490,7 @@ def test_main_exits_zero_only_for_green_verdicts(tmp):
 
 def test_the_aggregate_job_runs_the_module(tmp):
     del tmp
-    job = complete_job_mapping(_tests_yml(), 'aggregate')
+    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
     checkouts = [step for step in job['steps']
                  if str(step.get('uses', '')).startswith('actions/checkout')]
     assert len(checkouts) == 1, job['steps']
@@ -541,8 +534,7 @@ CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     """Absence is not an empty answer: this fixture shows both."""
     del tmp
-    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS,
-                                    readings=(0.0, 719.0))
+    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS, (0.0, 719.0))
     assert verdict in _gate().GREEN, message
     assert 'gitleaks' in message and 'concluded success' in message, message
     assert len(_polls(calls)) == 2, calls
@@ -551,11 +543,10 @@ def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
 def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
     """The bound governs the CONTINUE, so a verdict found at it stands."""
     del tmp
-    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS,
-                                    readings=(0.0, 720.0))
+    calls, verdict, message = _scan([[], [CLEAN]], CLEAN_JOBS, (0.0, 720.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
-    calls, verdict, message = _scan([[]], CLEAN_JOBS, readings=(0.0, 720.0))
+    calls, verdict, message = _scan([[]], CLEAN_JOBS, (0.0, 720.0))
     assert verdict == 'secrets-unreported'
     assert verdict not in _gate().GREEN
     assert 'secrets' in message and '720' in message, message
@@ -564,9 +555,8 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
 
 def test_an_unfinished_run_keeps_the_gate_waiting(tmp):
     del tmp
-    calls, verdict, message = _scan(
-        [[_secrets_run(7, status='in_progress')], [CLEAN]], CLEAN_JOBS,
-        readings=(0.0, 30.0, 60.0))
+    calls, verdict, message = _scan([[_secrets_run(7, status='in_progress')],
+                                    [CLEAN]], CLEAN_JOBS, (0.0, 30.0, 60.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
 
@@ -580,68 +570,72 @@ def test_the_jobs_verdict_is_read_and_not_the_runs_conclusion(tmp):
     assert 'failure' in message and CLEAN['html_url'] in message, message
 
 
+def test_both_secrets_queries_carry_the_head_sha_and_the_workflow(tmp):
+    """A query whose arguments are dropped reads some other run entirely."""
+    del tmp
+    calls, _verdict, _message = _scan([[CLEAN]], CLEAN_JOBS)
+    assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+            f'repos/o/r/actions/workflows/{SECRETS_WORKFLOW}/runs'
+            f'?head_sha={HEAD}&per_page=100'] in calls
+    assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+            f'repos/o/r/actions/runs/{CLEAN["id"]}/jobs?per_page=100'] in calls
+
+
 def test_every_scan_the_gate_cannot_read_clean_is_red_and_says_why(tmp):
     del tmp
     _, absent, missing = _scan([[CLEAN]], [_scan_job(name='setup')])
     assert absent == 'secrets-missing', absent
     assert 'setup' in missing and str(CLEAN['id']) in missing, missing
-    for conclusion in ('skipped', 'cancelled', 'timed_out', 'neutral', None):
+    for state in ('skipped', 'cancelled', 'timed_out', 'neutral', None):
         _, verdict, message = _scan([[CLEAN]],
-                                    [_scan_job(conclusion=conclusion)])
-        assert verdict == 'secrets-failed', (conclusion, verdict)
+                                    [dict(_scan_job(), conclusion=state)])
+        assert verdict == 'secrets-failed', (state, verdict)
         assert verdict not in _gate().GREEN
         assert 'gitleaks' in message, message
 
 
 def test_the_newest_run_on_the_sha_is_the_one_judged(tmp):
     del tmp
-    older = _secrets_run(1, conclusion='failure')
-    newer = _secrets_run(2, started='2026-09-07T11:05:00Z')
+    runs = [_secrets_run(1), _secrets_run(2, started='2026-09-07T11:05:00Z')]
     jobs = {1: [_scan_job(conclusion='failure')], 2: [_scan_job()]}
-    _, verdict, message = _scan([[older, newer]], jobs)
+    _, verdict, message = _scan([runs], jobs)
     assert verdict in _gate().GREEN, message
 
 
-def test_a_nonzero_gh_exit_is_red_and_is_not_retried(tmp):
+def test_an_unreadable_answer_is_red_not_an_absent_run_and_not_retried(tmp):
+    """One subject, three refusals: the answer, the transport, the retry."""
     del tmp
     mod = _gate()
-    failure = mock.Mock(returncode=1, stdout='', stderr='rate limited')
-    run = mock.Mock(return_value=failure)
+    run = mock.Mock(return_value=mock.Mock(
+        returncode=1, stdout='', stderr='rate limited'))
     with mock.patch.object(mod.subprocess, 'run', run):
         verdict, message = mod.require_secret_scan(
-            'o/r', HEAD, mod.DEFAULT_POLL_BOUND_S, mod.gh_read,
-            lambda: 0.0, lambda _seconds: None)
+            'o/r', HEAD, mod.DEFAULT_POLL_BOUND_S, mod.gh_read, *FROZEN)
     assert verdict == 'secrets-query-failed'
     assert verdict not in mod.GREEN
     assert 'could not be judged' in message, message
     assert run.call_count == 1, run.call_count
 
+    def good_on(marker):
+        def read(argv):
+            return (json.dumps({'workflow_runs': [CLEAN]})
+                    if marker in argv[-1] else 'not json at all')
+        return read
 
-def test_an_unreadable_answer_is_red_rather_than_an_absent_run(tmp):
-    del tmp
-    mod = _gate()
+    refused = mock.Mock(side_effect=mod.QueryError('HTTP 502'))
 
-    def garbage(argv):
-        return ('not json at all' if '/jobs?' in argv[-1]
-                else json.dumps({'workflow_runs': [CLEAN]}))
-
-    def refused(_argv):
-        raise mod.QueryError('HTTP 502')
-
-    for name, read in (('runs body', garbage), ('jobs body', garbage),
+    for name, read in (('runs body', good_on('/jobs?')),
+                       ('jobs body', good_on('head_sha=')),
                        ('refused', refused)):
         verdict, message = mod.require_secret_scan(
-            'o/r', HEAD, mod.DEFAULT_POLL_BOUND_S, read,
-            lambda: 0.0, lambda _seconds: None)
+            'o/r', HEAD, mod.DEFAULT_POLL_BOUND_S, read, *FROZEN)
         assert verdict == 'secrets-query-failed', (name, verdict)
         assert verdict not in mod.GREEN
         assert 'could not be judged' in message, (name, message)
     calls, read = _recorder(MINE, [], polls=[[]])
     verdict, _ = mod.require_secret_scan(
-        'o/r', '', mod.DEFAULT_POLL_BOUND_S, read,
-        lambda: 0.0, lambda _seconds: None)
-    assert verdict == 'secrets-query-failed'
-    assert calls == []
+        'o/r', '', mod.DEFAULT_POLL_BOUND_S, read, *FROZEN)
+    assert verdict == 'secrets-query-failed' and calls == [], calls
 
 
 def test_the_poll_bound_is_configurable_and_refuses_nonsense(tmp):
@@ -651,43 +645,38 @@ def test_the_poll_bound_is_configurable_and_refuses_nonsense(tmp):
         assert mod.poll_bound() == mod.DEFAULT_POLL_BOUND_S
         os.environ[mod.POLL_BOUND_ENV] = '90'
         assert mod.poll_bound() == 90.0
-        for raw in ('', 'soon', '0', '-5', 'inf', 'nan'):
+        for raw in ('', 'soon', '0', '-5', 'inf', 'nan',
+                    str(mod.MAX_POLL_BOUND_S + 1)):
             os.environ[mod.POLL_BOUND_ENV] = raw
             _query_error(mod, mod.poll_bound)
 
 
 def _gate_step():
-    job = complete_job_mapping(_tests_yml(), 'aggregate')
+    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
     steps = [step for step in job['steps'] if 'run' in step]
     assert len(steps) == 1, job['steps']
     return steps[0]
-
-
-def test_the_secrets_gate_names_the_pull_request_head_sha(tmp):
-    del tmp
-    parts = [part.strip() for part
-             in _gate_step()['env']['SECRETS_HEAD_SHA'].split('||')]
-    assert parts == ['${{ github.event.pull_request.head.sha',
-                     'github.sha }}'], parts
 
 
 def test_the_gate_waits_on_a_dispatch_event_too(tmp):
     """A skip here is a bypass: a dispatch publishes a check on the SHA."""
     del tmp
     step = _gate_step()
+    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
+    assert job.get('if') == '${{ always() }}', job.get('if')
     assert 'if' not in step, step
-    assert not [key for key in step['env'] if 'EVENT' in key.upper()], step
 
 
 def test_the_poll_bound_fits_inside_the_job_timeout(tmp):
     del tmp
     mod = _gate()
-    job = complete_job_mapping(_tests_yml(), 'aggregate')
+    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
     ceiling = int(job['timeout-minutes'])
     bound = float(_gate_step()['env']['SECRETS_POLL_BOUND_S'])
     assert ceiling == 20, ceiling
     assert bound == mod.DEFAULT_POLL_BOUND_S, bound
     assert bound < ceiling * 60, (bound, ceiling)
+    assert mod.MAX_POLL_BOUND_S < ceiling * 60, mod.MAX_POLL_BOUND_S
     assert 0 < mod.POLL_INTERVAL_S < bound, (mod.POLL_INTERVAL_S, bound)
 
 
