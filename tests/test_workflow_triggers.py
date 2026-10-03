@@ -532,8 +532,10 @@ def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
         " github.event.repository.default_branch)"), (
         f'the ref limb compares against {ref!r}')
 
-    assert tuple(jobs_mapping(scorecard)) == ('analysis',), (
-        f'scorecard also publishes from {sorted(jobs_mapping(scorecard))}, '
+    jobs = jobs_mapping(scorecard)
+    assert jobs is not None, 'scorecard.yml declares no jobs mapping'
+    assert tuple(jobs) == ('analysis',), (
+        f'scorecard also publishes from {sorted(jobs)}, '
         f'and that job carries none of the guard above')
 
     concurrency = workflow_mapping(scorecard).get('concurrency')
