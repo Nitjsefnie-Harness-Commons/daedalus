@@ -267,20 +267,30 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
         if line.startswith(f'| {unmeasured} '))
     assert 'returncode 255' in row and 'perf: no permission' in row, row
     # And the tool's own stderr verbatim, which is what `journey_counters`
-    # records: it carries a newline and a pipe. The cell this renders into is
-    # one line of one table, so a newline would split the row out of it and
-    # an unescaped pipe would add a phantom column.
-    noisy = {'returncode': 255,
-             'stderr': 'valgrind: load failed\nat 0x400000 | perf'}
+    # records. The wording is not a real tool's; the SHAPE is what this row
+    # is for, and it carries all four of it: a newline, a bare pipe, a
+    # backslash abutting one pipe, and two backslashes abutting another.
+    # The cell this renders into is one line of one table, so a newline
+    # would split the row out of it and an unescaped pipe would add a
+    # phantom column -- and a backslash the sanitiser does not account for
+    # leaves an EVEN run before a pipe, which the table grammar reads as a
+    # column boundary again, so the escape undoes itself.
+    noisy = {'returncode': 1, 'stderr': 'warn \\| and \\\\| too | here\nend'}
     row = next(line for line in summaries.verdict_lines(
         document, counts,
         {'over': {}, 'unmeasured': {unmeasured: 'perf-instructions'}}, noisy)
         if line.startswith(f'| {unmeasured} '))
-    assert '\n' not in row, (
-        f'the reason split the row out of the table it renders into: {row!r}')
-    assert 'load failed' in row and 'perf' in row, row
-    assert row.count('|') - row.count(r'\|') == 6, (
-        f'the reason added a phantom column to the row: {row!r}')
+    # The WHOLE row, written out. Counting pipes and subtracting a count of
+    # escaped pipes agrees with the correct rendering here and with the
+    # corrupt one everywhere except where the reason carried a backslash --
+    # the input this fixture is built around -- so the count is blind to
+    # exactly the defect it stands in for, and a literal is not. It also
+    # restates no column count, so a table that legitimately grows a
+    # column leaves this assertion green.
+    assert row == (
+        r'| command-round-trip | not measured | 1100 | — | no count for '
+        r'`perf-instructions`: returncode 1: warn \\\| and '
+        r'\\\\\| too \| here end |'), row
 
     remedy = gate.UNMEASURED_REMEDY
     assert 'DAEDALUS_CALLGRIND_BOUNDARY' in remedy, remedy
@@ -308,7 +318,13 @@ def test_an_unresolved_row_carries_the_refusal_the_gate_gave(tmp):
 
     This control fails for the opposite reason to the one above: that case
     is about a reason rendered UNSAFE, this one about a reason not
-    rendered at all, and neither can stand in for the other.
+    rendered at all, and neither can stand in for the other. It also pins
+    THIS call site to the sanitiser, which nothing else did: replacing the
+    `_reason` around `unresolved[name]` with the bare value left every suite
+    green, because today's refusals are minted from a journey name and two
+    int lists and carry neither a pipe nor a newline. So the refusal here
+    carries both -- no backslash, which is the one shape the sibling
+    control above owns, and the two controls stay disjoint.
     """
     del tmp
     summaries = _journey_contract.summaries()
@@ -317,14 +333,15 @@ def test_an_unresolved_row_carries_the_refusal_the_gate_gave(tmp):
     document = budget_document()
     counts = {name: 1000 for name in names}
     del counts[unresolved]
-    refusal = 'the journey measured [2000] net [-9000]'
+    refusal = 'the journey measured [2000] net [-9000]\nand it said | perf'
     row = next(line for line in summaries.verdict_lines(
         document, counts,
         {'over': {}, 'unmeasured': {}, 'unresolved': {unresolved: refusal}})
         if line.startswith(f'| {unresolved} '))
-    assert 'could not resolve' in row, row
-    assert refusal in row, (
-        f'the gate named no reason on the row a reader meets: {row}')
+    assert row == (
+        r'| command-round-trip | not measured | 1100 | — | this run could '
+        r'not resolve it: the journey measured [2000] net [-9000] and it '
+        r'said \| perf |'), row
 
 
 def main():

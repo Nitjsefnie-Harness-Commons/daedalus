@@ -272,15 +272,26 @@ def main(argv=None):
             # counted are different findings with different remedies — so
             # each keeps its own sentence — and neither may be the reason a
             # write lands a budget the next check refuses.
-            for kind, because, remedy in (
+            #
+            # What each arm NAMES is not the same thing either, and joining
+            # one shape for both dropped half of it: `violations` keys both
+            # mappings by journey, and only `unmeasured`'s value repeats
+            # what `because` has already said — `unresolved` holds the run's
+            # own SENTENCE, so joining its keys printed the journey's name
+            # and nothing of why the run could not resolve it. That is
+            # #1502 on its second reader path; the first is the row this
+            # same refusal reaches in the step summary.
+            for kind, because, remedy, named in (
                     ('unresolved',
-                     'the run could not resolve', UNRESOLVED_REMEDY),
+                     'the run could not resolve', UNRESOLVED_REMEDY,
+                     dict.values),
                     ('unmeasured',
                      f'the run counted no journey under '
-                     f'{counter or "no counter"} for', UNMEASURED_REMEDY)):
+                     f'{counter or "no counter"} for', UNMEASURED_REMEDY,
+                     dict.keys)):
                 if not found.get(kind):
                     continue
-                refused = ', '.join(sorted(found[kind]))
+                refused = ', '.join(sorted(named(found[kind])))
                 print(f'{because} {refused}, so nothing is tightened: '
                       'lowering the journeys it did measure would land a '
                       'budget the next check refuses over the ones it could '
