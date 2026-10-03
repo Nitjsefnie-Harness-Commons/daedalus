@@ -4,6 +4,9 @@ name: pr gate
 # comment and close would silently do nothing. The pinned action reads the
 # template at the PR's base SHA and runs no pull-request code; the body
 # reaches it through the API, never through an expression.
+#
+# Since v2.0.0 a run that closes an inadmissible pull request concludes failure,
+# so a red `pr gate` check can mean the gate did its job.
 on:
   pull_request_target:  # zizmor: ignore[dangerous-triggers]
     types: [opened, edited, reopened, ready_for_review]
@@ -31,8 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: >-
-          Nitjsefnie-Actions/pr-gate@39b1b91ed861dbb070629e34bf63fe25b916e54d
+      - uses: Nitjsefnie-Actions/pr-gate@441f855e54f4f6c98709152f2d2542031dc82f03  # v2.0.0
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
