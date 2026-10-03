@@ -101,9 +101,12 @@ def test_the_front_ends_import_is_one_thread_of_the_bridge_in_every_run(tmp):
         assert not classifier.is_own_process(found[0]['cmd']), (
             journey, found[0]['cmd'])
         # The cost that thread carries is the front end's whole bootstrap —
-        # over three billion instructions on every run — which is why the
-        # table drops it and why dropping the journey's own threads instead
-        # would be a number nobody could read back.
+        # over three billion instructions on every run, and not the same
+        # three billion twice. It is another process's thread, so no
+        # journey's own work is behind it, and a total that moves between
+        # runs of an unchanged tree is what a count cannot rest on; every
+        # journey's list drops it. Dropping the journey's OWN threads
+        # instead would be a number nobody could read back.
         assert found[0]['ir'] > 3_000_000_000, (journey, found[0]['ir'])
 
 

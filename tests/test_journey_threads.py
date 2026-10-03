@@ -442,12 +442,13 @@ def test_several_threads_of_one_excluded_role_are_all_dropped(tmp):
     kept, excluded, failure = threads.total_for(rows, 'command-round-trip')
     assert failure is None, failure
     assert kept == 430_000_000 + 2_100_000_000, kept
-    # `net-capture` excludes `bridge-serve` only, so the front end's own
-    # thread is counted — which is the shape that used to refuse.
-    kept, excluded, failure = threads.total_for(rows, 'net-capture')
+    # `mcp-exec` excludes the import and not the serve loop, so the two
+    # serve threads are BOTH counted beside it — several of a role nobody
+    # excludes are all kept, not one of them.
+    kept, excluded, failure = threads.total_for(rows, 'mcp-exec')
     assert failure is None, failure
-    assert kept == 430_000_000 + 3_800_000_000 + 2_100_000_000, kept
-    assert excluded == (threads.SERVE,), excluded
+    assert kept == 430_000_000 + 87_000_000 + 3_500_000 + 2_100_000_000, kept
+    assert excluded == (threads.IMPORT,), excluded
 
 
 def test_one_thread_in_a_role_nobody_excludes_just_counts(tmp):
@@ -560,18 +561,63 @@ def test_every_journey_says_which_roles_it_stops_counting(tmp):
         assert set(roles) <= set(threads.ROLES), (name, roles)
         assert threads.REQUEST not in roles, name
         assert threads.MAIN not in roles, name
-    # The SHAPE the module docstring's bullet list states, pinned without
-    # naming a journey: the bootstrap import is excluded by all but one, and
-    # the one that keeps it is the one that keeps the serve thread. A
-    # docstring that named the journey instead would be a second copy of
-    # the table, and a table entry added or changed moves both.
+    # The other half of the module docstring's rule, stated over the TABLE
+    # rather than over a journey: the two roles a journey's own process
+    # produces are reachable by no list at all, and `journey_artifact`
+    # refuses either by name. The import half — every journey drops the
+    # bridge's bootstrap — is its own control, derived from `NAMES`. A
+    # docstring naming a journey where a shape statement will do would be a
+    # second copy of the table, and a table entry moved changes both.
+    own_process = {threads.MAIN, threads.REQUEST}
+    assert own_process.isdisjoint(
+        {role for roles in threads.EXCLUDED.values() for role in roles}), \
+        threads.EXCLUDED
+    # The serve loop is the OTHER constant, and the table splits on it: some
+    # journeys exercise the bridge's HTTP surface and none of the front end's
+    # event loop, and some call that loop. The invariant this replaced also
+    # pinned the split, as a side effect of naming one journey.
+    keeps_serve = [roles for roles in threads.EXCLUDED.values()
+                   if threads.SERVE not in roles]
+    assert keeps_serve, threads.EXCLUDED
+    assert len(keeps_serve) < len(threads.EXCLUDED), threads.EXCLUDED
+
+
+def test_every_journey_drops_the_front_ends_bootstrap_import(tmp):
+    """The import is one thread of the BRIDGE, so no journey's own work is
+    behind it and every journey stops counting it.
+
+    The bootstrap is the one background thread whose cost does not repeat:
+    five rounds of identical code on one runner measured 4,015,865,696 to
+    4,020,617,049 instructions, so a journey that kept it carried that
+    run-varying constant into its own count and moved 1.14% between runs of
+    an unchanged tree (issue 1495). It used to be `net-capture` alone, kept
+    for a reason issue 1466 removed: under size bands that journey's own
+    request thread measured 2.12 billion instructions and landed in the
+    import band beside the bootstrap, so dropping the import there would
+    have dropped the work the journey exists to measure. Roles are decided
+    by the process a thread ran in now, so an importing request thread can
+    never claim the role.
+
+    Derived from `NAMES` through `excluded_for`, so a journey added to that
+    list and given an entry that keeps the import fails here. A hand-written
+    list of the seven would agree with itself for ever.
+
+    An absence assertion reads as green over an empty set, so the read is
+    driven both ways: a table dropping one journey's import must show up in
+    the same comprehension that must come back empty here.
+    """
+    del tmp
+    threads = _journey_contract.threads()
     names = _journey_contract.journeys().NAMES
+    assert names, 'no journey names, so this control reads nothing'
     keeps = [name for name in names
              if threads.IMPORT not in threads.excluded_for(name)]
-    assert len(keeps) == 1, keeps
-    assert threads.SERVE in threads.excluded_for(keeps[0]), keeps
-    assert all(threads.IMPORT in threads.excluded_for(name)
-               for name in names if name != keeps[0]), keeps
+    assert not keeps, keeps
+    planted = {**threads.EXCLUDED, names[0]: (threads.SERVE,)}
+    with _journey_contract.planting(threads, EXCLUDED=planted):
+        seen = [name for name in names
+                if threads.IMPORT not in threads.excluded_for(name)]
+    assert seen == [names[0]], seen
 
 
 def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
