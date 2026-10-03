@@ -1,0 +1,13 @@
+# pip-audit, the tool audit.yml runs to answer "is what we froze still safe".
+# Pinned here for the same reason zizmor is: Dependabot's `pip` entry reads
+# manifest files and never a workflow, so a version written into audit.yml's
+# `run:` block is a version nobody is ever told to move.
+#
+# NOT hash-pinned, unlike requirements-zizmor.txt, and the asymmetry is
+# deliberate in this direction. pip-audit's own runtime dependencies are the
+# subject this very gate audits: hash-pinning the tool would freeze the
+# transitive tree the gate exists to re-check against the advisory database,
+# so a gate whose own resolver can never move would stop being able to notice
+# a new advisory in it. What is pinned is the tool's version — the half whose
+# release must not turn CI red on an unchanged commit.
+pip-audit==2.10.1

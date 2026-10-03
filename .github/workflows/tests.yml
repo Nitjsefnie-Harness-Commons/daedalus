@@ -516,9 +516,14 @@ jobs:
 
       - name: Install zizmor
         id: install_zizmor
+        # Pinned in a manifest at the repository root rather than in this
+        # `run:` block, because Dependabot's `pip` entry reads manifest files
+        # and never a workflow: a version written into a step is a version
+        # nobody is ever told to move. `--require-hashes` because zizmor
+        # gates the gates. This step installs that manifest and no other, so
+        # the hash-pinned resolution stays its own.
         run: |
-          python -m pip install --upgrade pip
-          pip install zizmor==1.29.0
+          pip install --require-hashes -r requirements-zizmor.txt
 
       - name: actionlint
         id: actionlint
