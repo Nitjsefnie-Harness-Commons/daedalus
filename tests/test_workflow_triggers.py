@@ -496,17 +496,11 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
 def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
     """One score, from one ref, published only where it means something.
 
-    A `workflow_dispatch` names any branch, so without the guard a run from
-    one publishes that branch's score as the repository's, and a fork's
-    schedule publishes at all. A guard on `analysis` says nothing about a
-    second job publishing beside it, so the job set is pinned with it.
-
-    This is a structural pin, not an evaluation: the shared expression
-    reader admits a call only with no arguments, so it refuses `format(...)`
-    outright and the guard is never run under the contexts that would
-    decide it. Each limb below is recognised by its decoded shape rather
-    than by its position, pinned, and a limb of any other shape fails
-    instead of passing unread.
+    A structural pin, not an evaluation: the shared expression reader admits
+    a call only with no arguments, so it refuses `format(...)` outright and
+    the guard is never run under the contexts that would decide it. Each
+    limb is pinned as the shape it decodes to, and a limb of any other shape
+    fails rather than passing unread.
     """
     del tmp
     scorecard = (ROOT / '.github' / 'workflows' / 'scorecard.yml').read_text(
