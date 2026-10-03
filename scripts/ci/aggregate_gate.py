@@ -26,7 +26,11 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 WORKFLOW = '.github/workflows/tests.yml'
-SECRETS_WORKFLOW = '.github/workflows/secrets.yml'
+# The FILE NAME, not its path: the actions API's workflow selector
+# takes `secrets.yml` or a numeric id, and answers `Not Found` to
+# the path — which a gate that fails closed turns into every merge
+# on the repository.
+SECRETS_WORKFLOW = 'secrets.yml'
 SECRETS_JOB = 'gitleaks'
 POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
 # The gitleaks job's own 10-minute backstop plus queueing; the job this
