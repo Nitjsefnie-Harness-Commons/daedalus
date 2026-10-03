@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _ratchet_fixture import _git  # noqa: E402
+from _ratchet_fixture import _git, _normalised  # noqa: E402
 
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 SCRIPT = ROOT / 'scripts' / 'ci' / 'thresholds.py'
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
 DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
+SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 
 
 def _thresholds():
@@ -668,6 +669,52 @@ def test_the_real_tests_tree_is_within_its_recorded_line_budget(tmp):
          '--thresholds', str(DATA_PATH)],
         cwd=str(ROOT), capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, (done.stdout, done.stderr)
+
+
+def _skill_decisions(path=SKILL_SOURCE):
+    raw = path.read_text(encoding='utf-8')
+    # Isolate the tests/-budget paragraph, so a phrase the other ratchet
+    # paragraphs share cannot satisfy this one's decisions for it.
+    block = next((part for part in raw.split('\n\n')
+                  if 'tests_line_baseline' in part), '')
+    paragraph = _normalised(block)
+    return {
+        'owner': ('.github/ci-thresholds.json' in paragraph
+                  and 'tests_line_baseline' in paragraph),
+        'command': ('python3 scripts/ci/tests_lines.py --tighten'
+                    in paragraph),
+        'growth': 'pays for growth by deleting' in paragraph,
+        'merge_ref': 'MERGE ref' in paragraph,
+        'reads_skill': 'tests/test_ci_thresholds.py' in paragraph,
+    }
+
+
+def test_skill_names_the_state_owner_and_tighten_command(tmp):
+    del tmp
+    decisions = _skill_decisions()
+    assert decisions['owner'], decisions
+    assert decisions['command'], decisions
+    assert decisions['growth'], decisions
+    assert decisions['merge_ref'], decisions
+    assert decisions['reads_skill'], decisions
+
+
+def test_skill_mutations_are_caught_independently(tmp):
+    source = SKILL_SOURCE.read_text(encoding='utf-8')
+    mutations = (
+        ('owner', 'tests_line_baseline', 'tests_line_table'),
+        ('command', 'python3 scripts/ci/tests_lines.py --tighten',
+         'python3 .github/ci-thresholds.json --tighten'),
+        ('growth', 'pays for growth by deleting',
+         'pays for growth by re-baselining'),
+        ('merge_ref', 'MERGE\nref', 'HEAD\nref'),
+        ('reads_skill', 'tests/test_ci_thresholds.py',
+         'tests/test_ci_thresholds_absent.py'),
+    )
+    for name, old, new in mutations:
+        path = Path(tmp) / f'{name}.md'
+        path.write_text(source.replace(old, new), encoding='utf-8')
+        assert not _skill_decisions(path)[name], name
 
 
 def main():
