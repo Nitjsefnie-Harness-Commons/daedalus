@@ -495,11 +495,12 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
 
 
 def _without_call_spacing(expression):
-    """Return an expression with whitespace at call punctuation removed.
+    """Return an expression with whitespace at `(`, `,` and `)` removed.
 
-    Only `(`, `,` and `)` shed their neighbouring whitespace: it is call
-    spelling, and none of the three occurs inside a quoted argument, so a
-    format string's own whitespace survives and still reds.
+    Quote-blind, so it strips inside a quoted argument too and `'a, b'`
+    reads as `'a,b'`. Safe on the one expression this control compares:
+    neither `'refs/heads/{0}'` nor the path beside it holds any of the
+    three, so a format string's own spacing is never next to one and reds.
     """
     return re.sub(r'\s*([(),])\s*', r'\1', expression)
 
