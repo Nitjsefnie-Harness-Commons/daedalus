@@ -27,11 +27,15 @@ what a reader compares between two runs. `read()`'s `names` is a
 is written by `json.dumps` and read by a browser.
 
 A row is the SAME set of threads the count was summed over, read through
-the same classifier and the same per-journey exclusion list, so a row and
-the number that contains it are two views of one rule rather than two rules
-that agree today. A journey whose COUNT was refused keeps its rows: the
-refusal is a negative residual, the profile is on disk, and a refused
-journey is exactly where a reader comes for these.
+the same classifier and the same per-journey exclusion list, so WHERE A
+COUNT WAS TAKEN a row and the number that contains it are two views of one
+rule. They are not two views of one rule where the count was REFUSED:
+`total_for` also refuses a profile it could not read end to end and a
+journey whose excluded role is missing from it, and a journey whose COUNT
+was refused keeps its rows here — the refusal is a negative residual, the
+profile is on disk, and a refused journey is exactly where a reader comes
+for these. Emitting rows the count refused to read is the intent; the two
+lists agreeing everywhere is not claimed.
 """
 import os
 import sys

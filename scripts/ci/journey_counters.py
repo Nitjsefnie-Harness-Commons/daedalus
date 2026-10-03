@@ -414,7 +414,9 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     if why is not None:
                         break
             rows = {}
-            samples = {}
+            # Every round's whole profile is retained here to be broken
+            # into threads, and only a run that will emit rows keeps them.
+            samples = {} if journey_thread_rows.enabled() else None
             if why is None:
                 for name in names:
                     counted = []
@@ -430,7 +432,8 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     if why is not None:
                         break
                     rows[name] = counted
-                    samples[name] = taken
+                    if samples is not None:
+                        samples[name] = taken
             refusals = {}
             if why is None:
                 verdicts = {}

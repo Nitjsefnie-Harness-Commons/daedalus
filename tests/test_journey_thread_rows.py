@@ -120,6 +120,47 @@ def test_the_rows_are_recorded_only_while_the_flag_is_on(tmp):
         f"{sorted(on['counters']['valgrind-callgrind'])}")
 
 
+def test_the_samples_are_not_retained_while_the_flag_is_off(tmp):
+    """A run told to throw the rows away must not gather them first.
+
+    Every round's own profile is retained in the parent to build the rows,
+    so an ungated `samples` holds a profile for every thread of every
+    journey of every round for a key this run then never emits. What that
+    structure held at the moment the report consulted it is what a spy
+    sees, so this reads the retention rather than the output: a report with
+    no `thread_rows` key cannot tell a builder that never filled one from
+    one that filled it and dropped it.
+
+    The gate is `journey_thread_rows.enabled()` — the same reader that
+    decides whether the key is emitted — so there is one owner of the
+    switch's name and its meaning and no second spelling of either.
+    """
+    del tmp
+    counters = _journey_contract.counters()
+    rows = counters.journey_thread_rows
+    real = rows.for_counter
+    retained = []
+
+    def watching(bridge, samples):
+        retained.append(samples)
+        return real(bridge, samples)
+
+    counting = _stubbed(_even_counts())
+    with planting(rows, for_counter=watching):
+        _run_measure(None, counting)
+        _run_measure('1', counting)
+    assert len(retained) == 2, (
+        'both runs must reach the rows gate for this to mean anything: '
+        f'{retained}')
+    off = retained[0]
+    on = retained[1]
+    assert off is None, (
+        'every round of every journey was retained for a key this run '
+        f'never emits: {sorted(off or ())}')
+    assert sorted(on) == sorted(journeys().NAMES), sorted(on)
+    assert all(len(taken) == 1 for taken in on.values()), on
+
+
 def test_the_flag_is_the_exact_string_one(tmp):
     """`== '1'` and nothing else, which is the whole of the convention.
 
@@ -314,8 +355,15 @@ def test_the_rows_change_no_recorded_count(tmp):
     Both runs are driven through the same stub, so the only thing that can
     differ is the flag; strip the rows off the run that recorded them and
     the two reports have to be the same document, byte for byte. A builder
-    that subtracted, re-summed, re-ordered a round, or reached into the
-    child environment is caught here and nowhere else.
+    that subtracted, re-summed or re-ordered a round is caught here and
+    nowhere else.
+
+    The CHILD ENVIRONMENT is not caught here, and this docstring used to
+    say it was: `_stubbed` replaces `COUNTERS_BY_NAME` wholesale and never
+    calls `_run`, so it spawns no child and reads no child's environment.
+    A builder that reached into one would be green across this control. The
+    allowlist a child IS built from is pinned where that list is owned,
+    `tests/test_journey_counters.py`, not here.
     """
     del tmp
     counting = _stubbed(_even_counts())
@@ -328,12 +376,13 @@ def test_the_rows_change_no_recorded_count(tmp):
 
 
 def test_the_measuring_step_sets_the_flag_and_nothing_else_does(tmp):
-    """Step-level, because `os.environ` is the measured child's.
+    """Step-level, because the step that reads it is the one that sets it.
 
-    `_run` builds every counted child's environment from `os.environ`, so a
-    job-level entry would be inherited by every journey child — inside the
-    window the count is taken, which is the one place this flag must never
-    reach.
+    The switch is read only in the parent that assembles the report, from
+    this step's own process environment, and no counted child consults it —
+    so it is inert to a journey child whether the entry is step-level or
+    job-level, and the placement is here so the value's scope sits beside
+    the step that consumes it rather than beside seven steps it does not.
     """
     del tmp
     document = yaml.safe_load(TESTS_YML.read_text(encoding='utf-8'))
@@ -342,7 +391,7 @@ def test_the_measuring_step_sets_the_flag_and_nothing_else_does(tmp):
     assert len(steps) == 1, [step.get('name') for step in job['steps']]
     assert steps[0]['env'][FLAG] == '1', steps[0].get('env')
     assert FLAG not in (job.get('env') or {}), (
-        f'a job-level entry reaches every counted child: {job.get("env")}')
+        f'the flag belongs to the step that reads it: {job.get("env")}')
     elsewhere = [step.get('id') or step.get('name')
                  for step in job['steps']
                  if FLAG in (step.get('env') or {})]

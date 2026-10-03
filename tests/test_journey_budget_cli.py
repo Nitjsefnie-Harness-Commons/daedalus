@@ -586,6 +586,40 @@ def test_a_tighten_writes_nothing_the_check_refuses_over_a_missing_journey(
             'the artefact the tighten refused is one the check accepts')
 
 
+def _shipped_budget(tmp):
+    """The artefact this repository ships, copied byte for byte.
+
+    Its counts, tolerances and toolchain are the real ones: a fixture's
+    own tolerance makes a control about the tolerance instead.
+    """
+    budget = Path(tmp) / 'journey-budget.json'
+    budget.write_bytes(
+        (ROOT / '.github' / 'journey-budget.json').read_bytes())
+    return budget
+
+
+def _shipped_measurement(document, rounds):
+    """The shipped journeys measured, every one of them a half lower."""
+    report = measured_report(
+        {name: seen // 2 for name, seen in document['journeys'].items()},
+        rounds=rounds, toolchain=document['toolchain'],
+        excluded_threads=document['excluded_threads'],
+        shas=document['shas'])
+    report['counters'] = {document['counter']:
+                          report['counters']['perf-instructions']}
+    return report
+
+
+def _tighten(budget, report, tmp):
+    """`check --tighten` over `report`, as the subprocess a step drives."""
+    counts = Path(tmp) / 'counts.json'
+    counts.write_text(json.dumps(report), encoding='utf-8')
+    return subprocess.run(
+        [sys.executable, str(ROOT / 'scripts/ci/journey_budget.py'),
+         'check', '--artifact', str(budget), '--measurements', str(counts),
+         '--tighten'], capture_output=True, text=True, timeout=120)
+
+
 def test_a_single_draw_never_records_a_count(tmp):
     """The defect, on the artefact this repository actually ships.
 
@@ -594,27 +628,60 @@ def test_a_single_draw_never_records_a_count(tmp):
     journey down, so writing it is the ratchet: every later run is then
     measured against a baseline no second draw ever agreed with.
     """
-    budget = Path(tmp) / 'journey-budget.json'
-    budget.write_bytes(
-        (ROOT / '.github' / 'journey-budget.json').read_bytes())
+    budget = _shipped_budget(tmp)
     before = budget.read_bytes()
     document = json.loads(before)
-    report = measured_report(
-        {name: seen // 2 for name, seen in document['journeys'].items()},
-        rounds=1, toolchain=document['toolchain'],
-        excluded_threads=document['excluded_threads'],
-        shas=document['shas'])
-    report['counters'] = {document['counter']:
-                          report['counters']['perf-instructions']}
-    counts = Path(tmp) / 'counts.json'
-    counts.write_text(json.dumps(report), encoding='utf-8')
-    done = subprocess.run(
-        [sys.executable, str(ROOT / 'scripts/ci/journey_budget.py'),
-         'check', '--artifact', str(budget), '--measurements', str(counts),
-         '--tighten'], capture_output=True, text=True, timeout=120)
+    done = _tighten(budget, _shipped_measurement(document, 1), tmp)
     assert done.returncode == 0, done.stderr
     assert budget.read_bytes() == before, (
         f'a single draw was written as a baseline: {done.stdout}')
+
+
+def test_the_recording_boundary_is_pinned_in_both_directions(tmp):
+    """Two rounds record; one draw, and a count that is not a draw, do not.
+
+    `ROUNDS_TO_RECORD` is a `<`, and the control beside this one pins the
+    half the refusal is on. Nothing anywhere drives a `rounds: 2` report
+    through `check --tighten`, so a guard mutated to `<=` refuses a real
+    two-round measurement and every other row stays green. Every journey
+    here sits a half below its recorded count, so `over` cannot fire first
+    and the write is a real one.
+
+    The other limb fails closed — the right default for a safety net
+    nothing had dropped into. Absent, a null, `'2'` and `2.5` reach the
+    `isinstance` limb; `True` IS an `int` and compares equal to 1, so it
+    reaches the `<`. Each writes nothing and exits 0.
+    """
+    budget = _shipped_budget(tmp)
+    before = budget.read_bytes()
+    document = json.loads(before)
+    halved = {name: seen // 2 for name, seen in document['journeys'].items()}
+
+    recorded = _tighten(budget, _shipped_measurement(document, 2), tmp)
+    assert recorded.returncode == 0, recorded.stderr
+    assert budget.read_bytes() != before, (
+        'two rounds is the fewest a comparison may be taken from, and this '
+        f'run recorded nothing: {recorded.stdout}')
+    assert json.loads(budget.read_bytes())['journeys'] == halved, (
+        'the recorded counts are not the ones this run measured: '
+        f'{json.loads(budget.read_bytes())["journeys"]}')
+
+    # `absent` is a state an assignment cannot produce and is not the same
+    # one as an explicit null: one is a key the report does not carry, the
+    # other a key carrying `None`.
+    shapes = {'null': None, 'string': '2', 'float': 2.5, 'bool': True}
+    for label in ('absent', *shapes):
+        budget.write_bytes(before)
+        report = _shipped_measurement(document, 2)
+        if label == 'absent':
+            report.pop('rounds')
+        else:
+            report['rounds'] = shapes[label]
+        done = _tighten(budget, report, tmp)
+        assert done.returncode == 0, (label, done.stderr)
+        assert budget.read_bytes() == before, (
+            f'a report whose round count was {label} rewrote the artefact '
+            f'anyway: {done.stdout}')
 
 
 def main():
