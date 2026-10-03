@@ -95,6 +95,35 @@ def test_the_artefact_is_its_own_file_and_a_tracked_one(tmp):
         'normalise() refuses any field it does not own')
 
 
+def test_the_contributing_row_names_the_counter_the_artefact_records(tmp):
+    """The documented counted window holds for callgrind alone.
+
+    `journey_child_env` discloses that a client request is callgrind's own
+    and that `perf` counts the same child from `exec` whatever is issued,
+    but the row a contributor reads stated the window unconditionally — so
+    a runner image that granted `CAP_PERFMON` would make `_selected` prefer
+    perf and the documented window would silently revert to the older
+    quantity. The row is now scoped, and a control keeps the scope pointed at
+    the counter the artefact actually records rather than at a name in prose.
+    """
+    del tmp
+    policy = _journey_contract.policy()
+    recorded = policy.load(ARTIFACT)['counter']
+    row = next(line for line in
+               (ROOT / 'CONTRIBUTING.md').read_text(
+                   encoding='utf-8').splitlines()
+               if line.startswith('| `tests` (`journey-budget` check)'))
+    assert recorded in row, (
+        f'the row documents the counted window without naming the counter '
+        f'the artefact records ({recorded}): {row}')
+    assert 'Under `valgrind-callgrind`' in row, (
+        'the counted window is callgrind\'s alone, so the row has to say so '
+        f'rather than state it unconditionally: {row}')
+    assert 'different quantity' in row, (
+        'a runner counting with perf measures the whole child from `exec`, '
+        f'and the row has to say that is a different quantity: {row}')
+
+
 def test_the_artefact_records_the_threads_each_journey_excludes(tmp):
     """A count that drops a background thread means something the count
     alone cannot say, so the roles are recorded beside it.
