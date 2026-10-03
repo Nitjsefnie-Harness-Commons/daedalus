@@ -14,11 +14,16 @@ that moved, most often the runner image the toolchain records. Neither is a
 regression, so neither is a red: the one thing CI can do to the file is make
 it smaller, and a run that made nothing smaller says so rather than failing.
 
-A MEASUREMENT OF FEWER THAN TWO ROUNDS RECORDS NOTHING, which is why the
-automatic tighten never fires on `main`: CI measures with `--rounds 1`, so
-`rebaseline --measurements <counts>`, over a multi-round measurement somebody
-ran, is the only path that lowers a recorded count. A green run with no commit
-is then this, or a recorded gate that moved — and the step summary says which.
+A MEASUREMENT OF FEWER THAN TWO ROUNDS RECORDS NOTHING, and the refusal is
+`check`'s: the `Follow the journeys that got cheaper` step runs
+`check --tighten` on every push to `main`, and a draw it cannot confirm ends
+there. That is why the automatic tighten never fires on `main` — CI measures
+with `JOURNEY_ROUNDS: "1"`, which is a count of one, so a recorded count is
+lowered by `rebaseline --measurements <counts>` or not at all. `rebaseline` is
+the manual path and consults no round count of its own: a person runs it
+deliberately, it overwrites the whole document from their own measurement, and
+they judge their own rounds. A green run with no commit is then this, or a
+recorded gate that moved — and the step summary says which.
 
   python3 scripts/ci/journey_budget.py probe
   python3 scripts/ci/journey_budget.py measure --rounds 1 --out counts.json
