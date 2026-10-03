@@ -21,6 +21,7 @@ from _source_anchors import (  # noqa: E402
     the_call_line)
 from _repo import ROOT  # noqa: E402
 
+_PLANT_TARGET = 'tests/test_coverage_environment.py'
 _DECLARATION_LINE = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
 _CONTAINER_PRELUDE = (
     "def _real_module_copy(tmp, relative):\n"
@@ -81,7 +82,7 @@ def test_an_unmodelled_write_primitive_is_refused_in_a_real_control(tmp):
         "    shutil.copyfile(__file__, ROOT / '.probe.py')\n" + needle, 1)
     target.write_bytes(mutated.encode('utf-8'))
     violations = control_write_violations(target, root)
-    assert (f'tests/test_coverage_environment.py:{line}: '
+    assert (f'{_PLANT_TARGET}:{line}: '
             'shutil.copyfile is not a modelled call') in violations, violations
     target.write_bytes(text.encode('utf-8'))
     assert control_write_violations(target, root) == []
@@ -105,7 +106,7 @@ def test_a_proved_helper_rebound_after_its_definition_is_not_proof(tmp):
     call = first_call_line(mutated, '_real_module_copy')
     target.write_bytes(mutated.encode('utf-8'))
     violations = control_write_violations(target, root)
-    assert (f'tests/test_coverage_environment.py:{call}: _real_module_copy '
+    assert (f'{_PLANT_TARGET}:{call}: _real_module_copy '
             'callable is unresolved') in violations, violations
     assert any(v.endswith('write_bytes target path is not control-owned')
                for v in violations), violations
@@ -156,7 +157,7 @@ def test_a_lambda_default_call_site_seeds_the_helper_it_calls(tmp):
         "def test_planted_owned_site(tmp):\n"
         "    _planted_helper(tmp)\n")
     assert control_write_violations(target, root) == [
-        f'tests/test_coverage_environment.py:{line + 1}: write_text target '
+        f'{_PLANT_TARGET}:{line + 1}: write_text target '
         'path is not control-owned']
 
 
@@ -170,7 +171,7 @@ def test_a_control_called_in_its_module_is_seeded_like_a_helper(tmp):
         "    del tmp\n"
         "    test_planted_helper(ROOT)\n")
     assert control_write_violations(target, root) == [
-        f'tests/test_coverage_environment.py:{line + 1}: write_text target '
+        f'{_PLANT_TARGET}:{line + 1}: write_text target '
         'path is not control-owned']
 
 
@@ -222,7 +223,7 @@ def test_a_container_reached_through_an_alias_is_not_proof(tmp):
     target.write_bytes(mutated.encode('utf-8'))
     violations = control_write_violations(target, root)
     assert violations == [
-        f'tests/test_coverage_environment.py:{first + 3}: write_bytes '
+        f'{_PLANT_TARGET}:{first + 3}: write_bytes '
         'target path is not control-owned'], violations
     target.write_bytes(text.encode('utf-8'))
     assert control_write_violations(target, root) == []
@@ -669,9 +670,8 @@ def test_a_decorated_class_is_not_a_readable_definition(tmp):
         "    _DecoratedClassCopy(\n"
         "        source, ROOT / '.review-303-class-decorated-writer')\n")
     violations = control_write_violations(target, root)
-    assert (
-        f'tests/test_coverage_environment.py:{line + 10}: '
-        '_DecoratedClassCopy callable is unresolved') in violations, violations
+    assert (f'{_PLANT_TARGET}:{line + 10}: _DecoratedClassCopy callable is '
+            'unresolved') in violations, violations
 
 
 def test_a_decorated_def_is_not_a_readable_definition(tmp):
@@ -690,9 +690,8 @@ def test_a_decorated_def_is_not_a_readable_definition(tmp):
         "    source.write_bytes(b'decorated-writer')\n"
         "    _decorated_copy(source, ROOT / '.review-303-decorated-writer')\n")
     violations = control_write_violations(target, root)
-    assert (
-        f'tests/test_coverage_environment.py:{line + 10}: _decorated_copy '
-        'callable is unresolved') in violations, violations
+    assert (f'{_PLANT_TARGET}:{line + 10}: _decorated_copy callable is '
+            'unresolved') in violations, violations
 
 
 if __name__ == '__main__':
