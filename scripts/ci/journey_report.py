@@ -129,10 +129,12 @@ def probe_lines(found):
 def _reason(why):
     r"""One table cell's worth of prose, escaped so the cell stays one cell.
 
-    Two kinds of text reach a row's cells: a counter's reason, and the journey
-    NAME the row leads with. `journey_artifact` bounds a journey's recorded
-    COUNT and never its name, so a name arrives carrying whatever its key
-    carried.
+    Every value interpolated into a row's cells comes through here: a
+    counter's reason, the journey NAME the row leads with, and the toolchain
+    table's field and its two values. `journey_artifact` bounds a journey's
+    recorded COUNT and never its name, and nothing bounds the shas, thread
+    names or toolchain identities a measurement supplies, so each of them
+    arrives carrying whatever its own key carried.
 
     A counter reports its reason in whichever of two shapes it has: a
     sentence of its own when the refusal is one, and a returncode with the
@@ -151,16 +153,17 @@ def _reason(why):
     bytes. Escaping the pipe alone puts that escape beside a backslash the
     tool already wrote, and the cell then shows something other than what
     the tool printed. Doubling the backslashes FIRST is what makes the
-    source and the display agree: the run is of even length whatever the
-    tool wrote, so every pipe ends up behind an odd one.
+    display agree with what the tool printed: the run is of even length
+    whatever the tool wrote, so every pipe ends up behind an odd one.
 
     What the controls pin is the ROW, at the inputs
-    `tests/test_journey_report.py` renders: three literal rows — a reason
+    `tests/test_journey_report.py` renders: four literal rows — a reason
     carrying `|`, `\|`, `\\|` and a newline, a refusal carrying a newline
-    and a pipe, and a journey name carrying a pipe. The property above is
-    wider than those three rows, and no renderer is consulted to establish
+    and a pipe, a journey name carrying a pipe, and a toolchain row whose
+    three cells carry a pipe, a backslash and a pipe. The property above is
+    wider than those four rows, and no renderer is consulted to establish
     it: it is a claim about the order of two replaces, and the rows are
-    three samples of it.
+    four samples of it.
     """
     if not why:
         return ''
@@ -304,8 +307,15 @@ def toolchain_lines(document, report, changed, remedy,
                  'step succeeds because the tree did not regress, not '
                  'because anything was within budget.', '',
                  '| field | recorded | measured |', '|---|---|---|']
+        # All three cells are values the measurement supplied — the field
+        # names out of the recorded artefact, both sides shas or thread
+        # names — and none is bounded, so each goes through the reason's
+        # escape; an unescaped pipe spends the row. PLAIN cells, like the
+        # reason's: a code span is where a renderer leaves the doubled
+        # backslash, so a value the escape shows verbatim would read doubled.
         for field, (was, now) in sorted(changed.items()):
-            lines.append(f'| {field} | `{was}` | `{now}` |')
+            lines.append(f'| {_reason(field)} | {_reason(str(was))} | '
+                         f'{_reason(str(now))} |')
     else:
         lines = ['### Journey budget', '',
                  f'**the journey budget records no {subject} yet.**', '',

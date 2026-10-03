@@ -219,7 +219,11 @@ def test_a_gate_that_moved_says_so_in_the_summary_of_a_plain_check(tmp):
         'a run that compared no count wrote the artefact anyway')
     assert '**toolchain changed, re-baseline.**' in said, said
     assert 'No count was compared.' in said, said
-    assert ('| valgrind_version | `valgrind-3.24.0` | `valgrind-3.25.0` |'
+    # Plain cells rather than code spans: the two values go through the
+    # reason's escape so a field name or a toolchain identity carrying a pipe
+    # cannot spend the row, and a code span is the one context where a
+    # renderer does not consume the doubled backslash the escape relies on.
+    assert ('| valgrind_version | valgrind-3.24.0 | valgrind-3.25.0 |'
             in said), (
         'the summary must carry BOTH values of the field that moved, or a '
         f'reader is told to re-baseline without being told what moved: {said}')
