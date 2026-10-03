@@ -34,6 +34,16 @@ module comes out of one invocation, the same argv
         --callgrind-out-file=<workdir>/callgrind.<journey>.%p \
         python3 tests/_journeys.py --journey <journey> --root <root>
 
+That argv is unchanged by the counted boundary, and the shape of it is the
+point: `--instr-atstart` stays on and no toggle is added, so the bridge the
+harness spawns is instrumented from birth and counted exactly as before. The
+harness's own bootstrap LEAVES the measurement through a client request
+instead — `tests/_journeys.py` zeroes the counters at the first statement of
+`main()`, after its import closure has run and before anything is spawned —
+so the interpreter's startup and the compile of that closure are inside the
+profile on disk but outside every total below. `journey_child_env` says what
+refuses a run that has no helper to call.
+
 Each out file's `summary:` line is that thread's total,
 `read(<workdir>, 'callgrind.<journey>')` returns them all and `role_of` names
 each one, so a per-thread number here is reproducible rather than cited:

@@ -9,12 +9,15 @@ journey fact rather than a counter fact. Not a suite itself —
 `run_tests.py` only loads `test_*.py`.
 """
 import contextlib
+import ctypes
+import io
 import json
 
 import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -252,6 +255,127 @@ def measured_report(counts, **maps):
                             'spread': 0, 'raw': seen}
                      for name, seen in counts.items()}}}
     return report
+
+
+@contextlib.contextmanager
+def environment(name, value):
+    """`name` set to `value` for a block, and the ambient value back after.
+
+    `None` removes it for the block, which is a state a setting has and a
+    dict that only ever assigns cannot express. The name arrives as an
+    argument on purpose: a helper holding the name would be the shared
+    literal a control then reads its expectation out of, so each caller
+    spells the name its own subject reads and the drive proves they agree.
+    """
+    saved = os.environ.get(name)
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+    try:
+        yield
+    finally:
+        os.environ.pop(name, None)
+        if saved is not None:
+            os.environ[name] = saved
+
+
+# The variable a counted child reads its compiled helper's path from. It is
+# spelled HERE as well as in each of the two modules that read it, because a
+# control that read the name out of either of those would pin only that the
+# two agree -- which they would, by construction. A control spells it a third
+# time and drives both subjects with that spelling, so a rename in either one
+# is a red.
+BOUNDARY_ENV = 'DAEDALUS_CALLGRIND_BOUNDARY'
+
+
+def boundary_loader(**symbol):
+    """`ctypes.CDLL` as the journeys module reaches it, and its two records.
+
+    `served` is every path a load was asked for and `zeroed` every call of
+    the zero symbol; they are separate records because a control pinning
+    only the load passes against a module that loads the helper and then
+    never asks it to zero anything. Naming the symbol makes the stub serve
+    it, `fails` makes the call raise -- one of the ways the boundary can be
+    unavailable -- and a symbol the caller does not name raises
+    `AttributeError` off the returned namespace, which is what a shared
+    object without it does.
+    """
+    served, zeroed = [], []
+
+    def load(path):
+        served.append(path)
+
+        def zero():
+            zeroed.append(path)
+            if 'fails' in symbol:
+                raise OSError('the client request would not issue')
+
+        return SimpleNamespace(**{name: zero for name in symbol})
+
+    load.served = served
+    load.zeroed = zeroed
+    return load
+
+
+def boundary_set(path='/cgzero.so'):
+    """`BOUNDARY_ENV` pointed at a helper, for a control about what the
+    counter does once it has started.
+
+    The boundary is a PRECONDITION of the callgrind counter, so a control
+    about the work it does after that has to establish it rather than read
+    as the refusal the boundary control pins. Nothing here loads the path:
+    whether a child can is that control's question, not this one's.
+    """
+    return environment(BOUNDARY_ENV, path)
+
+
+def boundary_probe(boundary, loader, establish, call=None):
+    """One counted-boundary setting, driven, and everything it produced.
+
+    `(code, said, spawned)`: the exit code and the refusal it printed, and
+    the calls the bridge spawner received. All three in one record because
+    a control reading one proves only that one -- an absence assertion over
+    the spawner is an assertion only once the same record shows the probe
+    CAN reach it, which is what separates "nothing spawned because the
+    boundary refused" from "nothing spawned because nothing ran".
+
+    `loader` is planted as `ctypes.CDLL`, and a caller that wants the REAL
+    one plants `ctypes.CDLL` itself. `call` defaults to the boundary
+    itself; naming `main` is how the case that has to prove WHERE the
+    boundary runs drives the real call site instead.
+    """
+    spawned = []
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(environment(BOUNDARY_ENV, boundary))
+            stack.enter_context(planting(ctypes, CDLL=loader))
+            stack.enter_context(planting(_util, bridge=spawned.append))
+            try:
+                (call or establish)()
+            except SystemExit as refusal:
+                return refusal.code, said.getvalue(), spawned
+    return 0, said.getvalue(), spawned
+
+
+def counted_run(counters, name, root, workdir,
+                boundary: str | None = '/cgzero.so'):
+    """What the callgrind counter did with the boundary set to `boundary`.
+
+    The spawn is answered rather than performed, because a real one is a
+    whole journey under valgrind and the only question here is whether the
+    refusal fired before it. So the record is the refusal the counter
+    reported, and the argv it reached for when it did not refuse. `None` is
+    the UNSET case — the one the refusal exists for — while the default is
+    a counted run that has its helper.
+    """
+    argv = []
+    with environment(BOUNDARY_ENV, boundary), planting(
+            counters,
+            shutil=SimpleNamespace(which=lambda tool: f'/usr/bin/{tool}'),
+            _run=lambda run: (argv.append(run), (None, '', 'answered'))[1]):
+        value, why = counters._callgrind(name, root, workdir)
+    return value, why, argv
 
 
 @contextlib.contextmanager

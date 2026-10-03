@@ -476,23 +476,50 @@ def _print_record(name, rendering):
 def _establish_counted_boundary():
     """Zero callgrind's counters at the one fixed point before journey work.
 
-    TRANSIENT (issue 1499 experiment). A counted child reaches this line after
-    the whole import closure has run and before anything is spawned, which is
-    the one point where the interpreter's own startup and compile cost can
-    leave the measurement without touching the bridge: the bridge is spawned
-    after this line and is instrumented from birth either way. A client
-    request cannot be issued from pure Python, so the job compiles a helper
-    and names it here; a named helper that will not load refuses the run
-    rather than silently counting the import again.
+    The counted region is this whole child from `exec`, so interpreter
+    startup and the compile of the whole import closure are inside it, on
+    this process's own thread, which no journey excludes. A counted child
+    reaches this line after that closure has run and before anything is
+    spawned, which is the one point where the interpreter's own cost can
+    leave the measurement: the bridge is spawned below and is instrumented
+    from birth either way, because the valgrind argv is unchanged and it
+    never issues a request of its own.
+
+    A client request cannot be issued from pure Python -- it is `asm
+    volatile` inside a GNU statement expression -- so the job compiles
+    `scripts/ci/callgrind_boundary.c` and names the result here.
+
+    Inert when the variable is unset, which is the one state this cannot
+    refuse: a developer running a journey by hand is in exactly the same
+    state as a counted run whose helper failed to build, and nothing in
+    the child tells the two apart. So the parent refuses instead --
+    `journey_child_env.boundary_refusal`, read by the callgrind counter
+    before it spawns -- and everything else here refuses with the cause
+    named, because a count that silently included the import again would
+    not be comparable with the one beside it.
     """
     path = os.environ.get('DAEDALUS_CALLGRIND_BOUNDARY')
     if not path:
         return
+
+    def refuse(cause):
+        print(f'counted boundary unavailable: {cause}', file=sys.stderr)
+        raise SystemExit(3)
+
     try:
-        ctypes.CDLL(path).daedalus_cg_zero_stats()
-    except (OSError, AttributeError) as failure:
-        print(f'counted boundary unavailable: {failure}', file=sys.stderr)
-        raise SystemExit(3) from failure
+        helper = ctypes.CDLL(path)
+    except OSError as failure:
+        refuse(f'the helper does not load: {failure}')
+    try:
+        zero = helper.daedalus_cg_zero_stats
+    except AttributeError as failure:
+        refuse(f'the helper carries no daedalus_cg_zero_stats: {failure}')
+    try:
+        zero()
+    except Exception as failure:  # pylint: disable=broad-except
+        # The call crosses into a shared object, so its failure modes are
+        # whatever that object raises rather than this module's to enumerate.
+        refuse(f'daedalus_cg_zero_stats did not issue: {failure}')
 
 
 def _parser():

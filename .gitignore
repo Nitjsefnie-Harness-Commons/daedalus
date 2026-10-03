@@ -230,6 +230,7 @@
 !/scripts/ci/
 !/scripts/ci/aggregate_gate.py
 !/scripts/ci/cache_action_releases.py
+!/scripts/ci/callgrind_boundary.c
 !/scripts/ci/classify_changes.py
 !/scripts/ci/coverage_combine.py
 !/scripts/ci/coverage_suites.py
