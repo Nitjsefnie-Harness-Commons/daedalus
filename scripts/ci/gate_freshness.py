@@ -24,8 +24,8 @@ the tree is what a branch carries, so a branch runs the tests it brings.
   run_tests.py              which suites the suites job runs
   requirements-dev.txt      the manifests the gates install and run; so are
   requirements-test.txt     requirements-pip-audit.txt (the vulnerability
-  requirements-zizmor.txt   gate's own tool) and requirements-zizmor.txt (the
-                            release step's hash-pinned analyzer)
+  requirements-zizmor.txt   gate's own tool) and the hash-pinned analyzer the
+                            tests job installs and runs
 
   .github/ci-thresholds.json  and
   .github/journey-budget.json  the recorded counts two gates compare against.
@@ -45,10 +45,9 @@ invokes by path or passes to a tool to be listed here, so a gate file added
 later fails the suite. The REACH LIMIT is real and stated:
 `pyrightconfig.json`, `pyrightconfig.tests.json`, `setup.cfg`,
 `eslint.config.js` and `pyproject.toml` are read by tool DISCOVERY (a bare
-`pyright` / `eslint` /
-`pycodestyle` invocation, or a heredoc), never named, so the derivation cannot
-see them; those five are hand-held above, each with its reason. A `python3 -m
-module` invocation is likewise not seen.
+`pyright` / `eslint` / `pycodestyle` invocation, or a heredoc), never named,
+so the derivation cannot see them; those five are hand-held above, each with
+its reason. A `python3 -m module` invocation is likewise not seen.
 
 THE DECISION, per (gate commit, head): one `compare/<gate>...<head>` request.
 The gate commit is an ancestor of the head IFF the merge base equals the gate
@@ -87,7 +86,8 @@ APP_SLUG = 'github-actions'
 BASE_BRANCH = 'main'
 
 # THE SET. Order is readability only; every entry is checked against every
-# head.
+# head, and every entry must keep one commit on main permanently: a pattern
+# that resolves to none is a global refusal, publishing nothing at all.
 GATE_PATTERNS = (
     '.github/workflows/**',
     '.github/ci-thresholds.json',
@@ -194,9 +194,9 @@ def enumerate_gates(read, repository):
 
     One request per path, built from `_request_path`. Every failure mode is a
     GLOBAL failure that NAMES the pattern and is raised, never a silent skip:
-    unreadable, not a list, no readable sha, OR empty. Empty is anomalous (all
-    patterns have commits on main) and treating it as "no commits" would drop a
-    gate and turn every head green -- the exact defect this module prevents."""
+    unreadable, not a list, no readable sha, OR empty; treating an empty
+    answer as "no commits" would drop a gate and turn every head green -- the
+    exact defect this module prevents."""
     gates = []
     for pattern in GATE_PATTERNS:
         request = _request_path(pattern)
