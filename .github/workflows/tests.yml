@@ -1261,7 +1261,7 @@ jobs:
       # nothing. A higher value exists to derive a tolerance from a spread,
       # once, and is not what every run should pay for — three is how each
       # baseline's tolerance has been measured, on the per-journey number.
-      JOURNEY_ROUNDS: "1"
+      JOURNEY_ROUNDS: "3"
 
     steps:
       # actions/checkout v7.0.1
