@@ -699,6 +699,7 @@
 !/tests/test_suite_bound.py
 !/tests/test_suite_bound_survivor.py
 !/tests/test_suite_runner.py
+!/tests/test_sweep_launch_scan.py
 !/tests/test_tab_registry.py
 !/tests/test_teardown_retry.py
 !/tests/test_tree_analyser_helpers.py
