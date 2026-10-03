@@ -332,7 +332,7 @@ def test_serve_hands_uvicorn_a_derived_server(tmp):
     carries neither of the two members the derived one owns."""
     del tmp
     _mcp_load._need_deps()
-    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59983)
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
     handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     assert len(built) == 1, built
@@ -511,7 +511,7 @@ def test_a_connection_refreshes_the_headers_a_parser_refusal_answers(tmp):
         the cached list read live, never reaching the middleware at all."""
     del tmp
     _mcp_load._need_deps()
-    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59985)
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
     handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     server = built[0]
@@ -654,7 +654,7 @@ def test_the_tick_middleware_sits_outside_the_bearer_auth_middleware(tmp):
     in."""
     del tmp
     _mcp_load._need_deps()
-    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59984)
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
     handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     names, node = [], built[0].config.app.build_middleware_stack()
@@ -672,7 +672,7 @@ def test_a_refused_request_still_refreshes_the_date_header(tmp):
         tick that does not run there leaves the previous instant's date."""
     del tmp
     _mcp_load._need_deps()
-    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59986)
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
     handed, _banner, built = _mcp_load._serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
     app = built[0].config.app
