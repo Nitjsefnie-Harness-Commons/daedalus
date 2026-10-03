@@ -16,27 +16,25 @@
     "screenshot": ["front-end-import"],
     "segment-relay": ["front-end-import"]
   },
-  "thread_bands": {
-    "front-end-import": 1000000000,
-    "request": 1000,
-    "uvicorn-serve": 10000000
+  "thread_signatures": {
+    "front-end-import": ["PyInit__pydantic_core"]
   },
   "shas": {
     "cdp-result": "a309c336573b87df188e73f8d3597e38b98a4720e9dba5f35d8f169ab8a01850",
     "command-round-trip": "3f5ca89e843d0edbf3d16ebcfbc7c1c93a82622eef7abbb1ea1182c5ba67a9fc",
-    "dashboard-fanout": "a73f6fd82e993f22d0e8fc931ef351f99ba1c5aa93ef0dff81489ff386f7b319",
+    "dashboard-fanout": "516afee79aa4f935c0175b1b2de9df11c2f586144b988d07147ac7a85664c9e9",
     "mcp-exec": "0fee0549d2cfba78242e570358e085a555002d0e8b8511d6f8957475325013d9",
     "net-capture": "9126331353a3393e5730447331320bec172184b12a839086b57269640925f7d3",
-    "screenshot": "0961babbb4fd6c2152fcf5f3acab79daf886c50ad629efa936bb984320b7542f",
-    "segment-relay": "8e6bc610743d21359bde55048c8d96f0676c318c91f70f58cca591c3647e5142"
+    "screenshot": "6020c490d4ccc33cbcb38a845d39d63f66608aad0b0c97b263f42da274101960",
+    "segment-relay": "045137a566fe2acaf7ff15773c6f4779308faaf92ea1db9f6bdb416dc518bf0f"
   },
   "journeys": {
-    "cdp-result": 890793219,
-    "command-round-trip": 775628429,
-    "dashboard-fanout": 770500517,
-    "mcp-exec": 1283592948,
-    "net-capture": 7419240599,
-    "screenshot": 838712328,
-    "segment-relay": 831671546
+    "cdp-result": 99328397,
+    "command-round-trip": 1990884,
+    "dashboard-fanout": 16235342,
+    "mcp-exec": 3983660059,
+    "net-capture": 538564705,
+    "screenshot": 75976192,
+    "segment-relay": 42143004
   }
 }
