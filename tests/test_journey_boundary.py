@@ -58,7 +58,7 @@ def test_the_counted_boundary_is_established_or_the_run_is_refused(tmp):
     got, said, spawned = boundary_probe(
         absent, module.CDLL, establish, lambda: module.main(argv))
     assert (got, spawned) == (3, []) and absent in said, (
-        'main must refuse before it spawns anything', got, said)
+        'main must refuse before it spawns anything', got, said, spawned)
     value, why, argv = counted_run(counters, 'mcp-exec', ROOT, tmp, None)
     assert value is None and not argv and 'DAEDALUS_CALLGRIND_BOUNDARY' in (
         why or ''), (value, why, argv)

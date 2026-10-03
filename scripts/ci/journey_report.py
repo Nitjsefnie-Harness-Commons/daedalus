@@ -127,7 +127,12 @@ def probe_lines(found):
 
 
 def _reason(why):
-    r"""A counter's refusal as one table cell's worth of prose.
+    r"""One table cell's worth of prose, escaped so the cell stays one cell.
+
+    Two kinds of text reach a row's cells: a counter's reason, and the journey
+    NAME the row leads with. `journey_artifact` bounds a journey's recorded
+    COUNT and never its name, so a name arrives carrying whatever its key
+    carried.
 
     A counter reports its reason in whichever of two shapes it has: a
     sentence of its own when the refusal is one, and a returncode with the
@@ -135,19 +140,27 @@ def _reason(why):
     rendered with `str()` — a cell holding `{...}` is a cell naming nothing.
 
     The cell is ONE line of ONE table, so a newline the tool wrote is
-    collapsed and a pipe is escaped before the text goes in: a raw
-    newline splits the row out of the table, and a raw pipe adds a
-    phantom column. `journey_counters` records that stderr verbatim, so
-    both arrive on exactly the failure path this reason exists to explain.
+    collapsed and a pipe is escaped before the text goes in.
+    `journey_counters` records that stderr verbatim, so a newline and a
+    pipe both arrive on exactly the failure path this reason exists to
+    explain.
 
-    The escapes go on in that order, and the order is the point. Escaping
-    the pipe alone turns a reason that already carried a backslash into an
-    EVEN run before its pipe, which the table grammar reads as a column
-    boundary -- so the escape would undo itself on the one input that
-    needs it. What is proved here is the row, at the input
-    `tests/test_journey_report.py` renders: a reason carrying `|`, `\|`,
-    `\\|` and a newline comes back as the one row the template writes. It
-    is not a claim about every character a tool can print.
+    The escapes go on in that order, and the order is the point. A renderer
+    CONSUMES the escape: `\|` in the source is one `|` in the text a reader
+    sees, so the source bytes and the bytes in the cell are not the same
+    bytes. Escaping the pipe alone puts that escape beside a backslash the
+    tool already wrote, and the cell then shows something other than what
+    the tool printed. Doubling the backslashes FIRST is what makes the
+    source and the display agree: the run is of even length whatever the
+    tool wrote, so every pipe ends up behind an odd one.
+
+    What the controls pin is the ROW, at the inputs
+    `tests/test_journey_report.py` renders: three literal rows — a reason
+    carrying `|`, `\|`, `\\|` and a newline, a refusal carrying a newline
+    and a pipe, and a journey name carrying a pipe. The property above is
+    wider than those three rows, and no renderer is consulted to establish
+    it: it is a claim about the order of two replaces, and the rows are
+    three samples of it.
     """
     if not why:
         return ''
