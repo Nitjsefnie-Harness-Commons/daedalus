@@ -414,6 +414,42 @@ EXCLUDED = {
     'cdp-result': (IMPORT,),
     # The bridge's per-connection request work here IS the per-byte handling
     # of the capture this journey exists to measure, and dropping `serve`
-    # from a list that holds `front-end-import` stops dropping it.
+    # from a list that holds `front-end-import` stops dropping it. The
+    # request slot measured 2,102,279,390 instructions, the median of the
+    # three rounds the `IMPORT` comment above records, which is what makes
+    # this the one journey that keeps `serve` in the count and drops the
+    # import instead.
+    #
+    # The share that slot is of the journey's own count: 78.7% of the
+    # 2,672,689,227 `.github/journey-budget.json` records for `net-capture`.
+    # Those two figures are not one measurement, and a reader is owed which
+    # session each came from rather than left holding two counts for one
+    # quantity: the slot's three rounds are CI run 37093737192, the recorded
+    # count a later session (run 37096636089, `journey-counts` artefact
+    # 11265650340). The share is therefore one session's thread set against
+    # a later session's whole journey, not a ratio read off one profile.
+    #
+    # `front-end-import` stays in this list for the two reasons the module
+    # docstring gives. It is a thread of ANOTHER process, so no journey's
+    # own work is behind it, and its cost is the one background number that
+    # does not repeat between runs of an unchanged tree (issue 1495). And a
+    # role is read from the PROCESS a thread ran in, so no importing
+    # request thread can claim the role at any size — which is what lets a
+    # request slot of billions be told from the bootstrap beside it (issue
+    # 1466).
+    #
+    # What rides along instead is the front end's event-loop tick, and it
+    # rides as a NAMED RESIDUAL rather than an exclusion: the same deal the
+    # bullet above gives `mcp-exec` — "`mcp-exec` calls that loop, so its
+    # tick stays in as the named residual". `role_of` puts every other
+    # thread of the bridge in the one role this list does not exclude, so
+    # the tick is in the count because the classifier says so rather than
+    # because it slipped past. Against the idle `bridge-only` child that
+    # residual measures 34,694,712 to 34,703,439 instructions over three
+    # rounds. The share beside that range is the MEAN of its two ends,
+    # 34,699,075.5, which is 1.298% of the count — both numbers are
+    # printed here, so the division is one a reader can redo. It grows
+    # with how long the journey ran. So the count does carry a wall-clock
+    # term; it is named here rather than implied away.
     'net-capture': (IMPORT,),
 }
