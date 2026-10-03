@@ -21,8 +21,10 @@ by hand here, at the one place the shapes are known.
 """
 import argparse
 import asyncio
+import ctypes
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -471,6 +473,28 @@ def _print_record(name, rendering):
         flush=True)
 
 
+def _establish_counted_boundary():
+    """Zero callgrind's counters at the one fixed point before journey work.
+
+    TRANSIENT (issue 1499 experiment). A counted child reaches this line after
+    the whole import closure has run and before anything is spawned, which is
+    the one point where the interpreter's own startup and compile cost can
+    leave the measurement without touching the bridge: the bridge is spawned
+    after this line and is instrumented from birth either way. A client
+    request cannot be issued from pure Python, so the job compiles a helper
+    and names it here; a named helper that will not load refuses the run
+    rather than silently counting the import again.
+    """
+    path = os.environ.get('DAEDALUS_CALLGRIND_BOUNDARY')
+    if not path:
+        return
+    try:
+        ctypes.CDLL(path).daedalus_cg_zero_stats()
+    except (OSError, AttributeError) as failure:
+        print(f'counted boundary unavailable: {failure}', file=sys.stderr)
+        raise SystemExit(3) from failure
+
+
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--journey', required=True,
@@ -482,6 +506,7 @@ def _parser():
 
 def main(argv=None):
     """Run one journey in this process and print its record."""
+    _establish_counted_boundary()
     args = _parser().parse_args(argv)
     if args.journey == STARTUP_ONLY:
         return 0
