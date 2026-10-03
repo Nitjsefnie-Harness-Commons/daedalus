@@ -13,17 +13,19 @@
 # list is a superset of what any single runner needs and `--require-hashes`
 # selects the right artifact out of it.
 #
-# THE COUNT BELOW IS WRITTEN DOWN IN tests/_wfpins.py as a literal, and that
+# THE COUNT IS WRITTEN DOWN IN tests/_wfpins.py as a literal, and that
 # is where it is checked. It is deliberately NOT read back out of this file:
 # a control that takes its own expectation from the artifact it checks goes
 # green the moment the artifact and the sentence describing it are edited
 # together, which is exactly the edit a bump makes. The test requires this
 # pin to carry exactly that many hashes, and requires the requirement to be
 # here at all. A hash short of the count is an artifact no runner resolves
-# and one leg of the matrix fails on, with nothing red locally — so the
-# count is checked here rather than left to the runner that needs it:
-#
-#     zizmor 11 hashes - the ten py3-none-* wheels and the sdist
+# and one leg of the matrix fails on, with nothing red locally — so the count
+# is checked by the test that states it, rather than left to the runner that
+# needs it. A reader's note, NOT the checked value and not its second copy:
+# this pin carries the ten py3-none-* wheels and the sdist, every hash below
+# names a DISTINCT artifact, and a value listed twice is one artifact that
+# can no longer resolve.
 #
 # NOTHING ELSE IS PINNED HERE. zizmor 1.29.0 declares no Requires-Dist at all
 # and holds no .py file that imports yaml, so its transitive closure is EMPTY

@@ -298,6 +298,11 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
         f'the block announces a retry in {len(announcing)} ways, so "the '
         f'retry arm announced itself" names no single line: {announcing}')
     marker = announcing[0]
+    assert '$attempt' in marker, (
+        f'the retry announcement names no attempt: {marker!r}. Interpolated '
+        f'per attempt it is what tells one attempt from another, and a fixed '
+        f'string prints identically every time, so counting it proves only '
+        f'that the line is there')
     assert marker not in refusals, (
         f'the retry announcement is also a refusal text, so no output of the '
         f'block tells the two apart: {marker!r}')
