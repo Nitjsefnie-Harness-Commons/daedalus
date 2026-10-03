@@ -31,6 +31,7 @@
     "Platform": {"python": ["tests/_suite_bound_stubs.py"]},
     "RecordingExtCmd": {"python": ["tests/_cli_dispatch.py"]},
     "Refusal": {"python": ["tests/_gitignore_control.py"]},
+    "Removals": {"python": ["tests/_suite_bound_stubs.py"]},
     "ResponseProbe": {"python": ["tests/_mcp_transport_probes.py"]},
     "SharedModule": {"python": ["tests/_imported_calls.py"]},
     "SharedResolver": {"python": ["tests/_imported_calls.py"]},
