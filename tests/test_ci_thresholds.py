@@ -634,6 +634,20 @@ def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
         assert other_target.read_bytes() == before
 
 
+def test_the_tests_budget_check_passes_a_tree_exactly_on_budget(tmp):
+    """The check is `measured > recorded`, so equality is a pass.
+
+    The real tree sitting exactly on its recorded number is what makes the
+    real-tree row reject a `>=` mutant today; a fixture row pins the
+    boundary where a fixture can state it, so a deletion under tests/ does
+    not quietly take the control with it.
+    """
+    repo, _target = _line_budget_fixture(tmp, _tests_files(4, 3), 7, 'equal')
+    done = _run_lines_cli(repo)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert '7' in done.stdout, done.stdout
+
+
 def test_the_workflow_tightens_the_tests_budget_before_the_check(tmp):
     del tmp
     workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
