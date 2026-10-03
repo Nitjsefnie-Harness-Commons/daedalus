@@ -21,7 +21,6 @@ by hand here, at the one place the shapes are known.
 """
 import argparse
 import asyncio
-import ctypes
 import hashlib
 import json
 import os
@@ -29,6 +28,7 @@ import sys
 import tempfile
 import threading
 import time
+from ctypes import CDLL
 from pathlib import Path
 
 # Its own siblings, and the repository root above them: the command TTL's
@@ -507,7 +507,11 @@ def _establish_counted_boundary():
         raise SystemExit(3)
 
     try:
-        helper = ctypes.CDLL(path)
+        # `from ctypes import CDLL` rather than `ctypes.CDLL`: the name is
+        # bound HERE, so a control that plants a loader plants it on this
+        # module alone. Reaching through the stdlib would hand the double to
+        # every other holder of `ctypes.CDLL` in the process for the block.
+        helper = CDLL(path)
     except OSError as failure:
         refuse(f'the helper does not load: {failure}')
     try:

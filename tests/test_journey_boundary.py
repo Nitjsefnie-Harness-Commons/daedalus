@@ -3,7 +3,6 @@
 counters are zeroed, the argv that keeps the bridge it spawns instrumented
 from birth, and every way the boundary refuses rather than lets an
 interpreter's own cost back into the count."""
-import ctypes
 import sys
 from pathlib import Path
 
@@ -29,7 +28,7 @@ def test_the_counted_boundary_is_established_or_the_run_is_refused(tmp):
     idle = boundary_loader(daedalus_cg_zero_stats=True)
     for boundary, loader, code, cause in (
             (None, idle, 0, ''), ('/cg.so', idle, 0, ''),
-            (absent, ctypes.CDLL, 3, 'absent.so'),
+            (absent, module.CDLL, 3, 'absent.so'),
             ('/cg.so', boundary_loader(), 3, 'daedalus_cg_zero_stats'),
             ('/cg.so', boundary_loader(daedalus_cg_zero_stats=True,
                                        fails=True), 3, 'would not issue')):
@@ -40,7 +39,7 @@ def test_the_counted_boundary_is_established_or_the_run_is_refused(tmp):
         idle.served, idle.zeroed)
     argv = ['--journey', 'command-round-trip', '--root', tmp]
     got, said, spawned = boundary_probe(
-        absent, ctypes.CDLL, establish, lambda: module.main(argv))
+        absent, module.CDLL, establish, lambda: module.main(argv))
     assert (got, spawned) == (3, []) and absent in said, (
         'main must refuse before it spawns anything', got, said)
     value, why, argv = counted_run(counters, 'mcp-exec', ROOT, tmp, None)

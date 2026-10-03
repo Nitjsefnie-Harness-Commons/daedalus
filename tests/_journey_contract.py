@@ -9,7 +9,6 @@ journey fact rather than a counter fact. Not a suite itself —
 `run_tests.py` only loads `test_*.py`.
 """
 import contextlib
-import ctypes
 import io
 import json
 
@@ -290,7 +289,7 @@ BOUNDARY_ENV = 'DAEDALUS_CALLGRIND_BOUNDARY'
 
 
 def boundary_loader(**symbol):
-    """`ctypes.CDLL` as the journeys module reaches it, and its two records.
+    """The journeys module's own `CDLL` name, and its two records.
 
     `served` is every path a load was asked for and `zeroed` every call of
     the zero symbol; they are separate records because a control pinning
@@ -365,16 +364,19 @@ def boundary_probe(boundary, loader, establish, call=None):
     CAN reach it, which is what separates "nothing spawned because the
     boundary refused" from "nothing spawned because nothing ran".
 
-    `loader` is planted as `ctypes.CDLL`, and a caller that wants the REAL
-    one plants `ctypes.CDLL` itself. `call` defaults to the boundary
+    `loader` is planted as the journeys module's own `CDLL`, so the double
+    is bound to the subject rather than to the stdlib module every other
+    holder in the process shares. A caller that wants the REAL one passes
+    the journeys module's `CDLL` itself. `call` defaults to the boundary
     itself; naming `main` is how the case that has to prove WHERE the
     boundary runs drives the real call site instead.
     """
     spawned = []
+    subject = sys.modules[establish.__module__]
     with contextlib.redirect_stderr(io.StringIO()) as said:
         with contextlib.ExitStack() as stack:
             stack.enter_context(environment(BOUNDARY_ENV, boundary))
-            stack.enter_context(planting(ctypes, CDLL=loader))
+            stack.enter_context(planting(subject, CDLL=loader))
             stack.enter_context(planting(_util, bridge=_bridge_spy(spawned)))
             try:
                 (call or establish)()
