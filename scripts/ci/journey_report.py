@@ -129,12 +129,19 @@ def probe_lines(found):
 def _reason(why):
     r"""One table cell's worth of prose, escaped so the cell stays one cell.
 
-    Every value interpolated into a row's cells comes through here: a
-    counter's reason, the journey NAME the row leads with, and the toolchain
-    table's field and its two values. `journey_artifact` bounds a journey's
-    recorded COUNT and never its name, and nothing bounds the shas, thread
-    names or toolchain identities a measurement supplies, so each of them
-    arrives carrying whatever its own key carried.
+    Three cells are routed through here, and the three are the population:
+    a counter's reason, the journey NAME the verdict row leads with, and
+    the toolchain table's field and its two values. `journey_artifact`
+    bounds a journey's recorded COUNT and never its name, and on the
+    measured side nothing bounds the shas, thread names or toolchain
+    identities a run supplies, so those arrive carrying whatever their own
+    keys carried.
+
+    A fourth table in this module — the journeys that were never compared —
+    interpolates three cells that do NOT come through here and are safe
+    without it: a name from `_journeys.NAMES`, a literal tuple; a recorded
+    count admitted as a nonnegative int or `None`; and a median. Each is
+    bounded by its own producer, not by this escape.
 
     A counter reports its reason in whichever of two shapes it has: a
     sentence of its own when the refusal is one, and a returncode with the
@@ -307,12 +314,18 @@ def toolchain_lines(document, report, changed, remedy,
                  'step succeeds because the tree did not regress, not '
                  'because anything was within budget.', '',
                  '| field | recorded | measured |', '|---|---|---|']
-        # All three cells are values the measurement supplied — the field
-        # names out of the recorded artefact, both sides shas or thread
-        # names — and none is bounded, so each goes through the reason's
-        # escape; an unescaped pipe spends the row. PLAIN cells, like the
-        # reason's: a code span is where a renderer leaves the doubled
-        # backslash, so a value the escape shows verbatim would read doubled.
+        # `was` is the RECORDED side in each of the four producers, and it
+        # is bounded there: `_validated_shas` admits only 64 lowercase hex,
+        # and `_validated_exclusions` holds a role to `journey_threads.ROLES`.
+        # `now` is the measured side, which `journey_budget.py` reads with
+        # `json.load` and no validation. `field` is a journey name out of
+        # either side except under `toolchain_diff`, where it iterates the
+        # static `TOOLCHAIN_FIELDS`. Each cell goes through the reason's
+        # escape anyway: an unescaped pipe spends the row, and the bounded
+        # ones are not worth a second argument. PLAIN cells, like the
+        # reason's, because a renderer CONSUMES `\|` outside a code span but
+        # not inside one — so a value the escape shows verbatim would read
+        # doubled between backticks.
         for field, (was, now) in sorted(changed.items()):
             lines.append(f'| {_reason(field)} | {_reason(str(was))} | '
                          f'{_reason(str(now))} |')
