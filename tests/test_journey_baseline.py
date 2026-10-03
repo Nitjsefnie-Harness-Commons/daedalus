@@ -105,6 +105,58 @@ def test_the_baseline_is_read_through_each_journeys_own_exclusions(tmp):
     assert 'bridge-only' not in report['excluded_threads']
 
 
+def test_a_baselines_refusal_is_not_swallowed_by_the_next_journey(tmp):
+    """One journey's refusal is the counter's, and the next journey's
+    answer must not overwrite it.
+
+    The baseline is read once per journey through that journey's OWN
+    exclusion list, so a bridge-only profile that never ran the server loop
+    refuses every journey excluding one — `command-round-trip`,
+    `dashboard-fanout` and `net-capture` — and answers the rest.
+    `command-round-trip` is first in the real set, so the loop that reads
+    them stops at its refusal. Carrying on lets the next journey's `None`
+    erase it, and a half-filled baseline is then subtracted from counts
+    that cannot be read: a journey's measurement lost, nothing saying so.
+    """
+    del tmp
+    counters = _journey_contract.counters()
+    policy = _journey_contract.threads()
+    names = _journey_contract.journeys().NAMES
+    # A bridge whose front end initialised and whose server loop never ran:
+    # `served` left at zero omits that thread, which is what a profile that
+    # did not start one looks.
+    bridge = {'rows': _journey_contract.bridge_profile(
+        main=30_000, imported=3_000), 'unread': None}
+
+    def answering(name, root, workdir):
+        del root, workdir
+        if name == counters.STARTUP_NAME:
+            return {'rows': _journey_contract.bridge_profile(main=7_000),
+                    'unread': None}, None
+        if name == counters.BRIDGE_NAME:
+            return bridge, None
+        return {'rows': _journey_contract.bridge_profile(
+            main=100_000, request=2_000, imported=3_000, served=5_000),
+            'unread': None}, None
+
+    # ONE profile answers both ways, which is what makes overwriting the
+    # refusal possible at all.
+    refusing = names[0]
+    kept, why = counters.kept_for(bridge, refusing)
+    assert kept is None and why is not None, (kept, why)
+    answering_name = next(name for name in names
+                          if policy.SERVE not in policy.excluded_for(name))
+    _kept, why = counters.kept_for(bridge, answering_name)
+    assert why is None, why
+
+    _report, row = _measured(counters, answering)
+    # Nothing measured is reported beside the refusal: a partial set of
+    # counts is the shape a gate cannot compare in.
+    assert row.keys() == {'available', 'why'}, row
+    assert row['available'] is False, row
+    assert refusing in row['why'] and policy.SERVE in row['why'], row
+
+
 def test_a_journey_whose_own_work_is_under_the_bridge_refuses_and_says_so(tmp):
     """A negative residual refuses THAT JOURNEY, and names its four numbers.
 
