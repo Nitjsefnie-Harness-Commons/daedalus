@@ -127,17 +127,27 @@ def probe_lines(found):
 
 
 def _reason(why):
-    """A counter's refusal as one table cell's worth of prose.
+    r"""A counter's refusal as one table cell's worth of prose.
 
     A counter reports its reason in whichever of two shapes it has: a
     sentence of its own when the refusal is one, and a returncode with the
     tool's own stderr when the tool is what would not run. Neither is
     rendered with `str()` — a cell holding `{...}` is a cell naming nothing.
 
-    The cell is ONE line of ONE table, so the reason is made safe for it:
-    a newline the tool wrote splits the row out of the table and a pipe adds
-    a phantom column. `journey_counters` records that stderr verbatim, so
+    The cell is ONE line of ONE table, so a newline the tool wrote is
+    collapsed and a pipe is escaped before the text goes in: a raw
+    newline splits the row out of the table, and a raw pipe adds a
+    phantom column. `journey_counters` records that stderr verbatim, so
     both arrive on exactly the failure path this reason exists to explain.
+
+    The escapes go on in that order, and the order is the point. Escaping
+    the pipe alone turns a reason that already carried a backslash into an
+    EVEN run before its pipe, which the table grammar reads as a column
+    boundary -- so the escape would undo itself on the one input that
+    needs it. What is proved here is the row, at the input
+    `tests/test_journey_report.py` renders: a reason carrying `|`, `\|`,
+    `\\|` and a newline comes back as the one row the template writes. It
+    is not a claim about every character a tool can print.
     """
     if not why:
         return ''
@@ -146,7 +156,7 @@ def _reason(why):
     else:
         text = (f'returncode {why.get("returncode")}: '
                 f'{why.get("stderr") or ""}')
-    return ' '.join(text.split()).replace('|', r'\|')
+    return ' '.join(text.split()).replace('\\', '\\\\').replace('|', r'\|')
 
 
 def verdict_lines(document, counts, found, why=None):

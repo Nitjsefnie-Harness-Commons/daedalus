@@ -177,6 +177,15 @@ def test_a_check_with_no_measurement_file_measures_here(tmp):
         f'reads it: {written}')
 
 
+def _refusal_sentence(refused):
+    """The sentence `journey_residual` mints for a journey it could not
+    resolve, spelled the way the measurement records it."""
+    return (f'the {refused} journey measured [2000] instructions net '
+            '[-9000] against a startup-only baseline of 7000 and a '
+            'bridge-only baseline of 4000, so its own work is smaller '
+            'than the fixed background it shares')
+
+
 def _with_a_refused_residual(names, refused):
     """A measurement that resolved every journey but `refused`.
 
@@ -186,11 +195,7 @@ def _with_a_refused_residual(names, refused):
     report = measured_report({name: 1000 for name in names})
     entry = report['counters']['perf-instructions']
     entry['journeys'].pop(refused)
-    entry['refused'] = {
-        refused: f'the {refused} journey measured [2000] instructions net '
-                 '[-9000] against a startup-only baseline of 7000 and a '
-                 'bridge-only baseline of 4000, so its own work is smaller '
-                 'than the fixed background it shares'}
+    entry['refused'] = {refused: _refusal_sentence(refused)}
     return report
 
 
@@ -496,6 +501,14 @@ def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
     said = err.getvalue()
     assert refused in said, (
         f'the refusal does not name the journey it is about: {said}')
+    # The SENTENCE, not only the journey's name under it. `violations` keys
+    # `unresolved` by journey and holds the run's own words as the value, so
+    # joining that mapping's keys put the name on stderr and nothing of why
+    # the run could not resolve it — #1502 on its second reader path, after
+    # the row in the step summary this same refusal reaches first.
+    assert _refusal_sentence(refused) in said, (
+        "the refusal reached stderr without the run's own sentence, which is "
+        f'what says the journey could not be resolved and why: {said}')
     assert 'nothing is tightened' in said or 'tightened nothing' in said, said
 
     # And the check on that same artefact still refuses, so the two readers
