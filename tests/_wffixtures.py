@@ -12,6 +12,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import _util
 from _repo import ROOT
 from _wfgraph import _tests_yml
 from _yamlread import step_scalar
@@ -178,7 +179,7 @@ AUDIT_RETRY_FIXTURES = (
 )
 
 
-def audit_step_outcome(body, output, cwd, code=1):
+def audit_step_outcome(body, output, cwd, env, code=1):
     """Run audit.yml's own retry block over one pip-audit output.
 
     `pip-audit` and `sleep` become shell functions, so the block's OWN
@@ -192,6 +193,10 @@ def audit_step_outcome(body, output, cwd, code=1):
     The block arrives as a decoded `run:` scalar on a script this builds and
     is handed to bash through `-c`, never through `$( )`: macOS ships bash
     3.2, whose here-doc handling inside a substitution differs.
+
+    `env` is the environment the caller declares for the launches this one
+    makes: `tmp` is not a tree [tool.coverage.paths] maps back, so the child
+    must not inherit the collector this process is running under.
     """
     root = Path(cwd)
     (root / 'fixture.out').write_text(output, encoding='utf-8')
@@ -201,9 +206,11 @@ def audit_step_outcome(body, output, cwd, code=1):
               'pip-audit() { echo x >> runs.log; cat fixture.out;'
               ' return "$AUDIT_CODE"; }\n') + body
     result = subprocess.run(
-        ['bash', '-e', '-c', script], capture_output=True, text=True,
-        timeout=_AUDIT_RETRY_TIMEOUT, cwd=cwd,
-        env={**os.environ, 'AUDIT_CODE': str(code)})
+        [_util.workflow_bash(), '-e', '-c', script],
+        capture_output=True, text=True, timeout=_AUDIT_RETRY_TIMEOUT,
+        cwd=cwd,
+        env=_util.child_coverage(
+            'scrub', {**env, 'AUDIT_CODE': str(code)}))
     runs = len((root / 'runs.log').read_text(encoding='utf-8').split())
     waits = (root / 'sleeps.log').read_text(encoding='utf-8').split()
     return {'runs': runs, 'code': result.returncode,
@@ -307,7 +314,9 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
         f'the retry announcement is also a refusal text, so no output of the '
         f'block tells the two apart: {marker!r}')
     for label, output, runs, code in AUDIT_RETRY_FIXTURES:
-        outcome = audit_step_outcome(body, output, cwd=tmp, code=code)
+        outcome = audit_step_outcome(
+            body, output, cwd=tmp, env=_util.child_coverage('scrub'),
+            code=code)
         assert (outcome['runs'], outcome['code']) == (runs, code), (
             f'{label}: {outcome}')
         assert output.strip() in outcome['out'], (
