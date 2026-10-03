@@ -435,24 +435,29 @@ def net_capture(base, docroot):
     `DAEDALUS_MAX_UNAUTHENTICATED_BODY` (64 KiB by default), and anything
     larger with no header is answered 401 without being read. A real capture
     is megabytes, so the same trap holds for any real PNG.
-    What its recorded budget holds is this journey's own side of the work:
+
+    What its recorded budget holds is this journey's own side of the work —
     reading the capture buffer back and digesting it field by field, net of
-    the fixed background. No constant sits in that number.
-    The thread carrying that read-back runs to billions of instructions,
-    which under size bands landed in the import band beside the bridge's
-    own one-off bootstrap, so excluding the import then would have dropped
-    the work the journey exists to measure (issue 1461, bridge side). That
-    coupling is gone: a role comes from the process a thread ran in, and
-    `front-end-import` is a role no importing request thread can claim —
-    its signature is the init symbol of the compiled core that `mcp==2.2.0`
-    pulls and the bridge's own request path never loads (issue 1466). The
-    import is excluded here as it is everywhere else, a thread of another
-    process whose own cost does not repeat between runs of an unchanged tree
-    (issue 1495), and the serve role is excluded beside it: `role_of` reads
-    every bridge thread as one of the two roles this list names, so no
-    thread of the bridge is counted here at all — the bridge's own handling
-    of the capture is in neither the count nor the fixed background
-    subtracted from it.
+    the fixed background — and the bridge's own handling of the capture
+    beside it. Of a 2,674,843,640 median over three rounds, the bridge's
+    per-connection request slot is 2,102,507,000: 78.6%. That is the
+    per-byte handling the journey exists to measure, so `serve` is left out
+    of the exclusion list here while `front-end-import` stays in it. The
+    import is a thread of another process whose cost does not repeat between
+    runs of an unchanged tree (issue 1495), and it can be told from a
+    request thread running to billions at all because a role comes from the
+    process a thread ran in and its signature is the init symbol of the
+    compiled core that `mcp==2.2.0` pulls, which the bridge's own request
+    path never loads (issue 1466). Dropping `serve` from a list that holds
+    `front-end-import` stops dropping the request work as well.
+
+    `role_of` puts every other thread of the bridge in the one role this
+    list does not exclude, so the front end's event-loop tick rides along as
+    a named residual — the ruling `mcp-exec`'s exclusion rests on, its case
+    (a). Against the idle `bridge-only` child that residual measures
+    34,694,712 to 34,703,439 instructions over three rounds, 1.297% of the
+    count, and it grows with how long the journey ran. So this count does
+    carry a wall-clock term, named here rather than implied away.
     """
     del docroot
     status, raw = _bridge.put_command(base, {

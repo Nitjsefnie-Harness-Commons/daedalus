@@ -73,12 +73,13 @@ def test_the_baseline_is_read_through_each_journeys_own_exclusions(tmp):
     """One measured profile, and a different answer per journey.
 
     Every journey's exclusion list is its own, so the constant subtracted
-    is the journey's too: the journeys that keep neither background thread
-    and the ones that keep the serve loop beside the bootstrap read one
-    profile to two different answers. Reading the baseline once with one
-    journey's list and handing that number to the rest would net a journey
-    a thread it excluded, which is the defect this whole measurement is
-    for.
+    is the journey's too: the journeys that drop both background roles, the
+    ones that keep the serve role beside the bootstrap, and `net-capture`,
+    which keeps the bridge's own per-connection work and so drops only the
+    bootstrap, read one profile to three different answers. Reading the
+    baseline once with one journey's list and handing that number to the rest
+    would net a journey a thread it excluded, which is the defect this whole
+    measurement is for.
     """
     del tmp
     counters = _journey_contract.counters()
@@ -90,7 +91,7 @@ def test_the_baseline_is_read_through_each_journeys_own_exclusions(tmp):
                                   'screenshot': 97_000,
                                   'segment-relay': 97_000,
                                   'cdp-result': 97_000,
-                                  'net-capture': 92_000}, row
+                                  'net-capture': 97_000}, row
     assert row['startup_only'] == 45_000, row
     # 107,000 is mcp-exec's own KEPT total — its own two threads, the
     # bridge's serve threads still in it — and the 8,000 the bridge-only
