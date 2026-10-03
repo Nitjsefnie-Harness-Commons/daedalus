@@ -350,6 +350,48 @@ def test_the_summary_remedies_come_in_the_report_s_order(tmp):
     assert places == sorted(places), (places, said)
 
 
+def test_the_counter_s_own_refusal_reaches_the_step_summary(tmp):
+    """The check is the only thing that wires the reason to the row.
+
+    `verdict_lines` taking the reason proves nothing about whether anything
+    passes it: a parameter the one caller never supplies is a row that reads
+    exactly as it did before, and the sentence `boundary_refusal()` exists
+    to produce stays in the uploaded artifact. So the whole command is
+    driven, with a counter that refused and said why, and the summary is
+    read as a person would.
+    """
+    policy = _journey_contract.policy()
+    names = journeys().NAMES
+    document = recorded_document()
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(document))
+    refusal = ('DAEDALUS_CALLGRIND_BOUNDARY names no compiled boundary '
+               'helper, so a counted child would keep its interpreter '
+               'startup and the compile of its import closure in the '
+               'recorded count')
+    report = measured_report({})
+    report['counters']['perf-instructions'] = {
+        'available': False, 'why': refusal}
+    counts = Path(tmp) / 'counts.json'
+    counts.write_text(json.dumps(report), encoding='utf-8')
+    with summary_file(tmp, 'unmeasured.md') as summary:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = policy.main(['check', '--artifact', str(artifact),
+                                '--measurements', str(counts), '--summary'])
+    said = summary.read_text(encoding='utf-8')
+    assert code == 1, out.getvalue()
+    assert sorted([*names, 'journey']) == sorted(  # every journey unmeasured
+        line.split('|')[1].strip() for line in said.split('\n')
+        if line.startswith('|') and not line.startswith('|---')), said
+    assert refusal in said, (
+        'the counter refused and named why, and the summary a reader meets '
+        f'says only which counter produced no count: {said}')
+    assert 'Build the counted-boundary helper' in said, (
+        'the remedy must send the reader to the step that failed, not the '
+        f'probe step that succeeded: {said}')
+
+
 def test_a_drop_inside_the_tolerance_is_not_recorded(tmp):
     """A journey's own run-to-run spread is not a cheaper journey.
 

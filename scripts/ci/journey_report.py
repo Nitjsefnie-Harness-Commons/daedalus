@@ -51,9 +51,15 @@ SHAPE_REMEDY = (
 UNMEASURED_REMEDY = (
     'The budget names a counter this runner produced no count in, so no '
     'journey was compared and a green here would be a run that measured '
-    'nothing. The probe step says what this runner allows: `instructions:u` '
-    'needs less kernel access than an unqualified event, and callgrind is '
-    'the fallback when perf is refused.')
+    'nothing. Each unmeasured row carries the sentence the counter refused '
+    'with, and that sentence is what says which step to look at. If it '
+    'names `DAEDALUS_CALLGRIND_BOUNDARY`, the `Build the counted-boundary '
+    'helper` step is the one that failed: a counted child refuses rather '
+    'than record its own interpreter startup and the compile of its import '
+    'closure, and it does so when that variable names no compiled helper. '
+    'Otherwise the `Probe the counters` step says what this runner allows: '
+    '`instructions:u` needs less kernel access than an unqualified event, '
+    'and callgrind is the fallback when perf is refused.')
 TOOLCHAIN_REMEDY = (
     'A recorded count is only comparable against a measurement taken on the '
     'toolchain it was recorded on. Re-baseline from a measured run: '
@@ -120,7 +126,23 @@ def probe_lines(found):
     return lines
 
 
-def verdict_lines(document, counts, found):
+def _reason(why):
+    """A counter's refusal as one table cell's worth of prose.
+
+    A counter reports its reason in whichever of two shapes it has: a
+    sentence of its own when the refusal is one, and a returncode with the
+    tool's own stderr when the tool is what would not run. Neither is
+    rendered with `str()` — a cell holding `{...}` is a cell naming nothing.
+    """
+    if not why:
+        return ''
+    if isinstance(why, str):
+        return why.strip()
+    return (f'returncode {why.get("returncode")}: '
+            f'{(why.get("stderr") or "").strip()}').strip()
+
+
+def verdict_lines(document, counts, found, why=None):
     """One row per recorded journey, on a pass and on a fail alike.
 
     The same table either way is the point: a reader deciding whether a red
@@ -129,10 +151,17 @@ def verdict_lines(document, counts, found):
     same line — so a run whose verdict changed does not also change what
     there is to read. The budget is the gate's own arithmetic, not a
     second copy of it.
+
+    `why` is the counter's own refusal, and it is a parameter rather than
+    something read out of `report` here because this module renders data it
+    is handed: the sentence a counter refused with is the only thing that
+    tells a reader WHICH step to go and look at, and it used to survive only
+    inside the uploaded measurement.
     """
     over = found['over']
     unmeasured = found['unmeasured']
     unresolved = found.get('unresolved') or {}
+    reason = _reason(why)
     lines = ['### Journey budget', '',
              '| journey | count | budget | delta | verdict |',
              '|---|---|---|---|---|']
@@ -154,6 +183,8 @@ def verdict_lines(document, counts, found):
             measured = None
         elif name in unmeasured:
             verdict = f'no count for `{unmeasured[name]}`'
+            if reason:
+                verdict = f'{verdict}: {reason}'
             measured = None
         elif name in over:
             verdict = 'OVER BUDGET'

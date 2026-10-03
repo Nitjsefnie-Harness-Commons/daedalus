@@ -34,9 +34,10 @@ def test_the_counted_boundary_is_established_or_the_run_is_refused(tmp):
     # "would not issue", so an anchor drawn from either is satisfied by its
     # sibling limb. The minted prefix is what tells "the helper loaded but
     # carries no symbol" from "the call did not issue" -- the two
-    # diagnostics a reader has to be able to tell apart.
+    # diagnostics a reader has to be able to tell apart. A row that refuses
+    # nothing expects nothing, so it spells both empty.
     for boundary, loader, code, minted, carried in (
-            (None, idle, 0, None, None), ('/cg.so', idle, 0, None, None),
+            (None, idle, 0, '', ''), ('/cg.so', idle, 0, '', ''),
             (absent, module.CDLL, 3, 'the helper does not load', absent),
             ('/cg.so', boundary_loader(), 3,
              'the helper carries no daedalus_cg_zero_stats', 'no attribute'),

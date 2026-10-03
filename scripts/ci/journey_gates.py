@@ -77,6 +77,19 @@ def refused_of(report, counter):
     return dict(entry.get('refused') or {})
 
 
+def unavailable_reason(report, counter):
+    """Why this counter produced no count at all, or None when it did.
+
+    The sibling of `refused_of`, and the other half of what a journey with
+    no count has to say: that one is a journey's own sentence, this is the
+    counter's. A reader deciding whether a green measured anything is
+    reading the second, so a check that renders a verdict table has to carry
+    it there rather than leave it in the uploaded report.
+    """
+    entry = ((report or {}).get('counters') or {}).get(counter) or {}
+    return entry.get('why')
+
+
 def violations(counts, document, names, refused=()):
     """The kinds a check can refuse a journey on.
 

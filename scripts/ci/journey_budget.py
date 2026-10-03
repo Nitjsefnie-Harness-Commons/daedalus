@@ -108,6 +108,7 @@ toolchain_diff = journey_gates.toolchain_diff
 unrecorded = journey_gates.unrecorded
 stale = journey_gates.stale
 refused_of = journey_gates.refused_of
+unavailable_reason = journey_gates.unavailable_reason
 violations = journey_gates.violations
 tightened = journey_gates.tightened
 _recorded_gates = journey_gates._recorded_gates  # noqa: SLF001
@@ -310,8 +311,9 @@ def main(argv=None):
 
         _report_state(document, names, counter, report)
         if args.summary:
-            journey_counters.write_summary(
-                journey_report.verdict_lines(document, counts, found))
+            journey_counters.write_summary(journey_report.verdict_lines(
+                document, counts, found,
+                unavailable_reason(report, counter)))
         if not any(found.values()):
             print(f'{len(names)} journeys measured against '
                   f'{counter or "no counter"}; none over budget')
