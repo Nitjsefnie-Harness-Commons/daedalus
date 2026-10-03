@@ -472,7 +472,7 @@ def _installer_and_transfer(outcomes):
     return installer, _Transfer(installer, name, outcomes), name
 
 
-def _http_error(installer, code, phrase):
+def _http_error(installer, code, phrase, retry_after=None):
     """A status answer as urllib raises one, addressed at the installer's own
     release base.
 
@@ -481,11 +481,15 @@ def _http_error(installer, code, phrase):
     leg, and no control below asserts on this URL — they assert on the call
     count, the status and the bytes. The headers are an empty
     `email.message.Message` because that is what `HTTPError` declares, not a
-    dict that happens to be accepted.
+    dict that happens to be accepted, unless a caller names a `retry_after`
+    for the control that reads one back off a failing status.
     """
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers['Retry-After'] = str(retry_after)
     return urllib.error.HTTPError(
         f'{installer.RELEASE}/v{installer.ACTIONLINT_VERSION}/not-the-asset',
-        code, phrase, email.message.Message(), None)
+        code, phrase, headers, None)
 
 
 def test_a_transient_transfer_failure_is_retried_and_the_next_attempt_serves(
@@ -497,7 +501,8 @@ def test_a_transient_transfer_failure_is_retried_and_the_next_attempt_serves(
     del tmp
     installer, transfer, name = _installer_and_transfer([
         urllib.error.URLError(TimeoutError('timed out')), b'the asset bytes'])
-    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+    with (mock.patch.object(installer.urllib.request, 'urlopen', transfer),
+          mock.patch.object(installer.time, 'sleep', lambda seconds: None)):
         payload = installer._fetch(name)
     assert payload == b'the asset bytes', (
         f'_fetch returned {payload!r} where the second attempt served '
@@ -520,7 +525,8 @@ def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
     failures = [urllib.error.URLError(TimeoutError(f'attempt {n}'))
                 for n in range(1, installer.DOWNLOAD_ATTEMPTS + 1)]
     transfer = _Transfer(installer, name, failures)
-    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+    with (mock.patch.object(installer.urllib.request, 'urlopen', transfer),
+          mock.patch.object(installer.time, 'sleep', lambda seconds: None)):
         raised = None
         try:
             installer._fetch(name)
@@ -604,7 +610,9 @@ def test_a_4xx_is_asked_once_and_propagates(tmp):
     del tmp
     installer, transfer, name = _installer_and_transfer(
         lambda i: [_http_error(i, 404, 'Not Found')])
-    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+    waits = []
+    with (mock.patch.object(installer.urllib.request, 'urlopen', transfer),
+          mock.patch.object(installer.time, 'sleep', waits.append)):
         raised = None
         try:
             installer._fetch(name)
@@ -617,6 +625,10 @@ def test_a_4xx_is_asked_once_and_propagates(tmp):
     assert len(transfer.calls) == 1, (
         f'a 404 was asked for {len(transfer.calls)} times; the asset is not '
         'there, and the second ask gets the same answer')
+    assert waits == [], (
+        f'the installer paused {waits} on a status it never retried; a '
+        'verdict about the asset is not a failure worth waiting out, so the '
+        'retry window belongs to the failing half of the boundary')
 
 
 def test_a_5xx_is_asked_again_and_the_next_attempt_serves(tmp):
@@ -630,13 +642,50 @@ def test_a_5xx_is_asked_again_and_the_next_attempt_serves(tmp):
     installer, transfer, name = _installer_and_transfer(
         lambda i: [_http_error(i, 500, 'Internal Server Error'),
                    b'the asset bytes'])
-    with mock.patch.object(installer.urllib.request, 'urlopen', transfer):
+    with (mock.patch.object(installer.urllib.request, 'urlopen', transfer),
+          mock.patch.object(installer.time, 'sleep', lambda seconds: None)):
         payload = installer._fetch(name)
     assert payload == b'the asset bytes', payload
     assert len(transfer.calls) == 2, (
         f'a 500 was asked for {len(transfer.calls)} times and not retried; a '
         'server failing is the transfer failing, which is what the retry is '
         'for')
+
+
+def test_a_retry_waits_the_window_the_status_asked_for(tmp):
+    """The gap between attempts, proved by the wait the installer chose.
+
+    `time.sleep` is stood in for and recorded, so the subject is the value
+    passed to it and never how long the machine took to give it back — a
+    wall-clock bound passes on a fast runner and fails a loaded one, which
+    is the intermittency it would be written against.
+
+    Three properties, one run, because one run is where the SEQUENCE
+    lives: a pause between attempts at all, a header winning a window
+    below the ceiling, and the ceiling binding one above it. The two
+    headers straddle it on purpose — 6 is above the 2 s the first attempt
+    would have grown to and below the 10 s ceiling, so a path that ignores
+    the header records 2 where 6 is wanted, and 900 is above the ceiling,
+    so a path that never clamps records 900 where 10 is. Two entries and
+    not three: the third attempt served, and a pause after the attempt
+    that succeeded is waiting for nothing.
+    """
+    del tmp
+    installer, transfer, name = _installer_and_transfer(lambda i: [
+        _http_error(i, 503, 'Service Unavailable', retry_after=6),
+        _http_error(i, 503, 'Service Unavailable', retry_after=900),
+        b'the asset bytes'])
+    waits = []
+    with (mock.patch.object(installer.urllib.request, 'urlopen', transfer),
+          mock.patch.object(installer.time, 'sleep', waits.append)):
+        payload = installer._fetch(name)
+    assert payload == b'the asset bytes', payload
+    assert waits == [6, 10], (
+        f'the recorded pauses were {waits}, where the two failing statuses '
+        'carried Retry-After 6 and 900. The wait grows with the attempt, a '
+        'header below the ceiling REPLACES that growth rather than adding to '
+        'it, the ceiling binds a header above it, and nothing is recorded '
+        'after the attempt that served.')
 
 
 def main():

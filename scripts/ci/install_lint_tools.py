@@ -46,6 +46,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -143,6 +144,17 @@ DOWNLOAD_ATTEMPTS = 3
 # What a retry can change. A body cut short mid-transfer raises
 # IncompleteRead, an HTTPException and not an OSError.
 TRANSIENT_ERRORS = (OSError, http.client.HTTPException)
+# The gap a retry leaves before it asks again, and the ceiling that gap
+# stops at. Asking back to back spends every attempt inside the same few
+# milliseconds, so a 503 the server would have cleared on its own is
+# asked again before it can clear — measured at 0.004 s across all three
+# attempts, against a Retry-After the server had already sent. The
+# ceiling is what keeps the wait from becoming the failure: it is a
+# fraction of the tightest `timeout-minutes` any job gives this script,
+# so the job's own bound stays the outer one and a header asking for
+# longer than that cannot park a runner past it.
+RETRY_BACKOFF_SECONDS = 2
+RETRY_BACKOFF_CAP_SECONDS = 10
 # A whole-process bound, because pip owns the wheel transfer below, so
 # the per-socket one above does not apply to it.
 WHEEL_TIMEOUT = 300
@@ -189,6 +201,42 @@ def _worth_asking_again(why):
     return not isinstance(unwrapped, ssl.SSLCertVerificationError)
 
 
+def _retry_after_seconds(why):
+    """The delay in seconds a failing status asked for, or None.
+
+    `Retry-After` is either delay-seconds or an HTTP-date, and only the
+    first is used: a date is the same window in a form this code has no
+    clock to compare it against, so it falls back to the backoff rather
+    than being turned into a number nobody here could have checked. A
+    bare OSError carries no headers at all, and a value that is not a
+    non-negative integer is no delay this can honour.
+    """
+    headers = getattr(why, 'headers', None)
+    told = headers.get('Retry-After') if headers is not None else None
+    try:
+        seconds = int(told)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _pause_seconds(attempt, why):
+    """How long to wait before the next ask, and whose number that is.
+
+    The growth is this module's own. A `Retry-After` the failing status
+    carried REPLACES it rather than adding to it, because the server
+    knows when it will answer and this code does not — an ask scheduled
+    before the server asked to be asked is the same mistake the wait was
+    added to stop. The ceiling is applied last so it binds whichever of
+    the two is larger.
+    """
+    window = RETRY_BACKOFF_SECONDS * 2 ** attempt
+    told = _retry_after_seconds(why)
+    if told is not None:
+        window = max(window, told)
+    return min(window, RETRY_BACKOFF_CAP_SECONDS)
+
+
 def _fetch(name):
     """The release asset's bytes, bounded in size, on a per-read timeout.
 
@@ -198,7 +246,9 @@ def _fetch(name):
 
     The attempt is repeated while it fails transiently, and the last failure
     propagates as it does without the retry, so the traceback naming `_fetch`
-    and `urlopen` is what a reader of a dead install step still gets.
+    and `urlopen` is what a reader of a dead install step still gets. A retry
+    waits first, for the window `_pause_seconds` names, so the asks are
+    not three in the same few milliseconds.
     """
     url = f'{RELEASE}/v{ACTIONLINT_VERSION}/{name}'
     for attempt in range(DOWNLOAD_ATTEMPTS):
@@ -210,6 +260,7 @@ def _fetch(name):
             if (attempt + 1 == DOWNLOAD_ATTEMPTS
                     or not _worth_asking_again(why)):
                 raise
+            time.sleep(_pause_seconds(attempt, why))
             continue
         if len(payload) > MAX_TRANSFER:
             raise SystemExit(
