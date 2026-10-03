@@ -24,9 +24,19 @@ construction: the bridge's own server loop, its MCP front end, its protocol
 threads, and anything else the journey itself started.
 
 WHAT A SYMBOL CANNOT DO, measured on the real profiles in
-`tests/_journey_profile_fixtures.py` (CPython 3.13.14, valgrind 3.24.0,
+`tests/_journey_profile_fixture.py` (CPython 3.13.14, valgrind 3.24.0,
 `--separate-threads=yes --trace-children=yes`, three runs — `bridge-only`,
-`command-round-trip` and `mcp-exec`):
+`command-round-trip` and `mcp-exec`). Every per-thread figure quoted in this
+module comes out of one invocation, the same argv
+`journey_counters._callgrind` runs:
+
+    valgrind --tool=callgrind --trace-children=yes --separate-threads=yes \
+        --callgrind-out-file=cg.%p \
+        python3 tests/_journeys.py --journey <name> --root .
+
+Each out file's `summary:` line is that thread's total, `read` returns them
+all and `role_of` names each one, so a per-thread number here is reproducible
+rather than cited:
 
   - The seven `TaskObj_*`/`FutureObj_*` symbols an earlier reading took as
     exclusive to an event loop appear on NO background thread of any run.
@@ -111,13 +121,16 @@ Limitations rather than claimed here as a rule that holds.
   it — and every journey excludes it. It is a thread of ANOTHER process, so
   no journey's own work is behind it, and its cost is the one background
   number that does not repeat: five rounds of identical code on one runner
-  measured it between 4,015,865,696 and 4,020,617,049 instructions, so a
-  journey keeping it moved 1.14% between runs of an unchanged tree (issue
-  1495). Size bands once made keeping it necessary — a thread that journey
-  puts to work measured 2.12 billion instructions and landed in the import
-  band beside the bootstrap; the roles are now settled by the process a
-  thread ran in, so no importing request thread can claim the role at any
-  size.
+  measured it between 4,015,865,696 and 4,020,617,049 instructions, a range
+  of 4,751,353 — 0.118% of the smaller figure. The 1.14% a journey keeping
+  it moved between runs of an unchanged tree is a SECOND measurement, not
+  this one's consequence: it is issue 1495's own six-draw whole-journey
+  `max/min - 1`, a journey count over everything the tree did rather than a
+  thread's cost over itself. Size bands once made keeping it necessary — a
+  thread that journey puts to work measured 2.10 billion instructions and
+  landed in the import band beside the bootstrap; the roles are now settled
+  by the process a thread ran in, so no importing request thread can claim
+  the role at any size.
 - `command-round-trip` and `dashboard-fanout` also exclude `serve`: they
   exercise the bridge's HTTP surface and none of the front end's event loop,
   so the loop's idle tick is not their work.
@@ -272,7 +285,7 @@ def role_of(row):
     specific claim; no journey excludes a role it cannot name.
 
     A thread no signature claims is `request` inside the journey's own
-    process, and `bridge-serve` outside it. That is stated rather than left
+    process, and `uvicorn-serve` outside it. That is stated rather than left
     to the ladder's absence: no size falls back to it any more, so a role is
     never bought with a threshold — that was the defect issue 1466 removed.
 

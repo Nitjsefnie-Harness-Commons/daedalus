@@ -408,7 +408,7 @@ def test_a_thread_the_profile_does_not_have_is_a_refusal(tmp):
     assert front_end_symbol() in failure, failure
     assert threads.SERVE in failure, failure
     # The bridge's front end alone satisfies neither, because the rest of
-    # the bridge is what `bridge-serve` is.
+    # the bridge is what `uvicorn-serve` is.
     rows = [row(1, 430_000_000, HARNESS),
             row(4, 3_800_000_000, BRIDGE,
                 (front_end_symbol(),))]
@@ -498,13 +498,13 @@ def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
     assert [row['cmd'] for row in rows] == [HARNESS, BRIDGE], rows
     assert rows[0]['names'] == frozenset({'a_symbol'}), rows[0]['names']
     # `mcp-exec` excludes only the import, so a profile carrying no
-    # `bridge-serve` thread is a complete one for it — and the sum is the
+    # `uvicorn-serve` thread is a complete one for it — and the sum is the
     # rest.
     kept, excluded, failure = thread_classifier.total_for(rows, 'mcp-exec')
     assert failure is None, failure
     assert kept == 430000000, kept
     assert excluded == ('front-end-import',), excluded
-    # `dashboard-fanout` needs a `bridge-serve` thread, and a profile
+    # `dashboard-fanout` needs a `uvicorn-serve` thread, and a profile
     # without one is a refusal naming the role rather than a whole-tree sum.
     kept, excluded, failure = thread_classifier.total_for(
         rows, 'dashboard-fanout')
@@ -590,10 +590,11 @@ def test_every_journey_drops_the_front_ends_bootstrap_import(tmp):
 
     The bootstrap is the one background thread whose cost does not repeat:
     five rounds of identical code on one runner measured 4,015,865,696 to
-    4,020,617,049 instructions, so a journey that kept it carried that
-    run-varying constant into its own count and moved 1.14% between runs of
-    an unchanged tree (issue 1495). `net-capture` is the case that made it
-    safe: under size bands a thread that journey put to work measured 2.12
+    4,020,617,049 instructions, a range of 0.118% of the smaller figure.
+    The 1.14% issue 1495 records for a journey keeping it is its own
+    six-draw whole-journey `max/min - 1`, a second measurement rather than
+    a consequence of that range. `net-capture` is the case that made it
+    safe: under size bands a thread that journey put to work measured 2.10
     billion instructions and landed in the import band beside the bootstrap,
     so dropping the import there would have dropped the work the journey
     exists to measure. Roles are decided by the process a thread ran in now,
@@ -634,6 +635,41 @@ def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
     assert set(threads.SIGNATURES) == {threads.IMPORT}, threads.SIGNATURES
     assert threads.SIGNATURES == {
         threads.IMPORT: [front_end_symbol()]}, threads.SIGNATURES
+
+
+def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
+    """The committed `excluded_threads` IS the live table, by NAME.
+
+    Both arms of every recorded-vs-measured comparison are built from
+    `excluded_for`, so the committed map and the table were never compared
+    against each other by name: putting `uvicorn-serve` back into
+    `net-capture` changed what the gate drops and only a baseline literal
+    that happens to move noticed.
+    """
+    del tmp
+    threads = _journey_contract.threads()
+    artifact = _journey_contract.artifact()
+    document = artifact.load()
+    names = _journey_contract.journeys().NAMES
+    assert names, 'no journey names, so this control reads nothing'
+    recorded = document['excluded_threads']
+    for name in names:
+        applied = list(threads.excluded_for(name))
+        assert recorded.get(name) == applied, (
+            f'{name} is recorded as {recorded.get(name)} and the table '
+            f'excludes {applied}, so this artefact counts a different '
+            'quantity from the table a run classified the profile under')
+    # No tolerance of its own, so `net-capture` rides `tolerance_pct`: the
+    # three CI draws of the count this branch re-recorded span 2,672,681,420
+    # to 2,672,726,671 instructions — 0.0017% (run 37096636089, artefact
+    # `journey-counts` 11265650340) — and a per-journey tolerance is
+    # recorded only for a journey whose own draws exceed the default.
+    assert 'net-capture' not in document['tolerances'], (
+        f'net-capture is held to {document["tolerances"]["net-capture"]}% '
+        'while its own draws span 0.0017%, so the bound is read from a '
+        f'measurement this artefact does not carry: {document["tolerances"]}')
+    assert artifact.tolerance_of(document, 'net-capture') == \
+        document['tolerance_pct'], document['tolerances']
 
 
 def main():
