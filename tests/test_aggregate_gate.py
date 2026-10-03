@@ -58,8 +58,7 @@ def _recorder(own, pages, polls=None, jobs=None):
     """A gh read answering every query the gate makes.
 
     `polls` is one list of run pages per poll of the secrets wait, so the
-    same fixture answers "no run yet" and then a run; the last poll
-    repeats once the list runs out.
+    same fixture answers "no run yet" and then a run; the last one repeats.
     """
     calls = []
     remaining = list(polls or [[]])
@@ -682,12 +681,14 @@ def test_the_gate_waits_on_a_dispatch_event_too(tmp):
 
 def test_the_poll_bound_fits_inside_the_job_timeout(tmp):
     del tmp
+    mod = _gate()
     job = complete_job_mapping(_tests_yml(), 'aggregate')
     ceiling = int(job['timeout-minutes'])
     bound = float(_gate_step()['env']['SECRETS_POLL_BOUND_S'])
     assert ceiling == 20, ceiling
-    assert bound == _gate().DEFAULT_POLL_BOUND_S, bound
+    assert bound == mod.DEFAULT_POLL_BOUND_S, bound
     assert bound < ceiling * 60, (bound, ceiling)
+    assert 0 < mod.POLL_INTERVAL_S < bound, (mod.POLL_INTERVAL_S, bound)
 
 
 def main():
