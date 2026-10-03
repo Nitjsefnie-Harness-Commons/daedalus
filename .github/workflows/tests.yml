@@ -1300,6 +1300,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
 
+      # TRANSIENT (issue 1499 experiment): a valgrind client request is
+      # `asm volatile` inside a GNU statement expression, so pure Python
+      # cannot issue one and the boundary is a helper this job compiles. It is
+      # not part of the package and nothing outside this job loads it.
+      - name: Build the counted-boundary marker
+        run: |
+          cat > "${RUNNER_TEMP}/cgzero.c" <<'EOF'
+          #include <valgrind/callgrind.h>
+          void daedalus_cg_zero_stats(void) { CALLGRIND_ZERO_STATS; }
+          EOF
+          cc -shared -fPIC -O2 -o "${RUNNER_TEMP}/cgzero.so" "${RUNNER_TEMP}/cgzero.c"
+          echo "DAEDALUS_CALLGRIND_BOUNDARY=${RUNNER_TEMP}/cgzero.so" >> "$GITHUB_ENV"
+
       # What this runner actually allows, decided by measurement, and asked
       # AFTER the install above so the answer is about this runner as it will
       # measure. A counter it reports as unavailable is a counter the check
