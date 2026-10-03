@@ -53,7 +53,8 @@ def test_the_set_is_exactly_the_documented_patterns(tmp):
         'scripts/ci/**', 'scripts/check_versions.py',
         '.gitleaks.toml', 'pyrightconfig.json', 'pyrightconfig.tests.json',
         '.pylintrc', 'setup.cfg', 'eslint.config.js', 'pyproject.toml',
-        'run_tests.py', 'requirements-dev.txt', 'requirements-test.txt')
+        'run_tests.py', 'requirements-dev.txt', 'requirements-test.txt',
+        'requirements-pip-audit.txt', 'requirements-zizmor.txt')
     for path in m.GATE_PATTERNS:
         assert m.is_gate_defining(path), path
     assert m.is_gate_defining('scripts/ci/deep/x.py')

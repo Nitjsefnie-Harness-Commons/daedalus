@@ -219,12 +219,13 @@ def _pip_installs(body):
 
     Anything else is REFUSED rather than skipped. A token standing in the
     verb's place that is neither one of those commands nor an option — the
-    value of a detached option, `pip --proxy http://p:8080 install` — is a
-    shape this reader does not model, and a reader that returned nothing for
-    it could not tell that shape from there being no install here to
-    police. So it fails by name instead. The direction is deliberate: a
-    command refused wrongly is loud and says which form was not recognised,
-    while one passed wrongly says nothing at all.
+    value of a detached option, `pip --proxy
+    http://proxy.example.com:8080 install` — is a shape this reader does
+    not model, and a reader that returned nothing for it could not tell
+    that shape from there being no install here to police. So it fails by
+    name instead. The direction is deliberate: a command refused wrongly
+    is loud and says which form was not recognised, while one passed
+    wrongly says nothing at all.
     """
     logical, current = [], ''
     for line in body.splitlines():
@@ -261,13 +262,14 @@ def assert_the_pip_install_reader_refuses_what_it_cannot_model():
 
     The span that walks the options between the tool and the verb covers an
     option with its value attached and an option that takes none. An option
-    whose value is a SEPARATE token — `pip --proxy http://p:8080 install`,
-    the same `pip` with one literal word standing where the verb belongs —
-    is outside every form this reader models, and a reader that simply did
-    not match it reported nothing while the install ran: a missed control and
-    a control that found nothing to check are one silence. So the unmodelled
-    form is refused by name, and a refusal on a legitimate command is the
-    loud of the two directions, which is the one worth it.
+    whose value is a SEPARATE token — `pip --proxy
+    http://proxy.example.com:8080 install`, the same `pip` with one literal
+    word standing where the verb belongs — is outside every form this reader
+    models, and a reader that simply did not match it reported nothing while
+    the install ran: a missed control and a control that found nothing to
+    check are one silence. So the unmodelled form is refused by name, and a
+    refusal on a legitimate command is the loud of the two directions,
+    which is the one worth it.
 
     Both directions are checked here, because the refusal is worth little
     while the shapes around it stop reading: a verb that is not an install
@@ -275,7 +277,7 @@ def assert_the_pip_install_reader_refuses_what_it_cannot_model():
     same tool, and the two steps this reader reads as they stand.
     """
     for command in (
-            'pip --proxy http://p:8080 install zizmor==9.9.9',
+            'pip --proxy http://proxy.example.com:8080 install zizmor==9.9.9',
             'pip --timeout 30 install zizmor==9.9.9',
             'pip --retries 5 install zizmor==9.9.9',
             'pip --cache-dir /tmp/pc install zizmor==9.9.9',
