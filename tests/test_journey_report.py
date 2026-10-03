@@ -292,6 +292,26 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
         r'`perf-instructions`: returncode 1: warn \\\| and '
         r'\\\\\| too \| here end |'), row
 
+    # A journey NAME is the other value interpolated into a row, and
+    # `journey_artifact` validates a key only as a key -- it bounds the
+    # recorded COUNT and never the name -- so a name carrying a pipe reaches
+    # this table carrying it. It is the FIRST cell, which is why an
+    # unescaped pipe is worse here than in the reason: it moves the count,
+    # the delta and the verdict each out of the column a reader reads them
+    # from. The same escape as the cell above, and a literal for the same
+    # reason.
+    piped = 'dashboard | fanout'
+    piped_document = budget_document()
+    piped_document['journeys'] = {piped: 1000}
+    lines = summaries.verdict_lines(
+        piped_document, {piped: 900}, {'over': {}, 'unmeasured': {}})
+    # Anchored on the separator rather than a line number or a column count,
+    # so a table that legitimately grows a column leaves this green.
+    separator = next(line for line in lines if line.startswith('|---'))
+    rows = lines[lines.index(separator) + 1:]
+    assert rows == [
+        r'| dashboard \| fanout | 900 | 1100 | -200 | within budget |'], rows
+
     remedy = gate.UNMEASURED_REMEDY
     assert 'DAEDALUS_CALLGRIND_BOUNDARY' in remedy, remedy
     step = 'Build the counted-boundary helper'

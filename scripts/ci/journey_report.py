@@ -183,6 +183,11 @@ def verdict_lines(document, counts, found, why=None):
              '| journey | count | budget | delta | verdict |',
              '|---|---|---|---|---|']
     for name in sorted(document['journeys']):
+        # The name is the row's first cell and reaches here carrying whatever
+        # characters the artefact's key carries: `journey_artifact` bounds the
+        # recorded COUNT and never the name. The reason's own escape, rather
+        # than a second scheme beside it.
+        shown = _reason(name)
         # `None` here is a journey the artefact NAMES but has no count for
         # yet: `_validated` admits a null recorded count rather than
         # refusing it, and `violations()` and `tightened()` both skip that
@@ -214,12 +219,12 @@ def verdict_lines(document, counts, found, why=None):
         else:
             verdict = 'within budget'
         if measured is None:
-            lines.append(f'| {name} | not measured | {budget} | — | '
+            lines.append(f'| {shown} | not measured | {budget} | — | '
                          f'{verdict} |')
             continue
         delta = measured - limit
         sign = '+' if delta > 0 else ''
-        lines.append(f'| {name} | {measured} | {budget} | {sign}{delta:.0f} '
+        lines.append(f'| {shown} | {measured} | {budget} | {sign}{delta:.0f} '
                      f'| {verdict} |')
     return lines
 
