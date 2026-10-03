@@ -187,8 +187,8 @@ def test_omission_near_misses_stay_in_the_complaint(tmp):
     del tmp
     added = {
         '.claude/skills/changing-daedalus/watch_all.py': {1},
-        '.claude/skills/changing-daedalus/watch_all_helper.py': {1},
-        '.claude/skills/changing-daedalus/ci_watch_helper.py': {1},
+        '.claude/skillsx/watch_all.py': {1},
+        '.claude/other_tool/watch_all.py': {1},
         '.claude/yes.py': {1},
         '.claude2/foo.py': {1},
         'build2/foo.py': {1},
@@ -199,8 +199,8 @@ def test_omission_near_misses_stay_in_the_complaint(tmp):
     body = diff_coverage.render([], 0, 0, missing)
     assert 'Unmeasured changed source files:' in body, body
     for path in (
-            '.claude/skills/changing-daedalus/watch_all_helper.py',
-            '.claude/skills/changing-daedalus/ci_watch_helper.py',
+            '.claude/skillsx/watch_all.py',
+            '.claude/other_tool/watch_all.py',
             '.claude/yes.py', '.claude2/foo.py', 'build2/foo.py',
             'pkg/helper.py'):
         assert f'- `{path}`' in body, body
