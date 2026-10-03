@@ -43,7 +43,9 @@
 !/pyrightconfig.json
 !/pyrightconfig.tests.json
 !/requirements-dev.txt
+!/requirements-pip-audit.txt
 !/requirements-test.txt
+!/requirements-zizmor.txt
 !/run_tests.py
 !/server.py
 !/setup.cfg

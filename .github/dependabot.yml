@@ -24,8 +24,19 @@ updates:
     # bump arrived as two pull requests that could each only be red, and
     # merging either one left main red until the other landed. The group makes
     # the pair one proposal.
+    #
+    # EACH GROUP IS MIRRORED BENEATH IT, because a group with no
+    # `applies-to` covers VERSION UPDATES ONLY, and security updates are
+    # enabled on this repository. The two reach Dependabot by different paths,
+    # so the mirror is a group of its own rather than a second pattern in the
+    # first: a security update without one arrives ungrouped and reproduces
+    # exactly the split the group above exists to prevent.
     groups:
       codeql-action:
+        patterns:
+          - "github/codeql-action*"
+      codeql-action-security:
+        applies-to: security-updates
         patterns:
           - "github/codeql-action*"
       # `actions/cache/restore` and `actions/cache/save` are one action to the
@@ -35,11 +46,18 @@ updates:
       cache:
         patterns:
           - "actions/cache*"
+      cache-security:
+        applies-to: security-updates
+        patterns:
+          - "actions/cache*"
 
   # The Python surface: the `mcp` extra in pyproject.toml, which is the only
-  # third-party code that runs in production, and the lint/type/coverage pins
-  # in requirements-dev.txt and requirements-test.txt. All three live at the
-  # repository root, so one entry covers them.
+  # third-party code that runs in production, and the tool pins in
+  # requirements-dev.txt, requirements-test.txt, requirements-zizmor.txt and
+  # requirements-pip-audit.txt. Every one of them lives at the repository
+  # root, so this one entry covers all five — which is why the two CI tools
+  # are pinned in manifests rather than inside the workflows that install
+  # them: a version in a `run:` block is a version this entry cannot see.
   #
   # audit.yml answers "is what we froze still safe" on a daily cron; this
   # answers "is there something newer", which is the half a scanner cannot do.
