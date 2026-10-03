@@ -1439,7 +1439,8 @@ jobs:
     timeout-minutes: 20
     # A job-level block replaces the workflow-level one rather than adding
     # to it: contents read pays for the checkout, actions read is what lets
-    # GITHUB_TOKEN list this workflow's runs for the supersession check.
+    # GITHUB_TOKEN list workflow runs for the supersession check and the
+    # secrets verdict.
     permissions:
       contents: read  # the checkout
       actions: read  # the workflow-run reads
@@ -1461,9 +1462,7 @@ jobs:
       # It also requires the `secrets` workflow's gitleaks job on this head
       # SHA. That job is in no `needs:` set and no required context of this
       # repository, so `needs:` cannot reach it and a pull request whose
-      # scan is red would otherwise merge green (issue 1491). The SHA is
-      # the pull request's HEAD COMMIT, which is where a pull_request run
-      # records its head_sha, and github.sha on every other event.
+      # scan is red would otherwise merge green (issue 1491).
       #
       # No event skips it, workflow_dispatch included: a dispatch publishes
       # its check run on the SHA it ran against, and GitHub reads required
@@ -1471,7 +1470,7 @@ jobs:
       # produced them — a skip here would be a bypass. The cost is that a
       # manual run at a SHA with no `secrets` run goes red once the bound
       # expires, which is what
-      # `gh workflow run secrets.yml --ref <sha>` is for.
+      # `gh workflow run secrets.yml --ref <branch>` is for.
       - name: Check dependency results
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1480,7 +1479,5 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
           SECRETS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          # 12 minutes, and the job's own ceiling above is 20: see the
-          # comment there for why the gap is 8 minutes and not less.
           SECRETS_POLL_BOUND_S: '720'
         run: python3 scripts/ci/aggregate_gate.py
