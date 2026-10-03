@@ -1300,18 +1300,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
 
-      # TRANSIENT (issue 1499 experiment): a valgrind client request is
-      # `asm volatile` inside a GNU statement expression, so pure Python
-      # cannot issue one and the boundary is a helper this job compiles. It is
-      # not part of the package and nothing outside this job loads it.
-      - name: Build the counted-boundary marker
+      # A valgrind client request is `asm volatile` inside a GNU statement
+      # expression, so pure Python cannot issue one and the counted boundary
+      # is a helper this job compiles from the committed source -- which is
+      # why it is a file in the repository and not a heredoc here. The
+      # source is committed beside the measurement's own tooling and is not
+      # part of the package; nothing outside this job builds or loads it.
+      #
+      # The path is ABSOLUTE and goes out through `$GITHUB_ENV`, because every
+      # `run:` is a fresh shell with its own working directory: a relative
+      # name would resolve against whatever the measuring step's cwd is, and
+      # the child this names reads the variable through the environment it
+      # inherits rather than through anything on disk.
+      - name: Build the counted-boundary helper
         run: |
-          cat > "${RUNNER_TEMP}/cgzero.c" <<'EOF'
-          #include <valgrind/callgrind.h>
-          void daedalus_cg_zero_stats(void) { CALLGRIND_ZERO_STATS; }
-          EOF
-          cc -shared -fPIC -O2 -o "${RUNNER_TEMP}/cgzero.so" "${RUNNER_TEMP}/cgzero.c"
-          echo "DAEDALUS_CALLGRIND_BOUNDARY=${RUNNER_TEMP}/cgzero.so" >> "$GITHUB_ENV"
+          cc -shared -fPIC -O2 \
+            -o "${RUNNER_TEMP}/callgrind_boundary.so" \
+            scripts/ci/callgrind_boundary.c
+          echo "DAEDALUS_CALLGRIND_BOUNDARY=${RUNNER_TEMP}/callgrind_boundary.so" >> "$GITHUB_ENV"
 
       # What this runner actually allows, decided by measurement, and asked
       # AFTER the install above so the answer is about this runner as it will

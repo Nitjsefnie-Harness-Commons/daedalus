@@ -316,14 +316,15 @@ def test_the_startup_baseline_is_read_through_the_same_reader(tmp):
                 sorted(row['names']), pid=row['pid'], cmd=row['cmd'])
         return 0, '', ''
 
-    with planting(counters,
-                  shapes=lambda names, root, rounds: (
-                      {name: ['s'] for name in names}, None),
-                  shutil=SimpleNamespace(
-                      which=lambda _program: '/usr/bin/valgrind'),
-                  _run=answering, COUNTERS=('valgrind-callgrind',),
-                  COUNTERS_BY_NAME={'valgrind-callgrind': (
-                      counters._callgrind, True)}):
+    with _journey_contract.boundary_set(), planting(
+            counters,
+            shapes=lambda names, root, rounds: (
+                {name: ['s'] for name in names}, None),
+            shutil=SimpleNamespace(
+                which=lambda _program: '/usr/bin/valgrind'),
+            _run=answering, COUNTERS=('valgrind-callgrind',),
+            COUNTERS_BY_NAME={'valgrind-callgrind': (
+                counters._callgrind, True)}):
         report = counters.measure(root=ROOT, rounds=1, found=counter_facts())
     row = report['counters']['valgrind-callgrind']
     assert row['available'] is True, row
