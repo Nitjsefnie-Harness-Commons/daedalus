@@ -180,8 +180,9 @@ counted off the file by `scripts/ci/js_lines.py` and rendered in that same
 summary by `scripts/ci/js_coverage.py`'s per-file table. Nothing in the tree
 checks that figure against this paragraph, so move the file's code-line count
 and this line is simply out of date until someone reads it; the suite that
-read it back and failed on a mismatch went with the test-volume cut in
-#1483. The covered count and the total the number is measured over are
+read it back and failed on a mismatch was cut with the other
+analyser-owning suites. The covered count and the total the number is
+measured over are
 deliberately not restated here: the first is a measurement of one run, the
 second is a function of every shipped JavaScript file in the tree, and that
 run's own coverage step summary is where both belong. The percentage the
