@@ -15,12 +15,9 @@ these tables too — for the reason the role recognisers moved out of it for
 the same one: the mechanisms and the controls that hold them to the tree
 are read separately on purpose.
 
-The doubles below are the same split applied to the transfer. `_Fetched`,
-`_Transfer`, `_installer_and_transfer` and `_http_error` are what the
-installer's controls stand in with when one drives a download, so they
-model a PROCESS rather than the tree; they sit here rather than inside
-the controls for the reason the tables do. Nothing here reads a control
-name.
+The doubles below are that split applied to the transfer: what the
+installer's controls stand in with when one drives a download, modelling
+a PROCESS rather than the tree. Nothing here reads a control name.
 """
 import email.message
 import re

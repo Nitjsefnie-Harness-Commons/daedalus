@@ -134,10 +134,8 @@ WHEEL_TIMEOUT = 300
 MAX_TRANSFER = 64 * 1024 * 1024
 INSTALL_DIR = Path(os.environ.get('RUNNER_TEMP', tempfile.gettempdir()))
 TOOL_DIR = INSTALL_DIR / 'daedalus-lint-tools'
-# The three values `actionlint_asset` builds its ask from, handed over
-# rather than imported back: the definitions stay here, where the rest
-# of this module reads them, and a second copy of a pin is a pin that
-# drifts.
+# Handed to the module that builds the ask. Each stays defined here,
+# where the rest of this module reads it.
 actionlint_asset.RELEASE = RELEASE
 actionlint_asset.ACTIONLINT_VERSION = ACTIONLINT_VERSION
 actionlint_asset.MAX_TRANSFER = MAX_TRANSFER
