@@ -1105,14 +1105,17 @@ jobs:
             --thresholds .github/ci-thresholds.json
           # The size, long-line and per-module coverage baselines ratchet
           # the other way: each follows a file down when it shrinks, so the
-          # lines cannot come back for free. Growth is never written here —
-          # that stays a decision a reviewer sees.
+          # lines cannot come back for free. The tests/ budget is one
+          # tree-wide count with the same rule. Growth is never written
+          # here — that stays a decision a reviewer sees.
           python scripts/ci/size_baseline.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/line_lengths.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/js_module_coverage.py --tighten \
             "$NODE_V8_COVERAGE" \
+            --thresholds .github/ci-thresholds.json
+          python scripts/ci/tests_lines.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/thresholds.py --check \
             --thresholds .github/ci-thresholds.json
@@ -1124,7 +1127,7 @@ jobs:
             # space between them, which is how this line lost one once.
             printf '%s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
-              "${javascript_measured}% justified no raise; no module shrank, no file lost an over-limit line and no module lost an uncovered JavaScript line." \
+              "${javascript_measured}% justified no raise; no module shrank, no file lost an over-limit line, no module lost an uncovered JavaScript line and tests/ lost no line." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {
