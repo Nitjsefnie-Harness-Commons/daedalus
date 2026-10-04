@@ -134,7 +134,6 @@ def _separable():
 def _unresolved(name):
     """The same measurement, with `name` the one journey it could not
     do: a drop's case, not a shape failure's.
-    case, not a shape failure's.
     """
     report = _journey_contract.fixture_report()
     entry = report['counters']['valgrind-callgrind']
