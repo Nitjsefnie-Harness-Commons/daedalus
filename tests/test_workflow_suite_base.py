@@ -64,11 +64,10 @@ def _is_a_runnable_suite_file(node):
                  or fnmatch.fnmatch(path, 'tests/test_*.py')))
 
 
-# The five names the retired resolver-bypass guard declared, plus the
-# two its corpus entry named as ITS bypass: that guard enumerated those
-# five and `subprocess.getoutput` slipped past it, so an arm repeating
-# the same five would re-open a bypass this repository has already
-# recorded. Measured on this arm: `getoutput(["python3",
+# Five names a retired resolver-bypass guard enumerated, plus the two
+# its corpus entry named as ITS bypass: an arm repeating the same five
+# would re-open a bypass this repository has already recorded. Measured
+# on this arm: `getoutput(["python3",
 # "tests/test_x.py"])` is `True` and the string form
 # `getoutput("python3 tests/test_x.py")` is `False` — the path is inside
 # the string, which is the declined class named below, not a claim that
@@ -204,11 +203,8 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     The branch-boundary controls the retired reserved-name suite
     carried read the merge base's own declarations, and a checkout
     that resolved neither `origin/main` nor a local `main` made both
-    boundary tests take their refusal arm. In a job that turned a
-    failing suite red that was already visible; in a job that ran the
-    suites without failing on one it was quieter and worse — the
-    branch's central guarantee went unevaluated in a job that ran it,
-    and nothing reported that.
+    boundary tests take their refusal arm quietly in a job that ran
+    the suites without failing on one.
 
     WHAT THIS DOES NOT COVER, and the test is named for what it proves
     rather than for an enumeration it cannot deliver. A named bypass is a

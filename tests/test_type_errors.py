@@ -25,10 +25,8 @@ ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 SCRIPT = ROOT / 'scripts' / 'ci' / 'type_error_baseline.py'
 THRESHOLDS_SOURCE = ROOT / '.github' / 'ci-thresholds.json'
-# A second binding of the path _ratchet_fixture holds, kept rather than
-# imported: the retired reserved-name policy's python limb was
-# definitions-only, so this Assign was invisible to the control that
-# would have settled the question.
+# A second binding of the path _ratchet_fixture holds, kept as a
+# literal rather than imported.
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 CONFIG_NAME = 'pyrightconfig.tests.json'
 RATCHET_RUN = 'python3 scripts/ci/type_error_baseline.py'
