@@ -12,9 +12,9 @@ other.
 
 The names say what the fixture does in these suites rather than what it is
 generically. `_harness` cannot be kept: `tests/test_dashboard_tab_events.py`
-binds a `_harness` of its own with a different body, and the owner set is
-read as a set, so publishing the name here would make that suite a
-re-implementation of this module. The builder is therefore named for the
+binds a `_harness` of its own with a different body, and the retired
+reserved-name guard read that owner set as a set, so a shared module could
+not publish the name. The builder is therefore named for the
 harness it returns, and the temporary file for the file it writes.
 """
 import json
