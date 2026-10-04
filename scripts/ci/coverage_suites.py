@@ -111,17 +111,15 @@ def main(argv=None):
     if timed_out:
         # A suite that overran is not a suite that failed, and what it
         # leaves behind is what it managed to flush before the bound --
-        # which is a different thing on each platform, and the sentence has
-        # to be true of both. On POSIX the kill asks first, so a suite that
-        # answers the request keeps what it measured and one that does not
-        # contributes nothing. On Windows `taskkill /F` is a forced
-        # termination with no request and no grace, so a suite killed there
-        # never had the chance and contributes nothing either way. So this
-        # refuses the run even without --require-all, and says which suites
-        # to look at first.
-        flushed = ('a forced kill leaves a suite nothing to flush'
-                   if sys.platform.startswith('win') else
-                   'a suite that took the request to stop keeps what it '
+        # which is now decided the same way on every platform, because
+        # both routes ask before they escalate. A suite that took the
+        # request to stop flushed what it had measured, and one that did
+        # not contributes nothing; on Windows only a suite that handles
+        # the request can take it, since the coverage collector's own
+        # `sigterm = true` reaches POSIX alone. So this refuses the run
+        # even without --require-all, and says which suites to look at
+        # first.
+        flushed = ('a suite that took the request to stop keeps what it '
                    'had measured, and one that did not contributes nothing')
         print(f"TIMED OUT: {', '.join(timed_out)} — each was ended at its "
               f"{bound} s bound; {flushed}",

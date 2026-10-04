@@ -19,14 +19,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING,
+    FORCED_WITHOUT_GRACE,
     OPERATOR_ASKS_FIRST, OPERATOR_FORCES, REQUESTED_THEN_GRACED,
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
     records, settle_gone)
 from _processtree import taskkill_argv  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
-    GROUP, TINY_BOUND_S, Child, Clock, Platform, Signals, Spawns,
+    GROUP, TINY_BOUND_S, Child, Clock, Escalation, Platform, Signals, Spawns,
     require_sigkill, swapped)
 
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
@@ -44,10 +44,10 @@ time.sleep(120)
 
 _FAST_SUITE = "print('measured output arrived', flush=True)\n"
 
-# A suite that answers SIGTERM. `pyproject.toml` sets `sigterm = true` so a
-# terminated suite still flushes what it measured, and this is the suite
-# that flush is for: a launcher that kills rather than asks gives it no
-# chance, and the marker below is the only evidence either way.
+# A suite that answers its platform's request: SIGTERM on POSIX, where
+# `pyproject.toml`'s `sigterm = true` saves what a terminated suite
+# measured; CTRL_BREAK on Windows, where only a HANDLED request keeps
+# anything. The marker below is the only evidence either way.
 _STOPPABLE_SUITE = """import os, signal, sys, time
 from pathlib import Path
 
@@ -61,7 +61,7 @@ def _stopped(signum, frame):
     sys.exit(0)
 
 
-signal.signal(signal.SIGTERM, _stopped)
+signal.signal(getattr(signal, 'SIGBREAK', signal.SIGTERM), _stopped)
 print('wedged suite reached its own body', flush=True)
 time.sleep(120)
 """
@@ -155,13 +155,11 @@ def test_a_wedged_suite_is_named_and_fails_the_run(tmp):
                                     result.stderr)
     group = coverage_group(result.stdout, 'test_wedged.py')
     _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
-    # The operator's sentence is selected by the same platform this control
-    # is asserting for, and the other platform's is refused. The record pin
-    # above reads the cleanup clause, not this line, so a conditional that
-    # sent the wrong sentence to stderr used to move no assertion at all.
-    said, refused = ((OPERATOR_FORCES, OPERATOR_ASKS_FIRST)
-                     if FORCES_WITHOUT_ASKING
-                     else (OPERATOR_ASKS_FIRST, OPERATOR_FORCES))
+    # The operator's sentence is the one sentence now, and the forced-only
+    # wording is the one this run refuses. The record pin above reads the
+    # cleanup clause, not this line, so a conditional that sent the wrong
+    # sentence to stderr used to move no assertion at all.
+    said, refused = OPERATOR_ASKS_FIRST, OPERATOR_FORCES
     assert (f'TIMED OUT: tests/test_wedged.py — each was ended at its '
             f'{float(_WEDGE_BOUND_S)} s bound; {said}'
             ) in result.stderr, result.stderr
@@ -192,21 +190,16 @@ def test_a_fast_suite_is_measured_and_not_reported_as_timed_out(tmp):
 def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
     """Which contract the launcher gives on THIS platform, asserted as such.
 
-    POSIX: the suite is asked to stop, gets a bounded grace, and is killed
-    only if it does not comply -- so a suite that flushes on the request
-    keeps what it measured, and the record has to say the request was made
-    and taken. `pyproject.toml` sets `sigterm = true` for that.
+    Both routes ask before they escalate, and each platform's request is
+    the one its suites can answer: SIGTERM on POSIX, where the coverage
+    collector's own `sigterm = true` saves what a terminated suite
+    measured, and CTRL_BREAK on Windows, where only a suite that HANDLES
+    the request keeps anything. The planted suite installs the handler
+    each platform asks with, and the record has to say the request was
+    made and taken.
 
-    Windows: the route is one `taskkill /F /T`, a forced termination. No
-    request, no grace, nothing flushes, and the record says that rather
-    than leaving a reader to infer a graceful path ran. That is the
-    pre-branch Windows behaviour, which this branch did not change.
-
-    Both halves are asserted and each REFUSES the other platform's clause.
-    A control that skipped on Windows would leave that platform with
-    nothing asserting what it actually does, and one that asserted the
-    POSIX contract there would be a red leg that teaches nothing -- which
-    is what CI reported on 2026-09-29.
+    The forced-only clause is refused on both halves: no record this
+    route can produce may say the tree died unasked again.
     """
     marker = Path(tmp) / 'tree' / 'tests' / 'stopped.pid'
     try:
@@ -218,14 +211,6 @@ def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
     group = coverage_group(result.stdout, 'test_wedged.py')
     record = _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
     assert TREE_WAS_KILLED in record['cleanup'], record
-    if FORCES_WITHOUT_ASKING:
-        assert not marker.exists(), (
-            'a forced taskkill sent no request, so this suite cannot have '
-            f'flushed; the record says: {record}')
-        assert FORCED_WITHOUT_GRACE in record['cleanup'], record
-        assert REQUESTED_THEN_GRACED not in record['cleanup'], record
-        assert int(record['returncode']) != 0, record
-        return
     assert marker.exists(), (
         f'the suite was killed rather than asked to stop, so it flushed '
         f'nothing; the record says returncode {record["returncode"]}')
@@ -254,11 +239,10 @@ def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
     assert TREE_WAS_KILLED in group, (
         f'the record does not name the {TREE_WAS_KILLED} route the kill '
         f'took: {group}')
-    clause = (FORCED_WITHOUT_GRACE if FORCES_WITHOUT_ASKING
-              else REQUESTED_THEN_GRACED)
-    assert clause in group, (
+    assert REQUESTED_THEN_GRACED in group, (
         f'the record does not name what that route does about asking: '
         f'{group}')
+    assert FORCED_WITHOUT_GRACE not in group, group
 
 
 def test_a_timed_out_suites_own_child_does_not_survive_it(tmp):
@@ -583,44 +567,34 @@ def test_a_tree_kill_that_fails_outright_names_what_it_was_given(tmp):
     assert record == f'process-tree kill raised {boom!r}', record
 
 
-def test_the_windows_route_is_one_forced_taskkill_of_the_whole_tree(tmp):
-    """The dispatch and the command it builds, not the platform's answer.
+def test_the_windows_route_asks_then_insists_by_taskkill(tmp):
+    """The dispatch and both commands it sends, not the platform's answer.
 
     This runs on every cell, so what it proves is that a Windows platform
-    sends exactly the tree kill's own argv with exactly this bound. Only a
-    `windows-latest` cell proves that a real `taskkill` ends a real tree.
+    sends the request to the pid that leads the tree's group, spends the
+    grace, and only then sends the tree kill's own argv with exactly this
+    bound. Only a `windows-latest` cell proves that a real CTRL_BREAK and
+    a real `taskkill` end a real tree.
     """
     del tmp
     child = Child()
     spawns = Spawns(child=child, returncode=0)
-    with swapped(SUITE_BOUND, sys=Platform('win32'), subprocess=spawns):
+    clock = Clock()
+    signals = Signals()
+    with swapped(SUITE_BOUND, sys=Platform('win32'), os=signals,
+                 signal=Escalation, time=clock, subprocess=spawns):
         record = SUITE_BOUND.kill_process_tree(child)
-    assert len(spawns.runs) == 1, 'one forced call, never a graceful one'
+    assert signals.sent == [(GROUP, Escalation.CTRL_BREAK_EVENT)], (
+        signals.sent)
+    assert clock.slept >= SUITE_BOUND.CLEANUP_TIMEOUT_S, clock.slept
+    assert len(spawns.runs) == 1, spawns.runs
     argv, keywords = spawns.runs[0]
     assert argv == taskkill_argv(child.pid), argv
     assert keywords['timeout'] == SUITE_BOUND.CLEANUP_TIMEOUT_S, keywords
     assert keywords['check'] is False, keywords
     assert child.killed == 0, 'the tree is ended by pid, not from here'
-    assert 'force-killed the tree' in record, record
-
-
-def test_a_taskkill_that_failed_is_reported_for_its_own_reason(tmp):
-    """Three ways it fails, and each is named rather than merged."""
-    del tmp
-    for run_error, returncode, expected, ran in (
-            (subprocess.TimeoutExpired('taskkill', 10), 0,
-             f'gave up after {SUITE_BOUND.CLEANUP_TIMEOUT_S}s', True),
-            (OSError('taskkill is not on this path'), 0,
-             'could not run: taskkill is not on this path', False),
-            (None, 128, 'taskkill /F exited 128', True)):
-        spawns = Spawns(run_error=run_error, returncode=returncode)
-        with swapped(SUITE_BOUND, sys=Platform('win32'), subprocess=spawns):
-            record = SUITE_BOUND.kill_process_tree(Child())
-        assert spawns.runs[0][0][0] == 'taskkill', spawns.runs
-        assert expected in record, (record, expected)
-        # A `taskkill` that could not be launched leaves the tree's fate
-        # unknown rather than known-still-running, and the two say so.
-        assert ('may still be running' in record) is ran, record
+    assert 'ignored the request' in record, record
+    assert 'taskkill /F' in record, record
 
 
 def _launch(argv, tmp):

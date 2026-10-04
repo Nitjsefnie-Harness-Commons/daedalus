@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    FORCED_WITHOUT_GRACE, FORCES_WITHOUT_ASKING, REQUESTED_THEN_GRACED,
+    FORCED_WITHOUT_GRACE, REQUESTED_THEN_GRACED,
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
     records, settle_gone)
 from _suite_bound_stubs import Clock, Removals, swapped  # noqa: E402
@@ -52,9 +52,10 @@ _STALLING_SUITE = (
     'time.sleep({wedge})\n'
 )
 
-# A suite that answers SIGTERM and flushes, which is what
-# `pyproject.toml`'s `sigterm = true` exists for and what a runner that
-# kills its tree first would take away.
+# A suite that answers its platform's request and flushes: SIGTERM on
+# POSIX, where `pyproject.toml`'s `sigterm = true` saves what a terminated
+# suite measured; CTRL_BREAK on Windows, where only a handled request
+# keeps anything.
 _STOPPABLE_SUITE = (
     'import json, os, signal, sys, time\n'
     "summary = os.environ['DAEDALUS_TEST_SUMMARY']\n"
@@ -64,7 +65,7 @@ _STOPPABLE_SUITE = (
     "               'requires': None}, open(summary, 'w'))\n"
     "    print('suite was asked to stop and flushed', flush=True)\n"
     '    sys.exit(0)\n'
-    'signal.signal(signal.SIGTERM, _stopped)\n'
+    'signal.signal(getattr(signal, "SIGBREAK", signal.SIGTERM), _stopped)\n'
     'print("stalling", flush=True)\n'
     'time.sleep({wedge})\n'
 )
@@ -320,22 +321,16 @@ def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
 
 
 def test_a_runner_wedged_suite_states_the_kill_its_platform_took(tmp):
-    """Which contract the runner gives on THIS platform, asserted as such.
+    """The runner's route asks on every platform, and its record says so.
 
-    POSIX: the request goes to the whole group, a bounded grace follows,
-    and a suite that answers it flushes and reports what it did.
-    `pyproject.toml` sets `sigterm = true` for that, and before the tree
-    kill the runner's `terminate()` is what gave it the chance.
+    Both routes ask before they escalate, and each platform's request is
+    the one its suites can answer: SIGTERM on POSIX, CTRL_BREAK on
+    Windows, where only a suite that HANDLES the request keeps anything.
+    The planted suite installs the handler each platform asks with, and
+    the record has to say the request was made and taken.
 
-    Windows: one `taskkill /F /T`, a forced termination. Nothing is
-    asked, nothing is given a grace, and the suite cannot flush. That is
-    the pre-branch Windows behaviour -- `_terminate_and_reap` called
-    `process.terminate()`, which is `TerminateProcess` there -- and this
-    branch did not change it.
-
-    Each half refuses the other platform's clause, so a route that
-    silently changed platform is red rather than green for a reason no
-    reader could act on.
+    The forced-only clause is refused: no record this route can produce
+    may say the tree died unasked again.
     """
     root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
     result = _run_sandbox(
@@ -349,12 +344,6 @@ def test_a_runner_wedged_suite_states_the_kill_its_platform_took(tmp):
     # what the route DID, and this says which route it was. Either alone
     # is satisfiable by a record that got the other half wrong.
     assert TREE_WAS_KILLED in record['cleanup'], record
-    if FORCES_WITHOUT_ASKING:
-        assert 'suite was asked to stop and flushed' not in block, block
-        assert FORCED_WITHOUT_GRACE in record['cleanup'], record
-        assert REQUESTED_THEN_GRACED not in record['cleanup'], record
-        assert int(record['returncode']) != 0, record
-        return
     assert 'suite was asked to stop and flushed' in block, block
     assert int(record['returncode']) == 0, record
     # The cleanup has to say the suite TOOK THE REQUEST. The route alone
@@ -376,36 +365,22 @@ def test_a_flushed_suite_is_a_pass_only_where_a_flush_can_happen(tmp):
     SPECIFIED requirement rather than an accident, so a future change that
     closes it has to argue with this line.
 
-    The other half is the platform. A flush needs a request to answer, and
-    the Windows route sends none, so there a flushed wedge cannot exist
-    and the suite is reported as what it actually did: failed, with no
-    summary. Asserting the POSIX outcome there would be a red leg that
-    teaches its reader nothing, which is what CI reported on 2026-09-29
-    across all five `windows-latest` cells.
+    That a flushed wedge can happen is now true on every platform: both
+    routes ask before they escalate, and the planted suite handles the
+    request each platform asks with. `coverage_suites.py` still counts
+    any timed-out suite as failed whatever it reported, so the two
+    launchers disagree about a flushed wedge -- the rest of why this is
+    pinned rather than left implicit.
 
-    The two launchers also disagree about a flushed wedge, which is the
-    rest of why this is pinned rather than left implicit.
-    `coverage_suites.py` counts any timed-out suite as failed whatever it
-    reported.
-
-    The pull request states the disagreement in its `## Changes` section,
-    where the two per-launcher facts live, and the seat's task report
-    carries the argument for closing it and the reason for not closing it
-    here — a change to the `suites` job's gate, which this issue did not
-    ask for and which this seat cannot run to measure.
+    The pull request states the launcher disagreement where the two
+    per-launcher facts live; closing it would change the `suites` job's
+    gate, which no issue here has asked for.
     """
     root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)},
         outer_timeout=_RUNNER_OUTER_S)
     assert 'SUITE TIMED OUT' in result.stdout, result.stdout
-    if FORCES_WITHOUT_ASKING:
-        assert result.returncode == 1, (result.returncode, result.stdout,
-                                        result.stderr)
-        assert 'test_stoppable.py' in _failed_suites(result.stdout), (
-            result.stdout)
-        assert 'OVERALL: PASS' not in result.stdout, result.stdout
-        return
     assert result.returncode == 0, (result.returncode, result.stdout,
                                     result.stderr)
     assert 'OVERALL: PASS' in result.stdout, result.stdout

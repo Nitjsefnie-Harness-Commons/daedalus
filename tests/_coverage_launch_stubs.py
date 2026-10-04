@@ -73,11 +73,10 @@ def run_main(tmp, *, scripts=None, platform=None, argv=(),
     """Run the runner's `main()` here, over a tree holding `suites`.
 
     `platform` is what `sys.platform` reads as for the length of the call,
-    and it is the only thing that selects the Windows half of the timeout
-    sentence. Setting it proves the SELECTION -- that the value the runner
-    read is the one that chose the sentence; what a Windows run does at its
-    own bound stays proven by the windows-latest cells, which run the real
-    launcher on that host.
+    and it no longer selects any sentence -- both routes ask before they
+    escalate, so the timeout sentence is the same under either read. What
+    a Windows run does at its own bound stays proven by the windows-latest
+    cells, which run the real launcher on that host.
 
     `refuse_removals` makes that many of the runner's removals of its own
     output directory fail before it is really done. The stand-in goes onto

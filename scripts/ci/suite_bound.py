@@ -18,7 +18,10 @@ The direct child is not what a wedge leaves behind: a suite is a
 `coverage run` with the suite under it, plus whatever the suite itself
 started, so the kill here is of the child's whole TREE. `start_new_session`
 is what makes that reachable on POSIX, and it is a no-op on Windows, where
-the tree is killed by pid with the tree flag instead.
+the launch puts the tree in a process group of its own and the kill is a
+`CTRL_BREAK_EVENT` to that group, then `taskkill` by pid with the tree
+flag for whatever did not answer.
+
 
 `tests/_processtree.py` is the same shape for the suites' own children. It
 is followed here rather than imported: a shipped launcher must not depend
@@ -104,7 +107,11 @@ def kill_process_tree(process):
 
 def _ask_and_insist(process):
     if sys.platform.startswith('win'):
-        return _taskkill(process)
+        # The fork stays ahead of the group lookup below: `os.getpgid` has
+        # no Windows spelling, and the route below never needs one -- the
+        # request addresses the pid that leads the tree's group, because
+        # the launch put the tree in a group of its own.
+        return _ask_and_insist_windows(process)
     try:
         group = os.getpgid(process.pid)
     except ProcessLookupError:
@@ -180,22 +187,65 @@ def _kill_direct(process, reason):
     return f'{reason}; only the direct child was killed'
 
 
-def _taskkill(process):
-    """Kill the tree the way Windows can: by pid, with the tree flag.
+def _ask_and_insist_windows(process):
+    """Ask the tree to stop as Windows can, then insist, and name both.
 
-    One phase, and every string below says so. `/F` is a forced
-    termination, so a suite killed here is given no request and no grace
-    and cannot flush what it had measured -- which is the pre-branch
-    Windows behaviour, unchanged by this branch, and the reason the
-    record has to name it rather than let a reader infer that a graceful
-    path ran.
+    The request is `CTRL_BREAK_EVENT`, aimed at the pid that leads the
+    tree's group -- the launch set `creationflags=CREATE_NEW_PROCESS_GROUP`
+    to make it reachable. The escalation is `taskkill /F /T`, keyed on the
+    same pid, and it goes out whatever the request did: the two phases are
+    addressed differently on this platform, so a request that failed does
+    not cancel the escalation the way a failed group lookup does on POSIX.
 
-    `CTRL_BREAK_EVENT` to the child group would be the two-phase
-    analogue, and the launch already sets
-    `creationflags=CREATE_NEW_PROCESS_GROUP` to make it reachable. It is
-    not used here: it is new Windows behaviour that no host this branch
-    was written on can exercise, and issue #1204 asked for a bound rather
-    than for a graceful stop.
+    The record is the POSIX record's analogue, clause for clause: a suite
+    that ended inside the grace window is one that took the request, and
+    what the escalation then found is said in the same breath.
+    """
+    asked = _ctrl_break(process)
+    # Resolved once, before the direct child is reaped, for the POSIX
+    # route's reason: after that its pid is free to be reused.
+    stopped = not _still_running(process, CLEANUP_TIMEOUT_S)
+    insisted = _taskkill(process, stopped)
+    if asked is not None:
+        note = insisted or 'the escalation reached what was still in it'
+        return f'{asked}; {note}'
+    if stopped:
+        note = insisted or 'the escalation reached what was still in it'
+        return (f'process tree {process.pid} asked to stop and the suite '
+                f'did; {note}')
+    if insisted is not None:
+        return (f'process tree {process.pid} ignored the request, and '
+                f'after {CLEANUP_TIMEOUT_S} s of grace: {insisted}')
+    return (f'process tree {process.pid} ignored the request and was '
+            f'killed by taskkill /F after {CLEANUP_TIMEOUT_S} s of grace')
+
+
+def _ctrl_break(process):
+    """None when the request went out; the outcome string when it did not."""
+    try:
+        os.kill(process.pid, signal.CTRL_BREAK_EVENT)
+    except ProcessLookupError:
+        return f'process tree {process.pid} was already gone'
+    except OSError as error:
+        return f'CTRL_BREAK_EVENT failed: {error}'
+    return None
+
+
+def _taskkill(process, stopped):
+    """The escalation, and the honest reading of the exit code it returned.
+
+    `/F` is a forced termination, and it goes out whatever the request
+    did. What its exit code then says depends on what the suite did with
+    the request: after an answered one the pid the escalation is keyed on
+    is usually gone already, so a nonzero code there says the tree ended
+    at the request rather than that it may still be running. A nonzero
+    code beside a suite that ignored the request is the other reading,
+    and the record keeps the two apart so a stopped tree is never
+    reported as a live one.
+
+    Returns None when taskkill reported the terminations went out, and
+    the outcome string otherwise -- the shape `_signal_group` answers in
+    on the POSIX route.
     """
     try:
         result = subprocess.run(
@@ -205,15 +255,16 @@ def _taskkill(process):
             timeout=CLEANUP_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return (f'taskkill /F gave up after {CLEANUP_TIMEOUT_S}s, so the '
-                'tree may still be running; no request was sent and no '
-                'grace was given')
+                'tree may still be running')
     except OSError as error:
         return f'taskkill /F could not run: {error}'
     if result.returncode == 0:
-        return ('taskkill /F force-killed the tree; no request was sent '
-                'and no grace was given, so the suite flushed nothing')
-    return (f'taskkill /F exited {result.returncode}, so the tree may still '
-            'be running; no request was sent and no grace was given')
+        return None
+    if stopped:
+        return (f'the escalation found the tree already gone '
+                f'(taskkill exited {result.returncode})')
+    return (f'taskkill /F exited {result.returncode}, so the tree may '
+            'still be running')
 
 
 def discard_outputs(directory):

@@ -94,11 +94,13 @@ class Child:
 class Signals:
     """`os` as the subject sees it, recording every signal it sends.
 
-    `lookup_error` and `killpg_errors` are what make the tree misbehave, and
-    `sent` is what proves which signals went out and in which order -- the
-    one part of a tree kill no returned string can carry, since a string
-    saying the escalation happened is produced by the same branch either
-    way.
+    `lookup_error`, `killpg_errors` and `kill_errors` are what make the
+    tree misbehave, and `sent` is what proves which signals went out and in
+    which order -- the one part of a tree kill no returned string can
+    carry, since a string saying the escalation happened is produced by the
+    same branch either way. `kill` is the single-pid send, which is the
+    shape the Windows request takes: an event aimed at the pid that leads
+    the tree's group.
 
     `launcher_group` is what `getpgrp` answers, and it is a parameter rather
     than the process's own group because this stand-in owns both sides of the
@@ -108,11 +110,12 @@ class Signals:
     """
 
     def __init__(self, group=GROUP, launcher_group=LAUNCHER_GROUP,
-                 lookup_error=None, killpg_errors=None):
+                 lookup_error=None, killpg_errors=None, kill_errors=None):
         self.group = group
         self.launcher_group = launcher_group
         self.lookup_error = lookup_error
         self.killpg_errors = killpg_errors or {}
+        self.kill_errors = kill_errors or {}
         self.sent = []
 
     def __getattr__(self, name):
@@ -130,6 +133,11 @@ class Signals:
         self.sent.append((group, sig))
         if sig in self.killpg_errors:
             raise self.killpg_errors[sig]
+
+    def kill(self, pid, sig):
+        self.sent.append((pid, sig))
+        if sig in self.kill_errors:
+            raise self.kill_errors[sig]
 
 
 class Signal:
@@ -153,25 +161,19 @@ class Signal:
 class Escalation:
     """`signal` as the bounded teardown reads it, on every cell.
 
-    `_ask_and_insist` names exactly two signals, and reads both off its own
-    `signal` global rather than off a name the arm looks up. Standing that
-    global in is what makes the escalation arm reachable everywhere: read
-    from the interpreter's module instead, it is unreachable on a
-    windows-latest cell, which has no `SIGKILL` to name. There the read
-    raised inside the arm, `kill_process_tree`'s broad guard turned the
-    whole record into that exception, and the escalation never went out --
-    so a control asserting two signals was given one, on the cells where it
-    mattered most.
-
-    `SIGTERM` is the real member because `signal.SIGTERM` is defined on
-    every platform this repository runs, and a control that can name the
-    actual request should. `SIGKILL` cannot be: no interpreter this project
-    targets has both, and the arms it covers do not exist on the one that
-    has not. The existing POSIX-keyed control in `test_suite_bound.py` still
-    pins the escalation against the real member wherever one exists.
+    `_ask_and_insist` names three signals, one per route and phase, and
+    reads each off its own `signal` global. Standing that global in is
+    what makes every arm reachable everywhere: no interpreter this project
+    targets has both `SIGKILL` and `CTRL_BREAK_EVENT`, so a read from the
+    real module would raise inside the arm on some cells, and
+    `kill_process_tree`'s broad guard would make the record that exception
+    instead of the outcome the control asserts on. `SIGTERM` is the real
+    member because every platform defines it, and the POSIX-keyed
+    controls still pin the escalation against it wherever one exists.
     """
     SIGTERM = signal.SIGTERM
     SIGKILL = Signal('SIGKILL', 9)
+    CTRL_BREAK_EVENT = Signal('CTRL_BREAK_EVENT', 1)
 
 
 class Clock:
@@ -291,12 +293,12 @@ def require_sigkill():
     """End the control where `signal` has no escalation to name.
 
     `kill_process_tree` reads `signal.SIGKILL` only on the POSIX route:
-    `_taskkill` answers on Windows before that line is reached, and Windows
+    the Windows route answers before that line is reached, and Windows
     has no `SIGKILL` for a stand-in `sys` to route to either. So the arms
-    this covers do not exist there, and the control that does exist for
-    Windows -- the `taskkill` route and its refusals -- runs on every cell.
+    this covers do not exist there, and the Windows arms the route does
+    reach are pinned with the stand-in `signal` every cell can name.
     """
     if hasattr(signal, 'SIGKILL'):
         return
     _util.skip('signal.SIGKILL is POSIX-only, and the escalation arm is '
-               'reached only after _taskkill declines on Windows')
+               'reached only after the Windows route declines')
