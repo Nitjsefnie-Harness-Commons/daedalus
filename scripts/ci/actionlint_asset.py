@@ -97,12 +97,16 @@ def _retry_after_seconds(why):
 
 
 def _pause_seconds(attempt, why):
-    """How long to wait before the next ask, and whose number that is.
+    """How long to wait before the next ask: the longer of the two.
 
-    The growth is this module's own; a `Retry-After` the failing status
-    carried REPLACES it rather than adding to it, because the server
-    knows when it will answer and this code does not. The ceiling goes
-    last, so it binds whichever of the two is larger.
+    The growth is this module's own, and a `Retry-After` the failing
+    status carried is the other candidate — so the wait is whichever of
+    the two is longer, not whichever arrived last. A server that asked
+    for longer than the growth we would have waited anyway gets its
+    window, because it knows when it will answer and this code does not;
+    a server that asked for less is not the reason we wait, and waiting
+    its window would only bring the next ask forward. The ceiling is
+    applied last, so it binds whichever of the two survives.
     """
     window = RETRY_BACKOFF_SECONDS * 2 ** attempt
     told = _retry_after_seconds(why)
