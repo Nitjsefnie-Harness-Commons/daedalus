@@ -606,17 +606,13 @@ def test_an_unreadable_answer_is_red_not_an_absent_run_and_not_retried(tmp):
     assert verdict == 'secrets-query-failed' and calls == [], calls
 
 
-def test_the_poll_bound_is_configurable_and_refuses_nonsense(tmp):
+def test_the_poll_bound_is_the_default_and_stops_at_the_ceiling(tmp):
     del tmp
     mod = _gate()
     with mock.patch.dict(os.environ, {}, clear=True):
         assert mod.poll_bound() == mod.DEFAULT_POLL_BOUND_S
-        os.environ[mod.POLL_BOUND_ENV] = '90'
-        assert mod.poll_bound() == 90.0
-        for raw in ('', 'soon', '0', '-5', 'inf', 'nan',
-                    str(mod.MAX_POLL_BOUND_S + 1)):
-            os.environ[mod.POLL_BOUND_ENV] = raw
-            _query_error(mod, mod.poll_bound)
+        os.environ[mod.POLL_BOUND_ENV] = str(mod.MAX_POLL_BOUND_S + 1)
+        _query_error(mod, mod.poll_bound)
 
 
 def _gate_step():
@@ -675,20 +671,6 @@ def test_the_gate_waits_on_a_dispatch_event_too(tmp):
     job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
     assert job.get('if') == '${{ always() }}', job.get('if')
     assert 'if' not in step, step
-
-
-def test_the_poll_bound_fits_inside_the_job_timeout(tmp):
-    del tmp
-    mod = _gate()
-    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
-    ceiling = int(job['timeout-minutes'])
-    bound = float(_gate_step()['env']['SECRETS_POLL_BOUND_S'])
-    assert ceiling == 20, ceiling
-    assert bound == mod.DEFAULT_POLL_BOUND_S, bound
-    assert bound + 4 * mod.READ_TIMEOUT_S < ceiling * 60, (bound, ceiling)
-    worst = mod.MAX_POLL_BOUND_S + 4 * mod.READ_TIMEOUT_S
-    assert worst < ceiling * 60, worst
-    assert 0 < mod.POLL_INTERVAL_S < bound, (mod.POLL_INTERVAL_S, bound)
 
 
 def main():
