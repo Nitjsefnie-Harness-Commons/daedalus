@@ -75,8 +75,8 @@ def _mapping_key(stripped, filename='workflow'):
                 escaped = True
                 continue
             if char == quote:
-                if (quote == "'" and index + 1 < len(stripped)
-                        and stripped[index + 1] == quote):
+                if (index + 1 < len(stripped)
+                        and stripped[index + 1] == quote == "'"):
                     escaped = True
                     continue
                 quote = ''

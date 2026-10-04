@@ -393,7 +393,7 @@ def test_zero_body_limit_starts_and_refuses_nonempty_body(tmp):
     with _util.bridge(tmp, env=test_mcp_server.BRIDGE_ENV) as (
             base, _docroot):
         mod, port = _start_listener(base, 0)
-        assert mod.bound_port == port and port > 0, (mod.bound_port, port)
+        assert 0 < port == mod.bound_port, (mod.bound_port, port)
         assert not mod.startup_error, mod.startup_error
         status, _session_id, raw = test_mcp_server._mcp_request(port, b'x')
         assert status == 413, (status, raw)
