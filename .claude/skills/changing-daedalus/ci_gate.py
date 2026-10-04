@@ -71,6 +71,12 @@ PUBLISHED_CHECKS = frozenset({'gate freshness'})
 # `ci_wait`'s is an alias of this; `gh_client` spells its own, for a
 # reason its comment gives, and a control holds the two equal.
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
+# What a run's name can be when its conclusion is not about the commit
+# under test. An admission gate runs on `pull_request_target`, so it
+# reports against the base tip and judges another pull request, and since
+# v2.0.0 it concludes FAILURE when it closes an inadmissible one. Its exit
+# 1 is the gate working, not a red head.
+NOT_ABOUT_THE_HEAD = frozenset({'pr gate'})
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
 

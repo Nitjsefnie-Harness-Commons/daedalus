@@ -93,8 +93,7 @@ def test_claim_scopes_its_permission_to_the_job(tmp):
     assert effective == {'issues': 'write', 'pull-requests': 'write'}, (
         "claim's effective scope must be exactly issues: write plus "
         'pull-requests: write, which the two assertions above leave on the '
-        'job: a /claim on a pull request must read it and answer on its '
-        'conversation, and GitHub refuses both to an issues-only token')
+        'job: a claim on a pull request has to be answerable on it')
 
 
 def test_claim_pins_the_current_release(tmp):
