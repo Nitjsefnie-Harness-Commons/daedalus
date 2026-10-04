@@ -248,16 +248,6 @@ def _mechanism_residue(sources=None):
     return residue, overlap, stale
 
 
-def _asset_module(installer):
-    """The module that asks for the asset, where the retry window lives.
-
-    The installer names the asset and installs what comes back; this is
-    the module that reaches for it, so the controls that stand in for a
-    transfer patch and read it through here rather than naming it.
-    """
-    return installer.actionlint_asset
-
-
 class _Fetched:
     """What the transfer hands back: a context manager over one payload.
 
@@ -297,7 +287,7 @@ class _Transfer:
     def __init__(self, installer, name, outcomes):
         self.expected = (f'{installer.RELEASE}/v'
                          f'{installer.ACTIONLINT_VERSION}/{name}')
-        self.timeout = _asset_module(installer).DOWNLOAD_TIMEOUT
+        self.timeout = installer.actionlint_asset.DOWNLOAD_TIMEOUT
         self.outcomes = list(outcomes)
         self.calls = []
 
@@ -337,7 +327,7 @@ def _installer_and_transfer(outcomes):
     if callable(outcomes):
         outcomes = outcomes(installer)
     return (installer, _Transfer(installer, name, outcomes), name,
-            _asset_module(installer))
+            installer.actionlint_asset)
 
 
 def _http_error(installer, code, phrase, retry_after=None):
