@@ -463,14 +463,12 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
     green but this one.
 
     The searched domain is this skill's own directory and nothing wider: a
-    `*.py` module beside `ci_gate.py`. It cannot bound the other copies.
-    `scripts/ci/aggregate_gate.py` carries its own versions of the filter
-    - `_workflow_of` and `_started_key` with bodies identical to
-    `ci_gate.py`'s, and `superseded` under its own signature - and a copy
-    pasted in any module outside this directory is green here. That is
-    issue #1260, which this branch leaves open on purpose: `scripts/ci/`
-    is gate-defining, and an edit there turns every open pull request's
-    `gate freshness` check red on merge.
+    `*.py` module beside `ci_gate.py`. It cannot bound the other copies,
+    and a copy pasted into any module outside this directory is green
+    here. `scripts/ci/aggregate_gate.py` is such a module: since issue
+    #1260 it binds `_workflow_of` and `_started_key` through the import
+    from `ci_gate` rather than declaring them, and keeps `superseded`
+    local under its own signature - outside the scan's domain either way.
 
     Within that domain the first half refuses a module-scope definition
     of any name `FILTER_NAMES` watches outside `ci_gate`, whatever nests
