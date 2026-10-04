@@ -425,7 +425,7 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
     assert ('no raise; no module shrank, no file lost an over-limit '
             'line, no module lost an uncovered JavaScript line and '
-            'tests/ lost no line.'
+            'the suite tree lost no line.'
             ) in noop_summary.read_text(encoding='utf-8')
 
 
