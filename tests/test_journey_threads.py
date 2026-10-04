@@ -670,20 +670,20 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
     # where the pooled spread exceeds tolerance_pct — the default is a
     # floor, never a ceiling to tighten under — so every entry in the
     # block is strictly above the default, and every journey at or below
-    # it, `net-capture` among them, carries tolerance_pct. This control
-    # pins the convention against the committed artefact, never a number:
-    # the values are the runs' own measurements and move with the next
-    # pool. Where a draw may sit from the recorded count is the budget
+    # it carries tolerance_pct. `net-capture` is named because its draws
+    # are the narrowest the pool has seen, the journey the floor most
+    # often removes; the control pins the convention, not today's data —
+    # an above-floor re-derivation of it would carry an entry like any
+    # other. Where a draw may sit from the recorded count is the budget
     # gate's question, not this one; the bound the gate enforces is read
     # through `tolerance_of`, which prefers a journey's own entry over
     # the default.
     own = document.get('tolerances') or {}
-    assert 'net-capture' not in own, (
-        'net-capture is below tolerance_pct, and an entry exists only '
-        'above the default: an entry here means the artefact was recorded '
-        'under the pre-floor convention and must be re-derived')
     assert all(value > document['tolerance_pct']
-               for value in own.values()), own
+               for value in own.values()), (
+        'an entry at or below tolerance_pct means the artefact was '
+        'recorded under the pre-floor convention and must be re-derived: '
+        f'{own}')
 
 
 def main():
