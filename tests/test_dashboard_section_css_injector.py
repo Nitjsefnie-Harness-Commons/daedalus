@@ -2,13 +2,10 @@
 """The CSS injector panel, run rather than read.
 
 `dashboard/sections/css-injector.js` injects and removes CSS through
-`chrome.scripting` and keeps its own session list in `localStorage`, so a
-command that carries the wrong tab, drops the all-frames flag, or sends
-whitespace the bridge will reject is an operator looking at a page that
-did not change. The harness mounts the shipped section over the real
-`dashboard/api.js` and the real `_util.js` in Node, drives the form and
-the session table, and reads the parsed body of every request beside the
-cells the section rendered and the store it wrote.
+`chrome.scripting` and keeps its session list in `localStorage`. The
+harness mounts the shipped section over the real `dashboard/api.js` and
+`_util.js` in Node, drives the form and the session table, and reads every
+request body beside the rendered cells and the store.
 """
 import json
 import sys
@@ -84,14 +81,9 @@ def _store(report):
 
 def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
     """`bindTabSelector` returns before `api.get('/tabs')` when the token
-    is empty, and the zero-request half is the claim no other tab-selector
-    case in this suite carries: a select the mount never populated has
-    nothing to say even with a command behind it. `(active tab)` is the
-    option `css-injector.js:18` ships in the MARKUP, not the one the
-    `placeholder` argument appends -- that append is on the success path,
-    after the try/catch, so it never runs here. `runCommand` still
-    refuses a command at `api.js:128`; this case does not press anything
-    to say so."""
+    is empty: no request, no toast, and the MARKUP's own `(active tab)`
+    option -- the `placeholder` append sits on the success path and never
+    runs here. Nothing is pressed."""
     report = _run(SETTLED + 'sectionReport({ options:'
                   ' container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
@@ -99,21 +91,14 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
                   setup=TABS_ONLY + NO_TOKEN)
     assert report['options'] == ['(active tab)'], report
     assert report['toasts'] == [], report
-    # Not one request: a guard that fell through would have asked for the
-    # list and been answered with the two tabs the plan declares.
     assert report['requests'] == 0, report
     assert report['unplanned'] == [], report
 
 
 def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
-    """`_util.js:63` renders the error only when an `errorLabel` was
-    passed and this section passes none, so a 500 leaves the markup's own
-    `(active tab)` option and toasts nothing. What the bridge said is
-    nowhere on the panel, which is the contract the missing `errorLabel`
-    buys. Nothing is pressed, so that silence is the whole claim: the
-    case above makes the same disclosure about the no-token path, and
-    neither shows an INJECT still reaching the bridge under an
-    unpopulated select."""
+    """This section passes no `errorLabel`, so a 500 leaves the markup's
+    own `(active tab)` option and toasts nothing: what the bridge said is
+    nowhere on the panel. Nothing is pressed."""
     report = _run(SETTLED + 'sectionReport({ options:'
                   ' container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
@@ -207,19 +192,11 @@ def test_the_css_reaches_the_command_with_its_own_whitespace(_tmp):
 
 
 def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
-    """`save()` runs BEFORE `extCmd('inject-css')`, so the record is already
-    in the store when the command is refused. That is a record with no live
-    rule, and it is the safe direction: the reverse order's failure is a
-    rule applied to a page that nothing recorded, which the operator cannot
-    take off at all.
-
-    The refusal MARKS that record `failed` and the row shows the state, so
-    an operator can tell a residue row from a live one before removing it.
-    A successful inject leaves the flag off -- pinned by the exact key set
-    in `test_a_selected_tab_and_a_checked_box_reach_the_command` -- and the
-    removal the marking buys is
-    `test_remove_drops_a_failed_record_and_refuses_a_live_one`.
-    """
+    """`save()` runs BEFORE `extCmd('inject-css')` -- the reserve order the
+    ordering case pins -- so the record is in the store when the command
+    is refused. The refusal MARKS it `failed` and the row shows the state;
+    the success limb, the flag left off, is the exact key set in
+    `test_a_selected_tab_and_a_checked_box_reach_the_command`."""
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'sectionReport({ toasts: toasts(),\n'
@@ -227,12 +204,10 @@ def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
                   setup=SEEDED, answers=(INJECT_REFUSED,))
     assert report['toasts'] == [{'type': 'err',
                                  'text': 'cannot access the tab'}], report
-    # The record is on offer, newest first, showing the failed state, and
-    # the seeded two are behind it, unmarked.
+    # Newest first; the seeded two behind it, unmarked.
     assert [row[3] for row in report['rows'][1:]] == [
         '[failed] a{color:red}', 'a{--seed:1}', 'b{--seed:2}'], report
-    # The store keeps insertion order, so the reserved record is the LAST
-    # one there even though the table shows it first.
+    # The store keeps insertion order: the reserved record is LAST there.
     stored = _store(report)
     assert [entry['css'] for entry in stored] == [
         'b{--seed:2}', 'a{--seed:1}', 'a{color:red}'], report
@@ -240,17 +215,11 @@ def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
 
 
 def test_a_concurrent_store_write_survives_the_inject_refusal(_tmp):
-    """The marking write re-reads the store rather than writing back the
-    array captured before the command: the session stream fans out to
-    every open window, so a record a second window added while the
-    refused command was in flight must still be there after the marking
-    -- it is a live rule's only path to an exact removeCSS match. The
-    same re-read stops the other direction: a window that removed the
-    reserved record during the flight must not see it resurrected,
-    unmarked, by a stale write-back, so the not-found limb only re-renders
-    and writes nothing back -- both limbs of that check are driven here,
-    one inject each.
-    """
+    """The marking write re-reads the store instead of writing back the
+    pre-command array, one inject per limb: a record another window added
+    during the flight must survive the marking -- it is a live rule's
+    only path to an exact match -- and a record another window removed
+    must not be resurrected by a stale write-back."""
     report = _run(
         'const KEY = "daedalus-dash-css-sessions";\n'
         'const realFetch = globalThis.fetch;\n'
@@ -283,22 +252,18 @@ def test_a_concurrent_store_write_survives_the_inject_refusal(_tmp):
         '    "daedalus-dash-css-sessions")) });\n',
         setup=SEEDED, answers=(INJECT_REFUSED,))
     assert shared.types(report) == ['inject-css', 'inject-css'], report
-    # Found limb: the concurrent record added during the first refused
-    # command is still there, and the reserved record alone is marked.
+    # Found limb: the concurrent record survives; only the reservation
+    # is marked.
     assert [e['css'] for e in report['mid']] == [
         'b{--seed:2}', 'a{--seed:1}', 'a{--first}',
         'a{--concurrent}'], report
     assert report['mid'][2]['failed'] is True, report
     assert 'failed' not in report['mid'][3], report
-    # Not-found limb: the second window then removed the second
-    # reservation during its command, and the marking must not write the
-    # stale array back -- the removal stands.
+    # Not-found limb: the concurrent removal stands; no stale write-back.
     assert [e['css'] for e in report['left']] == [
         'b{--seed:2}', 'a{--seed:1}', 'a{--first}',
         'a{--concurrent}'], report
     assert report['left'][2]['failed'] is True, report
-    # The marked record still renders marked after the second render, and
-    # nothing beyond the two refusals was toasted.
     assert [row[3] for row in report['rows'][1:]] == [
         'a{--concurrent}', '[failed] a{--first}', 'a{--seed:1}',
         'b{--seed:2}'], report
@@ -323,13 +288,9 @@ def test_a_failed_remove_leaves_the_session_store_alone(_tmp):
 
 
 def test_a_session_rows_remove_aims_at_what_the_row_recorded(_tmp):
-    """The row rebuilds its own fields from the stored entry rather than
-    from the form, so a rule injected into one tab on all frames is removed
-    from that tab on those frames even though the form says something else
-    by now. A row with no tab and no frames flag carries neither key."""
-    # The second click goes through the tree as it is after the first
-    # one rebuilt it, so the case proves the rebuilt table is interactive
-    # rather than that a detached button still answers.
+    """The row rebuilds its own fields from the stored entry, not the
+    form; a row with no tab and no frames flag carries neither key."""
+    # The second click runs on the REBUILT tree, not a detached button.
     report = _run('container.all().filter(\n'
                   '  (el) => el.tag === "button" &&\n'
                   '    el.textContent === "remove")[0].click();\n' + SETTLED
@@ -346,15 +307,10 @@ def test_a_session_rows_remove_aims_at_what_the_row_recorded(_tmp):
 
 
 def test_a_row_remove_that_failed_keeps_the_local_session(_tmp):
-    """A refused `remove-css` leaves the record alone, and the workflow is
-    why: `chrome.scripting.removeCSS` needs an exact match, and that
-    record is the only place the string is kept. Drop it and a rule still
-    applied to the page can only come off by retyping the rule by hand,
-    with the operator working from a preview that is gone.
-
-    The success case beside it is the other half: a handler that never
-    deletes fails there, and one that always deletes fails here.
-    """
+    """A refused `remove-css` leaves the record alone: removeCSS needs an
+    exact match and the record is the only place the string is kept. A
+    handler that always deletes fails here; one that never deletes fails
+    in the success case beside it."""
     report = _run('const del = button("remove", container);\n'
                   'del.click();\n' + SETTLED
                   + 'const rows = rowTexts(container.all()[0]);\n'
@@ -387,14 +343,9 @@ def test_a_row_remove_that_succeeded_deletes_it_and_says_so(_tmp):
     assert len(_store(report)) == 1, report
 
 
-# A `setItem` that refuses the sessions key, installed AFTER `SEEDED`, which
-# writes that key to seed the table.
-#
-# The guard on the key is pinned by nothing and cannot be: `save()` is the
-# only `setItem` here and STORE_KEY the only key it writes, so a fake that
-# threw on EVERY key would behave identically in every case below. Dropping
-# the guard leaves the suite green, and the honest reading is that the
-# specificity is unobservable here, not merely unasserted.
+# A `setItem` that refuses the sessions key, installed AFTER `SEEDED`
+# seeded it. A key guard is unobservable here: `save()` is the only
+# `setItem` and STORE_KEY the only key it writes.
 QUOTA = ("const realSet = localStorage.setItem;\n"
          "localStorage.setItem = (key, value) => {\n"
          "  if (String(key) === 'daedalus-dash-css-sessions') {\n"
@@ -407,17 +358,11 @@ QUOTA = ("const realSet = localStorage.setItem;\n"
 
 
 def test_a_store_that_refuses_the_write_never_reaches_the_command(_tmp):
-    """The half the failed-command case cannot show. There the command was
-    sent and failed; here nothing is sent at all, because `save()` runs
-    first and its `setItem` throws. A `QuotaExceededError` under the old
-    order would have arrived AFTER `extCmd('inject-css')` resolved, leaving
-    a live rule with no record -- the harm #1180 exists to stop.
-
-    So the claim is two things, and the second is what makes the first mean
-    something: no command on the wire, and the store byte-for-byte as it was.
-    A handler that caught the refusal and then carried on to inject would
-    pass the first and fail the second only by luck, so both are asserted.
-    """
+    """The half the failed-command case cannot show: nothing is sent at
+    all, because `save()` runs first and its `setItem` throws. Both halves
+    are asserted -- no command on the wire, and the store byte-for-byte as
+    it was -- since a handler that caught the refusal and injected anyway
+    would pass the first by luck alone."""
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'sectionReport({ toasts: toasts(),\n'
@@ -435,15 +380,10 @@ def test_a_store_that_refuses_the_write_never_reaches_the_command(_tmp):
 
 
 def test_the_record_is_in_the_store_before_the_command_is_sent(_tmp):
-    """The ordering is observed rather than asserted, because the two orders
-    produce the same store and the same toast once the click has settled.
-    The only moment they differ is the request itself: reading the store as
-    the `/command` leaves the wire tells the two apart, and nothing else in
-    the panel does.
-
-    Three is two seeded records plus the one this click reserved. A handler
-    that wrote the record after the answer read two here.
-    """
+    """The ordering is observed, not asserted: both orders settle to the
+    same store, and only the store as the command leaves the wire tells
+    them apart. Three is two seeds plus the reservation; writing after the
+    answer would read two."""
     body = ('const atSend = [];\n'
             'const realFetch = globalThis.fetch;\n'
             'globalThis.fetch = async (target, init) => {\n'
@@ -464,13 +404,9 @@ def test_the_record_is_in_the_store_before_the_command_is_sent(_tmp):
 
 
 def test_a_row_remove_the_store_refuses_says_so_and_keeps_the_row(_tmp):
-    """`remove-css` has already answered when the store is written, so a
-    `setItem` that throws here costs a record and not a rule -- the same
-    safe direction as the inject side, reached the other way round. It is
-    caught and toasted rather than left as an unhandled rejection, and the
-    table is not re-rendered onto a store it cannot write, so what the
-    operator is looking at and what the store holds are the same two rows.
-    """
+    """`remove-css` has already answered, so a `setItem` that throws here
+    costs a record and not a rule: caught and toasted, and the table is
+    not re-rendered onto a store it cannot write."""
     report = _run('button("remove", container).click();\n' + SETTLED
                   + 'sectionReport({ toasts: toasts(),\n'
                     '  rows: rowTexts(container.all()[0]) });\n',
@@ -489,16 +425,10 @@ def test_a_row_remove_the_store_refuses_says_so_and_keeps_the_row(_tmp):
 
 def test_a_full_session_list_refuses_the_next_injection(_tmp):
     """The store holds twenty records and the twenty-first injection is
-    refused before anything is sent. The workflow is why: the panel's own
-    hint calls this list the way back to an exact `removeCSS` match, so a
-    twenty-first rule that is applied and then not recorded is one the
-    operator can only take off by retyping.
-
-    Twenty successful injections are the other half of this case: a panel
-    that always refuses fails on the first of them, and a panel that never
-    refuses fails on the twenty-first. The cap itself is pinned by what
-    the refusal proves, not by an eviction being observed.
-    """
+    refused before anything is sent: a cap applied-but-unrecorded would be
+    a rule the operator can only take off by retyping. Twenty successful
+    injections are the other half -- a panel that always refuses fails on
+    the first, one that never refuses on the twenty-first."""
     body = ('const css = container.find("[data-role=css]");\n'
             'const inject = async () => {\n'
             '  for (let i = 0; i < 21; i += 1) {\n'
@@ -553,13 +483,9 @@ def test_the_preview_collapses_whitespace_before_it_caps(_tmp):
 
 
 def test_a_row_renders_the_tab_the_frames_and_a_local_time(_tmp):
-    """Three of the five cells this row renders -- the time, the tab and
-    the frames flag, the fourth being the preview the case above pins.
-    They are read off the stored entry: `tabId || '—'`,
-    `allFrames ? 'all' : 'top'`, and a time computed inline as local
-    `HH:MM:SS`. The time is host-timezone dependent, so the case pins
-    its SHAPE and its relation to the entry's own `ts` rather than a
-    literal a runner in another zone would refuse."""
+    """Three of the five cells, read off the stored entry: `tabId || '—'`,
+    `allFrames ? 'all' : 'top'`, and a local `HH:MM:SS`. The time is
+    zone-dependent, so its SHAPE is pinned, not a literal."""
     report = _run('sectionReport({ rows: rowTexts(container.all()[0]) });\n',
                   setup=SEEDED)
     rows = report['rows'][1:]
@@ -604,12 +530,9 @@ def test_a_store_that_will_not_parse_renders_the_empty_state(_tmp):
 
 
 def test_a_bus_tab_event_repopulates_the_select_and_keeps_the_choice(_tmp):
-    """`bindTabSelector` registers its listener inside `mount`, which is
-    what `app.js` calls with the bus. The event has to reach a real
-    `/tabs` fetch -- counting them is what separates a listener that was
-    registered from one that was not, since the listing it repopulates is
-    the listing the mount already had. A selection survives a refresh only
-    while its tab is still offered."""
+    """`bindTabSelector` registers inside `mount`; the event must reach a
+    real `/tabs` fetch, which is what separates a registered listener from
+    a missing one. A selection survives only while its tab is offered."""
     report = _run(SETTLED
                   + 'const before = REQUESTS.length;\n'
                     'container.find("[data-role=tab]").value = "11";\n'
@@ -656,13 +579,10 @@ def _store_after(js, *, setup, answers=()):
 
 
 def test_two_overlapping_injections_cannot_both_pass_the_cap_check(_tmp):
-    """The overlap IS the claim: a sequential pair needs no interleaving,
-    so it would pass under either order and pin nothing. `click()` does not
-    await the handler, so two INJECTs fired without settling leave the first
-    suspended at its `await` while the second runs the cap check. The write
-    precedes it, so the second sees twenty and is refused; move the write
-    after it and its `save` slices the oldest away saying nothing.
-    """
+    """The overlap IS the claim -- a sequential pair would pin nothing.
+    `click()` does not await the handler, so the first INJECT hangs at its
+    `await` while the second runs the cap check over the written record
+    and is refused."""
     report = _store_after(
         'const css = container.find("[data-role=css]");\n'
         'css.value = "a{--first}";\n'
@@ -681,24 +601,14 @@ def test_two_overlapping_injections_cannot_both_pass_the_cap_check(_tmp):
 
 
 def test_a_row_remove_finds_its_record_after_the_store_moves(_tmp):
-    """Spliced out by the CONTENTS of the record the row was built from, not
-    by the position it was rendered at -- and when the record is gone by the
-    time the button is pressed, nothing is spliced at all.
-
-    The store is re-read at click time and the session stream fans out to
-    every open window, so a second window can remove this record between this
-    one's render and its click; the scenario does exactly that. A missing
-    `findIndex` returns -1, and -1 is a valid `splice` index meaning the
-    LAST element, so an unguarded splice takes the record it did not come
-    for. Two mutations die here: dropping the `at < 0` guard, and restoring
-    the index. They CONVERGE on this store, because for the row clicked `i`
-    is 0 and `length - 1 - 0` IS `-1`, so the two splices are the same call.
-    The position path is pinned by NO case, and the two remove cases beside
-    this one do not close that: each clicks its row at `i` 0 against a store
-    the index and the search agree on, so the position mutation survives
-    them. Closing it needs a click on a row with `i` above 0 and a
-    three-record store, which is not built here.
-    """
+    """Spliced out by the CONTENTS of the record the row was built from,
+    not the position it was rendered at -- and a record already gone by
+    click time is spliced not at all. The store is re-read at click time
+    and the stream fans out to every window, so the scenario has a second
+    window remove the record between render and click. A missing
+    `findIndex` is -1, a valid `splice` index meaning LAST, so an
+    unguarded splice takes the record it did not come for; dropping the
+    `at < 0` guard and restoring the index both die here."""
     report = _store_after(
         'const KEY = "daedalus-dash-css-sessions";\n'
         'localStorage.setItem(KEY, JSON.stringify([\n'
@@ -713,12 +623,9 @@ def test_a_row_remove_finds_its_record_after_the_store_moves(_tmp):
 
 def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
     """`{}` is valid JSON, so it passes the `catch` the corrupt-store guard
-    is built on. What reaches it first is not the cap check but the MOUNT:
-    `renderSessions` runs before any click and its row map calls `.slice`, so
-    the panel dies at the table. The cap check would have waved the same
-    `undefined` through -- against 20 is false -- so that guard belongs in
-    `sectionLoad()`.
-    """
+    is built on: the mount's row map calls `.slice` first and the panel
+    dies at the table; the cap check would have waved the same `undefined`
+    through."""
     report = _store_after(
         'container.find("[data-role=css]").value = "a{color:red}";\n'
         'button("INJECT").click();\n' + SETTLED,
@@ -735,17 +642,13 @@ def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
 
 def test_remove_drops_a_failed_record_and_refuses_a_live_one(_tmp):
     """One refused injection reserves a record the row's own remove takes
-    away WITHOUT the worker: the command never reached the page, so
-    `remove-css` has no exact match to confirm, and asking is what left
-    the record stuck before. The click after it is the seeded LIVE
-    record, which still goes to the worker first and stays when the
-    worker refuses -- the refuse-before-splice order of issue 1179, so
-    the local drop is not licence to drop a live record too. The flag
-    and the row's failed state are pinned by
-    `test_a_failed_inject_keeps_the_record_it_reserved`; a successful
-    inject leaves the flag off, pinned by the exact key set in
-    `test_a_selected_tab_and_a_checked_box_reach_the_command`.
-    """
+    away WITHOUT the worker: the panel holds no confirmation the rule is
+    live, and asking the worker anyway is what stuck the record before.
+    The next click is the seeded LIVE record, which still goes to the
+    worker first and stays put when the worker refuses -- the
+    refuse-before-splice order of issue 1179. The flag and the row's
+    failed state are pinned by
+    `test_a_failed_inject_keeps_the_record_it_reserved`."""
     report = _store_after(
         'container.find("[data-role=css]").value = "a{color:red}";\n'
         'button("INJECT").click();\n' + SETTLED
