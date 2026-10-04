@@ -25,11 +25,6 @@ from _coverage_guard import _BINDING_MESSAGE
 from _owned_writes import copy_test_tree
 
 
-def _normalized_source(target):
-    """A test module's source with checkout line endings normalised."""
-    return target.read_bytes().decode('utf-8').replace('\r\n', '\n')
-
-
 def _expected_binding_diagnostic(source, marker, message=_BINDING_MESSAGE):
     """The diagnostic owed a source, at the line carrying `marker`."""
     line = source[:source.index(marker)].count('\n') + 1

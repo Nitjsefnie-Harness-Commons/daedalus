@@ -22,7 +22,6 @@ from _repo import ROOT  # noqa: E402
 from _worker_sources import CONTENT_SCRIPT_PAGE  # noqa: E402
 
 SINGLE_ORIGIN = 'https://storage-test.example.com'
-FAILURE_ORIGIN = 'https://storage-failure.example.com'
 ORIGIN_A = 'https://alpha.example.com'
 ORIGIN_B = 'https://beta.example.com'
 

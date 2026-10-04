@@ -34,9 +34,6 @@ SETTLE_POLL_S = 0.05
 # that still answers the question; a broader mask asks for more access
 # than a receipt has any business holding.
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-# `ERROR_ACCESS_DENIED` — the null handle that means a process is RUNNING
-# and this one may not open it. Nothing else reports gone because of it.
-_ERROR_ACCESS_DENIED = 5
 # `ERROR_INVALID_PARAMETER` — the ONLY null-handle code that means there was
 # no such pid, and so the only one that reports gone.
 _ERROR_INVALID_PARAMETER = 87
