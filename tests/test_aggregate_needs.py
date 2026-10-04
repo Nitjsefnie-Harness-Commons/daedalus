@@ -20,11 +20,12 @@ from _yamlscalar import YAMLReadError  # noqa: E402
 AGGREGATE = 'aggregate'
 _REAL = ROOT / '.github' / 'workflows' / 'tests.yml'
 
-# Declared once, and asserted two ways: this is exactly what the real
-# workflow is left with once the aggregate, its needs and its descendants
-# are removed, and the workflow's own comment still says why.
+# What the real workflow is left with once the aggregate and its needs
+# are removed; the workflow's own comment says why.
 EXEMPT = {'diff-coverage'}
 _DOCUMENTED = ('INFORMATIONAL', 'deliberately absent')
+_EXEMPT_COMMENT = ('    # INFORMATIONAL, never a gate — which is why it is'
+                   ' deliberately absent\n')
 
 NEEDS_BLOCK = '    needs:\n      - probe\n'
 RUNNER = '    runs-on: ubuntu-latest\n    timeout-minutes: 5\n'
@@ -48,11 +49,10 @@ def test_the_control_reads_the_shape_off_a_literal_oracle(tmp):
     """The shape oracle is a literal set, read off a fixture by hand.
 
     The control recomputed `descendants` with the helper it judges, so
-    it agreed with the helper whatever the helper returned and the
-    issue's shape was invisible. Entries read off the fixture: `direct`
-    pins the listed half of the rule, `mid` and `leaf` the needs-closure
-    half, `inner` and `outer` are the issue's downstream-only jobs and
-    stay absent however far their needs reach.
+    it agreed with whatever the helper returned. `direct` pins the
+    listed half of the rule, `mid` and `leaf` the needs-closure half,
+    `inner` and `outer` the issue's downstream-only jobs, absent however
+    far their needs reach.
     """
     source = ('jobs:\n'
               '  aggregate:\n    needs:\n'
@@ -101,22 +101,10 @@ def test_an_undocumented_exemption_is_named_by_the_gate(tmp):
     root = _copy_real(tmp)
     source = _REAL.read_text(encoding='utf-8')
     (root / 'tests.yml').write_text(
-        source.replace(
-            '    # INFORMATIONAL, never a gate — which is why it is'
-            ' deliberately absent\n', '    # not a gate\n'),
+        source.replace(_EXEMPT_COMMENT, '    # not a gate\n'),
         encoding='utf-8')
     assert _undocumented(
         (root / 'tests.yml').read_text(encoding='utf-8')) == list(_DOCUMENTED)
-
-
-def test_an_extra_job_outside_the_aggregate_is_named(tmp):
-    """The issue's own repro: a second job left out of `needs`."""
-    source = ('jobs:\n'
-              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE
-              + '  late:\n' + RUNNER)
-    violations = _scan_fixture(tmp, 'late-job', source)
-    assert len(violations) == 1, violations
-    assert "'late'" in violations[0], violations
 
 
 def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
@@ -151,11 +139,9 @@ def test_the_documentation_check_reads_only_the_exempt_jobs_comment(tmp):
     """The why must sit on the exempt job; elsewhere in the file is not it."""
     root = _copy_real(tmp)
     source = _REAL.read_text(encoding='utf-8')
-    phrase = ('    # INFORMATIONAL, never a gate — which is why it is'
-              ' deliberately absent\n')
-    stripped = source.replace(phrase, '    # not a gate\n')
+    stripped = source.replace(_EXEMPT_COMMENT, '    # not a gate\n')
     relocated = stripped.replace(
-        '  journey-budget:\n', '  journey-budget:\n' + phrase, 1)
+        '  journey-budget:\n', '  journey-budget:\n' + _EXEMPT_COMMENT, 1)
     assert source.count('  journey-budget:\n') == 1, (
         'the relocation anchor moved')
     (root / 'tests.yml').write_text(relocated, encoding='utf-8')
@@ -166,8 +152,7 @@ def test_the_comparison_is_step_name_agnostic(tmp):
     """Steps are never consulted, so their spellings cannot move the set.
 
     Issue 156's silent miss hid a duplicated `Check dependency results`
-    step behind its field order; a needs-completeness gate has no
-    uniqueness guarantee to hide, and this pin holds the shape beside a
+    step behind its field order; the pin holds the shape beside a
     genuine coverage gap to show the two do not interact.
     """
     steps = ('    steps:\n'
@@ -229,11 +214,9 @@ def _aggregate_violations(directory=None):
 def _gaps(workflow):
     """Every gap in one aggregate job's coverage, not only the first."""
     needs = _needs_of(workflow.jobs)
-    aggregate_needs = needs[AGGREGATE]
-    unknown = sorted(aggregate_needs - set(workflow.jobs))
+    unknown = sorted(needs[AGGREGATE] - set(workflow.jobs))
     uncovered = sorted(
-        set(workflow.jobs) - aggregate_needs - {AGGREGATE}
-        - _descendants(needs) - EXEMPT)
+        set(workflow.jobs) - {AGGREGATE} - _descendants(needs) - EXEMPT)
     violations = []
     if unknown:
         violations.append(f'{_where(workflow)}: needs names jobs that do '
@@ -247,8 +230,7 @@ def _gaps(workflow):
 def _exemption_drift(workflow):
     """What the declared exemptions are against one workflow's reality."""
     needs = _needs_of(workflow.jobs)
-    leftover = set(workflow.jobs) - needs[AGGREGATE] - {AGGREGATE} \
-        - _descendants(needs)
+    leftover = set(workflow.jobs) - {AGGREGATE} - _descendants(needs)
     if leftover == EXEMPT:
         return []
     return [f'{_where(workflow)}: the declared exemptions '
