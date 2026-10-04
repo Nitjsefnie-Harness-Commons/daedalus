@@ -3,7 +3,7 @@
 
 The branch-boundary control a retired reserved-name suite carried read
 the merge base's own declarations over both allowance tables, and a
-checkout that resolves neither `origin/main` nor a local `main` made
+checkout that resolved neither `origin/main` nor a local `main` made
 it take its refusal arm. In a job that turns a failing suite red, the
 consequence is already visible; in a job that runs the suites without
 failing on one it is quieter and worse — the branch's central guarantee

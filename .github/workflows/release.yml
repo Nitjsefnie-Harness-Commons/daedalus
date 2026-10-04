@@ -173,11 +173,9 @@ jobs:
           # This job runs the suites from a DETACHED TAG, and a tag is a
           # commit ON main, so the merge base of a tag checkout IS its
           # head. The retired branch-boundary controls read that merge
-          # base, and without this they could not have read one at all;
-          # with them a tag build took the IS_THE_BASE skip, which said
-          # so in the control's own output — a tag build has no branch
-          # to compare against, and that is a skip rather than a
-          # failure.
+          # base, and no surviving suite pins this setting any more; it
+          # is kept conservative for tag builds, which have no branch to
+          # compare against.
           fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
