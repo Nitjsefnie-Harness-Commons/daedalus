@@ -83,15 +83,21 @@ def _retry_after_seconds(why):
     `Retry-After` is delay-seconds or an HTTP-date, and only the first
     is used: a date is the same window in a form this code has no clock
     to compare it against, so it falls back to the backoff rather than
-    becoming a number nobody here could have checked. A bare OSError
-    carries no headers, and a value that is not a non-negative integer
-    is no delay this can honour.
+    becoming a number nobody here could have checked.
+
+    Only a string counts. A bare OSError carries no headers at all, and
+    anything else the mapping hands back is not a delay-seconds value
+    this can honour. Narrowing to `str` first is what lets the parse
+    below catch `ValueError` alone: `int()` on a string raises nothing
+    else, so the `TypeError` arm would be a branch nothing can reach.
     """
     headers = getattr(why, 'headers', None)
     told = headers.get('Retry-After') if headers is not None else None
+    if not isinstance(told, str):
+        return None
     try:
         seconds = int(told)
-    except (TypeError, ValueError):
+    except ValueError:
         return None
     return seconds if seconds >= 0 else None
 
