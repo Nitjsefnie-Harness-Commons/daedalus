@@ -458,8 +458,7 @@ def test_files_that_disagree_on_identity_are_refused_before_any_write(tmp):
 
     A count denominated in another counter, or taken under another
     exclusion map, is a different quantity, and a median over two of them
-    is a number nothing measured. Both refusals leave the recorded budget
-    exactly as it was.
+    is a number nothing measured.
     """
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
@@ -490,8 +489,7 @@ def test_a_pool_of_another_counter_or_a_nonpositive_floor_is_refused(tmp):
     """The pool reads counts of the denomination the budget records.
 
     A draws file that selected another counter measured a different
-    quantity, and a span whose floor is zero divides nothing: both refuse,
-    and both leave the recorded budget exactly as it was.
+    quantity, and a span whose floor is zero divides nothing: both refuse.
     """
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
