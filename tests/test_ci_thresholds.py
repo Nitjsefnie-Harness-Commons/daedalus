@@ -22,6 +22,13 @@ SCRIPT = ROOT / 'scripts' / 'ci' / 'thresholds.py'
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
 DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
+# The budget fixtures run a copied policy script in a temporary tree the
+# coverage paths do not map back onto, so the child keeps no collector.
+_CHILD_ENV = _util.child_coverage('scrub')
+# Every accessor below is spelled as its member, so one list names both the
+# document key and the reader call that has to agree with it.
+_BASELINE_ACCESSORS = ('module_size_baseline', 'long_line_baseline',
+                       'type_error_baseline', 'js_coverage_baseline')
 
 
 def _thresholds():
@@ -67,18 +74,10 @@ def _assert_document_contract(path):
         assert floor < measured
         assert measured - floor == thresholds.CALIBRATION_GAP
         assert set(data['coverage'][language]) == {'measured', 'floor'}
-    baseline = thresholds.module_size_baseline(data)
-    assert baseline == data['module_size_baseline']
-    assert all(count > 0 for count in baseline.values())
-    lines = thresholds.long_line_baseline(data)
-    assert lines == data['long_line_baseline']
-    assert all(count > 0 for count in lines.values())
-    typed = thresholds.type_error_baseline(data)
-    assert typed == data['type_error_baseline']
-    assert all(count > 0 for count in typed.values())
-    modules = thresholds.js_coverage_baseline(data)
-    assert modules == data['js_coverage_baseline']
-    assert all(count > 0 for count in modules.values())
+    for member in _BASELINE_ACCESSORS:
+        baseline = getattr(thresholds, member)(data)
+        assert baseline == data[member], member
+        assert all(count > 0 for count in baseline.values()), member
     assert thresholds.tests_line_baseline(data) == data['tests_line_baseline']
     result = _check(path)
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -302,16 +301,8 @@ def test_public_accessors_return_validated_data(tmp):
     assert thresholds.coverage(data, 'python') == (
         data['coverage']['python']['measured'],
         data['coverage']['python']['floor'])
-    assert thresholds.module_size_baseline(data) \
-        == data['module_size_baseline']
-    assert thresholds.long_line_baseline(data) \
-        == data['long_line_baseline']
-    assert thresholds.type_error_baseline(data) \
-        == data['type_error_baseline']
-    assert thresholds.js_coverage_baseline(data) \
-        == data['js_coverage_baseline']
-    assert thresholds.tests_line_baseline(data) \
-        == data['tests_line_baseline']
+    for member in (*_BASELINE_ACCESSORS, 'tests_line_baseline'):
+        assert getattr(thresholds, member)(data) == data[member], member
     try:
         thresholds.coverage(data, 'ruby')
     except ValueError as error:
@@ -344,46 +335,18 @@ def _write_failure(tmp, boundary):
     target = Path(tmp) / f'{boundary}.json'
     target.write_bytes(b'previous\n')
     old_mode = stat.S_IMODE(target.stat().st_mode)
-    real_fsync = thresholds.os.fsync
     real_replace = thresholds.os.replace
     real_fdopen = thresholds.os.fdopen
-    if boundary == 'write':
-        def fdopen(*args, **kwargs):
-            handle = real_fdopen(*args, **kwargs)
-
-            class Broken:
-                def __enter__(self):
-                    handle.__enter__()
-                    return self
-
-                def __exit__(self, *exit_args):
-                    return handle.__exit__(*exit_args)
-
-                def write(self, _bytes):
-                    raise OSError('injected write failure')
-
-                def flush(self):
-                    return handle.flush()
-
-                def fileno(self):
-                    return handle.fileno()
-
-            return Broken()
-        thresholds.os.fdopen = fdopen
-    elif boundary == 'flush':
-        def fdopen(*args, **kwargs):
-            handle = real_fdopen(*args, **kwargs)
-            original_flush = handle.flush
-            handle.flush = lambda: (_ for _ in ()).throw(
-                OSError('injected flush failure'))
-            del original_flush
-            return handle
-        thresholds.os.fdopen = fdopen
-    elif boundary == 'replace':
+    if boundary == 'replace':
         thresholds.os.replace = lambda *_args: (_ for _ in ()).throw(
             OSError('injected replace failure'))
     else:
-        raise AssertionError(boundary)
+        def fdopen(*args, **kwargs):
+            handle = real_fdopen(*args, **kwargs)
+            setattr(handle, boundary, lambda *_args: (_ for _ in ()).throw(
+                OSError(f'injected {boundary} failure')))
+            return handle
+        thresholds.os.fdopen = fdopen
     try:
         try:
             thresholds.write(target, _valid())
@@ -392,7 +355,6 @@ def _write_failure(tmp, boundary):
         else:
             raise AssertionError(f'{boundary} failure was swallowed')
     finally:
-        thresholds.os.fsync = real_fsync
         thresholds.os.replace = real_replace
         thresholds.os.fdopen = real_fdopen
     assert target.read_bytes() == b'previous\n'
@@ -592,7 +554,8 @@ def _run_lines_cli(repo, *args):
     return subprocess.run(
         [sys.executable, str(repo / 'scripts' / 'ci' / 'tests_lines.py'),
          *args, '--thresholds', str(repo / '.github' / 'ci-thresholds.json')],
-        cwd=str(repo), capture_output=True, text=True, timeout=60)
+        cwd=str(repo), env=_CHILD_ENV, capture_output=True, text=True,
+        timeout=60)
 
 
 def test_tests_line_budget_is_a_positive_integer_that_round_trips(tmp):
