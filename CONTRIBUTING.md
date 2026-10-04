@@ -163,12 +163,10 @@ over `api.js` and `_util.js`; the seven
 `sections/block-rules.js`, `cdp.js`, `cookies.js`, `css-injector.js`,
 `fetch-timings.js`, `net-capture.js` and `overview.js` over the same two
 modules, and `tests/test_dashboard_hotfixes.py` mounts
-`sections/hotfixes.js`;
-`tests/test_dashboard_app_shell.py` and `tests/test_dashshell_harness.py`
-mount `dashboard/app.js` itself;
-`tests/test_dashboard_behaviour.py`
-and `tests/test_dashboard_harness.py` drive `api.js` and `_util.js`
-beside `extension/content.js`; and the extension's background, worker,
+`sections/hotfixes.js`; `tests/test_dashboard_app_shell.py` mounts
+`dashboard/app.js` itself; `tests/test_dashboard_behaviour.py`
+drives `api.js` and `_util.js` beside `extension/content.js`; and the
+extension's background, worker,
 content and page scripts run under `tests/test_extension_boundary.py`,
 `tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
 `tests/test_gm_*.py` suites. The one shipped module the JavaScript

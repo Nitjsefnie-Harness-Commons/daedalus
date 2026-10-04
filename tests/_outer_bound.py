@@ -8,8 +8,7 @@ the process the wait depends on, plus a failure naming what never arrived,
 because a wait only the suite ceiling ends says which job timed out and
 nothing about which assertion.
 
-Three properties are load-bearing, each observable in
-`tests/test_outer_bound.py`:
+Three properties are load-bearing:
 
 **The bound is outside the call.** It runs on its own thread and the block it
 wraps is never interrupted. A bound that raised INTO the blocked thread would

@@ -237,10 +237,9 @@ def test_the_timeout_renders_clamped_to_the_section_bounds(_tmp):
 
 
 # The control for the door the three fakes above close. It runs a
-# DIFFERENT method through it than `tests/test_dashfetch.py` does -- a
-# typed command rather than a `get` -- because the property is the same on
-# every path into `api.js` and a control that reuses a shape proves only
-# the shape.
+# typed command through it rather than a `get`, because the property is
+# the same on every path into `api.js` and a control that reuses a shape
+# proves only the shape.
 _NO_ROUTES_HARNESS = _dashnode.DashboardNodeHarness(
     _DOM + _dashfetch.DOOR + r"""
 (async () => {
@@ -277,8 +276,7 @@ def test_a_request_this_file_never_planned_is_refused_and_recorded(_tmp):
     The record is compared as a list holding the exact target, so a fake
     that recorded nothing fails rather than passing a truthiness check.
     A fake that recorded its DECLARED routes alongside is the case this
-    control cannot reach -- it declares none -- and
-    `tests/test_dashfetch.py` holds that half. The 599 in the refusal is
+    control cannot reach -- it declares none. The 599 in the refusal is
     the number `api.js` read off the response, not one this suite wrote
     into its own assertion."""
     del _tmp

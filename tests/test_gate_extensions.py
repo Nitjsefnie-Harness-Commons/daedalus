@@ -29,9 +29,9 @@ SYNC = 'POST /sync-tabs'
 # carried in from a sibling, so the chain is repeated here rather than
 # imported.
 #
-#   OUTER_BOUND_SAMPLES     measured in tests/test_noderun_deadline.py,
-#                           which is the file these samples come from and
-#                           the only one they are a measurement OF. This
+#   OUTER_BOUND_SAMPLES     measured by the retired noderun-deadline
+#                           suite, where these samples come from and the
+#                           only thing they are a measurement OF. This
 #                           file's armed control finishes in about 12s
 #                           against an 11s deadline, so a 52/55/57s sample
 #                           cannot be one of its runs.
