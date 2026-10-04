@@ -226,24 +226,17 @@ def test_the_table_never_reads_a_refused_journey_as_within_budget(tmp):
 
 
 def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
-    """The counter's own sentence has to reach a reader of a failed run.
+    """The counter's own sentence has to reach a reader of a failed run:
+    the row reporting an unmeasured journey named only the counter, and
+    the sentence survived inside the uploaded `journey-counts.json` and
+    nowhere a person reads.
 
-    `boundary_refusal()` exists because "the refusal is what a reader of a
-    failed run gets and it has to name the variable that was missing", and
-    the row reporting an unmeasured journey named only the counter: the
-    sentence survived inside the uploaded `journey-counts.json` and nowhere
-    a person reads. So the reason is rendered into the row.
-
-    The remedy beside it has to name the step that FAILED. It named the
-    probe step, which succeeded, while the build step is the one whose
-    missing output produces this refusal -- and the name is cross-checked
+    The remedy beside it has to name the step that FAILED, cross-checked
     against the job, so a step renamed in one place and not the other is
-    red rather than a remedy pointing at nothing.
-
-    The last two samples of the same escaping property live here rather
-    than in their own tests, and are named so a maintainer hunting for them
-    finds them by the input they pin: the journey NAME column at
-    `dashboard | fanout`, and the toolchain row at `journey | shas`.
+    red rather than a remedy pointing at nothing. The last two samples of
+    the same escaping property live here rather than in their own tests:
+    the journey NAME column at `dashboard | fanout`, and the toolchain row
+    at `journey | shas`.
     """
     del tmp
     summaries = _journey_contract.summaries()

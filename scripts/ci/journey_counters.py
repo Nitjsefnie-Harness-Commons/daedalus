@@ -33,8 +33,9 @@ from pathlib import Path
 # else both resolve it.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_child_env  # noqa: E402  pylint: disable=wrong-import-position
+# pylint: disable-next=wrong-import-position
+import journey_function_rows  # noqa: E402
 import journey_residual  # noqa: E402  pylint: disable=wrong-import-position
-import journey_thread_rows  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 # The residual arithmetic and the refusal it produces, in the leaf that
@@ -414,9 +415,9 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     if why is not None:
                         break
             rows = {}
-            # Every round's whole profile is retained here to be broken
-            # into threads, and only a run that will emit rows keeps them.
-            samples = {} if journey_thread_rows.enabled() else None
+            # Every round is retained as the pair the two row sets read,
+            # and only a run that will emit rows keeps them at all.
+            samples = {} if journey_function_rows.retaining() else None
             if why is None:
                 for name in names:
                     counted = []
@@ -424,7 +425,10 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     for _round in range(rounds):
                         measured, why = run(name, root, workdir)
                         if why is None:
-                            taken.append(measured)
+                            taken.append((measured,
+                                          journey_function_rows.read(
+                                              workdir,
+                                              f'callgrind.{name}')))
                             value, why = kept_for(measured, name)
                         if why is not None:
                             break
@@ -473,13 +477,9 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 # tell a journey it cannot measure from one the counter
                 # never counted.
                 'refused': refusals}
-            # What each count was summed from, and only while the flag is
-            # on: `journey_thread_rows` reads the flag and hands back None
-            # for a counter that reports one number, so the key is ABSENT
-            # rather than null in both of those cases.
-            per_thread = journey_thread_rows.for_counter(bridge, samples)
-            if per_thread:
-                entry['thread_rows'] = per_thread
+            # Each row set reads the pairs above only while its own
+            # switch is on, so each key is ABSENT where its rows are not.
+            journey_function_rows.wire(entry, bridge, samples)
             report['counters'][counter] = entry
     return report
 

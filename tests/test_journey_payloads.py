@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """What each journey CARRIES, against what the product carries.
 
-Three of the seven journeys posted a payload far smaller than the one a user
-actually produces, so their own work was not separable from the fixed
-background every child shares and the budget could not mean anything for
-them. The fix is a payload sized from a cited product basis.
+Every journey's payload is sized from a cited product basis, so a journey's
+own work is separable from the fixed background every child shares.
 
 WHAT IS PINNED HERE, and what is not, is worth stating exactly, because the
 difference is what a reviewer is being asked to trust:
@@ -162,7 +160,8 @@ def test_every_resized_payload_carries_the_size_it_was_given(tmp):
 
 
 def test_every_basis_is_still_the_call_it_cites(tmp):
-    """The product still CALLS what the basis says it calls.
+    """The product still CALLS what the basis says it calls, and still
+    says the FIGURE it names, in a file that has to exist.
 
     Matched as a call, in a file that has to exist. A word search does not
     survive the move a basis pin exists for: with `captureVisibleTab` renamed
@@ -172,14 +171,6 @@ def test_every_basis_is_still_the_call_it_cites(tmp):
     where an argument carries the size (`periodInMinutes: 0.5`), because a
     heartbeat that still fires but fires twice a minute is a different basis,
     not the same one.
-
-    And the FIGURE the basis names, checked in the same file, because a call
-    and a number are separate claims and the tab count is only in the second:
-    `chrome.tabs.query({}, …)` says nothing about how many tabs a session
-    has, so a pin that checked the call alone let the product's own "10-url
-    open_tabs" become a 30-url one without a word. Under `a4f09a27`'s word
-    search that edit was caught; the call recogniser introduced the gap and
-    this is the fix.
 
     The segment size is the row with no product claim to resolve: an HLS
     segment's length is a property of the encode a page happens to be
