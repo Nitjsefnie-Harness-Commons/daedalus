@@ -223,6 +223,10 @@ def _ask_and_insist_windows(process):
 def _ctrl_break(process):
     """None when the request went out; the outcome string when it did not."""
     try:
+        # The event is a Windows-only `signal` member, and every
+        # interpreter that reaches this line has it: the platform fork in
+        # `_ask_and_insist` sent POSIX elsewhere before this ran.
+        # pylint: disable-next=no-member
         os.kill(process.pid, signal.CTRL_BREAK_EVENT)
     except ProcessLookupError:
         return f'process tree {process.pid} was already gone'
