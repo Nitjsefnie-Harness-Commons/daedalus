@@ -131,7 +131,6 @@ DEFAULT_REPO = ci_gate.DEFAULT_REPO
 DEFAULT_INTERVAL = 60
 DEFAULT_TIMEOUT = 5400
 DEFAULT_GRACE = 300
-# ci_gate's definitions, re-exported for callers that reach them here.
 ACCEPTABLE = ci_gate.ACCEPTABLE
 # The workflows whose absence is a refusal rather than a wait, bound here
 # because the name is this tool's public contract. --required REPLACES it
