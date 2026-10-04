@@ -46,9 +46,9 @@ fact and compares nothing rather than calling it a regression.
 
 A re-baseline RAISES a recorded count, so it stays a reviewed commit and
 nothing here writes the artefact on a check. `rebaseline` is the one
-command that does, over a measurement file a person runs deliberately: it
-carries the whole document from that one measurement, so what lands is the
-run's own numbers rather than a transcription of a table.
+command that does, over measurement files a person runs deliberately: it
+carries the whole document from the runs it is given, so what lands is the
+runs' own numbers rather than a transcription of a table.
 """
 import argparse
 import json
@@ -173,10 +173,16 @@ def _parser():
     check.add_argument('--summary', action='store_true')
 
     rebase = sub.add_parser(
-        'rebaseline', help='write the artefact from one measurement')
+        'rebaseline',
+        help='write the artefact from the measurements it is given')
     rebase.add_argument('--measurements', type=Path, required=True,
-                        help='a measure --out file, read and not measured '
-                             'here')
+                        action='append',
+                        help='a measure --out file; repeatable, and the '
+                             'recorded count is the median across the files')
+    rebase.add_argument('--draws', type=Path, action='append', default=[],
+                        metavar='FILE',
+                        help='a measure --out file whose per-round counts '
+                             're-derive the recorded tolerance; repeatable')
     rebase.add_argument('--artifact', type=Path, default=ARTIFACT)
     # Per-journey and repeatable, because restoring a count the budget
     # deliberately dropped is a decision about that journey and nothing
@@ -233,7 +239,7 @@ def main(argv=None):
         if args.command == 'rebaseline':
             return journey_rebaseline.run(
                 args.measurements, args.artifact, remedy=SHAPE_REMEDY,
-                restore=args.restore, drop=args.drop)
+                restore=args.restore, drop=args.drop, draws=args.draws)
 
         document = load(args.artifact)
         names = journey_names()

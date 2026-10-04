@@ -9,6 +9,7 @@ reporting a clamped zero.
 """
 import contextlib
 import io
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -339,6 +340,107 @@ def test_the_startup_baseline_is_read_through_the_same_reader(tmp):
     # Once, not twice: the bridge-only child's own 37,000 already contains
     # the interpreter start the 17,000 measured.
     assert row['journeys']['mcp-exec']['net'] == [70_000], row
+
+
+def _measured_file(path, medians, nets=None, shas=None, toolchain=None):
+    """One `measure --out` file, spelled for what one arm of the run varies.
+
+    Every journey's row carries the `median` a recording reads, and the
+    journeys `nets` names carry the per-round `net` lists a `--draws` pool
+    reads — rows without one are the shape a pool file has for a journey
+    it could not separate, and they name no draws. `shas` and `toolchain`
+    move the identity the files must agree on.
+    """
+    report = _journey_contract.fixture_report()
+    rows = report['counters']['valgrind-callgrind']['journeys']
+    for name, row in rows.items():
+        count = medians.get(name, 950)
+        row.update({'min': count, 'max': count, 'median': count,
+                    'spread': 0, 'raw': [count]})
+        if nets and name in nets:
+            row['net'] = list(nets[name])
+    report['shas'].update(shas or {})
+    report['toolchain'].update(toolchain or {})
+    Path(path).write_text(json.dumps(report), encoding='utf-8')
+    return path
+
+
+def _rebaseline(artifact, measurements, draws):
+    """The real command over several files, and both of its streams.
+
+    Every refusal `run` prints goes to stderr, so a control that quoted
+    only stdout reported an empty reason for a refusal it had just caused.
+    """
+    argv = ['rebaseline', '--artifact', str(artifact)]
+    for source in measurements:
+        argv += ['--measurements', str(source)]
+    for source in draws:
+        argv += ['--draws', str(source)]
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = _journey_contract.policy().main(argv)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_a_rebaseline_records_the_median_of_files_and_the_span_of_draws(tmp):
+    """Recording from three files, and what a `--draws` pool re-binds.
+
+    Three files are what a replica matrix hands the command, so the
+    recorded count is the median of the files' own medians — not the last
+    file's, which is what reading `--measurements` once records. The
+    identity the files must share is refused the moment it splits: a
+    median over files whose rounds saw different renderings or ran on
+    different toolchains is a number no run measured, and every refusal
+    leaves the recorded budget exactly as it was. The pool re-binds a
+    journey the pool names to the span of all its draws, in the percent
+    the artefact denominates tolerances in, and leaves the journeys it
+    does not name — and `tolerance_pct` — where they were.
+    """
+    policy = _journey_contract.policy()
+    first, second = _journey_contract.journeys().NAMES[:2]
+    artifact = Path(tmp) / 'journey-budget.json'
+    document = _journey_contract.recorded_document(tolerances={second: 25.0})
+    artifact.write_bytes(policy.render(document))
+
+    counts = [Path(tmp) / f'counts-{index}.json' for index in (1, 2, 3)]
+    _measured_file(counts[0], {first: 900})
+    _measured_file(counts[1], {first: 1000})
+    _measured_file(counts[2], {first: 1100})
+    draws = [Path(tmp) / f'draws-{index}.json' for index in (1, 2)]
+    _measured_file(draws[0], {}, nets={first: [100, 110]})
+    _measured_file(draws[1], {}, nets={first: [120]})
+
+    code, _out, err = _rebaseline(artifact, counts, draws)
+    assert code == 0, err
+    written = policy.load(artifact)
+    assert written['journeys'][first] == 1000, written['journeys']
+    assert written['journeys'][second] == 950, written['journeys']
+    # (120 - 100) / 100 over the pool, in the units tolerances are
+    # denominated in. The pool does not name `second`, which carries 25.0.
+    assert written['tolerances'] == {first: 20.0, second: 25.0}, (
+        written.get('tolerances'))
+    assert written['tolerance_pct'] == 10, written['tolerance_pct']
+
+    # What the refusals must leave: the success arm's own bytes, not the
+    # artefact this run started from.
+    before = artifact.read_bytes()
+
+    elsewhere = Path(tmp) / 'sha-off.json'
+    _measured_file(elsewhere, {first: 900}, shas={first: ['b' * 64]})
+    code, _out, err = _rebaseline(artifact, [counts[0], elsewhere], draws)
+    assert code != 0, (
+        f'files whose rounds saw different renderings recorded anyway: {err}')
+    assert artifact.read_bytes() == before, (
+        'a refused re-baseline wrote the artefact anyway')
+
+    elsewhere = Path(tmp) / 'toolchain-off.json'
+    _measured_file(elsewhere, {first: 900},
+                   toolchain={'python': '3.12.0 (other) [GCC 1.0]'})
+    code, _out, err = _rebaseline(artifact, [counts[0], elsewhere], draws)
+    assert code != 0, (
+        f'files measured on two toolchains recorded anyway: {err}')
+    assert artifact.read_bytes() == before, (
+        'a refused re-baseline wrote the artefact anyway')
 
 
 def main():
