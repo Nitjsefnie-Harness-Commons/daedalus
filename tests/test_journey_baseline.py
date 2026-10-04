@@ -344,11 +344,9 @@ def test_the_startup_baseline_is_read_through_the_same_reader(tmp):
 
 def _measured_file(path, medians, nets=None, shas=None, toolchain=None,
                    selected=None, exclusions=None, planted=None):
-    """One `measure --out` file, spelled for what one arm varies.
-
-    Rows carry the `median` a recording reads; journeys `nets` names carry
-    the pool's per-round `net` lists (rows without one name no draws);
-    the rest move or split the identity, or plant a row verbatim.
+    """One `measure --out` file, spelled for what one arm varies: rows
+    carry the `median`; `nets` names the pool's per-round `net` lists; the
+    rest move or split the identity, or plant a row verbatim.
     """
     report = _journey_contract.fixture_report()
     rows = report['counters']['valgrind-callgrind']['journeys']
@@ -371,10 +369,7 @@ def _measured_file(path, medians, nets=None, shas=None, toolchain=None,
 
 
 def _rebaseline(artifact, measurements, draws):
-    """The real command over several files, and both of its streams.
-
-    Refusals print to stderr, so stdout alone reads as an empty reason.
-    """
+    """The real command over several files, both streams back."""
     argv = ['rebaseline', '--artifact', str(artifact)]
     for source in measurements:
         argv += ['--measurements', str(source)]
@@ -389,10 +384,8 @@ def _rebaseline(artifact, measurements, draws):
 def test_a_rebaseline_records_the_median_of_files_and_the_span_of_draws(tmp):
     """Recording from several files, and what a `--draws` pool re-binds.
 
-    The recorded count is the median of the files' own medians — not the
-    last file's, which is what reading `--measurements` once records — and
-    the pool re-binds a journey it names to the span of its draws, in the
-    percent tolerances are denominated in.
+    The recorded count is the median of the files' own medians, and the
+    pool re-binds a journey it names to the span of its draws.
     """
     policy = _journey_contract.policy()
     first, second = _journey_contract.journeys().NAMES[:2]
@@ -490,11 +483,9 @@ def test_a_pool_of_another_counter_or_a_nonpositive_floor_is_refused(tmp):
 
 
 def test_a_median_across_two_files_lands_on_the_count_it_reaches(tmp):
-    """An even file count records the count its median lands on.
-
-    `statistics.median([950, 950])` is the float `950.0`, which the schema
-    refuses; medians straddling a half-instruction refuse instead.
-    """
+    """An even file count records the count its median lands on: two equal
+    files arrive at the float `statistics.median` returns, which the schema
+    refuses; medians straddling a half-instruction refuse instead."""
     policy = _journey_contract.policy()
     first = _journey_contract.journeys().NAMES[0]
     artifact = Path(tmp) / 'journey-budget.json'
@@ -554,24 +545,25 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
 
     Toolchain and exclusion map decide what a count IS; the render sha is
     deliberately not required — a tolerance pool spans heads by design,
-    and a sha check would empty the pool it exists to fill.
+    and a sha check would empty the pool it exists to fill. The default is
+    a floor: a pool narrower than tolerance_pct writes no entry.
     """
     policy = _journey_contract.policy()
-    first = _journey_contract.journeys().NAMES[0]
+    first, second = _journey_contract.journeys().NAMES[:2]
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(_journey_contract.recorded_document(
         tolerances={first: 25.0})))
     counts = Path(tmp) / 'counts.json'
     _measured_file(counts, {})
     draws = Path(tmp) / 'draws.json'
-    _measured_file(draws, {}, nets={first: [100, 110]})
+    _measured_file(draws, {}, nets={first: [100, 140]})
 
     code, out, err = _rebaseline(artifact, [counts], [draws])
     assert code == 0, err
     before = artifact.read_bytes()
-    assert f'derived the tolerance for {first}: 10.0' in out, out
+    assert f'derived the tolerance for {first}: 40.0' in out, out
     written = policy.load(artifact)
-    assert written['tolerances'][first] == 10.0, written.get('tolerances')
+    assert written['tolerances'][first] == 40.0, written.get('tolerances')
 
     splits = (
         (lambda source: _measured_file(
@@ -595,6 +587,16 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     assert code == 0, err
     assert 'derived no bound' in out, out
 
+    # The default is a floor: a pool narrower than tolerance_pct writes no
+    # entry, and the journey falls back to the default.
+    narrow = Path(tmp) / 'draws-narrow.json'
+    _measured_file(narrow, {}, nets={second: [100, 101]})
+    code, out, err = _rebaseline(artifact, [counts], [narrow])
+    assert code == 0, err
+    assert 'derived the tolerance' not in out, out
+    written = policy.load(artifact)
+    assert second not in written['tolerances'], written['tolerances']
+
     broken = Path(tmp) / 'draws-broken.json'
     broken.write_text(json.dumps(
         {'rounds': 1, 'shape_failure': 'the segment-relay journey '
@@ -611,12 +613,12 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     more = Path(tmp) / 'counts-more.json'
     _measured_file(more, {})
     pool = Path(tmp) / 'draws-more.json'
-    _measured_file(pool, {}, nets={first: [200, 220]})
+    _measured_file(pool, {}, nets={first: [200, 260]})
     with contextlib.redirect_stdout(io.StringIO()):
         assert policy.journey_rebaseline.run(
             [str(more)], str(lists_artifact), draws=[str(pool)]) == 0
     written = policy.load(lists_artifact)
-    assert written['tolerances'][first] == 10.0, written.get('tolerances')
+    assert written['tolerances'][first] == 30.0, written.get('tolerances')
 
 
 def main():
