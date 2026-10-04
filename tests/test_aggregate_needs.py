@@ -99,8 +99,6 @@ def test_an_extra_job_outside_the_aggregate_is_named(tmp):
     assert "'late'" in violations[0], violations
 
 
-
-
 def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
     """One run names every gap, so fixing one cannot hide the other."""
     source = ('jobs:\n'
@@ -189,10 +187,6 @@ def _scan_fixture(tmp, name, source):
     return _aggregate_violations(_probe_workflow(tmp, name, source))
 
 
-
-
-
-
 def test_an_explicit_key_jobs_form_is_refused_not_passed(tmp):
     """The fail-open shape a real branch shipped: refusal, never silence."""
     source = ('? jobs\n'
@@ -201,8 +195,6 @@ def test_an_explicit_key_jobs_form_is_refused_not_passed(tmp):
               + NEEDS_BLOCK + RUNNER + PROBE)
     violations = _scan_fixture(tmp, 'explicit-key', source)
     assert violations, 'an explicit key form was accepted silently'
-
-
 
 
 def _aggregate_violations(directory=None):
