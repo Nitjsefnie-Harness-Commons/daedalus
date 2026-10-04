@@ -335,6 +335,13 @@ def test_an_unclassifiable_workflow_is_refused_not_passed(tmp):
     assert 'unsupported plain scalar' in named[0], named
 
 
+def test_the_numeric_bound_spellings_are_acceptances(tmp):
+    """Fractional, exponent, plus and underscore forms are all accepted."""
+    del tmp
+    for spelling in ('5.0', '5e2', '+5', '5_000'):
+        assert _positive_literal(spelling, 'probe.yml') is None, spelling
+
+
 def _planted(tmp):
     """Copy the real workflow, minus the aggregate job's bound, into `tmp`.
 
