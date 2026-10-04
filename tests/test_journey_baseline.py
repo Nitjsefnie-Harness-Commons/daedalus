@@ -598,7 +598,9 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     empty the pool it exists to fill. A journey already carrying a bound
     the pool re-names is reported as derived, and the artefact holds the
     new value; a pool that derives nothing says so in the output instead
-    of succeeding silently.
+    of succeeding silently. A pool file that measured nothing is refused
+    like a measurement file is, and the in-process caller passes real
+    lists — the same call the CLI spells as repeated flags.
     """
     policy = _journey_contract.policy()
     first = _journey_contract.journeys().NAMES[0]
@@ -639,6 +641,30 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     code, out, err = _rebaseline(artifact, [counts], [no_draws])
     assert code == 0, err
     assert 'derived no bound' in out, out
+
+    broken = Path(tmp) / 'draws-broken.json'
+    broken.write_text(json.dumps(
+        {'rounds': 1, 'shape_failure': 'the segment-relay journey '
+         'printed no record'}), encoding='utf-8')
+    code, _out, err = _rebaseline(artifact, [counts], [broken])
+    assert code == 1, err
+    assert 'the segment-relay journey printed no record' in err, err
+    assert artifact.read_bytes() == before, (
+        'a refused re-baseline wrote the artefact anyway')
+
+    rebaseline = policy.journey_rebaseline
+    lists_artifact = Path(tmp) / 'journey-budget-lists.json'
+    lists_artifact.write_bytes(
+        policy.render(_journey_contract.recorded_document()))
+    more = Path(tmp) / 'counts-more.json'
+    _measured_file(more, {})
+    pool = Path(tmp) / 'draws-more.json'
+    _measured_file(pool, {}, nets={first: [200, 220]})
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert rebaseline.run([str(more)], str(lists_artifact),
+                              draws=[str(pool)]) == 0
+    written = policy.load(lists_artifact)
+    assert written['tolerances'][first] == 10.0, written.get('tolerances')
 
 
 def main():
