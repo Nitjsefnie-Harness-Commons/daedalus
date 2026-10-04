@@ -109,12 +109,9 @@ def test_the_journeys_own_mcp_client_thread_is_its_work_and_is_counted(tmp):
     """The direction that loses a journey's work, pinned on real data.
 
     `mcp-exec`'s harness process runs its OWN MCP client beside the bridge,
-    and that thread declares `PyInit__pydantic_core`, `PyInit__cffi_backend`
-    and `PyInit__rust` — every symbol the front end's import could be named
-    from — at 3,820,164,240 instructions. Under a signature-only classifier
-    it reads as the front end's import, and `mcp-exec` excludes that: the
-    journey loses its own work with no refusal and a plausible number. That
-    is issue 1466's shape through the door built to close it.
+    and that thread declares every symbol the front end's import could be
+    named from, so under a signature-only classifier the journey loses its
+    own work with no refusal and a plausible number.
 
     So the control asks what the journey dropped, from two outputs of the
     shipped function rather than from a sum recomputed beside it: a journey

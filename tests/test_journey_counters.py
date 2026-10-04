@@ -333,22 +333,15 @@ def _profile(directory, name, slot, thread, ir, signature=(), pid=4242,
 def test_every_measured_child_runs_with_the_two_settings_a_count_depends_on(
         tmp):
     """The count must not move with host state, and the two settings that
-    move it are set on the child rather than subtracted afterwards.
-
-    `PYTHONHASHSEED` unset makes CPython randomise string hashing per
-    process, so which order a module's globals are built in — and what that
-    costs — differs between two runs of the same tree.
-    `PYTHONDONTWRITEBYTECODE` unset makes a warm `__pycache__` cheap:
-    measured on two runs of the same tree under valgrind, the first
-    child's harness main thread compiled
-    21,930,238 instructions of source and the second 6,268,419.
-
-    Neither is a number to subtract and neither is a tolerance to widen: both
-    make ONE side of the subtraction different from the other, and the
-    baseline is whichever child happened to run first. So they are set on
-    every child the counter traces, which is a real child here rather than a
-    stand-in for `subprocess.run` — a planted launcher would pass whatever
-    the module hands it and prove nothing about what the interpreter reads.
+    move it are set on the child rather than subtracted afterwards: one
+    randomises string hashing per process and the other makes a warm
+    `__pycache__` cheap. Neither is a number to subtract and neither is a
+    tolerance to widen: both make ONE side of the subtraction different
+    from the other, and the baseline is whichever child happened to run
+    first. So they are set on every child the counter traces, which is a
+    real child here rather than a stand-in for `subprocess.run` — a
+    planted launcher would pass whatever the module hands it and prove
+    nothing about what the interpreter reads.
     """
     del tmp
     counters = _journey_contract.counters()

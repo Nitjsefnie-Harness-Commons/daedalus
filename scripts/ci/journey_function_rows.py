@@ -38,12 +38,19 @@ next; it moves no self context. A `calls=` line prices the call that
 follows it: the one cost line after it is the call arc -- the callee's
 inclusive cost recorded at the call site -- and it is billed to no
 function's self total; the cost lines after the arc are the caller's own
-again, no new `fn=` line announcing them. On the synthetic file the
-suite drives, whose `summary:` is written as the sum of the self totals
-with the arc excluded, the self totals sum to the file's own `summary:`
-line; that equality is the numeric control. Whether a real cost-bearing
-profile's `summary:` carries the same exclusion is a measurement for the
-first CI artifact that holds one, not a claim this file makes.
+again, no new `fn=` line announcing them. The format compresses a
+repeated name to a bare `fn=(id)` / `cfn=(id)` line that re-selects the
+function the id was declared for, so the walk carries the id table
+beside the totals; an id the file never declared is a shape the parse
+cannot attribute, and the file is omitted whole rather than billed to a
+neighbour. On the synthetic file the suite drives, whose `summary:` is
+written as the sum of the self totals with the arc excluded, the self
+totals sum to the file's own `summary:` line; that equality is the
+numeric control. Whether a real cost-bearing profile's `summary:`
+carries the same exclusion -- and the carried `cfn=`-without-`calls=`
+form, the `*`-position spelling, and whether real out-files carry bare
+`fn=(id)` lines at all -- is a measurement for the first CI artifact
+that holds one, not a claim this file makes.
 """
 import os
 import re
@@ -60,9 +67,13 @@ import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 # A `calls=` line carries the call count and the call's target position,
 # and the cost line after it prices the call itself.
 CALLS = re.compile(r'^calls=\d+(?:[ \t]+\d+)*$')
-# A cost line is one or more integers; under `events: Ir` the last one is
-# the instruction count of the position(s) before it.
-COST = re.compile(r'^\d+(?:[ \t]+\d+)*$')
+# A cost line is the position columns and then the event count; under
+# `events: Ir` the last integer is the instruction count, and a `*`
+# position is the format's spelling for a position it does not resolve.
+COST = re.compile(r'^[*\d]+(?:[ \t]+[*\d]+)*$')
+# The format compresses a repeated name to a bare `fn=(id)` / `cfn=(id)`
+# line that re-selects the function the id was declared for.
+DECLARATION = re.compile(r'^(fn|cfn)=\((\d+)\)(?:[ \t]+(\S.*?))?[ \t]*$')
 
 BREAKDOWN_CAP = 64
 
@@ -85,32 +96,46 @@ def _self_totals(text):
 
     The header fields are `journey_threads`' own, so the two readers of one
     file read the same fields; the walk below is this module's. A bare
-    `fn=(id)` repeats a name declared earlier and names nothing, which is
-    why the declaration pattern is the reader's own `FN`, which does not
-    match the bare form either.
+    `fn=(id)` re-selects the function the id was declared for, and the
+    cost lines after it are that function's self again; a bare `cfn=(id)`
+    names the priced arc's callee through the same table and moves no self
+    context. An id the file never declared has no function to re-select
+    and the costs that follow it belong to a function this file never
+    named, so the walk returns None -- a file the parse cannot attribute
+    whole is omitted by `read` rather than billed to a neighbour.
 
-    A `cfn=` never moves self context (the module docstring's switching
-    rule); a `cfn=`-only name is entered at 0 rather than left out, so the
-    row says the function declared itself and paid nothing of its own.
+    A `cfn=` never moves self context; a `cfn=`-only name is entered at 0
+    rather than left out, so the row says the function declared itself and
+    paid nothing of its own.
     """
     totals = {}
+    ids = {}
     current = None
     call_site = False
     for line in text.splitlines():
-        declared = journey_threads.FN.match(line)
+        declared = DECLARATION.match(line)
         if declared:
-            name = declared.group(1)
-            totals.setdefault(name, 0)
-            if line.startswith('fn='):
-                current = name
+            kind, id_text, name = declared.groups()
+            number = int(id_text)
             call_site = False
+            if name is None:
+                name = ids.get(number)
+                if name is None:
+                    return None
+            else:
+                ids[number] = name
+            totals.setdefault(name, 0)
+            if kind == 'fn':
+                current = name
         elif CALLS.match(line):
             call_site = True
         elif COST.match(line):
             if call_site:
                 call_site = False
             elif current is not None:
-                totals[current] += int(line.split()[-1])
+                fields = line.split()
+                if fields[-1].isdigit():
+                    totals[current] += int(fields[-1])
     return totals
 
 
@@ -120,8 +145,9 @@ def read(directory, prefix):
     The acceptance is the count reader's: a file `journey_threads.read`
     refuses or skips contributes no function row and no new failure --
     this module is instrumentation and the refusal belongs to the count
-    reader -- so a file with no `summary:` line, or one with a summary and
-    an incomplete header, is left out whole.
+    reader -- so a file with no `summary:` line, one with a summary and
+    an incomplete header, or one whose compressed declaration re-selects
+    an id the file never declared, is left out whole.
     """
     directory = Path(directory)
     rows = []
@@ -136,6 +162,8 @@ def read(directory, prefix):
         if thread is None or pid is None or cmd is None:
             continue
         functions = _self_totals(text)
+        if functions is None:
+            continue
         ordered = sorted(functions.items(),
                          key=lambda item: (-item[1], item[0]))
         rows.append({'pid': int(pid.group(1)),

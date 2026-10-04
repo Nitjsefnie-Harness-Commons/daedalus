@@ -263,8 +263,9 @@ def read(directory, prefix):
         if not found:
             if FN.search(text):
                 return rows, (
-                    f'{path.name} carries cost lines but no summary: line, '
-                    'so this profile is not one this gate can read')
+                    f'{path.name} carries a named fn=/cfn= declaration but '
+                    'no summary: line, so this profile is not one this '
+                    'gate can read')
             continue
         thread = THREAD.search(text)
         pid = PID.search(text)
