@@ -30,11 +30,10 @@ SYNC = 'POST /sync-tabs'
 # imported.
 #
 #   OUTER_BOUND_SAMPLES     measured by the retired noderun-deadline
-#                           suite, where these samples come from and the
-#                           only thing they are a measurement OF. This
-#                           file's armed control finishes in about 12s
-#                           against an 11s deadline, so a 52/55/57s sample
-#                           cannot be one of its runs.
+#                           suite and nothing else — this file's armed
+#                           control finishes in about 12s against an 11s
+#                           deadline, so a 52/55/57s sample cannot be one
+#                           of its runs.
 #   OUTER_BOUND_SLOWEST_S   max of those samples
 #   OUTER_BOUND_S           the bound, with no multiple — 57s is already
 #                           about five times this file's 11s healthy budget
