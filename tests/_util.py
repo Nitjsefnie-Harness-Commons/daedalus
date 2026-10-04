@@ -124,8 +124,8 @@ def child_coverage(mode, environment=None, cwd=None):
     onto the repository makes this declaration at its `env=`: 'scrub' strips
     the collector so the child cannot record against paths that vanish with
     the temporary tree, and 'keep' retains it where the tree is mapped and
-    the child's coverage is wanted. The guard in
-    tests/test_coverage_environment.py reads the declaration syntactically.
+    the child's coverage is wanted. The coverage guard reads the
+    declaration syntactically.
 
     A 'keep' must also prove at runtime that its tree is mapped. The
     collector's `source = ["."]` resolves against the child's own cwd, so

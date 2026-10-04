@@ -2,7 +2,7 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-tests/test_coverage_environment.py scans the whole test tree once per
+The coverage guard scans the whole test tree once per
 control, so a run analyses the same file over and over. The key is the
 analyser, the path and the content together: a mutated copy of a real
 module cannot be served the unmutated answer, two files carrying one

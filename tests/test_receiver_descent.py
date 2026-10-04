@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """What the receiver descent hands over, and what a loop reads out of it.
 
-`_carried_parts` and the tables in `tests/_carrier_cases.py` judge the forms
-a value carries; the five tables here judge the two decisions the descent
-makes about what its chain lands on, which the other tables reach only
-through the rows that happen to sit on either side of them.
+`_carried_parts` judges the forms a value carries; the five tables here
+judge the two decisions the descent makes about what its chain lands on.
 
 Every row is a receiver that CONTAINS a module name with a method read off
 it, and the two tables answer two different questions about it. The three

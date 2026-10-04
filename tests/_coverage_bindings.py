@@ -67,9 +67,9 @@ _CARRIED_FIELDS = {
 # `conversion` are a str and an int, which the walk would refuse.
 #
 # The names are the split a reader needs: a form named here cannot appear
-# in a sentence that has to be true on every supported version, so
-# `tests/test_coverage_unfollowable_forms.py` reads this list to keep the
-# two groups apart rather than listing either of them itself.
+# in a sentence that has to be true on every supported version, so this
+# list is what keeps the two groups apart rather than either of them
+# being listed again.
 _CONDITIONAL_FIELDS = (
     ('TemplateStr', ('values',)),
     ('Interpolation', ('value', 'format_spec')),

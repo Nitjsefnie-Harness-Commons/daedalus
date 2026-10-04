@@ -3,9 +3,7 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 The whole engine moved here out of tests/test_workflow_cache_boundary.py,
-which tests/test_static_guard_regressions.py imported whole for six of
-these names. That suite keeps its own tests and imports back what they
-use, and `REVIEWED_CACHE_RELEASES` now has its only home here: the two
+and `REVIEWED_CACHE_RELEASES` now has its only home here: the two
 pip-cache suites read it here rather than through that suite.
 """
 import csv
