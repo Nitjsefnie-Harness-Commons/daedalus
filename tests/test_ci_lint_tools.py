@@ -572,24 +572,35 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     passed to it and never how long the machine took to give it back — a
     wall-clock bound passes on a fast runner and fails a loaded one.
 
-    Three runs, because `DOWNLOAD_ATTEMPTS` gives each of them two gaps
-    and the three things worth pinning do not fit in two.
+    Four runs, because `DOWNLOAD_ATTEMPTS` gives each of them two gaps.
 
-    The first carries a header on both failures, and they straddle the
-    growth: 1 is under the 2 s the first attempt would have waited
-    anyway, so the longer of the two wins and it records 2, while 900 is
-    over the 10 s ceiling, so the ceiling binds it and it records 10.
-    Dropping the header outright records `[2, 4]` — the growth alone —
-    and taking it whatever the growth was records `[1, 10]`. Two entries
-    and not three: the third attempt served, and a pause after the
-    attempt that succeeded is waiting for nothing.
+    A header can sit in three places relative to what the module would
+    have waited on its own, and each needs its own sample — two gaps
+    cannot carry three regions, and two samples once looked complete
+    while a real one went missing. Under the growth, above it, and over
+    the ceiling are three different answers, and a path that honoured a
+    header only when it exceeded the ceiling passed two of the three.
 
-    The second carries none, so the growth is recorded at the second
+    The first run carries a header on both failures and takes the outer
+    two: 1 is under the 2 s the first attempt would have waited anyway,
+    so the growth wins and it records 2, while 900 is over the 10 s
+    ceiling, so the ceiling binds it and it records 10. Two entries and
+    not three: the third attempt served, and a pause after the attempt
+    that succeeded is waiting for nothing.
+
+    The second run is the middle region, which is the issue's own defect:
+    a header over the growth and under the ceiling is a server saying
+    exactly how long to wait, and waiting less than it asked is asking
+    again too soon. It records `[7, 7]`, and a path that dropped any
+    header below the ceiling records `[2, 2]` here and nowhere else says
+    so.
+
+    The third carries none, so the growth is recorded at the second
     attempt rather than losing to a header: in the first run the 900 takes
     that gap outright. It records `[2, 4]`, where a flat wait records
     `[2, 2]` and a shifted exponent `[4, 8]`.
 
-    The third is the one header the module cannot read, and a parse that
+    The fourth is the one header the module cannot read, and a parse that
     raised instead of falling back would take the retry with it.
     """
     del tmp
@@ -610,6 +621,19 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
         'wait is the longer of growth and header, so 1 loses to 2 and 900 '
         'wins the ceiling at 10; nothing is recorded after the attempt that '
         'served.')
+    mid = _Transfer(installer, name, [
+        _http_error(installer, 503, 'Service Unavailable', retry_after=7),
+        _http_error(installer, 503, 'Service Unavailable', retry_after=7),
+        b'the asset bytes'])
+    honoured = []
+    with (mock.patch.object(asset.urllib.request, 'urlopen', mid),
+          mock.patch.object(asset.time, 'sleep', honoured.append)):
+        asset.fetch(name)
+    assert honoured == [7, 7], (
+        f'the pauses were {honoured} where both statuses carried '
+        'Retry-After 7, a window over the growth and under the ceiling. '
+        'That is a server saying how long to wait, and it is the whole '
+        'defect this change is for: waiting less asks again too soon')
     plain = _Transfer(installer, name, [
         _http_error(installer, 503, 'Service Unavailable'),
         _http_error(installer, 503, 'Service Unavailable'),
