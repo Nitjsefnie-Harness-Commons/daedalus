@@ -1,20 +1,16 @@
-"""Stand-ins for the arms of `scripts/ci/suite_bound.py` no launcher reaches.
+"""Stand-ins for teardown arms no launcher reaches.
 
-The bounded launch is the machinery a wedged-suite incident depends on, and
-its teardown has arms no CI run takes: a process group that is already gone,
-a `taskkill` that cannot run, a suite that ignores the request, a launcher
-interrupted between the spawn and the wait. Nothing misbehaves on a healthy
-runner, so each arm is reached here by standing in for whatever misbehaves.
-
-Every stand-in RECORDS what it was asked to do -- which signal, which argv,
-which wait bound, in which order -- because that record is the evidence. The
-string the subject returns is the subject's own account of the same event,
-and an assertion on it alone is satisfied by code that sent nothing.
-
-Nothing here starts a process, and nothing here waits on a clock: the grace
+The bounded teardown has arms no CI run takes: a process group already
+gone, a `taskkill` that cannot run, a suite that ignores the request, a
+launcher interrupted between the spawn and the wait. Nothing misbehaves
+on a healthy runner, so each arm is reached here by standing in for
+whatever misbehaves. Every stand-in RECORDS what it was asked to do --
+which signal, which argv, which wait bound, in which order -- because the
+string the subject returns is the subject's own account of the same
+event, and an assertion on it alone is satisfied by code that sent
+nothing. Nothing here starts a process or waits on a clock: the grace
 window is spent by a clock that advances only when it is told to, so no
-control here can pass because the machine was fast or fail because it was
-slow.
+control here can pass because the machine was fast.
 """
 import contextlib
 import os
@@ -28,16 +24,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
-# A process group that is neither the launcher's own nor one this process can
-# be holding, so a control that intends to signal it is signalling a stand-in
-# rather than anything real.
+# Neither the launcher's own nor one this process can be holding, so a
+# control that signals it is signalling a stand-in, not anything real.
 GROUP = 424241
-# The group the launcher itself runs in, which by default is NOT the child's:
-# the two are the same only where a launch was not given its own session, and
+# The group the launcher itself runs in, NOT the child's by default: the
+# two are the same only where a launch was not given its own session, and
 # a control that means that case says so rather than reading the real one.
 LAUNCHER_GROUP = GROUP + 1
-# A bound small enough that a stand-in child outlives it instantly. It is the
-# subject's own parameter, not an assertion about elapsed time.
+# A bound a stand-in child outlives instantly: the subject's own
+# parameter, not an assertion about elapsed time.
 TINY_BOUND_S = 0.05
 
 
@@ -52,10 +47,10 @@ class Child:
     """The suite's direct child, recording every call the teardown makes.
 
     `waits` carries the bound each `wait` was handed, so a teardown that
-    reaped without one would show in the record; `killed` counts the direct
-    kills. `stops_after` answers `poll` with an exit code after that many
-    calls, which is how a suite that complies with the request is stood in
-    for without a grace window actually elapsing.
+    reaped without one would show in the record; `killed` counts the
+    direct kills. `stops_after` answers `poll` with an exit code after
+    that many calls: a complying suite, stood in for without a grace
+    window actually elapsing.
     """
 
     def __init__(self, pid=GROUP, running=True, stops_after=None,
@@ -95,18 +90,14 @@ class Signals:
     """`os` as the subject sees it, recording every signal it sends.
 
     `lookup_error`, `killpg_errors` and `kill_errors` are what make the
-    tree misbehave, and `sent` is what proves which signals went out and in
-    which order -- the one part of a tree kill no returned string can
-    carry, since a string saying the escalation happened is produced by the
-    same branch either way. `kill` is the single-pid send, which is the
-    shape the Windows request takes: an event aimed at the pid that leads
-    the tree's group.
-
-    `launcher_group` is what `getpgrp` answers, and it is a parameter rather
-    than the process's own group because this stand-in owns both sides of the
-    comparison: the case a control means is the two being EQUAL, and reading
-    the real one makes that a statement about the machine it runs on -- and an
-    `os.getpgrp()` call is a POSIX-only API a Windows leg does not have.
+    tree misbehave, and `sent` is what proves which signals went out and
+    in which order -- the one part of a tree kill no returned string can
+    carry, since a string saying the escalation happened is produced by
+    the same branch either way. `kill` is the single-pid send, the shape
+    the Windows request takes. `launcher_group` is what `getpgrp`
+    answers, a parameter rather than the process's own group because
+    reading the real one makes the comparison a statement about the
+    machine it runs on -- and `os.getpgrp()` is POSIX-only.
     """
 
     def __init__(self, group=GROUP, launcher_group=LAUNCHER_GROUP,
@@ -143,11 +134,9 @@ class Signals:
 class Signal:
     """One signal by the two attributes the teardown reads off it.
 
-    The stand-in for `os` above is handed the object, and one refusal in the
-    subject writes `sig.name` beside it, so name and number are the whole of
-    what a stand-in has to carry -- and carrying them itself is the point,
-    because the members of the interpreter's own `signal` module are not
-    available on every cell.
+    Name and number are the whole of what a stand-in carries, and it
+    carries them itself because the members of the interpreter's own
+    `signal` module are not available on every cell.
     """
 
     def __init__(self, name, number):
@@ -162,14 +151,13 @@ class Escalation:
     """`signal` as the bounded teardown reads it, on every cell.
 
     `_ask_and_insist` names three signals, one per route and phase, and
-    reads each off its own `signal` global. Standing that global in is
-    what makes every arm reachable everywhere: no interpreter this project
-    targets has both `SIGKILL` and `CTRL_BREAK_EVENT`, so a read from the
-    real module would raise inside the arm on some cells, and
-    `kill_process_tree`'s broad guard would make the record that exception
-    instead of the outcome the control asserts on. `SIGTERM` is the real
-    member because every platform defines it, and the POSIX-keyed
-    controls still pin the escalation against it wherever one exists.
+    reads each off its own `signal` global. Standing that global in makes
+    every arm reachable everywhere: no interpreter this project targets
+    has both `SIGKILL` and `CTRL_BREAK_EVENT`, so a read from the real
+    module would raise inside the arm on some cells, and the subject's
+    broad guard would make the record that exception instead of the
+    outcome the control asserts on. `SIGTERM` is the real member because
+    every platform defines it.
     """
     SIGTERM = signal.SIGTERM
     SIGKILL = Signal('SIGKILL', 9)
@@ -180,9 +168,9 @@ class Clock:
     """`time` as the subject sees it, advancing only when it sleeps.
 
     The grace window is a deadline read off this clock, so a control that
-    needs it to expire spends it in arithmetic rather than in real seconds.
-    `slept` is the evidence that the window was actually entered, which is
-    a fact about the subject's own loop and not about elapsed time.
+    needs it to expire spends it in arithmetic rather than in real
+    seconds. `slept` is the evidence that the window was actually
+    entered: a fact about the subject's own loop, not elapsed time.
     """
 
     def __init__(self):
@@ -206,10 +194,8 @@ class Removals:
     The refusals `discard_outputs` retries exist on one platform only, so
     they are built rather than waited for. `refuse` is how many calls
     refuse before the work is done for real, and `error` is what they
-    raise -- a stand-in that only models the retry has no way to say what
-    something that is not a removal does to the loop. A call past
-    `refuse` is the real `shutil.rmtree`, so running out ends as the
-    machine would.
+    raise. A call past `refuse` is the real `shutil.rmtree`, so running
+    out ends as the machine would.
     """
 
     def __init__(self, refuse=0, error=None):
@@ -233,10 +219,10 @@ class Removals:
 class Spawns:
     """`subprocess` as the subject sees it: no process is ever started.
 
-    Only `run` and `Popen` are replaced. Every other name comes from the
-    real module, so the exception classes the subject catches and the file
-    flags it passes are the ones it would really be handed. `runs` and
-    `spawns` record the exact call each one was, keyword arguments included.
+    Only `run` and `Popen` are replaced; every other name comes from the
+    real module, so the exception classes the subject catches and the
+    file flags it passes are the ones it would really be handed. `runs`
+    and `spawns` record the exact call each one was, kwargs included.
     """
 
     def __init__(self, child=None, spawn_error=None, run_error=None,
@@ -271,14 +257,12 @@ def swapped(module, **stand_ins):
     """The subject's own globals, stood in for, and put back afterwards.
 
     On the module under test rather than on `os`, `time` or `subprocess`
-    themselves: those are shared with every other suite in this process, and
-    a control that mutated one would be a control that changed the machine
-    rather than the subject.
-
-    A function's `__globals__` is accepted as well as a module, because a
-    control that drives a function imported from elsewhere cannot name the
-    module object it came from -- it has to reach the dict that function
-    reads, which is the same object under a spelling `getattr` cannot reach.
+    themselves: those are shared with every other suite in this process,
+    and a control that mutated one would be a control that changed the
+    machine rather than the subject. A function's `__globals__` is
+    accepted as well as a module, because a control that drives a
+    function imported from elsewhere cannot name the module object it
+    came from -- it has to reach the dict that function reads.
     """
     namespace = module if isinstance(module, dict) else module.__dict__
     saved = {name: namespace[name] for name in stand_ins}
