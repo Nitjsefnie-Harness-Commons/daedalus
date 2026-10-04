@@ -2,10 +2,8 @@
 
 `composition_scan_set` reads a file tree, so a case that drives it must
 put a synthetic package on disk before it can ask the scan anything. The
-refusal assertion is what the retired assertion-pin suite drove it with:
-that suite pinned every assertion a shared helper makes on its callers'
-behalf, so a case there needed a real composition the scan refuses for a
-real reason, not a stub of the call.
+refusal arm needs a real composition the scan refuses for a real reason,
+not a stub of the call.
 
 Two readers live here, one per question a case asks of the walk, so a
 change to how a fixture is built cannot reach one consumer and miss
@@ -14,15 +12,11 @@ another: `_assert_scan_refusal` for the arms that REFUSE, and
 `test_mcp_import_refusals.py` carries the enumeration those readers are
 driven from, and drives both of them. The CALLEE verdict is not a third
 reader: it is `_scan_verdict`'s answer in three words over a tree the
-case writes, and it lives with the two cases that read it, which is all
-of them once the synthetic-tree suites are gone.
+case writes.
 
 The refusal assertion is named for the assertion it makes rather than for
 what it generically is, because other test modules already bind that
-name, and a shared helper that adopted a name other modules bind was a
-re-implementation the retired reserved-name guard detected — generically
-over `UNCONSOLIDATED_NAMES`, so no count of the offenders was asserted
-anywhere.
+name.
 """
 from pathlib import Path
 
