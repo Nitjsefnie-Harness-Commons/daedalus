@@ -43,7 +43,6 @@ def process_is_gone(pid, settle_s=SETTLE_S):
     over `os.kill`.
     """
     deadline = time.monotonic() + settle_s
-    deadline = time.monotonic() + settle_s
     while True:
         if not _process_is_live(pid):
             return True
