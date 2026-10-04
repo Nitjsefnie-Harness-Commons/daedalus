@@ -82,15 +82,10 @@ def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
 def test_no_workflow_gates_one_commit_twice(tmp):
     """A pull request's head SHA gets one run per workflow, not two.
 
-    A branch pushed to this repository fires `push`, and opening a pull
-    request from it fires `pull_request` against the same SHA — so seven
-    workflows ran twice on every Dependabot pull request, `tests` included
-    with its twelve matrix legs. Six open pull requests saturated the runner
-    pool and pushes to main sat queued behind work already done.
-
-    The fix is a `branches:` filter on `push`, which this pins. A branch with
-    no pull request open then gets no run at all, which is the trade: it is
-    not a tree anyone is reviewing.
+    A branch push and its pull request fire `push` and `pull_request`
+    against the same SHA, so every workflow ran twice per commit and the
+    runner pool saturated. The fix is the `branches:` filter on `push`
+    pinned here; a branch with no pull request open gets no run — the trade.
     """
     del tmp
     _assert_no_workflow_gates_one_commit_twice(
@@ -124,9 +119,9 @@ def _assert_workflow_trigger_filters_match(workflows):
 def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
     """Push and pull_request must make the same path-filtering choice.
 
-    A filter on push alone lets a documentation-only commit skip the gates on
-    main while the identical pull request runs them. This test owns only the
-    symmetry property; the release-safety direction is pinned separately.
+    A push-only filter lets a documentation-only commit skip the gates on
+    main while the identical pull request runs them; this test owns only
+    the symmetry property, and release safety is pinned separately.
     """
     del tmp
     _assert_workflow_trigger_filters_match(ROOT / '.github' / 'workflows')
@@ -208,9 +203,8 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
     threshold = '.github/ci-thresholds.json'
     budget = '.github/journey-budget.json'
     source = 'server.py'
-    # The data file each workflow's own gates own: `tests.yml` measures the
-    # journeys the budget records and `codeql.yml` scans no Python a
-    # budget commit changed, so only the first ignores it.
+    # Each workflow's own data file: `tests.yml` measures what its budget
+    # records, and `codeql.yml` scans no Python a budget commit changed.
     ignored_by = {'tests.yml': budget, 'codeql.yml': None}
     for name, data_file in ignored_by.items():
         path = workflows / name
@@ -219,16 +213,14 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
         assert _workflow_runs_for_paths(path, 'push', [source])
         assert _workflow_runs_for_paths(path, 'pull_request', [threshold])
         triggers = _workflow_triggers(path.read_text(encoding='utf-8'), name)
-        # A superset check, not equality: these workflows ignore more than
-        # one generated data file, and requiring the list to be exactly one
-        # entry would go red when the requirement is MET.
+        # A superset check, not equality: both ignore more generated data
+        # files than this one, and equality would red once one is MET.
         assert threshold in _workflow_path_filters(
             triggers['push'], name).get('paths-ignore', []), triggers['push']
         assert not _workflow_path_filters(triggers['pull_request'], name)
 
         # The run set, not the spelling: a data file alone never wakes these
-        # gates on push, and pull_request is unfiltered, so it reaches them
-        # there.
+        # gates on push; unfiltered pull_request reaches them there.
         for target in (threshold, data_file):
             if target is None:
                 continue
@@ -470,7 +462,7 @@ def test_journey_budget_steps_are_gated_on_the_steps_before_them(tmp):
 
 
 def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
-    """The handles this workflow declares today, at the step declaring each.
+    """The handles the shipped workflows declare, at the step declaring each.
 
     `actionlint` is the one nothing reads; the deleted suite held it. A
     handle added later needs its own row here — nothing enforces that.
@@ -492,6 +484,15 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
              'tighten')):
         actual = step_scalar(tests_yml, job, step, 'id')
         assert actual == expected, f'{job}/{step}: {actual!r}'
+    comment_yml = (ROOT / '.github' / 'workflows' / 'coverage-comment.yml'
+                   ).read_text(encoding='utf-8')
+    for job, step, expected in (
+            ('comment', 'Check for the comment artifact', 'artifact'),
+            ('comment', 'Resolve the target pull request from the event',
+             'pr'),
+            ('comment', 'Mark missing patch coverage', 'missing')):
+        actual = step_scalar(comment_yml, job, step, 'id')
+        assert actual == expected, f'{job}/{step}: {actual!r}'
 
 
 def _without_call_spacing(expression):
@@ -499,8 +500,7 @@ def _without_call_spacing(expression):
 
     Quote-blind, so it strips inside a quoted argument too and `'a, b'`
     reads as `'a,b'`. Safe on the one expression this control compares:
-    neither `'refs/heads/{0}'` nor the path beside it holds any of the
-    three, so a format string's own spacing is never next to one and reds.
+    neither quoted operand holds any of the three.
     """
     return re.sub(r'\s*([(),])\s*', r'\1', expression)
 
