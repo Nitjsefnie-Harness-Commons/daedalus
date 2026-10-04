@@ -459,13 +459,13 @@ def test_a_release_attests_every_artifact_it_publishes(tmp):
 
 
 def test_the_wheel_job_proves_both_published_formats(tmp):
-    """The sdist ships as unproven as the wheel is proven.
+    """The sdist ships as proven as the wheel is proven.
 
-    release.yml checksums, attests and uploads dist/*.tar.gz. Nothing
-    installed the sdist, and the twine check now covers both artifacts
-    in dist/. Checksums and attestations describe what was built, never
-    whether it builds, so a missing-file tarball went green. No
-    MANIFEST.in: only a clean install reads setuptools' file list.
+    The job builds both formats, twine-checks both artifacts in dist/,
+    and clean-installs each alone in a checkout-free venv running its
+    entry point. No MANIFEST.in, so the clean sdist install alone reads
+    setuptools' inferred file list. The test guards the --wheel
+    narrowing, the exact twine command, both smoke steps, the step order.
     """
     del tmp
     workflow = _tests_yml()
