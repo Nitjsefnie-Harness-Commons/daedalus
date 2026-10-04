@@ -55,7 +55,9 @@ _STALLING_SUITE = (
 # A suite that answers its platform's request and flushes: SIGTERM on
 # POSIX, where `pyproject.toml`'s `sigterm = true` saves what a terminated
 # suite measured; CTRL_BREAK on Windows, where only a handled request
-# keeps anything.
+# keeps anything, and where the pending SIGBREAK is read only when the
+# main thread reaches the bytecode loop -- a blocking sleep would outlast
+# the grace unread, so the wedge cycles on a short sleep instead.
 _STOPPABLE_SUITE = (
     'import json, os, signal, sys, time\n'
     "summary = os.environ['DAEDALUS_TEST_SUMMARY']\n"
@@ -67,7 +69,8 @@ _STOPPABLE_SUITE = (
     '    sys.exit(0)\n'
     'signal.signal(getattr(signal, "SIGBREAK", signal.SIGTERM), _stopped)\n'
     'print("stalling", flush=True)\n'
-    'time.sleep({wedge})\n'
+    'while True:\n'
+    '    time.sleep(0.05)\n'
 )
 
 # A suite that ignores SIGTERM and leaves a child of its own that does the
@@ -323,14 +326,10 @@ def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
 def test_a_runner_wedged_suite_states_the_kill_its_platform_took(tmp):
     """The runner's route asks on every platform, and its record says so.
 
-    Both routes ask before they escalate, and each platform's request is
-    the one its suites can answer: SIGTERM on POSIX, CTRL_BREAK on
-    Windows, where only a suite that HANDLES the request keeps anything.
-    The planted suite installs the handler each platform asks with, and
-    the record has to say the request was made and taken.
-
-    The forced-only clause is refused: no record this route can produce
-    may say the tree died unasked again.
+    Both routes ask before they escalate, and the planted suite installs
+    the handler each platform asks with, so the record has to say the
+    request was made and taken. The forced-only clause is refused: no
+    record this route can produce may say the tree died unasked again.
     """
     root = _sandbox(tmp, {'test_stoppable.py': _STOPPABLE_SUITE})
     result = _run_sandbox(
