@@ -16,7 +16,6 @@ agree on what was rendered and on what it ran on, and a `--draws` pool
 re-binds a journey to the span of its own draws.
 """
 import json
-import statistics
 import sys
 from pathlib import Path
 
@@ -27,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
+import journey_recording  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 
@@ -61,7 +61,7 @@ def document_from(reports, recorded, restore=(), drop=(), draws=()):
     from the command line.
     """
     reports = list(reports)
-    counter = _agreed_counter(reports)
+    counter = journey_recording.agreed_counter(reports)
     counts = [journey_counters.counts_of(report, counter)
               for report in reports]
     names = journey_counters.journey_names()
@@ -80,7 +80,7 @@ def document_from(reports, recorded, restore=(), drop=(), draws=()):
                     'nothing')
             journeys[name] = None
             continue
-        journeys[name] = _recorded_median(measured)
+        journeys[name] = journey_recording.recorded_median(measured)
     # Less whatever `--drop` names: that journey's recorded null is the
     # one decision this command has been asked to make again, and the
     # refusal below would otherwise answer it with a measurement that
@@ -91,13 +91,14 @@ def document_from(reports, recorded, restore=(), drop=(), draws=()):
     _restored([name for name in held if name not in set(drop)],
               held, restore, reports, counter)
     _dropped_now(drop, reports, counter)
-    shas = {name: _agreed_sha(reports, name) for name in names}
-    toolchain = _agreed_toolchain(reports)
+    shas = {name: journey_recording.agreed_sha(reports, name)
+            for name in names}
+    toolchain = journey_recording.agreed_toolchain(reports)
     if not journey_artifact.recorded_toolchain({'toolchain': toolchain}):
         raise ValueError(
             'the measurement carries no toolchain identity, and a recorded '
             'count without one compares against nothing')
-    exclusions = _agreed_exclusions(reports)
+    exclusions = journey_recording.agreed_exclusions(reports)
     unaccounted = [name for name in names if not exclusions.get(name)]
     if unaccounted:
         raise ValueError(
@@ -106,7 +107,7 @@ def document_from(reports, recorded, restore=(), drop=(), draws=()):
     measured = {'schema_version': journey_artifact.SCHEMA_VERSION,
                 'counter': counter,
                 'tolerance_pct': recorded.get('tolerance_pct'),
-                'tolerances': _carried_tolerances(
+                'tolerances': journey_recording.carried_tolerances(
                     recorded,
                     {name for name, count in journeys.items()
                      if count is not None},
@@ -266,160 +267,6 @@ def _dropped(recorded, names):
     journeys = recorded.get('journeys') or {}
     return [name for name in names
             if name in journeys and journeys[name] is None]
-
-
-def _carried_tolerances(recorded, counted, draws=(), counter=None):
-    """The recorded per-journey tolerances, for the journeys this one holds.
-
-    Absent stays absent, as everywhere else in the document: a re-baseline
-    of an artefact that names no per-journey tolerance writes no block, so
-    the canonical rendering of every artefact recorded before the field
-    still round-trips.
-
-    `counted` is the journeys this measurement records a COUNT for, not the
-    journeys the set carries. A journey recorded at `null` -- the manager's
-    own case, written only by `--drop` -- is in the set and carries no
-    count, so a bound kept beside it is a bound no arithmetic reads and
-    `_validated_tolerances` refuses the document for: `--drop` would be the
-    one flag that cannot be used on a budget with a per-journey tolerance,
-    and the remedy for that is the hand-edit this command replaces.
-
-    A `--draws` pool moves the bound instead of carrying it: a journey the
-    pool names is re-bound to the span of every round of every pool file,
-    in the percent the artefact denominates tolerances in; a journey the
-    pool does not name keeps the bound it carried.
-    """
-    own = recorded.get('tolerances')
-    if own is None:
-        carried = None
-    else:
-        carried = {name: value for name, value in own.items()
-                   if name in counted}
-    for name, value in sorted(_derived_tolerances(
-            draws, counter, counted).items()):
-        if carried is None:
-            carried = {}
-        carried[name] = value
-    return carried
-
-
-def _derived_tolerances(draws, counter, counted):
-    """The bound each pool-named journey is re-derived to, and none beside.
-
-    Each pool file contributes every ROUND's count — the row's `net`, the
-    per-round residual the recorded median is the median of — and a journey
-    the pool names is held to (max - min) / min over all of them. A journey
-    the pool does not name keeps its carried bound, which is why only named
-    journeys come back.
-
-    A file that selected another counter measured a different quantity, and
-    a count from it would re-bind a journey to a span its recorded counts
-    are not denominated in.
-    """
-    pool = {}
-    for report in draws:
-        selected = report.get('selected_counter')
-        if selected != counter:
-            raise ValueError(
-                'a draws file selected '
-                f'{selected or "no counter"} while the budget is '
-                f'denominated in {counter}, so its counts are a different '
-                'quantity')
-        rows = ((report.get('counters') or {}).get(counter)
-                or {}).get('journeys') or {}
-        for name, row in rows.items():
-            pool.setdefault(name, []).extend(row.get('net') or ())
-    derived = {}
-    for name, values in sorted(pool.items()):
-        if not values or name not in counted:
-            continue
-        low = min(values)
-        if low <= 0:
-            raise ValueError(
-                f'the draws for {name} reach {low}, and a span from a '
-                'nonpositive floor is not a bound any run can be held to')
-        derived[name] = round((max(values) - low) / low * 100, 6)
-    return derived
-
-
-def _agreed_sha(reports, name):
-    """The one sha every round of every file saw `name` render.
-
-    A measurement whose rounds disagree about what a journey rendered is
-    not one to record counts from: the rounds measured different things and
-    a set's pick among them is a coin toss wearing a determinism's clothes.
-    The same rule reaches across files, because two files whose rounds saw
-    different renderings are two runs of different journeys and a median
-    over them is a number no run measured.
-    """
-    seen = sorted({sha for report in reports
-                   for sha in (report.get('shas') or {}).get(name) or ()})
-    if len(seen) != 1:
-        raise ValueError(
-            f'the rounds did not agree what {name} rendered, so no sha can '
-            f'be recorded for it: {seen}')
-    return seen[0]
-
-
-def _agreed_counter(reports):
-    """The one counter every file selected, and the refusal for the rest.
-
-    A count denominated in one counter is a different quantity from a count
-    denominated in another, so files that selected differently have nothing
-    to record together.
-    """
-    selected = [report.get('selected_counter') for report in reports]
-    if len(set(selected)) != 1:
-        raise ValueError(
-            'the files do not agree which counter they measured under: '
-            f'{sorted(set(selected), key=str)}')
-    return selected[0]
-
-
-def _agreed_toolchain(reports):
-    """The one toolchain identity every file was measured on.
-
-    A count is comparable only within the toolchain it was taken on, and a
-    median over files from two of them is a number no machine measured.
-    """
-    seen = []
-    for report in reports:
-        identity = report.get('toolchain') or {}
-        if identity not in seen:
-            seen.append(identity)
-    if len(seen) != 1:
-        raise ValueError(
-            'the files were measured on different toolchains, and a count '
-            f'recorded across them compares against nothing: {seen}')
-    return seen[0]
-
-
-def _agreed_exclusions(reports):
-    """The one exclusion map every file counted under.
-
-    A count taken under one exclusion map is a different quantity under
-    another, so files that disagree there have nothing to record together.
-    """
-    exclusions = reports[0].get('excluded_threads') or {}
-    if any((report.get('excluded_threads') or {}) != exclusions
-           for report in reports[1:]):
-        raise ValueError(
-            'the files do not agree which threads each journey excluded, '
-            'so no count is recorded from them together')
-    return exclusions
-
-
-def _recorded_median(measured):
-    """The count across files: their median, integral when the median is.
-
-    An even file count averages its two middle files, and an average of two
-    equal integers arrives as a float; the schema records an integer, so an
-    integral median is written as one. A median that lands between two
-    counts is left a float, which the schema's own validator refuses — no
-    run measured that count.
-    """
-    value = statistics.median(measured)
-    return int(value) if value == int(value) else value
 
 
 def _paths(value):
