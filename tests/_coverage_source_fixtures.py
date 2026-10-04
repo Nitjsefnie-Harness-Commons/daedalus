@@ -6,25 +6,23 @@ normaliser, and two synthetic-source suites spelled the binding diagnostic
 they compare against the same way. Each pair was a byte-identical copy, so
 a fix to one shape reached one suite and not the other.
 
-The two readers here are new. `_module_text` belongs to
-`tests/_binding_assertions.py`, which keeps it, so the reader is named for
-what it returns; and `_at` is bound by `tests/test_wfjobs.py`, where it
-walks a decoded workflow document rather than a source. The owner set is
-read as a set, so publishing either name from a shared helper would make
-each of those suites a re-implementation of this module.
+The two readers here are new. `_module_text` is named for what it
+returns rather than for the short name a retired analyser reader held,
+so this one could not adopt it. `_at` is bound by `tests/test_wfjobs.py`,
+where it walks a decoded workflow document rather than a source.
 
-`_real_module_copy` is the third, and it is here because
-`tests/_control_calls.py` resolves a call a checked control makes through a
-def in that same file or a pair tabled in `_PURE_IMPORTS` — and a tabled
-pair has to mean the callee writes nothing, which this one does not: it
-copies the test tree and hands back the path every later write is proved
-against, so tabling it would be the checker losing sight of where a
-control writes. It is neither tabled nor local, so
-`tests/_control_writes.py` reads this file and judges that body itself.
-`tests/test_shared_helper_calls.py` holds that GUARD -- its rows, its hop
-bound and its refusals -- but it drives it through synthetic sources, so
-what this file's `_real_module_copy` reaches is pinned as guard behaviour,
-not as this callee's own route.
+`_real_module_copy` is the third, and it is here because the retired
+call resolution tabled a call a checked control makes only when the
+callee resolves through a def in that same file or a pair tabled in
+`_PURE_IMPORTS` — and a tabled pair has to mean the callee writes
+nothing, which this one does not: it copies the test tree and hands
+back the path every later write is proved against, so tabling it would
+be the checker losing sight of where a control writes. It is neither
+tabled nor local: the retired write audit read this file and judged
+that body itself, and the retired helper-call guard held that
+judgement's rows, hop bound and refusals, driving them through
+synthetic sources, so what this file's `_real_module_copy` reaches was
+pinned as guard behaviour, not as this callee's own route.
 """
 from pathlib import Path
 

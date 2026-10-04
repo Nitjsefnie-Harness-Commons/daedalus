@@ -2,9 +2,9 @@
 
 `composition_scan_set` reads a file tree, so a case that drives it must
 put a synthetic package on disk before it can ask the scan anything. The
-refusal assertion is what `test_helper_assertion_pins.py` drives it with:
-that suite pins every assertion a shared helper makes on its callers'
-behalf, so the case there needs a real composition the scan refuses for a
+refusal assertion is what the retired assertion-pin suite drove it with:
+that suite pinned every assertion a shared helper makes on its callers'
+behalf, so a case there needed a real composition the scan refuses for a
 real reason, not a stub of the call.
 
 Two readers live here, one per question a case asks of the walk, so a
@@ -12,17 +12,17 @@ change to how a fixture is built cannot reach one consumer and miss
 another: `_assert_scan_refusal` for the arms that REFUSE, and
 `_scan_verdict` for a tree whose answer is read whichever way it falls.
 `test_mcp_import_refusals.py` carries the enumeration those readers are
-driven from, and `test_helper_assertion_pins.py` drives the first of them.
-The CALLEE verdict is not a third reader: it is `_scan_verdict`'s answer in
-three words over a tree the case writes, and it lives with the two cases
-that read it, which is all of them once the synthetic-tree suites are gone.
+driven from, and drives both of them. The CALLEE verdict is not a third
+reader: it is `_scan_verdict`'s answer in three words over a tree the
+case writes, and it lives with the two cases that read it, which is all
+of them once the synthetic-tree suites are gone.
 
 The refusal assertion is named for the assertion it makes rather than for
 what it generically is, because other test modules already bind that
-name, and a shared helper that adopted a name other modules bind is a
-re-implementation `tests/test_reserved_test_names.py` detects —
-generically over `UNCONSOLIDATED_NAMES`, so no count of the offenders is
-asserted anywhere.
+name, and a shared helper that adopted a name other modules bind was a
+re-implementation the retired reserved-name guard detected — generically
+over `UNCONSOLIDATED_NAMES`, so no count of the offenders was asserted
+anywhere.
 """
 from pathlib import Path
 

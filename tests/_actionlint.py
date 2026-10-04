@@ -227,8 +227,8 @@ def _planted_workflow_tree(tmp):
 def _facts(overrides):
     """One lint run's facts, defaulted to a run that lints clean.
 
-    `overrides` arrives positionally: a `**`-carrying call is a bounded
-    launch to the audit in `tests/test_repo_layout.py`, whatever it calls.
+    `overrides` arrives positionally: a `**`-carrying call was a bounded
+    launch under the retired launch audit, whatever it called.
     The installed version defaults to the PIN, so raising it needs no edit
     here and no fixture carries a version this branch wrote down.
     """

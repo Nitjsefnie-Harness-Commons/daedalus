@@ -1,4 +1,4 @@
-"""The analysis behind tests/test_coverage_environment.py.
+"""The analysis behind the coverage environment guard.
 
 A Python child inheriting COVERAGE_* into a working directory that
 [tool.coverage.paths] does not map back onto the repository records
