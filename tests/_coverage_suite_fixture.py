@@ -43,29 +43,21 @@ _FAKE_COVERAGE_INIT = """def process_startup(**_kwargs):
 
 SYNTHETIC_PROCESS_START = 'fabricated coverage startup'
 
-# Which kill the launcher will reach on THIS host. Read here rather than
-# from the module under test, but the HONEST account of what that buys is
-# narrower than it looks: `sys.platform` is a host fact and not a decision
-# either side makes, so this predicate agrees with the launcher's by
-# spelling, and it cannot drift without the host changing. What a control
-# is really independent ON is the strings below -- they are spelled here and
-# asserted against the launcher's OWN output, so a control cannot pass by
-# agreeing with a copy of the thing it is checking. The predicate only
-# decides which of them the control expects to find.
-FORCES_WITHOUT_ASKING = sys.platform.startswith('win')
-# The half of a record that is true on every platform: the tree was ended
-# and a signal of some kind reached it.
-TREE_WAS_KILLED = 'taskkill' if FORCES_WITHOUT_ASKING else 'process group'
-# The clause that names the POSIX half's request, and the clause that says
-# the Windows half sent none. A control asserts the one its platform makes
-# and REFUSES the other, so a route that silently changed platform is red.
+# The clauses and sentences a launcher's own output carries, spelled here
+# and asserted against that output, so a control cannot pass by agreeing
+# with a copy of the thing it is checking. Both platforms now ask before
+# they escalate, so the request clause and the operator sentence are the
+# same on both; only the escalation's spelling differs, by host platform.
+TREE_WAS_KILLED = ('taskkill' if sys.platform.startswith('win')
+                   else 'process group')
+# The clause that names the request both platforms send, and the clause
+# that says a record let the tree die unasked -- the single-phase shape
+# this route left behind, which no record may carry again.
 REQUESTED_THEN_GRACED = 'asked to stop'
 FORCED_WITHOUT_GRACE = 'no request was sent and no grace was given'
-# The two sentences an operator reads, spelled here and nowhere else, for
-# the same reason as the clauses above: a control asserts the one its
-# platform selects and REFUSES the other, so a conditional that sends the
-# wrong platform's sentence to stderr is red. Inverting the conditional
-# used to move no assertion at all, which is the whole of finding E2.
+# The sentence an operator reads, and the sentence no platform prints any
+# more: a control asserts the sentence its run carried and REFUSES this
+# one, so a conditional resurrecting the forced-only wording is red.
 OPERATOR_ASKS_FIRST = ('a suite that took the request to stop keeps what it '
                        'had measured, and one that did not contributes '
                        'nothing')

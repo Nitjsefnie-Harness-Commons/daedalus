@@ -1,41 +1,23 @@
 #!/usr/bin/env python3
 """Arms of the bounded teardown that no healthy launcher ever reaches.
 
-The survivor clause is the first of them: `scripts/ci/suite_bound.py`
-answers a suite that TOOK the request with a sentence whose second clause
-is the outcome of the escalation that still went out: an escalation that
-found a member is one sentence, and one that found the group already gone
-is another. The `insisted or` selecting between them has two behaviours,
-and each needs a control pairing a child that STOPPED with an escalation
-whose own outcome is the thing under test.
+A suite of its own because `test_suite_bound.py` sits at the 700-line
+ceiling this repository holds test modules to, and because these arms are
+where a reader looks for what the teardown does when the tree misbehaves:
+the survivor clause, whose second half names what the escalation that
+still went out found, the bounded removal's report, and the Windows
+route's own arms.
 
-Nothing paired the two before. The only control reaching the stopped branch
-gave its `Signals` no `killpg_errors` and so never saw the escalation fail,
-and the only control making `insisted` name something gave a `Child` that
-never stops and so never reached the clause. Each half of the `or` was
-therefore green whether the production line read `insisted or <constant>` or
-just the constant.
-
-It is a suite of its own rather than two more controls in
-`test_suite_bound.py`: that file is at the 700-line ceiling this repository
-holds test modules to, and its other arms are where a reader looks first for
-what the teardown does when the tree misbehaves. The cleanup report is the
-second arm to arrive here, for the same reason and by the same rule.
-
-It stood in for `sys` and not for `signal`, on the reading that the route is
-chosen by the `sys.platform` read and the escalation follows from it. The
-`sys` read is a stand-in, and the escalation was not: `_ask_and_insist` names
-`signal.SIGKILL`, which a windows-latest interpreter has no member for, so
-the read raised inside the arm before the escalation went out and
-`kill_process_tree`'s broad guard made the record that exception instead.
-Both controls then saw one signal where the clause's own record has two
-(`scripts/ci/suite_bound.py`'s `note = insisted or ...`), on all four
-`windows-latest` cells and on no other. The `signal` global is stood in for
-too, so the arm is reached on every cell and neither control depends on what
-this interpreter can name.
+Both the `sys` and the `signal` globals are stood in for, so every arm is
+reached on every cell: `_ask_and_insist` names `signal.SIGKILL` and
+`signal.CTRL_BREAK_EVENT`, and no interpreter this project targets has
+both members, so a read from the real module would raise inside the arm
+and `kill_process_tree`'s broad guard would make the record that
+exception instead of the outcome the control asserts on.
 """
 import contextlib
 import io
+import subprocess
 import sys
 from pathlib import Path
 
@@ -43,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
-    GROUP, Child, Clock, Escalation, Platform, Removals, Signals, swapped)
+    GROUP, Child, Clock, Escalation, Platform, Removals, Signals, Spawns,
+    swapped)
 
 SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                          'suite_bound_survivor')
@@ -134,6 +117,74 @@ def test_a_survivor_clause_names_the_escalation_that_found_nothing(tmp):
     assert record == (f'process group {GROUP} asked to stop and the suite '
                       f'did; {GROUP_WAS_GONE}'), record
     assert ESCALATION_WENT_OUT not in record, record
+
+
+# The Windows route's arms, through the same stand-ins: the signals and
+# commands are read on every cell, and the real CTRL_BREAK and taskkill
+# await the windows-latest cells.
+
+
+def test_the_windows_escalation_is_read_against_the_answer_it_followed(tmp):
+    """A taskkill outcome is read against the answer it followed.
+
+    The same nonzero exit is two different facts: beside a suite that
+    ignored the request it says the tree may still be running, and beside
+    one that took the request it says the pid the escalation is keyed on
+    was already gone. Neither row may render the other's reading. The two
+    rows beside those name the escalation's own failures, recorded rather
+    than allowed to report a stopped tree as a live one.
+    """
+    del tmp
+    for answered, run_error, expected, refused in (
+            (False, None, ('may still be running', 'exited 128'),
+             'already gone'),
+            (True, None, ('already gone',), 'may still be running'),
+            (False, subprocess.TimeoutExpired('taskkill', 10),
+             ('gave up after', 'may still be running'), 'already gone'),
+            (False, OSError('taskkill is not on this path'),
+             ('could not run: taskkill is not on this path',),
+             'may still be running')):
+        child = Child(stops_after=1) if answered else Child()
+        spawns = Spawns(child=child, returncode=128, run_error=run_error)
+        clock = Clock()
+        with swapped(SUITE_BOUND, sys=Platform('win32'), os=Signals(),
+                     signal=Escalation, time=clock, subprocess=spawns):
+            record = SUITE_BOUND.kill_process_tree(child)
+        # The grace was entered, and an unanswered one spent all of it.
+        assert clock.slept >= (SUITE_BOUND.GRACE_POLL_S if answered
+                               else SUITE_BOUND.CLEANUP_TIMEOUT_S), clock.slept
+        for clause in expected:
+            assert clause in record, (record, clause)
+        assert refused not in record, (record, refused)
+
+
+def test_a_windows_request_that_never_went_out_still_escalates(tmp):
+    """The escalation is addressed by pid, so a failed request cancels nothing.
+
+    POSIX returns on a failed request, because the group id both of its
+    phases address is the thing that failed to resolve. Windows escalates
+    by pid, so the failure is recorded and the escalation still goes out.
+    """
+    del tmp
+    for error, asked in (
+            (ProcessLookupError(),
+             f'process tree {GROUP} was already gone'),
+            (OSError('no shared console'),
+             f'CTRL_BREAK_EVENT failed: no shared console')):
+        child = Child()
+        spawns = Spawns(child=child, returncode=0)
+        clock = Clock()
+        signals = Signals(kill_errors={Escalation.CTRL_BREAK_EVENT: error})
+        with swapped(SUITE_BOUND, sys=Platform('win32'), os=signals,
+                     signal=Escalation, time=clock, subprocess=spawns):
+            record = SUITE_BOUND.kill_process_tree(child)
+        assert signals.sent == [(GROUP, Escalation.CTRL_BREAK_EVENT)], (
+            signals.sent)
+        assert clock.slept >= SUITE_BOUND.CLEANUP_TIMEOUT_S, clock.slept
+        assert len(spawns.runs) == 1, spawns.runs
+        assert child.killed == 0, 'nothing is killed from here on Windows'
+        assert record == (f'{asked}; the escalation reached what was '
+                          'still in it'), (record, asked)
 
 
 # The bound this control shrinks, and the refusals that spend it: five of
