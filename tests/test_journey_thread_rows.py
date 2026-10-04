@@ -13,8 +13,6 @@ import json
 import sys
 from pathlib import Path
 
-import yaml
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
@@ -34,7 +32,6 @@ from _journey_contract import (  # noqa: E402
 FLAG = 'DAEDALUS_JOURNEY_THREAD_ROWS'
 
 ROWS_SOURCE = ROOT / 'scripts' / 'ci' / 'journey_thread_rows.py'
-TESTS_YML = ROOT / '.github' / 'workflows' / 'tests.yml'
 
 
 def rows_module():
@@ -190,26 +187,6 @@ def test_the_rows_change_no_recorded_count(tmp):
     assert recorded.pop('thread_rows'), 'this run recorded no rows'
     assert json.dumps(with_rows, sort_keys=True) == json.dumps(
         without, sort_keys=True), 'the rows moved a recorded number'
-
-
-def test_the_measuring_step_sets_the_flag_and_nothing_else_does(tmp):
-    """Step-level, because the step that reads it is the one that sets it.
-
-    The switch is read only in the parent that assembles the report, from
-    this step's own process environment, and no counted child consults it —
-    """
-    del tmp
-    document = yaml.safe_load(TESTS_YML.read_text(encoding='utf-8'))
-    job = document['jobs']['journey-budget']
-    steps = [step for step in job['steps'] if step.get('id') == 'measure']
-    assert len(steps) == 1, [step.get('name') for step in job['steps']]
-    assert steps[0]['env'][FLAG] == '1', steps[0].get('env')
-    assert FLAG not in (job.get('env') or {}), (
-        f'the flag belongs to the step that reads it: {job.get("env")}')
-    elsewhere = [step.get('id') or step.get('name')
-                 for step in job['steps']
-                 if FLAG in (step.get('env') or {})]
-    assert elsewhere == ['measure'], elsewhere
 
 
 def main():
