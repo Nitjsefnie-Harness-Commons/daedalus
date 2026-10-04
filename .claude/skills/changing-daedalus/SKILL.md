@@ -69,7 +69,7 @@ twelve CI legs then failed on a suite that loads `server.py` by path.
   imports**, so it never proposes one and the gap is invisible.
   `tests/test_release_scan.py` reads every tracked file and refuses a
   non-allowlisted host or a machine-specific path; `tests/test_file_sizes.py`
-  and `tests/test_repo_layout.py` read the tree the same way. Add every scanner
+  reads the tree the same way. Add every scanner
   to the list whenever a change adds or edits a **string** in a tracked file -
   a different trigger from changing an import surface. A fake hostname inside a
   new test has failed all twelve legs at once while every suite that imports
