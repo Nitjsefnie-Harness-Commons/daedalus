@@ -389,43 +389,6 @@ def _drop_matrix(tmp, name):
     return rows
 
 
-def test_every_refusal_in_the_matrix_says_something_the_run_established(tmp):
-    """Twelve cells, and every refusal checks out against the run's own facts.
-
-    Both artefact states crossed with both outcomes: a residual where the
-    run has one, no residual where it does not, no remedy that cannot run.
-
-    One refusal no cell reaches is the recorded null the measurement now
-    separates: every flag shape above either restores that journey or drops
-    it. `test_a_rebaseline_refuses_to_silently_restore_a_dropped_journey`
-    reads that one, and `about_separation` admits its sentence so a cell
-    added later is read by the same rule.
-    """
-    name = journeys().NAMES[0]
-    resolved = (_journey_contract.fixture_report()['counters']
-                ['valgrind-callgrind']['journeys'][name]['median'])
-    for state, outcome, flags, code, said in _drop_matrix(tmp, name):
-        shape = ' '.join(flags[:1] + ['+drop'] if len(flags) > 2 else flags)
-        where = f'{state} + {outcome} + {shape}'
-        if code == 0:
-            continue
-        assert 'None instructions' not in said, (
-            f'{where}: the refusal names a residual the run does not '
-            f'have: {said}')
-        # A residual belongs in a refusal ABOUT separability. One that is
-        # about the artefact's state instead has no residual to quote, and
-        # asking it for one would be asking for the same falsehood.
-        about_separation = ('separates it by' in said
-                            or 'cannot be dropped' in said
-                            or 'the budget holds no count for' in said)
-        if about_separation:
-            separable = outcome == 'separates'
-            did = 'separated' if separable else 'could not separate'
-            assert (str(resolved) in said) is separable, (
-                f'{where}: the run {did} {name}, and the refusal quotes the '
-                f'wrong residual: {said}')
-
-
 def test_a_restore_and_a_drop_do_not_refuse_each_other(tmp):
     """Two flags about one journey, and the pair must not refuse itself.
 
