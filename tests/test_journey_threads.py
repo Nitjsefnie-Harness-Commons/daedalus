@@ -666,28 +666,24 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
             f'{name} is recorded as {recorded.get(name)} and the table '
             f'excludes {applied}, so this artefact counts a different '
             'quantity from the table a run classified the profile under')
-    # No tolerance of its own, so `net-capture` rides `tolerance_pct`, and
-    # what this arms is whether the journey CARRIES a tolerance, not how
-    # wide the count runs. The three draws that decided the entry span
-    # 2,672,681,420 to 2,672,726,671 instructions — 0.0017% (run
-    # 37096636089, artefact `journey-counts` 11265650340); a later draw
-    # (run 37100959875, artefact `journey-counts` 11266910571) measured
-    # 2,672,097,656, 0.022% low. Where a draw may sit from the recorded
-    # count is the budget gate's question, not this one: a per-journey
-    # tolerance is recorded only for a journey whose own draws exceed the
-    # default.
-    # `tolerances` is absent when no journey carries an entry, which is the
-    # state this artefact is recorded in, so it is read as the empty block
-    # `journey_recording.carried_tolerances` calls absent rather than
-    # indexed: both the validator and `tolerance_of` accept the absence and
-    # only this read did not.
+    # The pool convention: a journey the pool names carries the span of its
+    # own draws as its per-journey tolerance — (max - min) / min over every
+    # round of every pool file, in the percent the artefact denominates
+    # bounds in — whatever its size; only a journey the pool cannot name
+    # (its draws never separated it in any pool file) falls back to
+    # `tolerance_pct`. `net-capture` is the sentinel journey: its derived
+    # bound is the smallest in the block, exactly the entry a "too small to
+    # matter" cleanup would drop first. Where a draw may sit from the
+    # recorded count is the budget gate's question, not this one; the bound
+    # the gate enforces is read through `tolerance_of`, which prefers the
+    # journey's own entry over the default.
     own = document.get('tolerances') or {}
-    assert 'net-capture' not in own, (
-        f'net-capture is held to {own["net-capture"]}% '
-        'while the draws that decided its entry span 0.0017%, so the bound '
-        f'is read from a measurement this artefact does not carry: {own}')
-    assert artifact.tolerance_of(document, 'net-capture') == \
-        document['tolerance_pct'], own
+    assert 'net-capture' in own, (
+        'net-capture is a journey the pool names, and a pool-named journey '
+        'carries its derived bound: no entry here means the artefact fell '
+        'back to the default for it, so the recording convention has moved '
+        f'and this control is stale: {own}')
+    assert own['net-capture'] >= 0, own
 
 
 def main():
