@@ -22,6 +22,7 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 SOURCE = ROOT / 'scripts' / 'ci' / 'aggregate_gate.py'
 CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+GATE_RUN = 'python3 scripts/ci/aggregate_gate.py'
 STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
 SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage')
@@ -412,7 +413,7 @@ def test_the_aggregate_job_runs_the_module(tmp):
     assert checkouts[0]['with'] == {'persist-credentials': 'false'}
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gates = [_gate_step()]
-    assert gates[0]['run'] == 'python3 scripts/ci/aggregate_gate.py'
+    assert gates[0]['run'] == GATE_RUN
     assert '${{' not in gates[0]['run']
     assert gates[0]['env'] == {
         'NEEDS_JSON': '${{ toJSON(needs) }}',
@@ -425,6 +426,39 @@ def test_the_aggregate_job_runs_the_module(tmp):
                             ' || github.sha }}',
         'SECRETS_POLL_BOUND_S': '600',
     }
+
+
+MARKER_RUN = (
+    '# git grep exits 1 for "no match" and above 1 for an error it could\n'
+    '# not run, and a guard that reads its own error as a clean tree is\n'
+    '# the false green this step exists to prevent.\n'
+    'found=0\n'
+    "git grep -nI -E '^(<{7}( |$)|>{7}( |$)|={7}$)' -- . || found=$?\n"
+    'if [ "$found" -gt 1 ]; then\n'
+    '  echo "git grep exited $found, so no marker was looked for."\n'
+    '  exit "$found"\n'
+    'fi\n'
+    'if [ "$found" -eq 0 ]; then\n'
+    '  echo "A merge-conflict marker is committed. Resolve the conflict,'
+    ' rebase onto the target branch and push again."\n'
+    '  exit 1\n'
+    'fi\n'
+)
+MARKER_STEP = {
+    'name': 'Check no tracked file carries a merge-conflict marker',
+    'shell': 'bash',
+    'run': MARKER_RUN,
+}
+
+
+def test_the_marker_step_is_the_claim_port_verbatim(tmp):
+    """Pins the port by decoded scalars: a one-token drift in the name, the
+    shell or the body is a red row, not a silent port drift."""
+    del tmp
+    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
+    steps = [s for s in job['steps'] if s.get('name') == MARKER_STEP['name']]
+    assert len(steps) == 1, job['steps']
+    assert steps[0] == MARKER_STEP
 
 
 def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
@@ -571,7 +605,7 @@ def test_the_poll_bound_is_read_and_refused_outside_its_range(tmp):
 
 def _gate_step():
     job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
-    steps = [step for step in job['steps'] if 'run' in step]
+    steps = [s for s in job['steps'] if s.get('run') == GATE_RUN]
     assert len(steps) == 1, job['steps']
     return steps[0]
 
