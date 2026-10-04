@@ -24,8 +24,8 @@ the tree is what a branch carries, so a branch runs the tests it brings.
   run_tests.py              which suites the suites job runs
   requirements-dev.txt      the manifests the gates install and run; so are
   requirements-test.txt     requirements-pip-audit.txt (the vulnerability
-  requirements-zizmor.txt   gate's own tool) and the hash-pinned analyzer the
-                            tests job installs and runs
+  requirements-release.txt  gate's own tool) and requirements-zizmor.txt,
+                            the hash-pinned analyzer the tests job installs
 
   .github/ci-thresholds.json  and
   .github/journey-budget.json  the recorded counts two gates compare against.
@@ -103,9 +103,8 @@ GATE_PATTERNS = (
     'pyproject.toml',
     'run_tests.py',
     'requirements-dev.txt',
-    'requirements-test.txt',
-    'requirements-pip-audit.txt',
-    'requirements-zizmor.txt',
+    'requirements-test.txt', 'requirements-release.txt',
+    'requirements-pip-audit.txt', 'requirements-zizmor.txt',
 )
 
 _HEX40 = frozenset('0123456789abcdef')

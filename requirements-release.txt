@@ -1,0 +1,18 @@
+# build and twine, the two CI tools the wheel job runs to build and check
+# the artifacts release.yml publishes. Pinned in a manifest at the repository
+# root rather than in tests.yml's `run:` block, because Dependabot's `pip`
+# entry reads manifest files and never a workflow: a version written into a
+# step is a version nobody is ever told to move.
+#
+# NOT hash-pinned, unlike requirements-zizmor.txt, and the asymmetry is
+# deliberate in this direction. --require-hashes freezes the whole
+# resolution, and unlike zizmor -- whose transitive closure is empty, which
+# is what makes its eleven-artifact hash set hand-maintainable -- build and
+# twine pull packaging, pyproject-hooks, readme-renderer, requests, rich and
+# the rest of a normal closure, so a hash-pinned manifest here would be a
+# hand-curated artifact set of the size the zizmor manifest's own prose
+# calls out of scope for hand maintenance. What is pinned is the tools'
+# versions -- the half whose release must not turn CI red on an unchanged
+# commit.
+build==1.6.1
+twine==7.0.0
