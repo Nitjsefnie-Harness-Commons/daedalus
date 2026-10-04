@@ -62,8 +62,7 @@ def test_the_process_double_keeps_the_refusals_a_popen_has(tmp):
 
 def test_every_reaper_wait_reads_the_shared_teardown_bound(tmp):
     """The reaper waits read SUITE_BOUND.CLEANUP_TIMEOUT_S: CPython interns
-    small ints, so no runtime check tells the shared constant from a copy.
-    """
+    small ints, so no runtime check tells the shared constant from a copy."""
     del tmp
     source = (Path(__file__).resolve().parent
               / '_realbrowser_workers.py').read_text(encoding='utf-8')
@@ -81,11 +80,12 @@ def test_every_reaper_wait_reads_the_shared_teardown_bound(tmp):
     for wait in waits:
         timeout = next((k for k in wait.keywords if k.arg == 'timeout'), None)
         assert timeout is not None, ast.dump(wait)
-        assert isinstance(timeout.value, ast.Attribute), (
+        assert (isinstance(timeout.value, ast.Attribute)
+                and timeout.value.attr == 'CLEANUP_TIMEOUT_S'
+                and isinstance(timeout.value.value, ast.Name)
+                and timeout.value.value.id == 'SUITE_BOUND'), (
             'a reaper wait is not bound to SUITE_BOUND.CLEANUP_TIMEOUT_S: '
             + ast.dump(timeout.value))
-        assert timeout.value.attr == 'CLEANUP_TIMEOUT_S', (
-            ast.dump(timeout.value))
 
 
 def test_cdp_eval_preserves_typed_evaluation_failure(tmp):
