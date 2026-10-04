@@ -36,8 +36,14 @@ def _installer_module(name):
     """The installer as its own module, so a control can stand a boundary in.
 
     A fresh module per control is what makes patching a constant here safe:
-    the module reads `MAX_TRANSFER` and `TOOL_DIR` as globals at call time, and
-    a shared module would carry one control's stand-in into the next.
+    the module reads `TOOL_DIR` as a global at call time, and a shared module
+    would carry one control's stand-in into the next.
+
+    It does not make every constant here safe to patch the same way. A
+    constant the move to `scripts/ci/actionlint_asset.py` took with it is
+    reached through `sys.modules`, so every load in one process shares that
+    one module and a fresh installer changes nothing for it; the arms below
+    that need such a constant must read it from the asset module.
     """
     return _util.load(INSTALLER_SOURCE, name)
 
