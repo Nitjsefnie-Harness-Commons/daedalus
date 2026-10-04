@@ -606,13 +606,22 @@ def test_an_unreadable_answer_is_red_not_an_absent_run_and_not_retried(tmp):
     assert verdict == 'secrets-query-failed' and calls == [], calls
 
 
-def test_the_poll_bound_is_the_default_and_stops_at_the_ceiling(tmp):
+def test_the_poll_bound_is_read_and_refused_outside_its_range(tmp):
+    """One in-range value, one per side of the range.
+
+    The in-range one is the only route to the return that honours the
+    environment; the two refusals differ only in which limb of the range
+    check they reach, and both land on the same raise.
+    """
     del tmp
     mod = _gate()
     with mock.patch.dict(os.environ, {}, clear=True):
         assert mod.poll_bound() == mod.DEFAULT_POLL_BOUND_S
-        os.environ[mod.POLL_BOUND_ENV] = str(mod.MAX_POLL_BOUND_S + 1)
-        _query_error(mod, mod.poll_bound)
+        os.environ[mod.POLL_BOUND_ENV] = '90'
+        assert mod.poll_bound() == 90.0
+        for raw in ('0', str(mod.MAX_POLL_BOUND_S + 1)):
+            os.environ[mod.POLL_BOUND_ENV] = raw
+            _query_error(mod, mod.poll_bound)
 
 
 def _gate_step():
