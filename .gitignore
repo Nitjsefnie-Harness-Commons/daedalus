@@ -244,6 +244,7 @@
 !/scripts/ci/journey_budget.py
 !/scripts/ci/journey_child_env.py
 !/scripts/ci/journey_counters.py
+!/scripts/ci/journey_function_rows.py
 !/scripts/ci/journey_gates.py
 !/scripts/ci/journey_rebaseline.py
 !/scripts/ci/journey_recording.py
