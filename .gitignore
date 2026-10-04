@@ -371,7 +371,6 @@
 !/tests/_outer_bound.py
 !/tests/_overlap.py
 !/tests/_overlap_clients.py
-!/tests/_owned_writes.py
 !/tests/_pip_cache.py
 !/tests/_plant_fixture.py
 !/tests/_processtree.py
