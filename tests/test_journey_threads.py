@@ -108,15 +108,9 @@ def test_the_reader_collects_the_names_a_thread_declared(tmp):
 def test_the_reader_collects_a_symbol_callgrind_declared_as_a_callee(tmp):
     """`cfn=(id) name` names the same symbol, and the reader takes it.
 
-    Callgrind declares a symbol's cost inline as `fn=` when it runs there
-    and writes it as `cfn=` when it runs as a callee. Which one it picks is
-    a cost-attribution detail and not a property of the thread: on the real
-    profiles in `tests/fixtures/journey_profiles/`, the front end's init
-    symbol is declared `fn=` on the bridge's own front-end thread in the
-    `bridge-only` run and `cfn=` on that same thread in
-    `command-round-trip`. A reader that took only `fn=` finds the front end
-    in one run and misses it in the next, and a journey excluding it is
-    refused on one and counted on the other.
+    Which of the two callgrind picks is a cost-attribution detail, not a
+    property of the thread; the module docstring records the two runs where
+    the same symbol moved between them.
     """
     classifier = _journey_contract.threads()
     directory = Path(tmp)
@@ -137,15 +131,9 @@ def test_a_clone_of_the_front_ends_init_symbol_still_matches(tmp):
     """Callgrind suffixes a CLONE of a symbol, and a clone is the symbol.
 
     Two threads in one profile run the same C function and callgrind writes
-    one of them as `PyInit__pydantic_core'2`. A reader that compares names
-    literally never sees that thread's module execution, and the bootstrap
-    import thread stops being the import thread.
-
-    The clone is written out here rather than substituted into a signature
-    read from the module: the earlier version of this control replaced the
-    text `import_find_and_load`, which no longer appears in the signature,
-    so it wrote a profile with no clone in it and passed with the folding
-    deleted.
+    one of them as `PyInit__pydantic_core'2`. The clone is written out
+    rather than substituted into a signature read from the module, so the
+    folding cannot be deleted with this still passing.
     """
     classifier = _journey_contract.threads()
     directory = Path(tmp)
@@ -209,7 +197,6 @@ def test_a_thread_outside_the_journeys_process_is_background(tmp):
     for total in (classifier.REQUEST_FROM, 3_548_079, 10_000_000,
                   3_548_079_000, 1_000_000_000, 90_000_000_000):
         assert classifier.role_of(row(1, total)) == classifier.SERVE, total
-        assert classifier.role_of(row(1, total)) != classifier.MAIN, total
     assert classifier.role_of(
         row(4, 3_800_000_000, BRIDGE, (expected,))) == classifier.IMPORT
     assert classifier.role_of(
@@ -238,13 +225,10 @@ def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
     """The finding that made the generic signature unshippable.
 
     A request thread that imports anything at all is the thread the
-    journeys that exclude the import silently drop, and the number it
-    produces is plausible: the reviewer drove the gate and `mcp-exec`
-    answered `kept=400000000, failure=None` with 5,000 instructions of
-    journey work gone and nothing said. That is issue 1466's own shape
-    through the new door — a journey loses its own work with no refusal —
-    so the signature has to name the front end rather than imports, and the
-    PROCESS has to be read before the signature at all: a thread of the
+    journeys that exclude the import silently drop, with a plausible
+    number and nothing said — issue 1466's own shape through the new
+    door — so the signature names the front end rather than imports, and
+    the PROCESS is read before the signature at all: a thread of the
     journey's own process that imported the front end is still the
     journey's.
     """
@@ -290,15 +274,9 @@ def test_the_module_init_signature_is_the_installed_extensions_init_symbol(
 def test_an_extension_that_is_not_installed_is_a_refusal_naming_it(tmp):
     """The oracle's failure path, driven — a claim until something drives it.
 
-    `front_end_symbol` says an absent extension is a refusal and there is no
-    fallback to a literal. That is the whole guarantee the round exists to
-    make, and a guard branch nothing reaches is a finding: replacing the
-    `raise` with `return 'PyInit_pydantic_core'` leaves the rest of the
-    suite green, because every other control drives the success path.
-
-    Both ways it can fail are driven. An extension that cannot be imported
-    and one that resolves to no file are both answers the oracle has no
-    right to accept, and neither may produce a symbol.
+    An absent extension is a refusal with no fallback to a literal, and both
+    ways it can fail are driven: an extension that cannot be imported and
+    one that resolves to no file may produce no symbol.
     """
     del tmp
     import importlib.util
@@ -479,6 +457,9 @@ def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
     thread_classifier = _journey_contract.threads()
     directory = Path(tmp)
     (directory / 'cg.1').write_text('', encoding='utf-8')
+    (directory / 'cg.header-only').write_text(
+        'version: 1\npid: 3\ncmd:  python3 server.py\nthread: 2\n'
+        'events: Ir\n', encoding='utf-8')
     (directory / 'cg.1-01').write_text(
         f'version: 1\npid: 1\ncmd:  {HARNESS}\nthread: 1\n'
         'events: Ir\nsummary: 430000000\n'
@@ -538,6 +519,23 @@ def test_a_profile_missing_any_of_its_header_lines_is_named(tmp):
         kept, _excluded, failure = thread_classifier.total_for(
             [], 'mcp-exec', unread)
         assert kept is None and failure is unread, (kept, failure)
+
+
+def test_a_profile_with_cost_lines_but_no_summary_is_named(tmp):
+    """A torn profile is a refusal naming the file, never a silent skip.
+
+    The old skip treated every summary-less file as the empty one a process
+    that cost nothing writes, so a torn write's instructions left every
+    total with nothing naming it.
+    """
+    classifier = _journey_contract.threads()
+    directory = Path(tmp)
+    (directory / 'cg.1-01').write_text(
+        'version: 1\npid: 1\ncmd:  python3 server.py\nthread: 2\n'
+        'events: Ir\nfn=(1) torn_symbol\n12 34000\n', encoding='utf-8')
+    rows, unread = classifier.read(directory, 'cg')
+    assert unread is not None and not rows, (rows, unread)
+    assert 'cg.1-01' in unread and 'no summary' in unread, unread
 
 
 def test_every_journey_says_which_roles_it_stops_counting(tmp):
@@ -634,8 +632,6 @@ def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
     del tmp
     threads = _journey_contract.threads()
     assert set(threads.SIGNATURES) == {threads.IMPORT}, threads.SIGNATURES
-    assert threads.SIGNATURES == {
-        threads.IMPORT: [front_end_symbol()]}, threads.SIGNATURES
     recorded = _journey_contract.artifact().load()['thread_signatures']
     assert recorded == dict(threads.SIGNATURES), (
         f'thread_signatures is recorded as {recorded} and the table puts a '
