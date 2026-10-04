@@ -212,3 +212,7 @@ artifact.
   [`<endpoints>` section of `AGENTS.md`](AGENTS.md).
 - Contributor setup, tests, house style, issues, and pull requests are
   documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+<!-- probe: gitleaks own testdata fixture + AWS documented example. Not a credential. -->
+aws_access_key_id = "AKIALALEMEL33243OLIA"
+aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
