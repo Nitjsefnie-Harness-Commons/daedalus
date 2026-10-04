@@ -1430,10 +1430,19 @@ jobs:
       - coverage
       - journey-budget
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Two numbers, and the gap between them is the reason for both. The
+    # poll bound (SECRETS_POLL_BOUND_S below) is 10 minutes: the gitleaks
+    # job carries its own 10-minute backstop and the rest is queueing.
+    # FOUR reads can finish after the bound — the cancelled-dependency
+    # pair, the poll that straddles the deadline, and the jobs read after
+    # it — so 10 minutes plus four 2-minute read ceilings is 18 of these
+    # 20. The job is alive for the last 2 to print the verdict and
+    # conclude; a ceiling under that would kill it instead of judging it.
+    timeout-minutes: 20
     # A job-level block replaces the workflow-level one rather than adding
     # to it: contents read pays for the checkout, actions read is what lets
-    # GITHUB_TOKEN list this workflow's runs for the supersession check.
+    # GITHUB_TOKEN list workflow runs for the supersession check and the
+    # secrets verdict.
     permissions:
       contents: read  # the checkout
       actions: read  # the workflow-run reads
@@ -1451,6 +1460,19 @@ jobs:
       # superseded-cancel rule: a cancelled dependency whose run a strictly
       # newer run of this workflow replaced gates nothing, while a
       # deliberate cancel stays a failure.
+      #
+      # It also requires the `secrets` workflow's gitleaks job on this head
+      # SHA. That job is in no `needs:` set and no required context of this
+      # repository, so `needs:` cannot reach it and a pull request whose
+      # scan is red would otherwise merge green (issue 1491).
+      #
+      # No event skips it, workflow_dispatch included: a dispatch publishes
+      # its check run on the SHA it ran against, and GitHub reads required
+      # contexts off the check runs on the pull request head whatever event
+      # produced them — a skip here would be a bypass. The cost is that a
+      # manual run at a SHA with no `secrets` run goes red once the bound
+      # expires, which is what
+      # `gh workflow run secrets.yml --ref <branch>` is for.
       - name: Check dependency results
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1458,4 +1480,6 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          SECRETS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SECRETS_POLL_BOUND_S: '600'
         run: python3 scripts/ci/aggregate_gate.py
