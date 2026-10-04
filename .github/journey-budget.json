@@ -8,9 +8,11 @@
     "runner_image": "ubuntu24 20260927.320.1"
   },
   "tolerances": {
-    "cdp-result": 1.951435,
-    "screenshot": 2.543178,
-    "segment-relay": 12.197171
+    "cdp-result": 2.095175,
+    "command-round-trip": 2.092406,
+    "dashboard-fanout": 1.059336,
+    "screenshot": 2.750571,
+    "segment-relay": 7.627812
   },
   "excluded_threads": {
     "cdp-result": ["front-end-import"],
@@ -34,12 +36,12 @@
     "segment-relay": "045137a566fe2acaf7ff15773c6f4779308faaf92ea1db9f6bdb416dc518bf0f"
   },
   "journeys": {
-    "cdp-result": 99378053,
-    "command-round-trip": 3296976,
-    "dashboard-fanout": 18101514,
-    "mcp-exec": 3986414516,
-    "net-capture": 2673020389,
-    "screenshot": 75957552,
-    "segment-relay": 42136005
+    "cdp-result": 99549615,
+    "command-round-trip": 3304374,
+    "dashboard-fanout": 18101381,
+    "mcp-exec": 3986361444,
+    "net-capture": 2673147032,
+    "screenshot": 76119270,
+    "segment-relay": 42295628
   }
 }
