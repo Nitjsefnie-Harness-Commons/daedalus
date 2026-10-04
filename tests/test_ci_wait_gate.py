@@ -78,10 +78,9 @@ def test_a_green_run_of_the_required_workflow_is_acceptable(tmp):
 
 
 def test_a_green_set_without_the_required_run_is_incomplete(tmp):
-    """Issue 1217: PR #1122's head conflicts with its base, so the merge ref
-    cannot be built, no pull_request workflow is dispatched and the `tests`
-    matrix has no run at all. Two unrelated green runs are a wait, and a
-    wait that never ends is a head nothing verified."""
+    """Issue 1217's shape: a conflicting head dispatches no gate workflow,
+    so two unrelated green runs are a wait, and a wait that never ends is
+    a head nothing verified."""
     del tmp
     runs = [
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness'),
@@ -155,9 +154,8 @@ def test_a_resembling_name_does_not_satisfy_the_requirement(tmp):
 # ---- the refusal on an incomplete set (issue 1217) ----
 
 def test_a_conflicting_head_refuses_before_the_grace_elapses(tmp):
-    """The control that reproduces cb67badf: the head conflicts with its
-    base, so the merge ref cannot be built and the gate workflow is never
-    dispatched. That is permanent rather than slow, so the refusal costs no
+    """A conflicting head builds no merge ref and dispatches no gate
+    workflow. That is permanent rather than slow, so the refusal costs no
     wait at all, and it names the pull request and the workflow that is
     missing from it."""
     del tmp
@@ -521,8 +519,8 @@ def test_the_refusal_names_the_gate_the_judged_set_is_missing(tmp):
     """`_missing` answers with the required names the run set carries none
     of, and that read was documented and unpinned: an answer of nothing
     makes the refusal degrade to `no  run on <sha>` - a doubled space and no
-    workflow name, which is issue #839's shape on this same file, a line
-    that reads like a verdict while saying nothing useful.
+    workflow name, a line that reads like a verdict while saying nothing
+    useful.
 
     Two workflows, neither of them the gate, is what leaves the answer
     empty by nothing more than absence - a superseded `tests` run is not
@@ -580,13 +578,10 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
     Every option under `pull_request` narrows when the event fires, so every
     one of them is a way to stop the gate running on a head that needs it:
     `paths` and `paths-ignore` by file, `branches` and `branches-ignore` by
-    ref, `types` by which activity the event reports. An earlier version
-    admitted `('paths', 'paths-ignore')` by name and so was blind to the
-    other three, which the reviewer measured: `branches: [main]`,
-    `types: [opened, synchronize]` and `branches-ignore: [dependabot/**]`
-    each left the suite green. `types:` is not hypothetical - two
-    workflows in this repository already declare that exact form on another
-    trigger. The keys are read with the shared reader, which is the one that
+    ref, `types` by which activity the event reports. `types:` is not
+    hypothetical - two workflows in this repository already declare that
+    exact form on another trigger. The keys are read with the shared reader,
+    which is the one that
     knows a deeper `paths-ignore:` belongs to something else, and the
     comparison is against no key at all rather than a list that would need
     extending every time GitHub adds a narrowing option.

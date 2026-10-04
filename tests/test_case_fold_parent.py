@@ -19,14 +19,9 @@ exact spelling, and the whole absent-entry contract
 (`test_result_stripe`). A skip in this file is therefore never the only
 evidence for a property, except where the report says so by name.
 
-There was once a double here that patched `os.stat` to fold, and it was
-verified on one platform and assumed on three. It could not be made to work
-on the others: `ntpath.realpath` answers through `nt._getfinalpathname`, a C
-call a Python patch cannot reach, so on Windows the fixtures' POSIX-resolver
-assumptions were false; and on CPython before 3.13 a folded `lstat` answer
-made `posixpath._joinrealpath` follow a link the spelling did not name and
-raise out of `realpath`. Asking the parent is the part that is true
-everywhere.
+There was once a double here that patched `os.stat` to fold; a Python patch
+cannot reach what `ntpath.realpath` answers through, so asking the parent
+is the part that is true everywhere.
 """
 import contextlib
 import json
