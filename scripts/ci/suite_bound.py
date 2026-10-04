@@ -22,7 +22,6 @@ the launch puts the tree in a process group of its own and the kill is a
 `CTRL_BREAK_EVENT` to that group, then `taskkill` by pid with the tree
 flag for whatever did not answer.
 
-
 `tests/_processtree.py` is the same shape for the suites' own children. It
 is followed here rather than imported: a shipped launcher must not depend
 on a test module, and that file is held by an open pull request.
@@ -107,10 +106,8 @@ def kill_process_tree(process):
 
 def _ask_and_insist(process):
     if sys.platform.startswith('win'):
-        # The fork stays ahead of the group lookup below: `os.getpgid` has
-        # no Windows spelling, and the route below never needs one -- the
-        # request addresses the pid that leads the tree's group, because
-        # the launch put the tree in a group of its own.
+        # The fork stays ahead of the group lookup below: `os.getpgid`
+        # has no Windows spelling.
         return _ask_and_insist_windows(process)
     try:
         group = os.getpgid(process.pid)
