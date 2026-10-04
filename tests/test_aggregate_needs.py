@@ -55,23 +55,21 @@ def test_the_control_reads_the_shape_off_a_literal_oracle(tmp):
     stay absent however far their needs reach.
     """
     source = ('jobs:\n'
-              '  aggregate:\n'
-              '    needs:\n'
-              '      - direct\n'
-              '      - suites\n' + RUNNER +
-              '  direct:\n' + RUNNER +
-              '  suites:\n'
-              '    needs:\n'
-              '      - mid\n' + RUNNER +
-              '  mid:\n'
-              '    needs:\n'
-              '      - leaf\n' + RUNNER +
-              '  leaf:\n' + RUNNER +
-              '  inner:\n'
-              '    needs: aggregate\n' + RUNNER +
-              '  outer:\n'
-              '    needs:\n'
-              '      - inner\n' + RUNNER)
+              '  aggregate:\n    needs:\n'
+              '      - direct\n      - suites\n'
+              + RUNNER
+              + '  direct:\n'
+              + RUNNER
+              + '  suites:\n    needs:\n      - mid\n'
+              + RUNNER
+              + '  mid:\n    needs:\n      - leaf\n'
+              + RUNNER
+              + '  leaf:\n'
+              + RUNNER
+              + '  inner:\n    needs: aggregate\n'
+              + RUNNER
+              + '  outer:\n    needs:\n      - inner\n'
+              + RUNNER)
     root = _probe_workflow(tmp, 'shape-oracle', source)
     workflow = load(root / 'probe.yml')
     actual = _descendants(_needs_of(workflow.jobs))
@@ -81,12 +79,11 @@ def test_the_control_reads_the_shape_off_a_literal_oracle(tmp):
 def test_a_job_that_only_reaches_the_aggregate_downstream_is_named(tmp):
     """The issue's repro: reaching the aggregate is not being covered."""
     source = ('jobs:\n'
-              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE +
-              '  inner:\n'
-              '    needs: aggregate\n' + RUNNER +
-              '  outer:\n'
-              '    needs:\n'
-              '      - inner\n' + RUNNER)
+              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE
+              + '  inner:\n    needs: aggregate\n'
+              + RUNNER
+              + '  outer:\n    needs:\n      - inner\n'
+              + RUNNER)
     violations = _scan_fixture(tmp, 'issue-shape', source)
     assert len(violations) == 1, violations
     assert "'inner'" in violations[0], violations
@@ -115,8 +112,8 @@ def test_an_undocumented_exemption_is_named_by_the_gate(tmp):
 def test_an_extra_job_outside_the_aggregate_is_named(tmp):
     """The issue's own repro: a second job left out of `needs`."""
     source = ('jobs:\n'
-              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE +
-              '  late:\n' + RUNNER)
+              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE
+              + '  late:\n' + RUNNER)
     violations = _scan_fixture(tmp, 'late-job', source)
     assert len(violations) == 1, violations
     assert "'late'" in violations[0], violations
@@ -127,8 +124,8 @@ def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
     source = ('jobs:\n'
               '  aggregate:\n'
               '    needs:\n'
-              '      - absent\n' + RUNNER + PROBE +
-              '  stray:\n' + RUNNER)
+              '      - absent\n' + RUNNER + PROBE
+              + '  stray:\n' + RUNNER)
     violations = _scan_fixture(tmp, 'dual-gap', source)
     assert len(violations) == 2, violations
     joined = '\n'.join(violations)
@@ -179,8 +176,8 @@ def test_the_comparison_is_step_name_agnostic(tmp):
              '      - run: echo again\n'
              '        name: Check dependency results\n')
     complete = ('jobs:\n'
-                '  aggregate:\n' + NEEDS_BLOCK + RUNNER +
-                steps + PROBE)
+                '  aggregate:\n' + NEEDS_BLOCK + RUNNER
+                + steps + PROBE)
     assert not _scan_fixture(tmp, 'steps-complete', complete)
     gap = complete.replace('    needs:\n      - probe\n', '    needs: []\n')
     violations = _scan_fixture(tmp, 'steps-gap', gap)
@@ -205,9 +202,9 @@ def test_an_explicit_key_jobs_form_is_refused_not_passed(tmp):
 def test_a_job_downstream_of_the_aggregate_is_named(tmp):
     """Waiting on the aggregate is not being covered by it."""
     source = ('jobs:\n'
-              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE +
-              '  downstream:\n'
-              '    needs: aggregate\n' + RUNNER)
+              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE
+              + '  downstream:\n    needs: aggregate\n'
+              + RUNNER)
     violations = _scan_fixture(tmp, 'descendant', source)
     named = [line for line in violations if "'downstream'" in line]
     assert len(named) == 1, violations
