@@ -251,6 +251,48 @@ def test_a_measurement_the_classifier_refuses_carries_no_rows(tmp):
     assert round_why is not None, round_why
 
 
+def test_a_baseline_the_classifier_refuses_carries_no_entry(tmp):
+    """The BASELINE's refusal drops the journey, exactly as a round's does.
+
+    `kept_rows` is asked about the baseline and about every round, and only
+    the round refusal had a case. A guard that fires for one of the two and
+    not the other hands back an entry whose `baseline` is null -- a
+    half-measured journey presented as a whole one, which is what
+    `journey_rows`'s own docstring forbids: a reader comparing it with the
+    next run's is comparing a sample against nothing.
+
+    The refusal is built the way the round case builds it -- one thread of
+    the profile dropped below the interpreter's floor -- because a profile
+    is a profile and the classifier does not know which of the two callers
+    is asking.
+    """
+    del tmp
+    rows = rows_module()
+    names = journeys().NAMES
+    floor = _journey_contract.threads().REQUEST_FROM
+    sample = _measured(_profile(200_000))
+    thin = _profile(100_000)
+    thin[0] = dict(thin[0], ir=floor - 1)
+
+    whole, why = rows.journey_rows(names[0], _measured(thin), [sample])
+    assert whole is None, whole
+    assert why is not None and str(floor - 1) in why, why
+
+    # One baseline serves the whole counter, so every journey in this
+    # mapping is refused with it and the mapping itself is the assertion:
+    # an entry per journey with a null `baseline` is what a guard that
+    # fired for rounds only would hand back here.
+    samples = {name: [sample] for name in names[:2]}
+    with environment(FLAG, '1'):
+        readable = rows.for_counter(_measured(_profile(100_000)), samples)
+        entries = rows.for_counter(_measured(thin), samples)
+    assert readable is not None and set(readable) == set(samples), (
+        'the fixture must reach the rows for the refusal to mean anything: '
+        f'{readable}')
+    assert entries is None, (
+        f'a baseline the classifier refused drops the entry whole: {entries}')
+
+
 def test_a_journey_whose_count_was_refused_still_carries_its_rows(tmp):
     """A refused count is exactly where a reader wants the rows.
 
