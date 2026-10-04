@@ -7,14 +7,16 @@
 The exit code is the verdict, so a caller cannot conflate the outcomes the
 hand-rolled loops this replaces conflate:
 
-  0  every run on the SHA has `status: completed`, every conclusion is
-     `success`, `neutral` or `skipped`, every workflow in
+  0  every run on the SHA has `status: completed`, every JUDGED conclusion
+     is `success`, `neutral` or `skipped`, every workflow in
      REQUIRED_WORKFLOWS has at least one run of its own left after the
      newest-run-per-workflow filter, and every check in PUBLISHED_CHECKS
-     has a check run of its own that concluded acceptably
-  1  every run concluded and at least one conclusion is none of those, or
-     a required published check run concluded otherwise; the offenders -
-     runs and checks alike - are named on stdout with their URLs
+     has a check run of its own that concluded acceptably. A run of a
+     workflow that is not about this head is never judged, and is named
+     rather than counted on the acceptable line
+  1  every run concluded and at least one JUDGED conclusion is none of
+     those, or a required published check run concluded otherwise; the
+     offenders - runs and checks alike - are named on stdout with their URLs
   2  the wait exceeded --timeout without every run concluding, or with
      every run concluded and a required workflow or check still absent
   3  the invocation was rejected, or a query failed - a malformed SHA, a
@@ -95,13 +97,12 @@ re-run then cleared. Issue #1249 is a head on which the older failure
 outvoted the newer green; with no newer sibling a run is judged as it
 stands, so a deliberate cancel and an unretried failure both still fail.
 
-Discarding a failure is what that rule costs, so the acceptable line
-names every run the filter dropped, with its workflow, its run id, its
+Discarding a failure is what those rules cost, so the acceptable line
+names every run either filter dropped, with its workflow, its run id, its
 conclusion and its URL, and its count is the number of lines printed.
-The filter is `ci_gate`'s, and so is the check that applies it, so a
-superseded run's name cannot satisfy the gate and no reader of it can
-answer differently (issue #1262). It is NOT applied to a check run: a
-publisher PATCHes the one it POSTed.
+Both filters are `ci_gate`'s, so a dropped run's name cannot satisfy the
+gate and no reader of it can answer differently (issue #1262). Neither is
+applied to a check run: a publisher PATCHes the one it POSTed.
 
 This file is AT the 500 ceiling, the room made by cutting prose, which
 cannot be repeated. There is NO SEAM in it - one tool, one contract - so
@@ -121,8 +122,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_gate  # noqa: E402
-# The newest-run-per-workflow filter is ci_gate's, beside the predicate it
-# defines the set for, so there is one filter rather than one per caller.
+# The newest-run filter is ci_gate's, so there is one, not one per caller.
 from ci_gate import judged, superseded  # noqa: E402
 import gh_client  # noqa: E402
 import gh_head_prs  # noqa: E402
@@ -133,12 +133,10 @@ DEFAULT_TIMEOUT = 5400
 DEFAULT_GRACE = 300
 # ci_gate's definitions, re-exported for callers that reach them here.
 ACCEPTABLE = ci_gate.ACCEPTABLE
-# The workflows whose absence is a refusal rather than a wait, and the
-# default a caller who names nothing is held to. The expectation itself is
-# ci_gate's; the name is bound here because it is this tool's public
-# contract. --required REPLACES it for a caller watching another
-# repository and only ADDS to it here (issue #1318); either way a caller
-# who names no gate cannot switch it off.
+# The workflows whose absence is a refusal rather than a wait, bound here
+# because the name is this tool's public contract. --required REPLACES it
+# for a caller watching another repository and only ADDS to it here (issue
+# #1318); a caller who names no gate cannot switch it off.
 REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS
 # The gates this repository's publisher writes as check runs rather than
 # as runs, and so the ones a run-shaped read could never see (issue
@@ -214,16 +212,13 @@ def verdict(runs, checks=(), *, required=REQUIRED_WORKFLOWS,
 
     The set question is ALL-OF and is ci_gate's: a head is incomplete
     unless EVERY required workflow has a run AND every required published
-    check has a check run. Being satisfied by one of two required
-    workflows is not being satisfied. It is asked only once every
-    conclusion is acceptable, which is why both checks sit below the
-    limbs above.
+    check has a check run. Being satisfied by one of two is not being
+    satisfied. Asked only once every conclusion is acceptable, which is
+    why both checks sit below the limbs above.
 
     The offenders are the runs or the checks that failed, never both - the
     run limb returns before the check limb is reached - and both carry the
-    same keys, so the caller prints either through one loop. A run whose
-    workflow is not about this head is no offender at all, whatever it
-    concluded: see `ci_gate.NOT_ABOUT_THE_HEAD`.
+    same keys, so the caller prints either through one loop.
     """
     runs = judged(runs)
     if not runs:
@@ -380,15 +375,17 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
         missing = None
         print_matrix(runs, sha, out)
         if state == 'acceptable':
-            discarded = [run for run in runs if superseded(run, runs)]
-            # Not `note`: that is the caller's gate note, below.
-            suffix = (f' ({len(discarded)} superseded run(s) ignored)'
-                      if discarded else '')
+            discarded = [run for run in runs if superseded(run, runs) or
+                         run.get('name') in ci_gate.NOT_ABOUT_THE_HEAD]
+            gone = sum(r.get('name') in ci_gate.NOT_ABOUT_THE_HEAD
+                       for r in discarded)
+            stale = len(discarded) - gone
+            parts = ([f'{stale} superseded run(s) ignored']
+                    if stale else []) + (
+                [f'{gone} not about this head'] if gone else [])
+            suffix = f' ({", ".join(parts)})' if parts else ''
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
                   f' acceptable{suffix}', file=out, flush=True)
-            # The count above is this loop's length, so the two cannot
-            # disagree; a dropped run never enters `judged`, so exit 1 has
-            # no offender to disclose, and the run id rides on these lines.
             for run in discarded:
                 print(f'  {run.get("name")} (run {run.get("id")}): '
                       f'{run.get("conclusion")} {run.get("html_url") or ""}',
