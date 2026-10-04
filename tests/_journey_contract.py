@@ -246,10 +246,6 @@ def measured_report(counts, **maps):
     about a journey with no count hands the check on purpose. Every gate's
     recorded side is carried too, or the check would refuse on the first one
     instead of reaching the budget the control is about.
-
-    THREE rounds, not one: a tighten records nothing out of a measurement
-    that took a single draw, so a fixture standing for a measurement a
-    comparison may act on has to be one that took more than one.
     """
     report = {'rounds': 3, 'python': sys.version, **recorded_maps(), **maps}
     report['counters'] = {'perf-instructions': {
