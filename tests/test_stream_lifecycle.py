@@ -17,6 +17,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -326,6 +327,27 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
         release.write_text('go', encoding='utf-8')
         proc.terminate()
         proc.wait(timeout=10)
+
+
+def test_the_unbound_front_end_thread_reports_starting(tmp):
+    """A live front-end thread whose bind is not set yet reads `starting`."""
+    del tmp
+    sys.path.insert(0, str(_util.ROOT))
+    from daedalus_bridge import mcp_bootstrap
+    bound = threading.Event()
+    thread = threading.Thread(target=bound.wait)
+    thread.start()
+    saved = dict(mcp_bootstrap._record)
+    try:
+        mcp_bootstrap._record.update(
+            thread=thread, bound=bound, import_failed=False)
+        assert mcp_bootstrap.state() == 'starting', dict(
+            mcp_bootstrap._record)
+    finally:
+        mcp_bootstrap._record.clear()
+        mcp_bootstrap._record.update(saved)
+        bound.set()
+        thread.join()
 
 
 def test_the_announcement_does_not_wait_on_a_reverse_dns_lookup(tmp):
