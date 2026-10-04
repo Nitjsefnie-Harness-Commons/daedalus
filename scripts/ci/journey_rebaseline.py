@@ -335,14 +335,16 @@ def run(measurements, artifact, remedy=None, restore=(), drop=(), draws=()):
     print(f'wrote {len(document["journeys"])} journeys to {artifact} from '
           f'{", ".join(str(path) for path in sources)}, denominated in '
           f'{document["counter"]}')
-    # Which bounds the pool moved and which it left — the two groups the
-    # pull-request body has to carry for a pool re-baseline, printed where
-    # the person who ran the command is looking: a pool that derives
-    # nothing must be visible, not a silent success.
+    # Which bounds the pool moved and which it held, classified by VALUE
+    # and not by membership: the mainline re-baseline runs over an
+    # artefact that already carries every bound, and a moved value there
+    # is a derivation, not a carry. A pool that derives nothing must be
+    # visible, not a silent success.
     own = recorded.get('tolerances') or {}
     written = document.get('tolerances') or {}
-    derived = {name: written[name] for name in written if name not in own}
-    carried = sorted(name for name in written if name in own)
+    derived = {name: value for name, value in written.items()
+               if value != own.get(name)}
+    carried = sorted(set(written) - set(derived))
     for name, value in sorted(derived.items()):
         print(f'derived the tolerance for {name}: {value}')
     if carried:

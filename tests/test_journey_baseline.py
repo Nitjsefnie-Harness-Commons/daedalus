@@ -424,7 +424,7 @@ def test_a_rebaseline_records_the_median_of_files_and_the_span_of_draws(tmp):
     assert code == 0, err
     # The run says what the pool derived and what carried: a no-op pool is
     # visible in the output instead of succeeding silently.
-    assert 'derived' in out and first in out, out
+    assert f'derived the tolerance for {first}: 20.0' in out, out
     written = policy.load(artifact)
     assert written['journeys'][first] == 1000, written['journeys']
     assert written['journeys'][second] == 950, written['journeys']
@@ -595,13 +595,16 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     nothing is written. The render sha is deliberately not required: a
     tolerance pool spans heads by design — it is a distribution over the
     gate's draws across ordinary tree movement — so a sha check would
-    empty the pool it exists to fill. And a pool that derives nothing
-    says so in the output instead of succeeding silently.
+    empty the pool it exists to fill. A journey already carrying a bound
+    the pool re-names is reported as derived, and the artefact holds the
+    new value; a pool that derives nothing says so in the output instead
+    of succeeding silently.
     """
     policy = _journey_contract.policy()
     first = _journey_contract.journeys().NAMES[0]
     artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(_journey_contract.recorded_document()))
+    artifact.write_bytes(policy.render(_journey_contract.recorded_document(
+        tolerances={first: 25.0})))
     counts = Path(tmp) / 'counts.json'
     _measured_file(counts, {})
     draws = Path(tmp) / 'draws.json'
@@ -610,7 +613,9 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     code, out, err = _rebaseline(artifact, [counts], [draws])
     assert code == 0, err
     before = artifact.read_bytes()
-    assert 'derived' in out and first in out, out
+    assert f'derived the tolerance for {first}: 10.0' in out, out
+    written = policy.load(artifact)
+    assert written['tolerances'][first] == 10.0, written.get('tolerances')
 
     other_machine = Path(tmp) / 'draws-other-toolchain.json'
     _measured_file(other_machine, {},
