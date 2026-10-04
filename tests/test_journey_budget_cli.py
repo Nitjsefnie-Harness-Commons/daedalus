@@ -587,11 +587,7 @@ def test_a_tighten_writes_nothing_the_check_refuses_over_a_missing_journey(
 
 
 def _shipped_budget(tmp):
-    """The artefact this repository ships, copied byte for byte.
-
-    Its counts, tolerances and toolchain are the real ones: a fixture's
-    own tolerance makes a control about the tolerance instead.
-    """
+    """The artefact this repository ships, copied byte for byte."""
     budget = Path(tmp) / 'journey-budget.json'
     budget.write_bytes(
         (ROOT / '.github' / 'journey-budget.json').read_bytes())
@@ -620,13 +616,7 @@ def _tighten(budget, report, tmp):
 
 
 def test_a_single_draw_never_records_a_count(tmp):
-    """The defect, on the artefact this repository actually ships.
-
-    One draw measured 48% below the median of three on unchanged code is
-    what a `--rounds 1` run gets, and `tightened` only ever follows a
-    journey down, so writing it is the ratchet: every later run is then
-    measured against a baseline no second draw ever agreed with.
-    """
+    """The defect, on the artefact this repository actually ships."""
     budget = _shipped_budget(tmp)
     before = budget.read_bytes()
     document = json.loads(before)
@@ -640,16 +630,7 @@ def test_the_recording_boundary_is_pinned_in_both_directions(tmp):
     """Two rounds record; one draw, and a count that is not a draw, do not.
 
     `ROUNDS_TO_RECORD` is a `<`, and the control beside this one pins the
-    half the refusal is on. Nothing anywhere drives a `rounds: 2` report
-    through `check --tighten`, so a guard mutated to `<=` refuses a real
-    two-round measurement and every other row stays green. Every journey
-    here sits a half below its recorded count, so `over` cannot fire first
-    and the write is a real one.
-
-    The other limb fails closed — the right default for a safety net
-    nothing had dropped into. Absent, a null, `'2'` and `2.5` reach the
-    `isinstance` limb; `True` IS an `int` and compares equal to 1, so it
-    reaches the `<`. Each writes nothing and exits 0.
+    half the refusal is on.
     """
     budget = _shipped_budget(tmp)
     before = budget.read_bytes()
@@ -665,9 +646,6 @@ def test_the_recording_boundary_is_pinned_in_both_directions(tmp):
         'the recorded counts are not the ones this run measured: '
         f'{json.loads(budget.read_bytes())["journeys"]}')
 
-    # `absent` is a state an assignment cannot produce and is not the same
-    # one as an explicit null: one is a key the report does not carry, the
-    # other a key carrying `None`.
     shapes = {'null': None, 'string': '2', 'float': 2.5, 'bool': True}
     for label in ('absent', *shapes):
         budget.write_bytes(before)

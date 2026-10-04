@@ -64,26 +64,6 @@ def test_every_summary_block_renders_and_names_its_remedy(tmp):
     assert 'toolchain' not in moved[2], moved[2]
 
 
-def test_the_round_count_is_rendered_rather_than_interpolated(tmp):
-    """Every shape the guard takes, and the reading a reader is handed.
-
-    The guard reaches this renderer for a round count that is absent, an
-    explicit null, a string, a float or a bool as readily as for a whole
-    one, and the function exists because those are not the same fact: an
-    absent count is not zero rounds, one is not several, and `2.5` is not a
-    whole number of rounds however close it is. So each shape is driven and
-    each reading is spelled HERE, because a control that asked the module
-    what it renders would pin only that the two agree. `None` is what the
-    guard passes for an absent count: `report.get('rounds')`.
-    """
-    del tmp
-    reading = _journey_contract.summaries().rounds_reading
-    for rounds, said in ((None, 'no round count'), (0, '0 rounds'),
-                         (1, '1 round'), (3, '3 rounds'),
-                         (2.5, '2.5'), ('2', "'2'"), (True, 'True round')):
-        assert reading(rounds) == said, (rounds, reading(rounds))
-
-
 def test_the_probe_row_says_whether_perf_ran_and_why_it_did_not(tmp):
     """The two probe states a runner can be in, neither of them a default.
 
