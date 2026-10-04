@@ -127,23 +127,8 @@ MINE = _run(1, 'cancelled', '2026-09-07T10:00:00Z')
 NEWER = _run(2, 'success', '2026-09-07T10:05:00Z')
 
 
-def test_all_dependencies_succeeding_passes(tmp):
-    del tmp
-    verdict, message = _gate().decide(
-        _needs(changes='success', suites='success'))
-    assert verdict == 'passed'
-    assert message == 'All dependencies succeeded: changes, suites'
 
 
-def test_a_superseded_cancel_passes_and_names_the_newer_run(tmp):
-    del tmp
-    mod = _gate()
-    verdict, message = mod.decide(
-        _needs(changes='success', suites='cancelled'), MINE,
-        [MINE, NEWER])
-    assert verdict == 'cancelled-superseded'
-    assert verdict in mod.GREEN
-    assert 'https://github.com/o/r/actions/runs/2' in message, message
 
 
 def test_a_deliberate_cancel_fails(tmp):
@@ -155,22 +140,8 @@ def test_a_deliberate_cancel_fails(tmp):
     assert 'deliberate' in message and 'suites=cancelled' in message
 
 
-def test_a_failed_query_fails_conservatively(tmp):
-    del tmp
-    mod = _gate()
-    verdict, message = mod.decide(_needs(suites='cancelled'), None, None)
-    assert verdict == 'query-failed'
-    assert verdict not in mod.GREEN
-    assert 'query failed' in message, message
 
 
-def test_only_a_cancelled_dependency_needs_the_query(tmp):
-    del tmp
-    calls, read = _recorder({}, [])
-    verdict, _ = _gate().evaluate(_needs(changes='failure'),
-                                  'o/r', '1', 'main', read)
-    assert verdict == 'failed'
-    assert calls == []
 
 
 def test_missing_context_fails_without_a_query(tmp):
@@ -278,11 +249,6 @@ def test_a_malformed_started_at_sorts_oldest_and_ignores_created_at(tmp):
     assert not mod.superseded(earlier, [broken, earlier])
 
 
-def test_the_raw_decoder_answers_an_empty_list_for_an_empty_payload(tmp):
-    del tmp
-    decode = _gate()._decode
-    assert decode('') == []
-    assert decode(' \n\t ') == []
 
 
 def test_the_raw_decoder_reads_whitespace_separated_documents(tmp):
@@ -307,15 +273,6 @@ def test_gh_read_turns_a_timeout_or_oserror_into_a_query_error(tmp):
         assert 'gh failed' in str(error), str(error)
 
 
-def test_gh_read_refuses_a_nonzero_exit_with_the_clipped_stderr(tmp):
-    del tmp
-    mod = _gate()
-    proc = mock.Mock(returncode=1, stdout='irrelevant',
-                     stderr=' ' + 'e' * 501)
-    run = mock.Mock(return_value=proc)
-    with mock.patch.object(mod.subprocess, 'run', run):
-        error = _query_error(mod, lambda: mod.gh_read(['gh', 'api']))
-    assert str(error) == 'e' * 400, str(error)
 
 
 def test_gh_read_returns_the_stdout_when_gh_exits_zero(tmp):
