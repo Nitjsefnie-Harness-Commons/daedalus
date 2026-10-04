@@ -398,8 +398,8 @@ def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
 
 
 def test_a_live_shaped_endpoint_resolves_every_pattern(tmp):
-    """Against a fake that answers [] for a glob, the run still resolves all
-    thirteen; reverting the translation makes it ask as `**` and refuse."""
+    """Against a fake that answers [] for a glob, the run still resolves every
+    pattern; reverting the translation makes it ask as `**` and refuse."""
     del tmp
     m = _mod()
     gates = m.enumerate_gates(_commits_read(m, live_shaped=True), 'o/r')
