@@ -170,7 +170,7 @@ def test_a_windows_request_that_never_went_out_still_escalates(tmp):
             (ProcessLookupError(),
              f'process tree {GROUP} was already gone'),
             (OSError('no shared console'),
-             f'CTRL_BREAK_EVENT failed: no shared console')):
+             'CTRL_BREAK_EVENT failed: no shared console')):
         child = Child()
         spawns = Spawns(child=child, returncode=0)
         clock = Clock()
