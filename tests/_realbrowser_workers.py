@@ -10,6 +10,11 @@ from _evalpages import CDP_TIMEOUT_EXIT_CODE
 from _realbrowser_errors import CDPEvaluationError, CDPTimeout
 from _repo import ROOT
 
+import _util
+
+SUITE_BOUND = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                         'worker_suite_bound')
+
 
 def cdp_call(node, target, method, params):
     args = [node, '-e', CDP_CALL_HARNESS, target, method, json.dumps(params),
@@ -86,10 +91,10 @@ def _browser_args(browser, loaded, profile):
 def _retire_browser(process):
     process.terminate()
     try:
-        process.wait(timeout=10)
+        process.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         process.kill()
-        process.wait(timeout=10)
+        process.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
 
 
 _WORKER_READY_PROBE = (

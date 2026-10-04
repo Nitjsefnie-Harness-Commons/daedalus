@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Browser-free controls for the real-browser fixture machinery."""
+import ast
 import contextlib
 import json
 import shutil
@@ -57,6 +58,38 @@ def test_the_process_double_keeps_the_refusals_a_popen_has(tmp):
         assert 'unexpectedly killed' in str(refusal), refusal
     else:
         raise AssertionError('the double let the fixture kill its browser')
+
+
+def test_every_reaper_wait_reads_the_shared_teardown_bound(tmp):
+    """The reaper waits read SUITE_BOUND.CLEANUP_TIMEOUT_S, and the AST is
+    the only witness: CPython interns small ints, so the literal `10` is
+    the same object a value assertion on the double records, and no
+    runtime observation can tell the shared teardown constant from a
+    private copy of it. The shape of every `process.wait` in
+    `_retire_browser` is pinned here instead.
+    """
+    del tmp
+    source = (Path(__file__).resolve().parent
+              / '_realbrowser_workers.py').read_text(encoding='utf-8')
+    reapers = [node for node in ast.walk(ast.parse(source))
+               if isinstance(node, ast.FunctionDef)
+               and node.name == '_retire_browser']
+    assert len(reapers) == 1, 'the MUTATION ANCHOR changed shape'
+    waits = [node for node in ast.walk(reapers[0])
+             if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute)
+             and node.func.attr == 'wait'
+             and isinstance(node.func.value, ast.Name)
+             and node.func.value.id == 'process']
+    assert waits, 'no process.wait: the MUTATION ANCHOR changed shape'
+    for wait in waits:
+        timeout = next((k for k in wait.keywords if k.arg == 'timeout'), None)
+        assert timeout is not None, ast.dump(wait)
+        assert isinstance(timeout.value, ast.Attribute), (
+            'a reaper wait is not bound to SUITE_BOUND.CLEANUP_TIMEOUT_S: '
+            + ast.dump(timeout.value))
+        assert timeout.value.attr == 'CLEANUP_TIMEOUT_S', (
+            ast.dump(timeout.value))
 
 
 def test_cdp_eval_preserves_typed_evaluation_failure(tmp):
