@@ -2,11 +2,9 @@
 
 `run_workflow_script` is the entry every behavioural pin over a workflow
 step goes through, so what it enforces is what those pins actually test.
-
 GitHub starts a step's body under `bash -e`, so the harness does too: a
 script that only looks fine without `-e` is not the script that runs. The
-timeout carries its own evidence rather than only its exit status, and the
-cleanup is a shared tree kill rather than a kill of one process.
+timeout carries its own evidence, and the cleanup is a shared tree kill.
 """
 import os
 import subprocess
@@ -21,12 +19,7 @@ _CLEANUP_TIMEOUT = 5
 
 
 def run_workflow_script(workdir, script, environment, timeout=120):
-    """Run one workflow run block with the stubs and no coverage collector.
-
-    GitHub starts a `run:` step's body under `bash -e`, so the harness does
-    too: a script that only looks fine without `-e` is not the script that
-    runs.
-    """
+    """Run one workflow run block with the stubs and no coverage collector."""
     output_dir = Path(workdir) / '.speedharness'
     output_dir.mkdir(parents=True, exist_ok=True)
     output_files = {
@@ -46,7 +39,9 @@ def run_workflow_script(workdir, script, environment, timeout=120):
             command, cwd=workdir,
             env=_util.child_coverage('scrub', child_environment),
             stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-            start_new_session=sys.platform != 'win32')
+            start_new_session=sys.platform != 'win32',
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
+                           if sys.platform.startswith('win') else 0))
     try:
         returncode = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
