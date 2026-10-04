@@ -1,17 +1,6 @@
 #!/usr/bin/env python3
 """The gate a caller names for a repository of their own (`--required`).
 
-Issue 1318: `ci_wait.py` certified a head only if `REQUIRED_WORKFLOWS` was
-present, and no argument changed it. On a repository whose gating workflow
-is named something else, exit 0 was unreachable - an all-green head exited
-4, "so this head is not certified", with a line that reads as "the gating
-workflow never started" when `tests` simply is not that repository's gate.
-
-A suite of its own because `tests/test_ci_wait_gate.py` is within forty
-lines of its own 700-line ceiling, and relocating is the remedy
-`scripts/ci/size_baseline.py` prints for a file over it - the same remedy
-that moved the head-pull-request controls out of that suite, whose own
-destination has since been deleted.
 The run builder and the clock come from `_ci_wait_fixtures`, which is
 where a helper shared by more than two suites belongs.
 """
@@ -47,12 +36,8 @@ def _green(*names):
 def _published():
     """The published `gate freshness` check run, concluded green.
 
-    Every case here is about the WORKFLOW direction rule, and since
-    issue 1360 a head whose publisher has written nothing is a state
-    of its own that `main` cannot be told about from a flag - it is
-    decided by the repository - so the precondition is stated here
-    once. `tests/test_ci_wait_published.py` is where the check is the
-    subject.
+    The publisher precondition is stated here once; the check itself is
+    the subject of `tests/test_ci_wait_published.py`.
     """
     return [{'id': 7, 'name': 'gate freshness', 'status': 'completed',
              'conclusion': 'success', 'completed_at':
@@ -81,11 +66,8 @@ def _run_main(mod, clock, argv, runs, pulls=(), err=None):
     `AssertionError` carrying its code and the refusal it printed. The
     suite runner catches `Exception`, and `SystemExit` is a
     `BaseException`, so one escaping a test ends the FILE: every result
-    after it is never printed, and the file exits with the SUBJECT's
-    status rather than the runner's (#1321, filed, and a change to
-    shared harness behaviour rather than to this flag). Converted here,
-    the same regression is an ordinary FAIL inside a run that completes
-    and reports every test in it.
+    after it is never printed. Converted here, the same regression is an
+    ordinary FAIL inside a run that completes and reports every test.
     """
     setattr(mod, 'ci_on', lambda repo, sha: _state(runs, _published()))
     setattr(mod, 'prs_on', lambda repo, sha: list(pulls))
@@ -103,9 +85,8 @@ def _run_main(mod, clock, argv, runs, pulls=(), err=None):
 
 
 def test_a_gate_the_caller_names_certifies_a_green_head(tmp):
-    """Issue 1318, the first half: this repository's gate is `ci`, every run
-    on the head is green, and the only reason for a refusal is that the
-    name this tool spells is not the name this repository gates on."""
+    """Issue 1318, the first half: this repository's gate is `ci` and every
+    run on the head is green; only the name mismatch refuses."""
     del tmp
     mod = _ci_wait()
     code, text = _run_main(
@@ -252,15 +233,12 @@ def test_the_trial_call_reads_the_named_gate_too(tmp):
 
 def test_an_empty_required_value_is_a_rejected_invocation(tmp):
     """Issue #1320: the set an empty value builds holds a name no run can
-    ever carry, so every head refused - and the missing name is empty, so
-    the refusal rendered `no  run on <sha>`, its doubled space the only
-    evidence the caller had that the argument was the problem.
+    ever carry, so every head refused.
 
     Refused the way this tool already refuses a malformed SHA and a
     non-positive bound: named on stderr, exit 3, and nothing at all on
-    stdout. The last half is the half a guard written as an ordinary wait
-    would get wrong, and it is the half that told the caller a head was
-    uncertified when the head was never judged.
+    stdout - the half a guard written as an ordinary wait would get
+    wrong.
 
     A conflicting pull request is what makes the unfixed path terminate
     on this fixture rather than reach for the network: the gate can never
@@ -303,11 +281,11 @@ def test_a_blank_required_value_is_a_rejected_invocation(tmp):
 # ---- the flag may only tighten, where this tool knows the gate (issue #1217)
 
 def test_the_flag_cannot_drop_this_repositories_own_gate(tmp):
-    """The false green #1217 exists to remove, reopened through this
-    branch's own flag. A head with no `tests` run at all is `acceptable`
-    the moment a caller names a workflow that DID run, because on this
-    repository the caller's names replaced the default instead of adding
-    to it - and nothing on the output says the gating matrix never ran.
+    """The false green #1217 exists to remove, reopened through the flag:
+    a head with no `tests` run at all is `acceptable` the moment a caller
+    names a workflow that DID run, because on this repository the caller's
+    names replaced the default instead of adding to it - and nothing on
+    the output says the gating matrix never ran.
 
     The refusal names `tests` and not the caller's name, because the
     caller's workflow is present and only the gate is missing; a control
@@ -374,13 +352,11 @@ def test_every_spelling_of_this_repository_is_still_the_default(tmp):
     Every row passes `--required` EXCEPT the last, and that last row is the
     one carrying the claim. With `--required` in hand the note's `named`
     disjunct short-circuits, so `--required' not in text` is proved by the
-    flag and never reaches the repository comparison - which is how
-    `ci_gate.gate_note` came to hold a literal `repo == DEFAULT_REPO` beside a
-    helper it was supposed to be asking, with every suite green. A row
-    with no `--required` proves the note's absence by the REPOSITORY
-    alone, and the case variant is the only spelling that discriminates:
-    the exact one matches `DEFAULT_REPO` literally and would pass with the
-    helper deleted.
+    flag and never reaches the repository comparison. A row with no
+    `--required` proves the note's absence by the REPOSITORY alone, and
+    the case variant is the only spelling that discriminates: the exact
+    one matches `DEFAULT_REPO` literally and would pass with the helper
+    deleted.
 
     The other rows document the behaviour rather than pinning the helper.
     """
@@ -443,10 +419,7 @@ _DEFAULT_REFUSAL = (
 
 def test_naming_this_repositories_own_gate_prints_identically(tmp):
     """The claim SKILL.md makes - naming the gate this tool already knows
-    leaves the output byte for byte what it was - held here. It used to be
-    cited to `ci_gate`'s `gate_note`, which no longer states it: that
-    docstring now claims only that the NOTE is empty on those paths, which
-    is the narrower thing that survives the union.
+    leaves the output byte for byte what it was - held here.
 
     The claim is pinned to the literal above, not to a comparison between
     two runs of this code: the plain run is the reference AND the

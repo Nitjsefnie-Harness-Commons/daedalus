@@ -27,9 +27,7 @@ from _journey_contract import (  # noqa: E402
 
 # The name is spelled HERE rather than read out of the module that owns it,
 # because a control that read the name would pin only that the two agree —
-# which they would by construction. This is the third spelling: the reader
-# owns one, the workflow sets one, and this drives both subjects with this
-# one, so a rename in either of them is a red.
+# which they would by construction — and a rename in either subject is a red.
 FLAG = 'DAEDALUS_JOURNEY_THREAD_ROWS'
 
 ROWS_SOURCE = ROOT / 'scripts' / 'ci' / 'journey_thread_rows.py'
@@ -189,12 +187,8 @@ def test_a_counter_that_hands_back_a_number_separates_no_threads(tmp):
 
 
 def test_the_rows_change_no_recorded_count(tmp):
-    """The assertion that says the instrumentation measured nothing.
-
-    Both runs are driven through the same stub, so the only thing that can
-    differ is the flag; strip the rows off the run that recorded them and
-    the two reports have to be the same document, byte for byte.
-    """
+    """The assertion that says the instrumentation measured nothing:
+    the reports must be the same document, byte for byte."""
     del tmp
     counting = _stubbed(_even_counts())
     without = copy.deepcopy(_run_measure(None, counting))
@@ -225,11 +219,7 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
     """THE numeric control: over a file that carries cost lines, the self
     totals of the declared functions sum to the file's own `summary:` value
     -- every cost line accounted -- and the inclusive cost a `calls=` line
-    records at a call site lands in NO self total. The cost lines AFTER
-    that call arc are the caller's self again -- no new `fn=` line
-    announces them -- so a `cfn=` names the callee of the priced call and
-    moves no self context. The summary-less companion is the torn profile
-    the count reader refuses, contributing no row and no failure."""
+    records at a call site lands in NO self total."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.x.torn', (
         'pid: 5\nthread: 1\ncmd: python3 x.py\nfn=(1) carried\n1 9\n'))
@@ -275,9 +265,8 @@ def test_every_preserved_profile_parses_whole(tmp):
 
 
 def test_the_breakdown_is_a_cap_not_a_partition(tmp):
-    """`functions` keeps the top 64 by self total -- a breakdown cap, not
-    a partition claim: a row says nothing about what it left out. Ties
-    order by name, so two runs of one tree read the same row."""
+    """`functions` keeps the top 64 by self total; the cap claims nothing
+    about what it left out, and ties order by name."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.c.1', (
         'pid: 3\nthread: 1\ncmd: c\npositions: line\nevents: Ir\n'

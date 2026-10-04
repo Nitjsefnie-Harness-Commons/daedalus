@@ -208,10 +208,6 @@ ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 # What the FRONT END's import leaves on the thread that ran it — a role read
 # inside the background set, so it decides which background thread is the
 # one-off bootstrap and which is the bridge serving.
-#
-# `tests/test_journey_threads.py` derives the expected spelling from the
-# installed `.so` rather than holding a copy of it, because this comment is
-# not a control and a copy in the test would have been agreed with.
 MODULE_INIT_SIGNATURE = ('PyInit__pydantic_core',)
 
 # The table that puts a thread in a role, by role, so the artefact records
@@ -442,11 +438,6 @@ def total_for(rows, journey, unread=None):
     return kept, excluded, None
 
 
-# What each journey stops counting, per journey. The rule every entry obeys
-# is the module docstring's, and `journey_artifact` enforces the half of it
-# about the work a journey runs in its own process: `main` and `request` are
-# named by no list here and refused by that validator, which is what makes
-# the rule structural rather than measured.
 EXCLUDED = {
     'command-round-trip': (IMPORT, SERVE),
     'dashboard-fanout': (IMPORT, SERVE),
