@@ -43,9 +43,6 @@ def _mixed_report(names):
     measured = {name: 1000 for name in names}
     measured[names[0]] = 1200
     measured[names[1]] = 800
-    # Three rounds, not one: a tighten records nothing out of a measurement
-    # that took a single draw, so a fixture a recording control drives has to
-    # be a measurement a recording was allowed from.
     return {'rounds': 3, 'python': sys.version, **recorded_maps(),
             'counters': {'perf-instructions': {
                 'available': True, 'startup_only': 0,
