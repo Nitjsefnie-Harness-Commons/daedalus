@@ -61,12 +61,8 @@ def test_the_process_double_keeps_the_refusals_a_popen_has(tmp):
 
 
 def test_every_reaper_wait_reads_the_shared_teardown_bound(tmp):
-    """The reaper waits read SUITE_BOUND.CLEANUP_TIMEOUT_S, and the AST is
-    the only witness: CPython interns small ints, so the literal `10` is
-    the same object a value assertion on the double records, and no
-    runtime observation can tell the shared teardown constant from a
-    private copy of it. The shape of every `process.wait` in
-    `_retire_browser` is pinned here instead.
+    """The reaper waits read SUITE_BOUND.CLEANUP_TIMEOUT_S: CPython interns
+    small ints, so no runtime check tells the shared constant from a copy.
     """
     del tmp
     source = (Path(__file__).resolve().parent

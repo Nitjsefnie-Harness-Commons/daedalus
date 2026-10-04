@@ -245,6 +245,10 @@ def test_machine_skip_carries_what_the_diagnosis_observed(tmp):
 def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
     outcome, launches, processes = answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
+    reported = str(outcome)
+    assert ('Chromium 151.0.7922.169 (controlled) demonstrably runs an '
+            'unpacked MV3 worker' in reported), reported
+    assert "is this repository's, not the machine's" in reported, reported
     assert len(processes) == 2, processes
     for process in processes:
         process.terminate.assert_called_once()
