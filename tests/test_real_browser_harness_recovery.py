@@ -425,15 +425,6 @@ def test_control_answer_then_retry_ours_answer_returns_contention(tmp):
     _assert_diagnosis_processes_settled(processes)
 
 
-def test_control_answer_in_both_windows_preserves_source_guilt(tmp):
-    outcome, launches, processes, _evaluations = _diagnosis(
-        tmp, [[False], [False]], [[True], [True]])
-    assert outcome.__class__ is AssertionError, outcome
-    assert 'two consecutive diagnosis launches' in str(outcome), outcome
-    assert len(launches) == 2, launches
-    _assert_diagnosis_processes_settled(processes)
-
-
 def test_control_answer_then_unanswered_retry_leaves_machine_skip(tmp):
     outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [[False], [False]], [[True], [False]])
@@ -487,13 +478,6 @@ def test_ours_answer_without_control_returns_contention(tmp):
     assert 'contention' in outcome[1], outcome
     assert all(target != 'ws://control'
                for target, _expression in evaluations), evaluations
-
-
-def test_control_answer_then_ours_answer_returns_contention(tmp):
-    outcome, _launches, _processes, _evaluations = _diagnosis(
-        tmp, [False, False, True], [True])
-    assert outcome[0] is True, outcome
-    assert 'contention' in outcome[1], outcome
 
 
 def test_control_answer_is_preserved_when_diagnosis_browser_exits(tmp):

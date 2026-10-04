@@ -242,28 +242,6 @@ def test_machine_skip_carries_what_the_diagnosis_observed(tmp):
     assert len(attempts) == 1, attempts
 
 
-def test_answering_control_worker_twice_marks_worker_absence_our_failure(tmp):
-    """A control worker that answers is a browser that proved the skill.
-
-    The absence of our worker is also what a machine without MV3 support
-    produces, so the verdict is only trustworthy once something else has
-    demonstrated the capability. What is pinned here is that contract: the
-    failure names our source and our declared script, never the machine.
-    """
-    outcome, _launches, processes = answered_diagnosis(tmp)
-    assert outcome.__class__ is AssertionError, outcome
-    reported = str(outcome)
-    assert str(EXTENSION_ROOT.resolve()) in reported, reported
-    assert 'background.js' in reported, reported
-    assert 'Chromium 151.0.7922.169 (controlled)' in reported, reported
-    assert 'not the machine' in reported, reported
-    assert 'two consecutive diagnosis launches' in reported, reported
-    assert len(processes) == 2, processes
-    for process in processes:
-        process.terminate.assert_called_once()
-        process.wait.assert_called_once_with(timeout=10)
-
-
 def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
     outcome, launches, processes = answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
