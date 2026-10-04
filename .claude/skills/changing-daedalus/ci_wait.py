@@ -221,7 +221,9 @@ def verdict(runs, checks=(), *, required=REQUIRED_WORKFLOWS,
 
     The offenders are the runs or the checks that failed, never both - the
     run limb returns before the check limb is reached - and both carry the
-    same keys, so the caller prints either through one loop.
+    same keys, so the caller prints either through one loop. A run whose
+    workflow is not about this head is no offender at all, whatever it
+    concluded: see `ci_gate.NOT_ABOUT_THE_HEAD`.
     """
     runs = judged(runs)
     if not runs:
@@ -229,7 +231,8 @@ def verdict(runs, checks=(), *, required=REQUIRED_WORKFLOWS,
     if any(run.get('status') != 'completed' for run in runs):
         return 'waiting', []
     offenders = [run for run in runs
-                 if run.get('conclusion') not in ACCEPTABLE]
+                 if run.get('name') not in ci_gate.NOT_ABOUT_THE_HEAD
+                 and run.get('conclusion') not in ACCEPTABLE]
     if offenders:
         return 'unacceptable', offenders
     offenders = ci_gate.red_published(checks, required=required_checks)
