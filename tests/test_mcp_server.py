@@ -1358,6 +1358,7 @@ def test_mcp_announces_the_port_once_the_front_end_serves(tmp):
     class Server(_mcp_load._FakeUvicornServer):
         def run(self, sockets=None):
             handed.extend(sockets or ())
+
             async def serve():
                 order.append(
                     ('run-begin', 'streamable-http' in banner.getvalue()))
