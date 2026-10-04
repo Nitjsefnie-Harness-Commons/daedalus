@@ -149,10 +149,7 @@ def test_every_resized_payload_carries_the_size_it_was_given(tmp):
             f'segment {index} is not the pinned size: '
             f'{len(typed.segment_payload(index))}')
     # The fan-out's BOTH halves, on the same argument as the capture's: a
-    # constant nothing builds is a number nothing reads. `_dashboard_tabs`
-    # is what every sync above posts, so the tab count the basis justifies
-    # is the tab count the journey sends — and `range(1, 3)` sent two while
-    # this file and the constant both still said ten.
+    # constant nothing builds is a number nothing reads.
     fanout = _journeys_module('_journeys')
     assert len(fanout._dashboard_tabs()) == fanout.FANOUT_TABS, (
         'the tab list the fan-out posts is not the pinned tab count: '
