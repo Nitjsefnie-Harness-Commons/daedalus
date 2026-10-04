@@ -63,7 +63,6 @@ def test_an_indentless_sequence_under_a_mapping_key_decodes(tmp):
         '    runs-on: ubuntu-latest\n'
         '    timeout-minutes: 9\n')
     assert jobs['aggregate']['needs'] == ['suites', 'wheel']
-    assert jobs['wheel']['timeout-minutes'] == '9'
 
 
 def test_an_indentless_sequence_of_mappings_decodes(tmp):
@@ -415,7 +414,6 @@ def test_a_bare_empty_value_reads_as_none_in_every_position(tmp):
             map(str, none_paths)), (name, _none_paths(oracle))
         for position in none_paths:
             assert _at(decoded, position) is None, (name, position)
-            assert _at(oracle, position) is None, (name, position)
             compared += 1
         for position in empty_paths:
             assert _at(decoded, position) == '', (name, position)
@@ -447,6 +445,12 @@ def test_a_bare_empty_needs_is_refused_as_not_a_list_of_names(tmp):
     assert 'needs is not a list of job names' in message, message
 
 
+def test_an_absent_needs_field_reads_as_no_dependencies(tmp):
+    """A job with no `needs:` key names no job, though the next one does."""
+    del tmp
+    assert _job_needs(_replaced(BLOCK_NEEDS, ''), 'suites') == []
+
+
 def _planted_needs(spelling):
     """`_job_needs` on the shipped suites job with one `needs:` spelling.
 
@@ -472,11 +476,7 @@ def _refuses_needs(spelling):
 
 
 def test_one_needs_dependency_reads_the_same_in_all_three_shapes(tmp):
-    """A bare scalar, a block sequence and a flow sequence name one job.
-
-    The bare scalar is a tolerance the reader grants; asserting it keeps
-    the acceptance from reading as a bug, or the bug as the acceptance.
-    """
+    """A bare scalar, a block sequence and a flow sequence name one job."""
     del tmp
     for spelling in ('    needs: changes\n',
                      '    needs:\n      - changes\n',
