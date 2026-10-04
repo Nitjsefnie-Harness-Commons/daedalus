@@ -33,12 +33,7 @@ from _journey_contract import (  # noqa: E402
 
 
 def _mixed_report(names):
-    """One measurement: a journey over its budget, one below, one level.
-
-    Recorded at 1000 with a 10% tolerance; the first name rises, the second
-    saves genuinely, the third is pinned exactly — the case a `<` that
-    became `<=` would write over.
-    """
+    """One measurement: a journey over its budget, one below, one level."""
     measured = {name: 1000 for name in names}
     measured[names[0]] = 1200
     measured[names[1]] = 800
@@ -51,13 +46,8 @@ def _mixed_report(names):
 
 
 def test_both_remedies_reach_the_step_summary_on_one_failing_run(tmp):
-    """Each kind's remedy lands in the summary beside the row that reports it.
-
-    The remedy writes are what the summary is for — stderr is collapsed by
-    default, so an unmeasured journey whose remedy went there showed three
-    rows and no next step. One run carries both a journey over budget and a
-    journey this runner measured nothing, because that is the shape the two
-    writes share a path with.
+    """One run carries both an over-budget and an unmeasured journey, the shape
+    the two remedy writes share a path with.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -92,12 +82,9 @@ def test_both_remedies_reach_the_step_summary_on_one_failing_run(tmp):
 
 
 def test_a_tighten_that_meets_a_rise_writes_nothing(tmp):
-    """The ruling, in the shape a regression takes it: one up, one down.
-
-    A tighten that lowers the journeys that fell while another rose lands a
-    lower budget over a regression still in the tree and no longer visible
-    as one. So a run with a rise writes the file not at all, and exits
-    nonzero rather than reporting a green that quietly recorded half a run.
+    """A lower budget over a regression still in the tree is the rise
+    committing itself, so a run with a rise writes nothing.
+    itself, so a run with a rise writes nothing.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -118,14 +105,7 @@ def test_a_tighten_that_meets_a_rise_writes_nothing(tmp):
 
 
 def test_a_committed_tighten_says_how_many_journeys_it_lowered(tmp):
-    """The one line a maintainer reads after an auto-commit says a number.
-
-    The artefact on disk is right either way, so a wrong count here is
-    invisible to every other control and ships as the single line the summary
-    exists to produce. Two journeys measure below their recorded count and
-    one holds level, so the number is neither 0 nor "all of them" — the two
-    a counting mistake actually produces.
-    """
+    """The one line a maintainer reads after an auto-commit says a number."""
     policy = _journey_contract.policy()
     names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
@@ -161,11 +141,9 @@ def test_a_committed_tighten_says_how_many_journeys_it_lowered(tmp):
 
 
 def test_a_re_baseline_writes_what_the_next_run_accepts(tmp):
-    """The command a rise is answered with, and the artefact it leaves.
-
-    The run AFTER it must read the file: every field but the tolerance
-    comes from the one measurement, and the tolerance stays the recorded
-    one — a re-baseline moves the counts and not the bound.
+    """The command a rise is answered with, and the artefact the run
+    after it must read.
+    read.
     """
     policy = _journey_contract.policy()
     # A tolerance the fixture does not default to, so a command that
@@ -201,12 +179,7 @@ def test_a_re_baseline_writes_what_the_next_run_accepts(tmp):
 
 
 def _tighten_step():
-    """The journey-budget job's tightening step, decoded from the workflow.
-
-    The decoder rather than a text scan: a control that reads the `if:` the
-    way Actions reads it is the only one that can be fooled by nothing about
-    how it is spelled.
-    """
+    """The journey-budget job's tightening step, decoded from the workflow."""
     source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     job = complete_job_mapping(source, 'journey-budget')
@@ -226,13 +199,6 @@ def _guard_step_names(guard):
 
 def test_the_tighten_guard_refuses_each_of_its_limbs_in_turn(tmp):
     """Every conjunct limb of the guard decides, on its own, to stop the run.
-
-    Asserting that four strings are PRESENT in the guard proves nothing about
-    what the guard does: flipping the connective between them, or renaming
-    the step whose conclusion it reads, leaves every one of those strings
-    exactly where it was. So each limb is flipped in isolation and the whole
-    expression is evaluated, which is the only question a reader of the job
-    actually has — does a red run commit, and does a pull request commit.
     """
     del tmp
     _, tighten = _tighten_step()
@@ -274,13 +240,7 @@ def test_the_tighten_guard_refuses_each_of_its_limbs_in_turn(tmp):
 
 
 def test_the_tighten_guard_reads_the_step_that_failed_on_a_rise(tmp):
-    """WHICH step the guard names, not merely that what it names exists.
-
-    A guard naming an undeclared id never runs; one naming a step that runs
-    but does not fail on a rise would commit a tightened budget over a
-    regression — the defect the guard exists to prevent — so both the id
-    and the step's own name are pinned.
-    """
+    """WHICH step the guard names, not merely that what it names exists."""
     del tmp
     job, tighten = _tighten_step()
     declared = {step['id']: step for step in job['steps'] if step.get('id')}
@@ -303,13 +263,7 @@ def test_the_tighten_guard_reads_the_step_that_failed_on_a_rise(tmp):
 
 
 def test_every_step_the_job_reads_is_a_step_the_job_declares(tmp):
-    """The same cross-check over the WHOLE job, not the tighten guard alone.
-
-    A guard naming an id no step declares resolves to empty, so the step
-    either never runs or runs unconditionally; this covers every reader in
-    the job, so an id renamed in one place and not the other is caught
-    wherever it is read.
-    """
+    """The same cross-check over the WHOLE job, not the tighten guard alone."""
     del tmp
     job, _ = _tighten_step()
     declared = {step['id'] for step in job['steps'] if step.get('id')}
@@ -329,12 +283,7 @@ def test_every_step_the_job_reads_is_a_step_the_job_declares(tmp):
 
 
 def test_a_journey_recorded_at_null_still_renders_a_row(tmp):
-    """The schema admits a null recorded count, and a command must not die.
-
-    `_validated` skips a journey recorded at `None`, so an artefact can name
-    a journey with no count yet; there is no budget to print for such a row,
-    so the row says so and the check exits 0 rather than dying in the render.
-    """
+    """The schema admits a null recorded count, and a command must not die."""
     policy = _journey_contract.policy()
     names = journeys().NAMES
     document = recorded_document()
@@ -367,13 +316,7 @@ def test_a_journey_recorded_at_null_still_renders_a_row(tmp):
 
 
 def test_a_recorded_gate_that_moved_tightens_nothing_and_succeeds(tmp):
-    """A gate that moved is not a regression, so the tighten path agrees.
-
-    `runner_image` moves on the hosted image's own schedule; in that state
-    nothing was compared, and a tighten that exited 1 would red the budget
-    job and every gate pattern beside it. What the tighten refuses is the
-    WRITE, and it does not write: it says what it did, and succeeds.
-    """
+    """A gate that moved is not a regression, so the tighten path agrees."""
     policy = _journey_contract.policy()
     names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
@@ -408,40 +351,20 @@ def test_a_recorded_gate_that_moved_tightens_nothing_and_succeeds(tmp):
 
 
 def _rebaseline():
-    """The command a rise is answered with, loaded by its own path.
-
-    Driven here rather than through `journey_budget.main` because the
-    refusals under test are the ones that reach `run` itself: a missing
-    file, a file the decoder rejects, and a measurement whose rounds
-    disagree. The command's own spelling of each is what is pinned, and
-    it prints to stderr where a reader of a `check` run never looks.
-    """
+    """The command a rise is answered with, loaded by its own path."""
     return _util.load(ROOT / 'scripts' / 'ci' / 'journey_rebaseline.py',
                       'journey_rebaseline_contract')
 
 
 def _written_artifact(tmp, document):
-    """The recorded budget as bytes, for a control about what a refusal
-    leaves on disk.
-
-    Every refusal in `run` writes nothing, so each control below reads the
-    file back and compares it with what it wrote — the exit code alone
-    would not tell a reader whose recorded budget was still the one that
-    holds.
-    """
+    """The recorded budget as bytes, for what a refusal leaves on disk."""
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(_journey_contract.policy().render(document))
     return artifact
 
 
 def _parse_refusal(source):
-    """What the decoder itself says about this file, read the same way.
-
-    `run` prints the exception's own text, so the expectation is computed
-    by decoding the same bytes rather than spelled out beside it: a second
-    literal could drift from the one the command prints and the control
-    would then pass against a refusal that changed.
-    """
+    """What the decoder itself says about this file, read the same way."""
     try:
         json.loads(source.read_bytes().decode('utf-8'))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
@@ -450,14 +373,8 @@ def _parse_refusal(source):
 
 
 def test_a_rebaseline_missing_its_measurement_file_says_which_path(tmp):
-    """A measurement file that is not there is the commonest refusal there
-    is: the job points at the upload and the upload never arrived.
-
-    The refusal names the path it looked at, because that path is the one
-    thing the person who has to fix it cannot otherwise see — a summary
-    reading "no measurements file" over a step whose `--measurements`
-    argument is scrolled off above it is a question, not a remedy.
-    """
+    """A measurement file that is not there is the commonest refusal: the
+    job points at the upload, and the refusal names the looked-at path."""
     rebaseline = _rebaseline()
     artifact = _written_artifact(tmp, recorded_document())
     before = artifact.read_bytes()
@@ -474,15 +391,8 @@ def test_a_rebaseline_missing_its_measurement_file_says_which_path(tmp):
 
 def test_a_measurement_file_the_decoder_rejects_is_refused_in_its_words(
         tmp):
-    """The parser's own refusal reaches the reader, verbatim.
-
-    Two arms, because they are told apart by that text and nothing else:
-    a document truncated mid-object is a JSON error naming a line and a
-    column, and bytes that are not UTF-8 at all are a codec error. A
-    command that flattened both into "could not read the file" answers a
-    question nobody asked — was the upload truncated, or was it something
-    other than a measurement?
-    """
+    """The parser's own refusal reaches the reader, verbatim: truncated
+    JSON names a line and a column; non-UTF-8 bytes are a codec error."""
     rebaseline = _rebaseline()
     artifact = _written_artifact(tmp, recorded_document())
     before = artifact.read_bytes()
@@ -501,13 +411,8 @@ def test_a_measurement_file_the_decoder_rejects_is_refused_in_its_words(
 
 
 def test_a_shape_failure_is_refused_with_the_remedy_it_promises(tmp):
-    """Rounds that disagree is a refusal, and the remedy rides with it.
-
-    It is printed whenever the caller supplied one; a caller that supplied
-    none gets the refusal on its own, since printing a remedy it never
-    passed would put words in the repository's mouth at the one point the
-    measurement is known to be unusable.
-    """
+    """Rounds that disagree is a refusal, and the remedy rides with it
+    whenever the caller supplied one."""
     rebaseline = _rebaseline()
     gate = _journey_contract.policy()
     artifact = _written_artifact(tmp, recorded_document())
@@ -534,12 +439,7 @@ def test_a_shape_failure_is_refused_with_the_remedy_it_promises(tmp):
 
 
 def _rebaseline_over(report, tmp):
-    """Drive the real rebaseline and report what it did to the artefact.
-
-    Returns `(code, wrote, said)`. `wrote` is read off the bytes rather than
-    off the exit status, because a refusal that wrote anyway is exactly the
-    case an exit code alone would hide.
-    """
+    """Drive the real rebaseline and report what it did to the artefact."""
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(recorded_document()))
@@ -554,14 +454,7 @@ def _rebaseline_over(report, tmp):
 
 
 def _assert_refused(report, tmp, what):
-    """A measurement this incomplete must leave the artefact untouched.
-
-    Each of these three refusals was planted out in turn and each one WROTE
-    an artefact with exit 0: the incompleteness travelled into the
-    committed baseline rather than stopping the run — a count of `null`
-    compares as nothing, an empty toolchain reads as a match against every
-    measured value — hence one case each rather than one over all three.
-    """
+    """A measurement this incomplete must leave the artefact untouched."""
     code, wrote, said = _rebaseline_over(report, tmp)
     assert not wrote, (
         f'{what} was recorded anyway, so the committed budget now describes '
@@ -574,9 +467,7 @@ def _assert_refused(report, tmp, what):
 def test_a_measurement_with_no_count_for_a_journey_is_not_recorded(tmp):
     """A journey with no count records nothing, rather than a null.
 
-    `violations()` and `tightened()` both skip a null recorded count, so a
-    `null` in the journeys map is a budget that compares nothing — the
-    budget going inert rather than a run going red.
+    A null in the journeys map is a budget that compares nothing.
     """
     report = _journey_contract.fixture_report()
     report['counters']['valgrind-callgrind']['journeys'].pop(
@@ -585,12 +476,8 @@ def test_a_measurement_with_no_count_for_a_journey_is_not_recorded(tmp):
 
 
 def test_a_measurement_with_no_toolchain_is_not_recorded(tmp):
-    """An empty toolchain records nothing.
-
-    `_validated` accepts an all-null toolchain, so this one reaches the
-    artefact rather than being caught on the way: every field then reads as
-    a match against whatever the next run measures, and no count is ever
-    compared against a recorded one again.
+    """Every field then reads as a match against whatever the next run
+    measures.
     """
     report = _journey_contract.fixture_report()
     report['toolchain'] = {}
@@ -600,10 +487,7 @@ def test_a_measurement_with_no_toolchain_is_not_recorded(tmp):
 def test_a_measurement_missing_a_journeys_threads_is_not_recorded(tmp):
     """A journey whose excluded threads go unrecorded records nothing.
 
-    A count that drops a background thread means something the count alone
-    cannot say, so `excluded_threads` is what says it. Writing a document
-    without that for one journey leaves the count looking comparable to
-    every other run's, which is the comparison the field exists to refuse.
+    Without the map the count looks comparable to every other run.
     """
     report = _journey_contract.fixture_report()
     report['excluded_threads'].pop(journeys().NAMES[0])
