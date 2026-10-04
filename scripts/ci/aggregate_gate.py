@@ -3,9 +3,10 @@
 
 A `cancelled` dependency used to fail the aggregate blindly: with
 `cancel-in-progress` on, every superseding push left a red aggregate on
-the old SHA. The rule ci_wait.py settled ports here — a cancelled run
-with a strictly newer run of the same workflow gates nothing, while a
-deliberate cancel stays a failure.
+the old SHA. The rule ci_wait.py settled holds here, computed on the
+ordering helpers `ci_gate` publishes and this module imports rather than
+copies: a cancelled run with a strictly newer run of the same workflow
+gates nothing, while a deliberate cancel stays a failure.
 
 The supersession query reads the head branch from
 `github.event.pull_request.head.ref || github.ref_name` — the pushed
@@ -22,8 +23,12 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]
+                       / '.claude' / 'skills' / 'changing-daedalus'))
+from ci_gate import _started_key, _workflow_of  # noqa: E402
 
 # Both selectors are FILE NAMES. The actions API's workflow selector
 # takes `secrets.yml` or a numeric id and answers `Not Found` to the
@@ -59,7 +64,6 @@ STRICT = frozenset(
     {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
 ALLOWED = frozenset({'success', 'skipped'})
 CANCELLED = 'cancelled'
-OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 REPOSITORY = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z')
 HEAD_SHA = re.compile(r'[0-9a-f]{40}\Z')
 
@@ -92,23 +96,6 @@ def classify_needs(needs):
     cancelled = [name for name in refused
                  if needs[name]['result'] == CANCELLED]
     return hard, cancelled
-
-
-def _workflow_of(run):
-    return run.get('workflow_id') or run.get('path')
-
-
-def _started_key(run):
-    text = run.get('run_started_at') or run.get('created_at')
-    stamp = OLDEST
-    if text:
-        try:
-            stamp = datetime.fromisoformat(str(text).replace('Z', '+00:00'))
-        except ValueError:
-            stamp = OLDEST
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return stamp, int(run.get('id') or 0)
 
 
 def superseding_run(mine, runs):

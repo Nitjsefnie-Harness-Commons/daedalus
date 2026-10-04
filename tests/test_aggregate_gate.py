@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from unittest import mock
 from pathlib import Path
 
@@ -237,7 +238,8 @@ def test_a_malformed_started_at_sorts_oldest_and_ignores_created_at(tmp):
     broken = _run(7, None, 'definitely-not-a-stamp',
                   created_at='2026-09-07T10:05:00Z', status='in_progress')
     earlier = _run(8, 'success', '2026-09-07T09:00:00Z')
-    assert mod._started_key(broken) == (mod.OLDEST, 7)
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    assert mod._started_key(broken) == (oldest, 7)
     assert mod.superseded(broken, [broken, earlier])
     assert not mod.superseded(earlier, [broken, earlier])
 
