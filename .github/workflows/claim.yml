@@ -51,11 +51,10 @@ jobs:
           || contains(github.event.comment.body, '/release'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # The narrowest token that can assign, and answer: a `/claim` posted on a
-    # pull request must read it and post its decline reply on the conversation,
-    # and GitHub refuses both to an issues-only token with 403 before the reply
-    # lands. Nothing here reads the tree, so there is no contents: read and no
-    # checkout: the job talks to the API only.
+    # The narrowest token that can assign, and answer: a `/claim` on a pull
+    # request must read it and reply on its conversation, and GitHub refuses
+    # both to an issues-only token with 403. Nothing here reads the tree, so
+    # there is no contents: read and no checkout: the job talks to the API only.
     permissions:
       issues: write
       pull-requests: write

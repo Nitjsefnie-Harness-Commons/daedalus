@@ -119,9 +119,8 @@ jobs:
         # risk here anyway, since the job runs it again below against the
         # tree it is about to build.
         #
-        # `pr gate` is excluded by name because it runs on
-        # `pull_request_target` and reports against the base tip: it judges
-        # someone else's pull request, never this commit.
+        # `pr gate` runs on `pull_request_target`, so its run is anchored on
+        # the base tip and judges that pull request, never this commit.
         run: |
           grace=$(( $(date +%s) + 5 * 60 ))
           deadline=$(( $(date +%s) + 30 * 60 ))
