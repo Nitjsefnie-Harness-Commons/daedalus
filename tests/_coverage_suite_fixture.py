@@ -291,16 +291,6 @@ def coverage_tree(
     # declaration for the `unlaunchable` and `cpu_count` sites, which this
     # branch did not write; the lines they drive stay measured by the
     # children that have no sitecustomize.
-    # A generated `sitecustomize.py` is scaffolding, not repository source:
-    # the coverage configuration measures the synthetic tree and attributes
-    # what it measured to repository paths, so a child that imports one
-    # hands `coverage report` a measured file with no source and the gate
-    # refuses it. Scrubbing the collector from exactly those children stops
-    # the RECORDING, on every platform -- an exclusion would only hide a
-    # path shape that reads differently per platform. It also lowers the
-    # declaration for the `unlaunchable` and `cpu_count` sites, which this
-    # branch did not write; the lines they drive stay measured by the
-    # children that have no sitecustomize.
     #
     # Two launches rather than one launch with a chosen mode, because the
     # guard reads the mode as a LITERAL at the `env=` keyword: a name bound
