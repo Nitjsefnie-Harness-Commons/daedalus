@@ -314,30 +314,29 @@ def assert_the_pip_install_reader_refuses_what_it_cannot_model():
 
 
 def assert_ci_tool_pins_live_in_a_watched_manifest():
-    """These two CI-tool installs resolve their pin from a `-r` manifest.
-
-    Dependabot reads manifest files and never a workflow, so a version
-    written into a step is a version nobody is ever told to move. The
-    positive half matters as much as the negative one: the manifest install
-    is asserted to EXIST, so an empty scan or a renamed step fails here
-    instead of passing vacuously.
-
-    It covers the two installs this table names — zizmor in the actionlint
-    job and pip-audit in the audit job — and nothing else in either workflow.
-    An install this control does not reach is not held by it: the release
-    job's own `python -m pip install --upgrade pip build twine==7.0.0` is an
-    inline pin of the same kind, outside this table and out of scope here.
-    The claim is about the two CI-tool gates, not about every install the
-    repository runs.
+    """These CI-tool installs resolve their pins from `-r` manifests: the
+    install is asserted to EXIST, so an empty scan or a renamed step fails
+    instead of passing vacuously, and every install in a row's step
+    resolves from one of that row's watched manifests.
     """
-    for read, step, manifest in (
-            (_job_step, 'Install zizmor', 'requirements-zizmor.txt'),
-            (_audit_step, 'Install pip-audit', 'requirements-pip-audit.txt')):
-        installs = _pip_installs(read(step))
+    for file, job, step, manifests in (
+            ('tests.yml', 'actionlint', 'Install zizmor',
+             ('requirements-zizmor.txt',)),
+            ('audit.yml', 'pip-audit', 'Install pip-audit',
+             ('requirements-pip-audit.txt',)),
+            ('tests.yml', 'wheel', 'Build the wheel and the sdist',
+             ('requirements-release.txt',)),
+            ('release.yml', 'publish',
+             'Install the build backend and test dependencies',
+             ('requirements-release.txt', 'requirements-test.txt',
+              'requirements-dev.txt'))):
+        workflow = (ROOT / '.github' / 'workflows' / file).read_text(
+            encoding='utf-8')
+        installs = _pip_installs(step_scalar(workflow, job, step, 'run'))
         assert installs, f'{step} runs no pip install to carry a pin'
         for command in installs:
             assert '==' not in command, command
-            assert f'-r {manifest}' in command, command
+            assert any(f'-r {m}' in command for m in manifests), command
 
 
 # The eslint job pins three npm packages in its own env block, installs
