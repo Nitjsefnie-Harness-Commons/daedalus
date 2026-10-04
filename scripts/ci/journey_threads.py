@@ -454,14 +454,14 @@ EXCLUDED = {
     # this the one journey that keeps `serve` in the count and drops the
     # import instead.
     #
-    # The share that slot is of the journey's own count: 78.7% of the
-    # 2,672,689,227 `.github/journey-budget.json` records for `net-capture`.
+    # The share that slot is of the journey's own count: 79.7% of the
+    # 2,638,478,228 `.github/journey-budget.json` records for `net-capture`.
     # Those two figures are not one measurement, and a reader is owed which
     # session each came from rather than left holding two counts for one
-    # quantity: the slot's three rounds are CI run 37093737192, the recorded
-    # count a later session (run 37096636089, `journey-counts` artefact
-    # 11265650340). The share is therefore one session's thread set against
-    # a later session's whole journey, not a ratio read off one profile.
+    # quantity: the slot's three rounds are CI run 37093737192; the recorded
+    # count is the re-record's median (tests run 37236292857, artefacts
+    # 11315707420, 11315509677 and 11316445141). The share is one session's
+    # thread set against a later session's whole journey.
     #
     # `front-end-import` stays in this list for the two reasons the module
     # docstring gives. It is a thread of ANOTHER process, so no journey's
@@ -472,18 +472,29 @@ EXCLUDED = {
     # request slot of billions be told from the bootstrap beside it (issue
     # 1466).
     #
-    # What rides along instead is the front end's event-loop tick, and it
-    # rides as a NAMED RESIDUAL rather than an exclusion: the same deal the
-    # bullet above gives `mcp-exec` — "`mcp-exec` calls that loop, so its
-    # tick stays in as the named residual". `role_of` puts every other
-    # thread of the bridge in the one role this list does not exclude, so
-    # the tick is in the count because the classifier says so rather than
-    # because it slipped past. Against the idle `bridge-only` child that
-    # residual measures 34,694,712 to 34,703,439 instructions over three
-    # rounds. The share beside that range is the MEAN of its two ends,
-    # 34,699,075.5, which is 1.298% of the count — both numbers are
-    # printed here, so the division is one a reader can redo. It grows
-    # with how long the journey ran. So the count does carry a wall-clock
-    # term; it is named here rather than implied away.
+    # What rides along instead is the front end's event-loop tick, riding
+    # as a NAMED RESIDUAL rather than an exclusion — the same deal the
+    # bullet above gives `mcp-exec`. `role_of` puts every other bridge
+    # thread in the one role this list does not exclude, so the tick is
+    # counted by the classifier's verdict, not by slipping past.
+    #
+    # The subtraction leaves the slot's work above the baseline slot and,
+    # since the announcement move, carries no startup term: the front end
+    # announces once the serve loop is up, so both children pay the same
+    # startup and the subtraction cancels it. The ~34.7M an earlier tail
+    # measured against the idle `bridge-only` child and read as the tick
+    # growing with journey length was that startup tail, uncancelled
+    # under the old readiness order; it did not scale with the journey —
+    # this re-record moves `net-capture` 2,673,147,032→2,638,478,228 and
+    # `segment-relay` 42,295,628→7,443,265, two counts 63-fold apart,
+    # down by 34,668,804 and 34,852,363. The three artefacts the share
+    # above names put the baseline child's serve slot at 615,737,738,
+    # 615,748,524 and 615,673,526 instructions, one child shared by the
+    # five journeys that keep the role; a journey adds above it its own
+    # serving — `cdp-result` 50,389,787-50,460,447, `mcp-exec`
+    # 499,654-719,215, `net-capture` 2,101,605,098-2,101,975,716,
+    # `screenshot` 21,191,422-21,203,357, `segment-relay` 632,420-645,802 —
+    # so a journey that serves almost nothing pays the startup and
+    # almost nothing above it: no wall-clock term.
     'net-capture': (IMPORT,),
 }
