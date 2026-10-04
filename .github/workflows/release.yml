@@ -118,6 +118,10 @@ jobs:
         # not run would deadlock this wait — and the suite is not the thing at
         # risk here anyway, since the job runs it again below against the
         # tree it is about to build.
+        #
+        # `pr gate` is excluded by name because it runs on
+        # `pull_request_target` and reports against the base tip: it judges
+        # someone else's pull request, never this commit.
         run: |
           grace=$(( $(date +%s) + 5 * 60 ))
           deadline=$(( $(date +%s) + 30 * 60 ))
@@ -126,6 +130,7 @@ jobs:
                       "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" \
                       --jq '.workflow_runs[]
                             | select(.name != "release")
+                            | select(.name != "pr gate")
                             | select(.event != "issue_comment")
                             | "\(.name)\t\(.status)\t\(.conclusion)"')"
             total=$(printf '%s\n' "$runs" | awk 'NF { n++ } END { print n + 0 }')
