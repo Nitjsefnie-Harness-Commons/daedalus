@@ -393,16 +393,11 @@ def test_a_thread_the_profile_does_not_have_is_a_refusal(tmp):
 
 
 def test_several_threads_of_one_excluded_role_are_all_dropped(tmp):
-    """The refusal this replaced was for an ambiguity the gate never had.
-
-    The classifier dropped EVERY thread of an excluded role, so two threads
-    of one role was two threads of background and not a choice between them
-    — while the refusal said the gate had to pick. On a real profile the
-    refusal fired on every run, because the bridge has several threads no
-    signature claims: `command-round-trip`'s own bridge carries six. The
-    control is the corrected rule, and it is pinned both ways: several
-    threads of an excluded role are all dropped, and several of a role
-    nobody excludes are all counted.
+    """The classifier drops EVERY thread of an excluded role, so two
+    threads of one role are two threads of background and not a choice
+    between them. Pinned both ways: several threads of an excluded role
+    are all dropped, and several of a role nobody excludes are all
+    counted.
     """
     del tmp
     threads = _journey_contract.threads()
@@ -423,10 +418,7 @@ def test_several_threads_of_one_excluded_role_are_all_dropped(tmp):
 
 
 def test_one_thread_in_a_role_nobody_excludes_just_counts(tmp):
-    """The plain case the widened rule has to leave exactly as it was.
-
-    One thread of a role nobody excludes is not an ambiguity and never was.
-    """
+    """The plain case the widened rule has to leave exactly as it was."""
     del tmp
     threads = _journey_contract.threads()
     rows = [row(1, 430_000_000, HARNESS),
@@ -489,10 +481,9 @@ def test_a_profiles_threads_are_read_from_files_callgrind_writes(tmp):
 def test_a_profile_missing_any_of_its_header_lines_is_named(tmp):
     """Three fields, one refusal, and the same for each.
 
-    `pid:` and `cmd:` are obvious. `thread:` is the one that must not
-    default: 1 is MAIN, and MAIN is never excluded, so a defaulted thread is
-    a thread the gate would KEEP without ever having said so — the one
-    asymmetry a reader cannot see in a number.
+    `thread:` is the one that must not default: 1 is MAIN, and MAIN is
+    never excluded, so a defaulted thread is a thread the gate would KEEP
+    without ever having said so.
     """
     thread_classifier = _journey_contract.threads()
     directory = Path(tmp)
@@ -515,12 +506,8 @@ def test_a_profile_missing_any_of_its_header_lines_is_named(tmp):
 
 
 def test_a_profile_with_cost_lines_but_no_summary_is_named(tmp):
-    """A torn profile is a refusal naming the file, never a silent skip.
-
-    The old skip treated every summary-less file as the empty one a process
-    that cost nothing writes, so a torn write's instructions left every
-    total with nothing naming it.
-    """
+    """A torn profile is a refusal naming the file, never a silent skip:
+    skipped, its instructions leave every total with nothing naming it."""
     classifier = _journey_contract.threads()
     directory = Path(tmp)
     (directory / 'cg.1-01').write_text(
