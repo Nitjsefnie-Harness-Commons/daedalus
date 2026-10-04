@@ -26,6 +26,10 @@ _REAL = ROOT / '.github' / 'workflows' / 'tests.yml'
 EXEMPT = {'diff-coverage'}
 _DOCUMENTED = ('INFORMATIONAL', 'deliberately absent')
 
+NEEDS_BLOCK = '    needs:\n      - probe\n'
+RUNNER = '    runs-on: ubuntu-latest\n    timeout-minutes: 5\n'
+PROBE = '  probe:\n' + RUNNER
+
 
 def test_the_real_aggregate_covers_exactly_its_jobs(tmp):
     """The gate's standing assertion over the shipped workflows."""
@@ -40,25 +44,53 @@ def test_the_declared_exemptions_are_the_jobs_left_over(tmp):
     assert not _exemption_drift(load(_REAL)), _exemption_drift(load(_REAL))
 
 
-def test_the_real_aggregate_covers_its_graph_derived_shape(tmp):
-    """Today's shape, pinned so a change is a decision and not a drift.
+def test_the_control_reads_the_shape_off_a_literal_oracle(tmp):
+    """The shape oracle is a literal set, read off a fixture by hand.
 
-    The aggregate's `needs:` is the graph's own complement -- every job
-    that is not the aggregate, not one of its descendants (which wait on
-    it instead) and not exempt -- so the set is re-derived from the jobs
-    rather than pinned at a count a new neighbour moves.
+    The control recomputed `descendants` with the helper it judges, so
+    it agreed with the helper whatever the helper returned and the
+    issue's shape was invisible. Entries read off the fixture: `direct`
+    pins the listed half of the rule, `mid` and `leaf` the needs-closure
+    half, `inner` and `outer` are the issue's downstream-only jobs and
+    stay absent however far their needs reach.
     """
-    del tmp
-    workflow = load(_REAL)
-    needs = _needs_of(workflow.jobs)
-    descendants = _descendants(needs)
-    derived = set(workflow.jobs) - {AGGREGATE} - descendants - EXEMPT
-    assert needs[AGGREGATE] == derived, sorted(
-        needs[AGGREGATE] ^ derived)
-    # Nothing waits on the aggregate any more, so the complement is the
-    # whole job set less the exempt one.
-    assert descendants == set(), descendants
-    assert EXEMPT == {'diff-coverage'}, EXEMPT
+    source = ('jobs:\n'
+              '  aggregate:\n'
+              '    needs:\n'
+              '      - direct\n'
+              '      - suites\n' + RUNNER +
+              '  direct:\n' + RUNNER +
+              '  suites:\n'
+              '    needs:\n'
+              '      - mid\n' + RUNNER +
+              '  mid:\n'
+              '    needs:\n'
+              '      - leaf\n' + RUNNER +
+              '  leaf:\n' + RUNNER +
+              '  inner:\n'
+              '    needs: aggregate\n' + RUNNER +
+              '  outer:\n'
+              '    needs:\n'
+              '      - inner\n' + RUNNER)
+    root = _probe_workflow(tmp, 'shape-oracle', source)
+    workflow = load(root / 'probe.yml')
+    actual = _descendants(_needs_of(workflow.jobs))
+    assert actual == {'direct', 'suites', 'mid', 'leaf'}, sorted(actual)
+
+
+def test_a_job_that_only_reaches_the_aggregate_downstream_is_named(tmp):
+    """The issue's repro: reaching the aggregate is not being covered."""
+    source = ('jobs:\n'
+              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE +
+              '  inner:\n'
+              '    needs: aggregate\n' + RUNNER +
+              '  outer:\n'
+              '    needs:\n'
+              '      - inner\n' + RUNNER)
+    violations = _scan_fixture(tmp, 'issue-shape', source)
+    assert len(violations) == 1, violations
+    assert "'inner'" in violations[0], violations
+    assert "'outer'" in violations[0], violations
 
 
 def test_the_exemption_is_still_documented_in_the_workflow(tmp):
@@ -83,17 +115,8 @@ def test_an_undocumented_exemption_is_named_by_the_gate(tmp):
 def test_an_extra_job_outside_the_aggregate_is_named(tmp):
     """The issue's own repro: a second job left out of `needs`."""
     source = ('jobs:\n'
-              '  aggregate:\n'
-              '    needs:\n'
-              '      - probe\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n'
-              '  probe:\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n'
-              '  late:\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n')
+              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE +
+              '  late:\n' + RUNNER)
     violations = _scan_fixture(tmp, 'late-job', source)
     assert len(violations) == 1, violations
     assert "'late'" in violations[0], violations
@@ -104,15 +127,8 @@ def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
     source = ('jobs:\n'
               '  aggregate:\n'
               '    needs:\n'
-              '      - absent\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n'
-              '  probe:\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n'
-              '  stray:\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n')
+              '      - absent\n' + RUNNER + PROBE +
+              '  stray:\n' + RUNNER)
     violations = _scan_fixture(tmp, 'dual-gap', source)
     assert len(violations) == 2, violations
     joined = '\n'.join(violations)
@@ -163,24 +179,13 @@ def test_the_comparison_is_step_name_agnostic(tmp):
              '      - run: echo again\n'
              '        name: Check dependency results\n')
     complete = ('jobs:\n'
-                '  aggregate:\n'
-                '    needs:\n'
-                '      - probe\n'
-                '    runs-on: ubuntu-latest\n'
-                '    timeout-minutes: 5\n'
-                + steps + '  probe:\n'
-                '    runs-on: ubuntu-latest\n'
-                '    timeout-minutes: 5\n')
+                '  aggregate:\n' + NEEDS_BLOCK + RUNNER +
+                steps + PROBE)
     assert not _scan_fixture(tmp, 'steps-complete', complete)
     gap = complete.replace('    needs:\n      - probe\n', '    needs: []\n')
     violations = _scan_fixture(tmp, 'steps-gap', gap)
     assert len(violations) == 1, violations
     assert "'probe'" in violations[0], violations
-
-
-NEEDS_BLOCK = '    needs:\n      - probe\n'
-RUNNER = '    runs-on: ubuntu-latest\n    timeout-minutes: 5\n'
-PROBE = '  probe:\n' + RUNNER
 
 
 def _scan_fixture(tmp, name, source):
@@ -195,6 +200,18 @@ def test_an_explicit_key_jobs_form_is_refused_not_passed(tmp):
               + NEEDS_BLOCK + RUNNER + PROBE)
     violations = _scan_fixture(tmp, 'explicit-key', source)
     assert violations, 'an explicit key form was accepted silently'
+
+
+def test_a_job_downstream_of_the_aggregate_is_named(tmp):
+    """Waiting on the aggregate is not being covered by it."""
+    source = ('jobs:\n'
+              '  aggregate:\n' + NEEDS_BLOCK + RUNNER + PROBE +
+              '  downstream:\n'
+              '    needs: aggregate\n' + RUNNER)
+    violations = _scan_fixture(tmp, 'descendant', source)
+    named = [line for line in violations if "'downstream'" in line]
+    assert len(named) == 1, violations
+    assert 'does not cover' in named[0], named
 
 
 def _aggregate_violations(directory=None):
@@ -256,8 +273,11 @@ def _needs_of(jobs):
 
 
 def _descendants(needs):
-    """Every job whose transitive needs closure reaches the aggregate."""
-    return {name for name in needs if AGGREGATE in _closure(needs, name)}
+    """Jobs the aggregate covers: those it lists and their needs-closure."""
+    covered = set(needs[AGGREGATE])
+    for name in needs[AGGREGATE]:
+        covered |= _closure(needs, name)
+    return covered
 
 
 def _closure(needs, name):
