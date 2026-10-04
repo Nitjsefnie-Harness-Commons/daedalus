@@ -111,8 +111,9 @@ def _fixture_binds(tree, shared):
     _wffixtures import *` brings a module's EXPORTED names, which no
     static reader enumerates without executing it; `_helper_binds.py`
     skips `alias.name == '*'` for the same reason, and the
-    re-implementation recogniser shares that reader and so shares the
-    hole. Nothing about this rule would change that.
+    re-implementation recogniser the retired reserved-name suite
+    carried shared that reader and so shared the hole. Nothing about
+    this rule would have changed that.
     """
     imports, binds = scan(tree)
     spelled = _module_imports(tree)

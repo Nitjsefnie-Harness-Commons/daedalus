@@ -17,8 +17,8 @@ runner's, and the `_Clock` declarations belong to suites that are
 genuinely different classes (one records each attempt and may refuse, one
 is a settable wall clock). A `tests/_*.py` module taking a bare `_run` or
 `_Clock` would own a name suites already use, trading the sibling-import
-red for a re-implementation red - and the allowance rows that would clear
-it belong to suites this branch has no business editing. `_verdict` is the
+red for a re-implementation red - and the allowance rows that would have
+cleared it belonged to the suites this branch retired. `_verdict` is the
 same case a third time, ten suites over, and its loader is spelled here
 rather than named `_ci_wait` for the same reason: four modules declare
 that name at module scope and none of them can import this one.
