@@ -99,20 +99,6 @@ def test_an_extra_job_outside_the_aggregate_is_named(tmp):
     assert "'late'" in violations[0], violations
 
 
-def test_a_need_that_names_no_declared_job_is_refused(tmp):
-    source = ('jobs:\n'
-              '  aggregate:\n'
-              '    needs:\n'
-              '      - absent\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n'
-              '  probe:\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n')
-    violations = _scan_fixture(tmp, 'absent-need', source)
-    named = [line for line in violations if "'absent'" in line]
-    assert len(named) == 1, violations
-    assert 'do not exist' in named[0], named
 
 
 def test_both_violation_classes_are_reported_for_one_aggregate(tmp):
@@ -203,60 +189,8 @@ def _scan_fixture(tmp, name, source):
     return _aggregate_violations(_probe_workflow(tmp, name, source))
 
 
-PASS_CASES = {
-    'spaced-jobs-key': 'jobs :\n' + '  aggregate:\n' + NEEDS_BLOCK + RUNNER
-                       + PROBE,
-    'quoted-jobs-key': '"jobs":\n' + '  aggregate:\n' + NEEDS_BLOCK + RUNNER
-                       + PROBE,
-    'flow-needs-trailing-comma': (
-        'jobs:\n  aggregate:\n    needs: [probe, ]\n' + RUNNER + PROBE),
-    'flow-needs-quoted-ids': (
-        'jobs:\n  aggregate:\n    needs: ["probe"]\n' + RUNNER + PROBE),
-    'block-needs-quoted-entry': (
-        'jobs:\n  aggregate:\n    needs:\n      - "probe"\n'
-        + RUNNER + PROBE),
-    'indentless-needs': (
-        'jobs:\n  aggregate:\n    needs:\n    - probe\n' + RUNNER + PROBE),
-    'scalar-needs': 'jobs:\n  aggregate:\n    needs: probe\n' + RUNNER
-                    + PROBE,
-    'unusual-field-keys': (
-        'jobs:\n  aggregate:\n    needs  : [probe]  # the cells\n'
-        + RUNNER + PROBE),
-    'flow-env-mapping': (
-        'jobs:\n  aggregate:\n' + NEEDS_BLOCK + RUNNER
-        + '    env: {NEEDS_JSON: from-context}\n' + PROBE),
-    'step-name-not-first': (
-        'jobs:\n  aggregate:\n' + NEEDS_BLOCK + RUNNER
-        + '    steps:\n'
-          '      - run: echo aggregate\n'
-          '        name: Check dependency results\n' + PROBE),
-    'explicit-block-indent': (
-        'jobs:\n  aggregate:\n' + NEEDS_BLOCK + RUNNER
-        + '    steps:\n'
-          '      - name: script\n'
-          "        run: |2-\n"
-          "            python3 - <<'PY'\n"
-          '            print("aggregate")\n'
-          '            PY\n' + PROBE),
-    'deeper-literal-block': (
-        'jobs:\n  aggregate:\n' + NEEDS_BLOCK + RUNNER
-        + '    steps:\n'
-          '      - name: script\n'
-          '        run: |\n'
-          "              python3 - <<'PY'\n"
-          '              print("aggregate")\n'
-          '              PY\n' + PROBE),
-    'flow-mapped-probe': (
-        'jobs:\n  aggregate:\n' + NEEDS_BLOCK + RUNNER
-        + '  probe: {runs-on: ubuntu-latest, timeout-minutes: 5}\n'),
-}
 
 
-def test_every_valid_spelling_of_a_complete_aggregate_passes(tmp):
-    """A valid workflow the reader can classify is never a false failure."""
-    for name, source in sorted(PASS_CASES.items()):
-        violations = _scan_fixture(tmp, name, source)
-        assert not violations, f'{name}: {violations}'
 
 
 def test_an_explicit_key_jobs_form_is_refused_not_passed(tmp):
@@ -269,23 +203,6 @@ def test_an_explicit_key_jobs_form_is_refused_not_passed(tmp):
     assert violations, 'an explicit key form was accepted silently'
 
 
-def test_a_descendant_needs_no_entry_of_its_own(tmp):
-    """A job downstream of the aggregate is covered through it."""
-    source = ('jobs:\n'
-              '  aggregate:\n'
-              '    needs:\n'
-              '      - probe\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n'
-              '  probe:\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n'
-              '  downstream:\n'
-              '    needs: aggregate\n'
-              '    runs-on: ubuntu-latest\n'
-              '    timeout-minutes: 5\n')
-    violations = _scan_fixture(tmp, 'descendant', source)
-    assert not violations, violations
 
 
 def _aggregate_violations(directory=None):

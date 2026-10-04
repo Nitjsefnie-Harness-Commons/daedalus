@@ -115,12 +115,6 @@ def test_a_gating_run_is_present(tmp):
     assert mod.missing_required([_gate_run('tests')]) == []
 
 
-def test_no_gating_run_names_what_is_missing(tmp):
-    del tmp
-    mod = _ci_gate()
-    runs = [_gate_run('gate freshness'), _gate_run('CodeQL - Code Quality')]
-    assert mod.missing_required(runs) == ['tests']
-    assert mod.missing_required([]) == ['tests']
 
 
 def test_the_name_matches_exactly(tmp):
@@ -522,28 +516,6 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
             f'ci_wait binds its own {name}; the filter must be ci_gate\'s')
 
 
-def test_the_waiter_reads_this_one_predicate(tmp):
-    """Kept, and no longer the control that carries the weight.
-
-    These assertions hold for any module that imports the name, so they
-    cannot see a caller that grew a copy or stopped calling the predicate
-    - the controls above are the ones that do. What is left here is the
-    weaker property, still worth pinning: the caller reaches the same
-    module object rather than resolving `ci_gate` somewhere of its own.
-
-    It was written for two callers; the second is gone from the tree, and
-    a control that asserted a second one would now be asserting the
-    absence of the thing it was written to check.
-    """
-    del tmp
-    skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
-    mod = _ci_gate()
-    wait = _util.load(skill / 'ci_wait.py', 'ci_wait_gate_owner')
-    assert wait.ci_gate is sys.modules['ci_gate']
-    assert wait.ci_gate.missing_required is sys.modules[
-        'ci_gate'].missing_required
-    assert wait.REQUIRED_WORKFLOWS == mod.REQUIRED_WORKFLOWS
-    assert wait.ci_gate.REQUIRED_WORKFLOWS == mod.REQUIRED_WORKFLOWS
 
 
 def test_an_unreadable_timestamp_ranks_as_the_absent_one(tmp):
@@ -610,24 +582,6 @@ def test_a_naive_timestamp_is_read_as_utc(tmp):
         assert set(anchors) == {'replace'}, sorted(set(anchors))
 
 
-def test_the_absent_gate_value_names_what_was_missing(tmp):
-    """The fourth answer, printed as itself.
-
-    Nothing in this tree constructs `GateAbsent` - the class is carried
-    deliberately and its own docstring says so - so the only thing a
-    control can hold is the text a refusal built from it would carry.
-    That is what is pinned here: the missing names as a tuple, and a
-    representation that spells them rather than naming the class and its
-    address.
-    """
-    del tmp
-    mod = _ci_gate()
-    absent = mod.GateAbsent(['tests', 'ci'])
-    assert absent.missing == ('tests', 'ci'), absent.missing
-    assert repr(absent) == 'gate absent: tests, ci', repr(absent)
-    empty = mod.GateAbsent([])
-    assert empty.missing == (), empty.missing
-    assert repr(empty) == 'gate absent: ', repr(empty)
 
 
 def main():

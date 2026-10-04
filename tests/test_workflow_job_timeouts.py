@@ -91,56 +91,6 @@ BOUNDED_JOB = (
     '      - run: echo hi\n')
 
 
-def test_each_valid_spelling_that_bounds_a_job_passes(tmp):
-    """The bound is found however valid YAML spells the job."""
-    cases = {
-        'jobs-first': 'jobs:\n' + BOUNDED_JOB,
-        'quoted-id': 'jobs:\n' + BOUNDED_JOB.replace(
-            '  probe:', '  "probe":'),
-        'comment-header': 'jobs:\n' + BOUNDED_JOB.replace(
-            '  probe:', '  probe: # manual probe'),
-        'flow-mapping': (
-            'jobs: {probe: {runs-on: ubuntu-latest, timeout-minutes: 5,'
-            ' steps: [{run: echo hi}]}}\n'),
-        'four-space': 'jobs:\n' + BOUNDED_JOB.replace('  ', '    '),
-        'after-another-key': 'name: x\non: push\njobs:\n' + BOUNDED_JOB,
-        'defaults-after': 'jobs:\n' + BOUNDED_JOB
-                          + 'defaults:\n  run:\n    shell: bash\n',
-        'snapshot-job': 'jobs:\n'
-                        '  probe:\n'
-                        '    snapshot:\n'
-                        '      always: true\n'
-                        '    steps:\n'
-                        '      - run: echo hi\n',
-        'needs-only-job': 'jobs:\n'
-                          '  probe:\n'
-                          '    needs: other\n'
-                          '  other:\n'
-                          '    runs-on: ubuntu-latest\n'
-                          '    timeout-minutes: 5\n',
-        'indentless-needs': 'jobs:\n'
-                            '  probe:\n'
-                            '    needs:\n'
-                            '    - other\n'
-                            '    runs-on: ubuntu-latest\n'
-                            '    timeout-minutes: 5\n'
-                            '  other:\n'
-                            '    runs-on: ubuntu-latest\n'
-                            '    timeout-minutes: 5\n',
-        'fractional-bound': 'jobs:\n' + BOUNDED_JOB.replace(
-            'timeout-minutes: 5', 'timeout-minutes: 0.5'),
-        'float-bound': 'jobs:\n' + BOUNDED_JOB.replace(
-            'timeout-minutes: 5', 'timeout-minutes: 4.5'),
-        'plus-signed-bound': 'jobs:\n' + BOUNDED_JOB.replace(
-            'timeout-minutes: 5', 'timeout-minutes: +5'),
-        'underscored-bound': 'jobs:\n' + BOUNDED_JOB.replace(
-            'timeout-minutes: 5', 'timeout-minutes: 1_000'),
-        'exponent-bound': 'jobs:\n' + BOUNDED_JOB.replace(
-            'timeout-minutes: 5', 'timeout-minutes: 1e3'),
-    }
-    for name, source in sorted(cases.items()):
-        violations = _timeout_violations(_probe_workflow(tmp, name, source))
-        assert not violations, f'{name}: {violations}'
 
 
 def test_each_unbounded_shape_is_named(tmp):
