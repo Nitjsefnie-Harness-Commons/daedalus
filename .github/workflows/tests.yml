@@ -1341,8 +1341,17 @@ jobs:
       # a spread, once.
       - name: Measure the journeys
         id: measure
+        # Step-level, because the step that reads the value is the step
+        # that sets it: `journey_thread_rows.enabled()` is consulted by this
+        # step's own process, after valgrind has exited, and no counted
+        # child consults it — so the variable is inert to every child
+        # whichever level it is set at, and this is where its scope sits
+        # beside the step that uses it. The flag records each counted
+        # thread's own total beside the sum, so a run whose counts moved can
+        # say which thread moved them.
         env:
           PYTHONDONTWRITEBYTECODE: "1"
+          DAEDALUS_JOURNEY_THREAD_ROWS: "1"
           COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py measure --root . \

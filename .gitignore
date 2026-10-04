@@ -247,6 +247,7 @@
 !/scripts/ci/journey_rebaseline.py
 !/scripts/ci/journey_report.py
 !/scripts/ci/journey_residual.py
+!/scripts/ci/journey_thread_rows.py
 !/scripts/ci/journey_threads.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
@@ -613,6 +614,7 @@
 !/tests/test_journey_real_profile.py
 !/tests/test_journey_rebaseline.py
 !/tests/test_journey_report.py
+!/tests/test_journey_thread_rows.py
 !/tests/test_journey_threads.py
 !/tests/test_journey_tighten.py
 !/tests/test_js_coverage.py

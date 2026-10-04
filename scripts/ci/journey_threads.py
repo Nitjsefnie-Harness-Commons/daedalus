@@ -354,6 +354,27 @@ def classify(rows):
     return roles, None
 
 
+def kept_for(measurement, journey):
+    """One journey's kept total, read out of one counter's measurement.
+
+    A counter that counts a process TREE whole hands back a number, and
+    that number is the total. A counter that separates threads hands back
+    the profile's rows, and `total_for` is what reads them — so the
+    baseline side and the journey side go through ONE call rather than two
+    that agree today. `journey` is the exclusion list applied, which is why
+    the same baseline profile answers differently per journey.
+
+    A classification failure is a sentence rather than the dict a failed
+    child carries: there is no returncode to report, and the sentence is
+    what a reader has to act on.
+    """
+    if isinstance(measurement, dict):
+        kept, _excluded, why = total_for(
+            measurement['rows'], journey, measurement['unread'])
+        return kept, why
+    return measurement, None
+
+
 def excluded_for(journey):
     return EXCLUDED.get(journey, ())
 

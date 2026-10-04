@@ -269,6 +269,44 @@ def tighten_skipped_lines(subject):
             'the budget stays as it is.', '']
 
 
+def rounds_reading(rounds):
+    """How a run's own round count reads in a sentence that names it.
+
+    Rendered rather than interpolated, because every shape the rule refuses
+    is a shape a reader has to be able to hear: absent is not zero rounds,
+    and a float is not a whole number of rounds however close it is.
+    """
+    if rounds is None:
+        return 'no round count'
+    if isinstance(rounds, int):
+        return f'{rounds} round' + ('s' if rounds != 1 else '')
+    return repr(rounds)
+
+
+def too_few_rounds_lines(rounds):
+    """The one line a run that measured too few rounds leaves for a reader.
+
+    Its own block beside `tighten_skipped_lines` because the FACT is a
+    different one, and a reader told the wrong fact goes looking in the
+    wrong place: that line says a recorded gate moved, so this run's counts
+    described something other than what was recorded and the runner image is
+    where to look. This one is about how many draws the run reports, and the
+    guard that reaches it takes a round count that is ABSENT, zero or
+    non-integral as readily as a single draw — so `rounds_reading` says what
+    the report carried, and nothing here claims a run measured every journey
+    correctly when it says nothing at all about that.
+    """
+    return [f'**This run measured {rounds_reading(rounds)}, and one draw is '
+            'not a record: nothing was tightened.**', '',
+            'A recorded count is a baseline, and one draw of every journey is '
+            'an observation: on unchanged code a single draw has been '
+            'measured 48% below the median of three draws of the same '
+            'journey. Nothing was compared into the budget and no commit was '
+            'made. Re-recording is `journey_budget.py rebaseline '
+            '--measurements <file>`, over a multi-round measurement somebody '
+            'ran.', '']
+
+
 def rebaseline_lines(run_id=None):
     """The one line a rise is answered with, runnable as printed.
 

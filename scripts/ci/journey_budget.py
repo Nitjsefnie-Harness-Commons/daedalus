@@ -14,6 +14,17 @@ that moved, most often the runner image the toolchain records. Neither is a
 regression, so neither is a red: the one thing CI can do to the file is make
 it smaller, and a run that made nothing smaller says so rather than failing.
 
+A MEASUREMENT OF FEWER THAN TWO ROUNDS RECORDS NOTHING, and the refusal is
+`check`'s: the `Follow the journeys that got cheaper` step runs
+`check --tighten` on every push to `main`, and a draw it cannot confirm ends
+there. That is why the automatic tighten never fires on `main` — CI measures
+with `JOURNEY_ROUNDS: "1"`, which is a count of one, so a recorded count is
+lowered by `rebaseline --measurements <counts>` or not at all. `rebaseline` is
+the manual path and consults no round count of its own: a person runs it
+deliberately, it overwrites the whole document from their own measurement, and
+they judge their own rounds. A green run with no commit is then this, or a
+recorded gate that moved — and the step summary says which.
+
   python3 scripts/ci/journey_budget.py probe
   python3 scripts/ci/journey_budget.py measure --rounds 1 --out counts.json
   python3 scripts/ci/journey_budget.py check --measurements counts.json
@@ -65,6 +76,13 @@ ROUNDS_DEFAULT = journey_counters.ROUNDS_DEFAULT
 # refused here by name, so a recorded count can never be
 # denominated in a quantity the gate does not defend.
 COUNTERS = journey_artifact.COUNTERS
+
+# The fewest rounds a measurement may have taken and still be a comparison.
+# Two is the smallest number whose disagreement a run can see at all, and one
+# is not enough: in CI run 37127310661 rounds one and two of one journey
+# agreed to 27,121 instructions and round three came in at 51,478,842 against
+# 99,551,275, all on unchanged code.
+ROUNDS_TO_RECORD = 2
 
 # The document shape lives in its own module, off this one's ceiling, and
 # the names below are this file's own bindings of it: the suites read the
@@ -298,6 +316,21 @@ def main(argv=None):
                       'not', file=sys.stderr)
                 print(remedy, file=sys.stderr)
                 return 1
+            # The LAST refusal before the write, and the only one about how
+            # MANY TIMES this run measured rather than about what it
+            # measured: a run that both met a rise and took a single draw is
+            # reported for the rise, which is the one that is a red. It
+            # exits 0 for the reason `_recorded_outcome` does — nothing was
+            # written, so the step has no diff to commit and no regression
+            # to report.
+            rounds = report.get('rounds')
+            if not isinstance(rounds, int) or rounds < ROUNDS_TO_RECORD:
+                print('this run measured '
+                      f'{journey_report.rounds_reading(rounds)}, and one '
+                      f'draw is not a record: nothing was tightened')
+                journey_counters.write_summary(
+                    journey_report.too_few_rounds_lines(rounds))
+                return 0
             recorded = document['journeys']
             updated = tightened(counts, document, names)
             if updated is None:

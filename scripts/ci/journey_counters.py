@@ -34,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_child_env  # noqa: E402  pylint: disable=wrong-import-position
 import journey_residual  # noqa: E402  pylint: disable=wrong-import-position
+import journey_thread_rows  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
 # The residual arithmetic and the refusal it produces, in the leaf that
@@ -325,26 +326,11 @@ def _callgrind(name, root, workdir):
     return {'rows': rows, 'unread': unread}, None
 
 
-def kept_for(measurement, journey):
-    """One journey's kept total, read out of one counter's measurement.
-
-    A counter that counts a process tree whole hands back a number, and
-    that number is the total. A counter that separates threads hands back
-    the profile's rows, and `journey_threads.total_for` is what reads
-    them — the same call the journey's own profile goes through, so the
-    baseline side and the journey side are under ONE rule rather than two
-    that agree today. `journey` is the exclusion list applied, which is
-    why the same baseline profile answers differently per journey.
-
-    A classification failure is a sentence rather than the dict a failed
-    child carries: there is no returncode to report, and the sentence is
-    what a reader has to act on.
-    """
-    if isinstance(measurement, dict):
-        kept, _excluded, why = journey_threads.total_for(
-            measurement['rows'], journey, measurement['unread'])
-        return kept, why
-    return measurement, None
+# How a counter's own measurement is read is the classifier's question, not
+# this module's, so `kept_for` lives there and is bound here under its old
+# name for the callers below and for the suites that reach it through this
+# module.
+kept_for = journey_threads.kept_for
 
 
 def _perf(name, root, workdir):
@@ -428,12 +414,17 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     if why is not None:
                         break
             rows = {}
+            # Every round's whole profile is retained here to be broken
+            # into threads, and only a run that will emit rows keeps them.
+            samples = {} if journey_thread_rows.enabled() else None
             if why is None:
                 for name in names:
                     counted = []
+                    taken = []
                     for _round in range(rounds):
                         measured, why = run(name, root, workdir)
                         if why is None:
+                            taken.append(measured)
                             value, why = kept_for(measured, name)
                         if why is not None:
                             break
@@ -441,6 +432,8 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                     if why is not None:
                         break
                     rows[name] = counted
+                    if samples is not None:
+                        samples[name] = taken
             refusals = {}
             if why is None:
                 verdicts = {}
@@ -466,7 +459,7 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 report['counters'][counter] = {
                     'available': False, 'why': why}
                 continue
-            report['counters'][counter] = {
+            entry = {
                 'available': True,
                 'gated': counter in GATE_CANDIDATES,
                 'startup_only': startup if childed else None,
@@ -480,6 +473,14 @@ def measure(root=ROOT, rounds=ROUNDS_DEFAULT, found=None):
                 # tell a journey it cannot measure from one the counter
                 # never counted.
                 'refused': refusals}
+            # What each count was summed from, and only while the flag is
+            # on: `journey_thread_rows` reads the flag and hands back None
+            # for a counter that reports one number, so the key is ABSENT
+            # rather than null in both of those cases.
+            per_thread = journey_thread_rows.for_counter(bridge, samples)
+            if per_thread:
+                entry['thread_rows'] = per_thread
+            report['counters'][counter] = entry
     return report
 
 
