@@ -120,12 +120,8 @@ def test_a_measurement_the_classifier_refuses_carries_no_rows(tmp):
 
 
 def test_a_baseline_the_classifier_refuses_carries_no_entry(tmp):
-    """The BASELINE's refusal drops the journey, exactly as a round's does.
-
-    A guard that fires for one of the two and not the other hands back an
-    entry whose `baseline` is null -- a half-measured journey presented as
-    a whole one.
-    """
+    """The BASELINE's refusal drops the journey, exactly as a round's
+    does: a half-measured journey is presented as a whole one."""
     del tmp
     rows = rows_module()
     names = journeys().NAMES
@@ -146,12 +142,8 @@ def test_a_baseline_the_classifier_refuses_carries_no_entry(tmp):
 
 
 def test_a_counter_that_hands_back_a_number_separates_no_threads(tmp):
-    """`syscalls` (and perf) report one number and get no rows.
-
-    A counter that counts a process tree whole hands back a number, and
-    that number IS the count the report carries: the arm that hands it back
-    reads it rather than building one out of it.
-    """
+    """`syscalls` (and perf) report one number, and that number IS the
+    count the report carries: the arm that hands it back reads it."""
     del tmp
     counters = _journey_contract.counters()
     ran = {}
