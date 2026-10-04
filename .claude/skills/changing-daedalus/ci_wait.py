@@ -23,7 +23,7 @@ hand-rolled loops this replaces conflate:
      refused argument, or the first failed query, with the reason on stderr.
      Never wrap this tool in a retry: retrying a failed query behind a
      message that reads like waiting is the failure it exists to remove
-  4  every run concluded acceptably and one of them is not a
+  4  every JUDGED conclusion is acceptable and one of them is not a
      REQUIRED_WORKFLOWS run, or no PUBLISHED_CHECKS check run is on the
      SHA at all, so this head is not certified. No merge is claimed: this
      is reached with a pull request, without one, and on a branch of its own
@@ -374,14 +374,14 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
         missing = None
         print_matrix(runs, sha, out)
         if state == 'acceptable':
-            discarded = [run for run in runs if superseded(run, runs) or
-                         run.get('name') in ci_gate.NOT_ABOUT_THE_HEAD]
-            gone = sum(r.get('name') in ci_gate.NOT_ABOUT_THE_HEAD
-                       for r in discarded)
-            stale = len(discarded) - gone
-            parts = ([f'{stale} superseded run(s) ignored']
-                    if stale else []) + (
-                [f'{gone} not about this head'] if gone else [])
+            off_head = ci_gate.NOT_ABOUT_THE_HEAD
+            gone = [run for run in runs if run.get('name') in off_head]
+            discarded = [run for run in runs if superseded(run, runs)
+                         or run.get('name') in off_head]
+            stale = len(discarded) - len(gone)
+            buckets = ((stale, 'superseded run(s) ignored'),
+                       (len(gone), 'not about this head'))
+            parts = [f'{n} {label}' for n, label in buckets if n]
             suffix = f' ({", ".join(parts)})' if parts else ''
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
                   f' acceptable{suffix}', file=out, flush=True)
