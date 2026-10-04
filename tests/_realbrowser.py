@@ -160,7 +160,8 @@ def _raise_start_failure(label, executable, why):
         raise AssertionError(
             f'{label} command was too large to start: {executable}') from why
     raise BrowserEnvironmentSkipped(
-        f'{label} could not be launched: {executable} — {why}') from why
+        f'{label} could not be launched: {executable} — '
+        f'{type(why).__name__}: {why}') from why
 
 
 def browser_requirements():

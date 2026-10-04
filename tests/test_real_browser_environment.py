@@ -99,6 +99,8 @@ def test_node_interpreter_start_failure_is_environment_skip(tmp):
     assert skipped is not None, 'unspawnable Node did not skip'
     assert str(bad_node) in str(skipped), skipped
     assert isinstance(skipped.__cause__, OSError), skipped.__cause__
+    assert type(skipped.__cause__).__name__ in str(skipped), skipped
+    assert 'too large' not in str(skipped), skipped
 
 
 def test_repository_node_probe_starts_and_terminates(tmp):
@@ -400,6 +402,8 @@ def test_browser_interpreter_start_failure_is_environment_skip(tmp):
     assert skipped is not None, 'unspawnable browser did not skip'
     assert str(bad_browser) in str(skipped), skipped
     assert isinstance(skipped.__cause__, OSError), skipped.__cause__
+    assert type(skipped.__cause__).__name__ in str(skipped), skipped
+    assert 'too large' not in str(skipped), skipped
 
 
 def test_oversized_browser_command_is_harness_failure(tmp):
