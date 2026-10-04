@@ -247,6 +247,7 @@
 !/scripts/ci/journey_counters.py
 !/scripts/ci/journey_gates.py
 !/scripts/ci/journey_rebaseline.py
+!/scripts/ci/journey_recording.py
 !/scripts/ci/journey_report.py
 !/scripts/ci/journey_residual.py
 !/scripts/ci/journey_thread_rows.py

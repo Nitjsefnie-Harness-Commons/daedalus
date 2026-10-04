@@ -56,6 +56,12 @@ def counters():
     return _util.load(source, 'journey_counters_contract')
 
 
+def residual():
+    """The residual builder, loaded the way the policy module loads it."""
+    source = ROOT / 'scripts' / 'ci' / 'journey_residual.py'
+    return _util.load(source, 'journey_residual_contract')
+
+
 def summaries():
     """The step-summary module, loaded the way the policy module loads it.
 
