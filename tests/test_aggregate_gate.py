@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """The aggregate gate: allowed sets, the superseded-cancel rule, the caller.
 
-scripts/ci/aggregate_gate.py owns the aggregate job's whole decision; these
-tests drive it in-process and pin its workflow wiring and its secrets gate.
+aggregate_gate.py owns the whole decision; these drive it in-process.
 """
 import contextlib
 import io
@@ -26,8 +25,7 @@ STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
 SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage')
 HEAD = 'c2ae15819d9374fda4720e59a46c3a991c0319be'
-# A non-zero clock origin: at 0.0 a deadline that IGNORES the clock reads
-# as the same number, so every control here would pass on either spelling.
+# Non-zero origin: at 0.0 a deadline ignoring the clock is the same number.
 EPOCH = 1e6
 FROZEN = (lambda: EPOCH, lambda _seconds: None)
 
@@ -66,12 +64,9 @@ def _recorder(own, pages, polls=None, jobs=None):
         target = argv[-1]
         if '/jobs?' in target:
             rid = int(target.split('/runs/')[1].split('/')[0])
-            found = jobs if not isinstance(jobs, dict) else (
-                jobs.get(rid) or [])
+            found = jobs if not isinstance(jobs, dict) else jobs.get(rid)
             return json.dumps({'jobs': found})
-        # Dispatch on the query's SHAPE, not on a constant: this held a
-        # second copy of the module's selector, and nothing caught the two
-        # when they diverged.
+        # Dispatch on the query's SHAPE, not on a constant.
         if 'head_sha=' in target:
             page = remaining.pop(0) if len(remaining) > 1 else remaining[0]
             return json.dumps({'workflow_runs': page})
@@ -93,8 +88,7 @@ def _scan_job(conclusion='success', name='gitleaks'):
 
 
 def _scripted_clock(readings):
-    """A clock that reaches its next reading each time the wait naps, then
-    adds the interval, so the wait's own bound is what ends it."""
+    """A clock at its next reading each nap, then adding the interval."""
     later = list(readings)[1:]
     current = [readings[0]]
 
@@ -500,9 +494,8 @@ CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     """Absence is not an empty answer: this fixture shows both."""
     del tmp
-    # The middle poll is 600 s in — inside the bound, past its half — and
-    # carries no run: the wait must not fire on it. This discriminates at
-    # the scale of the poll interval, not to sub-second resolution.
+    # The middle poll is 600 s in — inside the bound, past its half — with
+    # no run, so the wait must not fire on it. Scale: the poll interval.
     calls, verdict, message = _drive_scan(
         [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0, EPOCH + 719.0))
     assert verdict in _gate().GREEN, message
@@ -527,9 +520,9 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
 
 def test_an_unfinished_run_keeps_the_gate_waiting(tmp):
     del tmp
-    running = _secrets_run(7, status='in_progress')
     calls, verdict, message = _drive_scan(
-        [[running], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 30.0, EPOCH + 60.0))
+        [[_secrets_run(7, status='in_progress')], [CLEAN]], CLEAN_JOBS,
+        (EPOCH, EPOCH + 30.0, EPOCH + 60.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
 
@@ -547,10 +540,9 @@ def test_the_jobs_verdict_is_read_and_not_the_runs_conclusion(tmp):
 def test_both_secrets_queries_carry_the_head_sha_and_the_workflow(tmp):
     """A query whose arguments are dropped reads some other run entirely."""
     del tmp
-    mod = _gate()
     calls, _verdict, _message = _drive_scan([[CLEAN]], CLEAN_JOBS)
     assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
-            f'repos/o/r/actions/workflows/{mod.SECRETS_WORKFLOW}/runs'
+            f'repos/o/r/actions/workflows/{_gate().SECRETS_WORKFLOW}/runs'
             f'?head_sha={HEAD}&per_page=100'] in calls
     assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
             f'repos/o/r/actions/runs/{CLEAN["id"]}/jobs?per_page=100'] in calls
@@ -633,13 +625,31 @@ def _gate_step():
     return steps[0]
 
 
-def _named_workflow(mod, constant):
-    """The file one of the module's workflow selectors must name.
+def test_a_malformed_identity_is_refused_rather_than_read(tmp):
+    """`scan_jobs` refuses what it cannot vouch for; the gate then reds."""
+    del tmp
+    mod = _gate()
+    assert mod.scan_jobs('o/r', '7a', lambda _argv: '') is None
+    assert mod.scan_jobs('not-a-repo', 7, lambda _argv: '') is None
+    # A blank id reaches the guard; `_started_key` raises on any other.
+    _calls, verdict, _message = _drive_scan([[_secrets_run('')]], CLEAN_JOBS)
+    assert verdict == 'secrets-query-failed'
 
-    A constant holding a PATH passes every control that builds its
-    expectation from that same constant, and the actions API answers such
-    a selector `Not Found`. Only the filesystem says no.
-    """
+
+def test_a_refused_poll_bound_reaches_the_verdict(tmp):
+    """`poll_bound`'s refusal is forwarded, not swallowed by the caller."""
+    del tmp
+    mod = _gate()
+    with mock.patch.dict(os.environ, {mod.POLL_BOUND_ENV: 'soon'}):
+        verdict, message = mod._secret_scan()
+    assert verdict == 'secrets-query-failed'
+    assert mod.POLL_BOUND_ENV in message, message
+
+
+def _named_workflow(mod, constant):
+    """The file one of the module's workflow selectors must name: a
+    constant holding a PATH satisfies every control built from it, and
+    the actions API answers such a selector `Not Found`."""
     name = getattr(mod, constant)
     path = ROOT / '.github' / 'workflows' / name
     assert path.is_file(), f'{name} names no workflow file'
@@ -647,10 +657,8 @@ def _named_workflow(mod, constant):
 
 
 def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
-    """Both selectors, one control: each names a file this tree ships, and
-    the gate matches `jobs[].name` — the display name where the workflow
-    declares one, the job id where it does not. Pinning the id alone left
-    the two ends agreeing by coincidence."""
+    """Both selectors name a file this tree ships, and the gate matches
+    `jobs[].name`: the display name, or the job id where there is none."""
     del tmp
     mod = _gate()
     assert _named_workflow(mod, 'WORKFLOW').is_file()
