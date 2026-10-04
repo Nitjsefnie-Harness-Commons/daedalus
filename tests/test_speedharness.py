@@ -94,6 +94,11 @@ def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
         assert 'process tree' in text, text
         assert ('the tree did' in text
                 or 'ignored the request' in text), text
+        # The escalation-failure arms all say one of these two things; a
+        # real run whose taskkill failed leaves the grandchild alive and
+        # must go red, so neither substring may appear.
+        assert 'may still be running' not in text, text
+        assert 'could not run' not in text, text
         return
     pid = int(pid_file.read_text(encoding='utf-8'))
     for _ in range(50):
