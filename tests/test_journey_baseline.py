@@ -419,16 +419,17 @@ def test_a_rebaseline_records_the_median_of_files_and_the_span_of_draws(tmp):
     splits = (
         (lambda source: _measured_file(
             source, {first: 900}, shas={first: ['b' * 64]}),
-         'files whose rounds saw different renderings'),
+         'files whose rounds saw different renderings', 'did not agree'),
         (lambda source: _measured_file(
             source, {first: 900},
             toolchain={'python': '3.12.0 (other) [GCC 1.0]'}),
-         'files measured on two toolchains'))
-    for index, (build, why) in enumerate(splits):
+         'files measured on two toolchains', 'different toolchains'))
+    for index, (build, why, said) in enumerate(splits):
         off = Path(tmp) / f'split-{index}.json'
         build(off)
         code, _out, err = _rebaseline(artifact, [counts[0], off], draws)
         assert code != 0, f'{why} recorded anyway: {err}'
+        assert said in err, err
         assert artifact.read_bytes() == before, (
             'a refused re-baseline wrote the artefact anyway')
 
