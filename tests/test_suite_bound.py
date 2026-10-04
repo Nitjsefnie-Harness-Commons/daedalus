@@ -47,7 +47,10 @@ _FAST_SUITE = "print('measured output arrived', flush=True)\n"
 # A suite that answers its platform's request: SIGTERM on POSIX, where
 # `pyproject.toml`'s `sigterm = true` saves what a terminated suite
 # measured; CTRL_BREAK on Windows, where only a HANDLED request keeps
-# anything. The marker below is the only evidence either way.
+# anything, and where the pending SIGBREAK is read only when the main
+# thread reaches the bytecode loop -- a blocking sleep would outlast the
+# grace unread, so the wedge cycles on a short sleep instead. The marker
+# below is the only evidence either way.
 _STOPPABLE_SUITE = """import os, signal, sys, time
 from pathlib import Path
 
@@ -63,7 +66,8 @@ def _stopped(signum, frame):
 
 signal.signal(getattr(signal, 'SIGBREAK', signal.SIGTERM), _stopped)
 print('wedged suite reached its own body', flush=True)
-time.sleep(120)
+while True:
+    time.sleep(0.05)
 """
 
 # A suite that IGNORES SIGTERM, and a child of its own that does the same.
@@ -190,16 +194,10 @@ def test_a_fast_suite_is_measured_and_not_reported_as_timed_out(tmp):
 def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
     """Which contract the launcher gives on THIS platform, asserted as such.
 
-    Both routes ask before they escalate, and each platform's request is
-    the one its suites can answer: SIGTERM on POSIX, where the coverage
-    collector's own `sigterm = true` saves what a terminated suite
-    measured, and CTRL_BREAK on Windows, where only a suite that HANDLES
-    the request keeps anything. The planted suite installs the handler
-    each platform asks with, and the record has to say the request was
-    made and taken.
-
-    The forced-only clause is refused on both halves: no record this
-    route can produce may say the tree died unasked again.
+    Both routes ask before they escalate, and the planted suite installs
+    the handler each platform asks with, so the record has to say the
+    request was made and taken. The forced-only clause is refused: no
+    record this route can produce may say the tree died unasked again.
     """
     marker = Path(tmp) / 'tree' / 'tests' / 'stopped.pid'
     try:
