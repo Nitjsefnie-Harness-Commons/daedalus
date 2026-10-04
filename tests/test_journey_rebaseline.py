@@ -481,7 +481,8 @@ def test_a_dropped_journey_carries_no_bound_with_it(tmp):
     remedy the command exists to provide the thing that refuses it: the
     hand-edit it was written to replace.
 
-    `_carried_tolerances` narrowed to the journeys the SET carries, and a
+    `journey_recording.carried_tolerances` narrowed to the journeys the SET
+    carries, and a
     dropped journey is in the set — so this starts from a legal document,
     the journey holding BOTH a count and a bound, and drives the whole
     command. A helper-level assertion would pass on a helper the caller
