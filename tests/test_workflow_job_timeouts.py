@@ -91,8 +91,6 @@ BOUNDED_JOB = (
     '      - run: echo hi\n')
 
 
-
-
 def test_each_unbounded_shape_is_named(tmp):
     """Every shape that fails to bound a job is a named violation."""
     cases = {

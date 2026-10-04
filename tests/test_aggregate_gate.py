@@ -127,10 +127,6 @@ MINE = _run(1, 'cancelled', '2026-09-07T10:00:00Z')
 NEWER = _run(2, 'success', '2026-09-07T10:05:00Z')
 
 
-
-
-
-
 def test_a_deliberate_cancel_fails(tmp):
     del tmp
     mod = _gate()
@@ -138,10 +134,6 @@ def test_a_deliberate_cancel_fails(tmp):
     assert verdict == 'cancelled-deliberate'
     assert verdict not in mod.GREEN
     assert 'deliberate' in message and 'suites=cancelled' in message
-
-
-
-
 
 
 def test_missing_context_fails_without_a_query(tmp):
@@ -249,8 +241,6 @@ def test_a_malformed_started_at_sorts_oldest_and_ignores_created_at(tmp):
     assert not mod.superseded(earlier, [broken, earlier])
 
 
-
-
 def test_the_raw_decoder_reads_whitespace_separated_documents(tmp):
     del tmp
     assert _gate()._decode('{"a": 1}\n  [2]') == [{'a': 1}, [2]]
@@ -271,8 +261,6 @@ def test_gh_read_turns_a_timeout_or_oserror_into_a_query_error(tmp):
         with mock.patch.object(mod.subprocess, 'run', side_effect=effect):
             error = _query_error(mod, lambda: mod.gh_read(['gh', 'api']))
         assert 'gh failed' in str(error), str(error)
-
-
 
 
 def test_gh_read_returns_the_stdout_when_gh_exits_zero(tmp):
