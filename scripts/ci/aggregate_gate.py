@@ -39,16 +39,15 @@ POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
 READ_TIMEOUT_S = 120
 # The poll bound IS the gitleaks job's own 10-minute backstop: no
 # queueing is left in it, so a scan unreported by then is refused rather
-# than waited on. The job this runs in carries timeout-minutes 20, and
-# FOUR reads spend wall time around that wait. TWO of them are BEFORE it:
-# own_run and branch_runs, both inside evaluate, which main() calls
-# before it reaches the scan. TWO can finish AFTER the deadline — the
-# poll whose read straddles it, because the deadline is checked only
-# after that read, and scan_jobs once that poll finds a completed run; the
-# loop either trips the deadline OR judges, and judging spends the jobs
-# read on top of its own. So the budget is bound + 4 x READ_TIMEOUT_S
-# against the 1200 s the job carries, which leaves 120 s of report
-# margin here.
+# than waited on. FOUR reads spend wall time around that wait. TWO of
+# them are BEFORE it: own_run and branch_runs, both inside evaluate,
+# which main() calls before it reaches the scan. TWO can finish AFTER the
+# deadline — the poll whose read straddles it, because the deadline is
+# checked only after that read, and scan_jobs once that poll finds a
+# completed run; the loop either trips the deadline OR judges, and
+# judging spends the jobs read on top of its own. So the budget is
+# bound + 4 x READ_TIMEOUT_S against the 1200 s the job carries, which
+# leaves 120 s of report margin here.
 DEFAULT_POLL_BOUND_S = 600.0
 POLL_INTERVAL_S = 20.0
 # A bound at or over the job's own 20-minute ceiling is a wait the runner
