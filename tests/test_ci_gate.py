@@ -115,8 +115,6 @@ def test_a_gating_run_is_present(tmp):
     assert mod.missing_required([_gate_run('tests')]) == []
 
 
-
-
 def test_the_name_matches_exactly(tmp):
     """`Tests` and `test` are different workflows. A case difference or a
     decorated spelling treated as the gate would reinstate the false green
@@ -516,8 +514,6 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
             f'ci_wait binds its own {name}; the filter must be ci_gate\'s')
 
 
-
-
 def test_an_unreadable_timestamp_ranks_as_the_absent_one(tmp):
     """What the ordering does with a stamp it cannot parse.
 
@@ -580,8 +576,6 @@ def test_a_naive_timestamp_is_read_as_utc(tmp):
         # either way and the control would be green with the defect in
         # place.
         assert set(anchors) == {'replace'}, sorted(set(anchors))
-
-
 
 
 def main():
