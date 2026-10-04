@@ -34,19 +34,24 @@ WORKFLOW = 'tests.yml'
 SECRETS_WORKFLOW = 'secrets.yml'
 SECRETS_JOB = 'gitleaks'
 POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
-# The gitleaks job's own 10-minute backstop plus queueing; the job this
-# runs in carries timeout-minutes 20, leaving 8 minutes to report.
-DEFAULT_POLL_BOUND_S = 720.0
-POLL_INTERVAL_S = 20.0
 # One `gh` read, bounded, because a hung query must not outlive the bound
 # it is being counted against.
 READ_TIMEOUT_S = 120
+# The gitleaks job's own 10-minute backstop plus queueing. FOUR reads can
+# sit beyond the bound, and the job this runs in carries timeout-minutes
+# 20: own_run and branch_runs on the cancelled-dependency path, the poll
+# whose read straddles the deadline, and scan_jobs after that poll finds a
+# completed run — the loop either trips the deadline OR judges, and the
+# judging exit spends the jobs read on top of its own. So the budget is
+# bound + 4 x READ_TIMEOUT_S, which leaves 120 s of report margin here.
+DEFAULT_POLL_BOUND_S = 600.0
+POLL_INTERVAL_S = 20.0
 # A bound at or over the job's own 20-minute ceiling is a wait the runner
 # cuts off mid-verdict, so the module refuses it rather than accept a
-# number that can no longer report. 900 s is where the stop sits: the
-# bound plus two READ_TIMEOUT_S reads still lands under the 1200 s
-# ceiling the job carries.
-MAX_POLL_BOUND_S = 900.0
+# number that can no longer report. 660 s is where the stop sits: it is
+# 60 s above the default and, with the four reads above, still lands
+# under the 1200 s ceiling the job carries.
+MAX_POLL_BOUND_S = 660.0
 STRICT = frozenset(
     {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
 ALLOWED = frozenset({'success', 'skipped'})

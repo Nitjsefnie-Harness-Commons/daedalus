@@ -55,6 +55,7 @@ def _run(rid, conclusion, started, workflow=11, **fields):
 
 
 def _recorder(own, pages, polls=None, jobs=None):
+    """A gh read; `polls` is one page-LIST per poll of the secrets wait."""
     calls = []
     remaining = list(polls or [[]])
 
@@ -478,7 +479,7 @@ def test_the_aggregate_job_runs_the_module(tmp):
                        ' || github.ref_name }}',
         'SECRETS_HEAD_SHA': '${{ github.event.pull_request.head.sha'
                             ' || github.sha }}',
-        'SECRETS_POLL_BOUND_S': '720',
+        'SECRETS_POLL_BOUND_S': '600',
     }
 
 
@@ -495,9 +496,9 @@ CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     """Absence is not an empty answer: this fixture shows both."""
     del tmp
-    # Scale: the poll interval — the 600 s poll carries no run yet.
+    # Scale: the poll interval — the 420 s poll carries no run yet.
     calls, verdict, message = _drive_scan(
-        [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0, EPOCH + 719.0))
+        [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 420.0, EPOCH + 590.0))
     assert verdict in _gate().GREEN, message
     assert 'gitleaks' in message and 'concluded success' in message, message
     assert len(_polls(calls)) == 3, calls
@@ -507,11 +508,11 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
     """The bound governs the CONTINUE, so a verdict found at it stands."""
     del tmp
     calls, verdict, message = _drive_scan(
-        [[], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 720.0))
+        [[], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0))
     assert verdict in _gate().GREEN, message
     assert len(_polls(calls)) == 2, calls
     calls, verdict, message = _drive_scan(
-        [[]], CLEAN_JOBS, (EPOCH, EPOCH + 720.0))
+        [[]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0))
     assert verdict == 'secrets-unreported'
     assert verdict not in _gate().GREEN
     assert 'secrets' in message and '720' in message, message
@@ -684,8 +685,8 @@ def test_the_poll_bound_fits_inside_the_job_timeout(tmp):
     bound = float(_gate_step()['env']['SECRETS_POLL_BOUND_S'])
     assert ceiling == 20, ceiling
     assert bound == mod.DEFAULT_POLL_BOUND_S, bound
-    assert bound + 2 * mod.READ_TIMEOUT_S < ceiling * 60, (bound, ceiling)
-    worst = mod.MAX_POLL_BOUND_S + 2 * mod.READ_TIMEOUT_S
+    assert bound + 4 * mod.READ_TIMEOUT_S < ceiling * 60, (bound, ceiling)
+    worst = mod.MAX_POLL_BOUND_S + 4 * mod.READ_TIMEOUT_S
     assert worst < ceiling * 60, worst
     assert 0 < mod.POLL_INTERVAL_S < bound, (mod.POLL_INTERVAL_S, bound)
 
