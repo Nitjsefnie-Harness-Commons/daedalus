@@ -111,7 +111,8 @@ def document_from(reports, recorded, restore=(), drop=(), draws=()):
                     recorded,
                     {name for name, count in journeys.items()
                      if count is not None},
-                    draws=draws, counter=counter),
+                    draws=draws, counter=counter,
+                    toolchain=toolchain, exclusions=exclusions),
                 'toolchain': toolchain,
                 'excluded_threads': exclusions,
                 # `None` rather than absent: every schema field is spelled
@@ -323,7 +324,8 @@ def run(measurements, artifact, remedy=None, restore=(), drop=(), draws=()):
             return 1
         pool_reports.append(report)
     try:
-        document = document_from(reports, journey_artifact.load(artifact),
+        recorded = journey_artifact.load(artifact)
+        document = document_from(reports, recorded,
                                  restore=restore, drop=drop,
                                  draws=pool_reports)
     except ValueError as error:
@@ -333,6 +335,20 @@ def run(measurements, artifact, remedy=None, restore=(), drop=(), draws=()):
     print(f'wrote {len(document["journeys"])} journeys to {artifact} from '
           f'{", ".join(str(path) for path in sources)}, denominated in '
           f'{document["counter"]}')
+    # Which bounds the pool moved and which it left — the two groups the
+    # pull-request body has to carry for a pool re-baseline, printed where
+    # the person who ran the command is looking: a pool that derives
+    # nothing must be visible, not a silent success.
+    own = recorded.get('tolerances') or {}
+    written = document.get('tolerances') or {}
+    derived = {name: written[name] for name in written if name not in own}
+    carried = sorted(name for name in written if name in own)
+    for name, value in sorted(derived.items()):
+        print(f'derived the tolerance for {name}: {value}')
+    if carried:
+        print(f'carried the tolerance for {", ".join(carried)}')
+    if pools and not derived:
+        print('the pool derived no bound; every tolerance carried')
     # What it stopped holding, and why — the two numbers the pull-request
     # body has to carry for a dropped journey, printed where the person who
     # ran the command is looking rather than left to be reconstructed from
