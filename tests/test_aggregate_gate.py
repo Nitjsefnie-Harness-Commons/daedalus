@@ -2,7 +2,7 @@
 """The aggregate gate: allowed sets, the superseded-cancel rule, the caller.
 
 aggregate_gate.py owns the whole decision; these drive it in-process and pin
-the workflow wiring: the checkout, the permissions, the env indirection.
+the wiring: the checkout, the narrowed permissions, the env indirection.
 """
 import contextlib
 import io
@@ -55,7 +55,6 @@ def _run(rid, conclusion, started, workflow=11, **fields):
 
 
 def _recorder(own, pages, polls=None, jobs=None):
-    """A gh read; `polls` is one page-list per poll of the secrets wait."""
     calls = []
     remaining = list(polls or [[]])
 
@@ -89,7 +88,6 @@ def _scan_job(conclusion='success', name='gitleaks'):
 
 
 def _scripted_clock(readings):
-    """A clock at its next reading each nap, then adding the interval."""
     later = list(readings)[1:]
     current = [readings[0]]
 
@@ -658,6 +656,7 @@ def _named_workflow(mod, constant):
 
 
 def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
+    """The gate matches `jobs[].name`: a declared `name:`, else the job id."""
     del tmp
     mod = _gate()
     assert _named_workflow(mod, 'WORKFLOW').is_file()
@@ -686,7 +685,8 @@ def test_the_poll_bound_fits_inside_the_job_timeout(tmp):
     assert ceiling == 20, ceiling
     assert bound == mod.DEFAULT_POLL_BOUND_S, bound
     assert bound + 2 * mod.READ_TIMEOUT_S < ceiling * 60, (bound, ceiling)
-    assert mod.MAX_POLL_BOUND_S < ceiling * 60, mod.MAX_POLL_BOUND_S
+    worst = mod.MAX_POLL_BOUND_S + 2 * mod.READ_TIMEOUT_S
+    assert worst < ceiling * 60, worst
     assert 0 < mod.POLL_INTERVAL_S < bound, (mod.POLL_INTERVAL_S, bound)
 
 
