@@ -461,6 +461,17 @@ def test_the_marker_step_is_the_claim_port_verbatim(tmp):
     assert steps[0] == MARKER_STEP
 
 
+def test_the_marker_step_precedes_the_gate_step(tmp):
+    """The comment's ordering claim: fail fast before the poll-bound verdict."""
+    del tmp
+    steps = (complete_job_mapping(_tests_yml(), 'aggregate') or {})['steps']
+    marker = next(i for i, s in enumerate(steps)
+                  if s.get('name') == MARKER_STEP['name'])
+    gate = next(i for i, s in enumerate(steps)
+                if s.get('run') == GATE_RUN)
+    assert marker + 1 == gate, steps
+
+
 def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
     del tmp
     pins = set(re.findall(r'actions/checkout@([0-9a-f]{40})', _tests_yml()))
