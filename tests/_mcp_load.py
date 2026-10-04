@@ -34,20 +34,16 @@ TOK = 'mcptok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
 
 # The listener's bind re-reads the process environment after the load's
-# isolation has ended, so the token it authenticates against has to be in the
-# environment and not only in the mapping the load applied. This publication
-# therefore belongs to the fixture that owns the token, not to whichever suite
-# happened to import it: a suite that imported a sibling for this side effect
-# was reading a copy of another suite's environment, which is the defect this
-# module exists to end.
+# isolation has ended, so the token has to be published here, beside the
+# fixture that owns it — a suite that imported a sibling for this side
+# effect read a copy of another suite's environment.
 os.environ.update(BRIDGE_ENV)
 
 
 class _FakeUvicornServer:
-    """Stands where uvicorn.Server stands, minus the OS behind it.
-
-    `handed` and `built` are class state so the front end can be subclassed
-    the way it subclasses the real one: `_serve` derives its own Server from
+    """Stands where uvicorn.Server stands, minus the OS behind it: `handed`
+    and `built` are class state so the front end can be subclassed the way
+    it subclasses the real one — `_serve` derives its own Server from
     whatever `uvicorn.Server` names, and a lambda is not a base class.
     """
     handed = []
@@ -56,14 +52,22 @@ class _FakeUvicornServer:
     def __init__(self, config):
         self.config = config
         self.server_state = types.SimpleNamespace(default_headers=[])
+        self.should_exit = False
         type(self).built.append(self)
 
     async def on_tick(self, counter):
         del counter
         return False
 
+    async def startup(self, sockets=None):
+        pass
+
     def run(self, sockets=None):
         type(self).handed.extend(sockets or ())
+        async def serve():
+            await self.startup(sockets)
+            self.should_exit = True
+        asyncio.run(serve())
 
 
 class _FakeConfig:
@@ -105,11 +109,9 @@ def _serve_with_fake_uvicorn(mod):
 
     The fake stands where uvicorn.Config, uvicorn.Server and the HTTP
     protocol class stand, and records the sockets it was handed instead of
-    serving them; the caller closes any real socket in that list. The
-    bound-port banner is captured and returned beside `handed`, so the
-    suite's streams stay verdict-only. `built` is the Server instances the
-    front end constructed, so a caller can tell a derived class from the
-    base it was derived from.
+    serving them; the caller closes any real socket in that list. `built`
+    is what the front end constructed, so a caller can tell a derived
+    class from the base it was derived from.
     """
     handed, built, banner = [], [], io.StringIO()
     names = {'Config': _FakeConfig,
@@ -203,9 +205,7 @@ def _start_mcp_in_process(base, max_body_size=None, diagnostics=None):
 
     `diagnostics`, when given, receives the captured (stdout, stderr) texts.
     Neither capture is raced: the banner precedes the listener's first
-    accepted request and the crash print precedes the serve thread's exit,
-    so the success wait and the crash join end the redirect only after the
-    print has flushed.
+    accepted request and the crash print precedes the serve thread's exit.
     """
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

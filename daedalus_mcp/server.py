@@ -224,12 +224,14 @@ def _idle_server_class():
     `main_loop` is that 0.1 s poll back, with no error and no traceback. A
     renamed `startup` skips refresh_default_headers, and ServerState starts
     with an empty header list, so every request uvicorn refuses below ASGI
-    ships with no Date and no server header. `should_exit` is an attribute
-    this subclass replaces with a property, so a rename to a different
-    attribute leaves the property in place and permanently False: on_tick's
-    `if self.should_exit` never reads true and a graceful exit silently
-    never happens. `on_tick` we CALL rather than override, so its rename is
-    an AttributeError on the first request — the good case.
+    ships with no Date and no server header — and no announcement, which
+    this override prints once the serve is actually up, so the harness's
+    readiness wait fails loudly at its 900s bound. `should_exit` is an
+    attribute this subclass replaces with a property, so a rename to a
+    different attribute leaves the property in place and permanently False:
+    on_tick's `if self.should_exit` never reads true and a graceful exit
+    silently never happens. `on_tick` we CALL rather than override, so its
+    rename is an AttributeError on the first request — the good case.
     `config.http_protocol_class` is the silent one: a uvicorn that stopped
     reading it in `create_protocol` and cached the class elsewhere would
     leave this branch noticing nothing while the per-connection refresh
@@ -268,6 +270,8 @@ def _idle_server_class():
         async def startup(self, sockets=None):
             await super().startup(sockets=sockets)
             self.refresh_default_headers()
+            print(f'[MCP] streamable-http on 127.0.0.1:{bound_port}',
+                  flush=True)
 
         def refresh_default_headers(self):
             """Rebuild `default_headers` the way uvicorn's own tick does.
@@ -357,7 +361,6 @@ def _serve():
         sock.bind(('127.0.0.1', MCP_PORT))
         bound_port = sock.getsockname()[1]
         _bound.set()
-        print(f'[MCP] streamable-http on 127.0.0.1:{bound_port}', flush=True)
         # The middleware reads the server from `scope['app']`, so publish
         # it there before `run` hands the socket over.
         app.state.server = server = _idle_server_class()(config)

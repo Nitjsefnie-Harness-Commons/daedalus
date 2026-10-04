@@ -20,6 +20,7 @@ import re
 import socket
 import subprocess
 import sys
+import types
 import threading
 import time
 from pathlib import Path
@@ -37,8 +38,7 @@ if DEPS:
     logging.getLogger('mcp').setLevel(logging.WARNING)  # quiet mcp INFO logs
 
 # The shared load-and-drive helpers, bound from `_mcp_load` and read by
-# this suite's own cases. No tracked module imports this suite's
-# namespace — the two that did now import `_mcp_load` under that name.
+# this suite's own cases.
 TOK, BRIDGE_ENV = _mcp_load.TOK, _mcp_load.BRIDGE_ENV
 _need_deps = _mcp_load._need_deps
 _load_mcp = _mcp_load._load_mcp
@@ -102,11 +102,6 @@ def _bridge_with_live_mcp(tmp, env):
 def test_the_dependency_check_is_one_shared_definition(tmp):
     """`DEPS`/`_need_deps` decide skip-or-run for every MCP suite at once.
 
-    A shared copy that is subtly wrong does not fail loudly: it makes each
-    caller SKIP, so a broken front end reads green. What counts as present, and
-    the refusal a missing dependency gets, are therefore pinned here rather
-    than left to hold only because of where the helper was defined.
-
     The flag is put back in a `finally` on BOTH arms, because leaving it False
     does not fail this test — it disarms every test that runs after it, which
     is the same false green this control exists to prevent, one level down.
@@ -122,8 +117,6 @@ def test_the_dependency_check_is_one_shared_definition(tmp):
         _mcp_load._need_deps()
     finally:
         _mcp_load.DEPS = DEPS
-    # Absent: a skip naming the three, not a pass and not a failure — a suite
-    # that failed on a missing optional front end would be wrong.
     _mcp_load.DEPS = False
     try:
         _mcp_load._need_deps()
@@ -137,21 +130,12 @@ def test_the_dependency_check_is_one_shared_definition(tmp):
     assert _mcp_load.DEPS, 'the check left the suite disarmed'
     assert _mcp_load.TOK is TOK and _mcp_load.BRIDGE_ENV is BRIDGE_ENV, (
         'the bridge fixture has a second home')
-    # The bind re-reads the environment, so the token the listener
-    # authenticates against has to be published, not only mapped. Asserting
-    # the value rather than the presence keeps this from passing on a runner
-    # that happens to export a DAEDALUS_TOKEN of its own.
     assert os.environ.get('DAEDALUS_TOKEN') == TOK, (
         'the fixture no longer publishes the token the bind re-reads')
 
 
 def test_wait_for_mcp_refuses_a_non_mcp_listener(tmp):
-    """A foreign listener on the MCP port must fail the probe, not authenticate.
-
-    The readiness probe used to accept any TCP listener, so a bridge that won
-    the port race made every later MCP request fail 'authentication' with the
-    bridge's bad-token 400 — a misleading diagnosis for a port collision.
-    """
+    """A foreign listener on the MCP port must fail, not authenticate."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         port = int(base.rsplit(':', 1)[1])
         try:
@@ -166,8 +150,6 @@ def test_wait_for_mcp_refuses_a_non_mcp_listener(tmp):
 def test_module_imports_and_exposes_tools(tmp):
     _need_deps()
     mod = _load_mcp('http://127.0.0.1:1')  # URL unused here
-    # FastMCP's @tool() returns the original coroutine functions, so the tool
-    # surface is directly callable.
     for name in ('list_tabs', 'ping', 'navigate', 'screenshot',
                  'segment_status'):
         fn = getattr(mod, name, None)
@@ -175,13 +157,9 @@ def test_module_imports_and_exposes_tools(tmp):
 
 
 def test_local_url_derives_from_the_bridge_port(tmp):
-    """The MCP bridge client follows DAEDALUS_PORT unless explicitly overridden.
-
-    The module once hard-defaulted 127.0.0.1:8081 and sent every tool call to
-    the wrong local port on any other documented DAEDALUS_PORT.
-    DAEDALUS_LOCAL_URL remains the explicit override for a standalone
-    deployment.
-    """
+    """The MCP bridge client follows DAEDALUS_PORT unless explicitly
+    overridden; DAEDALUS_LOCAL_URL remains the explicit override for a
+    standalone deployment."""
     del tmp
     _need_deps()
 
@@ -318,8 +296,6 @@ def test_mcp_lifespan_closes_loop_clients(tmp):
 
     mod.mcp.streamable_http_app = capture_app
 
-    # The shared fake stands where Config, Server and the HTTP protocol
-    # class stand; this suite only needs its sockets closed on the way out.
     handed, banner, _built = _mcp_load._serve_with_fake_uvicorn(mod)
     for server_socket in handed:
         server_socket.close()
@@ -396,10 +372,8 @@ def test_start_in_thread_rejects_a_second_start(tmp):
 
 def _serve_crash_line(mod, failure):
     """Run _serve with its app factory raising `failure`, capturing the crash
-    line through a strict-encoding stderr — the condition that used to turn
-    the diagnostic itself into the traceback."""
-    # The stub stands in for the real factory, which _serve calls with the
-    # transport-security settings, so it has to accept what that call passes.
+    line through a strict-encoding stderr."""
+    # The stub takes what _serve passes the real factory.
     def crash(**_settings):
         raise failure
     mod.mcp.streamable_http_app = crash
@@ -423,7 +397,6 @@ def test_serve_crash_line_survives_a_broken_str(tmp):
 
     line = _serve_crash_line(mod, BrokenStr('x'))
     assert '[MCP] serve crashed: <unprintable value>' in line, line
-    # An ordinary exception message still arrives in full.
     line = _serve_crash_line(mod, Exception('bind failed'))
     assert '[MCP] serve crashed: bind failed' in line, line
 
@@ -438,13 +411,8 @@ def test_serve_crash_line_survives_a_surrogate_under_strict_stderr(tmp):
 
 
 def test_serve_crash_line_survives_a_hostile_decode_return(tmp):
-    """A decode() returning a non-string must not reach the crash line's f-string.
-
-    The exception's __str__ hands back a str subclass whose decode() returns
-    an object with a raising __format__: pre-fix the helper returned it
-    verbatim, the f-string raised RuntimeError, and the operator got zero
-    stderr bytes — worse than the unguarded interpolation it replaced.
-    """
+    """A decode() returning a non-string must not reach the crash line's
+    f-string: pre-fix the operator got zero stderr bytes."""
     del tmp
     _need_deps()
     mod = _load_mcp('http://127.0.0.1:1')
@@ -454,7 +422,6 @@ def test_serve_crash_line_survives_a_hostile_decode_return(tmp):
             raise RuntimeError('evil format')
 
     class HostileChain(str):
-        # The invalid shape is the point: str() hands back this subclass.
         def __str__(self):  # pylint: disable=invalid-str-returned
             return self
 
@@ -475,12 +442,10 @@ def test_serve_crash_line_survives_a_hostile_decode_return(tmp):
 
 
 def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
-    """The refusal has to land before the PUT, not after it.
+    """A non-positive timeout is refused before any command is submitted.
 
-    poll_result evaluates the deadline only after the command has been
-    submitted, so a non-positive timeout polled zero times, raised a timeout
-    for a command the browser had already been handed, and left the caller
-    believing nothing ran.
+    The deadline is evaluated by poll_result, which runs after the command
+    has been handed to the browser.
     """
     _need_deps()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
@@ -606,14 +571,9 @@ def test_mcp_uses_the_shared_log_safe_function(tmp):
 
 
 def test_the_shared_contract_catches_a_divergent_copy(tmp):
-    """Proof the anti-drift control has teeth: a divergent helper must fail it.
-
-    The generator must keep a standalone implementation because its script
-    import path excludes the repository root, so it is the surviving copy
-    that can drift independently. The divergent helper below keeps the
-    contract's exact shape and swaps one decode for ascii/replace, diverging
-    only on ordinary non-ASCII.
-    """
+    """Proof the anti-drift control has teeth: a divergent helper must fail
+    it. The generator keeps a standalone implementation, so it is that copy
+    which can drift; the helper below diverges only on non-ASCII."""
     del tmp
     generator = _util.load(
         _util.ROOT / 'scripts' / 'gen_gitignore.py',
@@ -625,7 +585,6 @@ def test_the_shared_contract_catches_a_divergent_copy(tmp):
                 'utf-8', 'backslashreplace').decode('ascii', 'replace')
         except Exception:
             return '<unprintable value>'
-        # Exact type, not isinstance: mirrors the contract's guard.
         if type(rendered) is not str:  # pylint: disable=unidiomatic-typecheck
             return '<unprintable value>'
         return rendered
@@ -659,9 +618,8 @@ def _relative_or_synthetic(target):
 
     Windows puts the temporary directory and the checkout on different
     drives, and os.path.relpath raises rather than answering across a mount
-    boundary. What the caller needs is a path-shaped argument the MCP tools
-    must refuse; whether it resolves to the sentinel is beside the point,
-    because the refusal happens at the schema before any filesystem access.
+    boundary; the caller needs only a path-shaped argument the MCP tools
+    must refuse, so whether it resolves to the sentinel is beside the point.
     """
     try:
         return os.path.relpath(target, _util.ROOT)
@@ -838,7 +796,7 @@ def test_ping_tool_round_trip(tmp):
             except Exception as exc:  # test-thread diagnosis, surfaced below
                 failure.append(exc)
 
-        # Execution channels round-trip verbatim, without implying trust.
+        # Execution channels round-trip verbatim.
         for world in ('cdp', 'page:scripting'):
             t = threading.Thread(target=extension, args=(world,))
             t.start()
@@ -924,7 +882,6 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
-        # Own job: the tool re-fetches the minted sig and reads status back.
         status, _ = _util.post_json(base + '/segment-job',
                                     {'token': TOK, 'job': 'mcpjob'})
         assert status == 200, status
@@ -995,10 +952,7 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
 def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):
     """Credentials are decided before the body is parsed, and it is capped.
 
-    The middleware used to parse the whole POST body before the Authorization
-    header was read; observable through the diagnostic: a duplicate-`job`
-    body answered 400 without credentials, now answers 401. Size is pinned
-    separately, since only an authenticated caller reaches the cap.
+    Size is pinned separately: only an authenticated caller reaches the cap.
     """
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
@@ -1016,7 +970,6 @@ def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):
             headers={'Content-Type': 'application/json'})
         assert status == 401, (status, body)
 
-        # The same body WITH credentials still gets the duplicate refusal.
         status, body = _util.request(
             url, 'POST', body=duplicate_carrier,
             headers={'Content-Type': 'application/json',
@@ -1381,12 +1334,58 @@ def test_mcp_port_zero_announces_the_actual_bound_port(tmp):
     with contextlib.redirect_stdout(out):
         _start_in_thread(mod)
         assert mod._bound.wait(timeout=10), mod.startup_error or 'never bound'
+        deadline = time.time() + 10
+        while (time.time() < deadline and not out.getvalue().strip()
+               and not mod.startup_error):
+            time.sleep(0.05)
     line = out.getvalue().strip()
     assert f'127.0.0.1:{mod.bound_port}' in line, line
     assert mod.bound_port > 0, line
     assert mod.bridge.transport._base_url == (
         'http://127.0.0.1:1'), mod.bridge.transport._base_url
     _wait_for_mcp(mod.bound_port)
+
+
+def test_mcp_announces_the_port_once_the_front_end_serves(tmp):
+    """The port announcement waits for serve startup; bind time is not
+    ready: the journey harness tears its baseline down on this line, and
+    a line printed at bind never pays uvicorn's serve startup.
+    """
+    del tmp
+    _need_deps()
+    banner, order, handed = io.StringIO(), [], []
+
+    class Server(_mcp_load._FakeUvicornServer):
+        def run(self, sockets=None):
+            handed.extend(sockets or ())
+            async def serve():
+                order.append(
+                    ('run-begin', 'streamable-http' in banner.getvalue()))
+                await self.startup(sockets)
+                self.should_exit = True
+                order.append(
+                    ('startup-done', 'streamable-http' in banner.getvalue()))
+            asyncio.run(serve())
+
+    mod = _load_mcp_at_port('http://127.0.0.1:1', 0)
+    fake = types.ModuleType('uvicorn')
+    fake.__dict__.update({'Config': _mcp_load._FakeConfig,
+                          'Server': Server,
+                          'Protocol': _mcp_load._FakeProtocol})
+    previous = sys.modules.get('uvicorn')
+    sys.modules['uvicorn'] = fake
+    try:
+        with contextlib.redirect_stdout(banner):
+            mod._serve()
+    finally:
+        if previous is None:
+            sys.modules.pop('uvicorn', None)
+        else:
+            sys.modules['uvicorn'] = previous
+        for server_socket in handed:
+            server_socket.close()
+    assert not mod.startup_error, mod.startup_error
+    assert order == [('run-begin', False), ('startup-done', True)], order
 
 
 def test_the_mcp_fixture_ignores_a_squatted_draw(tmp):

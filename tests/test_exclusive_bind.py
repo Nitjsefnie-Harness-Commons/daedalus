@@ -19,6 +19,8 @@ lands, when it lands relative to the app, and that the loop it replaced
 armed nothing.
 """
 import asyncio
+import contextlib
+import io
 import socket
 import sys
 import types
@@ -325,10 +327,8 @@ def _freeze_the_front_end_clock(mod, at=FROZEN):
 
 
 def test_serve_hands_uvicorn_a_derived_server(tmp):
-    """`_serve` must hand `run` a subclass, not uvicorn's own Server. Watching
-    `run` be called with the bound socket passes on a tree that polls ten
-    times a second forever, so the derived class itself is the thing pinned
-    here: issue 1444 is the base class's serve loop, and the fake base
+    """`_serve` must hand `run` a subclass, not uvicorn's own Server: the
+    derived class itself is the thing pinned here, and the fake base
     carries neither of the two members the derived one owns."""
     del tmp
     _mcp_load._need_deps()
@@ -604,7 +604,8 @@ def test_startup_populates_the_headers_a_below_asgi_refusal_sends(tmp):
     original = uvicorn.Server.startup
     uvicorn.Server.startup = base_startup
     try:
-        asyncio.run(server.startup(sockets=None))
+        with contextlib.redirect_stdout(io.StringIO()):
+            asyncio.run(server.startup(sockets=None))
     finally:
         uvicorn.Server.startup = original
     assert reached == [None], reached
