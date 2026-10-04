@@ -84,7 +84,7 @@ def _secrets_run(rid, conclusion='success', status='completed',
 
 
 def _scan_job(conclusion='success', name='gitleaks'):
-    return {'name': name, 'status': 'completed', 'conclusion': conclusion}
+    return {'id': 1, 'name': name, 'conclusion': conclusion}
 
 
 def _scripted_clock(readings):
@@ -625,15 +625,15 @@ def _gate_step():
     return steps[0]
 
 
-def test_a_malformed_identity_is_refused_rather_than_read(tmp):
-    """`scan_jobs` refuses what it cannot vouch for; the gate then reds."""
+def test_an_unidentified_identity_is_refused_rather_than_read(tmp):
+    """What the API will not identify is not read, and the gate reds."""
     del tmp
     mod = _gate()
-    assert mod.scan_jobs('o/r', '7a', lambda _argv: '') is None
-    assert mod.scan_jobs('not-a-repo', 7, lambda _argv: '') is None
-    # A blank id reaches the guard; `_started_key` raises on any other.
-    _calls, verdict, _message = _drive_scan([[_secrets_run('')]], CLEAN_JOBS)
-    assert verdict == 'secrets-query-failed'
+    for repository, run_id in (('o/r', '7a'), ('not-a-repo', 7)):
+        assert mod.scan_jobs(repository, run_id, lambda _argv: '') is None
+    for polls in ([[_secrets_run('7a')]], [[{'id': '7a'}]]):
+        _calls, verdict, _message = _drive_scan(polls, CLEAN_JOBS)
+        assert verdict == 'secrets-query-failed', polls
 
 
 def test_a_refused_poll_bound_reaches_the_verdict(tmp):
