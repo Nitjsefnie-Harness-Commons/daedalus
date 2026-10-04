@@ -215,10 +215,15 @@ never raised by hand, and there is no command that raises one: the test tree
 pays for growth by deleting as many lines elsewhere under `tests/` as the
 change added. The remedy for a refusal is therefore a deletion, not a
 re-baseline, and the fall is recorded with
-`python3 scripts/ci/tests_lines.py --tighten`. A pull request is checked on
-its MERGE ref, so a branch that net-adds lines goes red on merge however few
-it adds at its head. `tests/test_ci_thresholds.py` gates the policy and
-reads this paragraph the same way.
+`python3 scripts/ci/tests_lines.py --tighten`. The row's first recorded
+value is a seed, taken at the count the gate measures, so the seed absorbs
+whatever the introducing branch added under `tests/`: the recorded number
+stands above main's own count by that branch's net growth rather than by a
+raise, and no number main carried is increased. Once the branch merges, the
+push-to-main publisher tightens the row from there. A pull request is
+checked on its MERGE ref, so a branch that net-adds lines goes red on merge
+however few it adds at its head. `tests/test_ci_thresholds.py` gates the
+policy and reads this paragraph the same way.
 
 **The same file's `js_coverage_baseline` holds the per-module JavaScript
 coverage policy on the same terms.** It records how many uncovered
