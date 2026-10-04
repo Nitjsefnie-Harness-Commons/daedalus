@@ -314,7 +314,7 @@ def test_the_pip_install_reader_refuses_what_it_cannot_model(tmp):
 
 
 def test_ci_tool_pins_are_visible_to_dependabot(tmp):
-    """Every CI-tool install resolves its pin from a `-r` manifest."""
+    """CI-tool installs resolve their pins from watched `-r` manifests."""
     del tmp
     assert_ci_tool_pins_live_in_a_watched_manifest()
 
@@ -462,12 +462,10 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     """The sdist ships as unproven as the wheel is proven.
 
     release.yml checksums, attests and uploads dist/*.tar.gz, and the wheel
-    job built that wheel alone — nothing installed the sdist, and nothing ran
-    twine over either artifact. A tarball missing a file it needed would have
-    gone public green, because a checksum and an attestation describe what was
-    built, never whether it builds. There is no MANIFEST.in, so a clean
-    install of the tarball is also the only thing that reads the file list
-    setuptools inferred.
+    job built that wheel alone — nothing installed the sdist or ran twine
+    over it, so a tarball missing a file it needed would have gone public
+    green. No MANIFEST.in either: a clean install is the only thing that
+    reads the file list setuptools inferred.
     """
     del tmp
     workflow = _tests_yml()
@@ -479,9 +477,10 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     # defect this job exists to keep out.
     assert 'python -m build\n' in build, build
     assert '--wheel' not in build, build
-    # twine is a CI tool like any other here: pinned exactly, never floated.
-    install = 'python -m pip install --upgrade pip build twine==7.0.0'
+    install = 'pip install -r requirements-release.txt'
     assert install in build.splitlines(), build
+    assert '==' not in build, build
+    assert '--upgrade pip' not in build, build
 
     check = step_scalar(workflow, 'wheel', 'Check both artifacts render',
                         'run')
@@ -614,6 +613,7 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
         'pyproject.toml': 'pip',
         'requirements-dev.txt': 'pip',
         'requirements-pip-audit.txt': 'pip',
+        'requirements-release.txt': 'pip',
         'requirements-test.txt': 'pip',
         'requirements-zizmor.txt': 'pip',
         'package.json': 'npm',
