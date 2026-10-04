@@ -272,8 +272,6 @@ def _dropped(recorded, names):
 
 def _paths(value):
     """One path or many, as a list: one file is the commonest case."""
-    if value is None:
-        return []
     if isinstance(value, (str, Path)):
         return [value]
     return list(value)
