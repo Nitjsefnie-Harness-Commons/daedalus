@@ -290,8 +290,7 @@ def test_every_tool_the_installer_recorded_resolves_on_path(tmp):
 
     The early return is a SKIP carrying its reason, not a bare pass. A run
     log has to distinguish "ran, and every tool resolved" from "did not
-    run", and a control whose subject is this branch's whole motivation
-    cannot be the one that reports nothing about itself.
+    run", so the control never reports nothing about itself.
     """
     del tmp
     recorded = os.environ.get(LINT_TOOLS_ENV)

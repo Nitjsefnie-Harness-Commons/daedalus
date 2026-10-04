@@ -385,10 +385,8 @@ def test_the_statuses_a_body_is_read_on_are_exactly_three(tmp):
     `test_ci_wait_published.py`, for the same reason: a widening is a
     member this file's rows have no name for.
 
-    So the class the report left open BY NATURE - "no finite row set
-    proves every other status" - is true of a behavioural row set and
-    false of this one. `client` is loaded for its side effect: `gh_client`
-    does `from gh_rate_limit import exhausted`, so the set this reads is
+    `client` is loaded for its side effect: `gh_client` does
+    `from gh_rate_limit import exhausted`, so the set this reads is
     the object the client itself is holding.
     """
     del tmp
@@ -532,9 +530,7 @@ def test_every_spelling_of_the_report_is_read_and_a_lookalike_is_not(tmp):
     Driven on a 500, and the status is the load-bearing part of the
     fixture. An answer the body carrier is also asked spells the two
     words in its own JSON, so a suite proving the `errors[]` entry was
-    read could be proving the body text was read instead - which is
-    exactly what happened the first time this fixture was a 200, and why
-    dropping `code` from the pair of fields read left it green. On a
+    read could be proving the body text was read instead. On a
     status the body is not read on, the entry's own `code` is the only
     witness there is.
 

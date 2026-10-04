@@ -64,8 +64,6 @@ CALLS = re.compile(r'^calls=\d+(?:[ \t]+\d+)*$')
 # the instruction count of the position(s) before it.
 COST = re.compile(r'^\d+(?:[ \t]+\d+)*$')
 
-# How many functions one row keeps. A breakdown cap, not a partition: the
-# top functions by self total, ordered, and nothing claimed about the rest.
 BREAKDOWN_CAP = 64
 
 
@@ -91,12 +89,9 @@ def _self_totals(text):
     why the declaration pattern is the reader's own `FN`, which does not
     match the bare form either.
 
-    Only a `fn=` declaration moves the function a cost line bills to. A
-    `cfn=` names the callee of the call priced next; it opens no self
-    context of its own, and the cost lines after the call arc are the
-    caller's self again with no new `fn=` line announcing them -- which is
-    why a `cfn=`-only name is entered at 0 rather than left out: the row
-    says the function declared itself and paid nothing of its own.
+    A `cfn=` never moves self context (the module docstring's switching
+    rule); a `cfn=`-only name is entered at 0 rather than left out, so the
+    row says the function declared itself and paid nothing of its own.
     """
     totals = {}
     current = None
