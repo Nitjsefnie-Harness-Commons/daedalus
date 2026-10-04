@@ -1,4 +1,4 @@
-"""Structural readers for the job graph in tests.yml."""
+"""Structural readers for a workflow's job graph."""
 from _ghexpr import ExpressionError, evaluate, evaluate_if, sole_context_path
 from _repo import ROOT
 from _yamlread import (
