@@ -5,13 +5,9 @@ The files under `tests/fixtures/journey_profiles/<journey>/` are excerpts of
 profiles a real `python3 tests/_journeys.py --journey <name>` run produced on
 CPython 3.13.14 under valgrind 3.24.0 with `--separate-threads=yes` and
 `--trace-children=yes`. Three runs are kept: `bridge-only` (the baseline
-child), `command-round-trip` and `mcp-exec`.
-
-They exist because every other control in the tree classifies a profile whose
-`fn=` lines ARE the constants under test. Such a control passes by
-construction and cannot see a shape it was written from — which is how a
-seven-symbol event-loop signature that appears nowhere in a real profile, and
-a `fn=`/`cfn=` split that flips run to run, both reached a green branch.
+child), `command-round-trip` and `mcp-exec`. They exist because a control
+built from the constants it tests passes by construction; these are the real
+shapes.
 
 WHAT AN EXCERPT KEEPS, cut mechanically so it can be cut again and compared:
 

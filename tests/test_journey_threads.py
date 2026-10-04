@@ -81,10 +81,9 @@ def front_end_symbol():
 def test_the_reader_collects_the_names_a_thread_declared(tmp):
     """`fn=(id) name` names a symbol; `fn=(id)` only repeats one.
 
-    A thread's identity is read from what it entered, so the reader has to
-    keep the names and nothing else. An unnamed repeat carries the id of a
-    name declared earlier in the same file, and inventing a name for it
-    would put a symbol in the set that no call ever named.
+    An unnamed repeat carries the id of a name declared earlier in the
+    same file, and inventing a name for it would put a symbol in the set
+    that no call ever named.
     """
     classifier = _journey_contract.threads()
     directory = Path(tmp)
@@ -562,20 +561,12 @@ def test_every_journey_says_which_roles_it_stops_counting(tmp):
     # The other half of the module docstring's rule, stated over the TABLE
     # rather than over a journey: the two roles a journey's own process
     # produces are reachable by no list at all, and `journey_artifact`
-    # refuses either by name. The import half — every journey drops the
-    # bridge's bootstrap — is its own control, derived from `NAMES`. A
-    # docstring naming a journey where a shape statement will do would be a
-    # second copy of the table, and a table entry moved changes both.
+    # refuses either by name.
     own_process = {threads.MAIN, threads.REQUEST}
     assert own_process.isdisjoint(
         {role for roles in threads.EXCLUDED.values() for role in roles}), \
         threads.EXCLUDED
-    # The serve role is the OTHER constant, and the table splits on it: two
-    # journeys exercise the bridge's HTTP surface and none of the front end's
-    # event loop, some call that loop, and `net-capture` counts the bridge's
-    # own per-connection handling of the capture, which carries the loop's
-    # tick in as a residual. The invariant this replaced pinned the split as
-    # a side effect of naming one journey.
+    # The serve role is the OTHER constant, and the table splits on it.
     keeps_serve = [roles for roles in threads.EXCLUDED.values()
                    if threads.SERVE not in roles]
     assert keeps_serve, threads.EXCLUDED
@@ -585,18 +576,6 @@ def test_every_journey_says_which_roles_it_stops_counting(tmp):
 def test_every_journey_drops_the_front_ends_bootstrap_import(tmp):
     """The import is one thread of the BRIDGE, so no journey's own work is
     behind it and every journey stops counting it.
-
-    The bootstrap is the one background thread whose cost does not repeat:
-    five rounds of identical code on one runner measured 4,015,865,696 to
-    4,020,617,049 instructions, a range of 0.118% of the smaller figure.
-    The 1.14% issue 1495 records for a journey keeping it is its own
-    six-draw whole-journey `max/min - 1`, a second measurement rather than
-    a consequence of that range. `net-capture` is the case that made it
-    safe: under size bands a thread that journey put to work measured 2.10
-    billion instructions and landed in the import band beside the bootstrap,
-    so dropping the import there would have dropped the work the journey
-    exists to measure. Roles are decided by the process a thread ran in now,
-    so no importing request thread can claim the role whatever its size.
 
     Derived from `NAMES` through `excluded_for`, so a journey added to that
     list and given an entry that keeps the import fails here. A hand-written
@@ -662,18 +641,11 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
             f'{name} is recorded as {recorded.get(name)} and the table '
             f'excludes {applied}, so this artefact counts a different '
             'quantity from the table a run classified the profile under')
-    # The pool convention, final form: a per-journey entry exists ONLY
-    # where the pooled spread exceeds tolerance_pct — the default is a
-    # floor, never a ceiling to tighten under — so every entry in the
-    # block is strictly above the default, and every journey at or below
-    # it carries tolerance_pct. `net-capture` is named because its draws
-    # are the narrowest the pool has seen, the journey the floor most
-    # often removes; the control pins the convention, not today's data —
-    # an above-floor re-derivation of it would carry an entry like any
-    # other. Where a draw may sit from the recorded count is the budget
-    # gate's question, not this one; the bound the gate enforces is read
-    # through `tolerance_of`, which prefers a journey's own entry over
-    # the default.
+    # The pool convention: a per-journey entry exists ONLY where the pooled
+    # spread exceeds tolerance_pct — the default is a floor, never a
+    # ceiling to tighten under — so every entry in the block is strictly
+    # above the default. Where a draw may sit from the recorded count is
+    # the budget gate's question, read through `tolerance_of`.
     own = document.get('tolerances') or {}
     assert all(value > document['tolerance_pct']
                for value in own.values()), (

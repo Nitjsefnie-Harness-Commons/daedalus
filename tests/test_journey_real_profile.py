@@ -5,16 +5,11 @@ Every other control in this tree classifies a profile whose `fn=` lines ARE
 the constants under test, so it passes by construction and cannot see a
 shape it was written from. These four drive the shipped reader over profiles
 a real journey run produced, kept under `tests/fixtures/journey_profiles/`
-and described in `tests/_journey_profile_fixture.py`.
-
-What they are for is not coverage. It is that the reading this branch
-settled on was checked against the thing it reads: a seven-symbol
-event-loop signature that appears on no thread of any preserved profile, a
-front-end symbol declared `fn=` in one run and `cfn=` on the same thread in
-the next, and — the one that would have cost a journey its own work — the
+and described in `tests/_journey_profile_fixture.py`: a front-end symbol
+declared `fn=` in one run and `cfn=` on the same thread in the next, the
 harness process's own MCP client thread carrying every symbol the front
-end's import could be named from. All three passed every suite that wrote
-its own profile.
+end's import could be named from, and a profile shape no synthetic fixture
+wrote.
 """
 import sys
 from pathlib import Path

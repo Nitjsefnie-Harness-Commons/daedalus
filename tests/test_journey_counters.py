@@ -524,12 +524,8 @@ def test_the_shape_is_a_plain_run_of_each_journey(tmp):
 def test_a_callgrind_round_counts_the_last_one_not_the_sum_of_them(tmp):
     """Every round writes into the same workdir under the same prefix, so
     a round that did not clear the previous round's files would report a
-    count that grows with the round number.
-
-    The out-file argument is asserted whole and built from the workdir this
-    test hands the module, which is how the module builds it: a `Path`
-    interpolated plainly, so the platform spells the separator.
-    """
+    count that grows with the round number. The out-file argument is
+    asserted whole, built from the workdir this test hands the module."""
     counters = _journey_contract.counters()
     threads = _journey_contract.threads()
     _profile(tmp, 'mcp-exec', 9, 1, 5_000_000)
