@@ -45,15 +45,6 @@ def client_env():
     return env
 
 
-def cookie_client_argv(owner):
-    """The argv of a real `cookies` client for one owner."""
-    return [
-        sys.executable, '-c',
-        'from daedalus_cli.cli import main; main()',
-        'cookies', '--domain', owner, '--timeout', '120',
-    ]
-
-
 def _client_failure_diagnostics(bridge_log, docroot):
     """The announcement, the log tail and the deliveries, for one diagnosis.
 

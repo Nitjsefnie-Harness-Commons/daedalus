@@ -375,6 +375,43 @@ def test_the_reset_arms_on_the_first_click_and_sends_on_the_second(_tmp):
         ['fetch-timings', None], ['fetch-timings', True]], report
 
 
+def test_an_armed_reset_expires_to_disarmed_when_only_its_timer_runs(_tmp):
+    """The disarm half of the armed control: the first click parks the
+    revert timer beside the label swap, and when that timer runs the
+    button returns to its own label and class with NOTHING sent, and the
+    next click arms again instead of firing. The retired section-harness
+    suite carried this half; the kept armed controls always answer the
+    arm with their second click, so a reset that expires is now held
+    here."""
+    report = _run('const reset = button("reset buffer");\n'
+                  'const before = REQUESTS.length;\n'
+                  'reset.click();\n'
+                  'const parked = drive.live();\n'
+                  'const armed = { label: reset.textContent,\n'
+                  '  classes: reset.className,\n'
+                  '  requests: REQUESTS.length };\n'
+                  'for (const id of parked) drive.fire(id);\n'
+                  'const expired = { label: reset.textContent,\n'
+                  '  classes: reset.className,\n'
+                  '  requests: REQUESTS.length };\n'
+                  'reset.click();\n'
+                  'const rearmed = { label: reset.textContent,\n'
+                  '  requests: REQUESTS.length };\n'
+                  'sectionReport({ before, parked, armed, expired,\n'
+                  '  rearmed, sent: sent().map((b) =>\n'
+                  '    [b.type, b.reset]) });\n',
+                  setup=ONE, answers=(ANSWER,))
+    assert report['parked'], report
+    assert report['armed']['label'] == 'confirm reset', report
+    assert 'armed' in report['armed']['classes'], report
+    assert report['expired']['label'] == 'reset buffer', report
+    assert 'armed' not in report['expired']['classes'], report
+    assert report['expired']['requests'] == report['before'], report
+    assert report['rearmed']['label'] == 'confirm reset', report
+    assert report['rearmed']['requests'] == report['before'], report
+    assert report['sent'] == [['fetch-timings', None]], report
+
+
 def test_a_reset_that_failed_renders_the_error_pane_and_still_toasts_ok(_tmp):
     """`sectionLoad()` never rejects -- its own catch is total -- so the toast
     beside `await sectionLoad(...)` is unconditional. Asserting the toast ALONE

@@ -30,11 +30,6 @@ TESTS_LINES_PATH = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
 _WORKFLOW = ROOT / '.github' / 'workflows' / 'tests.yml'
 
 
-def thresholds_document(root=ROOT):
-    """The committed threshold document, as the publisher will read it."""
-    return (root / '.github' / 'ci-thresholds.json').read_bytes()
-
-
 def git(repo, *args):
     return subprocess.run(('git', '-C', str(repo)) + args, check=True,
                           capture_output=True, text=True,

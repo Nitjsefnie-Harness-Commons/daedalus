@@ -681,17 +681,3 @@ def _synthetic_violations(source):
     keeps = []
     violations = _analyze('tests/synthetic.py', source, keeps)
     return violations + _unlisted_keeps(keeps)
-
-
-def _coverage_environment_violations(root):
-    violations = []
-    keeps = []
-    for path in sorted((root / 'tests').glob('*.py')):
-        relative = path.relative_to(root).as_posix()
-        violations.extend(analysed(
-            _analyze, relative, path.read_text(encoding='utf-8'), keeps))
-    violations.extend(_unlisted_keeps(keeps))
-    declared = {_keep_site(module, function) for module, function in keeps}
-    for entry in sorted(_KEEP_ALLOWLIST - declared):
-        violations.append(f'allowlisted keep site {entry} has no launch')
-    return violations
