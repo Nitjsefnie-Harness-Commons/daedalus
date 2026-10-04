@@ -636,10 +636,8 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
             f'excludes {applied}, so this artefact counts a different '
             'quantity from the table a run classified the profile under')
     # The pool convention: a per-journey entry exists ONLY where the pooled
-    # spread exceeds tolerance_pct — the default is a floor, never a
-    # ceiling to tighten under — so every entry in the block is strictly
-    # above the default. Where a draw may sit from the recorded count is
-    # the budget gate's question, read through `tolerance_of`.
+    # spread exceeds tolerance_pct -- the default is a floor, never a
+    # ceiling to tighten under.
     own = document.get('tolerances') or {}
     assert all(value > document['tolerance_pct']
                for value in own.values()), (

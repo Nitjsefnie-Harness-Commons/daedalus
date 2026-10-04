@@ -342,25 +342,13 @@ def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
 
 
 def test_an_unresolved_row_carries_the_refusal_the_gate_gave(tmp):
-    """A journey the run REFUSED is reported under its own sentence.
-
+    """A journey the run REFUSED is reported under its own sentence:
     `journey_gates` fills `unresolved[name]` with the refusal the run
-    produced, and the table rendered a bare "this run could not resolve
-    it" without ever reading it: the sentence was computed, carried, and
-    dropped at the last step, so a reader of a failed run learned THAT a
-    journey was unresolved and nothing about WHY. The reason is rendered
-    into the row.
-
-    This control fails for the opposite reason to the one above: that case
-    is about a reason rendered UNSAFE, this one about a reason not
-    rendered at all, and neither can stand in for the other. It also pins
-    THIS call site to the sanitiser, which nothing else did: replacing the
-    `_reason` around `unresolved[name]` with the bare value left every suite
-    green, because today's refusals are minted from a journey name and two
-    int lists and carry neither a pipe nor a newline. So the refusal here
-    carries both -- no backslash, which is the one shape the sibling
-    control above owns, and the name column's own row pins a different
-    call site rather than a different shape.
+    produced, and the table once rendered a bare "could not resolve it"
+    without reading it. The shape, not the wording, is what this control
+    owns: a reason carrying a newline and a pipe -- no backslash, which is
+    the sibling control's shape -- so the sanitiser at THIS call site
+    cannot be dropped with the suite green.
     """
     del tmp
     summaries = _journey_contract.summaries()
