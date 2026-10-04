@@ -57,6 +57,33 @@ export function mount(container, bus) {
   }
   function save(arr) { localStorage.setItem(STORE_KEY, JSON.stringify(arr.slice(-STORE_MAX))); }
 
+  // One writer for every post-mount store write, so a refusal is caught
+  // and toasted at the label the caller chooses instead of being thrown
+  // out of an async handler, where it would take the child down.
+  function persist(arr, label) {
+    try {
+      save(arr);
+      renderSessions();
+      return true;
+    } catch (e) { toast(label + errMsg(e), 'err'); return false; }
+  }
+
+  // Splice one row's record out by its CONTENTS, not by the position the
+  // row was rendered at. The store is re-read here, so anything that
+  // changed it between the render and the click moved every index after
+  // the one that changed; a `splice` on an index now past the end takes
+  // the LAST record instead, and a record already gone is -1, so nothing
+  // is spliced at all.
+  function dropByContents(record) {
+    const all = load();
+    const at = all.findIndex((entry) => entry.css === record.css
+      && entry.tabId === record.tabId && entry.allFrames === record.allFrames
+      && entry.ts === record.ts);
+    if (at < 0) { renderSessions(); return; }
+    all.splice(at, 1);
+    persist(all, 'session not removed: ');
+  }
+
   function renderSessions() {
     clear(sessionsEl);
     const arr = load();
@@ -73,37 +100,31 @@ export function mount(container, bus) {
         h('td', { class: 'dimmer small' }, new Date(s.ts).toTimeString().slice(0, 8)),
         h('td', { class: 'mono' }, s.tabId || '—'),
         h('td', { class: 'small dim' }, s.allFrames ? 'all' : 'top'),
-        h('td', { class: 'mono-sm' }, truncate(s.css.replace(/\s+/g, ' '), 100)),
+        h('td', { class: 'mono-sm' },
+          (s.failed ? '[failed] ' : '')
+            + truncate(s.css.replace(/\s+/g, ' '), 100)),
         h('td', { style: { textAlign: 'right' } },
           h('button', { class: 'ghost sm', onclick: () => { cssEl.value = s.css; tabSel.value = s.tabId || ''; allEl.checked = !!s.allFrames; toast('loaded', 'info'); } }, 'load'),
           h('button', {
             class: 'ghost sm danger',
             onclick: async () => {
+              // A failed record names a rule that was never applied, so
+              // there is no removeCSS match for the worker to confirm:
+              // drop it here. A live record still goes to the worker
+              // first -- the record is the only way back to an exact
+              // match, so a refused removal leaves it in place.
+              if (s.failed) {
+                toast('removed', 'ok');
+                dropByContents(s);
+                return;
+              }
               const f = { css: s.css };
               if (s.tabId) f.tabId = Number(s.tabId);
               if (s.allFrames) f.allFrames = true;
-              // The record is the only way back to an exact removeCSS
-              // match, so a refused removal leaves it in place.
               try { await extCmd('remove-css', f); }
               catch (e) { toast(errMsg(e), 'err'); return; }
               toast('removed', 'ok');
-              const all = load();
-              // By the record's own contents, not by the position this row
-              // was rendered at: the store is re-read here, so anything that
-              // changed it between the render and this click moved every
-              // index after the one that changed. A `splice` on an index
-              // that is now past the end takes the LAST record instead.
-              const at = all.findIndex((entry) => entry.css === s.css
-                && entry.tabId === s.tabId && entry.allFrames === s.allFrames
-                && entry.ts === s.ts);
-              if (at < 0) { renderSessions(); return; }
-              all.splice(at, 1);
-              // The rule is already off the page, so a store that refuses
-              // this write costs a record and not a rule. Say which, rather
-              // than dropping the throw out of an async handler where it
-              // would take the child down instead of reaching the operator.
-              try { save(all); renderSessions(); }
-              catch (e) { toast('session not removed: ' + errMsg(e), 'err'); }
+              dropByContents(s);
             },
           }, 'remove'),
         ),
@@ -132,26 +153,25 @@ export function mount(container, bus) {
     }
     // The record is reserved BEFORE the command, not written after it. A
     // store that refuses the write then returns here, with nothing
-    // injected and nothing to record. A command that fails after the write
-    // leaves a record with no live rule, which is the safe direction: the
-    // reverse order's failure is a rule applied to a page that nothing
-    // recorded, and that one the operator cannot take off at all.
-    //
-    // The residue is not free, and saying otherwise would be false. The
-    // row's remove asks the worker to remove a rule that is not there, the
-    // worker refuses, and the record stays -- so a failed injection leaves
-    // a row this panel will not clear, and enough of them reach the cap,
-    // where the next injection is refused too. Clearing the store key by
-    // hand is the only way out. That is a bounded annoyance against an
-    // unrecoverable rule, which is why the order is this way round.
+    // injected and nothing to record; the reverse order's failure is a
+    // rule applied to a page that nothing recorded, and that one the
+    // operator cannot take off at all.
     const sessions = load();
     sessions.push({ css: f.css, tabId: f.tabId || '', allFrames: !!f.allFrames, ts: Date.now() });
-    try { save(sessions); renderSessions(); }
-    catch (e) { toast('session not recorded: ' + errMsg(e), 'err'); return; }
+    if (!persist(sessions, 'session not recorded: ')) return;
     try {
       const r = await extCmd('inject-css', f);
       toast(`injected ${r && r.injected} chars → tab ${r && r.tabId}`, 'ok');
-    } catch (e) { toast(errMsg(e), 'err'); }
+    } catch (e) {
+      toast(errMsg(e), 'err');
+      // A command that failed leaves the reservation holding no live
+      // rule: mark it, so the row shows the state and its remove drops
+      // the record without asking the worker to confirm a match that
+      // does not exist. A store that refuses the marking says so here
+      // rather than throwing out of this handler.
+      sessions[sessions.length - 1].failed = true;
+      persist(sessions, 'session not marked: ');
+    }
   });
   root.querySelector('[data-role=remove]').addEventListener('click', async () => {
     const f = buildFields();
