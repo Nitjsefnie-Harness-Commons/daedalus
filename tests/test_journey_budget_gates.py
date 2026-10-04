@@ -501,6 +501,21 @@ def test_the_check_command_refuses_with_the_remedy_it_promises(tmp):
         f'so a reader is told something the table does not promise: {said}')
 
 
+def test_a_rise_outranks_the_single_round_guard_under_tighten(tmp):
+    policy = _journey_contract.policy()
+    counts = {name: 500 for name in journeys().NAMES}
+    counts[journeys().NAMES[0]] = 2000
+    artifact = Path(tmp) / 'journey-budget.json'
+    artifact.write_bytes(policy.render(recorded_document()))
+    measurements = Path(tmp) / 'counts.json'
+    measurements.write_text(json.dumps(measured_report(counts, rounds=1)))
+    spoken = io.StringIO()
+    with contextlib.redirect_stderr(spoken):
+        code = policy.main(['check', '--artifact', str(artifact),
+                            '--measurements', str(measurements), '--tighten'])
+    assert code != 0 and policy.REMEDY_FOR['over'] in spoken.getvalue(), code
+
+
 def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
     policy = _journey_contract.policy()
     names = journeys().NAMES
