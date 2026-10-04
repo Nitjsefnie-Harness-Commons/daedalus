@@ -12,7 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _ratchet_fixture import _git, _normalised  # noqa: E402
+from _ratchet_fixture import (  # noqa: E402
+    _captured_main, _git, _normalised)
 
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -25,8 +26,7 @@ SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 # The budget fixtures run a copied policy script in a temporary tree the
 # coverage paths do not map back onto, so the child keeps no collector.
 _CHILD_ENV = _util.child_coverage('scrub')
-# Every accessor below is spelled as its member, so one list names both the
-# document key and the reader call that has to agree with it.
+# One list names both the document key and the reader call that must agree.
 _BASELINE_ACCESSORS = ('module_size_baseline', 'long_line_baseline',
                        'type_error_baseline', 'js_coverage_baseline')
 
@@ -56,12 +56,20 @@ def _assert_refused(path, needle):
 
 
 def _assert_load_refused(path, needle):
+    _assert_refused_by(lambda: _thresholds().load(path), needle)
+
+
+def _assert_normalise_refused(thresholds, candidate, needle):
+    _assert_refused_by(lambda: thresholds.normalise(candidate), needle)
+
+
+def _assert_refused_by(read, needle):
     try:
-        _thresholds().load(path)
+        read()
     except ValueError as error:
         assert str(error).startswith(needle), str(error)
     else:
-        raise AssertionError('invalid threshold input was accepted')
+        raise AssertionError(f'accepted input that should say {needle!r}')
 
 
 def _assert_document_contract(path):
@@ -96,6 +104,18 @@ def _assert_cli_floor(path):
     assert result.stderr == '', result.stderr
 
 
+def _fully_tightened_baseline(size_baseline, baseline):
+    """The empty shape a size baseline carries once every entry has fallen:
+    a populated one tightens to `{}`, an empty one to `None`."""
+    if baseline:
+        sizes = {rel: size_baseline.ceiling_for(rel) for rel in baseline}
+        tightened = size_baseline.tightened(baseline, sizes)
+        assert tightened == {}
+        return tightened
+    assert size_baseline.tightened(baseline, {}) is None
+    return {}
+
+
 def _restrictive_mode(platform_name):
     return 0o400 if platform_name == 'posix' else 0o600
 
@@ -111,6 +131,10 @@ def test_cli_prints_only_the_requested_floor(tmp):
 
 
 def test_required_and_unknown_fields_are_rejected(tmp):
+    """Every absent and every extra member, at both levels, in one table.
+
+    The needle names the field, so a merged row still says which one broke.
+    """
     path = Path(tmp) / 'thresholds.json'
     cases = []
     for key in ('schema_version', 'coverage', 'module_size_baseline',
@@ -119,36 +143,28 @@ def test_required_and_unknown_fields_are_rejected(tmp):
         value = _valid()
         del value[key]
         cases.append((value, f'missing field: {key}'))
+    for language in ('python', 'javascript'):
+        value = _valid()
+        del value['coverage'][language]['floor']
+        cases.append((value, f'missing field: coverage.{language}.floor'))
+        value = _valid()
+        value['coverage'][language]['extra'] = 1
+        cases.append((value, f'unknown field: coverage.{language}.extra'))
+    value = _valid()
+    del value['coverage']['python']
+    cases.append((value, 'missing coverage language: python'))
     value = _valid()
     value['unknown'] = 1
     cases.append((value, 'unknown field: unknown'))
+    value = _valid()
+    value['coverage']['ruby'] = {'measured': 1.0, 'floor': -0.5}
+    cases.append((value, 'unknown coverage language: ruby'))
     value = _valid()
     value['schema_version'] = 2
     cases.append((value, 'unsupported schema_version: 2'))
     for value, needle in cases:
         _write_json(path, value)
         _assert_refused(path, needle)
-
-
-def test_nested_required_and_unknown_fields_are_rejected(tmp):
-    path = Path(tmp) / 'thresholds.json'
-    for language in ('python', 'javascript'):
-        value = _valid()
-        del value['coverage'][language]['floor']
-        _write_json(path, value)
-        _assert_refused(path, f'missing field: coverage.{language}.floor')
-        value = _valid()
-        value['coverage'][language]['extra'] = 1
-        _write_json(path, value)
-        _assert_refused(path, f'unknown field: coverage.{language}.extra')
-    value = _valid()
-    del value['coverage']['python']
-    _write_json(path, value)
-    _assert_refused(path, 'missing coverage language: python')
-    value = _valid()
-    value['coverage']['ruby'] = {'measured': 1.0, 'floor': -0.5}
-    _write_json(path, value)
-    _assert_refused(path, 'unknown coverage language: ruby')
 
 
 def test_duplicate_keys_are_rejected_before_mapping_construction(tmp):
@@ -194,24 +210,17 @@ def test_invalid_utf8_and_malformed_json_are_refused(tmp):
 
 
 def test_in_memory_coverage_rejects_nonfinite_and_nonobject_values(tmp):
+    """These two never round-trip through JSON, so they reach normalise here."""
     del tmp
     thresholds = _thresholds()
     candidate = _valid()
     candidate['coverage']['python']['measured'] = Decimal('NaN')
-    try:
-        thresholds.normalise(candidate)
-    except ValueError as error:
-        assert str(error) == 'coverage.python.measured must be finite'
-    else:
-        raise AssertionError('non-finite in-memory coverage was accepted')
+    _assert_normalise_refused(
+        thresholds, candidate, 'coverage.python.measured must be finite')
     candidate = _valid()
     candidate['coverage']['python'] = []
-    try:
-        thresholds.normalise(candidate)
-    except ValueError as error:
-        assert str(error) == 'coverage.python must be an object'
-    else:
-        raise AssertionError('non-object in-memory coverage was accepted')
+    _assert_normalise_refused(
+        thresholds, candidate, 'coverage.python must be an object')
 
 
 def test_low_decimal_precision_is_a_clean_threshold_refusal(tmp):
@@ -219,14 +228,10 @@ def test_low_decimal_precision_is_a_clean_threshold_refusal(tmp):
     thresholds = _thresholds()
     with localcontext() as context:
         context.prec = 1
-        try:
-            thresholds.coverage_value(
-                Decimal('80.0'), 'coverage.python.measured')
-        except ValueError as error:
-            assert str(error) == (
-                'coverage.python.measured must have at most one decimal place')
-        else:
-            raise AssertionError('low precision accepted an invalid value')
+        _assert_refused_by(
+            lambda: thresholds.coverage_value(
+                Decimal('80.0'), 'coverage.python.measured'),
+            'coverage.python.measured must have at most one decimal place')
 
 
 def test_coverage_floor_is_strictly_lower_with_exact_gap(tmp):
@@ -246,13 +251,13 @@ def test_baseline_paths_and_counts_are_safe_and_positive(tmp):
     path = Path(tmp) / 'thresholds.json'
     for unsafe in ('', '/absolute.py', r'..\\escape.py', '../escape.py',
                    'tests/../escape.py', 'tests/has:colon.py',
-                   'tests/CON.py', 'tests/trailing. ', 'tests/a\x01.py'):
+                   'tests/CON.py', 'tests/trailing. ', 'tests/a\x01.py',
+                   'tests/\ud800.py', 'tests/' + 'x' * 241 + '.py'):
         candidate = _valid()
         candidate['module_size_baseline'] = {unsafe: 1}
         _write_json(path, candidate)
         _assert_refused(path, 'unsafe module path')
-    for member in ('module_size_baseline', 'long_line_baseline',
-                   'type_error_baseline', 'js_coverage_baseline'):
+    for member in _BASELINE_ACCESSORS:
         for count in (True, 0, -1, 1.5, '10'):
             candidate = _valid()
             candidate[member] = {'tests/x.py': count}
@@ -264,45 +269,25 @@ def test_baseline_paths_and_counts_are_safe_and_positive(tmp):
         _assert_refused(path, 'unsafe module path')
 
 
-def test_baseline_path_encoding_limits_are_refused(tmp):
-    path = Path(tmp) / 'thresholds.json'
-    for unsafe in ('tests/\ud800.py', 'tests/' + 'x' * 241 + '.py'):
-        candidate = _valid()
-        candidate['module_size_baseline'] = {unsafe: 1}
-        _write_json(path, candidate)
-        _assert_load_refused(path, 'unsafe module path')
-
-
 def test_nonobject_baseline_and_missing_threshold_file_are_refused(tmp):
     path = Path(tmp) / 'thresholds.json'
-    candidate = _valid()
-    candidate['module_size_baseline'] = []
-    _write_json(path, candidate)
-    _assert_load_refused(path, 'module_size_baseline must be an object')
-    candidate = _valid()
-    candidate['long_line_baseline'] = []
-    _write_json(path, candidate)
-    _assert_load_refused(path, 'long_line_baseline must be an object')
-    candidate = _valid()
-    candidate['type_error_baseline'] = []
-    _write_json(path, candidate)
-    _assert_load_refused(path, 'type_error_baseline must be an object')
-    candidate = _valid()
-    candidate['js_coverage_baseline'] = []
-    _write_json(path, candidate)
-    _assert_load_refused(path, 'js_coverage_baseline must be an object')
+    for member in _BASELINE_ACCESSORS:
+        candidate = _valid()
+        candidate[member] = []
+        _write_json(path, candidate)
+        _assert_load_refused(path, f'{member} must be an object')
     _assert_load_refused(Path(tmp) / 'missing.json', 'cannot read thresholds:')
 
 
 def test_public_accessors_return_validated_data(tmp):
+    """The per-member round-trip is `_assert_document_contract`'s, run here
+    only for `coverage`'s tuple shape and the unknown-language refusal."""
     del tmp
     thresholds = _thresholds()
     data = thresholds.load(DATA_PATH)
     assert thresholds.coverage(data, 'python') == (
         data['coverage']['python']['measured'],
         data['coverage']['python']['floor'])
-    for member in (*_BASELINE_ACCESSORS, 'tests_line_baseline'):
-        assert getattr(thresholds, member)(data) == data[member], member
     try:
         thresholds.coverage(data, 'ruby')
     except ValueError as error:
@@ -424,14 +409,8 @@ def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
         ROOT / 'scripts' / 'ci' / 'size_baseline.py',
         'thresholds_lifecycle_size_baseline')
     updated = thresholds.load(path)
-    baseline = thresholds.module_size_baseline(updated)
-    if baseline:
-        sizes = {rel: size_baseline.ceiling_for(rel) for rel in baseline}
-        tightened = size_baseline.tightened(baseline, sizes)
-        assert tightened == {}
-    else:
-        assert size_baseline.tightened(baseline, {}) is None
-        tightened = {}
+    tightened = _fully_tightened_baseline(
+        size_baseline, thresholds.module_size_baseline(updated))
     updated['module_size_baseline'] = tightened
     thresholds.write(path, updated)
     original_path = DATA_PATH
@@ -460,38 +439,27 @@ def _run_lifecycle_against(tmp, path):
         globals()['DATA_PATH'] = original_path
 
 
-def test_lifecycle_accepts_an_already_raised_calibration(tmp):
-    thresholds = _thresholds()
-    source = thresholds.load(DATA_PATH)
-    source['coverage']['python'] = {
-        'measured': Decimal('96.0'), 'floor': Decimal('94.5')}
-    path = Path(tmp) / 'already-raised.json'
-    thresholds.write(path, source)
-    ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
-                         'thresholds_already_raised_ratchet')
-    before = path.read_bytes()
-    assert ratchet.main([
-        '--language', 'python', '--measured', '96.0',
-        '--thresholds', str(path)]) == 0
-    assert path.read_bytes() == before
-    _run_lifecycle_against(tmp, path)
+def test_lifecycle_accepts_a_calibration_the_ratchet_cannot_move(tmp):
+    """A measured already above the hysteresis, and the 100.0 ceiling.
 
-
-def test_lifecycle_accepts_the_finite_coverage_ceiling(tmp):
+    Both are calibrations the ordinary raise must leave byte-identical, and
+    both go on to carry the whole lifecycle against the mutated document.
+    """
     thresholds = _thresholds()
-    source = thresholds.load(DATA_PATH)
-    source['coverage']['python'] = {
-        'measured': Decimal('100.0'), 'floor': Decimal('98.5')}
-    path = Path(tmp) / 'coverage-ceiling.json'
-    thresholds.write(path, source)
     ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
-                         'thresholds_coverage_ceiling_ratchet')
-    before = path.read_bytes()
-    assert ratchet.main([
-        '--language', 'python', '--measured', '100.0',
-        '--thresholds', str(path)]) == 0
-    assert path.read_bytes() == before
-    _run_lifecycle_against(tmp, path)
+                         'thresholds_at_ceiling_ratchet')
+    for measured in (Decimal('96.0'), Decimal('100.0')):
+        source = thresholds.load(DATA_PATH)
+        source['coverage']['python'] = {
+            'measured': measured, 'floor': measured - ratchet.CALIBRATION_GAP}
+        path = Path(tmp) / f'at-{measured}.json'
+        thresholds.write(path, source)
+        before = path.read_bytes()
+        assert ratchet.main([
+            '--language', 'python', '--measured', f'{measured}',
+            '--thresholds', str(path)]) == 0
+        assert path.read_bytes() == before
+        _run_lifecycle_against(tmp, path)
 
 
 def test_lifecycle_accepts_a_fully_tightened_empty_baseline(tmp):
@@ -500,15 +468,8 @@ def test_lifecycle_accepts_a_fully_tightened_empty_baseline(tmp):
     size_baseline = _util.load(
         ROOT / 'scripts' / 'ci' / 'size_baseline.py',
         'thresholds_empty_baseline_size_baseline')
-    baseline = thresholds.module_size_baseline(source)
-    if baseline:
-        sizes = {rel: size_baseline.ceiling_for(rel) for rel in baseline}
-        tightened = size_baseline.tightened(baseline, sizes)
-        assert tightened == {}
-    else:
-        assert size_baseline.tightened(baseline, {}) is None
-        tightened = {}
-    source['module_size_baseline'] = tightened
+    source['module_size_baseline'] = _fully_tightened_baseline(
+        size_baseline, thresholds.module_size_baseline(source))
     path = Path(tmp) / 'empty-baseline.json'
     thresholds.write(path, source)
     _run_lifecycle_against(tmp, path)
@@ -550,6 +511,13 @@ def _tests_files(first, second):
             'tests/second.py': b'x = 1\n' * second}
 
 
+def _mixed_tests_files(python_lines, note_lines):
+    """A tests/ tree whose shape the pathspec and `-I` have to name."""
+    return {'tests/first.py': b'x = 1\n' * python_lines,
+            'tests/notes.md': b'note\n' * note_lines,
+            'tests/blob.bin': b'\x00\xff\xfe binary\n' * 40}
+
+
 def _run_lines_cli(repo, *args):
     return subprocess.run(
         [sys.executable, str(repo / 'scripts' / 'ci' / 'tests_lines.py'),
@@ -575,20 +543,30 @@ def test_tests_line_budget_is_a_positive_integer_that_round_trips(tmp):
         _assert_refused(path, 'tests_line_baseline')
 
 
-def test_tests_line_budget_fails_naming_both_numbers_when_tests_grew(tmp):
+def test_tests_line_budget_fails_naming_both_numbers_and_the_remedy(tmp):
     repo, _target = _line_budget_fixture(
         tmp, _tests_files(5, 4), 8, 'grown')
     done = _run_lines_cli(repo)
     assert done.returncode != 0, (done.stdout, done.stderr)
     assert '8' in done.stderr and '9' in done.stderr, done.stderr
+    remedy = _util.load(POLICY_SOURCE, 'tests_lines_growth').GROWTH_REMEDY
+    assert _normalised(remedy) in _normalised(done.stderr), done.stderr
 
 
 def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
+    """The drop is recorded and nothing else in the document moves.
+
+    The comparison is against the document as `load` normalises it, not the
+    raw JSON: a raw float and the Decimal it becomes are not equal.
+    """
     repo, target = _line_budget_fixture(tmp, _tests_files(4, 3), 20, 'drop')
+    source = _thresholds().load(target)
     done = _run_lines_cli(repo, '--tighten')
     assert done.returncode == 0, (done.stdout, done.stderr)
-    assert _thresholds().tests_line_baseline(
-        _thresholds().load(target)) == 7
+    after = _thresholds().load(target)
+    assert after['tests_line_baseline'] == 7
+    for member in ('coverage', *_BASELINE_ACCESSORS):
+        assert after[member] == source[member], member
     for budget in (7, 2):
         other, other_target = _line_budget_fixture(
             tmp, _tests_files(4, 3), budget, f'steady-{budget}')
@@ -596,6 +574,37 @@ def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
         done = _run_lines_cli(other, '--tighten')
         assert done.returncode == 0, (done.stdout, done.stderr)
         assert other_target.read_bytes() == before
+
+
+def test_the_budget_answers_a_failure_on_stderr_with_exit_one(tmp):
+    """Driven in-process, because every other row scrubs the child.
+
+    A subprocess launch carries no collector, so a branch only the child
+    reaches is indistinguishable from a branch no row reaches at all.
+    """
+    policy = _util.load(POLICY_SOURCE, 'tests_lines_failure')
+    status, _stdout, stderr = _captured_main(
+        policy, ['--thresholds', str(Path(tmp) / 'missing.json')])
+    assert status == 1
+    assert 'cannot read thresholds' in stderr, stderr
+
+
+def test_the_budget_counts_every_tracked_text_file_under_tests(tmp):
+    """The counting DEFINITION is the subject, so it gets its own oracle.
+
+    The other rows only bound the count, so an under-count is the direction
+    they cannot see. This row asserts the count itself against a tree with a
+    non-`.py` text fixture (which a `tests/*.py` pathspec drops), a binary
+    one (which a missing `-I` counts) and files outside `tests/` (which a
+    dropped pathspec adds).
+    """
+    repo, _target = _line_budget_fixture(
+        tmp, _mixed_tests_files(4, 3), 7, 'mixed')
+    policy = _util.load(POLICY_SOURCE, 'tests_lines_definition')
+    assert policy.tracked_test_lines(repo) == 7
+    done = _run_lines_cli(repo)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert '7' in done.stdout, done.stdout
 
 
 def test_the_tests_budget_check_passes_a_tree_exactly_on_budget(tmp):
@@ -653,16 +662,10 @@ def _skill_decisions(path=SKILL_SOURCE):
 
 
 def test_skill_names_the_state_owner_and_tighten_command(tmp):
-    del tmp
-    decisions = _skill_decisions()
-    assert decisions['owner'], decisions
-    assert decisions['command'], decisions
-    assert decisions['growth'], decisions
-    assert decisions['merge_ref'], decisions
-    assert decisions['reads_skill'], decisions
-
-
-def test_skill_mutations_are_caught_independently(tmp):
+    """Both phases in one row: each decision is asserted true, then each
+    phrase is mutated once and its decision asserted false. The mutation
+    arm is vacuous without the first, so neither phase can be dropped
+    without the other becoming a green no-op."""
     source = SKILL_SOURCE.read_text(encoding='utf-8')
     mutations = (
         ('owner', 'tests_line_baseline', 'tests_line_table'),

@@ -177,7 +177,7 @@ def test_github_runner_checkout_roots_are_path_aliases(tmp):
 
 
 def test_contributor_skill_sources_are_omitted_from_measurement(tmp):
-    """Coverage-before-go asks for tests of product and shipped CI lines.
+    """The floors ask for tests of product and shipped CI lines.
 
     The skill drives `gh` against GitHub rather than exercising anything this
     repository distributes, so measuring it makes the floor track the tools

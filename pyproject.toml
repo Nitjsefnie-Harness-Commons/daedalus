@@ -83,7 +83,7 @@ omit = [
     "*/site-packages/*",
     # Untracked third-party JavaScript dependencies can ship Python files.
     "node_modules/*",
-    # Coverage-before-go asks for tests of product and shipped-CI lines, and
+    # The floors ask for tests of product and shipped-CI lines, and
     # contributor tooling is neither.
     ".claude/skills/*",
 ]

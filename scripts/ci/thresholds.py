@@ -183,11 +183,7 @@ def _baseline(baseline, member):
     normalised = {}
     for path, value in baseline.items():
         safe_path = _module_path(path)
-        count = _number(value, f'{member}.{safe_path}')
-        if count <= 0 or count != count.to_integral_value():
-            raise ValueError(
-                f'{member}.{safe_path} must be a positive integer')
-        normalised[safe_path] = int(count)
+        normalised[safe_path] = _positive_int(value, f'{member}.{safe_path}')
     return dict(sorted(normalised.items()))
 
 

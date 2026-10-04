@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Check and tighten the tests/ line budget in CI threshold data.
-
-The count is the text lines of every tracked file under ``tests/``, summed
-— binary fixtures are skipped rather than counted as their byte length.
-The mutable policy state is the ``tests_line_baseline`` member of
-``.github/ci-thresholds.json``, one tree-wide integer.
-
-A recorded number is never raised by hand and no command raises one: the
-test tree pays for growth by deleting elsewhere under ``tests/``. A drop is
-what the tighten exists to record, so --tighten only ever follows the
-number down, and a run that found the tree at or under budget writes
-nothing at all.
-
-  python3 scripts/ci/tests_lines.py
-  python3 scripts/ci/tests_lines.py --tighten
-"""
+"""Check and tighten the tests/ line budget in CI threshold data."""
 import argparse
 import importlib
 import subprocess
@@ -36,7 +21,11 @@ GROWTH_REMEDY = (
 
 
 def tracked_test_lines(root=ROOT):
-    """Return the summed text-line count of every tracked tests/ file."""
+    """Sum the text lines of every tracked file under ``tests/``.
+
+    ``git grep -I`` skips a binary fixture, and the pathspec names the
+    directory rather than an extension.
+    """
     listed = subprocess.run(
         ['git', '-C', str(root), 'grep', '-I', '-c', '', '--', 'tests/'],
         capture_output=True, check=True)
