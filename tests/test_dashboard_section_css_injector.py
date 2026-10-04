@@ -213,14 +213,12 @@ def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
     rule applied to a page that nothing recorded, which the operator cannot
     take off at all.
 
-    The residue is not free, and this case says so rather than claiming the
-    row is removable. It is not: the row's remove asks the worker to take
-    off a rule that was never applied, the worker refuses, and the record
-    stays. That is the whole of what this case pins. Enough of them reach
-    the cap, and clearing the store key by hand is then the only way out,
-    but that composition is not driven here -- its two halves are
-    `test_a_full_session_list_refuses_the_next_injection` and
-    `test_a_refused_injection_leaves_a_record_the_panel_cannot_clear`.
+    The refusal MARKS that record `failed` and the row shows the state, so
+    an operator can tell a residue row from a live one before removing it.
+    A successful inject leaves the flag off -- pinned by the exact key set
+    in `test_a_selected_tab_and_a_checked_box_reach_the_command` -- and the
+    removal the marking buys is
+    `test_remove_drops_a_failed_record_and_refuses_a_live_one`.
     """
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
@@ -229,13 +227,16 @@ def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
                   setup=SEEDED, answers=(INJECT_REFUSED,))
     assert report['toasts'] == [{'type': 'err',
                                  'text': 'cannot access the tab'}], report
-    # The record is on offer, newest first, and the seeded two are behind it.
+    # The record is on offer, newest first, showing the failed state, and
+    # the seeded two are behind it, unmarked.
     assert [row[3] for row in report['rows'][1:]] == [
-        'a{color:red}', 'a{--seed:1}', 'b{--seed:2}'], report
+        '[failed] a{color:red}', 'a{--seed:1}', 'b{--seed:2}'], report
     # The store keeps insertion order, so the reserved record is the LAST
     # one there even though the table shows it first.
-    assert [entry['css'] for entry in _store(report)] == [
+    stored = _store(report)
+    assert [entry['css'] for entry in stored] == [
         'b{--seed:2}', 'a{--seed:1}', 'a{color:red}'], report
+    assert stored[-1]['failed'] is True, report
 
 
 def test_a_failed_remove_leaves_the_session_store_alone(_tmp):
@@ -665,30 +666,36 @@ def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
     assert [row[3] for row in report['rows'][1:]] == one, report
 
 
-def test_a_refused_injection_leaves_a_record_the_panel_cannot_clear(_tmp):
-    """What this pins, precisely: ONE refused injection reserves a record
-    the row's own remove cannot take away, because the row asks the worker
-    for a rule that is not there, the worker answers `no such css`, and the
-    handler returns before the splice. That is what the module's corrected
-    comment rests on. The composition -- enough reaching the cap to refuse
-    the next -- is NOT driven here; its halves are
-    `test_a_failed_inject_keeps_the_record_it_reserved` and
-    `test_a_full_session_list_refuses_the_next_injection`.
+def test_remove_drops_a_failed_record_and_refuses_a_live_one(_tmp):
+    """One refused injection reserves a record the row's own remove takes
+    away WITHOUT the worker: the command never reached the page, so
+    `remove-css` has no exact match to confirm, and asking is what left
+    the record stuck before. The click after it is the seeded LIVE
+    record, which still goes to the worker first and stays when the
+    worker refuses -- the refuse-before-splice order of issue 1179, so
+    the local drop is not licence to drop a live record too. The flag
+    and the row's failed state are pinned by
+    `test_a_failed_inject_keeps_the_record_it_reserved`; a successful
+    inject leaves the flag off, pinned by the exact key set in
+    `test_a_selected_tab_and_a_checked_box_reach_the_command`.
     """
     report = _store_after(
         'container.find("[data-role=css]").value = "a{color:red}";\n'
         'button("INJECT").click();\n' + SETTLED
+        + 'button("remove", container).click();\n' + SETTLED
         + 'button("remove", container).click();\n' + SETTLED,
-        setup=SEEDED, answers=(INJECT_REFUSED, REMOVE_NO_CSS))
+        setup=SEEDED, answers=(INJECT_REFUSED, REMOVE_REFUSED))
+    # Exactly one remove-css on the wire: the failed record's remove sent
+    # nothing, and the live record's remove is that one.
     assert shared.types(report) == ['inject-css', 'remove-css'], report
     assert [t['text'] for t in report['toasts']] == [
-        'cannot access the tab', 'no such css'], report
-    # Still on offer, and still in the store, after the operator tried
-    # exactly what the panel offers for removing it.
+        'cannot access the tab', 'removed', 'removeCSS rejected it'], report
+    # The failed record is gone -- dropped locally -- while the live one
+    # the worker refused is still on offer and still in the store.
     assert [row[3] for row in report['rows'][1:]] == [
-        'a{color:red}', 'a{--seed:1}', 'b{--seed:2}'], report
+        'a{--seed:1}', 'b{--seed:2}'], report
     assert [e['css'] for e in report['left']] == [
-        'b{--seed:2}', 'a{--seed:1}', 'a{color:red}'], report
+        'b{--seed:2}', 'a{--seed:1}'], report
 
 
 def main():
