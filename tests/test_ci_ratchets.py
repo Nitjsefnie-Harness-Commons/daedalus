@@ -30,11 +30,6 @@ sys.path[:0] = [str(ROOT), str(ROOT / 'scripts' / 'ci')]
 
 THRESHOLDS_PATH = ROOT / '.github' / 'ci-thresholds.json'
 RATCHET_PATH = ROOT / 'scripts' / 'ci' / 'ratchet.py'
-SIZE_PATH = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
-LINES_PATH = ROOT / 'scripts' / 'ci' / 'line_lengths.py'
-JS_MODULE_PATH = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
-JS_COVERAGE_PATH = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
-JS_LINES_PATH = ROOT / 'scripts' / 'ci' / 'js_lines.py'
 
 
 def _thresholds():
@@ -61,6 +56,7 @@ def _ratchet_document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
         'long_line_baseline': {},
         'type_error_baseline': {},
         'js_coverage_baseline': {},
+        'tests_line_baseline': 1706,
     }
 
 
@@ -89,6 +85,7 @@ PROMOTED_MODULES = (
     'scripts.ci.ratchet',
     'scripts.ci.size_baseline',
     'scripts.ci.thresholds',
+    'scripts.ci.tests_lines',
     'scripts.ci.type_error_baseline',
     'scripts.ci.workflow_yaml',
 )
@@ -363,6 +360,23 @@ def test_real_publisher_step_size_only_preserves_calibrations(tmp):
     assert after['module_size_baseline']['tests/test_cli.py'] == 1238
 
 
+def test_real_publisher_step_tightens_the_suite_tree_budget(tmp):
+    """The no-op replays seed the budget at the measured number, so a tighten
+    that wrote a wrong value on a real drop passes every one of them."""
+    data = _ratchet_document()
+    data['tests_line_baseline'] = 1707
+    repo, path, _before, output, _summary, done = _run_publisher_case(
+        tmp, 'publisher-tests-lines', data, '80.0', '35.5')
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert 'changed=true' in output.read_text(encoding='utf-8')
+    after = _thresholds().load(path)
+    assert after['tests_line_baseline'] == 1706
+    assert after['coverage'] == data['coverage']
+    assert after['module_size_baseline'] == data['module_size_baseline']
+    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
+        '.github/ci-thresholds.json']
+
+
 def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
     data = _ratchet_document()
     data['module_size_baseline']['tests/test_mcp_server.py'] = 1707
@@ -422,7 +436,8 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
     assert ('no raise; no module shrank, no file lost an over-limit '
-            'line and no module lost an uncovered JavaScript line.'
+            'line, no module lost an uncovered JavaScript line and '
+            'the suite tree lost no line.'
             ) in noop_summary.read_text(encoding='utf-8')
 
 
@@ -611,6 +626,14 @@ def test_real_publisher_step_noop_reports_unchanged(tmp):
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert 'changed=false' in output.read_text(encoding='utf-8')
     assert _git(repo, 'diff', '--name-only').stdout == ''
+    # The noop holds at equality and at a budget below the seeded tree alike,
+    # so only the check itself says which one the fixture is sitting at.
+    budget = subprocess.run(
+        [sys.executable, str(repo / 'scripts' / 'ci' / 'tests_lines.py'),
+         '--thresholds', str(repo / '.github' / 'ci-thresholds.json')],
+        cwd=str(repo), capture_output=True, text=True, timeout=60,
+        env=_util.child_coverage('scrub'))
+    assert budget.returncode == 0, (budget.stdout, budget.stderr)
 
 
 def main():

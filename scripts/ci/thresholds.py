@@ -19,7 +19,11 @@ _COVERAGE_LANGUAGES = ('python', 'javascript')
 _BASELINE_FIELDS = (
     'module_size_baseline', 'long_line_baseline', 'type_error_baseline',
     'js_coverage_baseline')
-_TOP_LEVEL_FIELDS = ('schema_version', 'coverage', *_BASELINE_FIELDS)
+# One tree-wide count rather than a mapping: the subject is the whole
+# directory, so a per-file row would have nothing to key on.
+_SCALAR_FIELDS = ('tests_line_baseline',)
+_TOP_LEVEL_FIELDS = (
+    'schema_version', 'coverage', *_BASELINE_FIELDS, *_SCALAR_FIELDS)
 _COVERAGE_FIELDS = ('measured', 'floor')
 _FIELD_LABELS = {
     'thresholds': 'field: {field}',
@@ -168,6 +172,8 @@ def normalise(data):
     }
     for member in _BASELINE_FIELDS:
         normalised[member] = _baseline(data[member], member)
+    for member in _SCALAR_FIELDS:
+        normalised[member] = _positive_int(data[member], member)
     return normalised
 
 
@@ -177,12 +183,15 @@ def _baseline(baseline, member):
     normalised = {}
     for path, value in baseline.items():
         safe_path = _module_path(path)
-        count = _number(value, f'{member}.{safe_path}')
-        if count <= 0 or count != count.to_integral_value():
-            raise ValueError(
-                f'{member}.{safe_path} must be a positive integer')
-        normalised[safe_path] = int(count)
+        normalised[safe_path] = _positive_int(value, f'{member}.{safe_path}')
     return dict(sorted(normalised.items()))
+
+
+def _positive_int(value, name):
+    count = _number(value, name)
+    if count <= 0 or count != count.to_integral_value():
+        raise ValueError(f'{name} must be a positive integer')
+    return int(count)
 
 
 def load(path=THRESHOLDS):
@@ -216,6 +225,10 @@ def type_error_baseline(data):
 
 def js_coverage_baseline(data):
     return dict(normalise(data)['js_coverage_baseline'])
+
+
+def tests_line_baseline(data):
+    return normalise(data)['tests_line_baseline']
 
 
 def _json_ready(value):

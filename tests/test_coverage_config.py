@@ -25,12 +25,10 @@ _NODE_MODULE_FILE = (
     Path('node_modules') / 'arbitrary_dependency' / 'python'
     / 'vendor_tool.py')
 _SKILL_DIR = Path('.claude') / 'skills' / 'changing-daedalus'
-# Tracked: shipped with the skill and part of the repository, so measured like
-# any other source. `plant.py` belongs here for the same reason as the rest.
+# Tracked: shipped with the skill and part of the repository.
 _SKILL_MODULES = ('ci_gate.py', 'ci_wait.py', 'gh_client.py',
                   'gh_head_prs.py', 'gh_rate_limit.py', 'plant.py')
-# Untracked session machinery beside them: a checkout carries no copy, and
-# measuring them makes the floor track the tools rather than the product.
+# Untracked session machinery beside them: a checkout carries no copy.
 _SKILL_WATCHERS = ('ci_watch.py', 'pr_comment_watch.py', 'watch_all.py')
 
 
@@ -178,14 +176,28 @@ def test_github_runner_checkout_roots_are_path_aliases(tmp):
     assert str(foreign) not in measured, measured
 
 
-def test_tracked_skill_modules_are_measured_and_watchers_are_omitted(tmp):
+def test_contributor_skill_sources_are_omitted_from_measurement(tmp):
+    """The floors ask for tests of product and shipped CI lines.
+
+    The skill drives `gh` against GitHub rather than exercising anything this
+    repository distributes, so measuring it makes the floor track the tools
+    instead of the product. Tracked and untracked alike: the directory is the
+    boundary, not the fact that a checkout carries the file.
+    """
     del tmp
-    measured = {name for name in _SKILL_MODULES
+    measured = {name for name in _SKILL_MODULES + _SKILL_WATCHERS
                 if not _omitted(_SKILL_DIR / name)}
-    assert measured == set(_SKILL_MODULES), sorted(measured)
-    watchers = {name for name in _SKILL_WATCHERS
-                if _omitted(_SKILL_DIR / name)}
-    assert watchers == set(_SKILL_WATCHERS), sorted(watchers)
+    assert measured == set(), sorted(measured)
+    assert _omitted(Path('.claude') / 'skills' / 'other_skill' / 'tool.py')
+
+
+def test_skill_omission_does_not_spill_outside_the_skills_directory(tmp):
+    """A directory omission is one directory, not the whole `.claude` tree."""
+    del tmp
+    for sibling in (Path('.claude') / 'other' / 'tool.py',
+                    Path('.claude') / 'tool.py',
+                    Path('scripts') / 'ci' / 'tool.py'):
+        assert not _omitted(sibling), sibling
 
 
 def test_whitespace_only_report_lines_are_ignored(tmp):
