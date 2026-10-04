@@ -128,7 +128,6 @@
     "_assert_unlaunchable_binary_is_a_refusal": {"python": ["tests/_actionlint.py"]},
     "_assert_writer_inventory": {"python": ["tests/_workflow_cache_boundary.py"]},
     "_assertion_site": {"python": ["tests/_util.py"]},
-    "_asset_module": {"python": ["tests/_lint_tool_mechanisms.py"]},
     "_assigned": {"python": ["tests/_js_functions.py"]},
     "_assignment_target_lines": {"python": ["tests/_coverage_guard.py"]},
     "_attach_timeout_output": {"python": ["tests/_speedharness.py"]},

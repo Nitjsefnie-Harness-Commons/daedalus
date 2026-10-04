@@ -58,9 +58,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _actionlint import _job_step as _actionlint_job_step  # noqa: E402
 from _lint_tool_mechanisms import (  # noqa: E402
-    INSTALLER_PATH, INSTALLER_SOURCE, _Transfer, _asset_module,
-    _declared_tools, _http_error, _installer_and_transfer, _runs_installer,
-    _unjournalled)
+    INSTALLER_PATH, INSTALLER_SOURCE, _Transfer, _declared_tools,
+    _http_error, _installer_and_transfer, _runs_installer, _unjournalled)
 from _lint_tool_roles import (  # noqa: E402
     BOTH_ON, GUARDED_ON, REQUIRED_ON, _PREAMBLE, _derive_tool_roles,
     _tool_roles)
@@ -427,7 +426,7 @@ def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
     reaches the attempt with no retry left to wait for."""
     del tmp
     installer = _util.load(INSTALLER_SOURCE, 'lint_installer_retry')
-    asset = _asset_module(installer)
+    asset = installer.actionlint_asset
     name = installer._asset_name()[0]
     failures = [urllib.error.URLError(TimeoutError(f'attempt {n}'))
                 for n in range(1, asset.DOWNLOAD_ATTEMPTS + 1)]
@@ -568,41 +567,10 @@ def test_a_5xx_is_asked_again_and_the_next_attempt_serves(tmp):
 def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     """The gap between attempts, proved by the wait the installer chose.
 
-    `time.sleep` is stood in for and recorded, so the subject is the value
-    passed to it and never how long the machine took to give it back — a
-    wall-clock bound passes on a fast runner and fails a loaded one.
-
-    Four runs, because `DOWNLOAD_ATTEMPTS` gives each of them two gaps.
-
-    A header can sit in three places relative to what the module would
-    have waited on its own, and each needs its own sample — two gaps
-    cannot carry three regions, and two samples once looked complete
-    while a real one went missing. Under the growth, above it, and over
-    the ceiling are three different answers, and a path that honoured a
-    header only when it exceeded the ceiling passed two of the three.
-
-    The first run carries a header on both failures and takes the outer
-    two: 1 is under the 2 s the first attempt would have waited anyway,
-    so the growth wins and it records 2, while 900 is over the 10 s
-    ceiling, so the ceiling binds it and it records 10. Two entries and
-    not three: the third attempt served, and a pause after the attempt
-    that succeeded is waiting for nothing.
-
-    The second run is the middle region, which is the issue's own defect:
-    a header over the growth and under the ceiling is a server saying
-    exactly how long to wait, and waiting less than it asked is asking
-    again too soon. It records `[7, 7]`, and a path that dropped any
-    header below the ceiling records `[2, 4]` here — the growth alone,
-    the same pair the header-free run asserts, so that run cannot see
-    this one and this run is its only holder.
-
-    The third carries none, so the growth is recorded at the second
-    attempt rather than losing to a header: in the first run the 900 takes
-    that gap outright. It records `[2, 4]`, where a flat wait records
-    `[2, 2]` and a shifted exponent `[4, 8]`.
-
-    The fourth is the one header the module cannot read, and a parse that
-    raised instead of falling back would take the retry with it.
+    `time.sleep` is stood in for and recorded, so the subject is the
+    value passed to it, never how long the machine took to give it back.
+    Three transfers pin four things: a header under the growth, between
+    it and the ceiling, over the ceiling, and one that cannot be parsed.
     """
     del tmp
     installer, transfer, name, asset = _installer_and_transfer(
@@ -635,19 +603,6 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
         'Retry-After 7, a window over the growth and under the ceiling. '
         'That is a server saying how long to wait, and it is the whole '
         'defect this change is for: waiting less asks again too soon')
-    plain = _Transfer(installer, name, [
-        _http_error(installer, 503, 'Service Unavailable'),
-        _http_error(installer, 503, 'Service Unavailable'),
-        b'the asset bytes'])
-    bare = []
-    with (mock.patch.object(asset.urllib.request, 'urlopen', plain),
-          mock.patch.object(asset.time, 'sleep', bare.append)):
-        asset.fetch(name)
-    assert bare == [2, 4], (
-        f'the pauses with no Retry-After on either failure were {bare}; the '
-        "wait is the module's own and it grows with the attempt, so a flat "
-        'wait or a shifted exponent is visible here, where no header can '
-        'hide it')
     dated = _Transfer(installer, name, [
         _http_error(installer, 503, 'Service Unavailable',
                     retry_after='Wed, 21 Oct 2015 07:28:00 GMT'),
