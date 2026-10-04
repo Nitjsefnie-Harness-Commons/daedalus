@@ -176,8 +176,7 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
     threshold = '.github/ci-thresholds.json'
     budget = '.github/journey-budget.json'
     source = 'server.py'
-    # Each workflow's own data file: `tests.yml` measures what its budget
-    # records, and `codeql.yml` scans no Python a budget commit changed.
+    # Each workflow's own data file; codeql scans no Python to ignore.
     ignored_by = {'tests.yml': budget, 'codeql.yml': None}
     for name, data_file in ignored_by.items():
         path = workflows / name
@@ -191,8 +190,7 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
             triggers['push'], name).get('paths-ignore', []), triggers['push']
         assert not _workflow_path_filters(triggers['pull_request'], name)
 
-        # The run set, not the spelling: a data file alone never wakes these
-        # gates on push; unfiltered pull_request reaches them there.
+        # The run set: a data file alone never wakes these gates on push.
         for target in (threshold, data_file):
             if target is None:
                 continue
@@ -316,10 +314,8 @@ def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
 
 def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
     """A coverage gate runs only on a measurement that succeeded.
-
-    This table and its four siblings hold the shipped gates; a gate added
-    later needs its own row in one of them — nothing enforces that.
-    """
+    Every shipped gate holds a row here or in a sibling table; a gate
+    added later needs its own row — nothing enforces that."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
@@ -408,6 +404,8 @@ def _run_output_names(script):
     names, group = [], None
     for raw in script.splitlines():
         line = raw.strip()
+        if line.startswith('#'):
+            continue
         if group is not None and line.startswith('}'):
             if _OUTPUT_REDIRECT in line:
                 names.extend(group)
@@ -447,11 +445,9 @@ def _condition_output_reads(expression):
 
 def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
     """The handles the shipped workflows declare, at the step declaring each.
-
     coverage-comment.yml's id set is censused, its rows tied to it, and its
     conditions' steps-outputs reads pinned to what the handles write;
-    tests.yml's rows rely on disclosure alone. `actionlint` reads nothing.
-    """
+    tests.yml's and actionlint's rows rely on disclosure alone."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
@@ -484,10 +480,12 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
         actual = step_scalar(comment_yml, 'comment', step, 'id')
         assert actual == expected, f'comment/{step}: {actual!r}'
     steps = step_mappings(comment_yml, 'comment')
+    assert steps is not None, 'job comment declares no steps'
     produced = {step['id']: _run_output_names(step.get('run') or '')
                 for step in steps if step.get('id')}
-    reads = _condition_output_reads(
-        _job_if_expression(comment_yml, 'comment'))
+    job_condition = _job_if_expression(comment_yml, 'comment')
+    reads = ([] if job_condition is None
+             else _condition_output_reads(job_condition))
     reads += [read for step in steps if step.get('if')
               for read in _condition_output_reads(step['if'])]
     unproduced = [(handle, field) for handle, field in reads
@@ -495,24 +493,23 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
     assert not unproduced, (
         f'conditions read outputs no declared handle writes: {unproduced} '
         f'(produced: {sorted(produced.items())})')
+    assert _run_output_names(
+        "# echo 'phantom=1' >> \"$GITHUB_OUTPUT\"\n"
+        "echo 'present=true' >> \"$GITHUB_OUTPUT\"\n") == ['present']
 
 
 def _without_call_spacing(expression):
     """Return an expression with whitespace at `(`, `,` and `)` removed.
-
     Quote-blind (`'a, b'` reads as `'a,b'`); safe here: neither quoted
-    operand holds any of the three.
-    """
+    operand holds any of the three."""
     return re.sub(r'\s*([(),])\s*', r'\1', expression)
 
 
 def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
     """One score, from one ref, published only where it means something.
-
     A structural pin, not an evaluation: the expression reader refuses
     `format(...)` outright, and each limb of any other shape fails rather
-    than passing unread.
-    """
+    than passing unread."""
     del tmp
     scorecard = (ROOT / '.github' / 'workflows' / 'scorecard.yml').read_text(
         encoding='utf-8')
