@@ -462,7 +462,8 @@ def test_the_marker_step_is_the_claim_port_verbatim(tmp):
 
 
 def test_the_marker_step_precedes_the_gate_step(tmp):
-    """The comment's ordering claim: fail fast before the poll-bound verdict."""
+    """The comment's ordering claim: fail fast before the poll-bound
+    verdict."""
     del tmp
     steps = (complete_job_mapping(_tests_yml(), 'aggregate') or {})['steps']
     marker = next(i for i, s in enumerate(steps)
