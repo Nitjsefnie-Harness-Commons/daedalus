@@ -198,8 +198,7 @@ def _guard_step_names(guard):
 
 
 def test_the_tighten_guard_refuses_each_of_its_limbs_in_turn(tmp):
-    """Every conjunct limb of the guard decides, on its own, to stop the run.
-    """
+    """Every conjunct limb of the guard stops the run on its own."""
     del tmp
     _, tighten = _tighten_step()
     guard = tighten['if']
@@ -391,8 +390,7 @@ def test_a_rebaseline_missing_its_measurement_file_says_which_path(tmp):
 
 def test_a_measurement_file_the_decoder_rejects_is_refused_in_its_words(
         tmp):
-    """The parser's own refusal reaches the reader, verbatim: truncated
-    JSON names a line and a column; non-UTF-8 bytes are a codec error."""
+    """The parser's own refusal reaches the reader, verbatim."""
     rebaseline = _rebaseline()
     artifact = _written_artifact(tmp, recorded_document())
     before = artifact.read_bytes()
@@ -465,10 +463,8 @@ def _assert_refused(report, tmp, what):
 
 
 def test_a_measurement_with_no_count_for_a_journey_is_not_recorded(tmp):
-    """A journey with no count records nothing, rather than a null.
-
-    A null in the journeys map is a budget that compares nothing.
-    """
+    """A journey with no count records nothing, rather than a null: a
+    `null` in the journeys map is a budget that compares nothing."""
     report = _journey_contract.fixture_report()
     report['counters']['valgrind-callgrind']['journeys'].pop(
         journeys().NAMES[0])
@@ -485,9 +481,8 @@ def test_a_measurement_with_no_toolchain_is_not_recorded(tmp):
 
 
 def test_a_measurement_missing_a_journeys_threads_is_not_recorded(tmp):
-    """A journey whose excluded threads go unrecorded records nothing.
-
-    Without the map the count looks comparable to every other run.
+    """A journey whose excluded threads go unrecorded records nothing:
+    without the map the count looks comparable to every other run.
     """
     report = _journey_contract.fixture_report()
     report['excluded_threads'].pop(journeys().NAMES[0])

@@ -515,8 +515,7 @@ def test_the_pool_reads_the_row_the_residual_builder_wrote(tmp):
     """The draws reader and the row builder share one spelling of a round.
 
     The pool files are built through the builder itself, so a rename on
-    either side lands here as a wrong bound; `bridge` is nonzero on
-    purpose, so `raw` and `net` differ.
+    either side lands here; `bridge` is nonzero so `raw` and `net` differ.
     """
     residual = _journey_contract.residual()
     policy = _journey_contract.policy()
@@ -543,16 +542,15 @@ def test_the_pool_reads_the_row_the_residual_builder_wrote(tmp):
 def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     """Pool files measure the same quantity, not the same rendering.
 
-    Toolchain and exclusion map decide what a count IS; the render sha is
-    deliberately not required — a tolerance pool spans heads by design,
-    and a sha check would empty the pool it exists to fill. The default is
-    a floor: a pool narrower than tolerance_pct writes no entry.
+    The render sha is deliberately not required: a pool spans heads by
+    design, and a sha check would empty the pool it exists to fill. The
+    default is a floor: a narrower pool writes no entry.
     """
     policy = _journey_contract.policy()
-    first, second = _journey_contract.journeys().NAMES[:2]
+    first, second, third = _journey_contract.journeys().NAMES[:3]
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(_journey_contract.recorded_document(
-        tolerances={first: 25.0})))
+        tolerances={first: 25.0, third: 25.0})))
     counts = Path(tmp) / 'counts.json'
     _measured_file(counts, {})
     draws = Path(tmp) / 'draws.json'
@@ -564,6 +562,7 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     assert f'derived the tolerance for {first}: 40.0' in out, out
     written = policy.load(artifact)
     assert written['tolerances'][first] == 40.0, written.get('tolerances')
+    assert written['tolerances'][third] == 25.0, written.get('tolerances')
 
     splits = (
         (lambda source: _measured_file(
@@ -588,14 +587,21 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     assert 'derived no bound' in out, out
 
     # The default is a floor: a pool narrower than tolerance_pct writes no
-    # entry, and the journey falls back to the default.
+    # entry — for a journey with no entry (the fallback) AND for one whose
+    # pre-existing entry the carried block would otherwise shield.
     narrow = Path(tmp) / 'draws-narrow.json'
-    _measured_file(narrow, {}, nets={second: [100, 101]})
+    _measured_file(narrow, {}, nets={second: [100, 101],
+                                     third: [100, 101]})
     code, out, err = _rebaseline(artifact, [counts], [narrow])
     assert code == 0, err
     assert 'derived the tolerance' not in out, out
     written = policy.load(artifact)
-    assert second not in written['tolerances'], written['tolerances']
+    # The pool governs both journeys it named: no entry for either. The
+    # journey it does not name keeps the bound it carried.
+    assert written['tolerances'] == {first: 40.0}, written['tolerances']
+    # The narrow run legitimately stripped `third`, so the bytes the
+    # shape refusal must leave are the narrow run's own.
+    before = artifact.read_bytes()
 
     broken = Path(tmp) / 'draws-broken.json'
     broken.write_text(json.dumps(
