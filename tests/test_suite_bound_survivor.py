@@ -15,6 +15,7 @@ both members, so a read from the real module would raise inside the arm
 and `kill_process_tree`'s broad guard would make the record that
 exception instead of the outcome the control asserts on.
 """
+import ast
 import contextlib
 import io
 import subprocess
@@ -22,6 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _processtree  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
@@ -243,6 +245,62 @@ def test_a_listing_that_cannot_be_read_is_reported_as_unreadable(tmp):
     # so the report is pinned on the shape this module promised to print.
     assert 'left in place: (unreadable: ' in stderr.getvalue(), (
         stderr.getvalue())
+
+
+def _record_clauses(path):
+    """Whitespace-collapsed text of every non-docstring string literal.
+
+    f-string placeholders drop out, so the mirrors' clause templates
+    compare as plain text; docstrings are skipped so a stale docstring
+    cannot mask a reworded code clause.
+    """
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    docs = {id(node.body[0].value) for node in ast.walk(tree)
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef))
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)}
+    parts = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            text = ''.join(str(value.value) for value in node.values
+                           if isinstance(value, ast.Constant))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            text = node.value
+        else:
+            continue
+        if id(node) not in docs and text.strip():
+            parts.append(' '.join(text.split()))
+    return ' || '.join(parts)
+
+
+def test_the_two_windows_records_stay_clause_for_clause_mirrors(tmp):
+    """The child-kill record mirrors suite_bound's, clause for clause.
+
+    suite_bound's header declares `tests/_processtree.py` "the same
+    shape"; prose binds nobody. Every clause below must appear in BOTH
+    sources' pools. The stopped clause is the one mandated fork -- each
+    module names its own subject -- pinned as a pair.
+    """
+    del tmp
+    suite_pool = _record_clauses(ROOT / 'scripts' / 'ci' / 'suite_bound.py')
+    tree_pool = _record_clauses(Path(_processtree.__file__).resolve())
+    shared = (
+        'CTRL_BREAK_EVENT failed:',
+        'process tree was already gone',
+        'the escalation reached what was still in it',
+        'ignored the request, and after s of grace:',
+        'ignored the request and was killed by taskkill /F after s of grace',
+        'taskkill /F gave up after s, so the tree may still be running',
+        'taskkill /F could not run:',
+        'the escalation found the tree already gone (taskkill exited )',
+        'taskkill /F exited , so the tree may still be running',
+    )
+    for clause in shared:
+        assert clause in suite_pool, (clause, 'suite_bound')
+        assert clause in tree_pool, (clause, '_processtree')
+    assert ('asked to stop and the suite did' in suite_pool
+            and 'asked to stop and the tree did' in tree_pool), (
+                'the stopped clause names its own subject on each side')
 
 
 def main():
