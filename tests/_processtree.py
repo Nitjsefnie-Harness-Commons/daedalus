@@ -1,14 +1,8 @@
 """Terminate a child's whole process tree and report what the kill did.
 
-Lives beside the callers rather than in either of them, as
-`tests/_noderun.py` does: two modules needed one launcher and importing
-each other was a cycle. The cleanup bound is a parameter because the two
-sites do not share a reason for one number. Every outcome is named: a
-caller that discards this string has thrown away the only evidence of
-what happened to a process that had already stopped answering. The
-RECEIPT (`process_is_gone`) lives here for the same reason the kill
-does: it is the only reading of a kill that is not the string the kill
-wrote about it.
+Beside the callers rather than in either of them (`tests/_noderun.py`
+imports it too): two modules needed one launcher, and mutual import was
+a cycle.
 """
 import ctypes
 import os
@@ -18,29 +12,23 @@ import sys
 import time
 
 
-# The receipt's own two figures. A killed process stays in the table until
-# something reaps it, so one read of a just-killed grandchild calls it alive;
-# and a tree kill does not take effect the instant it is issued, so one read
-# of a survivor calls it gone.
+# A killed process stays in the table until reaped, and a tree kill does
+# not land the instant it is issued, so the receipt polls to its bound.
 SETTLE_S = 5
 SETTLE_POLL_S = 0.05
 # The least right Windows grants that still answers the question.
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 # The ONLY null-handle code that means there was no such pid.
 _ERROR_INVALID_PARAMETER = 87
-# `STILL_ACTIVE` (259) is the one code `GetExitCodeProcess` reports for a
-# process still running; every other value is an exit already published.
+# `STILL_ACTIVE` (259): the one code `GetExitCodeProcess` reports for running.
 _STILL_ACTIVE = 259
 
 
 def process_is_gone(pid, settle_s=SETTLE_S):
     """Whether `pid` is no longer a live process, polled to a bound.
 
-    The receipt for a kill, and non-destructive on every platform: POSIX
-    `os.kill(pid, 0)` sends no signal, while on Windows it opens the
-    process it is asked about and can end it, so there the answer is
-    asked of the API instead. That split is why this is not a one-liner
-    over `os.kill`.
+    Non-destructive: POSIX `os.kill(pid, 0)` sends no signal; Windows'
+    opens the process it asks about, so Windows asks the API instead.
     """
     deadline = time.monotonic() + settle_s
     while True:
@@ -66,19 +54,13 @@ def _process_is_live(pid):
 
 
 def _windows_is_live(pid):
-    """Whether Windows still holds `pid`, asked of the API, not a probe.
-
-    `os.kill(pid, 0)` here can end the process it asks about; the API
-    question below answers in BOTH directions — a handle, or an error
-    code, because a null handle is two conditions, not one.
-    """
+    """Whether Windows still holds `pid`, asked of the API, never a probe."""
     return _open_handle_says_live(_windows_kernel32(), pid)
 
 
 def _windows_kernel32():
-    """`kernel32` loaded with `use_last_error=True`, so the error code
-    behind a null handle is retrievable; `tests/test_parent_watch.py`
-    opens it the same way."""
+    """`kernel32` with `use_last_error=True`, so a null handle's error code
+    is retrievable; `tests/test_parent_watch.py` opens it the same way."""
     win_dll = getattr(ctypes, 'WinDLL')
     kernel32 = win_dll('kernel32', use_last_error=True)
     # Pointer-sized, or a 64-bit handle truncates to null — see below.
@@ -95,22 +77,18 @@ def _open_handle_says_live(kernel32, pid):
     """Whether this `OpenProcess` names a process that still exists.
 
     A handle is NOT a yes: Windows keeps a terminated process's object
-    open while any handle to it survives, and `taskkill /F` leaves one,
-    so the question is asked of the HANDLE, through `GetExitCodeProcess`.
-    A null handle is not a no either, and which way it fails depends on
-    the code behind it:
+    open while any handle survives (`taskkill /F` leaves one), so the
+    question is asked of the HANDLE, through `GetExitCodeProcess`; a
+    null handle is not a no either, and the code behind it decides:
 
     * `ERROR_INVALID_PARAMETER` (87) — the only code that positively means
       THIS PID WAS NEVER THERE. The one value that reports gone.
-    * `ERROR_ACCESS_DENIED` (5) — the pid is running and this process may
-      not open it. A privileged child, which is what a tree kill leaves.
-    * anything else — `ERROR_INVALID_HANDLE` (6) and every code the API may
-      grow — is not evidence of anything, so it reports LIVE.
+    * `ERROR_ACCESS_DENIED` (5) — the pid is running and privileged.
+    * anything else is no evidence of anything, so it reports LIVE.
 
     The default is live, not gone: a receipt that invents a kill is the
-    one failure this mechanism exists to prevent, and an unclassified
-    code costs a timeout, the cheap direction. `kernel32` is a parameter
-    so this is drivable off Windows, the only place the real loader runs.
+    one failure this mechanism exists to prevent; an unclassified code
+    costs a timeout, the cheap direction.
     """
     handle = kernel32.OpenProcess(
         _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
@@ -132,10 +110,8 @@ def process_group(process):
     """The group id of a process, or None where there is no group.
 
     The lookup a caller cannot make later: a reaped pid has no entry.
-    `None` off POSIX, and the platform is asked BEFORE the name is
-    spelled, because `os.getpgid` does not exist on Windows and naming it
-    unguarded raises `AttributeError` there. A caller that passes `None`
-    on to `cleanup_process_group` gets a no-op that says why.
+    `None` off POSIX, asked before `os.getpgid` is named -- Windows has
+    no such name.
     """
     if sys.platform == 'win32':
         return None
@@ -145,14 +121,8 @@ def process_group(process):
 def cleanup_process_group(group, cleanup_timeout):
     """Kill a process group by an id, and report what the kill did.
 
-    The sibling of `cleanup_process_tree` for a caller holding a group it
-    captured before reaping its leader. The zero signal first says
-    whether there is anything left to kill without signalling a number
-    the kernel may since have handed on. POSIX only, and a reaped pid
-    leaves `taskkill` nothing to name, so the caller keeps whatever
-    teardown it already had — anything the group would have reached is
-    left to the caller on that platform, worth knowing rather than
-    discovering.
+    The zero signal first says whether anything is left to kill. POSIX
+    only: a reaped pid leaves `taskkill` nothing to name there.
     """
     if group is None:
         return ('no process group to kill: this platform has none, and a '
@@ -177,9 +147,8 @@ def cleanup_process_group(group, cleanup_timeout):
 def cleanup_process_tree(process, cleanup_timeout):
     """Kill `process`'s tree, reap it, and return what each step did.
 
-    The kill itself is `kill_process_tree`, which a caller that has only
-    a pid can reach; the reap stays here, because a process this module
-    did not launch is not one it can wait on.
+    The reap stays here: this module cannot wait on a process it did
+    not launch.
     """
     try:
         killed = _kill_tree(process, cleanup_timeout)
@@ -201,20 +170,12 @@ def _kill_tree(process, cleanup_timeout):
 def kill_process_tree(pid, cleanup_timeout):
     """Terminate the tree rooted at `pid` and describe what the kill did.
 
-    A pid rather than a `Popen`, because a caller that never launched the
-    process still has to end it: `tests/_outer_bound.py` reads a pid a
-    wedged child announced and cannot reap what it did not start. Reaping
-    is the caller's half and stays in `cleanup_process_tree`.
-
-    Two phases on Windows, as on POSIX: a forced kill first takes away
-    the request a child could still answer, and a request alone leaves a
-    child that ignores it running for ever. The request is
-    `CTRL_BREAK_EVENT`, aimed at the group the launch's
-    `CREATE_NEW_PROCESS_GROUP` flag created (the forks in
-    `tests/_speedharness.py` and `tests/_noderun.py` set it), the grace
-    is the module's own `process_is_gone` bound, and the escalation is
-    `taskkill /F /T` -- the tree by pid, where the group is not a thing
-    `os` can signal.
+    A pid rather than a `Popen`: `tests/_outer_bound.py` reads a pid a
+    wedged child announced, and reaping is `cleanup_process_tree`'s
+    half. Two phases on Windows: a `CTRL_BREAK_EVENT` request to the
+    group the launch's `CREATE_NEW_PROCESS_GROUP` flag created, the
+    `process_is_gone` bound as the grace, then `taskkill /F /T` whatever
+    the request did.
     """
     if sys.platform == 'win32':
         return _ask_and_insist_windows(pid, cleanup_timeout)
@@ -237,21 +198,15 @@ def kill_process_tree(pid, cleanup_timeout):
 
 
 def taskkill_argv(pid):
-    """The exact argv a Windows tree kill sends.
-
-    The tree's one spelling of it, and a function rather than a constant
-    so a control that asserts what a launcher sent names the same builder
-    instead of writing a second copy of these flags beside the assertion.
-    """
+    """The exact argv a Windows tree kill sends: the tree's one spelling."""
     return ['taskkill', '/F', '/T', '/PID', str(pid)]
 
 
 def _ask_and_insist_windows(pid, cleanup_timeout):
     """Ask the tree to stop, resolve the grace once, insist, name both.
 
-    The escalation goes out whatever the request did: the two phases are
-    addressed differently on this platform, so a failed request does not
-    cancel the escalation the way a failed group lookup does on POSIX.
+    A failed request does not cancel the escalation: unlike the POSIX
+    group lookup, the phases are addressed differently here.
     """
     asked = _ctrl_break(pid)
     stopped = process_is_gone(pid, cleanup_timeout)
@@ -272,9 +227,8 @@ def _ask_and_insist_windows(pid, cleanup_timeout):
 def _ctrl_break(pid):
     """None when the request went out; the outcome string when it did not."""
     try:
-        # The event is a Windows-only `signal` member, and every
-        # interpreter that reaches this line has it: the platform fork
-        # sent POSIX elsewhere before this ran.
+        # A Windows-only `signal` member; the platform fork above sent
+        # POSIX elsewhere, so every interpreter reaching this line has it.
         # pylint: disable-next=no-member
         os.kill(pid, signal.CTRL_BREAK_EVENT)
     except ProcessLookupError:
@@ -285,15 +239,11 @@ def _ctrl_break(pid):
 
 
 def _taskkill(pid, cleanup_timeout, stopped):
-    """The escalation, and the honest reading of the exit code it returned.
+    """The escalation, reading its exit code against what the tree did.
 
-    `/F` goes out whatever the request did, and what its exit code says
-    depends on what the tree did with the request: after an answered one
-    the pid is usually gone already, so a nonzero code there says the
-    tree ended at the request, while beside a tree that ignored the
-    request it says the tree may still be running — the record keeps the
-    two apart so a stopped tree is never reported as a live one. Returns
-    None when the terminations went out, and the outcome string else.
+    After an answered request the pid is usually gone already, so a
+    nonzero code says the tree ended at the request; beside a tree that
+    ignored the request it says the tree may still be running.
     """
     try:
         result = subprocess.run(

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """The workflow-script runner's own runtime behaviour, executed not read back.
 
-`run_workflow_script` is what every behavioural pin over a workflow step
-runs through; the Windows arms of the two-phase tree kill are pinned
-here too, beside the launchers that clean up through `_processtree`.
+Every behavioural pin over a workflow step runs through
+`run_workflow_script`; the Windows tree-kill arms are pinned here too.
 """
 import os
 import subprocess
@@ -20,9 +19,7 @@ import _util  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
     Child, Escalation, Platform, Signals, Spawns, swapped)
 
-# The Windows arms are driven on a pid and a bound distinct from every
-# default `_processtree` carries (its settle bound defaults to 5), so a
-# stand-in that models only the defaults cannot pass the rows below.
+# Distinct from every `_processtree` default (its settle default is 5).
 WINDOWS_PID = 4242
 WINDOWS_TIMEOUT_S = 1.5
 
@@ -36,10 +33,8 @@ class GroupSpawns(Spawns):
 def _drive_windows_kill(gone_answer, **kwargs):
     """One Windows teardown arm, driven on stand-ins, on every cell.
 
-    The stand-ins are swapped into the subject module's own namespace,
-    never into `os` or `subprocess` themselves: a fake `win32` routes to
-    the arms no POSIX cell reaches, and what the route signalled, probed
-    and sent is recorded beside the record it returned.
+    The stand-ins are swapped into the subject module's own namespace; a
+    fake `win32` routes to the arms no POSIX cell reaches.
     """
     signals = Signals(kill_errors=kwargs.pop('kill_errors', None))
     spawns = GroupSpawns(**kwargs)
@@ -61,9 +56,8 @@ def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
 
     POSIX records a native grandchild pid, so ``os.kill(pid, 0)`` observes
     that the recorded grandchild no longer exists. Windows records an MSYS
-    pid in ``$!``, which is not a Windows pid and stays unprobed; the
-    cleanup record there names the tree the two-phase kill ended, and the
-    assertions below pin its invariant shape rather than the whole string.
+    pid in ``$!``, not a Windows pid, and stays unprobed; the assertions
+    below pin the cleanup record's invariant shape, not the whole string.
     """
     pid_file = Path(tmp) / 'grandchild.pid'
     script = (
@@ -94,9 +88,7 @@ def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
         assert 'process tree' in text, text
         assert ('the tree did' in text
                 or 'ignored the request' in text), text
-        # The escalation-failure arms all say one of these two things; a
-        # real run whose taskkill failed leaves the grandchild alive and
-        # must go red, so neither substring may appear.
+        # A taskkill failure leaves the grandchild alive; must go red.
         assert 'may still be running' not in text, text
         assert 'could not run' not in text, text
         return
@@ -114,11 +106,9 @@ def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
 def test_the_harness_bounds_cleanup_when_tree_kill_fails(tmp):
     """A failed tree kill still raises the original timeout with evidence.
 
-    The kill-and-report sequence lives in `_processtree`, shared with the
-    Node gate's launcher, so the seam this test forces the failure through
-    is the shared one. The expected diagnostic is unchanged by that move,
-    which is the point: one sequence, two callers, one description of what
-    it did.
+    The kill-and-report sequence is `_processtree`'s, shared with the
+    Node gate's launcher, so the seam this test forces the failure
+    through is the shared one.
     """
 
     class FakeProcess:
@@ -162,11 +152,9 @@ def test_the_harness_bounds_cleanup_when_tree_kill_fails(tmp):
 def test_the_windows_route_names_every_arm_of_the_two_phase_kill(tmp):
     """Every teardown arm names what its request and its escalation did.
 
-    Each row is a limb of the record the Windows route returns, reached
-    through stand-ins so it is discriminated on every cell. Every row
-    also asserts what the route DID: the request went to the driven pid,
-    the grace got the driven bound, and the escalation went out with
-    `taskkill_argv`'s exact argv and that bound.
+    Each row also asserts what the route DID: the request went to the
+    driven pid, the grace got the driven bound, and the escalation went
+    out with `taskkill_argv`'s exact argv and that bound.
     """
     del tmp
     request = (WINDOWS_PID, Escalation.CTRL_BREAK_EVENT)
@@ -226,12 +214,10 @@ def test_the_windows_route_names_every_arm_of_the_two_phase_kill(tmp):
 def test_the_launchers_give_a_windows_tree_its_own_group(tmp):
     """Windows launches each harness child a process group of its own.
 
-    The request phase is `CTRL_BREAK_EVENT` aimed at the tree's group,
-    which only exists if the launch created one: without the flag every
-    real request fails and the phase is dead code. The posix face is
-    pinned beside it because the fork is the point -- a flag sent on
+    Without the flag every real CTRL_BREAK fails and the request phase
+    is dead code. The posix face is pinned beside it: a flag sent on
     both platforms would change every POSIX launch. Asserts name the one
-    kwarg, never the whole call: an env= is not report material.
+    kwarg, never the whole call.
     """
     launches = (
         (_speedharness, lambda: _speedharness.run_workflow_script(

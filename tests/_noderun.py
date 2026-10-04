@@ -1,10 +1,8 @@
 """Run a Node program from a closed, automatically cleaned file.
 
-This launcher carries no scenario state and no configuration of its own, so
-it lives in a neutral module both the boundary harness and the shared fetch
-gate import — which is what stops `tests/_boundary_env.py` (which splices the
-gate) and `tests/_stream_fake.py` (the gate belongs to it) from importing
-each other, a cycle pylint reads as R0401 and CI treats as fatal.
+A neutral module both the boundary harness and the shared fetch gate
+import, so `tests/_boundary_env.py` and `tests/_stream_fake.py` never
+import each other (pylint R0401).
 """
 import contextlib
 import json
@@ -19,11 +17,8 @@ from _processtree import cleanup_process_tree
 
 # --- the hang detector -----------------------------------------------------
 #
-# A HANG DETECTOR, not a health margin (issue #1117): the flat margin that
-# was here failed correct children on a loaded `windows-latest` runner,
-# because the only thing a tight bound measures is how busy the runner is.
-# Nothing correct reaches this number, and the arithmetic is re-derivable
-# by reading these lines.
+# A HANG DETECTOR, not a health margin (issue #1117): a tight bound only
+# measures how busy the runner is, and nothing correct reaches this number.
 #   SLOWEST_CORRECT_CHILD_SAMPLES  the freeze control's observed times
 #   SLOWEST_CORRECT_CHILD_S  10.70   max of those samples
 #   HANG_DETECTOR_MULTIPLE   10      a runner ten times slower still passes
@@ -33,8 +28,7 @@ SLOWEST_CORRECT_CHILD_SAMPLES = (10.57, 10.58, 10.63, 10.70)
 SLOWEST_CORRECT_CHILD_S = max(SLOWEST_CORRECT_CHILD_SAMPLES)
 HANG_DETECTOR_MULTIPLE = 10
 CHILD_DEADLINE_S = round(SLOWEST_CORRECT_CHILD_S * HANG_DETECTOR_MULTIPLE)
-# The cleanup is its own bound: it bounds the kill of a process that has
-# already stopped answering, and is a fraction of the detector.
+# The cleanup bounds the kill of an already-unanswering process.
 CLEANUP_FRACTION = 0.05
 CLEANUP_DEADLINE_S = round(CHILD_DEADLINE_S * CLEANUP_FRACTION)
 
@@ -47,14 +41,11 @@ def _remove_tree(directory):
 class _Scratch:
     """A scratch directory whose removal is best-effort AND REPORTED.
 
-    `tempfile.TemporaryDirectory` deletes its tree in `__exit__`, and a
-    file another process still holds is not deletable on Windows — so a
-    plain context manager lets an `OSError` out of the `rmtree` replace
-    the caller's `ChildDeadlineExceeded` with a bare errno naming no
-    child, no deadline and no cleanup report. `tempfile.mkdtemp` rather
-    than `TemporaryDirectory` so there is no failing `__exit__` left to
-    be reached: the removal happens here, its outcome is appended to
-    `outcomes`, and the caller's exception keeps travelling.
+    A file another process still holds is not deletable on Windows, so a
+    `TemporaryDirectory.__exit__` removal could replace the caller's
+    classified error with a bare errno. `mkdtemp` instead: the removal
+    happens here, its outcome is appended to `outcomes`, and the
+    caller's exception keeps travelling.
     """
 
     def __init__(self, prefix, outcomes):
@@ -66,12 +57,8 @@ class _Scratch:
         return self._name
 
     def close(self):
-        """Remove the tree, recording a failure rather than raising it.
-
-        Idempotent, so the expiry handler can call it to have the outcome in
-        the report it is about to build, and `__exit__` can call it again
-        afterwards without a second removal.
-        """
+        """Remove the tree, recording a failure rather than raising it;
+        idempotent, so the expiry handler and `__exit__` can both call it."""
         if self._path is None:
             return
         try:
@@ -91,12 +78,9 @@ class _Scratch:
 class ChildDeadlineExceeded(Exception):
     """A harness child did not finish inside the hang detector's budget.
 
-    Named rather than raised as a bare `TimeoutExpired` because the reader
-    of a failed suite needs to tell "killed at the detector" from "killed
-    by the suite ceiling". Carries what the child produced before it was
-    killed and what the cleanup did, because a child that stopped
-    answering is exactly the case where partial output is the only
-    evidence there is.
+    Named rather than raised as a bare `TimeoutExpired` so the reader can
+    tell "killed at the detector" from "killed by the suite ceiling"; it
+    carries the child's partial output and the cleanup report.
     """
 
     def __init__(self, argv, deadline_s, stdout, stderr, cleanup,
@@ -120,21 +104,17 @@ class ChildDeadlineExceeded(Exception):
             f'  stderr: {stderr[:2000]!r}')
 
 
-# A bound on one element of the report's child line — a STRING this module
-# prints; a source handed to `node -e` is arbitrarily long.
+# A bound on one element of the report's child line, in characters.
 _LABEL_WIDTH = 60
 
 
 def _child_label(argv):
     """The child as the expiry report names it, from either argv shape.
 
-    A program launch hands `node <a written file> <arguments>`, and the
-    basename of that second element is the useful half. An exact-argv
-    launch hands `node -e <source>` or `node --check <path>`, where that
-    element is a flag and the element after it is a SOURCE — so the
-    basename is taken at the program file and nowhere else; applied
-    anywhere else it names a fragment that exists nowhere. Every element
-    is bounded too: a source pasted whole makes the line unreadable.
+    The basename is taken at element 1 only when it is not a flag: a
+    program launch names the written program file there, while an
+    exact-argv launch (`node -e <source>`) would otherwise name a
+    fragment that exists nowhere. Every element is bounded.
     """
     parts = []
     for index, part in enumerate(argv):
@@ -148,14 +128,9 @@ def _child_label(argv):
 def run_node_program(node, program, arguments, cwd, payload=None):
     """Run a Node program from a closed, automatically cleaned file.
 
-    `cwd` is positional so a caller that forwards its own `cwd` (the
-    shared gate's `run_gate`) neither names a `cwd=` keyword the coverage
-    guard would read as an undeclared launch nor restates the
-    environment. The prologue written ahead of the program splices the
-    written file out of `process.argv` and pushes `payload` as an object
-    literal LAST, which is where the harnesses read their plan from. The
-    bound, the launch shape and the classified expiry all belong to
-    `_launch_child`, shared with `run_node_argv`.
+    The prologue splices the written file out of `process.argv` and
+    pushes `payload` LAST, where the harnesses read their plan from; the
+    bound, launch shape and classified expiry belong to `_launch_child`.
     """
     unlinked = []
     directory_scratch = _Scratch('daedalus-node-', unlinked)
@@ -175,17 +150,11 @@ def run_node_program(node, program, arguments, cwd, payload=None):
 def run_node_argv(node, arguments, cwd, stdin_data=None, environment=None):
     """Run a Node child from an EXACT argv, with no program file of ours.
 
-    `arguments` is the argv tail as a list of strings, so a caller can
-    launch `['--check', path]`, `['-e', source, *args]` or `[script_path]`
-    — none of which the program launch's prologue would leave alone.
-    `cwd` is positional for the reason above; `stdin_data=None` means
-    stdin is DEVNULL, so a child that reads stdin to end of file reaches
-    it at once rather than waiting on a pipe nobody writes.
-    `environment` is the environment to scrub, for the caller whose child
-    needs a value this process does not carry (`test_js_coverage.py`
-    points `NODE_V8_COVERAGE` at a dumps directory of its own per test);
-    it is the second argument `child_coverage` already took, so `None`
-    keeps the launch it always was.
+    `arguments` is the argv tail, so a caller can launch `['--check',
+    path]`, `['-e', source, *args]` or `[script_path]` -- none of which
+    the program launch's prologue would leave alone. `stdin_data=None`
+    means stdin is DEVNULL; `environment` is what `child_coverage`
+    scrubs.
     """
     return _launch_child(
         [node, *arguments], cwd, [], stdin_data=stdin_data,
@@ -196,42 +165,28 @@ def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None,
                   environment=None):
     """Launch `argv`, bound by the detector, and read back what it produced.
 
-    The one launch path for both entry points: two copies would mean a
-    fix to the detector reached one of them. The bound spans the child's
-    own execution and nothing else — the clock starts at the launch, and
-    nothing before it (writing a program file) or after it (reading the
-    result) is inside it. A future serialisation gate placed before the
-    launch must stay outside it, or its queueing time would count
-    against the child.
+    The one launch path for both entry points. The bound spans the
+    child's own execution only: the clock starts at the launch, and a
+    future serialisation gate placed before the launch must stay outside
+    it, or its queueing time would count against the child.
 
-    The launch is the `Popen` shape rather than `subprocess.run` so that
-    expiry is a classified failure carrying the child's partial output
-    AND a bounded, verified cleanup: `subprocess.run` kills the child it
-    launched and nothing else, so a child that started a grandchild
-    leaves it running, while the suite ceiling sends its request to the
-    suite's whole process group, waits a bounded grace, and escalates on
-    that group whatever happened in between — this child is inside it
-    and does not survive. On Windows the two phases are a
-    `CTRL_BREAK_EVENT` request and a `taskkill /F /T` escalation,
-    addressed to the group the `CREATE_NEW_PROCESS_GROUP` flag below
-    creates; the cleanup lives in `tests/_processtree.py`.
+    The launch is the `Popen` shape rather than `subprocess.run` so
+    expiry carries the child's partial output AND a bounded cleanup: a
+    `run` would leave a grandchild alive. On Windows the two phases are
+    a `CTRL_BREAK_EVENT` request and a `taskkill /F /T` escalation to
+    the group the `CREATE_NEW_PROCESS_GROUP` flag below creates; the
+    cleanup lives in `tests/_processtree.py`.
 
-    Both scratch directories are `_Scratch`, not `TemporaryDirectory`, so
-    a removal that fails is recorded in the report instead of replacing
-    it. The child runs with `child_coverage('scrub')` evaluated here, at
-    launch, over the caller's `environment` when it supplied one — an
-    import-time snapshot would send `test_js_coverage.py`'s child to the
-    wrong dumps directory. `before_report` is the caller's own scratch
-    trees and `unlinked` their removal-failure list, both closed after
-    the cleanup and BEFORE the report is built.
+    Both scratch directories are `_Scratch`; `child_coverage` scrubbing
+    is evaluated here, over the caller's `environment`; `before_report`
+    and `unlinked` are closed after the cleanup, BEFORE the report.
     """
     output_scratch = _Scratch('daedalus-node-out-', unlinked)
     with output_scratch as output:
         stdout_path = Path(output) / 'stdout'
         stderr_path = Path(output) / 'stderr'
-        # stdout and stderr go to files rather than to pipes: a pipe buffer
-        # nobody drains would block a child that was only talking. stdin is
-        # a file for the same reason: a pipe fed after the launch blocks.
+        # Files, not pipes: an undrained pipe would block a child that
+        # was only talking, and a pipe fed after the launch blocks.
         stdin_path = None
         if stdin_data is not None:
             stdin_path = Path(output) / 'stdin'
@@ -251,13 +206,10 @@ def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None,
             try:
                 returncode = process.wait(timeout=CHILD_DEADLINE_S)
             except subprocess.TimeoutExpired:
-                # Flush, then read, then kill — in that order. Flush
-                # because the handles are buffered writers, so a read
-                # before the close sees an empty file; read BEFORE the
-                # kill because on Windows a file another process still
-                # holds open is not reliably readable, and a read after
-                # a failed tree kill can raise PermissionError and
-                # replace the classified error with an unrelated one.
+                # Flush, then read, then kill: the handles are buffered,
+                # and on Windows a file another process holds open is not
+                # reliably readable, so a read after the kill could
+                # replace the classified error with a PermissionError.
                 stdout.flush()
                 stderr.flush()
                 stdout = _read_stream(stdout_path)
@@ -275,11 +227,7 @@ def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None,
 
 
 def _read_stream(path):
-    """Read a child's stream, replacing bytes that are not valid UTF-8.
-
-    `errors='replace'` because this is read on the failure path too, and
-    a decode error there would replace the classified error with an
-    unrelated one; undecodable output is reported lossy rather than
-    fatal.
-    """
+    """Read a child's stream, replacing bytes that are not valid UTF-8,
+    so a decode error on the failure path cannot replace the classified
+    error with an unrelated one."""
     return path.read_text(encoding='utf-8', errors='replace')
