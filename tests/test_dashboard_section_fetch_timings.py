@@ -380,9 +380,8 @@ def test_an_armed_reset_expires_to_disarmed_when_only_its_timer_runs(_tmp):
     revert timer beside the label swap, and when that timer runs the
     button returns to its own label and class with NOTHING sent, and the
     next click arms again instead of firing. The retired section-harness
-    suite carried this half; the kept armed controls always answer the
-    arm with their second click, so a reset that expires is now held
-    here."""
+    suite carried this half; every kept armed control answers its arm
+    with a second click, so an expiring reset ran nowhere."""
     report = _run('const reset = button("reset buffer");\n'
                   'const before = REQUESTS.length;\n'
                   'reset.click();\n'

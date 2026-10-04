@@ -56,9 +56,9 @@ a file at its ceiling shares its headroom with every other branch.
 
 Not every refusal in here is controlled, and the docstring should not
 read as though it were. What the retired harness suite held by mutation:
-the selector
-registry (same element, refusal by name), `nextSibling`, `insertBefore`,
-the class set in both directions, the parked clock and its cancellation,
+the selector registry (same element, refusal by name), `nextSibling`,
+`insertBefore`, the class set in both directions, the parked clock and
+its cancellation,
 the `innerHTML` parse and its refusal, an unplanned request refused and
 recorded, a duplicate plan refused, an envelope that names another
 command, the poll retrying until the result is its own, the
