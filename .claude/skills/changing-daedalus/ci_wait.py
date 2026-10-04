@@ -25,7 +25,7 @@ hand-rolled loops this replaces conflate:
      message that reads like waiting is the failure it exists to remove
   4  every JUDGED conclusion is acceptable and one of them is not a
      REQUIRED_WORKFLOWS run, or no PUBLISHED_CHECKS check run is on the
-     SHA at all, so this head is not certified. No merge is claimed: this
+     SHA at all, so this head is not certified. No merge is claimed: exit 4
      is reached with a pull request, without one, and on a branch of its own
 
 The fourth outcome is the one this tool got wrong (issue 1217). "Every run
