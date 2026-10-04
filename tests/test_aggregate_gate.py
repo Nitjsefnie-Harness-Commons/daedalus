@@ -426,7 +426,6 @@ def test_main_exits_zero_only_for_green_verdicts(tmp):
         (json.dumps(_needs(suites='failure')), 1, CLEAN_JOBS),
         (json.dumps(_needs(changes='skipped')), 1, CLEAN_JOBS),
         ('{', 1, CLEAN_JOBS),
-        # The scan's verdict, not the needs' one, into the exit code.
         (json.dumps(_needs(changes='success', suites='success')), 1,
          [_scan_job(conclusion='failure')]),
     )
@@ -515,7 +514,8 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
         [[]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0))
     assert verdict == 'secrets-unreported'
     assert verdict not in _gate().GREEN
-    assert 'secrets' in message and '720' in message, message
+    bound = _gate().DEFAULT_POLL_BOUND_S
+    assert 'secrets' in message and f'{bound:g} s' in message, message
     assert len(_polls(calls)) == 2, calls
 
 
