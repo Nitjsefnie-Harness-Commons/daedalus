@@ -361,18 +361,20 @@ def test_a_counter_that_hands_back_a_number_separates_no_threads(tmp):
     The distinction is the measurement's own shape rather than a name in a
     list: a counter that counts a process tree whole hands back a number,
     and there is nothing under it to break into threads. The row it
-    produces therefore carries no key at all.
+    produces therefore carries no key at all — and that number IS the count
+    the row carries, so the arm that hands it back reads it rather than
+    building one out of it.
     """
     del tmp
     counters = _journey_contract.counters()
-    ran = []
+    ran = {}
 
     def answering(name, root, workdir):
         del root, workdir
-        ran.append(name)
         # A count that rises, because both fixed backgrounds come off the
         # top of it, so every journey nets a positive residual.
-        return 1000 * len(ran), None
+        ran[name] = 1000 * len(ran) + 1000
+        return ran[name], None
 
     def shape(names, root, rounds):
         del root
@@ -389,6 +391,14 @@ def test_a_counter_that_hands_back_a_number_separates_no_threads(tmp):
     row = report['counters']['syscalls']
     assert row['available'] is True, row
     assert 'thread_rows' not in row, row
+    # What the counter handed back is what the report carries, read rather
+    # than rebuilt: `perf` counts a tree whole too, so this arm is reached
+    # by a GATED counter and a total invented here is a recorded count that
+    # is wrong, not a diagnostic number that is wrong. The two assertions
+    # above survive a doubled return untouched, because a doubled total
+    # only reaches `startup_only` and `bridge_only`.
+    assert row['startup_only'] == ran['startup-only'], row
+    assert set(row['bridge_only'].values()) == {ran['bridge-only']}, row
 
 
 def test_the_rows_change_no_recorded_count(tmp):
