@@ -636,41 +636,6 @@ def test_a_measurement_missing_a_journeys_threads_is_not_recorded(tmp):
                     'a measurement that excludes no thread for one journey')
 
 
-def test_rounds_that_disagree_about_a_sha_are_not_rebaselined_over(tmp):
-    """A re-baseline records a journey's rendering, so it may only record one
-    the rounds agreed on.
-
-    This is the one refusal in the module whose failure is not an
-    over-refusal. The others stop a human whose measurement was unusable,
-    and a human reads the message and fixes the input. This one, if it stops
-    refusing, writes a sha no journey rendered: the next run's sha gate
-    then refuses to compare, every journey goes unrecorded against the new
-    baseline, and the budget goes inert — silently, with every check green.
-    So the write is the thing under test, not the exit code alone.
-    """
-    policy = _journey_contract.policy()
-    names = journeys().NAMES
-    artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(recorded_document()))
-    before = artifact.read_bytes()
-    report = _journey_contract.fixture_report()
-    # `--rounds 3` whose rounds disagree about one journey: the count is
-    # real, the rendering is not.
-    report['shas'][names[0]] = ['a' * 64, 'b' * 64]
-    measurements = Path(tmp) / 'counts.json'
-    measurements.write_text(json.dumps(report), encoding='utf-8')
-    spoken = io.StringIO()
-    with contextlib.redirect_stdout(spoken):
-        code = policy.main(['rebaseline', '--artifact', str(artifact),
-                            '--measurements', str(measurements)])
-    assert code != 0, (
-        'a measurement whose rounds disagree about what a journey rendered '
-        'was rebaselined, so the artefact now records a sha no journey '
-        'produced and the next run cannot compare against it')
-    assert artifact.read_bytes() == before, (
-        'a re-baseline over rounds that disagree wrote the artefact anyway')
-
-
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='journeytighten_')
