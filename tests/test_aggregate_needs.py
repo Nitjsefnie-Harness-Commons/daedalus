@@ -206,6 +206,7 @@ def test_a_job_downstream_of_the_aggregate_is_named(tmp):
               + '  downstream:\n    needs: aggregate\n'
               + RUNNER)
     violations = _scan_fixture(tmp, 'descendant', source)
+    assert len(violations) == 1, violations
     named = [line for line in violations if "'downstream'" in line]
     assert len(named) == 1, violations
     assert 'does not cover' in named[0], named
