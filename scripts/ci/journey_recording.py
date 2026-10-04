@@ -107,18 +107,17 @@ def carried_tolerances(recorded, counted, draws=(), counter=None,
     one flag that cannot be used on a budget with a per-journey tolerance,
     and the remedy for that is the hand-edit this command replaces.
 
-    A `--draws` pool moves the bound instead of carrying it: a journey the
-    pool names is re-bound to the span of every round of every pool file,
-    in the percent the artefact denominates tolerances in; a journey the
-    pool does not name -- or whose span reaches only the default -- keeps
-    the bound it carried.
+    A `--draws` pool governs every journey it names, entry or not: above
+    the default it is re-bound, at or below it the entry goes and the
+    journey falls back to tolerance_pct. The carried block is the fallback
+    for the journeys the pool does NOT name.
     """
     own = recorded.get('tolerances')
-    if own is None:
-        carried = None
-    else:
-        carried = {name: value for name, value in own.items()
-                   if name in counted}
+    named = pool_named(draws, counter)
+    carried = None if own is None else {name: value for name, value
+                                        in own.items()
+                                        if name in counted
+                                        and name not in named}
     for name, value in sorted(derived_tolerances(
             draws, counter, counted, toolchain, exclusions,
             recorded.get('tolerance_pct') or 0.0).items()):
@@ -126,6 +125,23 @@ def carried_tolerances(recorded, counted, draws=(), counter=None,
             carried = {}
         carried[name] = value
     return carried
+
+
+def pool_named(draws, counter):
+    """Every journey any pool file names with DRAWS under the counter.
+
+    The carried block may not speak for these: the pool bounds or strips
+    them. A row without a `net` list is a journey the pool could not
+    separate, which is the carried block's own case.
+    """
+    named = set()
+    for report in draws:
+        rows = ((report.get('counters') or {}).get(counter)
+                or {}).get('journeys') or {}
+        for name, row in rows.items():
+            if row.get('net'):
+                named.add(name)
+    return named
 
 
 def derived_tolerances(draws, counter, counted, toolchain, exclusions,
