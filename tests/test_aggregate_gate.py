@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The aggregate gate: allowed sets, the superseded-cancel rule, the caller.
 
-aggregate_gate.py owns the whole decision; these drive it in-process.
+aggregate_gate.py owns the whole decision; these drive it in-process and pin
+the workflow wiring: the checkout, the permissions, the env indirection.
 """
 import contextlib
 import io
@@ -647,9 +648,8 @@ def test_a_refused_poll_bound_reaches_the_verdict(tmp):
 
 
 def _named_workflow(mod, constant):
-    """The file one of the module's workflow selectors must name: a
-    constant holding a PATH satisfies every control built from it, and
-    the actions API answers such a selector `Not Found`."""
+    """The file a module's workflow selector must name: a PATH here
+    satisfies every control built from it, and the API refuses it."""
     name = getattr(mod, constant)
     path = ROOT / '.github' / 'workflows' / name
     assert path.is_file(), f'{name} names no workflow file'
@@ -657,8 +657,7 @@ def _named_workflow(mod, constant):
 
 
 def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
-    """Both selectors name a file this tree ships, and the gate matches
-    `jobs[].name`: the display name, or the job id where there is none."""
+    """Both selectors name a shipped file; the gate matches a name."""
     del tmp
     mod = _gate()
     assert _named_workflow(mod, 'WORKFLOW').is_file()
