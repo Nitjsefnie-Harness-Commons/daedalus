@@ -33,9 +33,8 @@ def _dropped_document(tmp, dropped, widened, **over):
 def _rebaseline_over(tmp, artifact, report, *flags):
     """Drive the real command, and return `(code, stdout, stderr)`.
 
-    Stderr is captured as well as stdout because every refusal `run` prints
-    goes to stderr — a control that quoted only the other stream reported an
-    empty reason for a refusal it had just caused.
+    Stderr comes back too: every refusal `run` prints goes there, and a
+    control quoting only stdout reported an empty reason it had caused.
     """
     policy = _journey_contract.policy()
     measurements = Path(tmp) / 'counts.json'
@@ -50,10 +49,9 @@ def _rebaseline_over(tmp, artifact, report, *flags):
 def test_a_rebaseline_keeps_the_bounds_it_did_not_ask_to_move(tmp):
     """What a re-baseline may move: the counts, and nothing else.
 
-    Every tolerance — the default and a journey's own — is a bound a person
-    set from a measured spread, so a command that carried the counts and
-    dropped them would widen every budget by a number nobody measured. The
-    journey the artefact holds no count for is the manager's case and has its
+    Every tolerance is a bound a person set from a measured spread, so a
+    command that carried the counts and dropped them would widen every
+    budget by a number nobody measured. The null-holding journey has its
     own control below.
     """
     policy = _journey_contract.policy()
@@ -73,12 +71,9 @@ def test_a_rebaseline_keeps_the_bounds_it_did_not_ask_to_move(tmp):
 def test_a_rebaseline_refuses_to_silently_restore_a_dropped_journey(tmp):
     """A `null` nothing can undo is a policy hole with a green face.
 
-    The journey reports `unrecorded`, passes, and stays that way forever. So a
-    measurement that now SEPARATES it is a change of fact, and a command that
-    answered it by either restoring the count or leaving the null would be
-    choosing between two decisions without saying which. It refuses instead,
-    naming the journey and the residual that makes the question a question —
-    a residual nobody can read off "it says unrecorded".
+    The journey reports `unrecorded` and passes forever, so a measurement
+    that now SEPARATES it is a change of fact: the command refuses, naming
+    the journey and the residual that makes the question a question.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -104,10 +99,9 @@ def test_a_rebaseline_refuses_to_silently_restore_a_dropped_journey(tmp):
 def test_a_restore_flag_records_only_the_journey_it_names(tmp):
     """Restoring is explicit and per-journey, and a typo is not silent.
 
-    Two arms, and the second is the one that matters: a name the artefact
-    does not hold at `null` is refused rather than ignored, because an
-    ignored `--restore` and a misspelled one look identical from the command
-    line and only one of them does what the person meant.
+    A name the artefact does not hold at `null` is refused rather than
+    ignored: an ignored `--restore` and a misspelled one look identical from
+    the command line.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -148,9 +142,8 @@ def _separable():
 def _unresolved(name):
     """The same measurement, with `name` the one journey it could not do.
 
-    A refused residual rather than a missing journey: the journey still ran,
-    still rendered, and still has a sha — only the count was withheld,
-    which is what makes it a drop's case and not a shape failure's.
+    A refused residual rather than a missing journey — the count was
+    withheld, which makes it a drop's case and not a shape failure's.
     """
     report = _journey_contract.fixture_report()
     entry = report['counters']['valgrind-callgrind']
@@ -206,12 +199,9 @@ def test_a_drop_writes_the_null_only_when_the_flag_names_the_journey(tmp):
 def test_a_drop_refuses_a_journey_the_measurement_can_separate(tmp):
     """`--drop` cannot be used to dodge a regression.
 
-    A separable, positive residual is a journey whose own work the run
-    measured above the background it shares — the opposite of the case a
-    drop exists for. Dropping it would remove the one journey a person most
-    wants the gate to hold, and it is a refusal rather than a warning
-    because the flag is the only thing standing between a count and its
-    deletion.
+    A separable, positive residual is the opposite of the case a drop exists
+    for, and the flag is the only thing standing between a count and its
+    deletion — so it refuses rather than warns.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -236,10 +226,9 @@ def test_a_drop_refuses_a_journey_the_measurement_can_separate(tmp):
 def test_a_drop_or_restore_naming_no_such_journey_is_a_typo_not_a_state(tmp):
     """A name no journey carries is its own failure, with its own words.
 
-    The likeliest thing that goes wrong with a per-journey flag is a
-    misspelling, and it used to be reported as "the budget already holds a
-    count for it" — true of nothing, because nothing is called that. The
-    two are told apart by the journey set, so the refusal names it.
+    A per-journey flag's likeliest failure is a misspelling, once reported
+    as "the budget already holds a count for it" — true of nothing. The two
+    are told apart by the journey set, so the refusal names it.
     """
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
@@ -257,18 +246,12 @@ def test_a_drop_or_restore_naming_no_such_journey_is_a_typo_not_a_state(tmp):
 def test_a_drop_succeeds_against_an_artefact_that_already_dropped_it(tmp):
     """`--drop` has to work in the state it creates.
 
-    The artefact now records the journey at `null` and the next re-baseline
-    runs against exactly that file — so this is the second invocation of the
-    command, not a first one over an artefact that holds every count. A flag
-    swept only against the state before it is a flag whose second use is
-    untested, and that is where it was broken: the recorded-null refusal ran
-    first and named a measurement separating the journey it could not
-    separate, offered a remedy that could not succeed, and printed `None`
-    where a number belongs.
-
-    So the artefact starts at `null` here, the measurement is one that cannot
-    separate the journey, and the flag is asked to do the one thing it
-    exists for.
+    The next re-baseline runs against exactly the file a drop leaves — the
+    artefact at `null` — and that second invocation is where it was broken:
+    the recorded-null refusal ran first, named a measurement separating the
+    journey it could not separate, and printed `None` where a number
+    belongs. So the artefact starts at `null` here and the flag is asked to
+    do the one thing it exists for.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -310,15 +293,11 @@ def test_a_drop_succeeds_against_an_artefact_that_already_dropped_it(tmp):
 def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
     """A bound for a journey the journey set no longer has goes with it.
 
-    The narrowing this pins is load-bearing and silent either way: the
-    recorded document is a legal one, because `_validated_tolerances` only
-    asks whether the journeys map carries the name, and a stale journey is
-    exactly the one a re-baseline drops. Carrying the bound forward past the
-    journey leaves a document whose own schema refuses it — so the command
-    that exists to make the artefact current fails on the artefact being
-    current, which is a re-baseline nobody can run and a budget nobody can
-    re-record. Dropping it is the same fate a stale count has, which is what
-    makes the two consistent rather than merely convenient.
+    The narrowing is load-bearing and silent either way: a stale journey is
+    exactly the one a re-baseline drops, and carrying its bound forward
+    leaves a document the schema itself refuses — the command that exists
+    to make the artefact current failing on the artefact being current.
+    Dropping it is the same fate a stale count has.
     """
     policy = _journey_contract.policy()
     gone = 'a-journey-nobody-runs'
@@ -346,12 +325,9 @@ def test_a_rebaseline_drops_a_bound_named_for_a_journey_the_set_lost(tmp):
 def _drop_matrix(tmp, name):
     """Every artefact state against every flag shape, and what each said.
 
-    Two states the artefact can be in about a journey (holds a count, holds
-    `null`) crossed with what the measurement could do (separated it, could
-    not) and the three flag shapes that reach either. Returned rather than
-    asserted here, because the cells are the FIXTURE and the two controls
-    below are what assert over them — a table of twelve outcomes belongs in
-    one place and not in twelve tests.
+    Two states (holds a count, holds `null`) crossed with both outcomes and
+    the three flag shapes — returned rather than asserted here, because the
+    cells are the FIXTURE and the controls below assert over them.
     """
     def report_unresolved():
         report = _journey_contract.fixture_report()
@@ -392,19 +368,13 @@ def _drop_matrix(tmp, name):
 def test_a_restore_and_a_drop_do_not_refuse_each_other(tmp):
     """Two flags about one journey, and the pair must not refuse itself.
 
-    The recorded-null refusal decides which journeys need a `--restore`
-    decision, and `--drop` names one of them — so the list it is handed is
-    "recorded at null AND not being dropped" while the message beside it says
-    "the budget already holds a count for". Those are different sets, and a
-    one-line subtraction put the wrong one in a function whose name said the
-    other: a journey being dropped and held at null at once was reported as
-    holding a COUNT, and `--restore X --drop X` together was refused on the
-    very artefact it is meant for.
-
-    What has to hold, precisely: on the state a drop exists for — the
-    artefact recording the journey at `null` and the run unable to separate it
-    — the pair must do what `--drop` alone does. The other cells legitimately
-    refuse, and the control below checks every sentence in them.
+    The recorded-null refusal hands `--restore` the journeys "recorded at
+    null AND not being dropped" while its message says "the budget already
+    holds a count for" — a one-line subtraction once put the wrong set
+    there, refusing `--restore X --drop X` on the very artefact it is meant
+    for. What has to hold: on the state a drop exists for, the pair does
+    what `--drop` alone does; the other cells legitimately refuse, and the
+    control below checks every sentence in them.
     """
     name = journeys().NAMES[0]
     both = ['--restore', name, '--drop', name]
@@ -436,20 +406,11 @@ def test_a_restore_and_a_drop_do_not_refuse_each_other(tmp):
 def test_a_dropped_journey_carries_no_bound_with_it(tmp):
     """`--drop` takes the journey's OWN tolerance with it.
 
-    A tolerance is a bound on a count, and a journey recorded at `null` is
-    one the budget does not hold — so a bound kept beside it is a bound no
-    arithmetic reads, and `journey_artifact` refuses the document for
-    exactly that. The refusal lands the moment the budget carries a
-    per-journey tolerance for the journey being dropped, which makes the one
-    remedy the command exists to provide the thing that refuses it: the
-    hand-edit it was written to replace.
-
-    `journey_recording.carried_tolerances` narrowed to the journeys the SET
-    carries, and a
-    dropped journey is in the set — so this starts from a legal document,
-    the journey holding BOTH a count and a bound, and drives the whole
-    command. A helper-level assertion would pass on a helper the caller
-    never used that way.
+    A bound beside a journey the budget does not hold decides nothing and
+    `journey_artifact` refuses the document for it, so this starts from a
+    legal document — the journey holding BOTH a count and a bound — and
+    drives the whole command: a helper-level assertion would pass on a
+    helper the caller never used that way.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
