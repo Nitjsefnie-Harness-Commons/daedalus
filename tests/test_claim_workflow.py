@@ -14,8 +14,8 @@ from _yamlsteps import (  # noqa: E402
 )
 
 # The current claim release, pinned by the commit it names.
-CLAIM_RELEASE = '2.0.3'
-CLAIM_COMMIT = '0c79a0325d8ab789a60c2eeaf751690d2875c39c'
+CLAIM_RELEASE = '2.0.4'
+CLAIM_COMMIT = 'cd8ffd8227e94cdf60ed2580016187353b055cf4'
 
 # The policy claim's reference block passes: per-role caps on concurrent
 # claims, and the days an idle claim survives.
