@@ -6,9 +6,6 @@ replaced by a reconnect. If the socket stays open afterwards the client sees
 silence rather than EOF, its fast reconnect path never fires, and recovery
 falls through to a multi-second watchdog — a failure that looks like a slow
 network rather than like a server that forgot to hang up.
-
-This lived in `scripts/` with a bespoke runner, which meant `run_tests.py`
-never ran it and it only ever executed when somebody remembered it existed.
 """
 import http.client
 import importlib.util
@@ -70,12 +67,8 @@ def _wait_for_stream_count(base, expected):
 
 
 def test_port_zero_binds_an_ephemeral_port_and_announces_it(tmp):
-    """DAEDALUS_PORT=0 lets the kernel pick; the Listening line names the port.
-
-    The bridge fixture drives this for every child it starts: with no
-    test-chosen number there is no release/rebind window for a concurrent
-    process to win.
-    """
+    """DAEDALUS_PORT=0 lets the kernel pick; the Listening line names
+    the port."""
     env = {name: value for name, value in os.environ.items()
            if not name.startswith('DAEDALUS_')}
     env.update({
@@ -116,12 +109,10 @@ def _noise_path(tmp, name, body):
 def test_a_line_printed_before_the_announcement_does_not_hide_it(tmp):
     """Startup output the reader does not recognise is skipped, not taken.
 
-    The bridge prints whatever its platform gives it cause to — on a
-    non-glibc host `mallopt` is missing and the malloc-tuning diagnostic goes
-    out before the bind, and a checkout without the MCP dependencies reports
-    that bootstrap failure from its own thread whenever it gets there. Those
-    lines are worth keeping, so readiness has to be found by searching the
-    output for the announcement.
+    The bridge prints whatever its platform gives it cause to — malloc
+    tuning on a non-glibc host, an MCP bootstrap failure from its own
+    thread — so readiness has to be found by searching the output for the
+    announcement.
     """
     noise = ('print("[Daedalus] malloc tuning unavailable: '
              'dlsym(0x0, mallopt): symbol not found", flush=True)\n')
@@ -142,15 +133,10 @@ def test_a_line_printed_before_the_announcement_does_not_hide_it(tmp):
 def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
     """The degraded start must be actionable, not just observed.
 
-    Without the optional dependencies the bridge comes up normally and the
-    MCP endpoint silently is not there, so a reader following the README's
-    MCP section sees a working bridge and a client that cannot connect. The
-    line that reports the failure is the one place that can name the install
-    that fixes it.
-
-    The bootstrap runs on a thread of its own, so this report is not ordered
-    against readiness and may land after it: it is waited for rather than
-    read out of whatever the child had printed by the time it answered.
+    The line that reports the failure is the one place that can name the
+    install that fixes it, and it is not ordered against readiness — the
+    bootstrap runs on a thread — so it is waited for rather than read out
+    of whatever the child had printed by the time it answered.
     """
     blocked = 'import sys\nsys.modules["daedalus_mcp.server"] = None\n'
     output = []
@@ -193,15 +179,12 @@ def _await_mcp_state(base, drained, wanted):
 def test_an_mcp_bind_crash_surfaces_in_the_health_payload(tmp):
     """A crashed MCP listener reaches the payload, not only one stderr line.
 
-    The serve thread's caught crash ends the thread and nothing else: the
-    bridge keeps answering /health with 200, so a consumer that misses the
-    line has no structured way to tell this child from a healthy one. The
-    squatted port is the issue's own repro — the listener genuinely cannot
-    come up — and the payload must say so while the child still answers.
-    The squatter carries no SO_REUSEADDR: on Windows that flag would let the
-    child's own SO_REUSEADDR bind coexist with it, and the crash this control
-    exists to inject never happens — the shape the collision test in
-    tests/test_mcp_server.py pins.
+    The serve thread's caught crash ends the thread and nothing else, so
+    /health is the only structured way to tell this child from a healthy
+    one. The squatted port is the issue's own repro, and the squatter
+    carries no SO_REUSEADDR: on Windows that flag would let the child's own
+    bind coexist with it and the injected crash never happens — the shape
+    the collision test in tests/test_mcp_server.py pins.
     """
     if not all(importlib.util.find_spec(name) is not None
                for name in ('httpx', 'mcp', 'starlette')):
@@ -225,10 +208,8 @@ def test_an_mcp_bind_crash_surfaces_in_the_health_payload(tmp):
 def test_a_healthy_child_reports_the_mcp_front_end_up(tmp):
     """The healthy case must read as healthy, not merely not-down.
 
-    A signal that said 'down' when nothing crashed would be worse than the
-    silence it replaced, and one that stayed 'starting' forever would never
-    confirm anything: a child whose listener bound and kept serving must
-    reach 'up'.
+    'down' without a crash is worse than the silence it replaced and
+    'starting' forever confirms nothing: a serving child must reach 'up'.
     """
     if not all(importlib.util.find_spec(name) is not None
                for name in ('httpx', 'mcp', 'starlette')):
@@ -244,10 +225,8 @@ def _held_mcp_import(tmp, entered, release, left):
 
     The finder sits ahead of the real ones on sys.meta_path, so it blocks
     where the bridge asks for the module rather than wherever that module's
-    own dependencies resolve, and it stays blocked until this test says
-    otherwise. It marks both edges of the block: `entered` on the way in and
-    `left` on the way out, which is what lets the caller assert the import
-    was still held when it read the announcement.
+    own dependencies resolve, and it marks both edges of the block so the
+    caller can assert the import was still held at the announcement.
     """
     body = (
         'import os, sys, time\n'
@@ -268,11 +247,9 @@ def _held_mcp_import(tmp, entered, release, left):
 def _await_alive(proc, drained, probe, what):
     """Poll `probe` with no deadline, giving up only when the child dies.
 
-    What is being waited for here is an ordering, so a deadline would turn a
-    loaded machine into a failure while proving nothing extra on a fast one.
-    This wait is still unbounded, and what ends a regression in it is the
-    launcher's bound on the suite, which kills the whole process tree and
-    names the suite rather than this wait.
+    What is being waited for is an ordering, so a deadline would turn a
+    loaded machine into a failure while proving nothing extra on a fast
+    one; the launcher's bound on the suite is what ends a regression here.
     """
     while True:
         value = probe()
@@ -285,13 +262,10 @@ def _await_alive(proc, drained, probe, what):
 def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
     """The announcement must not be gated on the optional front end.
 
-    daedalus_bridge/mcp_bootstrap.py carries what that import costs and why
-    readiness never meant the front end was up; this pins the ordering.
-
     The import is held open rather than timed: the announcement arriving
     while the finder is still blocked is what says the bootstrap is off the
-    main thread, and no wall-clock margin could say it. While the front
-    end's import is still held open, /health reports it `starting`.
+    main thread, and no wall-clock margin could say it. While the import is
+    still held open, /health reports it `starting`.
     """
     entered = Path(tmp) / 'mcp-import-entered'
     release = Path(tmp) / 'mcp-import-released'
@@ -521,9 +495,7 @@ def test_same_key_reconnect_replaces_and_closes_the_first_stream(tmp):
 def test_the_bridge_refuses_to_start_without_its_docroot(tmp):
     """Both settings are required, and the failure says which one is missing.
 
-    A bridge that defaulted its docroot would write commands and uploads
-    somewhere nobody chose — most likely the current directory of whatever
-    started it.
+    A bridge that defaulted its docroot would write somewhere nobody chose.
     """
     for missing in ('DAEDALUS_DIR', 'DAEDALUS_PORT'):
         env = dict(os.environ)
@@ -545,9 +517,7 @@ def test_inherited_daedalus_variables_do_not_reach_a_bridge_child(tmp):
 
     `bridge()` strips every inherited `DAEDALUS_*` variable before applying
     its own settings and the caller's `env=`, so a poisoned export around
-    the suite cannot kill the child at startup the way it kills an
-    unstripped spawn — the spurious suite failures this suite's own
-    environment-dependent arms exist to prevent.
+    the suite cannot kill the child at startup.
     """
     prior = os.environ.get('DAEDALUS_STREAM_KEEPALIVE')
     os.environ['DAEDALUS_STREAM_KEEPALIVE'] = '0'
