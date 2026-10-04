@@ -252,14 +252,23 @@ def read(directory, prefix):
     A file carrying a `summary:` but no `pid:` or no `cmd:` is a profile this
     reader has not been written for, and it is NAMED rather than crashed on:
     dereferencing a search that found nothing would end the measurement in an
-    `AttributeError` naming no file. A file with no summary at all is not a
-    failure — it is the empty one a process that cost nothing writes.
+    `AttributeError` naming no file. A summary-less file carrying no named
+    `fn=`/`cfn=` declaration is the empty one a process that cost nothing
+    writes — callgrind attributes every cost line to the nearest named
+    declaration — and it is skipped. A summary-less file that DOES carry one
+    is a torn write whose `summary:` never landed, and it is refused like
+    the missing-header one, naming the file: a skip would drop its
+    instructions from every total with nothing naming it.
     """
     rows = []
     for path in sorted(directory.glob(prefix + '.*')):
         text = path.read_text(encoding='utf-8', errors='replace')
         found = SUMMARY.search(text)
         if not found:
+            if FN.search(text):
+                return rows, (
+                    f'{path.name} carries cost lines but no summary: line, '
+                    'so this profile is not one this gate can read')
             continue
         thread = THREAD.search(text)
         pid = PID.search(text)
