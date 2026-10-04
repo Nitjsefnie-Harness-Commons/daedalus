@@ -302,10 +302,7 @@ def boundary_loader(*, fails=False, **symbol):
     only the load passes against a module that loads the helper and then
     never asks it to zero anything. Naming the symbol makes the stub serve
     it, and `fails` makes the call raise -- one of the ways the boundary can
-    be unavailable. It is its own keyword because it is not a symbol: in the
-    `**symbol` dict it read as one the stub served, and a symbol the caller
-    does not name raises `AttributeError` off the returned namespace, which
-    is what a shared object without it does.
+    be unavailable.
     """
     served, zeroed = [], []
 
@@ -330,8 +327,7 @@ def boundary_set(path='/cgzero.so'):
 
     The boundary is a PRECONDITION of the callgrind counter, so a control
     about the work it does after that has to establish it rather than read
-    as the refusal the boundary control pins. Nothing here loads the path:
-    whether a child can is that control's question, not this one's.
+    as the refusal the boundary control pins. Nothing here loads the path.
     """
     return environment(BOUNDARY_ENV, path)
 
@@ -347,12 +343,9 @@ class _Spawned(Exception):
 
 def _bridge_spy(spawned):
     """`_util.bridge` as a recorder: it records that it was asked to, and
-    stops the run there.
-
-    A bare `append` standing in for it would raise `TypeError` on the
-    keyword the real call passes, so a boundary that failed to refuse
-    would read as a crash in the double rather than as the refusal that
-    did not happen — a red naming the wrong conjunct.
+    stops the run there, so a boundary that failed to refuse reads as the
+    spy's marker rather than as a crash in a double -- a red naming the
+    wrong conjunct.
     """
     def bridge(*_args, **_kwargs):
         spawned.append(True)
@@ -371,12 +364,10 @@ def boundary_probe(boundary, loader, establish, call=None):
     CAN reach it, which is what separates "nothing spawned because the
     boundary refused" from "nothing spawned because nothing ran".
 
-    `loader` is planted as the journeys module's own `CDLL`, so the double
-    is bound to the subject rather than to the stdlib module every other
-    holder in the process shares. A caller that wants the REAL one passes
-    the journeys module's `CDLL` itself. `call` defaults to the boundary
-    itself; naming `main` is how the case that has to prove WHERE the
-    boundary runs drives the real call site instead.
+    `loader` is planted as the journeys module's own `CDLL`, bound to the
+    subject rather than to the stdlib module. `call` defaults to the
+    boundary itself; naming `main` is how the case that has to prove WHERE
+    the boundary runs drives the real call site instead.
     """
     spawned = []
     subject = sys.modules[establish.__module__]
@@ -400,10 +391,9 @@ def counted_run(counters, name, root, workdir,
 
     The spawn is answered rather than performed, because a real one is a
     whole journey under valgrind and the only question here is whether the
-    refusal fired before it. So the record is the refusal the counter
-    reported, and the argv it reached for when it did not refuse. `None` is
-    the UNSET case — the one the refusal exists for — while the default is
-    a counted run that has its helper.
+    refusal fired before it. `None` is the UNSET case -- the one the
+    refusal exists for -- while the default is a counted run that has its
+    helper.
     """
     argv = []
     with environment(BOUNDARY_ENV, boundary), planting(

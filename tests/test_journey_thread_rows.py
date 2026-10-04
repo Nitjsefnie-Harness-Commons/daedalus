@@ -216,10 +216,16 @@ def test_the_function_switch_is_the_exact_string_one(tmp):
 
 
 def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
-    """THE numeric control: over a file that carries cost lines, the self
-    totals of the declared functions sum to the file's own `summary:` value
-    -- every cost line accounted -- and the inclusive cost a `calls=` line
-    records at a call site lands in NO self total."""
+    """THE numeric control: over files that carry cost lines, the self
+    totals of the declared functions sum to the files' own `summary:`
+    values -- every cost line accounted -- and the inclusive cost a
+    `calls=` line records at a call site lands in NO self total. The cost
+    lines after that arc are the caller's self again, no new `fn=` line
+    announcing them; the format's compressed bare `fn=(id)` re-selects
+    the function the id was declared for, and an id the file never
+    declared leaves the file out whole rather than bill its costs to a
+    neighbour. The torn companion is the count reader's refusal shape,
+    contributing no row and no failure."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.x.torn', (
         'pid: 5\nthread: 1\ncmd: python3 x.py\nfn=(1) carried\n1 9\n'))
@@ -231,7 +237,24 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
         '15 40\n'
         'fn=(3) other\n2 7\n'
         'summary: 97\n'))
-    (row,) = functions.read(Path(tmp), 'callgrind.x')
+    _profile_file(tmp, 'callgrind.x.2', (
+        'version: 1\npid: 12\npart: 1\nthread: 1\ncmd: python3 x.py\n'
+        'positions: line\nevents: Ir\n'
+        'fn=(1) alpha\n5 30\n'
+        'fn=(2) gamma\n7 10\n'
+        'fn=(1)\n5 40\n'
+        'cfn=(2)\ncalls=1 0\n* 25\n'
+        '17 6\n'
+        'summary: 86\n'))
+    _profile_file(tmp, 'callgrind.x.3', (
+        'version: 1\npid: 13\npart: 1\nthread: 1\ncmd: python3 x.py\n'
+        'positions: line\nevents: Ir\n'
+        'fn=(1) alpha\n5 30\n'
+        'fn=(9)\n5 40\n'
+        'summary: 70\n'))
+    rows = functions.read(Path(tmp), 'callgrind.x')
+    assert [r['pid'] for r in rows] == [11, 12], rows
+    row = rows[0]
     assert row['pid'] == 11 and row['thread'] == 1 and (
         row['cmd'] == 'python3 x.py'), row
     assert row['functions'] == [
@@ -239,6 +262,11 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
         {'fn': 'other', 'ir': 7},
         {'fn': 'callee', 'ir': 0}], row
     assert sum(f['ir'] for f in row['functions']) == 97, row
+    mixed = rows[1]
+    assert mixed['functions'] == [
+        {'fn': 'alpha', 'ir': 76},
+        {'fn': 'gamma', 'ir': 10}], mixed
+    assert sum(f['ir'] for f in mixed['functions']) == 86, mixed
 
 
 def test_every_preserved_profile_parses_whole(tmp):
@@ -266,20 +294,32 @@ def test_every_preserved_profile_parses_whole(tmp):
 
 def test_the_breakdown_is_a_cap_not_a_partition(tmp):
     """`functions` keeps the top 64 by self total; the cap claims nothing
-    about what it left out, and ties order by name."""
+    about what it left out, and ties order by name, so the names are read
+    in name order whatever order the file declared them in."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.c.1', (
         'pid: 3\nthread: 1\ncmd: c\npositions: line\nevents: Ir\n'
         + ''.join(f'fn=({n}) fun{n}\n{n + 1} {70 - n}\n'
                   for n in range(70))
         + 'summary: 2485\n'))
-    (row,) = functions.read(Path(tmp), 'callgrind.c')
-    kept = row['functions']
+    _profile_file(tmp, 'callgrind.c.2', (
+        'pid: 4\nthread: 1\ncmd: c\npositions: line\nevents: Ir\n'
+        + ''.join(f'fn=({n}) tie{(n + 7) % 66:02d}\n1 7\n'
+                  for n in range(66))
+        + 'summary: 462\n'))
+    rows = functions.read(Path(tmp), 'callgrind.c')
+    kept = next(r for r in rows if r['pid'] == 3)['functions']
     assert len(kept) == 64, len(kept)
     irs = [f['ir'] for f in kept]
     assert irs == list(range(70, 6, -1)), irs
     assert kept[0]['fn'] == 'fun0', kept[0]
     assert kept[-1]['fn'] == 'fun63', kept[-1]
+    # 66 functions of one self total, declared out of name order: the cap
+    # keeps the first 64 NAMES, not the first 64 the file happened to
+    # declare, which is what makes two rounds diff-able.
+    tied = next(r for r in rows if r['pid'] == 4)
+    assert [f['fn'] for f in tied['functions']] == [
+        f'tie{n:02d}' for n in range(64)], tied
 
 
 def _writing(counting):
@@ -323,6 +363,10 @@ def test_function_rows_are_wired_beside_the_count_only_when_on(tmp):
     entry = _run_measure('1', _writing(numbering), flag=FUNCTION_FLAG,
                          counter='syscalls')['counters']['syscalls']
     assert 'function_rows' not in entry, entry
+    with environment(FLAG, '1'):
+        entry = _run_measure('1', writing, flag=FUNCTION_FLAG)[
+            'counters']['valgrind-callgrind']
+    assert 'thread_rows' in entry and 'function_rows' in entry, entry
 
 
 def main():

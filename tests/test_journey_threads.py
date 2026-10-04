@@ -51,17 +51,11 @@ def row(thread, ir, cmd=BRIDGE, names=(), pid=1):
 def front_end_symbol():
     """The CPython init symbol of the INSTALLED front-end extension.
 
-    CPython's init macro prefixes `PyInit_` to the module's leaf name, and
-    the leaf name here is `_pydantic_core` — which is why the symbol has
-    two underscores and not one. Deriving it from the file the module
-    resolves to is what makes this an oracle rather than a second copy of
-    the constant: a renamed or rebuilt extension moves the expectation with
-    it, and a constant that names a symbol nothing exports fails here
-    rather than in a CI run.
-
-    An extension that is not installed is a REFUSAL naming it. There is no
-    fallback to a literal, because a literal is exactly the thing this
-    exists not to be.
+    Deriving it from the file the module resolves to is what makes this an
+    oracle rather than a second copy of the constant: a renamed or rebuilt
+    extension moves the expectation with it. An extension that is not
+    installed is a REFUSAL naming it. There is no fallback to a literal,
+    because a literal is exactly the thing this exists not to be.
     """
     import importlib.util
     try:
