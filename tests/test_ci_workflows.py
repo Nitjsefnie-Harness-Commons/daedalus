@@ -325,6 +325,16 @@ def test_the_zizmor_manifest_is_hash_pinned(tmp):
     assert_the_zizmor_manifest_is_hash_pinned()
 
 
+def test_the_release_manifest_pins_the_expected_tools(tmp):
+    """The manifest pins exactly what these literals name, never read back."""
+    del tmp
+    manifest = (ROOT / 'requirements-release.txt').read_text(
+        encoding='utf-8')
+    lines = [line for line in manifest.splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+    assert lines == ['build==1.6.1', 'twine==7.0.0'], lines
+
+
 def test_every_dependabot_group_has_a_security_mirror(tmp):
     """A security bump must not arrive one pull request per dependency."""
     del tmp
@@ -473,8 +483,7 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     build = step_scalar(workflow, 'wheel', 'Build the wheel and the sdist',
                         'run')
     assert build, 'the wheel job no longer builds anything under that name'
-    # One build step produces both formats; the wheel-only flag is the exact
-    # defect this job exists to keep out.
+    # One build step produces both formats; --wheel is the defect kept out.
     assert 'python -m build\n' in build, build
     assert '--wheel' not in build, build
     install = 'pip install -r requirements-release.txt'
@@ -492,8 +501,7 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
                               'Install it with no checkout in reach and run'
                               ' its entry point', 'run')
     assert wheel_smoke is not None, 'the wheel is installed by nothing'
-    # The wheel alone: a tarball in this venv would prove the sdist twice
-    # and the wheel not at all.
+    # The wheel alone: a tarball here proves the sdist twice, not the wheel.
     assert wheel_smoke.splitlines() == [
         'python -m venv "$RUNNER_TEMP/probe"',
         '"$RUNNER_TEMP/probe/bin/pip" install dist/*.whl',
@@ -505,8 +513,7 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
                         'Install the sdist, no checkout in reach, and run'
                         ' its entry point', 'run')
     assert smoke is not None, 'the sdist is installed by nothing'
-    # The tarball alone: installing it beside the wheel would prove the wheel
-    # a second time and leave the sdist's file list as untested as before.
+    # The tarball alone: beside the wheel it proves the wheel, not itself.
     assert smoke.splitlines() == [
         'python -m venv "$RUNNER_TEMP/probe-sdist"',
         '"$RUNNER_TEMP/probe-sdist/bin/pip" install dist/*.tar.gz',
@@ -514,8 +521,7 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
         '"$RUNNER_TEMP/probe-sdist/bin/daedalus" --version',
     ], smoke
 
-    # The job's whole step list in order: an added, removed or moved step is
-    # a red event, and metadata still renders before either install.
+    # The whole step list in order: an added, removed or moved step is red.
     steps = complete_job_mapping(workflow, 'wheel')['steps']
     identities = [step.get('name') or step.get('uses', '').partition('@')[0]
                   for step in steps]
@@ -529,9 +535,8 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
         'actions/upload-artifact',
     ], identities
 
-    # A failed smoke test is the artifact worth keeping, for either format.
-    # The window is the wheel job alone: past the job, a later preamble may
-    # name dist/ paths of its own that are not this artifact's.
+    # A failed smoke test's artifact is worth keeping, for either format;
+    # the window is the wheel job alone.
     wheel_job = '\n'.join(_job_section(workflow, 'wheel'))
     before, marker, after = wheel_job.partition(
         'name: artifacts-failed-smoke-test')
