@@ -226,7 +226,12 @@ def scan_jobs(repository, run_id, read):
 
 def _runs_page(read, argv, field):
     # None here means the transport refused, which is what keeps an
-    # unreadable query from reading as a repository with no runs.
+    # unreadable query from reading as a repository with no runs. Entries
+    # the API did not identify are dropped before anything sorts them,
+    # because `_started_key` reads the id as an integer and a non-numeric
+    # one escapes as a traceback rather than a verdict; a page that
+    # carried only those is unanswerable rather than empty. Dropping a
+    # candidate can only make the superseded-cancel rule stricter.
     items = []
     try:
         for chunk in _decode(read(argv)):
@@ -234,7 +239,9 @@ def _runs_page(read, argv, field):
                 items.extend(chunk.get(field) or [])
     except QueryError:
         return None
-    return items
+    usable = [item for item in items
+              if isinstance(item, dict) and _is_run_id(item.get('id'))]
+    return usable or (None if items else [])
 
 
 def _judge_scan(repository, run, read):
