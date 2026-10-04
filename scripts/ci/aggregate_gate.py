@@ -230,8 +230,7 @@ def _runs_page(read, argv, field):
     # the API did not identify are dropped before anything sorts them,
     # because `_started_key` reads the id as an integer and a non-numeric
     # one escapes as a traceback rather than a verdict; a page that
-    # carried only those is unanswerable rather than empty. Dropping a
-    # candidate can only make the superseded-cancel rule stricter.
+    # carried only those is unanswerable rather than empty.
     items = []
     try:
         for chunk in _decode(read(argv)):
