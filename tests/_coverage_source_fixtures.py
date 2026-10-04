@@ -1,23 +1,9 @@
 """The source readers the coverage suites each kept a copy of.
 
-Two helpers travelled here rather than staying local: two controls read a
-real test module out of a copied tree through the same line-ending
-normaliser, and two synthetic-source suites spelled the binding diagnostic
-they compare against the same way.
-
-The two readers here are new. `_module_text` is named for what it
-returns rather than for the short name a retired analyser reader held,
-so this one could not adopt it. `_at` is bound by `tests/test_wfjobs.py`,
-where it walks a decoded workflow document rather than a source.
-
-`_real_module_copy` is the third, and it is here because the retired
-call resolution tabled a call a checked control makes only when the
-callee resolves through a def in that same file or a pair tabled in
-`_PURE_IMPORTS` — and a tabled pair has to mean the callee writes
-nothing, which this one does not: it copies the test tree and hands
-back the path every later write is proved against, so tabling it would
-be the checker losing sight of where a control writes. The retired
-write audit read this file and judged that body itself.
+`_expected_binding_diagnostic` travelled here rather than staying local:
+two synthetic-source suites spell the binding diagnostic they compare
+against the same way. `_real_module_copy` hands a control a copied test
+tree and the path in it that every later write is proved against.
 """
 from pathlib import Path
 
