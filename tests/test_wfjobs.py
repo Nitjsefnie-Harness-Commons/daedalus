@@ -484,6 +484,16 @@ def test_one_needs_dependency_reads_the_same_in_all_three_shapes(tmp):
         assert _planted_needs(spelling) == ['changes'], spelling
 
 
+def test_the_needs_spellings_only_the_tolerance_grants_all_decode(tmp):
+    """The four no other row spells: each is an acceptance, not a bug."""
+    del tmp
+    for spelling in ('    needs: [changes, ]\n',
+                     '    needs: ["changes"]\n',
+                     '    needs:\n      - "changes"\n',
+                     '    needs  : [changes]  # the cells\n'):
+        assert _planted_needs(spelling) == ['changes'], spelling
+
+
 def test_a_needs_flow_sequence_names_the_same_jobs_in_order(tmp):
     """A flow sequence decodes to the block sequence's list, in order.
 
