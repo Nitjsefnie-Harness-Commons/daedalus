@@ -678,7 +678,7 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
     # default.
     # `tolerances` is absent when no journey carries an entry, which is the
     # state this artefact is recorded in, so it is read as the empty block
-    # `journey_rebaseline._carried_tolerances` calls absent rather than
+    # `journey_recording.carried_tolerances` calls absent rather than
     # indexed: both the validator and `tolerance_of` accept the absence and
     # only this read did not.
     own = document.get('tolerances') or {}
