@@ -22,14 +22,6 @@ from _realbrowser_fixture_controls import (  # noqa: E402
     _browser_version, _enter_fixture, _fixture_runtime)
 
 
-def _control_diagnosis(tmp, answers, clock, poll=None):
-    return control_diagnosis(tmp, answers, clock, poll)
-
-
-def _answered_diagnosis(tmp):
-    return answered_diagnosis(tmp)
-
-
 def _fixture_failure(tmp):
     try:
         with _enter_fixture(tmp):
@@ -258,7 +250,7 @@ def test_answering_control_worker_twice_marks_worker_absence_our_failure(tmp):
     demonstrated the capability. What is pinned here is that contract: the
     failure names our source and our declared script, never the machine.
     """
-    outcome, _launches, processes = _answered_diagnosis(tmp)
+    outcome, _launches, processes = answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
     reported = str(outcome)
     assert str(EXTENSION_ROOT.resolve()) in reported, reported
@@ -273,7 +265,7 @@ def test_answering_control_worker_twice_marks_worker_absence_our_failure(tmp):
 
 
 def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
-    outcome, launches, processes = _answered_diagnosis(tmp)
+    outcome, launches, processes = answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
     assert len(processes) == 2, processes
     for process in processes:
@@ -295,7 +287,7 @@ def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
 
 def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
     """No control answer is a browser that never demonstrated anything."""
-    outcome, launches, processes = _control_diagnosis(
+    outcome, launches, processes = control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0, 31)))
     assert outcome[0] is False, outcome
     assert 'no answering worker either' in outcome[1], outcome
@@ -307,7 +299,7 @@ def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
 
 def test_control_browser_exit_ends_the_diagnosis_without_a_verdict(tmp):
     """A diagnosis browser that is gone cannot demonstrate anything."""
-    outcome, launches, processes = _control_diagnosis(
+    outcome, launches, processes = control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0)), poll=1)
     assert outcome[0] is False, outcome
     assert 'exited before any control worker' in outcome[1], outcome
@@ -319,7 +311,7 @@ def test_control_browser_exit_ends_the_diagnosis_without_a_verdict(tmp):
 
 def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
     """A transport failure is not an answer, and the next poll knows it."""
-    outcome, _launches, processes = _control_diagnosis(
+    outcome, _launches, processes = control_diagnosis(
         tmp, [AssertionError('controlled transport failure'), True],
         mock.Mock(side_effect=(0, 0, 0, 31, 31, 31, 62)))
     assert outcome.__class__ is AssertionError, outcome
