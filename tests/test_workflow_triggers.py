@@ -17,7 +17,7 @@ from _wfgraph import _job_if_expression  # noqa: E402
 from _wfjobs import jobs_mapping  # noqa: E402
 from _workflows import (  # noqa: E402
     _event_option_keys, _workflow_path_filters, _workflow_triggers)
-from _yamlread import step_scalar  # noqa: E402
+from _yamlread import step_scalar, step_scalars  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
 
 
@@ -82,10 +82,9 @@ def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
 def test_no_workflow_gates_one_commit_twice(tmp):
     """A pull request's head SHA gets one run per workflow, not two.
 
-    A branch push and its pull request fire `push` and `pull_request`
-    against the same SHA, so every workflow ran twice per commit and the
-    runner pool saturated. The fix is the `branches:` filter on `push`
-    pinned here; a branch with no pull request open gets no run — the trade.
+    A push and its pull request fire `push` and `pull_request` on the same
+    SHA, so every workflow ran twice. The fix is the `branches:` filter on
+    `push`; a branch with no open pull request gets no run — the trade.
     """
     del tmp
     _assert_no_workflow_gates_one_commit_twice(
@@ -120,8 +119,7 @@ def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
     """Push and pull_request must make the same path-filtering choice.
 
     A push-only filter lets a documentation-only commit skip the gates on
-    main while the identical pull request runs them; this test owns only
-    the symmetry property, and release safety is pinned separately.
+    main while the identical pull request runs them.
     """
     del tmp
     _assert_workflow_trigger_filters_match(ROOT / '.github' / 'workflows')
@@ -213,8 +211,8 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
         assert _workflow_runs_for_paths(path, 'push', [source])
         assert _workflow_runs_for_paths(path, 'pull_request', [threshold])
         triggers = _workflow_triggers(path.read_text(encoding='utf-8'), name)
-        # A superset check, not equality: both ignore more generated data
-        # files than this one, and equality would red once one is MET.
+        # Membership, not equality: a workflow may ignore other files
+        # besides this one without breaking the requirement it gates.
         assert threshold in _workflow_path_filters(
             triggers['push'], name).get('paths-ignore', []), triggers['push']
         assert not _workflow_path_filters(triggers['pull_request'], name)
@@ -378,9 +376,8 @@ def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
 def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
     """A coverage gate runs only on a measurement that succeeded.
 
-    This table and its four siblings hold the gates the shipped workflows
-    carry; a gate added later needs its own row in one of them — nothing
-    enforces that, for the reason the handle table beside it gives.
+    This table and its four siblings hold the shipped gates; a gate added
+    later needs its own row in one of them — nothing enforces that.
     """
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -464,8 +461,9 @@ def test_journey_budget_steps_are_gated_on_the_steps_before_them(tmp):
 def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
     """The handles the shipped workflows declare, at the step declaring each.
 
-    `actionlint` is the one nothing reads; the deleted suite held it. A
-    handle added later needs its own row here — nothing enforces that.
+    coverage-comment.yml's id set is censused and its rows tied to it, so
+    a duplicate, extra or unpinned handle goes red there; tests.yml's rows
+    still rely on disclosure alone. `actionlint` is the one nothing reads.
     """
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -486,11 +484,15 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
         assert actual == expected, f'{job}/{step}: {actual!r}'
     comment_yml = (ROOT / '.github' / 'workflows' / 'coverage-comment.yml'
                    ).read_text(encoding='utf-8')
-    for job, step, expected in (
-            ('comment', 'Check for the comment artifact', 'artifact'),
-            ('comment', 'Resolve the target pull request from the event',
-             'pr'),
-            ('comment', 'Mark missing patch coverage', 'missing')):
+    census = ('artifact', 'missing', 'pr')
+    assert tuple(sorted(step_scalars(comment_yml, 'comment', 'id'))) == census
+    rows = (
+        ('comment', 'Check for the comment artifact', 'artifact'),
+        ('comment', 'Resolve the target pull request from the event',
+         'pr'),
+        ('comment', 'Mark missing patch coverage', 'missing'))
+    assert tuple(sorted(row[-1] for row in rows)) == census
+    for job, step, expected in rows:
         actual = step_scalar(comment_yml, job, step, 'id')
         assert actual == expected, f'{job}/{step}: {actual!r}'
 
@@ -498,9 +500,8 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
 def _without_call_spacing(expression):
     """Return an expression with whitespace at `(`, `,` and `)` removed.
 
-    Quote-blind, so it strips inside a quoted argument too and `'a, b'`
-    reads as `'a,b'`. Safe on the one expression this control compares:
-    neither quoted operand holds any of the three.
+    Quote-blind, so it strips inside a quoted argument too (`'a, b'` reads
+    as `'a,b'`); safe here: neither quoted operand holds any of the three.
     """
     return re.sub(r'\s*([(),])\s*', r'\1', expression)
 
@@ -510,9 +511,8 @@ def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
 
     A structural pin, not an evaluation: the shared expression reader admits
     a call only with no arguments, so it refuses `format(...)` outright and
-    the guard is never run under the contexts that would decide it. Each
-    limb is pinned as the shape it decodes to, and a limb of any other shape
-    fails rather than passing unread.
+    the guard is never run under the contexts that would decide it; each
+    limb of any other shape fails rather than passing unread.
     """
     del tmp
     scorecard = (ROOT / '.github' / 'workflows' / 'scorecard.yml').read_text(
