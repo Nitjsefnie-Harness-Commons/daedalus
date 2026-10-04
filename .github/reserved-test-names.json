@@ -1285,6 +1285,7 @@
     "reserved": {"python": ["tests/_reserved_names.py"]},
     "reset": {"javascript": ["tests/_gm_harness.py"]},
     "resetStore": {"javascript": ["tests/_gm_two_origin.py"]},
+    "residual": {"python": ["tests/_journey_contract.py"]},
     "residue_sites": {"python": ["tests/_reserved_names.py"]},
     "resolveTarget": {"javascript": ["tests/_worker_sources.py"]},
     "resolve_origin": {"python": ["tests/_cli_arg_audit_resolver.py"]},
