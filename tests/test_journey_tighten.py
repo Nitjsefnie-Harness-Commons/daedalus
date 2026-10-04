@@ -84,7 +84,6 @@ def test_both_remedies_reach_the_step_summary_on_one_failing_run(tmp):
 def test_a_tighten_that_meets_a_rise_writes_nothing(tmp):
     """A lower budget over a regression still in the tree is the rise
     committing itself, so a run with a rise writes nothing.
-    itself, so a run with a rise writes nothing.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -143,7 +142,6 @@ def test_a_committed_tighten_says_how_many_journeys_it_lowered(tmp):
 def test_a_re_baseline_writes_what_the_next_run_accepts(tmp):
     """The command a rise is answered with, and the artefact the run
     after it must read.
-    read.
     """
     policy = _journey_contract.policy()
     # A tolerance the fixture does not default to, so a command that
