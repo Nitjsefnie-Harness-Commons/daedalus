@@ -35,7 +35,9 @@ required workflow that is present and red is a failure, not an absence.
 Those rules are the caller's alone. The gate question is asked of the set
 below; the wait judges the conclusion question over that set, where a
 watcher's hold once judged it over the raw runs - deliberately not shared,
-and the reason the filter is applied here.
+and the reason the filter is applied here. The two never meet, so a name a
+caller requires can satisfy the set by its PRESENCE while its conclusion is
+not judged at all: `--required 'pr gate'` is answered by that run existing.
 
 A PUBLISHED CHECK-RUN is a gate that is not a workflow run, and this
 repository has one. The `gate freshness` workflow's own run concludes
