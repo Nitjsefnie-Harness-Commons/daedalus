@@ -122,7 +122,6 @@ jobs:
 
       - name: Install linters
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
       - name: pycodestyle
@@ -714,8 +713,9 @@ jobs:
 
       - name: Build the wheel and the sdist
         run: |
-          # twine is pinned exactly here: the metadata gate may not float.
-          python -m pip install --upgrade pip build twine==7.0.0
+          # Both tools are pinned in requirements-release.txt, which
+          # Dependabot's pip entry watches; see that manifest.
+          pip install -r requirements-release.txt
           python -m build
 
       - name: Check both artifacts render
@@ -979,7 +979,6 @@ jobs:
 
       - name: Install the coverage toolchain and the project
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements-test.txt
           # The mcp extra too: without it the MCP suite skips itself entirely
           # and daedalus_mcp/server.py contributes a zero to a number that is supposed

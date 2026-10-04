@@ -4,7 +4,7 @@ name: audit
 # to its full transitive tree and checks every resolved version against the
 # PyPI advisory database.
 #
-# FOUR SURFACES, and none of them is the wheel. The published CLI declares
+# FIVE SURFACES, and none of them is the wheel. The published CLI declares
 # `dependencies = []` — stdlib only, deliberately — so `pip-audit .` over this
 # project collects zero packages and would be a gate that can never fire.
 # What this repository actually depends on is:
@@ -13,9 +13,10 @@ name: audit
 #     runtime and is the only third-party code that executes in production;
 #   * requirements-dev.txt, the lint and type pins;
 #   * requirements-test.txt, the coverage pin;
+#   * requirements-release.txt, the release path's build and metadata tools;
 #   * requirements-pip-audit.txt, this gate's own tool.
 #
-# The last three never ship, but they run in CI holding the repository token,
+# The last four never ship, but they run in CI holding the repository token,
 # so a compromised one is a supply-chain problem even though no user installs
 # it.
 #
@@ -122,7 +123,7 @@ jobs:
           fi
 
       - name: Audit dependencies
-        # All four surfaces in one invocation so a package constrained by
+        # All five surfaces in one invocation so a package constrained by
         # more than one of them is resolved once, consistently — the same way
         # an install would see it.
         #
@@ -163,6 +164,7 @@ jobs:
                  --requirement extras-requirements.txt \
                  --requirement requirements-dev.txt \
                  --requirement requirements-test.txt \
+                 --requirement requirements-release.txt \
                  --requirement requirements-pip-audit.txt \
                  > audit.out 2>&1; then
               cat audit.out
