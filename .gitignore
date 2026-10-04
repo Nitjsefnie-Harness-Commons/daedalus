@@ -613,6 +613,7 @@
 !/tests/test_journey_placement.py
 !/tests/test_journey_real_profile.py
 !/tests/test_journey_rebaseline.py
+!/tests/test_journey_refusal_order.py
 !/tests/test_journey_report.py
 !/tests/test_journey_thread_rows.py
 !/tests/test_journey_threads.py
