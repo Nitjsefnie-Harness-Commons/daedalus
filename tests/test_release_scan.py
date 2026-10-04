@@ -83,6 +83,18 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
         f'non-tracked paths included in scanner input: {enumerated - tracked}')
 
 
+def test_the_root_holds_no_python_module_but_the_entry_points(tmp):
+    """Only the two process entry points stay at the repository root."""
+    del tmp
+    root_modules = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in iter_tree_files(ROOT)
+        if path.parent == ROOT and path.suffix == '.py')
+    assert root_modules == ['run_tests.py', 'server.py'], (
+        f'the repository root holds {root_modules}, '
+        "expected ['run_tests.py', 'server.py']")
+
+
 def test_no_deployment_strings_in_tree(tmp):
     """No shipped file may name a host or an absolute path off this machine.
 
