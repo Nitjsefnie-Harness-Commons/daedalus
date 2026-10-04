@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Contracts for the per-thread rows a journey measurement carries.
 
-The journey budget records ONE instruction count per journey, and two runs
-of unchanged code have produced counts about seven percent apart. The
-measurement already reads every thread's own total out of the callgrind
-out-files and then sums them, so the data exists and is thrown away; these
-rows are what it read, kept so a later run can say WHICH THREAD carries the
-difference.
+The journey budget records ONE instruction count per journey; these rows
+are what that sum was read from, kept so a later run can say WHICH THREAD
+carries a difference.
 """
 import copy
 import json
@@ -224,8 +221,7 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
     announcing them; the format's compressed bare `fn=(id)` re-selects
     the function the id was declared for, and an id the file never
     declared leaves the file out whole rather than bill its costs to a
-    neighbour. The torn companion is the count reader's refusal shape,
-    contributing no row and no failure."""
+    neighbour."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.x.torn', (
         'pid: 5\nthread: 1\ncmd: python3 x.py\nfn=(1) carried\n1 9\n'))
@@ -314,9 +310,8 @@ def test_the_breakdown_is_a_cap_not_a_partition(tmp):
     assert irs == list(range(70, 6, -1)), irs
     assert kept[0]['fn'] == 'fun0', kept[0]
     assert kept[-1]['fn'] == 'fun63', kept[-1]
-    # 66 functions of one self total, declared out of name order: the cap
-    # keeps the first 64 NAMES, not the first 64 the file happened to
-    # declare, which is what makes two rounds diff-able.
+    # 66 functions of one self total, declared out of name order, so the
+    # kept list is the first 64 NAMES and not the first 64 declared.
     tied = next(r for r in rows if r['pid'] == 4)
     assert [f['fn'] for f in tied['functions']] == [
         f'tie{n:02d}' for n in range(64)], tied

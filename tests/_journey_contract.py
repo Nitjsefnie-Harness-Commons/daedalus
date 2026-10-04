@@ -119,16 +119,13 @@ def bridge_profile(main, request=0, imported=0, served=0):
 
     The counterpart to `callgrind_profile`, which writes the FILES a real
     profile arrives as; this hands back what `journey_threads.read` would
-    have read out of them, so a control can drive the real classifier
-    without a profiler. The signatures come from the classifier's own
-    table rather than from symbols copied here, so a control cannot agree
-    with a signature the tree changed.
-
-    `main` and `request` are the journey's own process; `imported` and
-    `served` are the bridge's. A role left at zero is thread 1's neighbour
-    that never ran, and is omitted rather than written as an empty thread: a
-    thread below `REQUEST_FROM` is a refusal about the SHAPE of a profile,
-    and a control that wanted one would be testing something else.
+    have read out of them, with the signatures from the classifier's own
+    table rather than symbols copied here. `main` and `request` are the
+    journey's own process; `imported` and `served` are the bridge's. A
+    role left at zero is omitted rather than written as an empty thread: a
+    thread below `REQUEST_FROM` is a refusal about the SHAPE of a
+    profile, and a control that wanted one would be testing something
+    else.
     """
     policy = threads()
     rows = [{'pid': 1, 'thread': 1, 'ir': main, 'cmd': HARNESS_CMD,
