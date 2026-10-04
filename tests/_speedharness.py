@@ -1,10 +1,8 @@
 """Executing a workflow `run:` block under the rules GitHub runs it by.
 
-`run_workflow_script` is the entry every behavioural pin over a workflow
-step goes through, so what it enforces is what those pins actually test.
-GitHub starts a step's body under `bash -e`, so the harness does too: a
-script that only looks fine without `-e` is not the script that runs. The
-timeout carries its own evidence, and the cleanup is a shared tree kill.
+Every behavioural pin over a workflow step runs through
+`run_workflow_script`, which starts the body under `bash -e` as GitHub
+does; the timeout carries its own evidence, and the cleanup is a tree kill.
 """
 import os
 import subprocess
