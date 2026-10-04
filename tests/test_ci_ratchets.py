@@ -30,11 +30,6 @@ sys.path[:0] = [str(ROOT), str(ROOT / 'scripts' / 'ci')]
 
 THRESHOLDS_PATH = ROOT / '.github' / 'ci-thresholds.json'
 RATCHET_PATH = ROOT / 'scripts' / 'ci' / 'ratchet.py'
-SIZE_PATH = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
-LINES_PATH = ROOT / 'scripts' / 'ci' / 'line_lengths.py'
-JS_MODULE_PATH = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
-JS_COVERAGE_PATH = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
-JS_LINES_PATH = ROOT / 'scripts' / 'ci' / 'js_lines.py'
 
 
 def _thresholds():
@@ -363,6 +358,23 @@ def test_real_publisher_step_size_only_preserves_calibrations(tmp):
     assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
         '.github/ci-thresholds.json']
     assert after['module_size_baseline']['tests/test_cli.py'] == 1238
+
+
+def test_real_publisher_step_tightens_the_suite_tree_budget(tmp):
+    """The no-op replays seed the budget at the measured number, so a tighten
+    that wrote a wrong value on a real drop passes every one of them."""
+    data = _ratchet_document()
+    data['tests_line_baseline'] = 1707
+    repo, path, _before, output, _summary, done = _run_publisher_case(
+        tmp, 'publisher-tests-lines', data, '80.0', '35.5')
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert 'changed=true' in output.read_text(encoding='utf-8')
+    after = _thresholds().load(path)
+    assert after['tests_line_baseline'] == 1706
+    assert after['coverage'] == data['coverage']
+    assert after['module_size_baseline'] == data['module_size_baseline']
+    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
+        '.github/ci-thresholds.json']
 
 
 def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
