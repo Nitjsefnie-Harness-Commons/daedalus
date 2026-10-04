@@ -9,10 +9,9 @@
 # resolution, and unlike zizmor -- whose transitive closure is empty, which
 # is what makes its eleven-artifact hash set hand-maintainable -- build and
 # twine pull packaging, pyproject-hooks, readme-renderer, requests, rich and
-# the rest of a normal closure, so a hash-pinned manifest here would be a
-# hand-curated artifact set of the size the zizmor manifest's own prose
-# calls out of scope for hand maintenance. What is pinned is the tools'
-# versions -- the half whose release must not turn CI red on an unchanged
-# commit.
+# the rest of a normal closure, so hash-pinning this manifest would mean
+# hand-keeping a hash set of that size, fresh on every bump. What is pinned
+# is the tools' versions -- the half whose release must not turn CI red on
+# an unchanged commit.
 build==1.6.1
 twine==7.0.0
