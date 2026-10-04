@@ -575,18 +575,19 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     Three runs, because `DOWNLOAD_ATTEMPTS` gives each of them two gaps
     and the three things worth pinning do not fit in two.
 
-    The first carries a header on both failures, which pins the header
-    limbs: 6 is above the 2 s the first attempt would have grown to and
-    below the 10 s ceiling, so a path that ignores the header records 2
-    where 6 is wanted, and 900 is above the ceiling, so a path that never
-    clamps records 900 where 10 is. Two entries and not three: the third
-    attempt served, and a pause after the attempt that succeeded is
-    waiting for nothing.
+    The first carries a header on both failures, and they straddle the
+    growth: 1 is under the 2 s the first attempt would have waited
+    anyway, so the longer of the two wins and it records 2, while 900 is
+    over the 10 s ceiling, so the ceiling binds it and it records 10.
+    Either way a path that ignored the header, or took the header
+    outright whatever the growth was, records 1 and goes red. Two
+    entries and not three: the third attempt served, and a pause after
+    the attempt that succeeded is waiting for nothing.
 
     The second carries none, which is what makes the module's own growth
     reachable: every header-bearing sample hides it behind the `max` that
     applies the header. It records `[2, 4]`, where a flat wait records
-    `[2, 2]` and a shifted exponent `[2, 8]`.
+    `[2, 2]` and a shifted exponent `[4, 8]`.
 
     The third is the one header the module cannot read, and a parse that
     raised instead of falling back would take the retry with it.
@@ -594,7 +595,7 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     del tmp
     installer, transfer, name, asset = _installer_and_transfer(
         lambda i: [
-            _http_error(i, 503, 'Service Unavailable', retry_after=6),
+            _http_error(i, 503, 'Service Unavailable', retry_after=1),
             _http_error(i, 503, 'Service Unavailable',
                         retry_after=900),
             b'the asset bytes'])
@@ -603,11 +604,11 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
           mock.patch.object(asset.time, 'sleep', waits.append)):
         payload = asset.fetch(name)
     assert payload == b'the asset bytes', payload
-    assert waits == [6, 10], (
+    assert waits == [2, 10], (
         f'the recorded pauses were {waits}, where the two failing statuses '
-        'carried Retry-After 6 and 900. A header below the ceiling REPLACES '
-        'the growing backoff rather than adding to it, the ceiling binds a '
-        'header above it, and nothing is recorded after the attempt that '
+        'carried Retry-After 1 and 900 against growths of 2 and 4. The '
+        'wait is the longer of growth and header, so 1 loses to 2 and 900 '
+        'wins the ceiling at 10; nothing is recorded after the attempt that '
         'served.')
     plain = _Transfer(installer, name, [
         _http_error(installer, 503, 'Service Unavailable'),
