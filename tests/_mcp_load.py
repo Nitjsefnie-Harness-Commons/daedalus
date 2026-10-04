@@ -5,10 +5,8 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 Every suite that needs the MCP server loads it through here, so the settings
 that decide WHERE it loads from are read in one place: a shell that exports
 `DAEDALUS_*` cannot redirect one caller's load into another caller's process.
-The same module carries the session and command-answering helpers, because they
-are read off the same loaded module and the same `TOK` that names its queue;
-splitting them would put one home in this file and the other in a suite, which
-is the duplication this module exists to remove.
+The session and command-answering helpers live here too: they are read off
+the same loaded module and the same `TOK` that names its queue.
 """
 import asyncio
 import contextlib
@@ -64,6 +62,7 @@ class _FakeUvicornServer:
 
     def run(self, sockets=None):
         type(self).handed.extend(sockets or ())
+
         async def serve():
             await self.startup(sockets)
             self.should_exit = True
