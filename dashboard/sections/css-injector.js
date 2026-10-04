@@ -57,9 +57,9 @@ export function mount(container, bus) {
   }
   function save(arr) { localStorage.setItem(STORE_KEY, JSON.stringify(arr.slice(-STORE_MAX))); }
 
-  // One writer for every post-mount store write, so a refusal is caught
-  // and toasted at the label the caller chooses instead of being thrown
-  // out of an async handler, where it would take the child down.
+  // One writer for every post-mount store write: a failed write becomes
+  // the label toast the caller chose, and the return value tells the
+  // reserve path to stop.
   function persist(arr, label) {
     try {
       save(arr);
@@ -114,11 +114,12 @@ export function mount(container, bus) {
           h('button', {
             class: 'ghost sm danger',
             onclick: async () => {
-              // A failed record names a rule that was never applied, so
-              // there is no removeCSS match for the worker to confirm:
-              // drop it here. A live record still goes to the worker
-              // first -- the record is the only way back to an exact
-              // match, so a refused removal leaves it in place.
+              // A failed record carries no confirmation the rule is
+              // live, and asking the worker to remove it is what left
+              // the record stuck before: drop it here. A live record
+              // still goes to the worker first -- the record is the only
+              // way back to an exact match, so a refused removal leaves
+              // it in place.
               if (s.failed) {
                 toast('removed', 'ok');
                 dropByContents(s);
@@ -170,10 +171,10 @@ export function mount(container, bus) {
       toast(`injected ${r && r.injected} chars → tab ${r && r.tabId}`, 'ok');
     } catch (e) {
       toast(errMsg(e), 'err');
-      // A command that failed leaves the reservation holding no live
-      // rule: mark it, so the row shows the state and its remove drops
-      // the record without asking the worker to confirm a match that
-      // does not exist. The store is RE-READ here rather than the
+      // A command that failed leaves the reservation unconfirmed: mark
+      // it, so the row shows the state and its remove drops the record
+      // instead of asking the worker about a match the panel cannot
+      // prove is there. The store is RE-READ here rather than the
       // pre-command array written back: another window may have added or
       // removed records while the command was in flight, and a stale
       // write would clobber or resurrect them. A record already gone
