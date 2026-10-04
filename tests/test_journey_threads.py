@@ -666,25 +666,24 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
             f'{name} is recorded as {recorded.get(name)} and the table '
             f'excludes {applied}, so this artefact counts a different '
             'quantity from the table a run classified the profile under')
-    # The pool convention: a journey the pool names carries the span of its
-    # own draws as its per-journey tolerance — (max - min) / min over every
-    # round of every pool file, in the percent the artefact denominates
-    # bounds in — whatever its size; only a journey the pool cannot name
-    # (its draws never separated it in any pool file) falls back to
-    # `tolerance_pct`. `net-capture` is the sentinel journey — an
-    # arbitrary pick, held to whatever the pool derived at the last
-    # re-derivation: this control pins the convention, never a number,
-    # because the value is the run's own measurement and moves with the
-    # next pool. Where a draw may sit from the recorded count is the
-    # budget gate's question, not this one; the bound the gate enforces is
-    # read through `tolerance_of`, which prefers the journey's own entry
-    # over the default.
+    # The pool convention, final form: a per-journey entry exists ONLY
+    # where the pooled spread exceeds tolerance_pct — the default is a
+    # floor, never a ceiling to tighten under — so every entry in the
+    # block is strictly above the default, and every journey at or below
+    # it, `net-capture` among them, carries tolerance_pct. This control
+    # pins the convention against the committed artefact, never a number:
+    # the values are the runs' own measurements and move with the next
+    # pool. Where a draw may sit from the recorded count is the budget
+    # gate's question, not this one; the bound the gate enforces is read
+    # through `tolerance_of`, which prefers a journey's own entry over
+    # the default.
     own = document.get('tolerances') or {}
-    assert 'net-capture' in own, (
-        'net-capture is a journey the pool names, and a pool-named journey '
-        'carries its derived bound: no entry here means the artefact fell '
-        'back to the default for it, so the recording convention has moved '
-        f'and this control is stale: {own}')
+    assert 'net-capture' not in own, (
+        'net-capture is below tolerance_pct, and an entry exists only '
+        'above the default: an entry here means the artefact was recorded '
+        'under the pre-floor convention and must be re-derived')
+    assert all(value > document['tolerance_pct']
+               for value in own.values()), own
 
 
 def main():
