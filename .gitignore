@@ -317,7 +317,6 @@
 !/tests/_dashpager.py
 !/tests/_dashqueue.py
 !/tests/_dashsection.py
-!/tests/_dashsection_controls.py
 !/tests/_dashsection_transport.py
 !/tests/_dashsection_wave1.py
 !/tests/_dashshell.py
@@ -326,7 +325,6 @@
 !/tests/_deliveries.py
 !/tests/_diff_coverage_fixtures.py
 !/tests/_drain.py
-!/tests/_drain_scan.py
 !/tests/_evalpages.py
 !/tests/_fake_gh.py
 !/tests/_fanout.py
@@ -337,7 +335,6 @@
 !/tests/_gitignore_control.py
 !/tests/_gm_harness.py
 !/tests/_gm_two_origin.py
-!/tests/_helper_binds.py
 !/tests/_hotfix_outcome.py
 !/tests/_hotfix_quota_scenario.py
 !/tests/_hotfixharness.py
@@ -347,7 +344,6 @@
 !/tests/_journeys.py
 !/tests/_jsread.py
 !/tests/_jsroute_keys.py
-!/tests/_launcher_stand_ins.py
 !/tests/_lint_tool_mechanisms.py
 !/tests/_lint_tool_refusals.py
 !/tests/_lint_tool_roles.py
@@ -390,7 +386,6 @@
 !/tests/_realbrowser_workers.py
 !/tests/_relayharness.py
 !/tests/_repo.py
-!/tests/_scratch_index.py
 !/tests/_seg_lock_seam.py
 !/tests/_segment_job_record.py
 !/tests/_segments.py
@@ -448,7 +443,6 @@
 !/tests/test_change_classifier.py
 !/tests/test_change_classifier_callers.py
 !/tests/test_checkout_pin.py
-!/tests/test_child_ready.py
 !/tests/test_ci_gate.py
 !/tests/test_ci_lint_tool_refusals.py
 !/tests/test_ci_lint_tools.py
@@ -483,7 +477,6 @@
 !/tests/test_cli_segment_origins.py
 !/tests/test_cli_waits.py
 !/tests/test_client_credentials.py
-!/tests/test_client_states.py
 !/tests/test_cmdqueue.py
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py
@@ -504,15 +497,10 @@
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_app_shell.py
 !/tests/test_dashboard_behaviour.py
-!/tests/test_dashboard_command_line.py
 !/tests/test_dashboard_drain_blocking.py
 !/tests/test_dashboard_eval.py
 !/tests/test_dashboard_fanout.py
-!/tests/test_dashboard_gate.py
-!/tests/test_dashboard_harness.py
-!/tests/test_dashboard_harness_metadata.py
 !/tests/test_dashboard_hotfixes.py
-!/tests/test_dashboard_node_retry.py
 !/tests/test_dashboard_section_block_rules.py
 !/tests/test_dashboard_section_cdp.py
 !/tests/test_dashboard_section_cookies.py
@@ -523,10 +511,6 @@
 !/tests/test_dashboard_sections.py
 !/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
-!/tests/test_dashfetch.py
-!/tests/test_dashsection_harness.py
-!/tests/test_dashshell_harness.py
-!/tests/test_dashshell_selectors.py
 !/tests/test_debugger_attachment.py
 !/tests/test_debugger_teardown.py
 !/tests/test_delivery_matching.py
@@ -535,8 +519,6 @@
 !/tests/test_diff_coverage.py
 !/tests/test_diff_coverage_boundaries.py
 !/tests/test_diff_coverage_javascript.py
-!/tests/test_drain.py
-!/tests/test_drain_bounds.py
 !/tests/test_eval_relay.py
 !/tests/test_examples_parse.py
 !/tests/test_exclusive_bind.py
@@ -601,13 +583,6 @@
 !/tests/test_mcp_transport.py
 !/tests/test_mcp_transport_close.py
 !/tests/test_mcp_transport_guards.py
-!/tests/test_noderun_deadline.py
-!/tests/test_outer_bound.py
-!/tests/test_overlap_bound.py
-!/tests/test_overlap_client_state.py
-!/tests/test_overlap_harness.py
-!/tests/test_overlap_stall_retry.py
-!/tests/test_owned_writes.py
 !/tests/test_parent_watch.py
 !/tests/test_path_containment.py
 !/tests/test_path_safety.py
@@ -675,7 +650,6 @@
 !/tests/test_version_empty_values.py
 !/tests/test_version_set_atomic.py
 !/tests/test_wf_refusals.py
-!/tests/test_wf_suite_boundaries.py
 !/tests/test_wfjobs.py
 !/tests/test_worker_close_tab.py
 !/tests/test_worker_command_types.py
