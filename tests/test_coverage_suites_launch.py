@@ -33,14 +33,20 @@ def test_a_suite_ended_at_its_bound_is_recorded_and_refuses_the_run(tmp):
     _launch.assert_timed_out(outcome, _launch.KILLED)
 
 
-def test_a_forced_kill_is_told_so_and_the_other_platform_is_not(tmp):
-    """The platform the runner read picks the sentence an operator reads."""
+def test_a_windows_read_gets_the_same_sentence_and_refuses_the_dead_one(tmp):
+    """The sentence no longer depends on the platform the runner read.
+
+    Both routes ask before they escalate, so the sentence an operator
+    reads is the same under a Windows read as under a POSIX one, and the
+    forced-only wording this runner retired is refused: a conditional
+    that resurrects it for one platform is red here rather than silent.
+    """
     outcome = _launch.run_main(tmp, platform='win32', scripts={
         'test_alpha': {'result': (0, _launch.KILLED)}})
     _launch.assert_timed_out(outcome, _launch.KILLED)
     assert outcome.launch.calls[0].platform == 'win32', outcome.launch.calls
-    assert OPERATOR_FORCES in outcome.stderr, outcome.stderr
-    assert OPERATOR_ASKS_FIRST not in outcome.stderr, outcome.stderr
+    assert OPERATOR_ASKS_FIRST in outcome.stderr, outcome.stderr
+    assert OPERATOR_FORCES not in outcome.stderr, outcome.stderr
 
 
 def test_a_suite_that_could_not_start_is_grouped_not_fatal(tmp):
