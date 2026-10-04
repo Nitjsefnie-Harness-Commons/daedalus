@@ -110,7 +110,8 @@ def carried_tolerances(recorded, counted, draws=(), counter=None,
     A `--draws` pool moves the bound instead of carrying it: a journey the
     pool names is re-bound to the span of every round of every pool file,
     in the percent the artefact denominates tolerances in; a journey the
-    pool does not name keeps the bound it carried.
+    pool does not name -- or whose span reaches only the default -- keeps
+    the bound it carried.
     """
     own = recorded.get('tolerances')
     if own is None:
@@ -119,14 +120,16 @@ def carried_tolerances(recorded, counted, draws=(), counter=None,
         carried = {name: value for name, value in own.items()
                    if name in counted}
     for name, value in sorted(derived_tolerances(
-            draws, counter, counted, toolchain, exclusions).items()):
+            draws, counter, counted, toolchain, exclusions,
+            recorded.get('tolerance_pct') or 0.0).items()):
         if carried is None:
             carried = {}
         carried[name] = value
     return carried
 
 
-def derived_tolerances(draws, counter, counted, toolchain, exclusions):
+def derived_tolerances(draws, counter, counted, toolchain, exclusions,
+                       default):
     """The bound each pool-named journey is re-derived to, and none beside.
 
     Each pool file contributes every ROUND's count — the row's `net`, the
@@ -134,6 +137,12 @@ def derived_tolerances(draws, counter, counted, toolchain, exclusions):
     the pool names is held to (max - min) / min over all of them. A journey
     the pool does not name keeps its carried bound, which is why only named
     journeys come back.
+
+    An entry exists ONLY where the pooled spread exceeds `default`
+    (tolerance_pct), strictly greater: the default is a floor, never a
+    ceiling to tighten under, so a journey at or below it falls back to
+    tolerance_pct — a sub-default band over an unseen tail is the next
+    #1519.
 
     Pool files are quantity identity: each must select the same counter,
     carry the same toolchain and count under the same exclusion map as the
@@ -174,5 +183,7 @@ def derived_tolerances(draws, counter, counted, toolchain, exclusions):
             raise ValueError(
                 f'the draws for {name} reach {low}, and a span from a '
                 'nonpositive floor is not a bound any run can be held to')
-        derived[name] = round((max(values) - low) / low * 100, 6)
+        span = round((max(values) - low) / low * 100, 6)
+        if span > default:
+            derived[name] = span
     return derived
