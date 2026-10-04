@@ -356,22 +356,13 @@ def test_the_ceiling_the_session_is_measured_against_is_the_products(tmp):
 
 def test_the_command_ttl_default_is_the_one_the_documentation_states(tmp):
     """The number is the PRODUCT's decision, and AGENTS.md is where it is
-    written down.
-
-    The control above pins that one place states it and everything else
-    reads it — a hoist, not a value. So the value itself was pinned by
-    nothing, and `CMD_TTL_DEFAULT = 90` became `= 3` with every suite still
-    green: the two sides would move together and agree, which is what a
-    control comparing a module to itself always does.
-
-    The oracle is the endpoint and directory reference, which says
-    `DAEDALUS_CMD_TTL` defaults to 90 — twice, and both must say it. A
-    control holding `90` as a literal would be a second copy that a rename
-    moves with the first; this one reads the published number back, so
-    changing the default without changing what the documentation says fails
-    here rather than at a real run — where a raised TTL delivers a stale
-    command and a lowered one drops a fresh one, and neither is visible in
-    the journey's own count.
+    written down: the control above pins that one place states it and
+    everything else reads it -- a hoist, not a value -- so the value
+    itself is pinned by this one, against the published number, read back
+    rather than held as a literal that a rename moves with the first.
+    Changing the default without changing what the documentation says
+    fails here rather than at a real run, where neither direction is
+    visible in the journey's own count.
     """
     del tmp
     documented = re.findall(
@@ -462,20 +453,11 @@ def _drive_dashboard_fanout(events, served):
 
 def test_the_fan_out_reads_every_event_and_notices_one_that_never_arrived(tmp):
     """The session's length is read as an exact count, and the reader's
-    bound is the session's length.
-
-    Three things about this journey were unasserted because nothing ran it:
-    the sync count was compared with `<=` instead of `==`, `FANOUT_EVENTS`
-    dropped the registration from its sum, and `_read_all` could drop the
-    frame it read for. A control that only reads the module's constants
-    catches none of them — this drives the journey's own body over a fake
-    bridge, so each one has to survive a session that is the right shape and
-    fail one that is not.
-
-    The frames are the journey's: `FANOUT_EVENTS` of them, the wanted one
-    last, each carrying the count a `tab-synced` event carries. Nothing here
-    is a journey run — the browser and the bridge are not here — but the
-    reading is the journey's own code rather than a restatement of it.
+    bound is the session's length. The frames are the journey's own body
+    driven over a fake bridge, `FANOUT_EVENTS` of them, the wanted one
+    last -- a control that only reads the module's constants catches none
+    of what this drives, and each pin has to survive a session that is
+    the right shape and fail one that is not.
     """
     del tmp
     journeys = _journeys_module('_journeys')
