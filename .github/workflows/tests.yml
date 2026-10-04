@@ -1431,11 +1431,13 @@ jobs:
       - journey-budget
     runs-on: ubuntu-latest
     # Two numbers, and the gap between them is the reason for both. The
-    # poll bound (SECRETS_POLL_BOUND_S below) is 12 minutes: the gitleaks
+    # poll bound (SECRETS_POLL_BOUND_S below) is 10 minutes: the gitleaks
     # job carries its own 10-minute backstop and the rest is queueing.
-    # This ceiling is 8 minutes above it, so the job is still alive to
-    # print the verdict and conclude cleanly when the wait ends — a
-    # ceiling under the bound would kill the job instead of judging it.
+    # FOUR reads can finish after the bound — the cancelled-dependency
+    # pair, the poll that straddles the deadline, and the jobs read after
+    # it — so 10 minutes plus four 2-minute read ceilings is 18 of these
+    # 20. The job is alive for the last 2 to print the verdict and
+    # conclude; a ceiling under that would kill it instead of judging it.
     timeout-minutes: 20
     # A job-level block replaces the workflow-level one rather than adding
     # to it: contents read pays for the checkout, actions read is what lets
@@ -1479,5 +1481,5 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
           SECRETS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          SECRETS_POLL_BOUND_S: '720'
+          SECRETS_POLL_BOUND_S: '600'
         run: python3 scripts/ci/aggregate_gate.py
