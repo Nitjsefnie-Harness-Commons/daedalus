@@ -1471,6 +1471,43 @@ jobs:
           # is reusable by every later step in the job.
           persist-credentials: false
 
+      - name: Check no tracked file carries a merge-conflict marker
+        # A conflict marker is text that looks like prose in a Markdown file,
+        # so only a mechanical check can see it. git grep reads the tracked
+        # files out of the working tree, which on a clean checkout is what the
+        # repository ships, and -I keeps a binary from being reported as a
+        # match. The three markers are matched in the shapes git writes them:
+        # `<<<<<<< ` and `>>>>>>> ` carry the label after seven characters, and
+        # the separator is exactly seven `=`; diff3's extra `||||||| base` line
+        # changes nothing, because the other three are still written.
+        # In this job rather than a new one: a new job would be a new required
+        # status context, which means editing the ruleset, and `Aggregate
+        # workflow checks` already reports on every pull request regardless of
+        # the docs-only classifier (`if: always()`) — doc-only commits are
+        # exactly where a Markdown marker lands.
+        # Immediately before the verdict step: fail fast — the secrets verdict
+        # the next step renders can wait out a 10-minute poll bound, and a
+        # marker commit should not spend it.
+        # Explicit `shell: bash`: the explicit form adds --noprofile --norc,
+        # and pipefail is its only operative delta — the body already guards
+        # `git grep` with `|| found=$?`, so no pipe here can turn "no match"
+        # into a failure the implicit shell would not have.
+        shell: bash
+        run: |
+          # git grep exits 1 for "no match" and above 1 for an error it could
+          # not run, and a guard that reads its own error as a clean tree is
+          # the false green this step exists to prevent.
+          found=0
+          git grep -nI -E '^(<{7}( |$)|>{7}( |$)|={7}$)' -- . || found=$?
+          if [ "$found" -gt 1 ]; then
+            echo "git grep exited $found, so no marker was looked for."
+            exit "$found"
+          fi
+          if [ "$found" -eq 0 ]; then
+            echo "A merge-conflict marker is committed. Resolve the conflict, rebase onto the target branch and push again."
+            exit 1
+          fi
+
       # scripts/ci/aggregate_gate.py owns the verdict, including the
       # superseded-cancel rule: a cancelled dependency whose run a strictly
       # newer run of this workflow replaced gates nothing, while a
