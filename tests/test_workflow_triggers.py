@@ -33,8 +33,7 @@ def _assert_no_workflow_gates_one_commit_twice(workflows):
             continue
         checked.append(path.name)
         # The event's OWN keys, not any line in its block: a `branches:`
-        # nested a level deeper filters something else, and reading it as
-        # the push filter passes a trigger that carries none.
+        # nested a level deeper filters something else entirely.
         assert 'branches' in _event_option_keys(
             triggers['push'], path.name), (
             f'{path.name} runs on every branch push AND on pull_request, so a '
@@ -211,8 +210,7 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
         assert _workflow_runs_for_paths(path, 'push', [source])
         assert _workflow_runs_for_paths(path, 'pull_request', [threshold])
         triggers = _workflow_triggers(path.read_text(encoding='utf-8'), name)
-        # Membership, not equality: a workflow may ignore other files
-        # besides this one without breaking the requirement it gates.
+        # Membership, not equality: other ignores don't break the requirement.
         assert threshold in _workflow_path_filters(
             triggers['push'], name).get('paths-ignore', []), triggers['push']
         assert not _workflow_path_filters(triggers['pull_request'], name)
@@ -485,7 +483,9 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
     comment_yml = (ROOT / '.github' / 'workflows' / 'coverage-comment.yml'
                    ).read_text(encoding='utf-8')
     census = ('artifact', 'missing', 'pr')
-    assert tuple(sorted(step_scalars(comment_yml, 'comment', 'id'))) == census
+    declared = step_scalars(comment_yml, 'comment', 'id')
+    assert declared is not None, 'job comment declares no id values'
+    assert tuple(sorted(declared)) == census
     rows = (
         ('comment', 'Check for the comment artifact', 'artifact'),
         ('comment', 'Resolve the target pull request from the event',
