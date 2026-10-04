@@ -215,7 +215,7 @@ def definition_nodes(tree):
     """{name: [node]} for the def, async def and class binds alone.
 
     The nodes, not just their lines, so a caller can compare two
-    definitions by CONTENT: the branch boundary keys an allowance row on
+    definitions by CONTENT: the branch boundary keyed an allowance row on
     a declaration, and a declaration is identified by what it contains
     rather than by the line it sits on.
 
