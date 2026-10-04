@@ -346,14 +346,11 @@ def _measured_file(path, medians, nets=None, shas=None, toolchain=None,
                    selected=None, exclusions=None, planted=None):
     """One `measure --out` file, spelled for what one arm of the run varies.
 
-    Every journey's row carries the `median` a recording reads, and the
-    journeys `nets` names carry the per-round `net` lists the draws pool
-    reads — rows without one are the shape a pool file has for a journey
-    it could not separate, and they name no draws. `shas` and `toolchain`
-    move the identity the files must agree on; `selected` and `exclusions`
-    split an identity two files must share; `planted` sets a journey's row
-    verbatim, which is how a pool file carries the row the residual
-    builder wrote.
+    Rows carry the `median` a recording reads; the journeys `nets` names
+    carry the per-round `net` lists the pool reads, and rows without one
+    name no draws. `shas`/`toolchain` move, and `selected`/`exclusions`
+    split, the identity the files must agree on; `planted` sets a row
+    verbatim, the shape the residual builder wrote.
     """
     report = _journey_contract.fixture_report()
     rows = report['counters']['valgrind-callgrind']['journeys']
@@ -378,8 +375,7 @@ def _measured_file(path, medians, nets=None, shas=None, toolchain=None,
 def _rebaseline(artifact, measurements, draws):
     """The real command over several files, and both of its streams.
 
-    Every refusal `run` prints goes to stderr, so a control that quoted
-    only stdout reported an empty reason for a refusal it had just caused.
+    Refusals print to stderr, so stdout alone reads as an empty reason.
     """
     argv = ['rebaseline', '--artifact', str(artifact)]
     for source in measurements:
@@ -395,35 +391,30 @@ def _rebaseline(artifact, measurements, draws):
 def test_a_rebaseline_records_the_median_of_files_and_the_span_of_draws(tmp):
     """Recording from several files, and what a `--draws` pool re-binds.
 
-    However many files the command line hands it, the recorded count is
-    the median of the files' own medians — not the last file's, which is
-    what reading `--measurements` once records. The identity the files
-    must share is refused the moment it splits: a median over files whose
-    rounds saw different renderings or ran on different toolchains is a
-    number no run measured, and every refusal leaves the recorded budget
-    exactly as it was. The pool re-binds a journey the pool names to the
-    span of all its draws, in the percent the artefact denominates
-    tolerances in, and leaves the journeys it does not name — and
+    The recorded count is the median of the files' own medians — not the
+    last file's, which is what reading `--measurements` once records. The
+    identity the files must share is refused the moment it splits, and
+    every refusal leaves the recorded budget exactly as it was. The pool
+    re-binds a journey it names to the span of its draws, in the percent
+    tolerances are denominated in, leaving the unnamed — and
     `tolerance_pct` — where they were.
     """
     policy = _journey_contract.policy()
     first, second = _journey_contract.journeys().NAMES[:2]
     artifact = Path(tmp) / 'journey-budget.json'
-    document = _journey_contract.recorded_document(tolerances={second: 25.0})
-    artifact.write_bytes(policy.render(document))
+    artifact.write_bytes(policy.render(_journey_contract.recorded_document(
+        tolerances={second: 25.0})))
 
     counts = [Path(tmp) / f'counts-{index}.json' for index in (1, 2, 3)]
-    _measured_file(counts[0], {first: 900})
-    _measured_file(counts[1], {first: 1000})
-    _measured_file(counts[2], {first: 1100})
+    for source, count in zip(counts, (900, 1000, 1100)):
+        _measured_file(source, {first: count})
     draws = [Path(tmp) / f'draws-{index}.json' for index in (1, 2)]
-    _measured_file(draws[0], {}, nets={first: [100, 110]})
-    _measured_file(draws[1], {}, nets={first: [120]})
+    for source, net in zip(draws, ([100, 110], [120])):
+        _measured_file(source, {}, nets={first: net})
 
     code, out, err = _rebaseline(artifact, counts, draws)
     assert code == 0, err
-    # The run says what the pool derived and what carried: a no-op pool is
-    # visible in the output instead of succeeding silently.
+    # A no-op pool is visible in the output, not a silent success.
     assert f'derived the tolerance for {first}: 20.0' in out, out
     written = policy.load(artifact)
     assert written['journeys'][first] == 1000, written['journeys']
@@ -437,23 +428,18 @@ def test_a_rebaseline_records_the_median_of_files_and_the_span_of_draws(tmp):
     # What the refusals must leave: the success arm's own bytes, not the
     # artefact this run started from.
     before = artifact.read_bytes()
-
-    elsewhere = Path(tmp) / 'sha-off.json'
-    _measured_file(elsewhere, {first: 900}, shas={first: ['b' * 64]})
-    code, _out, err = _rebaseline(artifact, [counts[0], elsewhere], draws)
-    assert code != 0, (
-        f'files whose rounds saw different renderings recorded anyway: {err}')
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
-
-    elsewhere = Path(tmp) / 'toolchain-off.json'
-    _measured_file(elsewhere, {first: 900},
-                   toolchain={'python': '3.12.0 (other) [GCC 1.0]'})
-    code, _out, err = _rebaseline(artifact, [counts[0], elsewhere], draws)
-    assert code != 0, (
-        f'files measured on two toolchains recorded anyway: {err}')
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
+    splits = (
+        ({'shas': {first: ['b' * 64]}},
+         'files whose rounds saw different renderings'),
+        ({'toolchain': {'python': '3.12.0 (other) [GCC 1.0]'}},
+         'files measured on two toolchains'))
+    for index, (over, why) in enumerate(splits):
+        off = Path(tmp) / f'split-{index}.json'
+        _measured_file(off, {first: 900}, **over)
+        code, _out, err = _rebaseline(artifact, [counts[0], off], draws)
+        assert code != 0, f'{why} recorded anyway: {err}'
+        assert artifact.read_bytes() == before, (
+            'a refused re-baseline wrote the artefact anyway')
 
 
 def test_files_that_disagree_on_identity_are_refused_before_any_write(tmp):
@@ -469,23 +455,17 @@ def test_files_that_disagree_on_identity_are_refused_before_any_write(tmp):
     before = artifact.read_bytes()
     agreeing = Path(tmp) / 'agreeing.json'
     _measured_file(agreeing, {})
-    other = Path(tmp) / 'counter-off.json'
-    _measured_file(other, {}, selected='perf-instructions')
-
-    code, _out, err = _rebaseline(artifact, [agreeing, other], [])
-    assert code != 0, err
-    assert 'counter' in err, err
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
-
-    mapped = Path(tmp) / 'exclusions-off.json'
-    _measured_file(mapped, {}, exclusions={'mcp-exec': ['uvicorn-serve']})
-
-    code, _out, err = _rebaseline(artifact, [agreeing, mapped], [])
-    assert code != 0, err
-    assert 'excluded' in err, err
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
+    refusals = (
+        ({'selected': 'perf-instructions'}, 'counter'),
+        ({'exclusions': {'mcp-exec': ['uvicorn-serve']}}, 'excluded'))
+    for index, (over, said) in enumerate(refusals):
+        other = Path(tmp) / f'identity-off-{index}.json'
+        _measured_file(other, {}, **over)
+        code, _out, err = _rebaseline(artifact, [agreeing, other], [])
+        assert code != 0, err
+        assert said in err, err
+        assert artifact.read_bytes() == before, (
+            'a refused re-baseline wrote the artefact anyway')
 
 
 def test_a_pool_of_another_counter_or_a_nonpositive_floor_is_refused(tmp):
@@ -500,41 +480,34 @@ def test_a_pool_of_another_counter_or_a_nonpositive_floor_is_refused(tmp):
     before = artifact.read_bytes()
     counts = Path(tmp) / 'counts.json'
     _measured_file(counts, {})
-    elsewhere = Path(tmp) / 'draws-other-counter.json'
-    _measured_file(elsewhere, {}, selected='perf-instructions')
-
-    code, _out, err = _rebaseline(artifact, [counts], [elsewhere])
-    assert code != 0, err
-    assert 'draws file' in err, err
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
-
-    floor = Path(tmp) / 'draws-zero-floor.json'
-    _measured_file(floor, {}, nets={'mcp-exec': [0, 100]})
-
-    code, _out, err = _rebaseline(artifact, [counts], [floor])
-    assert code != 0, err
-    assert 'mcp-exec' in err, err
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
+    refusals = (
+        ({'selected': 'perf-instructions'}, 'draws file'),
+        ({'nets': {'mcp-exec': [0, 100]}}, 'mcp-exec'))
+    for index, (over, said) in enumerate(refusals):
+        off = Path(tmp) / f'pool-off-{index}.json'
+        _measured_file(off, {}, **over)
+        code, _out, err = _rebaseline(artifact, [counts], [off])
+        assert code != 0, err
+        assert said in err, err
+        assert artifact.read_bytes() == before, (
+            'a refused re-baseline wrote the artefact anyway')
 
 
 def test_a_median_across_two_files_lands_on_the_count_it_reaches(tmp):
     """An even file count records the count its median lands on.
 
-    Two files that measured the same journey at the same cost arrive at a
-    float the schema refuses — statistics.median([950, 950]) is `950.0` —
-    so an integral median is written as the integer it is. Two files whose
-    medians straddle a half-instruction refuse instead, because no run
-    measured the count between them.
+    Two equal files arrive at a float the schema refuses —
+    `statistics.median([950, 950])` is `950.0` — so an integral median is
+    written as the integer it is; medians straddling a half-instruction
+    refuse, because no run measured the count between them.
     """
     policy = _journey_contract.policy()
     first = _journey_contract.journeys().NAMES[0]
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(_journey_contract.recorded_document()))
     counts = [Path(tmp) / f'counts-{index}.json' for index in (1, 2)]
-    _measured_file(counts[0], {first: 950})
-    _measured_file(counts[1], {first: 950})
+    for source in counts:
+        _measured_file(source, {first: 950})
 
     code, _out, err = _rebaseline(artifact, counts, [])
     assert code == 0, err
@@ -559,9 +532,9 @@ def test_the_pool_reads_the_row_the_residual_builder_wrote(tmp):
     `journey_residual.row` builds the row a measurement carries, `net`
     included, and the pool reads `net` back out of it — so this control
     builds its pool files through the builder itself, and a rename on
-    either side lands here as a refusal or a wrong bound instead of as a
-    silent pool of nothing. `bridge` is nonzero on purpose, so `raw` and
-    `net` differ and a reader of the wrong list computes another bound.
+    either side lands here as a wrong bound. `bridge` is nonzero on
+    purpose, so `raw` and `net` differ and a reader of the wrong list
+    computes another bound.
     """
     residual = _journey_contract.residual()
     policy = _journey_contract.policy()
@@ -570,15 +543,13 @@ def test_the_pool_reads_the_row_the_residual_builder_wrote(tmp):
     artifact.write_bytes(policy.render(_journey_contract.recorded_document()))
     counts = Path(tmp) / 'counts.json'
     _measured_file(counts, {})
-    row, why = residual.row(first, [110, 120], 10)
-    assert why is None, why
-    another, why = residual.row(first, [130], 10)
-    assert why is None, why
-    assert row['net'] == [100, 110], row
-    assert another['net'] == [120], another
+    built = [residual.row(first, raw, 10) for raw in ([110, 120], [130])]
+    assert [why for _row, why in built] == [None, None], built
+    nets = [row['net'] for row, _why in built]
+    assert nets == [[100, 110], [120]], built
     draws = [Path(tmp) / 'draws-1.json', Path(tmp) / 'draws-2.json']
-    _measured_file(draws[0], {}, planted={first: row})
-    _measured_file(draws[1], {}, planted={first: another})
+    for source, (row, _why) in zip(draws, built):
+        _measured_file(source, {}, planted={first: row})
 
     code, _out, err = _rebaseline(artifact, [counts], draws)
     assert code == 0, err
@@ -593,14 +564,12 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     Toolchain and exclusion map decide what a count IS, so a pool file
     from another machine or under another exclusion map is refused and
     nothing is written. The render sha is deliberately not required: a
-    tolerance pool spans heads by design — it is a distribution over the
-    gate's draws across ordinary tree movement — so a sha check would
-    empty the pool it exists to fill. A journey already carrying a bound
-    the pool re-names is reported as derived, and the artefact holds the
-    new value; a pool that derives nothing says so in the output instead
-    of succeeding silently. A pool file that measured nothing is refused
-    like a measurement file is, and the in-process caller passes real
-    lists — the same call the CLI spells as repeated flags.
+    tolerance pool spans heads by design — a distribution over the gate's
+    draws across ordinary tree movement — so a sha check would empty the
+    pool it exists to fill. A pre-bound journey the pool re-names is
+    reported as derived and the artefact holds the new value; a pool that
+    derives nothing says so; a pool file that measured nothing is refused
+    like a measurement file; and the in-process caller passes real lists.
     """
     policy = _journey_contract.policy()
     first = _journey_contract.journeys().NAMES[0]
@@ -619,22 +588,17 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     written = policy.load(artifact)
     assert written['tolerances'][first] == 10.0, written.get('tolerances')
 
-    other_machine = Path(tmp) / 'draws-other-toolchain.json'
-    _measured_file(other_machine, {},
-                   toolchain={'python': '3.12.0 (other) [GCC 1.0]'})
-    code, _out, err = _rebaseline(artifact, [counts], [other_machine])
-    assert code != 0, err
-    assert 'toolchain' in err, err
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
-
-    other_map = Path(tmp) / 'draws-other-exclusions.json'
-    _measured_file(other_map, {}, exclusions={'mcp-exec': ['uvicorn-serve']})
-    code, _out, err = _rebaseline(artifact, [counts], [other_map])
-    assert code != 0, err
-    assert 'exclusion' in err, err
-    assert artifact.read_bytes() == before, (
-        'a refused re-baseline wrote the artefact anyway')
+    splits = (
+        ({'toolchain': {'python': '3.12.0 (other) [GCC 1.0]'}}, 'toolchain'),
+        ({'exclusions': {'mcp-exec': ['uvicorn-serve']}}, 'exclusion'))
+    for index, (over, said) in enumerate(splits):
+        other = Path(tmp) / f'pool-identity-off-{index}.json'
+        _measured_file(other, {}, **over)
+        code, _out, err = _rebaseline(artifact, [counts], [other])
+        assert code != 0, err
+        assert said in err, err
+        assert artifact.read_bytes() == before, (
+            'a refused re-baseline wrote the artefact anyway')
 
     no_draws = Path(tmp) / 'draws-empty.json'
     _measured_file(no_draws, {})
@@ -652,7 +616,6 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     assert artifact.read_bytes() == before, (
         'a refused re-baseline wrote the artefact anyway')
 
-    rebaseline = policy.journey_rebaseline
     lists_artifact = Path(tmp) / 'journey-budget-lists.json'
     lists_artifact.write_bytes(
         policy.render(_journey_contract.recorded_document()))
@@ -661,8 +624,8 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
     pool = Path(tmp) / 'draws-more.json'
     _measured_file(pool, {}, nets={first: [200, 220]})
     with contextlib.redirect_stdout(io.StringIO()):
-        assert rebaseline.run([str(more)], str(lists_artifact),
-                              draws=[str(pool)]) == 0
+        assert policy.journey_rebaseline.run(
+            [str(more)], str(lists_artifact), draws=[str(pool)]) == 0
     written = policy.load(lists_artifact)
     assert written['tolerances'][first] == 10.0, written.get('tolerances')
 
