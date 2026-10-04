@@ -4,14 +4,10 @@ The helpers here keep the subprocesses of an overlap run observable. They live
 beside the Node harness itself in `_overlap`, which holds the driver they call
 back into; every suite imports each name from the module that now owns it.
 """
-import contextlib
-import http.server
 import json
 import os
 import subprocess
 import sys
-import threading
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,66 +33,6 @@ def _wait_for_client_commands(queue, count):
         raise AssertionError(
             'timed out waiting for both same-id client commands')
     return commands
-
-
-@contextlib.contextmanager
-def _slow_result_server(post_delay=0, post_status=200, post_statuses=None,
-                        post_body=None):
-    statuses = list(post_statuses or [post_status])
-    status_lock = threading.Lock()
-    status_index = 0
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):
-            self.rfile.read(int(self.headers['Content-Length']))
-            if post_delay:
-                time.sleep(post_delay)
-            nonlocal status_index
-            with status_lock:
-                index = min(status_index, len(statuses) - 1)
-                status_index += 1
-            status = statuses[index]
-            body = post_body
-            if body is None:
-                body = b'{}' if status == 200 else b'{"error":"no"}'
-            if isinstance(body, str):
-                body = body.encode('utf-8')
-            try:
-                self.send_response(status)
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except OSError:
-                # A delayed POST can outlive the child the backstop killed,
-                # so writing to its closed socket is expected.
-                pass
-
-        def do_GET(self):
-            time.sleep(60)
-            body = b'{"pending":false}'
-            try:
-                self.send_response(200)
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except OSError:
-                # The test deliberately ends the peer while this is pending,
-                # so its closed socket is expected to reset here.
-                pass
-
-        # pylint: disable-next=redefined-builtin
-        def log_message(self, format, *args):
-            del format, args
-
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f'http://127.0.0.1:{server.server_port}'
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
 
 
 def client_env():

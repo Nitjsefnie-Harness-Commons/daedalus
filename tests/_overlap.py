@@ -506,42 +506,6 @@ def run_background_overlap(background, commands, order, result_base='',
     return outcome['posted']
 
 
-def _assert_step_trace(failure, labels):
-    marker = '[step] '
-    trace_start = failure.find(marker)
-    trace_text = failure[trace_start:] if trace_start >= 0 else ''
-    trace_text = trace_text.replace('\\n', '\n')
-    actual = _STEP_LINE.findall(trace_text)
-    position = 0
-    for expected in labels:
-        try:
-            position = actual.index(expected, position) + 1
-        except ValueError as mismatch:
-            reason = 'out of order' if expected in actual else 'missing'
-            raise AssertionError(
-                f'expected step {expected!r} was {reason}; '
-                f'actual step labels: {actual}'
-            ) from mismatch
-
-
-def _harness_failure(background, inner_wait=1, commands=None, order=None,
-                     result_base='', wait_between=False, outer_slack=0,
-                     boot=True, results=None):
-    commands = commands or [{'id': '_cookies', 'domain': 'owner-a'}]
-    order = order or ['owner-a']
-    try:
-        run_background_overlap(
-            background, commands, order, result_base=result_base,
-            wait_between=wait_between, inner_wait=inner_wait,
-            outer_slack=outer_slack, boot=boot, results=results)
-    except AssertionError as failure:
-        return str(failure)
-    except subprocess.TimeoutExpired as failure:
-        raise AssertionError(
-            f'bare TimeoutExpired after {failure.timeout}s') from failure
-    raise AssertionError('the stalled overlap harness unexpectedly succeeded')
-
-
 def _drain_text(value):
     """A drained pipe's bytes or None, as the str the messages below embed.
 
