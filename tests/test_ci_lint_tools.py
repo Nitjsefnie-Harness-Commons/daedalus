@@ -592,8 +592,9 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     a header over the growth and under the ceiling is a server saying
     exactly how long to wait, and waiting less than it asked is asking
     again too soon. It records `[7, 7]`, and a path that dropped any
-    header below the ceiling records `[2, 2]` here and nowhere else says
-    so.
+    header below the ceiling records `[2, 4]` here — the growth alone,
+    the same pair the header-free run asserts, so that run cannot see
+    this one and this run is its only holder.
 
     The third carries none, so the growth is recorded at the second
     attempt rather than losing to a header: in the first run the 900 takes
