@@ -107,10 +107,9 @@ def _serve_with_fake_uvicorn(mod):
     """Run _serve to completion without its real front end.
 
     The fake stands where uvicorn.Config, uvicorn.Server and the HTTP
-    protocol class stand, and records the sockets it was handed instead of
-    serving them; the caller closes any real socket in that list. `built`
-    is what the front end constructed, so a caller can tell a derived
-    class from the base it was derived from.
+    protocol class stand, serving nothing. Returns (handed sockets, the
+    captured banner text, the built Server instances); the caller closes
+    any real socket in the first.
     """
     handed, built, banner = [], [], io.StringIO()
     names = {'Config': _FakeConfig,
