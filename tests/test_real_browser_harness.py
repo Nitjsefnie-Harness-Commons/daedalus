@@ -553,7 +553,8 @@ CDP_HARNESS_DEADLINE_S = round(CDP_HARNESS_SLOWEST_S * SITE_HANG_MULTIPLE)
 #
 #   OUTER_BOUND_SAMPLES     the same measurement as the other three files
 #                           that hold one — these samples are of the bound's
-#                           own expiry, measured in test_noderun_deadline.py
+#                           own expiry, measured by the retired
+#                           noderun-deadline suite
 #   OUTER_BOUND_SLOWEST_S   max of those samples
 #   OUTER_BOUND_S           the bound, with no multiple
 #

@@ -5,8 +5,7 @@ sections read surface that double does not carry -- sibling links, a real
 class set, a clock the scenario drives, an observable `innerHTML` -- and
 each gap is silent: an unmodelled member answers `undefined`, the section
 misbehaves, and the suite pins the misbehaviour as though it were
-behaviour. Every gap is filled here and every fill is controlled by a case
-in `tests/test_dashsection_harness.py`.
+behaviour. Every gap is filled here and every fill is a refusal by name.
 
 The document-wide selector and the `[data-*]` attribute grammar are NOT
 among them: both are modelled by `_dashnode_dom` and held there, because
@@ -56,8 +55,8 @@ carrying both was at 616 of the 700 lines a `tests/` module is allowed, and
 a file at its ceiling shares its headroom with every other branch.
 
 Not every refusal in here is controlled, and the docstring should not
-read as though it were. What
-`tests/test_dashsection_harness.py` holds by mutation: the selector
+read as though it were. What the retired harness suite held by mutation:
+the selector
 registry (same element, refusal by name), `nextSibling`, `insertBefore`,
 the class set in both directions, the parked clock and its cancellation,
 the `innerHTML` parse and its refusal, an unplanned request refused and
@@ -66,7 +65,8 @@ command, the poll retrying until the result is its own, the
 `localStorage` round trip, the fan-out bus and its live dispatch, the
 pump's selectivity, a `Headers` bag, a poll with no command behind it, a
 duplicate selector, a response header other than `content-type`, and the
-`console.error` recorder. What is not held and is a refusal by
+`console.error` recorder. What is not held by mutation and is a refusal
+by
 inspection only: `removeChild` of a non-child, `remove()` outside the
 tree, an `insertBefore` reference outside its parent, an `innerHTML`
 read, a non-string body and a body that will not parse. A refusal

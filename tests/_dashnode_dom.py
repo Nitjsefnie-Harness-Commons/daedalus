@@ -21,7 +21,7 @@ splices too, so the two share one copy of it.
 `undefined` where a browser answers a node -- so a section that reads one
 gets a wrong answer rather than a refusal. The section shell in
 `_dashsection.py` is where the suite for a shipped section composes this
-scaffold, and `tests/test_dashsection_harness.py` holds the refusals.
+scaffold.
 """
 
 from _worker_sources import TEXT_NODE_STUB

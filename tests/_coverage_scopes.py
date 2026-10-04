@@ -488,11 +488,11 @@ def _scope_shadows(tree, layout=None, facts=None):
     binding in the module. A lambda is a scope too: its parameters bind its
     own body, and nothing in the scope that writes the lambda.
 
-    Other consumers: `tests/_drain_scan.py` reads the same attribution to
-    resolve a receiver to the process object it names. It is wrong if this
-    attribution drifts — a parameter this function stops attributing
-    resolves from an outer binding instead of being out of
-    scope, and a drain stops joining the stop on the object it names.
+    A consumer reading the same attribution to resolve a receiver to the
+    process object it names is wrong if this attribution drifts — a
+    parameter this function stops attributing resolves from an outer
+    binding instead of being out of scope, and a drain stops joining the
+    stop on the object it names.
     """
     facts = facts or _ScopeFacts(tree, layout)
     scoped, parents = facts.layout
