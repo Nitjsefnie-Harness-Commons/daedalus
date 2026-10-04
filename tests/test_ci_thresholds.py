@@ -210,7 +210,7 @@ def test_invalid_utf8_and_malformed_json_are_refused(tmp):
 
 
 def test_in_memory_coverage_rejects_nonfinite_and_nonobject_values(tmp):
-    """These two never round-trip through JSON, so they reach normalise here."""
+    """These two never round-trip through JSON, so they reach `normalise`."""
     del tmp
     thresholds = _thresholds()
     candidate = _valid()
@@ -602,20 +602,6 @@ def test_the_budget_counts_every_tracked_text_file_under_tests(tmp):
         tmp, _mixed_tests_files(4, 3), 7, 'mixed')
     policy = _util.load(POLICY_SOURCE, 'tests_lines_definition')
     assert policy.tracked_test_lines(repo) == 7
-    done = _run_lines_cli(repo)
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert '7' in done.stdout, done.stdout
-
-
-def test_the_tests_budget_check_passes_a_tree_exactly_on_budget(tmp):
-    """The check is `measured > recorded`, so equality is a pass.
-
-    The real tree sitting exactly on its recorded number is what makes the
-    real-tree row reject a `>=` mutant today; a fixture row pins the
-    boundary where a fixture can state it, so a deletion under tests/ does
-    not quietly take the control with it.
-    """
-    repo, _target = _line_budget_fixture(tmp, _tests_files(4, 3), 7, 'equal')
     done = _run_lines_cli(repo)
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert '7' in done.stdout, done.stdout
