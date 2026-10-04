@@ -67,9 +67,7 @@ _CARRIED_FIELDS = {
 # `conversion` are a str and an int, which the walk would refuse.
 #
 # The names are the split a reader needs: a form named here cannot appear
-# in a sentence that has to be true on every supported version, so this
-# list is what keeps the two groups apart rather than either of them
-# being listed again.
+# in a sentence that has to be true on every supported version.
 _CONDITIONAL_FIELDS = (
     ('TemplateStr', ('values',)),
     ('Interpolation', ('value', 'format_spec')),
