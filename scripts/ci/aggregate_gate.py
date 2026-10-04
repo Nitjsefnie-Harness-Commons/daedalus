@@ -38,11 +38,14 @@ POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
 # runs in carries timeout-minutes 20, leaving 8 minutes to report.
 DEFAULT_POLL_BOUND_S = 720.0
 POLL_INTERVAL_S = 20.0
+# One `gh` read, bounded, because a hung query must not outlive the bound
+# it is being counted against.
+READ_TIMEOUT_S = 120
 # A bound at or over the job's own 20-minute ceiling is a wait the runner
 # cuts off mid-verdict, so the module refuses it rather than accept a
 # number that can no longer report. 900 s is where the stop sits: the
-# bound plus the 120 s read ceiling of both queries still lands under the
-# 1200 s ceiling the job carries.
+# bound plus two READ_TIMEOUT_S reads still lands under the 1200 s
+# ceiling the job carries.
 MAX_POLL_BOUND_S = 900.0
 STRICT = frozenset(
     {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
@@ -317,7 +320,7 @@ def poll_bound():
 def gh_read(argv):
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=120)
+            argv, capture_output=True, text=True, timeout=READ_TIMEOUT_S)
     except (subprocess.SubprocessError, UnicodeDecodeError,
             OSError) as exc:
         raise QueryError(f'gh failed: {exc}') from exc

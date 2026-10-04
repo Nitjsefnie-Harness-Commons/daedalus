@@ -455,6 +455,8 @@ def test_main_exits_zero_only_for_green_verdicts(tmp):
             os.environ.update(saved)
     assert calls, 'the cancelled case never queried'
     assert _polls(calls), 'the green case never asked about the scan'
+    # A hard `needs:` failure returns without polling.
+    assert len(_polls(calls)) == 2, calls
 
 
 def test_the_aggregate_job_runs_the_module(tmp):
@@ -495,8 +497,7 @@ CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
     """Absence is not an empty answer: this fixture shows both."""
     del tmp
-    # The middle poll is 600 s in — inside the bound, past its half — with
-    # no run, so the wait must not fire on it. Scale: the poll interval.
+    # Scale: the poll interval — the 600 s poll carries no run yet.
     calls, verdict, message = _drive_scan(
         [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0, EPOCH + 719.0))
     assert verdict in _gate().GREEN, message
@@ -657,7 +658,6 @@ def _named_workflow(mod, constant):
 
 
 def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
-    """Both selectors name a shipped file; the gate matches a name."""
     del tmp
     mod = _gate()
     assert _named_workflow(mod, 'WORKFLOW').is_file()
@@ -685,7 +685,7 @@ def test_the_poll_bound_fits_inside_the_job_timeout(tmp):
     bound = float(_gate_step()['env']['SECRETS_POLL_BOUND_S'])
     assert ceiling == 20, ceiling
     assert bound == mod.DEFAULT_POLL_BOUND_S, bound
-    assert bound < ceiling * 60, (bound, ceiling)
+    assert bound + 2 * mod.READ_TIMEOUT_S < ceiling * 60, (bound, ceiling)
     assert mod.MAX_POLL_BOUND_S < ceiling * 60, mod.MAX_POLL_BOUND_S
     assert 0 < mod.POLL_INTERVAL_S < bound, (mod.POLL_INTERVAL_S, bound)
 
