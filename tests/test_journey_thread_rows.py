@@ -225,9 +225,11 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
     """THE numeric control: over a file that carries cost lines, the self
     totals of the declared functions sum to the file's own `summary:` value
     -- every cost line accounted -- and the inclusive cost a `calls=` line
-    records at a call site lands in NO self total. `fn=` and `cfn=` both
-    switch the current function; the summary-less companion is the torn
-    profile the count reader refuses, contributing no row and no failure."""
+    records at a call site lands in NO self total. The cost lines AFTER
+    that call arc are the caller's self again -- no new `fn=` line
+    announces them -- so a `cfn=` names the callee of the priced call and
+    moves no self context. The summary-less companion is the torn profile
+    the count reader refuses, contributing no row and no failure."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.x.torn', (
         'pid: 5\nthread: 1\ncmd: python3 x.py\nfn=(1) carried\n1 9\n'))
@@ -236,16 +238,17 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
         'positions: line\nevents: Ir\n'
         'fn=(1) caller\n5 30\n9 20\n'
         'cfn=(2) callee\ncalls=1 0\n5 100\n'
+        '15 40\n'
         'fn=(3) other\n2 7\n'
-        'summary: 57\n'))
+        'summary: 97\n'))
     (row,) = functions.read(Path(tmp), 'callgrind.x')
     assert row['pid'] == 11 and row['thread'] == 1 and (
         row['cmd'] == 'python3 x.py'), row
     assert row['functions'] == [
-        {'fn': 'caller', 'ir': 50},
+        {'fn': 'caller', 'ir': 90},
         {'fn': 'other', 'ir': 7},
         {'fn': 'callee', 'ir': 0}], row
-    assert sum(f['ir'] for f in row['functions']) == 57, row
+    assert sum(f['ir'] for f in row['functions']) == 97, row
 
 
 def test_every_preserved_profile_parses_whole(tmp):

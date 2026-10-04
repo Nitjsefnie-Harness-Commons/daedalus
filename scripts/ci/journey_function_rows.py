@@ -31,15 +31,19 @@ functions and never a residual. Ties order by name, so two runs of one
 tree read the same row.
 
 The self total is read from the file's cost lines the way callgrind
-attributes them: a `fn=`/`cfn=` declaration switches the current function,
-and a cost line under it sums into that function's self total. A `calls=`
-line prices the call that follows it: the one cost line after it is the
-callee's inclusive cost recorded at the call site, and it is billed to no
-function's self total -- billing it to the caller would charge one call to
-both sides, and billing it to the callee would bill an inclusive cost as
-self. On a file the parse covers whole, the self totals sum to the file's
-own `summary:` line; that equality is the numeric control the suite drives
-on a file that carries cost lines.
+attributes them: only a `fn=` declaration moves the function a cost line
+bills to, and every cost line outside a call arc sums into that
+function's self total. A `cfn=` names the callee of the call priced
+next; it moves no self context. A `calls=` line prices the call that
+follows it: the one cost line after it is the call arc -- the callee's
+inclusive cost recorded at the call site -- and it is billed to no
+function's self total; the cost lines after the arc are the caller's own
+again, no new `fn=` line announcing them. On the synthetic file the
+suite drives, whose `summary:` is written as the sum of the self totals
+with the arc excluded, the self totals sum to the file's own `summary:`
+line; that equality is the numeric control. Whether a real cost-bearing
+profile's `summary:` carries the same exclusion is a measurement for the
+first CI artifact that holds one, not a claim this file makes.
 """
 import os
 import re
@@ -86,6 +90,13 @@ def _self_totals(text):
     `fn=(id)` repeats a name declared earlier and names nothing, which is
     why the declaration pattern is the reader's own `FN`, which does not
     match the bare form either.
+
+    Only a `fn=` declaration moves the function a cost line bills to. A
+    `cfn=` names the callee of the call priced next; it opens no self
+    context of its own, and the cost lines after the call arc are the
+    caller's self again with no new `fn=` line announcing them -- which is
+    why a `cfn=`-only name is entered at 0 rather than left out: the row
+    says the function declared itself and paid nothing of its own.
     """
     totals = {}
     current = None
@@ -93,8 +104,10 @@ def _self_totals(text):
     for line in text.splitlines():
         declared = journey_threads.FN.match(line)
         if declared:
-            current = declared.group(1)
-            totals.setdefault(current, 0)
+            name = declared.group(1)
+            totals.setdefault(name, 0)
+            if line.startswith('fn='):
+                current = name
             call_site = False
         elif CALLS.match(line):
             call_site = True
