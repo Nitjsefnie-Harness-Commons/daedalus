@@ -425,7 +425,7 @@ def _run_output_names(script):
             if written:
                 names.append(written[1])
     assert group is None, 'unclosed `{` output group'
-    return names
+    return list(dict.fromkeys(names))
 
 
 def _condition_output_reads(expression):
