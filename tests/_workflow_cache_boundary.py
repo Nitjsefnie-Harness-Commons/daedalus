@@ -4,7 +4,7 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 The whole engine moved here out of tests/test_workflow_cache_boundary.py,
 and `REVIEWED_CACHE_RELEASES` now has its only home here: the two
-pip-cache suites read it here rather than through that suite.
+pip-cache suites read it here.
 """
 import csv
 import io

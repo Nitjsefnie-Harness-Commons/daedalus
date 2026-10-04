@@ -201,13 +201,14 @@ def _checkout_widths(job):
 def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     """Each job THIS GUARD IDENTIFIES must fetch the merge base.
 
-    The branch-boundary controls read the merge base's own declarations,
-    and a checkout that resolves neither `origin/main` nor a local `main`
-    makes both boundary tests take their refusal arm. In a job that turns
-    a failing suite red that is already visible; in a job that runs the
-    suites without failing on one it is quieter and worse — the branch's
-    central guarantee goes unevaluated in a job that runs it, and nothing
-    reports that.
+    The branch-boundary controls the retired reserved-name suite
+    carried read the merge base's own declarations, and a checkout
+    that resolved neither `origin/main` nor a local `main` made both
+    boundary tests take their refusal arm. In a job that turned a
+    failing suite red that was already visible; in a job that ran the
+    suites without failing on one it was quieter and worse — the
+    branch's central guarantee went unevaluated in a job that ran it,
+    and nothing reported that.
 
     WHAT THIS DOES NOT COVER, and the test is named for what it proves
     rather than for an enumeration it cannot deliver. A named bypass is a
@@ -246,9 +247,9 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
         if not _checkout_widths(job) or any(
             width != '0' for width in _checkout_widths(job))}
     assert not unreadable, (
-        'these jobs run a suite and so run the branch-boundary controls, '
-        'which cannot be evaluated without the merge base; give every '
-        f'checkout step in them fetch-depth: 0 (found {unreadable})')
+        'these jobs run a suite and must fetch the merge base; give '
+        'every checkout step in them fetch-depth: 0 '
+        f'(found {unreadable})')
 
 
 def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):

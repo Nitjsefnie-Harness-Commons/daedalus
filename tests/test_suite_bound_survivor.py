@@ -158,8 +158,7 @@ def test_a_listing_that_cannot_be_read_is_reported_as_unreadable(tmp):
     the arm: nothing lists a directory whose removal succeeded, and a
     listing that failed over a directory still on disk is what the arm is
     for. The two stand-ins are the ones this suite already uses, and the
-    `os` one is a local class rather than a shared helper, so the
-    generated reserved-name set stays current.
+    `os` one is a local class rather than a shared helper.
     """
     directory = Path(tmp) / 'outputs'
     directory.mkdir()
