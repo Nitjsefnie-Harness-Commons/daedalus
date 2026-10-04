@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Check and tighten the tests/ line budget in CI threshold data."""
+"""Check and tighten the tests/ line budget in CI threshold data.
+
+  python3 scripts/ci/tests_lines.py
+  python3 scripts/ci/tests_lines.py --tighten
+"""
 import argparse
 import importlib
 import subprocess
@@ -21,11 +25,7 @@ GROWTH_REMEDY = (
 
 
 def tracked_test_lines(root=ROOT):
-    """Sum the text lines of every tracked file under ``tests/``.
-
-    ``git grep -I`` skips a binary fixture, and the pathspec names the
-    directory rather than an extension.
-    """
+    """Sum the text lines of every tracked file under ``tests/``."""
     listed = subprocess.run(
         ['git', '-C', str(root), 'grep', '-I', '-c', '', '--', 'tests/'],
         capture_output=True, check=True)
