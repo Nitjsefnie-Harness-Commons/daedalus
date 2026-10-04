@@ -247,8 +247,8 @@ def _reads_timeout(node):
 
 
 def _wait_timeout_keyword(source):
-    """The waits in _terminate_and_reap pass the constant 10, so they are not
-    the anchor."""
+    """The waits in _terminate_and_reap pass CLEANUP_TIMEOUT_S, so they are
+    not the anchor."""
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
