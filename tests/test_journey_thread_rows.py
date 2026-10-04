@@ -362,6 +362,11 @@ def test_function_rows_are_wired_beside_the_count_only_when_on(tmp):
         entry = _run_measure('1', writing, flag=FUNCTION_FLAG)[
             'counters']['valgrind-callgrind']
     assert 'thread_rows' in entry and 'function_rows' in entry, entry
+    with environment(FUNCTION_FLAG, '1'):
+        only_empty = functions_module().for_counter(
+            _measured(_profile(100_000)),
+            {'mcp-exec': [(_measured(_profile(100_000)), [])]})
+    assert only_empty is None, only_empty
 
 
 def main():
