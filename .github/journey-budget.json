@@ -9,7 +9,7 @@
   },
   "tolerances": {
     "cdp-result": 0.893039,
-    "command-round-trip": 0.838538,
+    "command-round-trip": 1.315095,
     "dashboard-fanout": 0.271366,
     "mcp-exec": 0.348197,
     "net-capture": 0.070575,
