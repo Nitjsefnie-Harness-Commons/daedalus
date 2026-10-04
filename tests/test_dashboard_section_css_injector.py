@@ -239,6 +239,73 @@ def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
     assert stored[-1]['failed'] is True, report
 
 
+def test_a_concurrent_store_write_survives_the_inject_refusal(_tmp):
+    """The marking write re-reads the store rather than writing back the
+    array captured before the command: the session stream fans out to
+    every open window, so a record a second window added while the
+    refused command was in flight must still be there after the marking
+    -- it is a live rule's only path to an exact removeCSS match. The
+    same re-read stops the other direction: a window that removed the
+    reserved record during the flight must not see it resurrected,
+    unmarked, by a stale write-back, so the not-found limb only re-renders
+    and writes nothing back -- both limbs of that check are driven here,
+    one inject each.
+    """
+    report = _run(
+        'const KEY = "daedalus-dash-css-sessions";\n'
+        'const realFetch = globalThis.fetch;\n'
+        'let leg = 0;\n'
+        'globalThis.fetch = async (target, init) => {\n'
+        '  const r = await realFetch(target, init);\n'
+        '  if (String(target).endsWith("/command")) {\n'
+        '    leg += 1;\n'
+        '    const store = JSON.parse(localStorage.getItem(KEY));\n'
+        '    if (leg === 1) {\n'
+        '      store.push({ css: "a{--concurrent}", tabId: "",\n'
+        '        allFrames: false, ts: 1750000000099 });\n'
+        '    } else {\n'
+        '      const at = store.findIndex(\n'
+        '        (e) => e.css === "a{--second}");\n'
+        '      store.splice(at, 1);\n'
+        '    }\n'
+        '    localStorage.setItem(KEY, JSON.stringify(store));\n'
+        '  }\n'
+        '  return r;\n'
+        '};\n'
+        'container.find("[data-role=css]").value = "a{--first}";\n'
+        'button("INJECT").click();\n' + SETTLED
+        + 'const mid = JSON.parse(localStorage.getItem(KEY));\n'
+        'container.find("[data-role=css]").value = "a{--second}";\n'
+        'button("INJECT").click();\n' + SETTLED
+        + 'sectionReport({ mid, toasts: toasts(),\n'
+        '  rows: rowTexts(container.all()[0]),\n'
+        '  left: JSON.parse(localStorage.getItem(\n'
+        '    "daedalus-dash-css-sessions")) });\n',
+        setup=SEEDED, answers=(INJECT_REFUSED,))
+    assert shared.types(report) == ['inject-css', 'inject-css'], report
+    # Found limb: the concurrent record added during the first refused
+    # command is still there, and the reserved record alone is marked.
+    assert [e['css'] for e in report['mid']] == [
+        'b{--seed:2}', 'a{--seed:1}', 'a{--first}',
+        'a{--concurrent}'], report
+    assert report['mid'][2]['failed'] is True, report
+    assert 'failed' not in report['mid'][3], report
+    # Not-found limb: the second window then removed the second
+    # reservation during its command, and the marking must not write the
+    # stale array back -- the removal stands.
+    assert [e['css'] for e in report['left']] == [
+        'b{--seed:2}', 'a{--seed:1}', 'a{--first}',
+        'a{--concurrent}'], report
+    assert report['left'][2]['failed'] is True, report
+    # The marked record still renders marked after the second render, and
+    # nothing beyond the two refusals was toasted.
+    assert [row[3] for row in report['rows'][1:]] == [
+        'a{--concurrent}', '[failed] a{--first}', 'a{--seed:1}',
+        'b{--seed:2}'], report
+    assert [t['text'] for t in report['toasts']] == [
+        'cannot access the tab', 'cannot access the tab'], report
+
+
 def test_a_failed_remove_leaves_the_session_store_alone(_tmp):
     """The toolbar REMOVE is the plain command: its failure toasts and the
     store is not touched, which is the asymmetry the session row's own
