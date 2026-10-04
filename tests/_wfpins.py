@@ -30,12 +30,9 @@ _GROUP_KEYS = ('applies-to', 'dependency-type', 'patterns')
 # whatever stands in front of it. The boundaries keep a word that merely
 # carries the letters out — `mypip` is another tool, and `pip-audit` is a
 # different program sharing a prefix — and the tool is looked for wherever it
-# stands rather than under a prefix spelled out ahead of it, so an assignment,
-# a `sudo`, an interpreter or a path is not a shape this reader is taught
-# one at a time. That prefix axis is where the pattern used to grow:
-# `PIP_ROOT_USER_ACTION=ignore pip install` is the idiom GitHub's own pip
-# setup documentation leads with, and anchoring on the line instead hid the
-# install behind it.
+# stands rather than under a prefix spelled out ahead of it, so an
+# assignment, a `sudo`, an interpreter or a path is not a shape this reader
+# is taught one at a time.
 _PIP_TOOL = re.compile(
     r'(?<![0-9A-Za-z._/-])(?:\S*/)?pip[\d.]*(?![0-9A-Za-z._/-])')
 
@@ -317,7 +314,8 @@ def assert_ci_tool_pins_live_in_a_watched_manifest():
     """These CI-tool installs resolve their pins from `-r` manifests: the
     install is asserted to EXIST, so an empty scan or a renamed step fails
     instead of passing vacuously, and every install in a row's step
-    resolves from one of that row's watched manifests.
+    resolves from one of that row's watched manifests, carrying no `==`
+    and no `--upgrade pip`.
     """
     for file, job, step, manifests in (
             ('tests.yml', 'actionlint', 'Install zizmor',
@@ -336,6 +334,7 @@ def assert_ci_tool_pins_live_in_a_watched_manifest():
         assert installs, f'{step} runs no pip install to carry a pin'
         for command in installs:
             assert '==' not in command, command
+            assert '--upgrade pip' not in command, command
             assert any(f'-r {m}' in command for m in manifests), command
 
 
@@ -392,12 +391,11 @@ def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
 
 
 # The requirement requirements-zizmor.txt is expected to carry, and how many
-# artifacts each one's full release set holds. A LITERAL here, not a number
-# read back out of the manifest's own prose: a control whose expectation is
-# read out of the file it checks agrees with every edit made to both at once,
-# which is exactly the edit a bump makes. The red this raises on a legitimate
-# count change is the point — it makes whoever opens the bump read the hash
-# set rather than have it rewrite itself.
+# artifacts its full release set holds. A LITERAL here, not a number read
+# back out of the manifest's own prose: a control whose expectation is read
+# out of the file it checks agrees with every edit made to both at once —
+# exactly the edit a bump makes. The red on a legitimate count change is
+# the point: it makes the bump's author read the hash set.
 _EXPECTED_ARTIFACT_COUNTS = {'zizmor': 11}
 
 
@@ -460,30 +458,26 @@ def _canonical_name(name):
 def assert_the_zizmor_manifest_is_hash_pinned():
     """zizmor gates the gates, so every artifact behind its pin is named.
 
-    `--require-hashes` makes a hash a constraint rather than a note, and it
-    is asserted through `_pip_installs` because inside a `run: |` block a
-    `#` line is string content: reading the raw scalar lets a comment satisfy
-    the pin while the install runs with no hash enforcement at all.
+    `--require-hashes` makes a hash a constraint rather than a note, and
+    it is asserted through `_pip_installs`: inside a `run: |` block a `#`
+    line is string content, so reading the raw scalar catches a comment
+    satisfying the pin while the install runs with no hash enforcement.
 
     The artifact count is checked against `_EXPECTED_ARTIFACT_COUNTS` in
     BOTH directions, and the values are checked to be DISTINCT, because a
-    count is satisfied by a token count rather than by a set: eleven tokens
-    naming ten artifacts leave one artifact unresolvable under
-    `--require-hashes`, and the count is the same eleven either way. A
-    digest is compared the way its consumer compares it, lowercased — pip
-    lowercases every digest before `is_hash_allowed` sees it, so a value
-    differing only in case names the artifact beside it. The NAME is compared
-    the way pip compares it too, and for the same reason: `_canonical_name`
-    folds the spellings pip resolves to one package, because a name read
-    byte-exactly is how one package ends up pinned twice under two names with
-    every count here still satisfied. One hash short of the expected count is
-    a broken install on one platform's runner
-    and nothing else, so a control that only asks what a pin carries passes a
-    manifest naming nine of zizmor's ten wheels and the job then fails on
-    exactly one leg of the matrix with no local symptom. The other direction
-    is the vacuous half: a manifest that stopped pinning a requirement is
-    checked by nothing at all, which is the shape a Dependabot group with no
-    patterns had on the other side of this file.
+    count is satisfied by a token count, not a set: eleven tokens naming
+    ten artifacts leave one artifact unresolvable, the count the same
+    eleven either way. A digest is compared the way its consumer compares
+    it, lowercased — pip lowercases every digest before `is_hash_allowed`
+    sees it, so a value differing only in case names the artifact beside
+    it. The NAME is compared the way pip compares it too: `_canonical_name`
+    folds the spellings pip resolves to one package, so a byte-exact
+    reading pins one package twice with every count still satisfied. One
+    hash short of the expected count is a broken install on one platform's
+    runner alone, so a control that only asks what a pin carries passes a
+    manifest naming nine of zizmor's ten wheels. The other direction is
+    the vacuous half: a manifest that stopped pinning a requirement is
+    checked by nothing at all.
     """
     installs = _pip_installs(_job_step('Install zizmor'))
     assert installs, 'the zizmor step runs no pip install to hash-check'

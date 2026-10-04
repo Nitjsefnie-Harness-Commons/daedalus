@@ -113,8 +113,9 @@ jobs:
           PY
           cat extras-requirements.txt
           # An empty file here would narrow the gate in silence — pip-audit
-          # accepts it, reports the other two surfaces clean, and the extra
-          # that carries every third-party import at runtime goes unchecked.
+          # accepts it, reports every other audited surface clean, and the
+          # extra that carries every third-party import at runtime goes
+          # unchecked.
           if [ ! -s extras-requirements.txt ]; then
             echo "pyproject.toml declares no extras, so this workflow is" >&2
             echo "auditing less than it claims to. Fix the reader or drop" >&2
