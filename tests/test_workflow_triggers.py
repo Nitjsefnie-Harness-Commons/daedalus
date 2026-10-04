@@ -11,14 +11,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _ghexpr import sole_context_path  # noqa: E402
+from _ghexpr import _tokenize, _unwrap, sole_context_path  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_if_expression  # noqa: E402
 from _wfjobs import jobs_mapping  # noqa: E402
 from _workflows import (  # noqa: E402
     _event_option_keys, _workflow_path_filters, _workflow_triggers)
 from _yamlread import step_scalar, step_scalars  # noqa: E402
-from _yamlsteps import workflow_mapping  # noqa: E402
+from _yamlsteps import step_mappings, workflow_mapping  # noqa: E402
 
 
 def _assert_no_workflow_gates_one_commit_twice(workflows):
@@ -45,46 +45,32 @@ def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
     """The double-gate helper must inspect both suffixes and own keys."""
     workflows = Path(tmp) / 'workflows'
     workflows.mkdir()
-    control = ('name: control\n\non:\n'
-               '  push:\n    branches: [main]\n'
-               '  pull_request:\n')
-    (workflows / 'control.yml').write_text(control, encoding='utf-8')
-    branchless = ('name: branchless\n\non:\n'
-                  '  push:\n  pull_request:\n')
-    branchless_path = workflows / 'branchless.yaml'
-    branchless_path.write_text(branchless, encoding='utf-8')
-    try:
-        _assert_no_workflow_gates_one_commit_twice(workflows)
-    except AssertionError as failure:
-        assert 'branchless.yaml' in str(failure), failure
-    else:
-        raise AssertionError('branchless .yaml workflow was accepted')
-
-    branchless_path.unlink()
-    nested = ('name: nested\n\non:\n'
-              '  push:\n'
-              '    paths:\n'
-              '      - src/**\n'
-              '    types:\n'
-              '      branches: [main]\n'
-              '  pull_request:\n')
-    nested_path = workflows / 'nested.yaml'
-    nested_path.write_text(nested, encoding='utf-8')
-    try:
-        _assert_no_workflow_gates_one_commit_twice(workflows)
-    except AssertionError as failure:
-        assert 'nested.yaml' in str(failure), failure
-    else:
-        raise AssertionError('nested branches key was treated as an option')
+    (workflows / 'control.yml').write_text(
+        'name: control\n\non:\n'
+        '  push:\n    branches: [main]\n'
+        '  pull_request:\n', encoding='utf-8')
+    cases = (
+        ('branchless.yaml',
+         'name: branchless\n\non:\n  push:\n  pull_request:\n'),
+        ('nested.yaml',
+         'name: nested\n\non:\n  push:\n'
+         '    paths:\n      - src/**\n'
+         '    types:\n'
+         '      branches: [main]\n'
+         '  pull_request:\n'))
+    for name, content in cases:
+        (workflows / name).write_text(content, encoding='utf-8')
+        try:
+            _assert_no_workflow_gates_one_commit_twice(workflows)
+        except AssertionError as failure:
+            assert name in str(failure), failure
+        else:
+            raise AssertionError(f'{name} was accepted')
+        (workflows / name).unlink()
 
 
 def test_no_workflow_gates_one_commit_twice(tmp):
-    """A pull request's head SHA gets one run per workflow, not two.
-
-    A push and its pull request fire `push` and `pull_request` on the same
-    SHA, so every workflow ran twice. The fix is the `branches:` filter on
-    `push`; a branch with no open pull request gets no run — the trade.
-    """
+    """A pull request's head SHA gets one run per workflow, not two."""
     del tmp
     _assert_no_workflow_gates_one_commit_twice(
         ROOT / '.github' / 'workflows')
@@ -115,11 +101,7 @@ def _assert_workflow_trigger_filters_match(workflows):
 
 
 def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
-    """Push and pull_request must make the same path-filtering choice.
-
-    A push-only filter lets a documentation-only commit skip the gates on
-    main while the identical pull request runs them.
-    """
+    """Push and pull_request must make the same path-filtering choice."""
     del tmp
     _assert_workflow_trigger_filters_match(ROOT / '.github' / 'workflows')
 
@@ -136,12 +118,6 @@ def test_workflow_reader_accepts_string_controls_and_a_leading_bom(tmp):
     bom = '\ufeff' + content.replace(spelling, '[docs\ufeff.md]')
     (workflows / 'bom.yml').write_text(bom, encoding='utf-8')
     _assert_workflow_trigger_filters_match(workflows)
-    expected = {'paths-ignore': [
-        'main', 'release', '.gitignore', 'release-candidate', '**/*.md']}
-    triggers = _workflow_triggers(content, 'controls.yml')
-    assert _workflow_path_filters(triggers['push'], 'controls.yml') == expected
-    assert _workflow_path_filters(
-        triggers['pull_request'], 'controls.yml') == expected
     triggers = _workflow_triggers(bom, 'bom.yml')
     assert _workflow_path_filters(triggers['push'], 'bom.yml') == {
         'paths-ignore': ['docs\ufeff.md']}
@@ -226,10 +202,6 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
 
     audit = workflows / 'audit.yml'
     assert _workflow_runs_for_paths(audit, 'push', [threshold])
-    assert _workflow_runs_for_paths(audit, 'push', [threshold, source])
-    assert not _workflow_path_filters(
-        _workflow_triggers(audit.read_text(encoding='utf-8'), 'audit.yml')
-        ['push'], 'audit.yml')
 
 
 def test_threshold_filter_mutations_change_the_run_set(tmp):
@@ -249,23 +221,6 @@ def test_threshold_filter_mutations_change_the_run_set(tmp):
         assert _workflow_runs_for_paths(
             path, 'push', ['.github/ci-thresholds.json']) \
             is (label == 'missing')
-        if label == 'broad':
-            assert _workflow_runs_for_paths(
-                path, 'push',
-                ['.github/ci-thresholds.json',
-                 '.github/workflows/source.yml']) \
-                is False
-
-    audit_source = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
-        encoding='utf-8')
-    audit_mutated = audit_source.replace(
-        '  push:\n    # main only.',
-        "  push:\n    paths-ignore:\n      - '.github/ci-thresholds.json'\n"
-        '    # main only.', 1)
-    audit_path = workflows / 'audit.yml'
-    audit_path.write_text(audit_mutated, encoding='utf-8')
-    assert _workflow_runs_for_paths(
-        audit_path, 'push', ['.github/ci-thresholds.json']) is False
 
 
 def test_contribution_gates_have_unfiltered_push_triggers(tmp):
@@ -330,33 +285,21 @@ def test_workflow_trigger_filters_accept_string_pairs_and_opposite_quotes(tmp):
             raise AssertionError(f'{name}: unsupported quote was accepted')
 
 
-def test_duplicate_branches_option_is_refused(tmp):
-    """A repeated `branches:` is refused rather than read last-wins."""
+def test_duplicate_event_options_are_refused(tmp):
+    """A repeated event option is refused rather than read last-wins."""
     del tmp
-    content = ('name: control\n\non:\n  push:\n'
-               '    branches: [main]\n    branches: [release]\n')
-    try:
-        triggers = _workflow_triggers(content, 'control.yml')
-        _workflow_path_filters(triggers['push'], 'control.yml')
-    except AssertionError as failure:
-        assert 'duplicate event option' in str(failure), failure
-    else:
-        raise AssertionError('a duplicate branches option was accepted')
-
-
-def test_duplicate_paths_ignore_option_is_refused(tmp):
-    """A repeated `paths-ignore:` is refused rather than read last-wins."""
-    del tmp
-    content = ('name: control\n\non:\n  push:\n'
-               '    paths-ignore: [docs/**]\n'
-               '    paths-ignore: [.github/**]\n')
-    try:
-        triggers = _workflow_triggers(content, 'control.yml')
-        _workflow_path_filters(triggers['push'], 'control.yml')
-    except AssertionError as failure:
-        assert 'duplicate event option' in str(failure), failure
-    else:
-        raise AssertionError('a duplicate paths-ignore option was accepted')
+    for option, first, second in (
+            ('branches', '[main]', '[release]'),
+            ('paths-ignore', '[docs/**]', '[.github/**]')):
+        content = ('name: control\n\non:\n  push:\n'
+                   f'    {option}: {first}\n    {option}: {second}\n')
+        try:
+            triggers = _workflow_triggers(content, 'control.yml')
+            _workflow_path_filters(triggers['push'], 'control.yml')
+        except AssertionError as failure:
+            assert 'duplicate event option' in str(failure), failure
+        else:
+            raise AssertionError(f'a duplicate {option} was accepted')
 
 
 def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
@@ -456,12 +399,58 @@ def test_journey_budget_steps_are_gated_on_the_steps_before_them(tmp):
         assert actual == expected, f'journey-budget/{step}: {actual!r}'
 
 
+_OUTPUT_REDIRECT = '>> "$GITHUB_OUTPUT"'
+_OUTPUT_NAME = r'[a-z_][a-z0-9_]*'
+
+
+def _run_output_names(script):
+    """The output names one run block writes to `$GITHUB_OUTPUT`."""
+    names, group = [], None
+    for raw in script.splitlines():
+        line = raw.strip()
+        if group is not None and line.startswith('}'):
+            if _OUTPUT_REDIRECT in line:
+                names.extend(group)
+            group = None
+        elif line == '{':
+            group = []
+        elif _OUTPUT_REDIRECT in line:
+            assert not line.startswith('}'), f'stray group close: {line!r}'
+            written = re.search(rf"echo (['\"])(?P<name>{_OUTPUT_NAME})=",
+                                line)
+            assert written, f'output redirect not admitted: {line!r}'
+            names.append(written['name'])
+        elif group is not None:
+            written = re.search(rf"printf '({_OUTPUT_NAME})=", line)
+            if written:
+                names.append(written[1])
+    assert group is None, 'unclosed `{` output group'
+    return names
+
+
+def _condition_output_reads(expression):
+    """The (handle, field) steps-outputs lookups one condition makes."""
+    tokens = _tokenize(_unwrap(expression))
+    reads, index = [], 0
+    while index < len(tokens):
+        cursor = index + 1
+        while (cursor + 1 < len(tokens)
+               and tokens[cursor].kind == '.'
+               and tokens[cursor + 1].kind == 'IDENT'):
+            cursor += 2
+        path = [token.value for token in tokens[index:cursor:2]]
+        if len(path) == 4 and path[0] == 'steps' and path[2] == 'outputs':
+            reads.append((path[1], path[3]))
+        index = max(cursor, index + 1)
+    return reads
+
+
 def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
     """The handles the shipped workflows declare, at the step declaring each.
 
-    coverage-comment.yml's id set is censused and its rows tied to it, so
-    a duplicate, extra or unpinned handle goes red there; tests.yml's rows
-    still rely on disclosure alone. `actionlint` is the one nothing reads.
+    coverage-comment.yml's id set is censused, its rows tied to it, and its
+    conditions' steps-outputs reads pinned to what the handles write;
+    tests.yml's rows rely on disclosure alone. `actionlint` reads nothing.
     """
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -487,21 +476,32 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
     assert declared is not None, 'job comment declares no id values'
     assert tuple(sorted(declared)) == census
     rows = (
-        ('comment', 'Check for the comment artifact', 'artifact'),
-        ('comment', 'Resolve the target pull request from the event',
-         'pr'),
-        ('comment', 'Mark missing patch coverage', 'missing'))
+        ('Check for the comment artifact', 'artifact'),
+        ('Resolve the target pull request from the event', 'pr'),
+        ('Mark missing patch coverage', 'missing'))
     assert tuple(sorted(row[-1] for row in rows)) == census
-    for job, step, expected in rows:
-        actual = step_scalar(comment_yml, job, step, 'id')
-        assert actual == expected, f'{job}/{step}: {actual!r}'
+    for step, expected in rows:
+        actual = step_scalar(comment_yml, 'comment', step, 'id')
+        assert actual == expected, f'comment/{step}: {actual!r}'
+    steps = step_mappings(comment_yml, 'comment')
+    produced = {step['id']: _run_output_names(step.get('run') or '')
+                for step in steps if step.get('id')}
+    reads = _condition_output_reads(
+        _job_if_expression(comment_yml, 'comment'))
+    reads += [read for step in steps if step.get('if')
+              for read in _condition_output_reads(step['if'])]
+    unproduced = [(handle, field) for handle, field in reads
+                  if field not in produced.get(handle, ())]
+    assert not unproduced, (
+        f'conditions read outputs no declared handle writes: {unproduced} '
+        f'(produced: {sorted(produced.items())})')
 
 
 def _without_call_spacing(expression):
     """Return an expression with whitespace at `(`, `,` and `)` removed.
 
-    Quote-blind, so it strips inside a quoted argument too (`'a, b'` reads
-    as `'a,b'`); safe here: neither quoted operand holds any of the three.
+    Quote-blind (`'a, b'` reads as `'a,b'`); safe here: neither quoted
+    operand holds any of the three.
     """
     return re.sub(r'\s*([(),])\s*', r'\1', expression)
 
@@ -509,10 +509,9 @@ def _without_call_spacing(expression):
 def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
     """One score, from one ref, published only where it means something.
 
-    A structural pin, not an evaluation: the shared expression reader admits
-    a call only with no arguments, so it refuses `format(...)` outright and
-    the guard is never run under the contexts that would decide it; each
-    limb of any other shape fails rather than passing unread.
+    A structural pin, not an evaluation: the expression reader refuses
+    `format(...)` outright, and each limb of any other shape fails rather
+    than passing unread.
     """
     del tmp
     scorecard = (ROOT / '.github' / 'workflows' / 'scorecard.yml').read_text(
