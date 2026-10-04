@@ -90,7 +90,8 @@ def recorded_median(measured):
     return int(value) if value == int(value) else value
 
 
-def carried_tolerances(recorded, counted, draws=(), counter=None):
+def carried_tolerances(recorded, counted, draws=(), counter=None,
+                       toolchain=None, exclusions=None):
     """The recorded per-journey tolerances, for the journeys this one holds.
 
     Absent stays absent, as everywhere else in the document: a re-baseline
@@ -118,14 +119,14 @@ def carried_tolerances(recorded, counted, draws=(), counter=None):
         carried = {name: value for name, value in own.items()
                    if name in counted}
     for name, value in sorted(derived_tolerances(
-            draws, counter, counted).items()):
+            draws, counter, counted, toolchain, exclusions).items()):
         if carried is None:
             carried = {}
         carried[name] = value
     return carried
 
 
-def derived_tolerances(draws, counter, counted):
+def derived_tolerances(draws, counter, counted, toolchain, exclusions):
     """The bound each pool-named journey is re-derived to, and none beside.
 
     Each pool file contributes every ROUND's count — the row's `net`, the
@@ -134,9 +135,13 @@ def derived_tolerances(draws, counter, counted):
     the pool does not name keeps its carried bound, which is why only named
     journeys come back.
 
-    A file that selected another counter measured a different quantity, and
-    a count from it would re-bind a journey to a span its recorded counts
-    are not denominated in.
+    Pool files are quantity identity: each must select the same counter,
+    carry the same toolchain and count under the same exclusion map as the
+    measurements, or its counts are a different quantity. The render sha
+    is deliberately not checked: a tolerance pool spans heads by design —
+    it is a distribution over the gate's draws across ordinary tree
+    movement — so requiring render agreement would empty the very pool it
+    exists to fill.
     """
     pool = {}
     for report in draws:
@@ -147,6 +152,15 @@ def derived_tolerances(draws, counter, counted):
                 f'{selected or "no counter"} while the budget is '
                 f'denominated in {counter}, so its counts are a different '
                 'quantity')
+        if (report.get('toolchain') or {}) != (toolchain or {}):
+            raise ValueError(
+                'a draws file was measured on a different toolchain, and a '
+                'span from it would re-bind a journey to a quantity its '
+                'recorded counts are not denominated in')
+        if (report.get('excluded_threads') or {}) != (exclusions or {}):
+            raise ValueError(
+                'a draws file counted under a different exclusion map, so '
+                'its counts are a different quantity')
         rows = ((report.get('counters') or {}).get(counter)
                 or {}).get('journeys') or {}
         for name, row in rows.items():
