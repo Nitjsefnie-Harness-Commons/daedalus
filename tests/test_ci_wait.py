@@ -40,8 +40,8 @@ def _filter_wait(mod, repo, sha, interval, bound, out, grace=300):
     """`wait` with the published check switched off, as above.
 
     The parameters are named, never `*args`/`**kwargs`: a call that
-    unpacks a mapping is refused by `tests/test_repo_layout.py`, which
-    cannot tell a hidden `timeout=` from any other keyword.
+    unpacks a mapping was refused by the retired layout audit, which
+    could not tell a hidden `timeout=` from any other keyword.
     """
     return mod.wait(repo, sha, interval, bound, out, grace=grace,
                     required_checks=frozenset())

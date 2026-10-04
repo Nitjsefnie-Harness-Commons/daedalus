@@ -100,12 +100,12 @@ def _fixture_binds(tree, shared):
     `from _wffixtures import _refuses` is the pattern this rule exists to
     protect, and this is not it.
 
-    So this rule and the re-implementation limb of
-    `tests/test_reserved_test_names.py` read the same scope and answer
-    different questions, which is the distinction that keeps both right.
-    That one owns a name a helper DEFINES, so a walrus is not a second
-    definition of it and needs an allowance row. This one owns a name at
-    all, has no allowance table, and so refuses the bind itself.
+    So this rule answers a different question than the re-implementation
+    limb a retired reserved-name suite carried, which is the distinction
+    that kept the two of them right. That one owned a name a helper
+    DEFINES, so a walrus was not a second definition of it and needed an
+    allowance row. This one owns a name at all, has no allowance table,
+    and so refuses the bind itself.
 
     WHAT IT STILL CANNOT SEE, and it is the honest end state. A `from
     _wffixtures import *` brings a module's EXPORTED names, which no

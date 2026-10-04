@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Every job this guard identifies must be able to read the merge base.
 
-The branch-boundary control in `tests/test_reserved_test_names.py` reads
+The branch-boundary control a retired reserved-name suite carried read
 the merge base's own declarations over both allowance tables, and a
-checkout that resolves neither `origin/main` nor a local `main` makes it
-take its refusal arm. In a job that turns a failing suite red, the
+checkout that resolves neither `origin/main` nor a local `main` made
+it take its refusal arm. In a job that turns a failing suite red, the
 consequence is already visible; in a job that runs the suites without
 failing on one it is quieter and worse — the branch's central guarantee
 goes unevaluated in a job that runs it, and nothing reports that.
@@ -64,8 +64,8 @@ def _is_a_runnable_suite_file(node):
                  or fnmatch.fnmatch(path, 'tests/test_*.py')))
 
 
-# The same five names tests/_bash_resolver_scan.py declares, plus the two
-# its own corpus entry names as ITS bypass: that guard enumerates those
+# The five names the retired resolver-bypass guard declared, plus the
+# two its corpus entry named as ITS bypass: that guard enumerated those
 # five and `subprocess.getoutput` slipped past it, so an arm repeating
 # the same five would re-open a bypass this repository has already
 # recorded. Measured on this arm: `getoutput(["python3",

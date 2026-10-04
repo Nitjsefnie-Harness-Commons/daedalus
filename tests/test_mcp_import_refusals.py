@@ -198,7 +198,7 @@ FLOOR_ARMS = (
      '::test_a_reached_or_guard_is_refused'),
 )
 FIXTURE_ARMS = (
-    (('_assert_scan_refusal', 49), 'test_helper_assertion_pins.py drives '
+    (('_assert_scan_refusal', 49), 'test_mcp_import_refusals.py drives '
      'the reader this site is the last assertion of'),
 )
 

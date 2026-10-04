@@ -207,8 +207,7 @@ def test_the_expectation_has_exactly_one_definition(tmp):
     of either name would leave this filtering for a name nothing defines,
     enumerating everything and matching nothing, which is a control that
     passes while measuring nothing. That is the same failure as I2 one
-    rename later, and the shape `tests/_unconsolidated_names.py` already
-    uses for its own table - a row naming no live site is a refusal.
+    rename later: a row naming no live site is a refusal.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'

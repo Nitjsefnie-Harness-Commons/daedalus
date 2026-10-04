@@ -14,9 +14,8 @@ carries; `_wait_result` spells the
 tab and is a different body, so it is not a copy of this); `_answered_result`
 builds the record the recorder hands back rather than a request. They are
 renamed because the short names are held already: `_put`, `_ext` and `_get`
-belong to `tests/_mcp_tool_commands.py` with a different body, and a shared
-helper that adopted one of them would make that module an offender of it
-along with the suites that stayed (`tests/test_reserved_test_names.py`).
+belong to `tests/_mcp_tool_commands.py` with a different body, so a shared
+helper does not adopt one of them.
 """
 
 
