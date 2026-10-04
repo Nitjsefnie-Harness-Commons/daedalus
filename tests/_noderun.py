@@ -200,7 +200,9 @@ def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None,
     fix to the detector reached one of them. The bound spans the child's
     own execution and nothing else — the clock starts at the launch, and
     nothing before it (writing a program file) or after it (reading the
-    result) is inside it.
+    result) is inside it. A future serialisation gate placed before the
+    launch must stay outside it, or its queueing time would count
+    against the child.
 
     The launch is the `Popen` shape rather than `subprocess.run` so that
     expiry is a classified failure carrying the child's partial output
