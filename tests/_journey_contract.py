@@ -91,8 +91,6 @@ def callgrind_profile(directory, name, slot, thread, ir, signature=(),
     bodies instead of only how big it was. `cmd` is the command line of the
     PROCESS the thread belongs to, because that is what the classifier reads
     first; it defaults to the harness child, which is what most of them are.
-    It lives here because the suite that grew it is at the size ceiling and
-    the profile is a journey fact rather than a counter fact.
     """
     path = Path(directory) / f'callgrind.{name}.{slot}'
     body = ''.join(f'fn=({index}) {symbol}\n1 12\n'
