@@ -68,6 +68,14 @@ export function mount(container, bus) {
     } catch (e) { toast(label + errMsg(e), 'err'); return false; }
   }
 
+  // A stored record's identity is its full contents, `ts` included; both
+  // post-command store writes find their record with this.
+  function findByContents(all, record) {
+    return all.findIndex((entry) => entry.css === record.css
+      && entry.tabId === record.tabId && entry.allFrames === record.allFrames
+      && entry.ts === record.ts);
+  }
+
   // Splice one row's record out by its CONTENTS, not by the position the
   // row was rendered at. The store is re-read here, so anything that
   // changed it between the render and the click moved every index after
@@ -76,9 +84,7 @@ export function mount(container, bus) {
   // is spliced at all.
   function dropByContents(record) {
     const all = load();
-    const at = all.findIndex((entry) => entry.css === record.css
-      && entry.tabId === record.tabId && entry.allFrames === record.allFrames
-      && entry.ts === record.ts);
+    const at = findByContents(all, record);
     if (at < 0) { renderSessions(); return; }
     all.splice(at, 1);
     persist(all, 'session not removed: ');
@@ -167,10 +173,18 @@ export function mount(container, bus) {
       // A command that failed leaves the reservation holding no live
       // rule: mark it, so the row shows the state and its remove drops
       // the record without asking the worker to confirm a match that
-      // does not exist. A store that refuses the marking says so here
-      // rather than throwing out of this handler.
-      sessions[sessions.length - 1].failed = true;
-      persist(sessions, 'session not marked: ');
+      // does not exist. The store is RE-READ here rather than the
+      // pre-command array written back: another window may have added or
+      // removed records while the command was in flight, and a stale
+      // write would clobber or resurrect them. A record already gone
+      // stays gone -- the re-render is what takes its row off this
+      // window's table -- and a store that refuses the marking says so
+      // here rather than throwing out of this handler.
+      const all = load();
+      const at = findByContents(all, sessions[sessions.length - 1]);
+      if (at < 0) { renderSessions(); return; }
+      all[at].failed = true;
+      persist(all, 'session not marked: ');
     }
   });
   root.querySelector('[data-role=remove]').addEventListener('click', async () => {
