@@ -359,17 +359,19 @@ python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha> \
 ```
 
 Its exit code is the verdict, so a caller never has to read the loop: 0 every
-run on the SHA concluded `success`, `neutral` or `skipped` **and the
-`tests` matrix has a run on that SHA** **and the `gate freshness` check
-run has concluded acceptably**; 1 every run concluded and one concluded
+run on the SHA concluded and every JUDGED conclusion was `success`, `neutral`
+or `skipped` **and the `tests` matrix has a run on that SHA** **and the
+`gate freshness` check run has concluded acceptably** - a run whose workflow
+is not about this head is never judged, and is named rather than counted on
+the acceptable line; 1 every run concluded and one JUDGED conclusion was
 otherwise, or a required published check run did, offenders - runs and
 checks alike - named with URLs; 2 the `--timeout` bound expired first - with
 named runs still open, with no run ever appearing, or with every run
 concluded and a required workflow or check still absent; 3 the
 invocation was rejected or a query failed - loud and at
-once, never retried behind a message that reads like waiting; 4 every run
-concluded acceptably and either none of them is a `tests` run or no
-`gate freshness` check run is on the SHA, so this head is not
+once, never retried behind a message that reads like waiting; 4 every
+JUDGED conclusion is acceptable and either none of them is a `tests` run or
+no `gate freshness` check run is on the SHA, so this head is not
 certified - no merge is claimed, because this is reached with a pull
 request, without one, and on a branch of its own. A rate-limit refusal is
 the one exception to exit 3: it is a known wait, so it pauses until the
