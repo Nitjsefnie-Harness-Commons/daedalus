@@ -23,7 +23,7 @@ name: audit
 # ONE MANIFEST IS DELIBERATELY ABSENT. requirements-zizmor.txt is
 # hash-pinned, and pip's hash checking is a property of the whole resolution
 # rather than of one file, so a hashed manifest cannot share this one
-# invocation with the unpinned three: it would drag every other surface into
+# invocation with the unpinned four: it would drag every other surface into
 # hash mode and fail on hashes they do not carry. It is installed by its own
 # step in tests.yml, which touches no other manifest.
 #
