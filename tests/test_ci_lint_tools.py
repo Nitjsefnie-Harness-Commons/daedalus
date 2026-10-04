@@ -579,14 +579,14 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     growth: 1 is under the 2 s the first attempt would have waited
     anyway, so the longer of the two wins and it records 2, while 900 is
     over the 10 s ceiling, so the ceiling binds it and it records 10.
-    Either way a path that ignored the header, or took the header
-    outright whatever the growth was, records 1 and goes red. Two
-    entries and not three: the third attempt served, and a pause after
-    the attempt that succeeded is waiting for nothing.
+    Dropping the header outright records `[2, 4]` — the growth alone —
+    and taking it whatever the growth was records `[1, 10]`. Two entries
+    and not three: the third attempt served, and a pause after the
+    attempt that succeeded is waiting for nothing.
 
-    The second carries none, which is what makes the module's own growth
-    reachable: every header-bearing sample hides it behind the `max` that
-    applies the header. It records `[2, 4]`, where a flat wait records
+    The second carries none, so the growth is recorded at the second
+    attempt rather than losing to a header: in the first run the 900 takes
+    that gap outright. It records `[2, 4]`, where a flat wait records
     `[2, 2]` and a shifted exponent `[4, 8]`.
 
     The third is the one header the module cannot read, and a parse that
@@ -621,7 +621,8 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
     assert bare == [2, 4], (
         f'the pauses with no Retry-After on either failure were {bare}; the '
         "wait is the module's own and it grows with the attempt, so a flat "
-        'wait or a shifted exponent shows here and nowhere else')
+        'wait or a shifted exponent is visible here, where no header can '
+        'hide it')
     dated = _Transfer(installer, name, [
         _http_error(installer, 503, 'Service Unavailable',
                     retry_after='Wed, 21 Oct 2015 07:28:00 GMT'),

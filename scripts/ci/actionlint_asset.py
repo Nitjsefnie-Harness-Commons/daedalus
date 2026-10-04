@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 
 
-# Filled by the installer on import, before anything reaches `fetch`.
+# The installer writes all three here as it imports this module.
 RELEASE = ''
 ACTIONLINT_VERSION = ''
 MAX_TRANSFER = 0
