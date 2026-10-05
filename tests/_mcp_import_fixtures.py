@@ -1,9 +1,8 @@
 """The on-disk compositions handed to the import-closure scan.
 
 `composition_scan_set` reads a file tree, so a case that drives it must
-put a synthetic package on disk before it can ask the scan anything. The
-refusal arm needs a real composition the scan refuses for a real reason,
-not a stub of the call.
+put a synthetic package on disk first. The refusal arm needs a real
+composition the scan refuses for a real reason, not a stub of the call.
 
 Two readers live here, one per question a case asks of the walk, so a
 change to how a fixture is built cannot reach one consumer and miss
@@ -14,9 +13,8 @@ driven from, and drives both of them. The CALLEE verdict is not a third
 reader: it is `_scan_verdict`'s answer in three words over a tree the
 case writes.
 
-The refusal assertion is named for the assertion it makes rather than for
-what it generically is, because other test modules already bind that
-name.
+The refusal assertion is named for the assertion it makes, because other
+test modules already bind that name.
 """
 from pathlib import Path
 
@@ -38,6 +36,8 @@ def _assert_scan_refusal(_tmp, source, site, phrase):
             Path(_tmp) / 'composition.py', _tmp)
     except AssertionError as raised:
         assert site is None or f'composition:{site}' in str(raised), raised
+        if site is None:
+            assert 'composition:' not in str(raised), raised
         assert phrase in str(raised), raised
     else:
         raise AssertionError('a computed import was silently skipped')
