@@ -618,13 +618,9 @@ NOT_CANDIDATES = (
 PLANTED_RUN_STEP = (
     'jobs:\n'
     '  suites:\n'
-    '    runs-on: ubuntu-latest\n'
-    '    timeout-minutes: 5\n'
     '    steps:\n'
-    '      - name: Install the lint tools the suites drive\n'
-    '        run: python scripts/ci/install_lint_tools.py\n'
-    '      - name: Probe the run-path control\n'
-    '        run: python'
+    '      - run: python scripts/ci/install_lint_tools.py\n'
+    '      - run: python'
     ' scripts/ci/install_lint_tools_that_does_not_exist.py\n')
 
 
@@ -654,13 +650,11 @@ def test_the_planted_step_is_refused_and_the_verdict_flips_on_resolution(tmp):
     jobs = jobs_mapping(PLANTED_RUN_STEP)
     run_text = '\n'.join(step.get('run', '')
                          for step in jobs['suites']['steps'])
-    assert unresolved_run_paths(
-        run_text, {'scripts/ci/install_lint_tools.py'}
-    ) == ['scripts/ci/install_lint_tools_that_does_not_exist.py']
-    assert unresolved_run_paths(
-        run_text, {'scripts/ci/install_lint_tools.py',
-                   'scripts/ci/install_lint_tools_that_does_not_exist.py'}
-    ) == []
+    tracked = {'scripts/ci/install_lint_tools.py'}
+    assert unresolved_run_paths(run_text, tracked) == [
+        'scripts/ci/install_lint_tools_that_does_not_exist.py']
+    tracked |= {'scripts/ci/install_lint_tools_that_does_not_exist.py'}
+    assert unresolved_run_paths(run_text, tracked) == []
 
 
 if __name__ == '__main__':
