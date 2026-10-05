@@ -43,8 +43,9 @@ permissions:
 # one group and the newer run cancelled the incumbent. pull_request events
 # carry pull_request.number, so a PR keeps one group per number and a
 # superseded head push is still cancelled. Push and workflow_dispatch of
-# the same commit share that commit's group, and the later run replaces
-# the earlier's identical matrix — no verdict is lost.
+# the same commit share that commit's group, and the later run supersedes
+# the earlier's verdict — a dispatch runs the full matrix even where a
+# docs-only push ran the reduced documentation matrix — no verdict is lost.
 concurrency:
   group: tests-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
