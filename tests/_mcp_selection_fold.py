@@ -107,15 +107,13 @@ def _operator_settled(operation, *operands):
 def _runtime_settled(node, bound, scopes):
     """The value a form the runtime has already SETTLED produces, `UNREAD`
     when this walk will not compute it, and `UNREACHABLE` when the runtime
-    raises before the value exists.
-
-    SETTLED is a property and not a list: a constant, a unary or binary
-    operator over two settled values, a walrus, a conditional whose two
-    arms agree, and `bool` of a settled one are each a value Python has
-    computed already, and each is asked of Python's own operator. A
-    parameter no store has taken back carries its own default; a
-    field-less f-string is the constant the compiler builds it from. A
-    form nobody has met is `UNREAD` here — where a new settled form goes.
+    raises before the value exists. SETTLED is a property and not a list:
+    constants, operators over settled values, walruses, agreeing
+    conditionals and `bool` of a settled one are values Python has
+    computed already, asked of Python's own operator. A parameter no store
+    has taken back carries its own default; a field-less f-string is the
+    constant the compiler builds it from. A form nobody has met is
+    `UNREAD` here — where a new form goes.
     """
     if isinstance(node, ast.Constant):
         return node.value

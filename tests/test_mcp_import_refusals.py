@@ -19,22 +19,21 @@ VARIABLE, so one call site spells three refusals, and
 The set is derived twice over and compared with the tables both ways, so
 neither the analysers nor the tables can drift apart quietly. Both halves
 of the derivation live in `_mcp_arm_derivation`, which recognises what a
-thing IS rather than how it is written — a raiser through the name or the
-attribute it is bound to and through a partial built from one, a module the
-walk REACHES. The MODULES are the connected component of the `_mcp_*` graph
-the walk's entry belongs to, keeping the members that spell a refusal site
-at all. The comparison cannot pass by returning nothing
-on both sides: `CONTROL` and `CONTROL_LEAF` are a two-module TREE, the second
+thing IS rather than how it is written — a raiser through the name or
+attribute it is bound to, through a partial built from one, a module the
+walk REACHES — and the MODULES are the connected component of the `_mcp_*`
+graph the walk's entry belongs to, keeping members that spell a site. The
+comparison cannot pass by returning nothing on both sides: `CONTROL` and
+`CONTROL_LEAF` are a two-module TREE, the second
 reached from the first by nothing but a `__import__` call, so the control is
 on the MODULE-SET axis as well as the detail axis, and the derivation is
 asked to find every one of them before it compares anything. A key is a
-LINE, the same convention `_mcp_guard_floor` keys its own sites on, so an
-edit above a site moves it and this case says exactly where it moved to,
-with the derived set printed in the failure. Each arm is stated twice: the
-refusal, and a NEAR MISS the walk must leave alone — the same shape with
-the one separating decision taken the other way, so a rule that
-over-reaches loses as visibly as one that under-reaches; an arm with no
-near miss says so in its row.
+LINE, the convention `_mcp_guard_floor` keys its own sites on, so an edit
+above a site moves it and this case says where it moved to, the derived
+set printed in the failure. Each arm is stated twice: the refusal, and a
+NEAR MISS the walk must leave alone — the same shape with the separating
+decision taken the other way, so a rule that over-reaches loses as
+visibly as one that under-reaches; an arm with no near miss says so.
 """
 import sys
 from pathlib import Path
@@ -348,9 +347,7 @@ BOOL_INDEX = (
 # The ORDER the module's statements run in: a `from builtins` binds the
 # builtin once its own statement has run, so a use BEFORE it reads a name
 # the module has not bound yet and the walk declines. Every BOOL_INDEX row
-# puts the binding first, so the axis was carried by no row above; a rule
-# that drops the order resolves both, one that declines every alias loses
-# the first.
+# puts the binding first, so the axis was carried by no row above.
 BINDING_ORDER = (
     ('\nimport importlib\nfrom builtins import bool as b\n\n\ndef load():\n'
      '    return [importlib.import_module, 0][b(0)]("pkg.leaf")\n',

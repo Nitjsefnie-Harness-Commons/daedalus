@@ -1,8 +1,8 @@
 """The refusal SITES the analysers spell, derived by what they MEAN.
 
-`test_mcp_import_refusals.py` compares what this reads with the tables that
-claim to cover it, so a derivation that recognises a raiser or a reachable
-module by its SPELLING is a gate that goes green on a real arm: the walk
+`test_mcp_import_refusals.py` compares what this reads with the tables
+that claim to cover it, so a derivation recognising a raiser or a
+reachable module by its SPELLING goes green on a real arm: the walk
 reaches a module through whatever the runtime reaches, and a refusal is
 raised through whatever object the module hands away; neither is a name.
 
