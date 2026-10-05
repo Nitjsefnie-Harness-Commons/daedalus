@@ -2,30 +2,28 @@
 """Every refusal SITE the import-closure walk has, and a case per arm.
 
 THE MARKER IS A PLACE THAT CAN RAISE, not a test name, not a node type and
-not a message. A site is a `raise` whatever it raises, or a call to a
+not a message: a site is a `raise` whatever it raises, or a call to a
 refusal raiser — the closure's own `_refuse`, the callback every arm
-receives, or the `AssertionError` constructor both of those raise — keyed on
-the function it stands in and its own line, because that is the place a
-reader can go and look at. An arm whose message is assembled, passed by
-keyword, forwarded through a local, produced by a helper, or raised as an
-exception type nobody anticipated is still an arm, and a table keyed on
-message text cannot see one. The message is still read, as the LABEL a row
-carries beside its site, so a row still reads like the refusal it names, and
-each table row carries the FIXED part of the message, never the node's own
-spelling. Two labels are shaped so a plain grep of the analysers under-counts
-them: `_refuse_default` names the thing it hands away through `_HIDDEN_NOUN`,
-a VARIABLE, so one call site spells three refusals, and
+receives, or the `AssertionError` constructor both of those raise — keyed
+on the function it stands in and its own line. An arm whose message is
+assembled, passed by keyword, forwarded through a local, produced by a
+helper, or raised as an exception type nobody anticipated is still an arm,
+and a table keyed on message text cannot see one. The message is still
+read, as the LABEL a row carries beside its site, and each row carries the
+FIXED part of the message, never the node's own spelling. Two labels are
+shaped so a plain grep of the analysers under-counts them:
+`_refuse_default` names the thing it hands away through `_HIDDEN_NOUN`, a
+VARIABLE, so one call site spells three refusals, and
 `yields_the_operation` refuses a mention that is a FORMAT of the node.
 
 The set is derived twice over and compared with the tables both ways, so
-neither the analysers nor the tables can drift apart quietly. Both halves of
-the derivation live in `_mcp_arm_derivation` and both recognise what a thing
-IS rather than how it is written — a raiser through the name or the attribute
-it is bound to and through a partial built from one, and a module the walk
-REACHES, by an `import` statement or by a call of the import-by-name
-operation carrying a literal name. The MODULES are the connected component of
-the `_mcp_*` graph the walk's entry belongs to, keeping the members that
-spell a refusal site at all. The comparison cannot pass by returning nothing
+neither the analysers nor the tables can drift apart quietly. Both halves
+of the derivation live in `_mcp_arm_derivation`, which recognises what a
+thing IS rather than how it is written — a raiser through the name or the
+attribute it is bound to and through a partial built from one, a module the
+walk REACHES. The MODULES are the connected component of the `_mcp_*` graph
+the walk's entry belongs to, keeping the members that spell a refusal site
+at all. The comparison cannot pass by returning nothing
 on both sides: `CONTROL` and `CONTROL_LEAF` are a two-module TREE, the second
 reached from the first by nothing but a `__import__` call, so the control is
 on the MODULE-SET axis as well as the detail axis, and the derivation is
@@ -369,9 +367,7 @@ BINDING_ORDER = (
 # either alone and the position resolves, putting a module in a closure
 # only one of two values ever reaches.
 def _conditional_index(index):
-    """A composition whose INDEX is one expression, over a container whose
-    second position holds the operation — so a conditional that settles
-    picks the operation and one that does not decides nothing."""
+    """A composition whose INDEX is the one expression."""
     return (f'\nimport importlib\n\n\ndef load():\n'
             f'    return [0, importlib.import_module][{index}]("pkg.leaf")\n')
 
