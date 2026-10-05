@@ -378,7 +378,6 @@
 !/tests/_ratchet_fixture.py
 !/tests/_realbrowser.py
 !/tests/_realbrowser_broken_worker.py
-!/tests/_realbrowser_classification_support.py
 !/tests/_realbrowser_controls.py
 !/tests/_realbrowser_errors.py
 !/tests/_realbrowser_fixture_controls.py
@@ -478,13 +477,9 @@
 !/tests/test_cli_segment_origins.py
 !/tests/test_cli_waits.py
 !/tests/test_client_credentials.py
-!/tests/test_cmdqueue.py
-!/tests/test_cmdqueue_clock.py
-!/tests/test_cmdqueue_injectors.py
 !/tests/test_command_admission.py
 !/tests/test_command_queue.py
 !/tests/test_command_queue_aliased.py
-!/tests/test_command_queue_candidates.py
 !/tests/test_command_queue_ordering.py
 !/tests/test_command_queue_unit.py
 !/tests/test_config_boot_generation.py
@@ -592,15 +587,8 @@
 !/tests/test_pyright_scope.py
 !/tests/test_queued_command.py
 !/tests/test_ratchet_push.py
-!/tests/test_real_browser_boundary.py
-!/tests/test_real_browser_cdp_timeouts.py
-!/tests/test_real_browser_classification.py
-!/tests/test_real_browser_control_extension.py
-!/tests/test_real_browser_environment.py
 !/tests/test_real_browser_eval.py
-!/tests/test_real_browser_fixture_waits.py
 !/tests/test_real_browser_harness.py
-!/tests/test_real_browser_harness_recovery.py
 !/tests/test_receiver_descent.py
 !/tests/test_relay_example_placeholders.py
 !/tests/test_release_scan.py
