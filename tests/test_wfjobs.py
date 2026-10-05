@@ -648,6 +648,7 @@ def test_the_planted_step_is_refused_and_the_verdict_flips_on_resolution(tmp):
     """The issue's planted step, decoded and walked like the real gate."""
     del tmp
     jobs = jobs_mapping(PLANTED_RUN_STEP)
+    assert jobs is not None, PLANTED_RUN_STEP
     run_text = '\n'.join(step.get('run', '')
                          for step in jobs['suites']['steps'])
     tracked = {'scripts/ci/install_lint_tools.py'}
