@@ -25,7 +25,6 @@
   "type_error_baseline": {
     "tests/_cli_arg_audit_resolver.py": 19,
     "tests/_cli_arg_audit_support.py": 1,
-    "tests/_cmdqueue_faults.py": 5,
     "tests/_coverage_comment_publication.py": 2,
     "tests/_coverage_guard.py": 2,
     "tests/_coverage_scopes.py": 4,
