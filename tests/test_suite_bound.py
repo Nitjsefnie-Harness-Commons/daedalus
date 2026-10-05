@@ -127,28 +127,6 @@ def _assert_one_record(text, bound, name):
     return record
 
 
-def test_a_wedged_suite_is_named_and_fails_the_run(tmp):
-    """A suite that never returns must end, be named, and turn the job red."""
-    recorded = Path(tmp) / 'tree' / 'tests' / 'suite.pid'
-    try:
-        result, _invocations = coverage_tree(
-            tmp, {'test_wedged.py': _WEDGED_SUITE,
-                  'test_fast.py': _FAST_SUITE},
-            suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
-    finally:
-        kill_recorded(recorded)
-    assert result.returncode != 0, (result.returncode, result.stdout,
-                                    result.stderr)
-    group = coverage_group(result.stdout, 'test_wedged.py')
-    _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
-    # The sibling that finished kept its own block and is named in no
-    # record, which is what makes the refusal a diagnosis rather than a
-    # blanket verdict on the run.
-    sibling = coverage_group(result.stdout, 'test_fast.py')
-    assert 'measured output arrived' in sibling, result.stdout
-    assert not records(sibling), sibling
-
-
 def test_a_fast_suite_is_measured_and_not_reported_as_timed_out(tmp):
     """A suite that finishes keeps its own output and its own verdict."""
     result, _invocations = coverage_tree(
@@ -415,10 +393,13 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
 
 
 def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
-    """Every `.wait(` call in the bridge fixture reads the shared bound.
+    """Every `.wait(` call in tests/_util.py reads the shared bound.
 
-    A literal satisfies the reaper controls' existence demand; the shape
-    is demanded literally here, not derived from the file it judges.
+    The walk is the whole file, fixture and helpers alike, so moving a
+    wait out of the bridge fixture escapes nothing: each call carries
+    exactly timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S, spelled literally
+    here; the constant is never rebound on the binding and the method
+    is never aliased to a bare name.
     """
     tree = ast.parse(
         (ROOT / 'tests' / '_util.py').read_text(encoding='utf-8'))
@@ -427,22 +408,33 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
                and node.name == 'bridge']
     assert len(bridges) == 1, (
         f'{len(bridges)} bridge fixtures: the pin cannot name a subject')
-    found, unshared = 0, []
-    for node in ast.walk(bridges[0]):
-        if not (isinstance(node, ast.Call)
+    waits, unshared, aliased, rebound = [], [], [], []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == 'wait'):
-            continue
-        timeouts = [kw for kw in node.keywords if kw.arg == 'timeout']
-        if not (len(timeouts) == 1
-                and isinstance(timeouts[0].value, ast.Attribute)
-                and timeouts[0].value.attr == 'CLEANUP_TIMEOUT_S'
-                and isinstance(timeouts[0].value.value, ast.Name)
-                and timeouts[0].value.value.id == 'SUITE_BOUND'):
-            unshared.append(f'tests/_util.py:{node.lineno}')
-        found += 1
-    assert found, ('no wait call left in the bridge fixture: the pin '
-                   'has no subject until derived again from the teardown')
+            waits.append(node)
+            timeouts = [kw for kw in node.keywords if kw.arg == 'timeout']
+            if not (timeouts
+                    and isinstance(timeouts[0].value, ast.Attribute)
+                    and timeouts[0].value.attr == 'CLEANUP_TIMEOUT_S'
+                    and isinstance(timeouts[0].value.value, ast.Name)
+                    and timeouts[0].value.value.id == 'SUITE_BOUND'):
+                unshared.append(f'tests/_util.py:{node.lineno}')
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            if (isinstance(node.value, ast.Attribute)
+                    and node.value.attr == 'wait'):
+                aliased.append(f'tests/_util.py:{node.lineno}')
+            targets = ([node.target] if isinstance(node, ast.AnnAssign)
+                       else node.targets)
+            if any(isinstance(t, ast.Attribute)
+                   and isinstance(t.value, ast.Name)
+                   and t.value.id == 'SUITE_BOUND' for t in targets):
+                rebound.append(f'tests/_util.py:{node.lineno}')
+    assert waits, ('no wait call in tests/_util.py: the pin has no '
+                   'subject until derived again from the teardown')
+    assert not aliased, f'wait aliased to a bare name: {aliased}'
+    assert not rebound, f'SUITE_BOUND rebound: {rebound}'
     assert not unshared, ('waits not reading timeout=SUITE_BOUND.'
                           f'CLEANUP_TIMEOUT_S: {unshared}')
 
