@@ -210,9 +210,8 @@ def test_control_extension_turns_worker_absence_into_failure(tmp):
 
 
 def test_machine_skip_carries_observation_and_diagnosis_payload(tmp):
-    """The machine verdict is a skip carrying what the diagnosis observed
-    and the arguments it ran with; a byte-identical skip would leave the
-    machine-blame claim unevidenced."""
+    """The machine verdict is a skip carrying the diagnosis's observation
+    and arguments; a byte-identical skip would be unevidenced."""
     def observed(*args):
         del args
         return False, 'controlled: the control worker never answered either'
@@ -236,9 +235,8 @@ def test_machine_skip_carries_observation_and_diagnosis_payload(tmp):
 
 
 def test_answered_control_diagnosis_blames_our_source_and_relaunches(tmp):
-    """An answering control worker proves the browser has the skill, so
-    worker absence is blamed on our source; each relaunch loads the
-    declared worker plus a fresh control extension before concluding."""
+    """An answering control worker proves the skill, so worker absence is
+    blamed on our source; each relaunch loads a fresh control."""
     outcome, launches, processes = answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
     reported = str(outcome)
@@ -283,6 +281,10 @@ def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
         mock.Mock(side_effect=(0, 0)), poll=1)
     assert exited[0] is False, exited
     assert 'exited before any control worker' in exited[1], exited
+    assert len(launches) == 1, launches
+    assert len(processes) == 1, processes
+    processes[0].terminate.assert_called_once()
+    processes[0].wait.assert_called_once_with(timeout=BOUND.CLEANUP_TIMEOUT_S)
 
 
 def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
@@ -428,8 +430,8 @@ def _delivery_timeout(call):
     with mock.patch.object(
             _realbrowser._util, 'request',
             return_value=(200, '{"did":"controlled-delivery"}')), \
-            mock.patch.object(
-                _realbrowser._util, 'get_json', return_value=(200, {})), \
+            mock.patch.object(_realbrowser._util, 'get_json',
+                              return_value=(200, {})), \
             mock.patch.object(
                 _realbrowser.time, 'time', side_effect=(0, 21)):
         return _call_failure(call)
@@ -588,15 +590,22 @@ def _assert_shared_bound(node, name, line):
         for item in node.elts:
             _assert_shared_bound(item, name, line)
         return
-    shared = (isinstance(node, ast.Attribute)
-              and node.attr == 'CLEANUP_TIMEOUT_S')
-    assert shared, (f'{name}:{line}: teardown-wait row pins a literal, '
-                    'not BOUND.CLEANUP_TIMEOUT_S')
+    assert (isinstance(node, ast.Attribute)
+            and node.attr == 'CLEANUP_TIMEOUT_S'), (
+                f'{name}:{line}: teardown-wait row pins a literal, '
+                'not BOUND.CLEANUP_TIMEOUT_S')
 
 
 def test_teardown_wait_rows_read_the_shared_cleanup_bound(tmp):
-    """Every teardown-wait row reads BOUND.CLEANUP_TIMEOUT_S: CPython
-    interns small ints, so only the parse tree can tell it from a 10."""
+    """Teardown-wait rows in these two files read BOUND.CLEANUP_TIMEOUT_S.
+    CPython interns small ints, so only the parse tree can tell the
+    shared constant from a literal 10. Span: the two files walked, the
+    two recognized shapes (.wait.assert_called_once_with(timeout=X)
+    calls, wait_timeouts comparisons). Limits: a non-once
+    assert_called_with spelling is not policed; a **-splat timeout reds
+    even when it reads the constant; a future non-teardown wait row
+    reds the pin.
+    """
     del tmp
     here = Path(__file__).resolve().parent
     for name in ('test_real_browser_classification.py',

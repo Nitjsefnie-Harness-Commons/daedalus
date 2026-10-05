@@ -42,11 +42,9 @@ def _process_launches(recovery_failure=None):
 
 def _ready_targets():
     page = {'webSocketDebuggerUrl': 'ws://page'}
-    workers = [{
-        'type': 'service_worker',
-        'url': 'chrome-extension://controlled/background.js',
-        'webSocketDebuggerUrl': 'ws://worker',
-    }]
+    workers = [{'type': 'service_worker',
+                'url': 'chrome-extension://controlled/background.js',
+                'webSocketDebuggerUrl': 'ws://worker'}]
     return page, workers, '9222'
 
 
@@ -113,13 +111,12 @@ def _recovery_runtime(tmp, waits, verdict, recovery_failure=None,
         mock.patch.object(
             _realbrowser, 'browser_requirements', _browser_requirements),
         mock.patch.object(_realbrowser.subprocess, 'Popen', popen),
-        mock.patch.object(
-            _realbrowser, '_wait_for_devtools', wait_for_devtools),
+        mock.patch.object(_realbrowser, '_wait_for_devtools',
+                          wait_for_devtools),
         mock.patch.object(_realbrowser, 'cdp_call', _navigate),
-        mock.patch.object(
-            _realbrowser, '_reached_worker',
-            _reached_double(worker_ready_patience,
-                            worker_waits or ['ws://worker'])),
+        mock.patch.object(_realbrowser, '_reached_worker',
+                          _reached_double(worker_ready_patience,
+                                          worker_waits or ['ws://worker'])),
         mock.patch.object(_realbrowser, '_configured_fixture',
                           _configured_double(page_ready_timeout)),
     )
@@ -154,7 +151,7 @@ def _assert_diagnosis_processes_settled(processes):
 
 
 def _assert_relayed_waits(tmp, launches, processes, wait_calls):
-    """The relaunch re-reads devtools on the recovery profile."""
+    """Both recovery launches re-read devtools on their own profile."""
     profiles = _profile_args(launches)
     assert profiles == [
         str(Path(tmp) / 'chromium-profile'),
@@ -162,6 +159,17 @@ def _assert_relayed_waits(tmp, launches, processes, wait_calls):
     assert wait_calls == [
         (Path(profiles[i]), processes[i], 'background.js')
         for i in (0, 1)], wait_calls
+
+
+def _survived_skip(tmp, waits, verdict, **kwargs):
+    """Enter the fixture through a recovery run; the skip is the result."""
+    with _recovery_runtime(tmp, waits, verdict, **kwargs) as runtime:
+        processes, launches, _wait_calls = runtime
+        try:
+            with _enter_fixture(tmp):
+                raise AssertionError('fixture unexpectedly yielded')
+        except _realbrowser.BrowserEnvironmentSkipped as why:
+            return why, processes, launches
 
 
 def test_contention_relaunch_recovers_the_fixture(tmp):
@@ -212,15 +220,8 @@ def test_contention_relaunch_absence_remains_a_skip(tmp):
         'controlled recovery worker absence')
     verdict = mock.Mock(return_value=(
         True, 'controlled contention evidence'))
-    survived = None
-    with _recovery_runtime(
-            tmp, [first_absence, recovery_absence], verdict) as runtime:
-        processes, launches, _wait_calls = runtime
-        try:
-            with _enter_fixture(tmp):
-                raise AssertionError('fixture yielded after two absences')
-        except _realbrowser.BrowserEnvironmentSkipped as why:
-            survived = why
+    survived, processes, launches = _survived_skip(
+        tmp, [first_absence, recovery_absence], verdict)
 
     assert survived is recovery_absence, survived
     assert 'controlled contention evidence' in str(survived), survived
@@ -238,16 +239,9 @@ def test_contention_recovery_launch_failure_is_not_worker_absence(tmp):
         errno.ENOENT, 'controlled recovery launch failure')
     verdict = mock.Mock(return_value=(
         True, 'controlled contention evidence'))
-    survived = None
-    with _recovery_runtime(
-            tmp, [first_absence], verdict,
-            recovery_failure=recovery_failure) as runtime:
-        processes, launches, _wait_calls = runtime
-        try:
-            with _enter_fixture(tmp):
-                raise AssertionError('fixture yielded after launch failure')
-        except _realbrowser.BrowserEnvironmentSkipped as why:
-            survived = why
+    survived, processes, launches = _survived_skip(
+        tmp, [first_absence], verdict,
+        recovery_failure=recovery_failure)
 
     assert survived is not None, survived
     assert 'controlled contention evidence' in str(survived), survived
@@ -264,17 +258,17 @@ def test_diagnosis_poll_exception_retires_both_browser_owners(tmp):
         'controlled first-launch worker absence')
     poll_failure = RuntimeError('controlled diagnosis poll failure')
     survived = None
-    with _recovery_runtime(tmp, [first_absence], None) as runtime:
-        processes, launches, _wait_calls = runtime
-        with mock.patch.object(
+    with _recovery_runtime(tmp, [first_absence], None) as runtime, \
+            mock.patch.object(
                 _realbrowser_workers, '_listed_workers',
                 side_effect=poll_failure):
-            try:
-                with _enter_fixture(tmp):
-                    raise AssertionError(
-                        'fixture yielded after diagnosis failure')
-            except RuntimeError as why:
-                survived = why
+        processes, launches, _wait_calls = runtime
+        try:
+            with _enter_fixture(tmp):
+                raise AssertionError(
+                    'fixture yielded after diagnosis failure')
+        except RuntimeError as why:
+            survived = why
 
     assert survived is poll_failure, survived
     assert len(launches) == 2, launches
