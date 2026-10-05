@@ -178,8 +178,6 @@ def test_a_missing_stored_screenshot_names_what_the_bridge_said(tmp):
         try:
             qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
             command = queued_command(qdir, 'the screenshot command')
-            # The result claims a stored file; nothing was uploaded, so the
-            # download that follows it is refused.
             status, body = _util.post_json(base + '/result', {
                 'token': TOK,
                 'tabId': 'extension',
@@ -207,7 +205,6 @@ def test_segment_job_subcommand_prints_a_working_capability(tmp):
         assert r.returncode == 0, (r.returncode, r.stderr)
         sig = r.stdout.strip()
         assert sig, 'segment-job printed nothing'
-        # The printed sig authorizes a segment post.
         status, _ = _util.request(
             base + f'/segment?job={job}&seg=0&total=1&sig={sig}', 'POST',
             body=b'\x47', headers={'Content-Type': 'application/octet-stream'})

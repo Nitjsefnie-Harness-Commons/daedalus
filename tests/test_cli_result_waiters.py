@@ -190,7 +190,6 @@ def test_a_negative_timeout_is_refused_before_the_command_is_sent(tmp):
         r = run_cli(['screenshot', '--timeout', '-1'], env)
         assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
         assert 'timeout must not be negative' in r.stderr, r.stderr
-        # Nothing reached the bridge: no queue directory, or an empty one.
         qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
         queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
         assert queued == [], queued

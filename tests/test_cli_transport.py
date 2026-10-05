@@ -90,7 +90,7 @@ def test_a_non_json_error_body_reaches_the_operator(tmp):
 
 
 def test_connection_failure_is_a_clean_error(tmp):
-    port = _util.free_port()  # nothing listens here
+    port = _util.free_port()
     r = run_cli(['tabs'], cli_env(DAEDALUS_URL=f'http://127.0.0.1:{port}',
                                   DAEDALUS_TOKEN=TOK))
     assert r.returncode != 0, (r.returncode, r.stdout)
@@ -112,7 +112,7 @@ def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
         'seen = []\n'
         'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
         '    seen.append(timeout)\n'
-        '    time.sleep(0.3)\n'       # the stall
+        '    time.sleep(0.3)\n'
         '    return {"pending": True}\n'
         'transport._request = fake_api\n'
         'start = time.monotonic()\n'
