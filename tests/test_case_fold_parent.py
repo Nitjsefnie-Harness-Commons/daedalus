@@ -274,9 +274,7 @@ def test_the_guard_still_refuses_a_symlink_the_parent_folds(tmp):
 
 
 def test_the_guard_accepts_a_canonicalizing_resolver(tmp):
-    """The relaxation reached through a resolver that canonicalises.
-
-    `posixpath.realpath` answers with the caller's spelling on every POSIX
+    """`posixpath.realpath` answers with the caller's spelling on every POSIX
     platform, so on a folding vfat the guard's exact-case comparison would
     pass by itself and its relaxed branch would never be reached.
     `ntpath.realpath` answers through `nt._getfinalpathname` with the

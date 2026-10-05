@@ -352,7 +352,6 @@ def test_a_current_run_replaces_the_marker_and_gates_the_job(tmp):
 
 
 def test_a_cancelled_run_credits_the_run_whatever_the_jobs_hold(tmp):
-    """The run's own conclusion credits a cancelled run, jobs aside."""
     for jobs in ([], [{'name': 'coverage', 'conclusion': 'cancelled'}]):
         marked, _state, calls, output = _run_comment_block(
             tmp, 'Mark missing patch coverage', state=[],
