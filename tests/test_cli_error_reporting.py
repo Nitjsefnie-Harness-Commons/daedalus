@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The CLI's failure paths: one line, on one stream, never a traceback.
 
-A sibling of tests/test_cli.py, which is size-frozen. Same fixture style:
-the CLI is always run as a subprocess, the way a shell would run it, and the
+Same fixture style as the other tests/test_cli_*.py suites: the CLI is always
+run as a subprocess, the way a shell would run it, and the
 proxy that fronts the bridge is a stub from tests/_frontend.py.
 """
 import contextlib
