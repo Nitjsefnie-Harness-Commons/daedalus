@@ -34,6 +34,7 @@ VALUE.
 """
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_code_eval  # noqa: E402
@@ -85,31 +86,29 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
 
 def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
     """A depth-20 chain costs at most a small constant times a depth-10
-    one; code re-asking a subtree's verdict twice per level scores x2 per
-    level here, and the result arm rejects a stopped scan beside it."""
-    real = _mcp_code_eval._scan
-    calls = [0]
-    counts = {}
+    one; re-asking a subtree's verdict twice per level scores x2 here. The
+    set is the composition alone: the chain folds to UNREACHABLE past it."""
+    real_scan, real_element = (_mcp_code_eval._scan,
+                               _mcp_code_eval._element_node)
+    calls, counts = [0], {}
 
-    def counting(*args):
-        calls[0] += 1
-        return real(*args)
+    def surrogate(real):
+        def counting(*args):
+            calls[0] += 1
+            return real(*args)
+        return counting
 
-    try:
+    with mock.patch.multiple(
+            _mcp_code_eval, _scan=surrogate(real_scan),
+            _element_node=surrogate(real_element)):
         for depth in (10, 20):
             calls[0] = 0
-            _mcp_code_eval._scan = counting
             names = _composition_names(_tmp, {
                 'composition.py': '\nimport importlib\n\n\ndef load():\n'
                                   '    return [[importlib.import_module]]'
-                                  f'{"[0]" * (depth - 1)}("pkg.leaf")\n',
-                'pkg/leaf.py': 'leaf = True\n'})
+                                  f'{"[0]" * (depth - 1)}("pkg.leaf")\n'})
             counts[depth] = calls[0]
-    finally:
-        _mcp_code_eval._scan = real
-    assert counts[20] <= 8 * counts[10], counts
-    # Past the operation the chain folds to UNREACHABLE, so the correct set
-    # is the composition alone; the arm catches a stopped or refused walk.
+    assert counts[20] <= 3 * counts[10], counts
     assert names == {'composition.py'}, names
 
 
