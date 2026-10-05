@@ -22,7 +22,7 @@ comparison of a row would bake this machine's timezone into the suite;
 `tests/test_cli_hotfixes.py` owns the two columns an operator can act
 on, and this file pins the empty listing, whose `No hotfixes stored`
 line no suite in the tree asserted before -- the branch was driven
-through `tests/test_cli.py` with its output unchecked.
+through the CLI with its output unchecked.
 """
 import sys
 from pathlib import Path

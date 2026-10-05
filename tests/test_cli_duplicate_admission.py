@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Suite for daedalus_cli — what a retried command id admits.
 
-A sibling of tests/test_cli.py, which is size-frozen. Same fixture style:
-the CLI is always run as a subprocess, the way a shell would run it, against
+Same fixture style as the other tests/test_cli_*.py suites: the CLI is always
+run as a subprocess, the way a shell would run it, against
 a real bridge() no extension is draining.
 """
 import json
@@ -17,7 +17,7 @@ from _cli_helpers import CLI, cli_env, run_cli  # noqa: E402
 
 # The result header's marker is whichever glyph the console can encode, so
 # what is pinned is that a marker immediately precedes the id (see
-# tests/test_cli.py).
+# tests/test_cli_output.py).
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
