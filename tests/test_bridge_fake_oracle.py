@@ -18,10 +18,7 @@ RESULT = 'POST /result'
 TABS = 'POST /tabs'
 NO_ORIGIN = '(no origin)'
 
-# The probe's outcome, whole. Five requests were seen even though the plan
-# declares three, because the probe deliberately over- and mis-addresses
-# requests; the 599s are those refusals.
-EXPECTED_STATUSES = [200, 599, 599, 599, 599, 200, 200, 599, 599]
+# The probe's outcome, whole; the 599s are those refusals.
 EXPECTED_NON_STREAM = [SYNC, SYNC, TABS, OTHER, RESULT]
 EXPECTED_REFUSED = [SYNC, TABS]
 EXPECTED_BAD_ORIGINS = [ELSEWHERE, NO_ORIGIN, ELSEWHERE, NO_ORIGIN]

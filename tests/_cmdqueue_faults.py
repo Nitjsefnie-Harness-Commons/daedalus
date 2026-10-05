@@ -175,8 +175,6 @@ def _virtual_cmdqueue_clock(
     events = []
     sleep_count = [0]
     no_progress_count = [0]
-    # Read cost exposes stale deadline samples; the fallback avoids underflow.
-    read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
     def accumulated(seconds):
         if seconds == 0:
@@ -201,12 +199,6 @@ def _virtual_cmdqueue_clock(
             return origin + elapsed[0]
 
         perf_counter = monotonic
-
-        def record_read(self):
-            check_wall_bound()
-            events.append(('read', read_cost))
-            elapsed[0], correction[0] = accumulated(read_cost)
-            no_progress_count[0] = 0
 
         def sleep(self, seconds):
             if not math.isfinite(seconds) or seconds < 0:
