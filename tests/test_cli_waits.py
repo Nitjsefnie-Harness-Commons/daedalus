@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Suite for daedalus_cli — what a command's wait admits and survives.
 
-A sibling of tests/test_cli.py, which is size-frozen. Same fixture style:
-the CLI is always run as a subprocess, the way a shell would run it, against
+Same fixture style as the other tests/test_cli_*.py suites: the CLI is always
+run as a subprocess, the way a shell would run it, against
 a real bridge() or against a stub front end that answers the way a proxy in
 front of the bridge does.
 """
@@ -24,7 +24,7 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 
 # The result header's marker is whichever glyph the console can encode, so
 # what is pinned is that a marker immediately precedes the id (see
-# tests/test_cli.py).
+# tests/test_cli_output.py).
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
@@ -270,8 +270,9 @@ def test_the_result_wait_records_the_ramp_opening_below_the_interval(tmp):
     shape and was fixed first. A virtual clock records the sleeps the
     loop REQUESTS, so this pins the ramp's opening: macOS read 0.357s
     against a 0.25s bound. The fake charges the sleep, not the request,
-    so the request budget is tests/test_cli.py's stalled-poll test, and
-    the backoff is test_cli_result_wait.py's.
+    so the request budget is the stalled-poll test in
+    tests/test_cli_transport.py, and the backoff is
+    test_cli_result_wait.py's.
 
     The opening is also held BELOW the interval this call waits on, and
     that default is read off the signature rather than restated here, so
