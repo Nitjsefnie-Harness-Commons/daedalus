@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _plant_fixture import (  # noqa: E402
     PLANT, _FIXED, _PLANTED, _as_nobody, _committed_repo, _only_entry,
-    _open_the_entry, _reported_state, _run_plant, _say)
+    _open_the_entry, _reported_state, _run_plant, _saved_pair, _say)
 
 _NOT_HEADS = "the published bytes are the worktree's, not what HEAD holds"
 
@@ -69,11 +69,7 @@ def _drop_the_state_field(store):
 
 
 def _saved_then_planted(tmp, payload=_FIXED):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(payload)
-    assert _run_plant('save', str(target), '--store',
-                      str(store)).returncode == 0
+    target, store = _saved_pair(tmp, payload)
     target.write_bytes(_PLANTED)
     return target, store
 
@@ -607,6 +603,16 @@ def test_clear_of_an_entry_without_the_field_still_names_its_others(tmp):
     assert cleared.returncode == 0, _say(cleared)
     labels = [label for label, _ in _entry_fields(cleared.stdout)]
     assert labels == ['path', 'saved'], labels
+
+
+def test_clear_reports_an_unvouched_state_the_way_restore_does(tmp):
+    target, store = _saved_then_planted(tmp)
+    _write_state(store, 'clean-ish')
+
+    cleared = _run_plant('clear', str(target), '--store', str(store))
+    assert cleared.returncode == 0, _say(cleared)
+    fields = _entry_fields(cleared.stdout)
+    assert ['captured', 'unknown'] in fields, _say(cleared)
 
 
 def main():
