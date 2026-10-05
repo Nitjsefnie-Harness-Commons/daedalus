@@ -393,6 +393,32 @@ def test_bounded_port_wait_requires_expiry_failure(tmp):
     assert not finite_port_accepts(info), 'port double did not close'
 
 
+def test_the_bounded_exit_wait_expires_naming_the_child(tmp):
+    """The bounded exit wait expires naming pid, port, and watch state."""
+    del tmp
+
+    class LiveProcess:
+        pid = 424242
+        polls = iter((None, 0))
+
+        def poll(self):
+            return next(self.polls, 0)
+
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        info = {'base': f'http://127.0.0.1:{listener.getsockname()[1]}',
+                'parent_watch': 'enabled'}
+        try:
+            _wait_for_exit(LiveProcess(), info, timeout=0)
+        except AssertionError as failure:
+            assert 'pid=424242' in str(failure), failure
+            assert 'port_accepts=True' in str(failure), failure
+            assert 'parent_watch=enabled' in str(failure), failure
+        else:
+            raise AssertionError('live process wait did not expire')
+
+
 def test_spawn_failure_propagates_and_closes_the_writer(tmp):
     missing = str(Path(tmp) / 'missing')
     with _record_watch_pipe() as descriptors:
