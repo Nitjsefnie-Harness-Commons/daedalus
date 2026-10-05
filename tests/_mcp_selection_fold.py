@@ -339,11 +339,8 @@ def _settled_position(node, bound, scopes):
 
 
 def _display_entries(base, bound, scopes):
-    """The entries a dict display CARRIES, `None` when the walk cannot read
-    them, and a `raises` answer for a display that provably never finishes
-    building: the entries are one list in build order, so the last of two
-    equal keys wins wherever the pair was spelled.
-    """
+    """The entries a dict display CARRIES, `None` when unreadable, and a
+    `raises` answer for a display that never finishes building."""
     entries = []
     for key, value in zip(base.keys, base.values):
         if key is None:
@@ -369,9 +366,8 @@ def _display_entries(base, bound, scopes):
 
 def _keyed(node, base, bound, scopes):
     """The value a dict literal's key selects, or `UNREACHABLE` for a key
-    the display does not carry.
-
-    A DISPLAY keeps the LAST of two equal keys — the runtime's rule — and
+    the display does not carry. A DISPLAY keeps the LAST of two equal
+    keys — the runtime's rule — and
     the equality is Python's, so `1`, `1.0` and `True` name one entry and
     `0` and `False` another. A `**` unpack whose display the walk reads
     merges its entries where the runtime merges them; one it cannot read
@@ -427,9 +423,7 @@ def _called(func, call, bound, scopes):
 def _boolop_value(node, bound, scopes):
     """The value an `and`/`or` produces: the first operand whose truth
     short-circuits it, else the last operand's value. `wanted` is the truth
-    that takes the branch — truthy for an `or`, falsy for an `and` — and an
-    undecided operand leaves the whole expression undecided. A known truth
-    is a constant's `bool` and the truth of the operation or a lambda.
+    that takes the branch — truthy for an `or`, falsy for an `and`.
     """
     wanted = isinstance(node.op, ast.Or)
     for value in node.values[:-1]:
@@ -451,8 +445,8 @@ def _boolop_value(node, bound, scopes):
 
 def _decided_if_value(node, bound, scopes):
     """The value a conditional produces when its condition settles: the
-    chosen arm's value. A raising condition raises the whole expression,
-    and one this walk cannot settle leaves the choice a runtime value.
+    chosen arm's value. A raising condition raises the whole expression;
+    one this walk cannot settle leaves the choice a runtime value.
     """
     test = _runtime_settled(node.test, bound, scopes)
     if test is UNREACHABLE:

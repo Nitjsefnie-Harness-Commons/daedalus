@@ -1,8 +1,7 @@
 """The bridge command each registered MCP tool is pinned to put on the bridge.
 
 One entry per registered tool: a case is (argument overrides, expected
-bridge calls), filled from REQUIRED_ARGUMENTS and asserted in order on the
-probe bridge.
+bridge calls), filled from REQUIRED_ARGUMENTS, asserted in order.
 
 A parameter no case exercises is named in UNPINNED_PARAMETERS with the
 reason it is safe to leave unwitnessed. The raise site every refusal case

@@ -394,10 +394,9 @@ def test_every_refusal_arm_is_refused_with_its_own_message(_tmp):
     """Each arm refuses, naming its own site and its own fixed phrase.
 
     The phrase is the part of the message that does not interpolate the
-    node, so a refusal raised by a neighbouring arm cannot satisfy it. The
-    failures are COLLECTED rather than raised at the first one, because a
-    planted arm has to name every row it silenced, and a run that stops at
-    the first cannot say which of them it reached.
+    node, so a refusal raised by a neighbouring arm cannot satisfy it; the
+    failures are COLLECTED, because a planted arm has to name every row it
+    silenced.
     """
     quiet = []
     for _site, label, phrase, line, source in ARMS:

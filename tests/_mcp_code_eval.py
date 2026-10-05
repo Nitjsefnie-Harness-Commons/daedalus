@@ -78,9 +78,8 @@ class _Scopes:
         self._local = {}
         self._alias = {}
         self._uncertain = {}
-        # The AST node each matched scope table belongs to, so the value a
-        # parameter carries at entry — its own default — is readable off
-        # the tree the scope was matched from.
+        # The AST node each matched scope table belongs to, so a
+        # parameter's entry default is readable off the tree.
         self._scope_ast = {}
         # The names a NESTED scope rebinds in the MODULE, read off the
         # resolver's tables — `_rebindings` owns the why.
@@ -257,15 +256,13 @@ class _Scopes:
         value this walk can read. The nearest scope that binds the name owns
         the answer — a nested scope binding it as its OWN parameter takes it
         back — and the value it carries is the default evaluated once at the
-        definition, so it is what any use inside reads unless a store has
-        taken it back. Declined: a scope the walk could not match, a store
-        in the owning scope, a store from a nested one (`nonlocal`,
-        reported in the nested scope only), and a default naming any
-        parameter of its own signature, the cycle this reader would
-        otherwise follow into the walk's recursion backstop. The answer is
-        the parameter's ENTRY value: a call-site override makes the runtime
-        value differ, which can admit a leaf the runtime does not import —
-        the fail-safe direction for a closure.
+        definition. Declined: a scope the walk could not match, a store in
+        the owning scope, a store from a nested one (`nonlocal`, reported
+        in the nested scope only), and a default naming any parameter of
+        its own signature, the cycle this reader would otherwise follow
+        into the walk's recursion backstop. The answer is the parameter's
+        ENTRY value: a call-site override can admit a leaf the runtime
+        does not import — the fail-safe direction for a closure.
         """
         if self._uncertain.get(id(node)):
             return None
