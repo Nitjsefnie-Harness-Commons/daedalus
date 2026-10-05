@@ -9,10 +9,10 @@ suite process's own environment: a suite reads the credential from `TOK` and
 hands `BRIDGE_ENV` to the child it spawns.
 
 `_patch_env` and `_wait_for_delivery_health` moved here out of
-tests/test_bridge_results.py and tests/test_bridge_streams.py, which the
-stripes and legacy suites imported for them; both are the fixtures every
-bridge suite in this family needs, next to the env and the stream readers
-they are built on.
+tests/test_bridge_results_{deliveries,slots}.py and
+tests/test_bridge_streams.py, which the stripes and legacy suites imported
+for them; both are the fixtures every bridge suite in this family needs,
+next to the env and the stream readers they are built on.
 """
 import http.client
 import json
