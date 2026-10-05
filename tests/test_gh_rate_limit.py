@@ -232,25 +232,18 @@ def test_a_retry_after_header_is_the_instant_the_refusal_carries(tmp):
 
 
 def test_a_retry_after_the_reader_cannot_count_falls_to_the_reset(tmp):
-    """`Retry-After` is an HTTP-date as often as it is a count, and a date
-    is not something this reader can turn into a moment - so the value is
-    not read as one, and the reset beside it is. Dropping the digits
-    check instead would make `int()` raise on a legal header and answer a
-    throttled query with a loud failure; believing the date as a count
-    would wake a watcher in the past.
+    """`Retry-After` is an HTTP-date as often as it is a count, and a
+    date is not something this reader can turn into a moment - so the
+    value is not read as one, and the reset beside it is. Believing the
+    date as a count would wake a watcher in the past.
 
-    And the same header with no reset beside it is still a REPORT, by the
-    module's own rule that a `Retry-After` needs nothing else - it is a
-    pause that carries no instant, so the waiter falls back to its plain
-    minute. Pinning that says the date is not refused, rather than
-    refusing an answer the API called a retry.
-
-    The third arm is the other header and the near miss both ways: a
-    `x-ratelimit-reset` the reader cannot turn into a moment is not an
-    instant, and with no `Retry-After` beside it there is nothing left to
-    report - so the answer is a failure, not a pause at a moment nobody
-    named. `float()` on that value would raise rather than answer, which
-    is the loud way to be wrong about a header.
+    The same header with no reset beside it is still a REPORT, by the
+    module's own rule that a `Retry-After` needs nothing else - a pause
+    that carries no instant, so the waiter falls back to its plain
+    minute. The third arm is the other header and the near miss both
+    ways: a `x-ratelimit-reset` the reader cannot turn into a moment is
+    not an instant, and with no `Retry-After` beside it there is nothing
+    left to report - a failure, not a pause at a moment nobody named.
     """
     client = _client()
     dated = 'Wed, 21 Oct 2026 07:28:00 GMT'
@@ -524,26 +517,22 @@ def test_a_report_naming_no_instant_is_a_pause_with_no_instant(tmp):
 
 
 def test_every_spelling_of_the_report_is_read_and_a_lookalike_is_not(tmp):
-    """The match is on the two WORDS rather than on a list of the strings,
-    so a spelling nobody has seen yet still reads as the report it is.
+    """The match is on the two WORDS rather than on a list of the
+    strings, so a spelling nobody has seen yet still reads as the report
+    it is.
 
     Driven on a 500, and the status is the load-bearing part of the
-    fixture. An answer the body carrier is also asked spells the two
-    words in its own JSON, so a suite proving the `errors[]` entry was
-    read could be proving the body text was read instead. On a
-    status the body is not read on, the entry's own `code` is the only
-    witness there is.
-
-    The near misses are the other half, on the same fixture: a different
-    report, a word that merely ENDS in the two behind a letter, letters
-    standing BETWEEN the two, and the two words the other way round. All
-    four are failures. The separator class the matcher holds between the
-    two words is what rejects the third, and a matcher widened to take
-    anything there takes a code no server has ever written.
+    fixture: on a status the body is not read on, the `errors[]` entry's
+    own `code` is the only witness there is. The near misses are the
+    other half, on the same fixture: a different report, a word that
+    merely ENDS in the two behind a letter, letters standing BETWEEN the
+    two, and the two words the other way round - all four failures. The
+    separator class the matcher holds between the two words is what
+    rejects the third, and a matcher widened to take anything there
+    takes a code no server has ever written.
 
     `_undelivered` returning is the check for these four: it raises the
-    moment a label reads as the report, and the raise names the label,
-    because the refusal it found carries the body it read the label in.
+    moment a label reads as the report, and the raise names the label.
     """
     client = _client()
     for label in ('RATE_LIMITED', 'RATE_LIMIT', 'graphql_rate_limit'):

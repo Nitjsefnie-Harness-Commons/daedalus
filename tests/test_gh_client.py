@@ -3,29 +3,23 @@
 
 `gh_client.py` is the transport every `ci_wait` read goes through, and
 its subject is its own: the shape of a `gh` run, the read the pages of
-one become, and the wait a refusal with no instant behind it turns into.
-Three neighbours already hold the subjects around it and none of them
-holds this one. `test_gh_rate_limit.py` asks WHICH ANSWERS ARE a
-refusal, through this same client; `test_ci_wait_published.py` asks
-whether a published verdict is a pass, end to end, as a process; and
-`test_gh_client_lifetime.py` asks what the pipe a watcher child is
-handed does. This file is the middle: the answers the other two do not
-ask about, because for them a wrong answer is one their rows never
-reach.
-
-So this is NOT the published-verdict predicate `test_ci_wait_published.py`
-states as its subject, and that file is not split for it - at 689 lines
-against a 700 ceiling it has no room, and its own header claims a
-subject this one does not share. The read the pages become is here for
-the same reason: `ci_state` is the client's, and a suite about a
-published verdict reaching it transitively is not a suite about it.
+one become, and the wait a refusal with no instant behind it turns
+into. The neighbours hold the subjects around it -
+`test_gh_rate_limit.py` asks WHICH ANSWERS ARE a refusal through this
+same client, `test_ci_wait_published.py` asks whether a published
+verdict is a pass end to end, and `test_gh_client_lifetime.py` asks
+what the pipe a watcher child is handed does. This file is the middle,
+and it is not the published-verdict predicate, which that suite states
+as its subject and was not split for; `ci_state` is here because it is
+the client's, and a suite about a published verdict reaching it
+transitively is not a suite about it.
 
 Every row drives the REAL loaded module against the fake `gh` in
 `_fake_gh.py`, so the answer is a real `gh` process and only the
 transport behind it is a double. `RateLimited` is deliberately not
 caught anywhere in this file: an answer that pauses is the classifier's
-verdict, `test_gh_rate_limit.py` owns it, and a row here that expected
-one would be reading that suite's subject through this one's client.
+verdict, and a row here that expected one would be reading another
+suite's subject through this one's client.
 """
 import contextlib
 import os
@@ -61,11 +55,9 @@ RELEASE_CEILING = 5.0
 def _client(tmp, answer, gate=False):
     """The real module, and the fake `gh` it will read one answer from.
 
-    Keyed on the selection, not on the whole query: a query that stopped
-    asking for check runs finds no fixture and is refused. That is the
-    width of it - the key is a substring of the request, so a query that
-    kept `checkRuns` and dropped `checkSuites` would still match, and
-    presence is not exclusivity.
+    Keyed on the selection, not the whole query: the key is a substring
+    of the request, so presence is not exclusivity, and a query that
+    stopped asking for check runs finds no fixture and is refused.
     """
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: answer}, gate=gate)
     return _util.load(SKILL / 'gh_client.py', 'gh_client_answers'), fake
@@ -76,12 +68,9 @@ def _answered(client, fake, variables=None, env=None):
 
     `env` is applied inside the activation, so a row that needs a `gh`
     this tree cannot offer overrides one the activation would otherwise
-    have put back before the call.
-
-    Only the failure path is caught. A `RateLimited` raised here is not
-    a shape this file asks about, and swallowing it into `failure` would
-    let a classifier that paused over a plain failure pass every row
-    below.
+    put back. Only the failure path is caught: swallowing a
+    `RateLimited` into `failure` would let a classifier that paused over
+    a plain failure pass every row below.
     """
     with fake.activate():
         before = {name: os.environ.get(name) for name in (env or {})}
@@ -114,17 +103,12 @@ def _launch_refusal(executable):
     """(class, message) of the refusal this platform makes of a launch.
 
     Asked of `subprocess` itself rather than read out of the failure
-    under test, because that text belongs to the operating system: POSIX
-    names the path it could not find, Windows names a code and a sentence
-    and the path is not in it anywhere. Comparing the two refusals keeps
-    this file out of that prose and still pins WHICH refusal the client
-    reported - a caller gets the launch's own words, whatever this
-    platform's are.
+    under test, because that text belongs to the operating system, and
+    its wording differs by platform; comparing keeps this file out of
+    that prose and still pins WHICH refusal the client reported.
 
-    The shape is the client's own - a payload on stdin - so both refusals
-    are raised the same way and only the wording can differ. The bound is
-    a ceiling on a launch that must not happen, never a margin on an
-    answer.
+    The shape is the client's own - a payload on stdin - so both
+    refusals are raised the same way and only the wording can differ.
     """
     try:
         subprocess.run([executable], input=b'', capture_output=True,
@@ -139,25 +123,19 @@ def _gate_opened_off_thread(fake):
     """Release a hold from a thread the call is not on.
 
     `_fake_gh` writes its launcher per platform, and the two forms do
-    not agree about what the process being killed IS. A POSIX script
-    `exec`s, so the process `subprocess.run` launched is the python
-    reading stdin; a `.bat` cannot, so on Windows the process launched
-    is `cmd.exe` and the python is its child. The bound kills `cmd.exe`
-    only, and CPython's reaping of what is left is not the same on the
-    two: `subprocess.run`'s timeout branch calls `communicate()` again
-    under `_mswindows` and only `wait()` everywhere else, so the
-    Windows read waits for every handle the surviving grandchild still
-    holds - and that grandchild is blocked in the hold, waiting for the
-    gate only the call holding it can open. Opening it here, on a
-    thread, is what the finally below the call could no longer do once
+    not agree about what the process being killed IS: a POSIX script
+    `exec`s, so the launched process is the python reading stdin; a
+    `.bat` cannot, so on Windows it is `cmd.exe` and the python is its
+    child. The bound kills `cmd.exe` only, and the timeout branch's
+    drain on Windows waits for every handle the surviving grandchild
+    still holds - and that grandchild is blocked in the hold, waiting
+    for the gate only the call holding it can open. Opening it here, on
+    a thread, is what the finally below the call could no longer do once
     the call had stopped returning.
 
     It opens the gate on the way out as well, which is the finally this
-    replaces, and it opens it while the call is still in it only after
-    the ceiling - never on a path the bound has not already fired on.
-    A fake that had answered inside the bound raises `nothing failed`
-    rather than the timeout the row asserts, so this can release a
-    stalled call without being able to pass a call that never stalled.
+    replaces, and only after the ceiling while the call is still in it -
+    never on a path the bound has not already fired on.
     """
     finished = threading.Event()
 
@@ -189,30 +167,22 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
     and a run that never wrote one - a `gh` killed between its status
     line and its body - is a failure rather than a body.
 
-    This row is on `_parse` itself rather than on `graphql`, and that is
-    forced rather than chosen: `_fake_gh` terminates every run it writes
-    with a newline, so every answer it can render ends its header block,
-    and no fixture of its own can reach the arm this row is about. The
-    caller is not what is in question - the parser is, and the parser's
-    own subject is a run's bytes.
+    This row is on `_parse` itself, forced rather than chosen:
+    `_fake_gh` terminates every run it writes with a newline, so no
+    fixture of its own can reach this arm. The rows beside it are the
+    boundary in both directions: the same run with the blank line back
+    is a body, and with the blank line and nothing after it an empty
+    body - a DIFFERENT failure, raised further on. The last is the
+    line-by-line reason the parser reads this way at all: a re-translated
+    ending carries a `\r` on every line, and a reader that cut at the
+    first blank-line byte pair would take the block's last header for
+    the body's first line.
 
-    The two rows beside it are the boundary in both directions: the same
-    run with the blank line back is a body, and the same run with the
-    blank line and nothing after it is an empty body - which is a
-    DIFFERENT failure, raised further on, and reporting it as a missing
-    block would be reporting a `gh` that answered nothing as a `gh` that
-    answered in pieces. The third is the line-by-line reason the parser
-    reads this way at all: a re-translated ending carries a `\\r` on
-    every line, and a reader that cut at the first blank-line byte pair
-    would take the block's last header for the body's first line.
-
-    The whitespace-only separator separates a line that is BLANK from one
-    that is merely whitespace. Those are the same line to a caller - both
-    say the header block is over - and not to a reader testing `line ==
-    ''`: that one walks past the whitespace-only line, reads it as a
-    header (partition finds no colon, so nothing is stored), reaches the
-    end and raises, reporting a `gh` that answered in pieces as one that
-    answered nothing.
+    The whitespace-only separator separates a line that is BLANK from
+    one that is merely whitespace - the same line to a caller, and not
+    to a reader testing `line == ''`: that one walks past it, reads it
+    as a header, reaches the end and raises, reporting a `gh` that
+    answered in pieces as one that answered nothing.
     """
     del tmp
     client = _util.load(SKILL / 'gh_client.py', 'gh_client_answers')
@@ -251,19 +221,15 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
 
 def test_a_gh_that_cannot_be_launched_is_a_failure(tmp):
     """The half of the launch that is an operating-system refusal: the
-    executable is not there. `gh` not installed, or removed between two
-    polls of a wait that runs for hours, both arrive here - and neither
-    is a rate limit, so neither may become a pause.
+    executable is not there. Neither this nor a hang is a rate limit, so
+    neither may become a pause. `DAEDALUS_GH` is the module's own
+    override, so this is a real launch failing rather than the transport
+    replaced.
 
-    `DAEDALUS_GH` is the module's own override, so this is a real launch
-    failing rather than the transport replaced.
-
-    Three things are pinned here, and all three are what a pause would
-    take away: the exact failure class, so a refusal handed to the caller
-    as something to sleep on is caught here rather than hours later in a
-    wait; the message, which must be the launch's own refusal and nothing
-    this suite made up; and the exception it was raised from, which is
-    what tells this half apart from the timeout beside it.
+    Three things are pinned, and all three are what a pause would take
+    away: the exact failure class, the message - the launch's own
+    refusal - and the exception it was raised from, which tells this
+    half from the timeout beside it.
     """
     client, fake = _client(tmp, runs_page([]))
     absent = os.path.join(fake.dir, 'gh-that-was-never-installed')
@@ -280,17 +246,12 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     an `OSError`, and a reader that caught only the latter let the wait
     die on an exception instead of reporting a failed poll.
 
-    The bound is one second rather than the module's 120 because the
-    bound being pinned is not what this row is about, and the hold is
-    what makes the timeout real: a fake that answered would be a row
-    proving nothing. `entered` is the proof the call reached the hold,
-    so a run whose fake answered before the bound would fail here rather
-    than pass on a green that meant nothing ran.
-
-    The cause is compared by class as well as the message read, because
-    that is the first paragraph's sentence made checkable: the two rows
-    either side of the tuple assert causes no single narrower `except`
-    could have raised, so narrowing the tuple takes one of them red.
+    The bound is one second, and the hold makes the timeout real: a fake
+    that answered would be a row proving nothing, `entered` the proof
+    the call reached it. The cause is compared by class as well as the
+    message read - the two rows either side of the tuple assert causes
+    no single narrower `except` could have raised, so narrowing the
+    tuple takes one of them red.
     """
     client, fake = _client(tmp, runs_page([]), gate=True)
     # `setattr`, because the module was executed from a path rather than
@@ -307,12 +268,11 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
 
 
 def test_only_the_launch_becomes_a_failure(tmp):
-    """The negative space the tuple is drawn around. A caller whose
-    variables cannot be written as JSON is a caller's bug, and it is
-    raised before the process is ever started - so it stays a `TypeError`
-    out in the open. A reader that widened the `try` to the whole call
-    would answer a bug in the caller as a `gh` that failed, which is the
-    one thing this handler must never do.
+    """The negative space the tuple is drawn around: a caller whose
+    variables cannot be written as JSON has a caller's bug, raised
+    before the process is ever started, and it stays a `TypeError` out
+    in the open - a reader that widened the `try` would answer a bug in
+    the caller as a `gh` that failed.
     """
     client = _util.load(SKILL / 'gh_client.py', 'gh_client_answers')
     try:
@@ -331,10 +291,9 @@ def test_a_body_that_is_not_json_is_a_failure_naming_the_parse(tmp):
     """The two halves of the boundary, one character apart: a body cut
     short is a body the client could not read, and the message quotes
     the reader's own complaint about where it stopped. The complete body
-    is the row's other half - a reader that refused anything that was not
-    a perfectly formed object would refuse a real `gh` over a truncated
-    pipe, and the message is what tells the two apart in a wait that
-    runs for hours.
+    is the row's other half - a reader that refused anything that was
+    not a perfectly formed object would refuse a real `gh` over a
+    truncated pipe, and the message tells the two apart.
     """
     client, fake = _client(tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
@@ -352,16 +311,13 @@ def test_a_body_that_is_not_json_is_a_failure_naming_the_parse(tmp):
 def test_a_body_that_is_json_but_not_an_object_is_a_failure(tmp):
     """Every value JSON admits except the object one, because a body is
     data and the client may not assume its shape. The number and the
-    boolean are beside the list and the string because a reader that
+    boolean ride beside the list and the string because a reader that
     refused only the two it had seen would pass every other row here.
 
-    The two rows after the loop are the boundary in both directions, and
-    they are a pair rather than one: `[]` and `{}` are both answers that
-    carry nothing, and they are two DIFFERENT failures. A list is not a
-    response the client can read at all; an object is one it read whole
-    and found no data in. A reader that answered both with the same
-    message would be reporting a `gh` that answered in pieces as one that
-    answered with the wrong shape.
+    The two rows after the loop are a pair rather than one: `[]` and
+    `{}` are both answers that carry nothing, and two DIFFERENT
+    failures. A list is not a response the client can read at all; an
+    object is one it read whole and found no data in.
     """
     client, fake = _client(tmp, {'status': 200, 'exit': 0, 'headers': {},
                                  'stderr': '', 'body': 'null'})
@@ -387,16 +343,14 @@ def test_a_body_that_is_json_but_not_an_object_is_a_failure(tmp):
 def test_a_body_with_no_data_is_a_failure_quoting_the_server(tmp):
     """A GraphQL answer that delivered nothing says why in its own
     `errors[]`, and that is the only text a reader has: the client
-    quotes it rather than reporting that data was absent, which is a
-    statement about the client and not about the query.
+    quotes it rather than reporting that data was absent.
 
-    The cut at 300 characters is the second half, and it is why the
-    quote is asserted by its length as well as by the words in it - a
-    wait prints this line on every refusal, and a server that answered
-    with a stack trace in its `errors[]` would otherwise fill the log.
-    The last two rows are the near miss in both directions: the empty
-    object IS data, and a `data` that is not an object is this same
-    failure rather than something handed back to the caller.
+    The cut at 300 characters is why the quote is asserted by length as
+    well as words - a wait prints this line on every refusal, and a
+    server that answered with a stack trace would otherwise fill the
+    log. The last two rows are the near miss in both directions: the
+    empty object IS data, and a `data` that is not an object is this
+    same failure rather than something handed back to the caller.
     """
     answer = 'Could not resolve to a Repository with the name o/r.'
     client, fake = _client(tmp, {
@@ -431,20 +385,15 @@ def test_a_body_with_no_data_is_a_failure_quoting_the_server(tmp):
 def test_a_suite_with_no_run_is_no_run_and_its_checks_are_still_read(tmp):
     """Issue 1360's other half. A verdict published through the Checks
     API arrives in a suite that belongs to no workflow run, so the run
-    list must not gain an entry for it - and its check runs must be read
-    anyway, because that check run is the thing every seat was reading
-    the run list to find.
+    list must not gain an entry for it - and its check runs must be
+    read anyway, because that check run is the thing every seat was
+    reading the run list to find.
 
-    The pair is one fixture apart: the same check run inside a suite that
-    does belong to a run. A reader that dropped the suite from the run
-    list AND from the checks would report an empty answer and look like
-    a head nothing ran on.
-
-    The third row is the near miss the first two cannot see. A suite
-    whose `workflowRun` is there but carries nothing is a run the reader
-    cannot read, and it must be stepped over rather than grouped: a
-    reader that only asked whether the field was ABSENT would group it,
-    find no run in it, and have nothing to collapse the suite into.
+    The pair is one fixture apart: the same check run inside a suite
+    that does belong to a run. A reader that dropped the suite from the
+    run list AND from the checks would report an empty answer and look
+    like a head nothing ran on. The third row is the near miss: a suite
+    whose `workflowRun` carries nothing is stepped over, not grouped.
     """
     client, fake = _client(tmp, runs_page([]))
     verdict = {'databaseId': 7, 'name': 'gate freshness',
@@ -478,10 +427,10 @@ def test_a_run_whose_jobs_have_not_started_is_the_first_one_outstanding(
         tmp):
     """A run whose matrix has not reported is a WAIT, and the state it
     reads is the first suite of the run that has not completed - the
-    order the API listed them in, which is the order the jobs were
-    queued. The second row is the same two suites the other way round,
-    because a reader that took the last outstanding state would answer
-    both rows the same and neither would be pinning anything.
+    order the API listed them in. The second row is the same two suites
+    the other way round, because a reader that took the last outstanding
+    state would answer both rows the same and neither would pin
+    anything.
     """
     client, fake = _client(tmp, runs_page([]))
     for states, expected in ((('QUEUED', 'IN_PROGRESS'), 'queued'),
@@ -500,12 +449,11 @@ def test_a_run_whose_jobs_have_not_started_is_the_first_one_outstanding(
 def test_a_refusal_naming_no_instant_is_the_plain_minute(tmp):
     """The classifier reports a pause with no instant whenever the
     evidence it read carries none, and this is where that pause becomes
-    a number: the waiter's own default, exact rather than banded
-    because the value IS the answer. The floor and the ceiling are
-    driven either side of it, because a reader that clamped a
-    no-instant refusal to the floor would answer a throttled query with
-    a two-second retry against an API that says nothing about when it
-    will answer at all.
+    a number: the waiter's own default, exact rather than banded because
+    the value IS the answer. The floor and the ceiling are driven either
+    side of it, because a reader that clamped a no-instant refusal to
+    the floor would answer a throttled query with a two-second retry
+    against an API that says nothing about when it will answer.
     """
     client = _util.load(SKILL / 'gh_client.py', 'gh_client_answers')
     watcher = client.Watcher('ci_wait')
