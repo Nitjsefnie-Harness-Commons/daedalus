@@ -2,8 +2,9 @@
 stored action destinations and parser defaults; GUARANTEED adds required and
 non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
-A namespace store is admitted but satisfies no read; an augmented assignment
-target is checked as the read it is, and a del is still refused.
+A store to an attribute of the namespace parameter is admitted; a rebind of
+the name or a non-attribute store is refused; an augmented attribute target
+is read-checked; a del is refused; a store never satisfies a read.
 An origin the audit can see is a module-level name, a literal, or an
 attribute of such a value. A name a local scope binds is NOT one, so
 ``data = {'f_locals': 1}`` read as ``data['f_locals']`` is refused: a
