@@ -149,9 +149,12 @@ def _runtime_settled(node, bound, scopes):
         if default is None:
             return UNREAD
         return _runtime_settled(default, bound, scopes)
-    if isinstance(node, ast.JoinedStr) and all(
-            isinstance(part, ast.Constant) for part in node.values):
-        return ''.join(part.value for part in node.values)
+    if isinstance(node, ast.JoinedStr):
+        constants = [part.value for part in node.values
+                     if isinstance(part, ast.Constant)
+                     and isinstance(part.value, str)]
+        if len(constants) == len(node.values):
+            return ''.join(constants)
     return UNREAD
 
 
