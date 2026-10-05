@@ -7,7 +7,7 @@ answers built here rather than at each call site, so the two cannot
 drift apart into two subjects. `RUNS_QUERY` is the selection the
 answers are keyed on, `page_info` the pagination shape `runs_page`
 writes them with; `test_gh_rate_limit.py` consumes both as "an answer
-that delivered". Not a suite - `run_tests.py` loads only `test_*.py`.
+that delivered". Not a suite; `run_tests.py` loads `test_*.py` only.
 """
 
 SHA = 'a' * 40
