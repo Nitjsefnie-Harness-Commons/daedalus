@@ -7,9 +7,8 @@ one it does not present, driven on a synthetic composition instead, and the
 arms of the walk are enumerated in `test_mcp_import_refusals.py`. The
 lambda case stays because dropping the lambda arm from `static_value` reds
 it alone — nothing else on this tree catches a call's callee being read as
-a VALUE — and the settled-callee families and their bounds are the
-callee-value question at the five forms issue 1213 records, each read
-through the walk's own entry.
+a VALUE. The settled-callee families and their bounds are the callee-value
+question at the five forms issue 1213 records.
 """
 import sys
 from pathlib import Path
@@ -109,14 +108,10 @@ def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
             names
 
 
-# The five callee families issue 1213 records: each is refused at the base
-# the fix lands on while the runtime imports the leaf — a conditional the
-# parameter default decides, a boolean whose left operand is the operation,
-# a projection read through a defaulted position, a display carrying a `**`
-# merge, and a field-less f-string key. Where a wrong choice could still
-# pass, the driven values differ: the settled condition runs on both
-# routes, the defaulted position is 1 and not 0, and both boolean spellings
-# reach the operation by the route their rule names.
+# The five callee families issue 1213 records: each refused at base while
+# the runtime imports the leaf. Where a wrong choice could still pass, the
+# driven values differ (condition runs both routes; defaulted position is
+# 1, not 0).
 _LEAF = {'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n'}
 SETTLED_CALLEES = (
     ('a conditional the default decides, truthy route',
