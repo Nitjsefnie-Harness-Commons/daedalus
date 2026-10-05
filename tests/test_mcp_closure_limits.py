@@ -31,11 +31,6 @@ than on a preference: dropping the lambda arm from `static_value` reds it
 and leaves `test_mcp_import_refusals.py` 10/10 and `test_mcp_tools.py`
 21/21. Nothing else on this tree catches a call's callee being read as a
 VALUE.
-
-Beside it a second case pins a cost class instead of a shape: the code-eval
-scan's own recursion on a deep subscript chain, counted structurally so a
-walk that re-asks one subtree's verdict twice per level fails it while a
-walk whose cost tracks the tree it covers passes.
 """
 import sys
 from pathlib import Path
@@ -89,10 +84,9 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
 
 
 def _scan_call_count(_tmp, depth):
-    """The `_scan` invocations one depth-`depth` subscript chain costs, and
-    the scan set that came with them. The count is taken by a pass-through
-    surrogate on the module attribute the recursion itself resolves, so
-    every re-entry of the walk is counted wherever it re-enters."""
+    """The `_scan` invocations one depth-`depth` chain costs, counted by a
+    pass-through surrogate on the attribute the recursion resolves, and the
+    scan set that came with them."""
     real = _mcp_code_eval._scan
     calls = [0]
 
@@ -106,7 +100,6 @@ def _scan_call_count(_tmp, depth):
             'composition.py': '\nimport importlib\n\n\ndef load():\n'
                               '    return [[importlib.import_module]]'
                               f'{"[0]" * (depth - 1)}("pkg.leaf")\n',
-            'pkg/__init__.py': '',
             'pkg/leaf.py': 'leaf = True\n'})
     finally:
         _mcp_code_eval._scan = real
@@ -114,19 +107,16 @@ def _scan_call_count(_tmp, depth):
 
 
 def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
-    """The scan's cost grows with the tree it walks, not with the chain's
-    shape: a depth-20 subscript chain costs at most a small constant times a
-    depth-10 one, where code that re-asks a subtree's verdict twice per
-    level scores x2 per level (~x1024 over this span). The result set is
-    read beside the ratio, so a scan that stopped walking cannot satisfy
-    the pin either.
+    """A depth-20 chain costs at most a small constant times a depth-10 one;
+    code re-asking a subtree's verdict twice per level scores x2 per level
+    here. The result set is read beside the ratio, so a scan that stopped
+    walking, refused or raised cannot pass either.
     """
     shallow, _ = _scan_call_count(_tmp, 10)
     deep, names = _scan_call_count(_tmp, 20)
     assert deep <= 8 * shallow, (shallow, deep)
     # Past the operation the chain folds to UNREACHABLE, so the correct set
-    # is the composition alone; the arm is there so a scan that stopped
-    # walking, refused or raised cannot pass the ratio.
+    # is the composition alone; the arm catches a stopped or refused walk.
     assert names == {'composition.py'}, names
 
 
