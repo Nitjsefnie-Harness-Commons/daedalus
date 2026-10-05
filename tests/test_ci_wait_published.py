@@ -10,9 +10,9 @@ runs concluded `success` and the `gate freshness` check concluded FAILURE.
 Every control here drives the REAL `ci_wait.py` as a process against the
 fake `gh` in `_fake_gh.py`, so the query, the read and the verdict are
 the shipped ones and only the transport is a double. The suite-level
-controls sit beside the end-to-end ones, the same question smaller:
-the predicate and the read both waiters would otherwise have to grow
-their own.
+controls sit beside the end-to-end ones because they are the same
+question on a smaller surface: the predicate and the read both waiters
+would otherwise have to grow their own.
 """
 import contextlib
 import io
@@ -434,10 +434,13 @@ def test_the_predicate_ignores_which_conclusions_are_acceptable(tmp):
     wait = _ci_wait()
     assert wait.ACCEPTABLE is wait.ci_gate.ACCEPTABLE, (
         'ci_wait.ACCEPTABLE is a copy, so the two sets can drift')
-    # The THIRD name, the one a spelling cannot hold: `gh_client` spells
-    # its own because a suite extracts that module WITHOUT its siblings
-    # and could not import `ci_gate` from the copy, so the two are held
-    # EQUAL rather than by an import.
+    # The THIRD name, and the one a spelling cannot hold: `gh_client`
+    # spells its own because a suite extracts that module WITHOUT its
+    # siblings and could not import `ci_gate` from the copy, so the two
+    # are held EQUAL here rather than by an import. Proven: dropping
+    # 'skipped' from the client's literal left all three of these suites
+    # green, because `_run_from_suites` and `_check_run` both read
+    # whatever set that module holds.
     assert wait.gh_client.ACCEPTABLE == wait.ci_gate.ACCEPTABLE, (
         'gh_client.ACCEPTABLE has drifted, so the run filter and the '
         'check filter are judged by two different sets')
@@ -466,8 +469,8 @@ def test_ci_state_answers_both_questions_from_one_walk(tmp):
                                     for call in fake.calls()]
     assert [run['id'] for run in runs] == [1], runs
     # Normalised to the keys the run dicts already use, so one offender
-    # loop prints either, and lowercased, the API spelling caps where
-    # the printed conclusion is compared against ACCEPTABLE.
+    # loop prints either, and lowercased, because the API spells them
+    # in caps and the printed conclusion is compared against ACCEPTABLE.
     assert [(c['name'], c['conclusion'], c['status'], c['html_url'])
             for c in checks] == [
                 ('tests (3.13, ubuntu-24.04)', 'success', 'completed',

@@ -1,23 +1,22 @@
 """An executable double for `gh`, and the environment that puts it on PATH.
 
 Its consumers shell out to `gh`, so a `gh` earlier on PATH is a complete
-seam: they drive real `gh` processes, no network in the loop. Each call
-is answered from a JSON fixture and appended to a call log, which makes
-the request budget measurable: the log, not a claim, is the number. The
-launcher is written per platform rather than assumed: a POSIX script
-named `gh` is executable on Linux and macOS and nothing on Windows,
-where the launcher is a `.bat` the client is pointed at by absolute
-path (`DAEDALUS_GH`). The launcher finds this file relative to itself,
-and an install proves it executes before a suite trusts it. The fake
-mirrors real `gh api -i`: status line, header block and body on stdout,
-`gh: ... (HTTP NNN)` on stderr, exit 1 for any error status, rate-limit
-refusals included. That is the SHAPE of an answer, and the part it left
-out is the part a throttled query really arrives in: a 200 carrying the
-spent rate-limit headers, `gh` exiting 1 over it, and `gh: API rate
-limit already exceeded ...` on stderr. So an answer may also state the
-exit code, the stderr and the stdout `gh` leaves behind, and a shape
-the fake cannot render is REFUSED BY NAME, never answered plausibly:
-a double that fills in what it was not told is a control with no
+seam: they drive real `gh` processes, no network in the loop. Each call is
+answered from a JSON fixture and appended to a call log, which makes the
+request budget measurable: the log, not a claim, is the number. The launcher
+is written per platform rather than assumed: a POSIX script named `gh` is
+executable on Linux and macOS and nothing on Windows, where the launcher is
+a `.bat` the client is pointed at by absolute path (`DAEDALUS_GH`). The
+launcher finds this file relative to itself, and an install proves it
+executes before a suite trusts it. The fake mirrors real `gh api -i`: status
+line, header block and body on stdout, `gh: ... (HTTP NNN)` on stderr, exit
+1 for any error status, rate-limit refusals included. That is the SHAPE of
+an answer, and the part it left out is the part a throttled query really
+arrives in: a 200 carrying the spent rate-limit headers, `gh` exiting 1 over
+it, and `gh: API rate limit already exceeded ...` on stderr. So an answer
+may also state the exit code, the stderr and the stdout `gh` leaves behind,
+and a shape the fake cannot render is REFUSED BY NAME, never answered
+plausibly: a double that fills in what it was not told is a control with no
 opinion on the case it stands in for.
 """
 
@@ -172,7 +171,7 @@ def _response(answer):
     are what `gh` leaves behind it, and `stdout` replaces the rendered
     response outright. A bare string is a 200 whose body is that value;
     each field is checked for its renderer's type, a wrong one refused
-    by name rather than defaulted."""
+    by name, never defaulted."""
     spec = (answer if isinstance(answer, dict)
             and set(answer) & (RESPONSE | OUTCOME)
             else {'body': answer})

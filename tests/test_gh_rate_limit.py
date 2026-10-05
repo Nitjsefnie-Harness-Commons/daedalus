@@ -16,12 +16,12 @@ no caller can put its own data into, while a header, a body and a
 stderr complaint are three places a caller's own field spells the two
 words. So each carrier is driven in BOTH directions here, pause and
 near miss, because a classifier pinned in one direction is a classifier
-pinned on whichever direction was written first. The two false
-positives that shape produced are recorded in the module's own
-docstring - a 200 that SUCCEEDED with complete data and a `gh` warning
-that merely mentioned a limit, and the last good request before the
-window closes carrying `X-Ratelimit-Remaining: 0` beside valid data -
-both rows below, each its pause-shaped partner with one field changed.
+pinned on whichever direction was written first. The two false positives
+that shape produced are recorded in the module's own docstring - a 200
+that SUCCEEDED with complete data and a `gh` warning that merely
+mentioned a limit, and the last good request before the window closes
+carrying `X-Ratelimit-Remaining: 0` beside valid data - both rows
+below, each its pause-shaped partner with one field changed.
 """
 import contextlib
 import sys
