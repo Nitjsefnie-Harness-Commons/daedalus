@@ -69,8 +69,7 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
-_PHANTOM_SUITE = """import os
-print("ModuleNotFoundError: No module named '_phantom'")
+_PHANTOM_SUITE = """print("ModuleNotFoundError: No module named '_phantom'")
 raise SystemExit(3)
 """
 
