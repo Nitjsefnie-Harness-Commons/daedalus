@@ -207,6 +207,8 @@ def load(path, name=None):
 
 _PARENT_WATCH = load(
     ROOT / 'daedalus_bridge' / 'parent_watch.py', 'fixture_parent_watch')
+SUITE_BOUND = load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                   'fixture_suite_bound')
 
 
 BIND_ERROR_MARKERS = (
@@ -467,10 +469,10 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
         try:
             proc.terminate()
             try:
-                proc.wait(timeout=10)
+                proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                proc.wait(timeout=10)
+                proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
         finally:
             os.close(write_fd)
 
