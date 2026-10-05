@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Suite for daedalus_cli — how the command resolves its configuration.
 
-The version banner, --help, the token and URL the environment hands the
-command, and the import that must succeed without an ambient _settings
-module. The CLI is always run as a subprocess, the way a shell would run
-it, so what is checked is the configuration an operator's environment
-actually produces.
+The version banner, --help, the URL the environment hands the command,
+and the import that must succeed without an ambient _settings module.
+The CLI is always run as a subprocess, the way a shell would run it, so
+what is checked is the configuration an operator's environment actually
+produces.
 """
 import subprocess
 import sys
@@ -35,13 +35,6 @@ def test_help_exits_zero(tmp):
     r = run_cli(['--help'], cli_env())
     assert r.returncode == 0, (r.returncode, r.stderr)
     assert 'usage' in r.stdout.lower()
-
-
-def test_missing_token_is_an_error(tmp):
-    # No TOKEN and no DAEDALUS_TOKEN: required() must refuse before any HTTP.
-    r = run_cli(['tabs'], cli_env(DAEDALUS_URL='http://127.0.0.1:1'))
-    assert r.returncode != 0, (r.returncode, r.stdout)
-    assert 'DAEDALUS_TOKEN is not set' in r.stderr, r.stderr
 
 
 def test_url_default_and_override(tmp):

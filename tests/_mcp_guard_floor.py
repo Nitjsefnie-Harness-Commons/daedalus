@@ -609,7 +609,7 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'tests/test_stream_lifecycle.py::'
      'test_numeric_environment_settings_fail_cleanly_at_startup'),
     ('daedalus_cli.transport', 'required', 'not v',
-     'tests/test_cli_invoke.py::test_missing_token_is_an_error'),
+     'tests/test_cli_error_reporting.py::test_missing_token_is_an_error'),
     ('daedalus_cli.transport', 'capture_limit',
      "raise argparse.ArgumentTypeError(f'--max must be an integer from 1 "
      'to {NET_CAPTURE_MAX}; got {value!r}\') from None',
@@ -625,7 +625,7 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'tests/test_cli_argument_types.py::'
      'test_a_non_integer_timeout_is_refused'),
     ('daedalus_cli.transport', 'positive_timeout', 'seconds < 0',
-     'tests/test_cli_result_waiters.py::'
+     'tests/test_cli_result_wait.py::'
      'test_a_negative_timeout_is_refused_before_the_command_is_sent'),
     ('daedalus_cli.transport', 'positive_count',
      "raise argparse.ArgumentTypeError(f'count must be a whole number; "
@@ -663,7 +663,8 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     # a cut-off read; the HTTPError-body site by a cut-off error read.
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e.reason) from e',
-     'tests/test_cli_transport.py::test_connection_failure_is_a_clean_error'),
+     'tests/test_cli_error_reporting.py::'
+     'test_connection_failure_is_a_clean_error'),
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e) from e',
      'tests/test_cli_waits.py::'

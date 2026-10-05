@@ -478,10 +478,7 @@
 !/tests/test_cli_output.py
 !/tests/test_cli_result_handlers.py
 !/tests/test_cli_result_wait.py
-!/tests/test_cli_result_waiters.py
 !/tests/test_cli_segment_origins.py
-!/tests/test_cli_tabs.py
-!/tests/test_cli_transport.py
 !/tests/test_cli_typed_commands.py
 !/tests/test_cli_waits.py
 !/tests/test_client_credentials.py
