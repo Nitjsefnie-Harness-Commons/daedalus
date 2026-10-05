@@ -124,7 +124,7 @@ class _Scopes:
         The ROOT is not walked: a module-level name is global to the resolver
         and local to the module at once, so taking its own symbols would make
         every alias a rebinding. A `nonlocal` store is not here either, for
-        the reason it never needed to be: the resolver reports the ENCLOSING
+        the store lands on the NESTED symbol and never marks the enclosing
         function's own symbol as assigned.
 
         The cost is one name set with no scope on it, so a module-level use
