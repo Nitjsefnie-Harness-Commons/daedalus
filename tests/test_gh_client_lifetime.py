@@ -203,12 +203,10 @@ def _armed_line(child):
     the wait blocks on its arrival object, LIFETIME bounds without driving), on
     expiry the child is killed and the failure names the bound, the state and
     the output. Not bounded: a child a kill cannot end, whose drain thread then
-    outlives it. First line wins: `await_line` returns the first line whose
-    `matches` result is not `None`, and `str.strip` never returns `None`, so
-    the value compared against `ARMED` is the first captured line, stripped; a
-    diagnostic the child prints before arming therefore fails the row, the
-    discrimination the suite wants (an any-line predicate would pass such a
-    child silently; a plant measured exactly that as a silent 10/10)."""
+    outlives it. First line wins: `await_line` returns the first non-`None`
+    `matches` result and `str.strip` never returns `None`, so the value
+    compared against `ARMED` is the first captured line, stripped; a
+    diagnostic printed before arming therefore fails the row."""
     drained = _child_ready.drain(child)
     armed = _child_ready.await_line(child, drained, str.strip, LIFETIME)
     if armed != ARMED:
