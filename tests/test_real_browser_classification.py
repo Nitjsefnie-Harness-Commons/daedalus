@@ -144,7 +144,8 @@ def test_live_browser_reaches_ready_devtools_targets(tmp):
 
 
 def test_devtools_start_deadline_is_environment_skip(tmp):
-    process = mock.Mock(**{'poll.return_value': None})
+    process = mock.Mock()
+    process.poll.return_value = None
     with mock.patch.object(_realbrowser.time, 'time', side_effect=(0, 31)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         failure = _call_failure(
