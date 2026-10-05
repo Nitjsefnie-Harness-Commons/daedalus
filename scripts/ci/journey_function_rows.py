@@ -46,11 +46,12 @@ cannot attribute, and the file is omitted whole rather than billed to a
 neighbour. On the synthetic file the suite drives, whose `summary:` is
 written as the sum of the self totals with the arc excluded, the self
 totals sum to the file's own `summary:` line; that equality is the
-numeric control. Whether a real cost-bearing profile's `summary:`
-carries the same exclusion -- and the carried `cfn=`-without-`calls=`
-form, the `*`-position spelling, and whether real out-files carry bare
-`fn=(id)` lines at all -- is a measurement for the first CI artifact
-that holds one, not a claim this file makes.
+numeric control, and the real profiles the CI artifacts hold measure
+the same way: their cost lines carry the relative positions and the
+trailing-space signed `calls=` spellings the two matchers below accept,
+arcs are excluded from both of a file's own total lines, and the self
+totals sum to the file's `totals:` line exactly -- and to its
+`summary:` line wherever callgrind writes the two equal.
 """
 import os
 import re
@@ -64,13 +65,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_thread_rows  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
-# A `calls=` line carries the call count and the call's target position,
-# and the cost line after it prices the call itself.
-CALLS = re.compile(r'^calls=\d+(?:[ \t]+\d+)*$')
-# A cost line is the position columns and then the event count; under
-# `events: Ir` the last integer is the instruction count, and a `*`
-# position is the format's spelling for a position it does not resolve.
-COST = re.compile(r'^[*\d]+(?:[ \t]+[*\d]+)*$')
+# A `calls=` line carries the call count and the target position the real
+# profiles write -- signed or `*`, with the format's trailing space -- and
+# the cost line after it prices the call itself.
+CALLS = re.compile(r'^calls=\d+(?:[ \t]+[*+\-\d]+)*[ \t]*$')
+# A cost line is the position columns and then the event count; the
+# positions are absolute, relative (`+1`, `-1`) or `*`, and under
+# `events: Ir` the last integer is the instruction count.
+COST = re.compile(r'^[*+\-\d]+(?:[ \t]+[*+\-\d]+)*$')
 # The format compresses a repeated name to a bare `fn=(id)` / `cfn=(id)`
 # line that re-selects the function the id was declared for.
 DECLARATION = re.compile(r'^(fn|cfn)=\((\d+)\)(?:[ \t]+(\S.*?))?[ \t]*$')
