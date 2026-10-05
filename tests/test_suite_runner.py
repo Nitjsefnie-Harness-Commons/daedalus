@@ -10,6 +10,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -150,32 +151,35 @@ raise SystemExit({returncode})
 """
 
 
-def _runner_tree(tmp, suites, under='.', runner_encoding=None,
-                 sitecustomize=None, before_exec=None):
+# The sentence a child prints when the clone cannot resolve a helper: the
+# module named is the file the tuple forgot.
+_MISSING_MODULE = re.compile(r"ModuleNotFoundError: No module named '(_\w+)'")
+
+
+def _runner_tree(tmp, suites, runner_encoding=None, sitecustomize=None,
+                 before_exec=None, omit=()):
     """A copy of run_tests.py over fabricated suites, run where it stands.
 
-    `under` names a PARENT directory, so one test can build two trees and
-    compare what the aggregate says about each. The tree itself is always
-    called `tree`: coverage maps `*/tree` back onto this repository — see the
-    `[tool.coverage.paths]` note in pyproject.toml — and a tree by any other
-    name is measured under a path that no longer exists when the report is
-    read, which fails the coverage job rather than the suite. Generated suites
-    and the startup stub stay under `tests`, which coverage omits.
+    `omit` leaves helpers out of the clone, which is how a suite really comes
+    to die on an import. The tree is always called `tree`, because a tree by
+    any other name is measured under a path that no longer exists when the
+    report is read — see `tests/_coverage_guard.py` on the `*/tree` mapping.
+    Generated suites and the startup stub stay under `tests`, which coverage
+    omits.
     """
-    root = Path(tmp) / under / 'tree'
+    root = Path(tmp) / 'tree'
     (root / 'tests').mkdir(parents=True)
     (root / 'daedalus_bridge').mkdir()
     (root / 'scripts' / 'ci').mkdir(parents=True)
     shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
                  root / 'scripts' / 'ci' / 'suite_bound.py')
-    # `_util` imports `_child_ready` beside it, and `_mcp_ready` reaches it
-    # too, so a clone carrying one without the other builds a tree whose
-    # helper cannot be imported at all.
+    # `_util` imports every one of these, so omitting one kills every suite.
     for helper in ('_util.py', '_mcp_ready.py', '_child_ready.py',
                    '_completion.py', '_teardown.py', '_log_safe_cases.py',
                    '_child_boot_env.py'):
-        shutil.copy2(ROOT / 'tests' / helper, root / 'tests' / helper)
+        if helper not in omit:
+            shutil.copy2(ROOT / 'tests' / helper, root / 'tests' / helper)
     shutil.copy2(ROOT / 'daedalus_bridge' / 'parent_watch.py',
                  root / 'daedalus_bridge' / 'parent_watch.py')
     for name, source in suites.items():
@@ -192,22 +196,25 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
             env['PYTHONPATH'] += os.pathsep + inherited_path
     if runner_encoding:
         env['PYTHONIOENCODING'] = runner_encoding
-    return subprocess.run(
+    result = subprocess.run(
         [sys.executable, 'run_tests.py'], cwd=str(root),
         env=_util.child_coverage('keep', env, cwd=root),
         capture_output=True, text=True,
         encoding=runner_encoding or 'utf-8', timeout=300,
         preexec_fn=before_exec)
+    if result.returncode != 0:
+        absent = sorted(set(_MISSING_MODULE.findall(
+            result.stdout + result.stderr)))
+        if absent:
+            raise AssertionError(
+                f'the synthetic tree could not resolve {", ".join(absent)}: '
+                f'add {", ".join(n + ".py" for n in absent)} '
+                'to the helper tuple in _runner_tree')
+    return result
 
 
 def test_a_suite_that_ran_no_coverage_is_not_an_overall_pass(tmp):
-    """A run that executed nothing must not read as a verified one.
-
-    Per-suite lines carried the skip counts, but the aggregate was a boolean
-    over exit codes, so a suite whose every test skipped — no browser, no
-    dependencies — was indistinguishable from a verified one at exactly the
-    line a reader and CI both key on.
-    """
+    """A run that executed nothing must not read as a verified one."""
     result = _runner_tree(tmp, {
         'test_all_skipped.py': _ALL_SKIPPED_SUITE,
         'test_passing.py': _PASSING_SUITE,
@@ -218,14 +225,7 @@ def test_a_suite_that_ran_no_coverage_is_not_an_overall_pass(tmp):
 
 
 def test_a_suite_that_named_what_it_needs_is_unrun_rather_than_empty(tmp):
-    """A browser suite on a machine with no browser is not a broken suite.
-
-    The rule above exists because a suite whose every test skipped cannot be
-    told apart from one that is broken. A suite that says which external
-    dependency it needs IS distinguishable, so the aggregate names it as not
-    run here and still passes — while a suite that says nothing keeps failing
-    the run, which is what the second half of this asserts.
-    """
+    """A browser suite on a machine with no browser is not a broken suite."""
     result = _runner_tree(tmp, {
         'test_dependent.py': _DEPENDENT_SUITE,
         'test_passing.py': _PASSING_SUITE,
@@ -235,13 +235,6 @@ def test_a_suite_that_named_what_it_needs_is_unrun_rather_than_empty(tmp):
     assert 'needs a real browser' in result.stdout, result.stdout
     assert result.returncode == 0, (result.returncode, result.stdout)
 
-    undeclared = _runner_tree(tmp, {
-        'test_all_skipped.py': _ALL_SKIPPED_SUITE,
-        'test_passing.py': _PASSING_SUITE,
-    }, under='undeclared')
-    assert 'OVERALL: PASS' not in undeclared.stdout, undeclared.stdout
-    assert undeclared.returncode != 0, undeclared.stdout
-
 
 def test_the_aggregate_carries_the_totals_it_verified(tmp):
     """A pass says how much was run and how much was skipped."""
@@ -250,6 +243,20 @@ def test_the_aggregate_carries_the_totals_it_verified(tmp):
                                     result.stderr)
     assert 'OVERALL: PASS' in result.stdout, result.stdout
     assert '1 passed' in result.stdout.rsplit('OVERALL', 1)[-1], result.stdout
+
+
+def test_a_helper_missing_from_the_clone_is_named_in_the_failure(tmp):
+    """A stale helper tuple is a fixture failure naming the file to add."""
+    for omitted in ('_teardown.py', '_child_boot_env.py'):
+        failure = None
+        try:
+            _runner_tree(os.path.join(tmp, os.path.splitext(omitted)[0]),
+                         {'test_passing.py': _PASSING_SUITE},
+                         omit=(omitted,))
+        except AssertionError as raised:
+            failure = str(raised)
+        assert failure and f'add {omitted} to the helper tuple' in failure, (
+            f'{omitted}: {failure}')
 
 
 def test_suites_run_concurrently(tmp):
@@ -443,9 +450,8 @@ class _SurvivesEverySignal:
 def test_a_suite_surviving_sigkill_is_reported_not_raised(tmp):
     """A child no signal reaps is written off in a note, never re-raised.
 
-    Raising from the last-resort reap would replace the failure that
-    reached the helper, and waiting longer would hold the suite worker
-    forever, so the only outcome left is the note naming the child.
+    A raise from the last-resort reap would replace the failure that reached
+    this helper, and an unbounded wait would hold the suite worker forever.
     """
     del tmp
     spec = importlib.util.spec_from_file_location(
@@ -468,13 +474,9 @@ def test_a_suite_surviving_sigkill_is_reported_not_raised(tmp):
 def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
     """The subprocess bound leaves slack beyond its bounded inner waits.
 
-    Every wait names what it was waiting for and has its own bound except the
-    result POST wait, whose incidental round-trip is bounded only by the child
-    backstop. The inequality below sizes slack beyond the bounded waits for
-    config load, handler startup, requested gaps, and dispatch settlement,
-    while reserving one interval per result POST. It does not prove every path
-    reports before the backstop; a stuck result POST reaches the whole-command
-    timeout instead of an inner deadline.
+    Only the result POST wait is unbounded, so the inequality reserves one
+    interval per POST. A stuck POST still reaches the whole-command timeout,
+    not an inner deadline.
     """
     del tmp
     inner = _overlap._OVERLAP_INNER_WAIT_S
@@ -492,12 +494,9 @@ def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
 
 
 def test_the_overlap_harness_backstop_takes_outer_slack(tmp):
-    """Outer slack widens the child backstop without moving an inner bound.
-
-    A caller that shrinks its inner waits keeps its outer backstop: slack is
-    added once, after every bounded wait, so the parameter moves only the
-    insurance against an unbounded result POST and costs no wall time when
-    the child ends on its own schedule.
+    """Outer slack widens the child backstop without moving an inner bound:
+    it is added once, after every bounded wait, costing no wall time when the
+    child ends on its own schedule.
     """
     del tmp
     bound = _overlap.overlap_child_timeout(['a'], False, 1, outer_slack=7)
@@ -513,11 +512,8 @@ def test_the_overlap_harness_backstop_takes_outer_slack(tmp):
 def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
     """A failure the console cannot spell must still be reported.
 
-    The detail carries whatever the test was comparing, and on a legacy code
-    page `print` raises rather than degrading. One failing assertion holding
-    an arrow used to abort the whole file with UnicodeEncodeError, so the
-    report was lost AND every test after it in that file never ran. A runner
-    that cannot say what went wrong is worse than the thing that went wrong.
+    On a legacy code page `print` raises rather than degrading, so the report
+    was lost AND every test after it in that file never ran.
     """
     del tmp
     program = (
