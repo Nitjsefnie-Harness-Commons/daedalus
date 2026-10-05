@@ -1,29 +1,28 @@
 """An executable double for `gh`, and the environment that puts it on PATH.
 
 Its consumers shell out to `gh`, so a `gh` earlier on PATH is a complete
-seam: they drive real `gh` processes with no network in the loop.
-Each call is answered from a JSON fixture file and appended to a call log,
-which is what makes the request budget measurable - the log, not a claim, is
-the number.
+seam: they drive real `gh` processes with no network in the loop. Each
+call is answered from a JSON fixture file and appended to a call log,
+which is what makes the request budget measurable - the log, not a
+claim, is the number.
 
-The launcher is written per platform rather than assumed. A POSIX shell
-script named `gh` is executable on Linux and macOS and is nothing on Windows,
-where a bare program name resolves only to `gh.exe`; the Windows launcher is
-a `.bat` the client is pointed at by absolute path (`DAEDALUS_GH`). Either
-way the launcher finds this file relative to itself, so a tree that moves
-still runs, and an install proves the launcher executes before a suite trusts
-it. The fake mirrors real `gh api -i`: status line, header block and body on
-stdout, `gh: ... (HTTP NNN)` on stderr, exit 1 for any error status,
-rate-limit refusals included.
+The launcher is written per platform rather than assumed: a POSIX script
+named `gh` is executable on Linux and macOS and nothing on Windows,
+where the launcher is a `.bat` the client is pointed at by absolute
+path (`DAEDALUS_GH`). The launcher finds this file relative to itself,
+and an install proves it executes before a suite trusts it. The fake
+mirrors real `gh api -i`: status line, header block and body on stdout,
+`gh: ... (HTTP NNN)` on stderr, exit 1 for any error status, rate-limit
+refusals included.
 
-That is the SHAPE of an answer, not everything `gh` does, and the part it
-left out is the part a throttled query really arrives in: a 200 carrying
-the spent rate-limit headers, `gh` exiting 1 over it, and `gh: API rate
-limit already exceeded ...` on stderr. So an answer may also state the
-exit code, the stderr and the stdout `gh` leaves behind, and a shape the
-fake cannot render is REFUSED BY NAME rather than answered plausibly: a
-double that fills in what it was not told is a control with no opinion on
-the case it is standing in for.
+That is the SHAPE of an answer, and the part it left out is the part a
+throttled query really arrives in: a 200 carrying the spent rate-limit
+headers, `gh` exiting 1 over it, and `gh: API rate limit already
+exceeded ...` on stderr. So an answer may also state the exit code, the
+stderr and the stdout `gh` leaves behind, and a shape the fake cannot
+render is REFUSED BY NAME rather than answered plausibly: a double that
+fills in what it was not told is a control with no opinion on the case
+it is standing in for.
 """
 
 import contextlib
@@ -53,45 +52,38 @@ REASONS = {200: 'OK', 400: 'Bad Request', 403: 'Forbidden',
 # tree and a base commit's scripts.
 GRAPHQL_MARK = 'graphql'
 
-# The name a watcher publishes its poll index under, which its `gh` children
-# inherit. Recorded beside every request so a poll is a group in the log
-# rather than a width inferred from the requests. Nothing TRACKED publishes
-# it, so a tracked caller logs `None` on every call; the watcher this
-# repository no longer ships still sets it, and the field is kept so that
-# watcher keeps logging its polls.
+# The name a watcher publishes its poll index under, recorded beside every
+# request so a poll is a group in the log. Nothing TRACKED publishes it;
+# the field is kept for the untracked watcher that still sets it.
 POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
-# A path whose existence releases the calls this fake is holding. Set only
-# where a case asks for a hold; every other answer is written at once.
+# A path whose existence releases the calls this fake is holding; every
+# other answer is written at once.
 GATE = 'DAEDALUS_FAKE_GH_GATE'
-# Where the hold's entry and its release are recorded, beside the call log
-# and not inside it - a line in the call log would be counted as a call. A
-# release is the only terminal fact about a wait, because a call still
-# waiting looks exactly like one nobody has looked at; the entry is beside it
-# because a case that DEPENDS on the hold needs both, and a hold scoped away
-# from a call is invisible to either alone.
+# Where the hold's entry and its release are recorded, beside the call log -
+# a line there would be counted as a call. A release is the only terminal
+# fact about a wait; a case that DEPENDS on the hold needs both.
 RELEASES = 'DAEDALUS_FAKE_GH_RELEASES'
 
 
 def _hold():
     """Withhold this answer until the gate the caller named exists.
 
-    The call is logged before this runs, so a reader counting entries can
-    see a call entered and still open - a state, not an instant. What that
-    buys is narrower than "the subject cannot be gone": it cannot RETURN
-    from the call, because the answer is not written, and that is all. A
-    signal, or a `gh_client` watchdog whose `os._exit` runs on any thread,
-    still removes it - so a case reading liveness here must name the parent
-    it is reading about, or a parent that dies takes the reading with it.
+    The call is logged before this runs, so a reader counting entries
+    can see a call entered and still open - a state, not an instant. It
+    cannot RETURN from the call, and that is all: a signal, or a
+    `gh_client` watchdog whose `os._exit` runs on any thread, still
+    removes it - so a case reading liveness here must name the parent it
+    is reading about, or a parent that dies takes the reading with it.
 
     There is no bound in here, and that is the point: a bound would turn
-    the hold into a guess, and a guess that expires silently reinstates the
-    sample it exists to replace. Two sit outside it. `gh_client.GH_TIMEOUT`
-    (120 s) bounds the `subprocess.run` the caller is blocked in, so a hold
-    does expire on a subject slow enough to reach it. And the gate is opened
-    by the caller's `finally`, so a caller SIGKILLed outright leaves the
-    fake here for the life of the box - measured at 42 s of CPU over 97
-    minutes, and its tmp tree is never cleaned.
+    the hold into a guess, and a guess that expires silently reinstates
+    the sample it exists to replace. Two sit outside it. The client's
+    own GH_TIMEOUT (120 s) bounds the call the caller is blocked in, so
+    a hold does expire on a subject slow enough to reach it. And the
+    gate is opened by the caller's `finally`, so a caller SIGKILLed
+    outright leaves the fake here for the life of the box - measured at
+    42 s of CPU over 97 minutes, and its tmp tree is never cleaned.
     """
     path = os.environ.get(GATE)
     if path is None:
@@ -166,10 +158,10 @@ def _entries(log):
 def _fixture(answers, request):
     """The first fragment the request carries, its key, and its response.
 
-    Successive pages of one connection are a list, consumed in order and the
-    last repeated, so a two-page answer needs no counter that could race
-    between two watcher processes; the count is taken before this call is
-    logged, so the first request gets the first page.
+    Successive pages of one connection are a list, consumed in order and
+    the last repeated, so a two-page answer needs no counter that could
+    race between two watcher processes; the count is taken before this
+    call is logged, so the first request gets the first page.
     """
     for fragment, answer in answers.items():
         if fragment in request:
@@ -191,13 +183,11 @@ def _response(answer):
 
     `status`, `headers` and `body` are the response; `exit` and `stderr`
     are what `gh` leaves behind it, and `stdout` replaces the rendered
-    response outright - the empty string included, which is how a suite
-    models a refusal the transport never produced a body for.
-
-    A bare string, or a JSON object naming none of these fields, is a 200
-    whose body is that value: the shape most fixtures use. The file is
-    data, so each field is checked for the type its renderer needs and a
-    value of the wrong type is refused by name rather than defaulted.
+    response outright. A bare string, or a JSON object naming none of
+    these fields, is a 200 whose body is that value: the shape most
+    fixtures use. The file is data, so each field is checked for the
+    type its renderer needs and a value of the wrong type is refused by
+    name rather than defaulted.
     """
     spec = (answer if isinstance(answer, dict)
             and set(answer) & (RESPONSE | OUTCOME)
@@ -237,7 +227,8 @@ def main(argv):
     fragment, response = _fixture(answers, request)
     _logged(os.environ['DAEDALUS_FAKE_GH_LOG'],
             {'t': time.time(), 'argv': list(argv), 'request': request,
-             'fragment': fragment, 'poll': os.environ.get(POLL_MARK)})
+             'fragment': fragment, 'poll': os.environ.get(POLL_MARK),
+             'pid': os.getpid()})
     if response is None:
         # Refused before the hold, so a call this fake cannot answer fails
         # by name rather than waiting for a gate that has nothing to open.
@@ -346,20 +337,16 @@ class FakeGh:
         return env
 
     def releases(self):
-        """Every release this fake recorded, or none if it held nothing.
+        """Every release this fake recorded, or none if it held nothing:
+        which calls came back, and which never did."""
 
-        The terminal counterpart of the call log: which calls came back,
-        and which never did.
-        """
         return [entry for entry in self.stages()
                 if entry['stage'] == 'release']
 
     def entered(self):
-        """Every hold this fake began, or none if it held nothing.
+        """Every hold this fake began: a case that only counts releases
+        reads the same whether the hold ran for it or not."""
 
-        A case that only counts releases reads the same whether the hold
-        ran for it or not, which is why this half exists.
-        """
         return [entry for entry in self.stages()
                 if entry['stage'] == 'entered']
 
