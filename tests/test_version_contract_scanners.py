@@ -144,7 +144,6 @@ def _malformed_tree(tmp, label, fragment):
 
 
 def test_check_refuses_a_source_it_cannot_tokenize(tmp):
-    """check refuses a tree whose Python site it cannot tokenize."""
     for label, fragment in _MALFORMED:
         copy_root = _malformed_tree(tmp, label, fragment)
         r = _run_checker(copy_root)
