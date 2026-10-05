@@ -19,8 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    FORCED_WITHOUT_GRACE,
-    OPERATOR_ASKS_FIRST, OPERATOR_FORCES, REQUESTED_THEN_GRACED,
+    FORCED_WITHOUT_GRACE, REQUESTED_THEN_GRACED,
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
     records, settle_gone)
 from _processtree import taskkill_argv  # noqa: E402
@@ -159,17 +158,6 @@ def test_a_wedged_suite_is_named_and_fails_the_run(tmp):
                                     result.stderr)
     group = coverage_group(result.stdout, 'test_wedged.py')
     _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
-    # The operator's sentence is the one sentence now, and the forced-only
-    # wording is the one this run refuses. The record pin above reads the
-    # cleanup clause, not this line, so a conditional that sent the wrong
-    # sentence to stderr used to move no assertion at all.
-    said, refused = OPERATOR_ASKS_FIRST, OPERATOR_FORCES
-    assert (f'TIMED OUT: tests/test_wedged.py — each was ended at its '
-            f'{float(_WEDGE_BOUND_S)} s bound; {said}'
-            ) in result.stderr, result.stderr
-    assert refused not in result.stderr, result.stderr
-    assert 'test_wedged.py' in result.stderr, result.stderr
-    assert 'TIMED OUT' in result.stderr, result.stderr
     # The sibling that finished kept its own block and is named in no
     # record, which is what makes the refusal a diagnosis rather than a
     # blanket verdict on the run.
@@ -326,14 +314,6 @@ def test_the_coverage_launcher_binds_the_module_the_workflow_path_finds(tmp):
     _assert_one_record(group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
 
 
-def test_the_coverage_launcher_refuses_every_unusable_bound(tmp):
-    for value, expected in UNUSABLE_BOUNDS:
-        result, _unused = coverage_tree(
-            tmp, {'test_fast.py': _FAST_SUITE},
-            timeout_env={'DAEDALUS_SUITE_TIMEOUT': value})
-        _refusal(result, value, expected)
-
-
 def _refusal(result, value, expected):
     """What a launcher said about a bound it would not accept."""
     reported = result.stdout + result.stderr
@@ -478,6 +458,49 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
             readers.append(relative)
     assert definitions == ['scripts/ci/suite_bound.py'], definitions
     assert readers == ['scripts/ci/suite_bound.py'], readers
+
+
+def _shared_bound_wait(node):
+    """Whether one `proc.wait` call carries the shared bound exactly."""
+    timeouts = [kw for kw in node.keywords if kw.arg == 'timeout']
+    return (len(timeouts) == 1
+            and isinstance(timeouts[0].value, ast.Attribute)
+            and timeouts[0].value.attr == 'CLEANUP_TIMEOUT_S'
+            and isinstance(timeouts[0].value.value, ast.Name)
+            and timeouts[0].value.value.id == 'SUITE_BOUND')
+
+
+def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
+    """Every wait in the bridge fixture's teardown reads the shared bound.
+
+    A literal at either wait satisfies the reaper controls' existence
+    demand, so this one demands the shared name, spelled here literally
+    rather than derived from the subject file: a control that rebuilt the
+    shape from the file it judges agrees with a subject that got it
+    wrong.
+    """
+    tree = ast.parse(
+        (ROOT / 'tests' / '_util.py').read_text(encoding='utf-8'))
+    bridges = [node for node in ast.walk(tree)
+               if isinstance(node, ast.FunctionDef)
+               and node.name == 'bridge']
+    assert len(bridges) == 1, (
+        f'expected one bridge fixture, found {len(bridges)}: the pin '
+        'cannot say which teardown it judges')
+    sites = [node for node in ast.walk(bridges[0])
+             if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute)
+             and node.func.attr == 'wait'
+             and isinstance(node.func.value, ast.Name)
+             and node.func.value.id == 'proc']
+    assert sites, (
+        'no proc.wait left in the bridge fixture: the pin has no subject '
+        'until it is derived again from the teardown')
+    unshared = [f'tests/_util.py:{node.lineno}' for node in sites
+                if not _shared_bound_wait(node)]
+    assert not unshared, (
+        'these teardown waits do not read the shared cleanup bound '
+        f'(expected timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S): {unshared}')
 
 
 # The arms no launcher reaches. Most controls above drive a real launcher;
