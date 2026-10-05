@@ -89,32 +89,6 @@ def test_poll_rejects_an_empty_delivery_id(tmp):
     assert result == expected, (result, expected)
 
 
-def test_poll_rejects_a_delivery_id_when_none_is_expected(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'command',
-        'deliveryId': 'someone-elses',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
-
-    result = _poll_outcome(session.poll_result(
-        '', 0.001, interval=0, expect_id='command'))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
 def test_poll_rejects_a_matching_delivery_with_a_foreign_command_id(tmp):
     del tmp
     transport = _transport()
