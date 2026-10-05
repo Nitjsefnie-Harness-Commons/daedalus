@@ -11,7 +11,6 @@
     }
   },
   "module_size_baseline": {
-    "tests/test_bridge_results.py": 976,
     "tests/test_cli.py": 1117,
     "tests/test_mcp_server.py": 1487
   },
