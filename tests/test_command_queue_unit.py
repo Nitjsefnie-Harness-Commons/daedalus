@@ -47,6 +47,7 @@ def test_a_directory_candidate_is_refused_with_its_reason(tmp):
     if stream is not None:
         stream.close()
     assert stream is None and reason, (stream, reason)
+    # POSIX refuses at the regular-file check, Windows at the open.
     if os.name == 'nt':
         assert reason.startswith('cannot open'), reason
     else:

@@ -90,12 +90,12 @@ WINDOWS_COMMAND_TOO_LONG = 206
 #   MINIMAL_SPAWN_DEADLINE_S  80     round(15.904 * 5)
 #
 # `MINIMAL_SPAWN` has no stall control at its COMPOSED figure — its site is
-# reached only through a launch that failed with E2BIG, and the only suites
-# that reach it construct that failure themselves, so nothing ever waits 80s
-# for this child. Its FIGURE is not typed at the call site: it is
-# `round()`ed from the slowest sample of the recorded table below and the
-# shared `SITE_HANG_MULTIPLE` in `tests/_node_launch_routing.py`, so a
-# reader re-derives it from the measurement rather than believing it.
+# reached only through a launch that failed with E2BIG, and no kept suite
+# reaches it, so nothing ever waits 80s for this child. Its FIGURE is not
+# typed at the call site: it is `round()`ed from the slowest sample of the
+# recorded table below and the shared `SITE_HANG_MULTIPLE` in
+# `tests/_node_launch_routing.py`, so a reader re-derives it from the
+# measurement rather than believing it.
 NODE_PROBE_SAMPLES_S = (0.654, 0.300, 0.173, 0.379,
                         2.944, 0.846, 1.899, 0.984)
 NODE_PROBE_SLOWEST_S = max(NODE_PROBE_SAMPLES_S)

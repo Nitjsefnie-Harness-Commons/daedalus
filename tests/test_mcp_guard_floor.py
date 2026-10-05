@@ -557,7 +557,7 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     del _tmp
     assert _mcp_guard_floor.missing_citations(
         _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE, _util.ROOT) == []
-    nested_function = 'tests/test_real_browser_boundary.py::test_passes'
+    nested_function = 'tests/test_runner_refuses_unawaited.py::test_x'
     absent_function = (
         'tests/test_mcp_tools.py::test_this_test_does_not_exist_anywhere')
     absent_suite = 'tests/test_no_such_suite.py::test_absent'

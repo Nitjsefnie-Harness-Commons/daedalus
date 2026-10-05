@@ -189,6 +189,17 @@ def test_exec_and_put_hand_the_waiter_exactly_fifteen_seconds_for_zero(
     assert handed == [['ex', 15], ['pt', 15], ['ex', 7], ['pt', 7]], handed
 
 
+def test_an_extension_command_with_no_result_times_out_exiting_nonzero(tmp):
+    """ext_cmd's timeout arm: an extension command nothing answers exits
+    nonzero naming the timeout, the CLI's own wait being the bound."""
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        unanswered = run_cli(['ext-reload'], env)
+    assert unanswered.returncode != 0, (
+        unanswered.returncode, unanswered.stdout, unanswered.stderr)
+    assert 'Timeout' in unanswered.stderr, unanswered.stderr
+
+
 def test_the_result_wait_outlives_a_truncated_peek(tmp):
     """A peek the proxy cuts off is retried until the deadline, once.
 
