@@ -7,23 +7,21 @@ against the fake `gh` in `_fake_gh.py` and reads back the exception the
 client raised or the data it returned. Calling the classifier directly
 would prove the classifier's own spelling; what the tree depends on is
 that the CLIENT asks it and obeys it, and a client that dropped
-`RateLimited` leaves a direct call green.
-
-The rule is an answer reports exhaustion when it did NOT DELIVER what was
-asked for and carries rate-limit evidence, or when it delivered and its
-own `errors[]` entry is the report. The line is drawn at delivery because
-of who owns the words: an `errors[]` `type` or `code` is a label the
-server writes and no caller can put its own data into, while a header,
-a body and a stderr complaint are three places a caller's own field
-spells the two words. So each carrier is driven in BOTH directions here -
-the shape that must be a pause and the near miss that must not - because
-a classifier pinned in one direction is a classifier pinned on whichever
-direction was written first. The two false positives that shape produced
-are recorded in the module's own docstring - a 200 that SUCCEEDED with
-complete data and a `gh` warning that merely mentioned a limit, and the
-last good request before the window closes carrying
-`X-Ratelimit-Remaining: 0` beside valid data - both rows below, each
-its pause-shaped partner with one field changed.
+`RateLimited` leaves a direct call green. The rule is an answer reports
+exhaustion when it did NOT DELIVER what was asked for and carries
+rate-limit evidence, or when it delivered and its own `errors[]` entry
+is the report. The line is drawn at delivery because of who owns the
+words: an `errors[]` `type` or `code` is a label the server writes and
+no caller can put its own data into, while a header, a body and a
+stderr complaint are three places a caller's own field spells the two
+words. So each carrier is driven in BOTH directions here, pause and
+near miss, because a classifier pinned in one direction is a classifier
+pinned on whichever direction was written first. The two false
+positives that shape produced are recorded in the module's own
+docstring - a 200 that SUCCEEDED with complete data and a `gh` warning
+that merely mentioned a limit, and the last good request before the
+window closes carrying `X-Ratelimit-Remaining: 0` beside valid data -
+both rows below, each its pause-shaped partner with one field changed.
 """
 import contextlib
 import sys
@@ -137,11 +135,11 @@ def _undelivered(client, tmp, answer):
 
 def test_an_empty_answer_whose_complaint_names_a_limit_is_a_pause(tmp):
     """`gh` refusing before the transport produced a response leaves no
-    status and no header block, so the complaint is all there is - and
-    the only carrier that can never name an instant, so the pause it
-    leads to is the caller's plain minute. `resume_at` being None is
-    the assertion: a reader inventing a default here would send the
-    waiter to sleep on a guess the answer never made."""
+    status and no header block, so the complaint is all there is - the
+    only carrier that can never name an instant, so the pause it leads
+    to is the caller's plain minute. `resume_at` being None is the
+    assertion: a reader inventing a default here would send the waiter
+    to sleep on a guess the answer never made."""
     client = _client()
     refusal = _paused(client, tmp, {
         'status': 200, 'stdout': '', 'exit': 1,
@@ -255,8 +253,7 @@ def test_a_reset_on_its_own_is_not_evidence(tmp):
 def test_a_spent_counter_with_no_reset_carries_no_instant_to_wait_for(tmp):
     """The other half: the counter says the limit is gone and the answer
     does not say when it returns, so `_resume_at` answers None rather
-    than the clock, and a reader that took the counter alone takes this
-    row."""
+    than the clock, a reader taking the counter alone failing here."""
     client = _client()
     _undelivered(client, tmp, {
         'status': 200, 'exit': 1, 'headers': {'x-ratelimit-remaining': '0'},
@@ -328,9 +325,9 @@ def test_the_statuses_a_body_is_read_on_are_exactly_three(tmp):
     the next one a reader would reach for - is caught by none of the
     rows above, each of which reads the same body on the same call.
     `ACCEPTABLE` is pinned that way in `test_ci_wait_published.py` too.
-    `client` is loaded for its side effect: `gh_client` does
-    `from gh_rate_limit import exhausted`, so the set this reads is
-    the object the client itself is holding."""
+    `client` is loaded for its side effect: `gh_client` does `from
+    gh_rate_limit import exhausted`, so the set this reads is the
+    object the client itself is holding."""
     del tmp
     _client()
     assert sys.modules['gh_rate_limit'].REFUSAL_STATUSES == frozenset(
