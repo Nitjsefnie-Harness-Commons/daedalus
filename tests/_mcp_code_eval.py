@@ -271,7 +271,9 @@ class _Scopes:
         if self._uncertain.get(id(node)):
             return None
         table = self._owner(self._scope_of.get(id(node)), name)
-        definition = self._scope_ast.get(id(table)) if table else None
+        if table is None:
+            return None
+        definition = self._scope_ast.get(id(table))
         if definition is None:
             return None
         symbol = self._symbols(table).get(name)
