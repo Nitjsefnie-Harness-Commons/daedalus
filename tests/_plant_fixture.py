@@ -55,12 +55,14 @@ def _committed_repo(tmp, name='plantrepo'):
     return target
 
 
-def _saved_pair(tmp, payload=None):
+def _saved_pair(tmp, payload=None, chmod=None):
     """A target saved at `payload` (or its committed bytes) with its store."""
     target = _committed_repo(tmp)
     store = Path(tmp) / 'store'
     if payload is not None:
         target.write_bytes(payload)
+    if chmod is not None:
+        target.chmod(chmod)
     saved = _run_plant('save', str(target), '--store', str(store))
     assert saved.returncode == 0, _say(saved)
     return target, store
@@ -85,11 +87,10 @@ def _only_entry(store):
 
 def _unreadable_as_bytes(entry):
     """Make a stored copy unreadable as bytes, on every platform: a
-    directory where a file is expected refuses the open everywhere -
-    IsADirectoryError on POSIX, PermissionError on Windows - so only
-    OSError may be relied on. A claim about the OPEN, so it holds
-    where the open is reached: the advice path has no presence guard,
-    the restore path does.
+    directory where a file is expected refuses the open everywhere
+    (IsADirectoryError or PermissionError), so only OSError may be
+    relied on. A claim about the OPEN, so it holds where the open is
+    reached: the advice path has no presence guard, the restore path does.
     """
 
     payload = entry / 'bytes'
