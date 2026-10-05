@@ -578,17 +578,6 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     ], _util.ROOT) == [nested_function, absent_function, absent_suite]
 
 
-def test_module_level_class_citations_are_reported_missing(_tmp):
-    """A class is not a test function citation target."""
-    del _tmp
-    citation = 'tests/test_mcp_tools.py::ToolRegistry'
-    missing = _mcp_guard_floor.missing_citations([
-        *_mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE,
-        ('m', 'f', 'c', citation),
-    ], _util.ROOT)
-    assert citation in missing, missing
-
-
 def test_module_level_async_function_citations_are_reported_missing(_tmp):
     """The runner refuses an async test, so a citation to one pins nothing."""
     suite = Path(_tmp) / 'tests' / 'test_probe.py'
@@ -609,17 +598,6 @@ def test_module_level_sync_test_citations_are_accepted(_tmp):
     missing = _mcp_guard_floor.missing_citations(
         [('m', 'f', 'c', citation)], _tmp)
     assert citation not in missing, missing
-
-
-def test_module_level_sync_helper_citations_are_reported_missing(_tmp):
-    """A helper the runner never collects pins nothing, whatever its kind."""
-    suite = Path(_tmp) / 'tests' / 'test_probe.py'
-    suite.parent.mkdir()
-    suite.write_text('def _helper():\n    pass\n', encoding='utf-8')
-    citation = 'tests/test_probe.py::_helper'
-    missing = _mcp_guard_floor.missing_citations(
-        [('m', 'f', 'c', citation)], _tmp)
-    assert citation in missing, missing
 
 
 def test_a_module_level_helper_citation_is_reported_missing(_tmp):

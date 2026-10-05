@@ -84,9 +84,8 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
 
 
 def _scan_call_count(_tmp, depth):
-    """The `_scan` invocations one depth-`depth` chain costs, counted by a
-    pass-through surrogate on the attribute the recursion resolves, and the
-    scan set that came with them."""
+    """The `_scan` invocations one depth-`depth` chain costs, counted by
+    a pass-through surrogate, and the scan set that came with them."""
     real = _mcp_code_eval._scan
     calls = [0]
 
@@ -107,10 +106,9 @@ def _scan_call_count(_tmp, depth):
 
 
 def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
-    """A depth-20 chain costs at most a small constant times a depth-10 one;
-    code re-asking a subtree's verdict twice per level scores x2 per level
-    here. The result set is read beside the ratio, so a scan that stopped
-    walking, refused or raised cannot pass either.
+    """A depth-20 chain costs at most a small constant times a depth-10
+    one; code re-asking a subtree's verdict twice per level scores x2 per
+    level here. The result arm beside the ratio rejects a stopped scan.
     """
     shallow, _ = _scan_call_count(_tmp, 10)
     deep, names = _scan_call_count(_tmp, 20)

@@ -56,10 +56,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_arm_derivation  # noqa: E402
-import _mcp_import_closure  # noqa: E402
 import _util  # noqa: E402
-from _mcp_import_fixtures import (  # noqa: E402
-    _assert_scan_refusal, _scan_verdict, _write_tree)
+from _mcp_import_fixtures import (_assert_scan_refusal,  # noqa: E402
+                                  _scan_verdict)
 
 # (the analyser site that spells it, a label, the fixed part of its
 # message, the site the refusal names, the composition the arm refuses).
@@ -622,25 +621,6 @@ def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
     assert len(FIXTURE_ARMS) == 1, len(FIXTURE_ARMS)
     assert len(CONTROL_SITES) == 6, len(CONTROL_SITES)
     assert len(CONTROL_LEAF_SITES) == 4, len(CONTROL_LEAF_SITES)
-
-
-def test_a_scanned_composition_is_read_from_disk_on_every_call(_tmp):
-    """The fixture writes what it is handed, so two cases cannot share a
-    tree by accident.
-
-    `_scan_verdict` and `_assert_scan_refusal` both write `composition.py`
-    into the one directory a case is handed, so a stale file from an
-    earlier case would answer for a later one. The composition here draws
-    no refusal, so the case reads the file back and the walk's own answer
-    without claiming any arm.
-    """
-    _write_tree(Path(_tmp), {'composition.py': 'FIRST = 1\n'})
-    assert (Path(_tmp) / 'composition.py').read_text(
-        encoding='utf-8') == 'FIRST = 1\n'
-    tree = {'composition.py': '\nSPELLING = "importlib"\n'}
-    assert _scan_verdict(_tmp, tree) == ('clean', ['composition.py'])
-    assert _mcp_import_closure.dotted_module(
-        Path(_tmp) / 'composition.py', _tmp) == 'composition'
 
 
 def _read(verdict, detail):

@@ -447,10 +447,9 @@ def _builtin_projection(node, bound, scopes):
 
 
 def _element_node(subscript, bound, scopes, elements):
-    """The expression a subscript SELECTS, resolved once per node: the first
-    ask walks the chain and folds each level's answer into `elements`, and a
-    walk that revisits the level reads the fold. None when the selected value
-    is not readable."""
+    """The expression a subscript SELECTS, resolved once per node: the
+    first ask folds each level's answer into `elements`, a revisit reads
+    the fold. None when the selected value is not readable."""
     if subscript not in elements:
         elements[subscript] = _select_element(
             subscript, bound, scopes, elements)
@@ -458,10 +457,9 @@ def _element_node(subscript, bound, scopes, elements):
 
 
 def _select_element(subscript, bound, scopes, elements):
-    """The element one subscript names, or None when it is not readable. An
-    int key reads a sequence element, a str key a mapping value, so a
-    two-level or string-key selection resolves by the same rule as a
-    one-level one."""
+    """The element one subscript names, or None when it is not readable.
+    An int key reads a sequence element, a str key a mapping value, so a
+    two-level selection resolves by the same rule as a one-level one."""
     key = subscript.slice
     container = subscript.value
     if isinstance(container, ast.Subscript):
@@ -525,9 +523,8 @@ def _scan(node, bound, scopes, elements):
     projection, choice, selection, return, container) reaches the builtin
     the same way, and one passed to a call or used as a lookup key is a
     hand-off. A sixth spelling is resolved by the same rules, not a branch.
-    Each verdict is asked once: where two arms read one subtree, the pair
-    is computed in a single descent, and `elements` folds an element
-    selection so a revisited level re-reads it instead of re-walking.
+    Each verdict is asked once: where two arms read one subtree the pair
+    computes in one descent, and `elements` folds a selection per node.
     """
     if denotes_code_eval(node, bound, scopes) or _builtin_projection(
             node, bound, scopes):
