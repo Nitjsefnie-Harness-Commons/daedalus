@@ -51,12 +51,9 @@ STAMP_EPOCH = 1789902000.0
 
 
 class _Held:
-    """A clock that reads one instant and never moves.
-
-    Only `time` is here, because `gh_rate_limit` reads only `time`: a
-    missing `sleep` is then a loud `AttributeError` rather than a real
-    wait this suite never asked for.
-    """
+    """A clock that reads one instant and never moves. Only `time` is
+    here, because `gh_rate_limit` reads only `time`: a missing `sleep` is
+    then a loud `AttributeError` rather than a real wait."""
 
     def __init__(self, moment):
         self.moment = moment
@@ -69,17 +66,11 @@ class _Held:
 def _clock(moment=FROZEN):
     """`gh_rate_limit`'s clock, held at one instant.
 
-    Patched on the module the client already imported rather than on a
-    second copy loaded here: `gh_client` does `from gh_rate_limit import
-    exhausted`, so the reader it obeys is the object registered under that
-    name, and a fresh load of the file would be a different object whose
-    patch nothing the client calls would ever read.
-
-    `setattr` for the two assignments: the module was executed from a
-    path rather than imported under its own name, so `time` is as
-    dynamic as the module object carries it, and a checker reading the
-    object as a typed namespace would be reading a file it never saw.
-    """
+    Patched on the module the client already imported - `gh_client` does
+    `from gh_rate_limit import exhausted`, so a fresh load would be an
+    object nothing the client calls reads. `setattr` for the two
+    assignments: the module was executed from a path, and a checker
+    reading it as a typed namespace reads a file it never saw."""
     mod = sys.modules['gh_rate_limit']
     real = mod.time
     setattr(mod, 'time', _Held(moment))
@@ -97,15 +88,11 @@ def _answered(client, tmp, answer, moment=FROZEN):
     """(data, refusal, failure) from one real `gh_client.graphql` call.
 
     The three are exclusive by construction, and a caller asserts on the
-    one it expects: an answer that delivered returns its data, an answer
-    reporting exhaustion raises the `RateLimited` `gh_client` imported
-    from the classifier, and an answer carrying no evidence raises the
-    client's own `QueryError`. Both classes are read off the passed
-    client rather than named here, because `_util.load` executes the file
-    per call and two loads are two classes - a check against a second
-    copy's `QueryError` would be false on every run for a reason that has
-    nothing to do with the rule.
-    """
+    one it expects. Both classes are read off the passed client rather
+    than named here, because `_util.load` executes the file per call and
+    two loads are two classes - a check against a second copy's
+    `QueryError` would be false on every run for a reason that has
+    nothing to do with the rule."""
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: answer})
     with fake.activate(), _clock(moment):
         try:
@@ -213,17 +200,13 @@ def test_an_undelivered_answer_carrying_no_evidence_is_a_failure(tmp):
 # ---- the headers: an instant, and the two things that make it evidence ----
 
 def test_a_retry_after_header_is_the_instant_the_refusal_carries(tmp):
-    """A `Retry-After` is a report on its own - no spent counter beside it,
-    no reset beside it, and no limit anywhere in the body - and it counts
-    DOWN, so the instant is the clock plus the number. Driven on a 200
-    rather than a 403 because that is the status that cannot complete the
-    co-condition any other way: a reader that dropped the header fast path
-    and fell through to the spent counter beside a reset would still
-    answer this on a 403, and the short-circuit is the whole of the
-    header's own rule. The value is exact because a band would pass on a
-    reader returning the wall clock, the reset beside it, or half the
-    number: all three are pauses with a different wait.
-    """
+    """A `Retry-After` is a report on its own and it counts DOWN, so the
+    instant is the clock plus the number. Driven on a 200 because that is
+    the status that cannot complete the co-condition any other way: a
+    reader that dropped the header fast path would still answer this on a
+    403, and the short-circuit is the whole of the header's own rule. The
+    value is exact because a band would pass on a reader returning the
+    wall clock, the reset beside it, or half the number."""
     client = _client()
     refusal = _paused(client, tmp, {
         'status': 200, 'exit': 1, 'headers': {'Retry-After': '7'},
@@ -237,14 +220,11 @@ def test_a_retry_after_the_reader_cannot_count_falls_to_the_reset(tmp):
     value is not read as one, and the reset beside it is. Believing the
     date as a count would wake a watcher in the past.
 
-    The same header with no reset beside it is still a REPORT, by the
-    module's own rule that a `Retry-After` needs nothing else - a pause
+    The same header with no reset beside it is still a REPORT - a pause
     that carries no instant, so the waiter falls back to its plain
-    minute. The third arm is the other header and the near miss both
-    ways: a `x-ratelimit-reset` the reader cannot turn into a moment is
-    not an instant, and with no `Retry-After` beside it there is nothing
-    left to report - a failure, not a pause at a moment nobody named.
-    """
+    minute. The third arm: a `x-ratelimit-reset` the reader cannot turn
+    into a moment is not an instant, and with no `Retry-After` beside it
+    there is nothing left to report - a failure, not a pause."""
     client = _client()
     dated = 'Wed, 21 Oct 2026 07:28:00 GMT'
     refusal = _paused(client, tmp, {
@@ -265,15 +245,11 @@ def test_a_retry_after_the_reader_cannot_count_falls_to_the_reset(tmp):
 
 def test_a_reset_on_its_own_is_not_evidence(tmp):
     """Half the co-condition, absent. A reset says the limit is gone and
-    says nothing about when it returns, and a wait needs a moment to wake
-    at - so a 200 that exited 1 carrying a reset and nothing beside it is
-    a failure. The near miss of the two rows below, which are this
-    fixture with one header or one status added.
-
-    `_undelivered` returning rather than raising is the assertion, and
-    this row is also what catches a widening of the refusal pair to every
-    status: a 200 refused nothing and its reset names no limit of its
-    own, so a reader that read the status as the whole answer takes it."""
+    says nothing about when it returns, so a 200 that exited 1 carrying a
+    reset and nothing beside it is a failure. `_undelivered` returning is
+    the assertion, and this row also catches a widening of the refusal
+    pair to every status: a 200 refused nothing and its reset names no
+    limit of its own."""
     client = _client()
     _undelivered(client, tmp, {
         'status': 200, 'exit': 1, 'headers': {'x-ratelimit-reset': '1900'},
@@ -282,14 +258,10 @@ def test_a_reset_on_its_own_is_not_evidence(tmp):
 
 
 def test_a_spent_counter_with_no_reset_carries_no_instant_to_wait_for(tmp):
-    """The other half, and the reason `_resume_at` answers None here
-    rather than the clock: the counter says the limit is gone and the
-    answer does not say when it returns. Evidence needs both a moment and
-    a reason to believe one, and this fixture has the moment's absence on
-    the header and the reason's absence everywhere else.
-
-    As above, `_undelivered` returning rather than raising is what this
-    row asserts, and a reader that made the counter enough takes it."""
+    """The other half: the counter says the limit is gone and the answer
+    does not say when it returns, so `_resume_at` answers None here
+    rather than the clock. A reader that made the counter enough takes
+    this row."""
     client = _client()
     _undelivered(client, tmp, {
         'status': 200, 'exit': 1, 'headers': {'x-ratelimit-remaining': '0'},
@@ -313,20 +285,12 @@ def test_a_spent_counter_beside_a_reset_is_a_pause_at_that_reset(tmp):
 
 
 def test_a_reset_on_a_403_or_a_429_is_a_pause_and_a_400_is_a_failure(tmp):
-    """The other way the co-condition completes: on a status that has
-    already said the request was refused, the reset says when to try
-    again and needs no spent counter beside it. Both statuses are driven,
-    because a reader that kept only the one this repository happens to
-    have seen answers the other as an ordinary failure.
-
-    The third arm is the pair's negative space, and the status is the
-    load-bearing part of it: a reset says when to try again only under a
-    status that already refused the request, and a 400 is not one. The
-    200 in `test_a_reset_on_its_own_is_not_evidence` is what catches a
-    widening to every status; this row is here for a widening that adds
-    the one status either refusal list in this module would reach for
-    next.
-    """
+    """On a status that has already said the request was refused, the
+    reset says when to try again and needs no spent counter beside it.
+    Both statuses are driven, because a reader that kept only the one
+    this repository has seen answers the other as an ordinary failure.
+    The 400 is the negative space: a reset means retry only under a
+    status that already refused, and a 400 is not one."""
     client = _client()
     for status in (403, 429):
         refusal = _paused(client, tmp, {
@@ -347,15 +311,10 @@ def test_the_body_is_a_carrier_on_a_refusal_status_and_on_nothing_else(
     """Six statuses, one body, both directions. A throttled GraphQL query
     is answered 200, so a reader that read the body only on 403 and 429
     misses the shape this repository actually met; and a body naming a
-    limit under any other status says so by accident - the words are as
-    likely to be a bug report's.
-
-    The 400 is the near miss a widening to one status would reach for,
-    and it is here because `gh` answers a GraphQL request it rejects as
-    malformed with one: a validation error quoting the rate-limit field
-    the caller sent is a body naming a limit under a status that never
-    refused one. A 404 and a 500 catch a widening to every status; only
-    a row for the status that was actually added catches this one."""
+    limit under any other status says so by accident. The 400 is the near
+    miss a widening would reach for: `gh` answers a malformed GraphQL
+    request with one, and a validation error quoting the rate-limit field
+    is a body naming a limit under a status that never refused one."""
     client = _client()
     body = 'API rate limit exceeded for user 1'
     for status in (200, 403, 429):
@@ -370,18 +329,15 @@ def test_the_body_is_a_carrier_on_a_refusal_status_and_on_nothing_else(
 
 
 def test_the_statuses_a_body_is_read_on_are_exactly_three(tmp):
-    """The SET and not three members of it. Every status in the negative
-    loop above is one the set does not name, so a status ADDED to it -
-    422, the next one a reader would reach for - is caught by none of
-    those rows: each of them reads the same body on the same call and
-    gets the same answer. `ACCEPTABLE` is pinned this way in
-    `test_ci_wait_published.py`, for the same reason: a widening is a
-    member this file's rows have no name for.
+    """The SET and not three members of it: a status ADDED to it - 422,
+    the next one a reader would reach for - is caught by none of the rows
+    above, each of which reads the same body on the same call.
+    `ACCEPTABLE` is pinned this way in `test_ci_wait_published.py` for
+    the same reason.
 
     `client` is loaded for its side effect: `gh_client` does
-    `from gh_rate_limit import exhausted`, so the set this reads is
-    the object the client itself is holding.
-    """
+    `from gh_rate_limit import exhausted`, so the set this reads is the
+    object the client itself is holding."""
     del tmp
     _client()
     assert sys.modules['gh_rate_limit'].REFUSAL_STATUSES == frozenset(
@@ -435,12 +391,10 @@ def test_the_last_good_request_is_not_discarded_for_its_own_reset(tmp):
 # ---- the `errors[]` entry, read whatever the answer delivered ----
 
 def test_an_errors_entry_is_the_report_even_on_a_delivered_answer(tmp):
-    """The one carrier read on an answer that DID deliver, and the reason
-    the rule has a second limb at all: a throttler reporting at a NESTED
-    field nulls part of `data` and leaves the rest, so the answer is
-    delivered and its own `errors[]` entry is the only report there is.
-    Dropping the second limb reads that as a successful query that
-    returned nothing. The reset is driven in both of the places the
+    """The one carrier read on an answer that DID deliver: a throttler
+    reporting at a NESTED field nulls part of `data` and leaves the rest,
+    so the answer is delivered and its own `errors[]` entry is the only
+    report there is. The reset is driven in both of the places the
     extension carries it, because a reader keeping only the nested one
     pauses with no instant on every real capture."""
     client = _client()
@@ -491,17 +445,12 @@ def test_a_reset_it_cannot_read_is_skipped_for_the_one_beside_it(tmp):
 
 def test_a_report_naming_no_instant_is_a_pause_with_no_instant(tmp):
     """The capture this tree actually holds carries a `type` and nothing
-    else, so the common case is a pause with no moment in it at all, and
-    the waiter's plain minute is the answer. A reader that demanded an
-    instant before agreeing it was a refusal would answer the only shape
-    GitHub has been observed to send as an ordinary failure.
-
-    The `retryAfter` beside it is a string rather than a count, which is
-    the same reason in a second shape: a body is data, so the reader may
-    not assume a number is there even when the key is. Adding a string to
-    a clock is a `TypeError` out of the middle of a throttled answer, and
-    the whole point of this module is that such an answer is a WAIT.
-    """
+    else, so the common case is a pause with no moment in it at all. A
+    reader that demanded an instant before agreeing it was a refusal
+    would answer the only shape GitHub has been observed to send as an
+    ordinary failure. The `retryAfter` beside it is a string, the same
+    reason in a second shape: a body is data, so the reader may not
+    assume a number is there even when the key is."""
     client = _client()
     refusal = _paused(client, tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',
@@ -524,16 +473,10 @@ def test_every_spelling_of_the_report_is_read_and_a_lookalike_is_not(tmp):
     Driven on a 500, and the status is the load-bearing part of the
     fixture: on a status the body is not read on, the `errors[]` entry's
     own `code` is the only witness there is. The near misses are the
-    other half, on the same fixture: a different report, a word that
-    merely ENDS in the two behind a letter, letters standing BETWEEN the
-    two, and the two words the other way round - all four failures. The
-    separator class the matcher holds between the two words is what
-    rejects the third, and a matcher widened to take anything there
-    takes a code no server has ever written.
-
-    `_undelivered` returning is the check for these four: it raises the
-    moment a label reads as the report, and the raise names the label.
-    """
+    other half: a different report, a word that merely ENDS in the two
+    behind a letter, letters standing BETWEEN the two, and the two words
+    the other way round - all four failures, and the separator class the
+    matcher holds between the two words is what rejects the third."""
     client = _client()
     for label in ('RATE_LIMITED', 'RATE_LIMIT', 'graphql_rate_limit'):
         refusal = _paused(client, tmp, {
@@ -565,15 +508,9 @@ def test_an_errors_message_is_not_the_report_the_labels_carry(tmp):
     """The field beside the pair, and the reason the pair is two and not
     three: `type` and `code` are labels the server writes and no caller
     can put its own data into, while `message` is free text - a
-    validation error or a complaint about a field quotes the two words
-    while saying nothing about a window. An entry whose labels name
-    nothing and whose message names everything is the discriminating
-    input a reader that added `message` meets first.
-
-    Driven on a delivered 200, where the body carrier is never asked, so
-    the two words this body spells are the entry's own message and
-    nothing else here can be what read them.
-    """
+    validation error quotes the two words while saying nothing about a
+    window. Driven on a delivered 200, where the body carrier is never
+    asked, so the two words this body spells are the entry's own."""
     client = _client()
     data = _the_data(client, tmp, {
         'status': 200, 'exit': 0, 'headers': {}, 'stderr': '',

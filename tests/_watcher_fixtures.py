@@ -45,12 +45,9 @@ def suite(rid, conclusion: str | None = 'SUCCESS', status='COMPLETED',
     `name` overrides the workflow's own name, which is how a fixture
     carries the gating workflow: since issue 1217 a run set with no run
     of it is an INCOMPLETE set, not a settled one. `check_runs` are the
-    suite's own check runs - the job checks of a `pull_request` run, and
-    the verdict a publisher POSTed of its own.
-
-    `workflow=None` leaves the suite with no `workflowRun` at all, which
-    is what a suite published through the Checks API arrives in.
-    """
+    suite's own check runs; `workflow=None` leaves the suite with no
+    `workflowRun` at all, which is what a suite published through the
+    Checks API arrives in."""
     # Annotated, because the suite gains a `workflowRun` and a
     # `checkRuns` it does not start with: inferred from the three
     # string keys it would be a `dict[str, str]` and both of those

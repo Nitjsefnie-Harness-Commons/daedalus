@@ -26,6 +26,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -57,8 +58,7 @@ def _client(tmp, answer, gate=False):
 
     Keyed on the selection, not the whole query: the key is a substring
     of the request, so presence is not exclusivity, and a query that
-    stopped asking for check runs finds no fixture and is refused.
-    """
+    dropped the clause finds no fixture and is refused."""
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: answer}, gate=gate)
     return _util.load(SKILL / 'gh_client.py', 'gh_client_answers'), fake
 
@@ -68,9 +68,9 @@ def _answered(client, fake, variables=None, env=None):
 
     `env` is applied inside the activation, so a row that needs a `gh`
     this tree cannot offer overrides one the activation would otherwise
-    put back. Only the failure path is caught: swallowing a
-    `RateLimited` into `failure` would let a classifier that paused over
-    a plain failure pass every row below.
+    put back. Only the failure path is caught:
+    `RateLimited` into `failure` would let a paused classifier pass
+    every row below.
     """
     with fake.activate():
         before = {name: os.environ.get(name) for name in (env or {})}
@@ -105,11 +105,8 @@ def _launch_refusal(executable):
     Asked of `subprocess` itself rather than read out of the failure
     under test, because that text belongs to the operating system, and
     its wording differs by platform; comparing keeps this file out of
-    that prose and still pins WHICH refusal the client reported.
-
-    The shape is the client's own - a payload on stdin - so both
-    refusals are raised the same way and only the wording can differ.
-    """
+    that prose and still pins WHICH refusal the client reported. The
+    shape is the client's own - a payload on stdin."""
     try:
         subprocess.run([executable], input=b'', capture_output=True,
                        timeout=1)
@@ -126,17 +123,11 @@ def _gate_opened_off_thread(fake):
     not agree about what the process being killed IS: a POSIX script
     `exec`s, so the launched process is the python reading stdin; a
     `.bat` cannot, so on Windows it is `cmd.exe` and the python is its
-    child. The bound kills `cmd.exe` only, and the timeout branch's
-    drain on Windows waits for every handle the surviving grandchild
-    still holds - and that grandchild is blocked in the hold, waiting
-    for the gate only the call holding it can open. Opening it here, on
-    a thread, is what the finally below the call could no longer do once
-    the call had stopped returning.
-
-    It opens the gate on the way out as well, which is the finally this
-    replaces, and only after the ceiling while the call is still in it -
-    never on a path the bound has not already fired on.
-    """
+    child. The bound kills `cmd.exe` only, and the drain on Windows
+    waits out the surviving grandchild's handles. Opening the gate here,
+    on a thread, is what the finally below the call could no longer do
+    once the call had stopped returning; it opens the gate on the way
+    out as well, and only after the ceiling while the call is in it."""
     finished = threading.Event()
 
     def release():
@@ -160,6 +151,18 @@ def _the_data(client, fake):
     return data
 
 
+def _pid_gone(pid, bound=5.0):
+    """Bounded linear wait for a pid to leave the process table."""
+    deadline = time.monotonic() + bound
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
 # ---- the shape of the run itself ----
 
 def test_a_response_with_no_header_block_is_not_an_answer(tmp):
@@ -170,20 +173,16 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
     This row is on `_parse` itself, forced rather than chosen:
     `_fake_gh` terminates every run it writes with a newline, so no
     fixture of its own can reach this arm. The rows beside it are the
-    boundary in both directions: the same run with the blank line back
-    is a body, and with the blank line and nothing after it an empty
-    body - a DIFFERENT failure, raised further on. The last is the
-    line-by-line reason the parser reads this way at all: a re-translated
-    ending carries a `\r` on every line, and a reader that cut at the
-    first blank-line byte pair would take the block's last header for
-    the body's first line.
+    boundary in both directions; the last is the line-by-line reason the
+    parser reads this way at all: a re-translated ending carries a `\r`
+    on every line, and a reader that cut at the first blank-line byte
+    pair would take the block's last header for the body's first line.
 
     The whitespace-only separator separates a line that is BLANK from
     one that is merely whitespace - the same line to a caller, and not
     to a reader testing `line == ''`: that one walks past it, reads it
     as a header, reaches the end and raises, reporting a `gh` that
-    answered in pieces as one that answered nothing.
-    """
+    answered in pieces as one that answered nothing."""
     del tmp
     client = _util.load(SKILL / 'gh_client.py', 'gh_client_answers')
     try:
@@ -265,6 +264,14 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     assert str(failure).startswith('gh failed: '), failure
     assert 'timed out' in str(failure), failure
     assert isinstance(failure.__cause__, subprocess.TimeoutExpired), failure
+    if os.name != 'nt':
+        # The launcher spelling again: on Windows the timeout kills
+        # cmd.exe and the drain waits out the grandchild's handles, so
+        # the error arrives only after the release there. Here the kill
+        # lands before the error, and the release has not happened.
+        pid = fake.calls()[-1]['pid']
+        assert _pid_gone(pid), f'the killed gh still runs: {pid}'
+        assert not fake.releases(), 'the timeout drained before it killed'
 
 
 def test_only_the_launch_becomes_a_failure(tmp):
@@ -385,16 +392,11 @@ def test_a_body_with_no_data_is_a_failure_quoting_the_server(tmp):
 def test_a_suite_with_no_run_is_no_run_and_its_checks_are_still_read(tmp):
     """Issue 1360's other half. A verdict published through the Checks
     API arrives in a suite that belongs to no workflow run, so the run
-    list must not gain an entry for it - and its check runs must be
-    read anyway, because that check run is the thing every seat was
-    reading the run list to find.
-
-    The pair is one fixture apart: the same check run inside a suite
-    that does belong to a run. A reader that dropped the suite from the
-    run list AND from the checks would report an empty answer and look
-    like a head nothing ran on. The third row is the near miss: a suite
-    whose `workflowRun` carries nothing is stepped over, not grouped.
-    """
+    list must not gain an entry for it - and its check runs must be read
+    anyway, because that check run is the thing every seat was reading
+    the run list to find. The pair is one fixture apart; the third row
+    is the near miss: a suite whose `workflowRun` carries nothing is
+    stepped over, not grouped."""
     client, fake = _client(tmp, runs_page([]))
     verdict = {'databaseId': 7, 'name': 'gate freshness',
                'status': 'COMPLETED', 'conclusion': 'FAILURE',
@@ -452,9 +454,7 @@ def test_a_refusal_naming_no_instant_is_the_plain_minute(tmp):
     a number: the waiter's own default, exact rather than banded because
     the value IS the answer. The floor and the ceiling are driven either
     side of it, because a reader that clamped a no-instant refusal to
-    the floor would answer a throttled query with a two-second retry
-    against an API that says nothing about when it will answer.
-    """
+    the floor would answer a throttled query with a two-second retry."""
     client = _util.load(SKILL / 'gh_client.py', 'gh_client_answers')
     watcher = client.Watcher('ci_wait')
     anonymous = client.RateLimited('gh: API rate limit exceeded', None)
