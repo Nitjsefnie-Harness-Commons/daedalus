@@ -602,7 +602,9 @@ RUN_PATH_SPELLINGS = (
     'python scripts/ci/install_lint_tools.py\n'
     'python scripts/ci/install_lint_tools.py\n'
     'python -m pytest daedalus_mcp/server.py --thresholds'
-    ' ".github/ci-thresholds.json"\n')
+    ' ".github/ci-thresholds.json"\n'
+    "run: 'scripts/ci/coverage_suites.py';\n"
+    'python (scripts/ci/aggregate_gate.py),\n')
 NOT_CANDIDATES = (
     ('$RUNNER_TEMP/probe', 'variable-led'),
     ('./actionlint', 'explicit relative'),
@@ -625,13 +627,12 @@ PLANTED_RUN_STEP = (
 
 
 def test_a_run_naming_real_paths_yields_exactly_those_candidates(tmp):
-    """Real spellings, one quoted; repeated, sorted, deduplicated."""
+    """Real spellings, quoted and edge-decorated; sorted, deduplicated."""
     del tmp
     assert run_path_candidates(RUN_PATH_SPELLINGS) == [
-        '.github/ci-thresholds.json',
-        'daedalus_mcp/server.py',
-        'scripts/ci/install_lint_tools.py',
-    ]
+        '.github/ci-thresholds.json', 'daedalus_mcp/server.py',
+        'scripts/ci/aggregate_gate.py', 'scripts/ci/coverage_suites.py',
+        'scripts/ci/install_lint_tools.py']
 
 
 def test_each_out_of_grammar_spelling_yields_no_candidates(tmp):
