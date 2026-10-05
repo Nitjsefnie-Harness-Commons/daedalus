@@ -4,8 +4,7 @@ refusal pass in `test_mcp_tools.py` walks the real tree, so it can only
 witness a property the tree presents; each shape below is driven on a
 synthetic composition, and the walk's arms are enumerated in
 `test_mcp_import_refusals.py`. The lambda case stays because dropping the
-lambda arm from `static_value` reds it alone — nothing else on this tree
-catches a call's callee being read as a VALUE. The settled-callee families
+lambda arm from `static_value` reds it alone; the settled-callee families
 and their bounds are the callee-value question at the five forms issue
 1213 records.
 """
@@ -136,11 +135,8 @@ SETTLED_CALLEES = (
      '\n\ndef load():\n    return ({f"a": __import__}[f"a"])("pkg.leaf")\n'),
 )
 
-# The same widening's negative space. The first two rows are the direction
-# the short-circuit and last-wins rules take AWAY from the operation, so an
-# over-wide arm that reads the other operand or entry first loses them; the
-# rest are the raise positions the runtime settles to a KeyError or a
-# ZeroDivisionError, which name nothing and never enter the set either way.
+# The same widening's negative space: short-circuits away from the
+# operation, and the raise positions, which name nothing either way.
 BOUNDS = (
     ('a boolean that short-circuits away from the operation',
      '\n\ndef load():\n    return ([__import__][0] and print)("pkg.leaf")\n',
@@ -202,10 +198,8 @@ def test_the_settled_callee_families_resolve_their_module(_tmp):
 def test_the_short_circuit_and_raise_positions_keep_the_leaf_out(_tmp):
     """The widening's bound: no raise position and no short-circuit away
     from the operation puts the leaf in the set, and the raise positions
-    are CLEAN — the fold's raise semantics, which a mutant restoring the
-    base's decline would flip to a refusal. A boolean that hands out the
-    WRONG operand is the over-wide mutant of the family above, and the
-    store row stays refused because the store leaves the condition
+    are CLEAN — a mutant restoring the base's decline flips them to a
+    refusal. The store row stays refused: the store leaves the condition
     undecidable.
     """
     wrong = []
