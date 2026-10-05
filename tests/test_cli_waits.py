@@ -270,9 +270,8 @@ def test_the_result_wait_records_the_ramp_opening_below_the_interval(tmp):
     shape and was fixed first. A virtual clock records the sleeps the
     loop REQUESTS, so this pins the ramp's opening: macOS read 0.357s
     against a 0.25s bound. The fake charges the sleep, not the request,
-    so the request budget is the stalled-poll test in
-    tests/test_cli_transport.py, and the backoff is
-    test_cli_result_wait.py's.
+    so the request budget is the stalled-poll test below, and the
+    backoff is test_cli_result_wait.py's.
 
     The opening is also held BELOW the interval this call waits on, and
     that default is read off the signature rather than restated here, so
@@ -534,6 +533,49 @@ def test_a_bare_oserror_is_a_connection_failure_on_every_entry(tmp):
     """The clause admits the family, not the members met so far."""
     del tmp
     _check_transport_family('OSError')
+
+
+def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
+    """The timeout bounds the whole wait, not just the top of each lap.
+
+    The loop checked the clock before each iteration and then handed every
+    HTTP call its own fixed 30s, so one stalled poll ran far past what the
+    caller asked for — a 50ms wait returned after 320ms against a single
+    300ms stall.
+    """
+    del tmp
+    code = (
+        'import time\n'
+        'from daedalus_cli import transport\n'
+        'seen = []\n'
+        'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
+        '    seen.append(timeout)\n'
+        '    time.sleep(0.3)\n'
+        '    return {"pending": True}\n'
+        'transport._request = fake_api\n'
+        'start = time.monotonic()\n'
+        'res = transport.wait_for_result("c1", "extension", "d1", 0.5)\n'
+        'print("ELAPSED", round(time.monotonic() - start, 3))\n'
+        'print("RESULT", res)\n'
+        'print("FIRST_TIMEOUT", seen[0] if seen else None)\n')
+    r = run_python(code, cli_env(DAEDALUS_TOKEN=TOK))
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    fields = dict(
+        line.split(' ', 1) for line in r.stdout.splitlines() if ' ' in line)
+    assert fields['RESULT'] == 'None', r.stdout
+    # Two correct outcomes, and which one appears depends on how fast the
+    # interpreter got here: either no poll was started at all, because the
+    # deadline went before the first sleep returned — the loop refusing a
+    # poll it has no budget for — or exactly one was started and handed the
+    # REMAINING budget rather than 30 seconds. What must not happen is a poll
+    # carrying a timeout larger than the wait it belongs to.
+    if fields['FIRST_TIMEOUT'] != 'None':
+        first = float(fields['FIRST_TIMEOUT'])
+        assert 0 < first <= 0.5, r.stdout
+    # One stall of 0.3s can be absorbed; a second would mean the loop kept
+    # polling past its deadline. A generous ceiling, because this asserts the
+    # absence of a 30-second poll, not the scheduler's precision.
+    assert float(fields['ELAPSED']) < 3.0, r.stdout
 
 
 if __name__ == '__main__':
