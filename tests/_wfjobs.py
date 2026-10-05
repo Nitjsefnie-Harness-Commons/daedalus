@@ -5,6 +5,7 @@ decoder refuses never reaches a gate as an empty jobs set, and each job's
 header line travels with its decoded fields so a refusal or a violation
 names file, line and literal text.
 """
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,6 +72,41 @@ def workflow_files(directory=None):
     if not paths:
         raise YAMLReadError(f'no workflow files under {root}')
     return paths
+
+
+_RUN_PATH_TOKEN = re.compile(r'^[A-Za-z0-9_.][A-Za-z0-9_./-]*$')
+
+
+def run_path_candidates(run_text):
+    """Every repo-relative path a decoded `run:` text names.
+
+    The grammar: split the text on whitespace, strip edge `"` `'` `(` `)`
+    `;` `,` characters from each token, then admit a token whose first
+    character is a letter, digit, underscore or dot, whose every character
+    is one of those or a slash or a dash, that carries at least one `/`,
+    that does not begin `./`, `../` or `/`, and that does not end with
+    `/`. Output is sorted, without duplicates.
+
+    The boundary: a green proves each named path is a tracked file at a
+    root checkout's layout; it does not prove the step executes, and every
+    job on current main checks out at the repository root (the one
+    `working-directory: dist` step in release.yml names no candidates).
+    """
+    candidates = set()
+    for token in run_text.split():
+        token = token.strip('\'"();,')
+        if (_RUN_PATH_TOKEN.match(token)
+                and '/' in token
+                and not token.startswith(('./', '../', '/'))
+                and not token.endswith('/')):
+            candidates.add(token)
+    return sorted(candidates)
+
+
+def unresolved_run_paths(run_text, tracked):
+    """The candidates `tracked` (repo-relative paths) does not contain."""
+    return [path for path in run_path_candidates(run_text)
+            if path not in tracked]
 
 
 def jobs_mapping(workflow):

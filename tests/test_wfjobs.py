@@ -17,7 +17,9 @@ from _wffixtures import (  # noqa: E402
     BLOCK_NEEDS, BLOCK_OUTPUTS, _real, _refuses, _replaced)
 from _wfgraph import (  # noqa: E402
     _job_needs, _job_output_mapping, _matrix_job_running, _tests_yml)
-from _wfjobs import jobs_mapping, load, workflow_files  # noqa: E402
+from _wfjobs import (  # noqa: E402
+    jobs_mapping, load, run_path_candidates, unresolved_run_paths,
+    workflow_files)
 from _yamlscalar import YAMLReadError  # noqa: E402
 from _yamlsteps import (  # noqa: E402
     complete_job_mapping, step_mappings, workflow_mapping)
@@ -594,6 +596,71 @@ def test_shapes_beside_a_bare_empty_value_keep_their_verdicts(tmp):
     source = _real(tmp, BOUNDED_JOB + '    env: {a: , b: 1}\n')
     assert workflow_mapping(source)['jobs']['probe']['env'] == {
         'a': None, 'b': '1'}
+
+
+RUN_PATH_SPELLINGS = (
+    'python scripts/ci/install_lint_tools.py\n'
+    'python scripts/ci/install_lint_tools.py\n'
+    'python -m pytest daedalus_mcp/server.py --thresholds'
+    ' ".github/ci-thresholds.json"\n')
+NOT_CANDIDATES = (
+    ('$RUNNER_TEMP/probe', 'variable-led'),
+    ('./actionlint', 'explicit relative'),
+    ('../up/tool', 'parent relative'),
+    ('dist/*.whl', 'glob'),
+    ('/usr/bin/env', 'absolute'),
+    ('FOO=x/y', 'assignment'),
+    ('repos/$REPO/pulls', 'embedded variable'),
+    ('//', 'no name'),
+    ('https://example.com/a/b', 'scheme-led'),
+    ('.github/workflows/', 'trailing slash'),
+)
+PLANTED_RUN_STEP = (
+    'jobs:\n'
+    '  suites:\n'
+    '    runs-on: ubuntu-latest\n'
+    '    timeout-minutes: 5\n'
+    '    steps:\n'
+    '      - name: Install the lint tools the suites drive\n'
+    '        run: python scripts/ci/install_lint_tools.py\n'
+    '      - name: Probe the run-path control\n'
+    '        run: python'
+    ' scripts/ci/install_lint_tools_that_does_not_exist.py\n')
+
+
+def test_a_run_naming_real_paths_yields_exactly_those_candidates(tmp):
+    """Real spellings, one quoted; repeated, sorted, deduplicated."""
+    del tmp
+    assert run_path_candidates(RUN_PATH_SPELLINGS) == [
+        '.github/ci-thresholds.json',
+        'daedalus_mcp/server.py',
+        'scripts/ci/install_lint_tools.py',
+    ]
+
+
+def test_each_out_of_grammar_spelling_yields_no_candidates(tmp):
+    """One rule rejects each spelling; that rule's death flips its entry."""
+    del tmp
+    for spelling, label in NOT_CANDIDATES:
+        found = run_path_candidates(spelling)
+        assert found == [], (label, spelling, found)
+    combined = ' '.join(spelling for spelling, _label in NOT_CANDIDATES)
+    assert run_path_candidates(combined) == [], run_path_candidates(combined)
+
+
+def test_the_planted_step_is_refused_and_the_verdict_flips_on_resolution(tmp):
+    """The issue's planted step, decoded and walked like the real gate."""
+    del tmp
+    jobs = jobs_mapping(PLANTED_RUN_STEP)
+    run_text = '\n'.join(step.get('run', '')
+                         for step in jobs['suites']['steps'])
+    assert unresolved_run_paths(
+        run_text, {'scripts/ci/install_lint_tools.py'}
+    ) == ['scripts/ci/install_lint_tools_that_does_not_exist.py']
+    assert unresolved_run_paths(
+        run_text, {'scripts/ci/install_lint_tools.py',
+                   'scripts/ci/install_lint_tools_that_does_not_exist.py'}
+    ) == []
 
 
 if __name__ == '__main__':
