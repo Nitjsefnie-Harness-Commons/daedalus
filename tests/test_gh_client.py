@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """What `gh_client` calls an answer that is neither data nor a refusal.
 
-`gh_client.py` is the transport every `ci_wait` read goes through, and
-its subject is its own: the shape of a `gh` run, the read the pages of
-one become, and the wait a refusal with no instant behind it turns
-into. The neighbours hold the subjects around it, and this file is the
-middle - not the published-verdict predicate,
-`test_ci_wait_published.py`'s subject; `ci_state` is here because it
-is the client's. Every row drives the REAL loaded module against the
-fake `gh` in `_fake_gh.py`, so the answer is a real `gh` process and
-only the transport behind it is a double. `RateLimited` is deliberately
-not caught anywhere in this file: a pause is the classifier's verdict,
-and a row here expecting one would read another suite's subject
-through this one's client.
+`gh_client.py` is the transport every `ci_wait` read goes through, and its
+subject is its own: the shape of a `gh` run, the read the pages of one
+become, and the wait a refusal with no instant behind it turns into. The
+neighbours hold the subjects around it, and this file is the middle - not
+the published-verdict predicate, `test_ci_wait_published.py`'s subject;
+`ci_state` is here because it is the client's. Every row drives the REAL
+loaded module against the fake `gh` in `_fake_gh.py`, so the answer is a
+real `gh` process and only the transport behind it is a double.
+`RateLimited` is deliberately not caught anywhere in this file: a pause is
+the classifier's verdict, and a row here expecting one would read another
+suite's subject through this one's client.
 """
 import contextlib
 import os
@@ -109,9 +108,10 @@ def _gate_opened_off_thread(fake):
 
     `_fake_gh` writes its launcher per platform, and the two forms do
     not agree about what the process being killed IS: a POSIX script
-    `exec`s, so the launched process is the python reading stdin; a
-    `.bat` cannot, so on Windows it is `cmd.exe` and the python is its
-    child, whom the bound kills only. Opening the gate here, on a
+    `exec`s, so the launched process is the python reading stdin; a `.bat`
+    cannot, so on Windows it is `cmd.exe` and the python is its child.
+    The bound kills `cmd.exe` only, and the drain on Windows waits out
+    the surviving grandchild's handles. Opening the gate here, on a
     thread, is what the finally below could no longer do once the call
     stopped returning; it opens the gate on the way out too, only after
     the ceiling while the call is in it."""
@@ -208,11 +208,10 @@ def test_a_gh_that_cannot_be_launched_is_a_failure(tmp):
     executable is not there. Neither this nor a hang is a rate limit, so
     neither may become a pause. `DAEDALUS_GH` is the module's own
     override, so this is a real launch failing rather than the transport
-    replaced. Three things are pinned, and all three are what a pause
-    would take away: the exact failure class, the message - the launch's
-    own refusal - and the exception it was raised from, which tells this
-    half from the timeout beside it.
-    """
+    replaced. Three things are pinned, all three what a pause would take
+    away: the exact failure class, the message - the launch's own
+    refusal - and the exception it was raised from, which tells this
+    half from the timeout beside it."""
     client, fake = _client(tmp, runs_page([]))
     absent = os.path.join(fake.dir, 'gh-that-was-never-installed')
     refusal_type, message = _launch_refusal(absent)
@@ -229,9 +228,10 @@ def test_a_gh_that_never_answers_is_a_failure_too(tmp):
     die on an exception instead of reporting a failed poll. The bound is
     one second, and the hold makes the timeout real: a fake that
     answered would be a row proving nothing, `entered` the proof the
-    call reached it. The cause is compared by class as well as message -
-    the rows either side assert causes no single narrower `except`
-    could raise, so narrowing it takes one of them red."""
+    call reached it. The cause is compared by class as well as message:
+    the two rows either side of the tuple assert causes no single
+    narrower `except` could raise, so narrowing the tuple takes one of
+    them red."""
     client, fake = _client(tmp, runs_page([]), gate=True)
     # `setattr`, because the module was executed from a path rather than
     # imported: its names are as dynamic as the module object carries them

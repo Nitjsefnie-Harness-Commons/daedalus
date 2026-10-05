@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """The liveness pipe a watcher child is handed, and what ends it.
 
-`gh_client.spawn_watched` and `gh_client.watch_parent` are the half of
-the module that has no `ci_wait` in it: the untracked watchers the skill
-ships rest on this guarantee, and nothing measured it. The guarantee is
-the pipe's, not a parent id's - a pid against `os.getppid()` is
-re-parented on POSIX and historical on Windows, and a process-group kill
-orphans rather than ends - so the rows here are its two directions, on
-a real child: write end open and child alive, write end closed and
-gone. The platform arms are not faked: `os.name` is never patched,
-because patching it would claim a runtime this run is not. The coverage
-matrix unions the three platforms, so a row written for the platform it
-runs on measures the `nt` arms there and the POSIX arms here; what the
-Windows half cannot see is stated in the PR body. Five rows reach
-inside the module, direct calls - a stray `os._exit` here takes the
-suite down: the `watch_parent` refusals and the four ending rows on
-`_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`.
+`gh_client.spawn_watched` and `gh_client.watch_parent` are the half of the
+module that has no `ci_wait` in it: the untracked watchers the skill ships
+rest on this guarantee, and nothing measured it. The guarantee is the
+pipe's, not a parent id's - a pid against `os.getppid()` is re-parented on
+POSIX and historical on Windows, and a process-group kill orphans rather
+than ends - so the rows here are its two directions, on a real child: write
+end open and child alive, write end closed and gone. The platform arms are
+not faked: `os.name` is never patched, because patching it would claim a
+runtime this run is not. The coverage matrix unions the three platforms, so
+a row written for the platform it runs on measures the `nt` arms there and
+the POSIX arms here; what the Windows half cannot see is stated in the PR
+body. Five rows reach inside the module, direct calls - a stray `os._exit`
+here takes the suite down: the `watch_parent` refusals and the four ending
+rows on `_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`.
 """
 import contextlib
 import errno
@@ -41,7 +40,7 @@ SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 LIFETIME = 60
 
 # What a child writes once armed - and all an unmarked child writes: a
-# second line would sit in a pipe the row that never drains would fill.
+# second line would sit in a pipe that row never drains.
 ARMED = 'watching'
 
 # Tells the child to save coverage before it ends: `os._exit` runs no
@@ -375,8 +374,7 @@ def _alive_on_windows(pid):
     """Whether Windows answers the pid alive: `os.kill(pid, 0)` is not a
     probe there - signal 0 is CTRL_C_EVENT, aimed at the caller's own
     console - so liveness is asked of `OpenProcess`, a pid it cannot
-    open reading as gone.
-    """
+    open reading as gone."""
     import ctypes
     kernel32 = ctypes.windll.kernel32
     handle = kernel32.OpenProcess(0x1000, False, pid)
