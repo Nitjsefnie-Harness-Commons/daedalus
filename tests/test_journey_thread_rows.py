@@ -261,21 +261,22 @@ def test_self_totals_reconcile_on_the_shapes_a_real_profile_carries(tmp):
     """The numeric control over the shapes a REAL profile writes, recorded
     from the harvested CI profiles: relative positions (`+1 2`, `-1 21`),
     the trailing-space signed `calls=`, `*`-position arcs, a bare
-    `fn=(id)` re-select, and the thread-root chain whose entry arc
-    carries the thread's inclusive cost. Every cost line here is either
-    self or the arc it follows, so the totals sum to the file's own
-    `summary:` and `totals:` lines -- where the walk that matched neither
-    spelling billed every arc to the chain's root and read 4x the summary."""
+    `fn=(id)` re-select, and the thread-entry chain whose arc carries the
+    thread's inclusive cost. Every cost line here is either self or the
+    arc it follows, so the totals sum to the file's own `summary:` and
+    `totals:` lines -- where the walk that matched neither spelling
+    billed each arc to the caller that drew it, which on the harvest put
+    a whole thread's cost on `clone` alone."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.x.4', (
         'version: 1\npid: 21\npart: 1\nthread: 3\n'
         'cmd:  python3 server.py\npositions: line\nevents: Ir\n'
-        'summary: 3101\n'
+        'summary: 3106\n'
         '\n'
         'ob=(1) libc.so.6\n'
         'fl=(1) clone.S\n'
         'fn=(1) clone\n'
-        '83 1\n+1 1\n+1 1\n'
+        '83 1\n+1 1\n-2 5\n+1 1\n'
         'cfi=(2) pthread_create.c\n'
         'cfn=(2) start_thread\n'
         'calls=1 338 \n* 3057\n'
@@ -290,7 +291,6 @@ def test_self_totals_reconcile_on_the_shapes_a_real_profile_carries(tmp):
         'calls=1 12 \n* 3005\n'
         'fn=(5) work\n'
         '1 3000\n'
-        '\n'
         'fl=(6) errno-loc.c\n'
         'fn=(6) __errno_location\n'
         '25 1\n+1 2\n+1 1\n'
@@ -301,7 +301,7 @@ def test_self_totals_reconcile_on_the_shapes_a_real_profile_carries(tmp):
         '169 1\n+3 4\n+9 58\n+9 2\n'
         'fn=(4)\n'
         '0 8\n'
-        'totals: 3101\n'))
+        'totals: 3106\n'))
     rows = functions.read(Path(tmp), 'callgrind.x')
     assert len(rows) == 1, rows
     row = rows[0]
@@ -309,9 +309,10 @@ def test_self_totals_reconcile_on_the_shapes_a_real_profile_carries(tmp):
         row['cmd'] == 'python3 server.py'), row
     assert row['functions'] == [
         {'fn': 'work', 'ir': 3000}, {'fn': '_itoa_word', 'ir': 65},
-        {'fn': 'thread_run', 'ir': 23}, {'fn': '__errno_location', 'ir': 6},
-        {'fn': 'start_thread', 'ir': 4}, {'fn': 'clone', 'ir': 3}], row
-    assert sum(f['ir'] for f in row['functions']) == 3101, row
+        {'fn': 'thread_run', 'ir': 23}, {'fn': 'clone', 'ir': 8},
+        {'fn': '__errno_location', 'ir': 6},
+        {'fn': 'start_thread', 'ir': 4}], row
+    assert sum(f['ir'] for f in row['functions']) == 3106, row
 
 
 def test_every_preserved_profile_parses_whole(tmp):
