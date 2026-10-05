@@ -5,8 +5,8 @@ bridge calls), filled from REQUIRED_ARGUMENTS, asserted in order.
 
 A parameter no case exercises is named in UNPINNED_PARAMETERS with the
 reason it is safe to leave unwitnessed. The raise site every refusal case
-must witness is _mcp_guard_floor's: one witness per site, and every site
-the tool surface spells is owed a case, an allowlist entry, or an
+must witness is _mcp_guard_floor's: one witness per site; every site the
+tool surface spells is owed a case, an allowlist entry, or an
 off-surface declaration. That floor witnesses raises only — a refusal
 written as `return {'error': ...}` (the repo's own convention at
 daedalus_mcp/tools_css.py `unblock_requests`) never raises, so rewriting a
