@@ -28,17 +28,14 @@ over a control tree that is only a string.
 
 A RAISER is the OBJECT a call reaches, not the letters it is written with.
 `REFUSAL_RAISERS` names the ones the analysers spell out, and to those this
-adds every name one is BOUND to — by a store of another, in any of the three
-forms a binding takes, resolved to a fixed point so a chain of stores is a
-chain rather than an accident of order — and every `functools.partial` built
-from one, which raises the refusal it wraps wherever it is called from. An
-ATTRIBUTE is matched on its own name whatever its base, because the analysers
-hand their raiser to `self` and the property is the attribute the call names.
-
-The message is not read at all: an arm whose detail is assembled, passed by
-keyword, forwarded through a local, produced by a helper or raised as an
-exception type nobody anticipated is a site here exactly as one that spells a
-literal is, which is the whole difference between a site and a message.
+adds every name one is BOUND to — by a store of another, resolved to a fixed
+point so a chain of stores is a chain rather than an accident of order — and
+every `functools.partial` built from one, which raises the refusal it wraps
+wherever it is called from. An ATTRIBUTE is matched on its own name whatever
+its base, because the analysers hand their raiser to `self`. The message is
+not read at all: an arm whose detail is assembled, passed by keyword,
+forwarded through a local, produced by a helper or raised as an exception
+type nobody anticipated is a site here exactly as one that spells a literal.
 
 This module RAISES nothing and calls no raiser, which is why it is absent
 from the derived set rather than named out of it: a module is in the

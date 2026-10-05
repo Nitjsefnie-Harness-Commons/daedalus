@@ -4,15 +4,18 @@
 THE MARKER IS A PLACE THAT CAN RAISE, not a test name, not a node type and
 not a message. A site is a `raise` whatever it raises, or a call to a
 refusal raiser — the closure's own `_refuse`, the callback every arm
-receives, or the `AssertionError` constructor both of those raise — and it
-is keyed on the function it stands in and its own line, because that is the
-place a reader can go and look at. An arm whose message is assembled, passed
-by keyword, forwarded through a local, produced by a helper, or raised as an
+receives, or the `AssertionError` constructor both of those raise — keyed on
+the function it stands in and its own line, because that is the place a
+reader can go and look at. An arm whose message is assembled, passed by
+keyword, forwarded through a local, produced by a helper, or raised as an
 exception type nobody anticipated is still an arm, and a table keyed on
-message text cannot see one of those: each was a real arm a reviewer planted
-in a real analyser while this suite stayed green. The message is still read,
-as the LABEL a row carries beside its site rather than as the site's
-identity, so a row still reads like the refusal it names.
+message text cannot see one. The message is still read, as the LABEL a row
+carries beside its site, so a row still reads like the refusal it names, and
+each table row carries the FIXED part of the message, never the node's own
+spelling. Two labels are shaped so a plain grep of the analysers under-counts
+them: `_refuse_default` names the thing it hands away through `_HIDDEN_NOUN`,
+a VARIABLE, so one call site spells three refusals, and
+`yields_the_operation` refuses a mention that is a FORMAT of the node.
 
 The set is derived twice over and compared with the tables both ways, so
 neither the analysers nor the tables can drift apart quietly. Both halves of
@@ -22,25 +25,15 @@ it is bound to and through a partial built from one, and a module the walk
 REACHES, by an `import` statement or by a call of the import-by-name
 operation carrying a literal name. The MODULES are the connected component of
 the `_mcp_*` graph the walk's entry belongs to, keeping the members that
-spell a refusal site at all.
+spell a refusal site at all. The comparison cannot pass by returning nothing
+on both sides: `CONTROL` and `CONTROL_LEAF` are a two-module TREE, the second
+reached from the first by nothing but a `__import__` call, so the control is
+on the MODULE-SET axis as well as the detail axis, and the derivation is
+asked to find every one of them before it compares anything.
 
-The comparison cannot pass by returning nothing on both sides. `CONTROL` and
-`CONTROL_LEAF` below are a two-module TREE, the second reached from the first
-by nothing but a `__import__` call, so the control is on the MODULE-SET axis
-as well as the detail axis the six arms on it are on. The derivation is asked
-to find every one of them before it is asked to compare anything.
-
-A key is a LINE, the same convention `_mcp_guard_floor` keys its own sites on,
-so an edit above a site in one of these modules moves it and this case says
-exactly where it moved to — a loud cost for naming a place, and the derived
-set is printed in the failure.
-
-Two labels are shaped so a plain grep of the analysers under-counts them:
-`_refuse_default` names the thing it hands away through `_HIDDEN_NOUN`, a
-VARIABLE, so one call site spells three refusals, and
-`yields_the_operation` refuses a mention that is a FORMAT of the node rather
-than of the text. Each table row carries the FIXED part of the message and
-never the node's own spelling.
+A key is a LINE, the same convention `_mcp_guard_floor` keys its own sites
+on, so an edit above a site in one of these modules moves it and this case
+says exactly where it moved to, with the derived set printed in the failure.
 
 Each arm is stated twice: the refusal, and a NEAR MISS the walk must leave
 alone — the same shape with the one decision that separates the two arms taken
@@ -568,30 +561,19 @@ def test_every_dead_code_barrier_kind_marks_the_tail_behind_it(_tmp):
 def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
     """Every site the analysers can raise has a row, on both sides.
 
-    The module set is DERIVED (`analyser_modules`) rather than named, the
-    sites are read off each module's parse, and each set is compared with
-    the table that claims to cover it both ways: a site with no row fails,
-    and a row whose site is gone fails, so neither the analysers nor the
-    tables can move without this saying so. A count sits beside each
-    comparison because two wrong answers of the same size satisfy a set
-    equality, and the FLOOR has its own table and count for the reason its
-    sites were absorbed by a set of function names.
-
-    The comparison cannot pass vacuously, and the control is on the axis the
-    first six arms are not. `CONTROL_LEAF` is in the component only because
-    the walk follows the one `__import__` call at the foot of `CONTROL`, and
-    its own three arms are raisers reached through a local, through an
-    attribute and through a `functools.partial`. A derivation that closed
-    over static import statements, or that recognised a raiser by the letters
-    its call is written with, reports half a control and this says which half
-    before it compares anything against a table.
-
+    The module set is DERIVED (`analyser_modules`), the sites are read off
+    each module's parse, and each set is compared with its table both ways:
+    a site with no row fails, a row whose site is gone fails. A count sits
+    beside each comparison because two wrong answers of the same size
+    satisfy a set equality, and the FLOOR has its own table and count for
+    the reason its sites were absorbed by a set of function names.
+    `CONTROL_LEAF` is in the component only because the walk follows the
+    one `__import__` call at the foot of `CONTROL`; a derivation that closed
+    over static imports, or recognised a raiser by the letters its call is
+    written with, reports half a control and this says which half.
     The deep-chain arm drives the walk's own recursion limit (site `None`).
-
-    `_refuse_default` is one derived site and three rows, which is the arm
-    count and the site count disagreeing on purpose: the message names the
-    thing handed away through `_HIDDEN_NOUN`, so one call site spells three
-    refusals.
+    `_refuse_default` is one derived site and three rows:
+    the message names the thing handed away through `_HIDDEN_NOUN`.
     """
     del _tmp
     sources = {'control': CONTROL, 'control_leaf': CONTROL_LEAF}
