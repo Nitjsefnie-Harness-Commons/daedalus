@@ -415,7 +415,7 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
 
 
 def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
-    """Every wait in the bridge fixture's teardown reads the shared bound.
+    """Every `.wait(` call in the bridge fixture reads the shared bound.
 
     A literal satisfies the reaper controls' existence demand; the shape
     is demanded literally here, not derived from the file it judges.
@@ -431,9 +431,7 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
     for node in ast.walk(bridges[0]):
         if not (isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
-                and node.func.attr == 'wait'
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == 'proc'):
+                and node.func.attr == 'wait'):
             continue
         timeouts = [kw for kw in node.keywords if kw.arg == 'timeout']
         if not (len(timeouts) == 1
@@ -443,7 +441,7 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
                 and timeouts[0].value.value.id == 'SUITE_BOUND'):
             unshared.append(f'tests/_util.py:{node.lineno}')
         found += 1
-    assert found, ('no proc.wait left in the bridge fixture: the pin '
+    assert found, ('no wait call left in the bridge fixture: the pin '
                    'has no subject until derived again from the teardown')
     assert not unshared, ('waits not reading timeout=SUITE_BOUND.'
                           f'CLEANUP_TIMEOUT_S: {unshared}')
