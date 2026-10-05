@@ -2,17 +2,13 @@
 """The refusal witness floor's own detection limbs, on synthetic input.
 
 Every guard the tools reach is witnessed on a healthy tree, so the
-registration-driven pass in test_mcp_tools.py never sees a gap. These drive
-the floor directly, which is the only way its detection is banked. The
-import closure is what makes the set of modules the floor scans closed,
-and the registration-driven pass drives it over the real tree, beside the
-closure limit it cannot exercise: that is the shape `daedalus_mcp`
-never presents, carried as a synthetic composition in
-`test_mcp_closure_limits.py` and enumerated arm by arm in
-`test_mcp_import_refusals.py`. They are not
-the shapes `_mcp_import_closure` declares ACCEPTED — a value reached
-through a call's result, a tracked module or the operation handed as a
-call argument, a value computed at runtime — which no control pins, because
+registration-driven pass in test_mcp_tools.py never sees a gap; these
+drive the floor directly, the only way its detection is banked. The
+import closure closes the module set the floor scans; the closure limit
+the real tree never presents is carried in `test_mcp_closure_limits.py`,
+enumerated in `test_mcp_import_refusals.py`. The shapes
+`_mcp_import_closure` declares ACCEPTED (a call's result, a handed
+tracked module, a runtime-computed value) are pinned by no control, for
 a control that pinned them would forbid closing them.
 """
 import ast

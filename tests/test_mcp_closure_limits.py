@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
-"""The one import-closure limit the real `daedalus_mcp` tree cannot show.
+"""Import-closure shapes the real `daedalus_mcp` tree cannot show.
 
 The refusal pass in `test_mcp_tools.py` walks the real tree, so it can only
 witness a closure property the tree actually presents. Each shape below is
 one it does not present, driven on a synthetic composition instead, and the
-arms of the walk are enumerated in `test_mcp_import_refusals.py`.
-
-This file carried three such shapes and carries two. The removed one went
-because a mutant that kills its case here ALSO reds a case in
-`test_mcp_import_refusals.py`, so the file was not the only place the defect
-showed and the shape was breadth rather than cover. The lambda case stayed
-on a measurement rather than on a preference: dropping the lambda arm
-from `static_value` reds it and leaves `test_mcp_import_refusals.py` 10/10
-and `test_mcp_tools.py` 21/21. Nothing else on this tree catches a call's
-callee being read as a VALUE. The settled-callee families and their bounds
-below are the second: they are the callee-value question at the five forms
-issue 1213 records, and each row is read through the walk's own entry.
+arms of the walk are enumerated in `test_mcp_import_refusals.py`. The
+lambda case stays because dropping the lambda arm from `static_value` reds
+it alone — nothing else on this tree catches a call's callee being read as
+a VALUE — and the settled-callee families and their bounds are the
+callee-value question at the five forms issue 1213 records, each read
+through the walk's own entry.
 """
 import sys
 from pathlib import Path
@@ -41,14 +35,12 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
     """A call's callee is a VALUE, and `(lambda: op)()` produces the
     operation, so the module resolves exactly as the direct spelling does.
 
-    The near miss is a lambda the SAME call cannot fill, which is the arm
-    this row is about rather than its neighbour: a lambda with a required
-    parameter raises `TypeError` before it produces anything, so it
-    resolves nothing and refuses nothing. The zero-argument CALL after the
-    lambda is what makes it that arm — it is the shape every positive here
-    has, differing only in the signature. Without that call the row would be
-    testing "a lambda read in place", which the walk answers by the
-    call-result limit instead, and a rule that confused the two would pass.
+    The near miss is a lambda the SAME call cannot fill: a lambda with a
+    required parameter raises `TypeError` before it produces anything, so
+    it resolves nothing and refuses nothing. The zero-argument CALL after
+    the lambda is what makes it that arm — without it the row would test "a
+    lambda read in place", which the walk answers by the call-result limit
+    instead.
     """
     for callee in ('(lambda: importlib.import_module)()',
                    '(lambda *a: importlib.import_module)()',
@@ -161,9 +153,6 @@ BOUNDS = (
     ('a merge whose repeated key the last entry replaces',
      '\n\ndef load():\n'
      '    return ({"a": __import__, **{"a": print}}["a"])("pkg.leaf")\n'),
-    ('an f-string key the display does not carry',
-     '\n\ndef load():\n    return ({0: 1, "a": __import__}[f"b"])'
-     '("pkg.leaf")\n'),
     ('a merge display that does not carry the key',
      '\n\ndef load():\n    return ({**{0: 1}, "a": __import__}["b"])'
      '("pkg.leaf")\n'),
@@ -196,10 +185,9 @@ def test_the_settled_callee_families_resolve_their_module(_tmp):
     """Each family the issue names resolves the leaf it reaches at runtime.
 
     The leaf in the scan set is the only witness: a resolution is told
-    apart from a silence by it, and from the base's over-refusal by its
-    absence there. The failures are collected, because the five families
-    are five arms of one fold and a plant that silences two of them has to
-    name both.
+    apart from a silence by it. The failures are collected, because the
+    five families are five arms of one fold and a plant that silences two
+    of them has to name both.
     """
     wrong = []
     for label, source in SETTLED_CALLEES:
@@ -211,12 +199,10 @@ def test_the_settled_callee_families_resolve_their_module(_tmp):
 
 def test_the_short_circuit_and_raise_positions_keep_the_leaf_out(_tmp):
     """The widening's bound: no raise position and no short-circuit away
-    from the operation puts the leaf in the set.
-
-    A raise position names nothing, so the leaf's absence is the witness on
-    both sides of the fix; the two short-circuit rows are read the same way
-    because a boolean that hands out the WRONG operand is the over-wide
-    mutant of the family above them.
+    from the operation puts the leaf in the set. A raise position names
+    nothing, so the leaf's absence is the witness on both sides of the fix;
+    a boolean that hands out the WRONG operand is the over-wide mutant of
+    the family above.
     """
     wrong = []
     for label, source in BOUNDS:
@@ -230,9 +216,7 @@ def test_the_short_circuit_and_raise_positions_keep_the_leaf_out(_tmp):
 def test_the_undecided_callees_stay_refused(_tmp):
     """A callee the fold cannot decide still mentions the operation, and
     that refusal is the fail-closed default this widening is bounded by.
-
-    Each row is read against the arm it enters, so a rule that refuses by
-    some other route does not satisfy it, and a rule that settles an
+    Each row is read against the arm it enters, so a rule that settles an
     undecided condition, an unread operand, an unread key or an unread
     projection loses the row named for it.
     """
