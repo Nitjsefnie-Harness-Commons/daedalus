@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Browser-free mutation controls for fixture fault classification."""
+import ast
 import contextlib
 import errno
 import subprocess
@@ -20,6 +21,9 @@ from _realbrowser_classification_support import (  # noqa: E402
     answered_diagnosis, control_diagnosis)
 from _realbrowser_fixture_controls import (  # noqa: E402
     _browser_version, _enter_fixture, _fixture_runtime)
+
+BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                   'classification_suite_bound')
 
 
 def _fixture_failure(tmp):
@@ -193,23 +197,6 @@ def test_answering_unready_worker_is_repository_failure(tmp):
     assert attempts == [], attempts
 
 
-def test_unreachable_worker_is_environment_skip(tmp):
-    failure, attempts = _worker_timeout_failure(tmp, False)
-    environment = _realbrowser.BrowserEnvironmentSkipped
-    assert failure.__class__ is environment, failure
-    assert 'controlled worker timeout' in str(failure), failure
-    assert 'this browser never let the extension worker be reached' in str(
-        failure), failure
-    # One diagnosis, carrying what it needs to name our source on a verdict.
-    assert len(attempts) == 1, attempts
-    node, browser, extension, worker_script, tmp_dir = attempts[0]
-    assert node == 'node-for-control', node
-    assert browser == '/controlled/chromium', browser
-    assert extension == EXTENSION_ROOT.resolve(), extension
-    assert worker_script == 'background.js', worker_script
-    assert tmp_dir is tmp or Path(tmp_dir) == Path(tmp), tmp_dir
-
-
 def test_control_extension_turns_worker_absence_into_failure(tmp):
     def guilty(*args):
         del args
@@ -222,12 +209,10 @@ def test_control_extension_turns_worker_absence_into_failure(tmp):
     assert len(attempts) == 1, attempts
 
 
-def test_machine_skip_carries_what_the_diagnosis_observed(tmp):
-    """The machine verdict carries what the diagnosis observed with it.
-
-    A skip byte-identical to one where no diagnosis ran leaves the
-    machine-blame claim unevidenced.
-    """
+def test_machine_skip_carries_observation_and_diagnosis_payload(tmp):
+    """The machine verdict is a skip carrying what the diagnosis observed
+    and the arguments it ran with; a byte-identical skip would leave the
+    machine-blame claim unevidenced."""
     def observed(*args):
         del args
         return False, 'controlled: the control worker never answered either'
@@ -235,24 +220,38 @@ def test_machine_skip_carries_what_the_diagnosis_observed(tmp):
     failure, attempts = _worker_timeout_failure(tmp, False, verdict=observed)
     assert failure.__class__ is (
         _realbrowser.BrowserEnvironmentSkipped), failure
+    assert 'controlled worker timeout' in str(failure), failure
     assert 'this browser never let the extension worker be reached' in str(
         failure), failure
     assert 'controlled: the control worker never answered either' in str(
         failure), failure
+    # One diagnosis, carrying what it needs to name our source on a verdict.
     assert len(attempts) == 1, attempts
+    node, browser, extension, worker_script, tmp_dir = attempts[0]
+    assert node == 'node-for-control', node
+    assert browser == '/controlled/chromium', browser
+    assert extension == EXTENSION_ROOT.resolve(), extension
+    assert worker_script == 'background.js', worker_script
+    assert tmp_dir is tmp or Path(tmp_dir) == Path(tmp), tmp_dir
 
 
-def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
+def test_answered_control_diagnosis_blames_our_source_and_relaunches(tmp):
+    """An answering control worker proves the browser has the skill, so
+    worker absence is blamed on our source; each relaunch loads the
+    declared worker plus a fresh control extension before concluding."""
     outcome, launches, processes = answered_diagnosis(tmp)
     assert outcome.__class__ is AssertionError, outcome
     reported = str(outcome)
+    assert str(EXTENSION_ROOT.resolve()) in reported, reported
+    assert 'background.js' in reported, reported
     assert ('Chromium 151.0.7922.169 (controlled) demonstrably runs an '
             'unpacked MV3 worker' in reported), reported
     assert "is this repository's, not the machine's" in reported, reported
+    assert 'two consecutive diagnosis launches' in reported, reported
     assert len(processes) == 2, processes
     for process in processes:
         process.terminate.assert_called_once()
-        process.wait.assert_called_once_with(timeout=10)
+        process.wait.assert_called_once_with(timeout=BOUND.CLEANUP_TIMEOUT_S)
     assert len(launches) == 2, launches
     loaded = [[item for item in launch
                if item.startswith('--load-extension=')]
@@ -268,27 +267,22 @@ def test_control_diagnosis_launches_both_extensions_twice_before_guilt(tmp):
 
 
 def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
-    """No control answer is a browser that never demonstrated anything."""
+    """No control answer — or a diagnosis browser that is gone before it
+    could answer — leaves the skip with the machine."""
     outcome, launches, processes = control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0, 31)))
     assert outcome[0] is False, outcome
     assert 'no answering worker either' in outcome[1], outcome
-    assert len(processes) == 1, processes
-    processes[0].terminate.assert_called_once()
-    processes[0].wait.assert_called_once_with(timeout=10)
-    assert len(launches) == 1, launches
-
-
-def test_control_browser_exit_ends_the_diagnosis_without_a_verdict(tmp):
-    """A diagnosis browser that is gone cannot demonstrate anything."""
-    outcome, launches, processes = control_diagnosis(
-        tmp, [False], mock.Mock(side_effect=(0, 0)), poll=1)
-    assert outcome[0] is False, outcome
-    assert 'exited before any control worker' in outcome[1], outcome
     assert len(launches) == 1, launches
     assert len(processes) == 1, processes
     processes[0].terminate.assert_called_once()
-    processes[0].wait.assert_called_once_with(timeout=10)
+    processes[0].wait.assert_called_once_with(timeout=BOUND.CLEANUP_TIMEOUT_S)
+    (Path(tmp) / 'exited').mkdir()
+    exited, launches, processes = control_diagnosis(
+        Path(tmp) / 'exited', [False],
+        mock.Mock(side_effect=(0, 0)), poll=1)
+    assert exited[0] is False, exited
+    assert 'exited before any control worker' in exited[1], exited
 
 
 def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
@@ -300,7 +294,7 @@ def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
     assert len(processes) == 2, processes
     for process in processes:
         process.terminate.assert_called_once()
-        process.wait.assert_called_once_with(timeout=10)
+        process.wait.assert_called_once_with(timeout=BOUND.CLEANUP_TIMEOUT_S)
 
 
 def test_no_browser_never_launches_a_diagnosis(tmp):
@@ -586,6 +580,45 @@ def test_hostile_page_setup_failure_is_repository_failure(tmp):
         failure = _call_failure(lambda: _realbrowser.hostile_eval_matrix(tmp))
     assert failure.__class__ is AssertionError, failure
     assert 'controlled poison' in str(failure), failure
+
+
+def _assert_shared_bound(node, name, line):
+    """One expected-side leaf: the shared constant, spelled by name."""
+    if isinstance(node, ast.List):
+        for item in node.elts:
+            _assert_shared_bound(item, name, line)
+        return
+    shared = (isinstance(node, ast.Attribute)
+              and node.attr == 'CLEANUP_TIMEOUT_S')
+    assert shared, (f'{name}:{line}: teardown-wait row pins a literal, '
+                    'not BOUND.CLEANUP_TIMEOUT_S')
+
+
+def test_teardown_wait_rows_read_the_shared_cleanup_bound(tmp):
+    """Every teardown-wait row reads BOUND.CLEANUP_TIMEOUT_S: CPython
+    interns small ints, so only the parse tree can tell it from a 10."""
+    del tmp
+    here = Path(__file__).resolve().parent
+    for name in ('test_real_browser_classification.py',
+                 'test_real_browser_harness_recovery.py'):
+        tree = ast.parse((here / name).read_text(encoding='utf-8'))
+        for node in ast.walk(tree):
+            waits = (isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Attribute)
+                     and node.func.attr == 'assert_called_once_with'
+                     and isinstance(node.func.value, ast.Attribute)
+                     and node.func.value.attr == 'wait')
+            if waits:
+                bound = next((k.value for k in node.keywords
+                              if k.arg == 'timeout'), None)
+                _assert_shared_bound(bound, name, node.lineno)
+            recorded = (isinstance(node, ast.Compare)
+                        and any(isinstance(leaf, ast.Attribute)
+                                and leaf.attr == 'wait_timeouts'
+                                for leaf in ast.walk(node)))
+            if recorded:
+                for side in node.comparators:
+                    _assert_shared_bound(side, name, node.lineno)
 
 
 def main():
