@@ -612,20 +612,18 @@ def test_teardown_wait_rows_read_the_shared_cleanup_bound(tmp):
                  'test_real_browser_harness_recovery.py'):
         tree = ast.parse((here / name).read_text(encoding='utf-8'))
         for node in ast.walk(tree):
-            waits = (isinstance(node, ast.Call)
-                     and isinstance(node.func, ast.Attribute)
-                     and node.func.attr == 'assert_called_once_with'
-                     and isinstance(node.func.value, ast.Attribute)
-                     and node.func.value.attr == 'wait')
-            if waits:
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'assert_called_once_with'
+                    and isinstance(node.func.value, ast.Attribute)
+                    and node.func.value.attr == 'wait'):
                 bound = next((k.value for k in node.keywords
                               if k.arg == 'timeout'), None)
                 _assert_shared_bound(bound, name, node.lineno)
-            recorded = (isinstance(node, ast.Compare)
-                        and any(isinstance(leaf, ast.Attribute)
-                                and leaf.attr == 'wait_timeouts'
-                                for leaf in ast.walk(node)))
-            if recorded:
+            elif (isinstance(node, ast.Compare)
+                    and any(isinstance(leaf, ast.Attribute)
+                            and leaf.attr == 'wait_timeouts'
+                            for leaf in ast.walk(node))):
                 for side in node.comparators:
                     _assert_shared_bound(side, name, node.lineno)
 
