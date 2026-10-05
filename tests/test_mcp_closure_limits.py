@@ -83,9 +83,10 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
 def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
     """A depth-20 chain costs at most a small constant times a depth-10
     one; re-asking a subtree's verdict twice per level scores x2 here, in
-    whichever arm the descent runs — subscript nesting, or nested calls.
-    Each depth's set is asserted, so the composition alone must be the
-    answer at every depth, not only the last one's."""
+    whichever arm the descent runs — subscript nesting, nested calls, or
+    the one-tuple store's fall-through. Each depth's set is asserted, so
+    the composition alone must be the answer at every depth, not only the
+    last one's."""
     real_scan, real_element = (_mcp_code_eval._scan,
                                _mcp_code_eval._element_node)
     tally, counts, names = [0], {}, {}
@@ -106,7 +107,12 @@ def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
                 f'    return {"f(" * depth}importlib.import_module'
                 f'{")" * depth}("pkg.leaf")\n')
 
-    shapes = {'subscript': subscript, 'call': calls}
+    def tuples(depth):
+        return ('\n\n\ndef load():\n'
+                f'    x = {"(" * depth}0{",)" * depth}\n')
+
+    shapes = {'subscript': subscript, 'call': calls,
+              'fall-through': tuples}
     with mock.patch.multiple(
             _mcp_code_eval, _scan=surrogate(real_scan),
             _element_node=surrogate(real_element)):
