@@ -37,8 +37,14 @@ on:
 permissions:
   contents: read
 
+# Per-commit groups on push and workflow_dispatch: a landed main SHA's
+# verdict must complete, so neither a newer push nor a re-run of an older
+# SHA may cancel it (issue #1547) — under github.ref every main push shared
+# one group and the newer run cancelled the incumbent. pull_request events
+# carry pull_request.number, so a PR keeps one group per number and a
+# superseded head push is still cancelled.
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
