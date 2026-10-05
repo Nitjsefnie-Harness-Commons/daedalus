@@ -2,44 +2,34 @@
 
 `test_mcp_import_refusals.py` compares what this reads with the tables that
 claim to cover it, so a derivation that recognises a raiser or a reachable
-module by its SPELLING is a gate that goes green on a real arm. The walk
+module by its SPELLING is a gate that goes green on a real arm: the walk
 reaches a module through whatever the runtime reaches, and a refusal is
-raised through whatever object the module hands away; neither is a name, and
-a reader who looks for the name finds nothing where the arm is.
+raised through whatever object the module hands away; neither is a name.
 
-Two decisions follow, and both are the walk's own rather than a reader's.
+An EDGE is what the walk would FOLLOW: a static import, and a call the walk
+resolves to the import-by-name operation and hands a LITERAL module name
+(`__import__('_mcp_dead_code')` reaches the same module the `import` above
+it reaches). A name the walk cannot read is a REFUSAL at that call rather
+than an edge — the arm is already one of that module's own sites, and the
+module it might have named is unprovable. The readers are the walk's own —
+`_mcp_import_closure._dynamic_callees`, `_mcp_selection_fold.callee_value`,
+`is_dynamic_import` and `_mcp_import_closure._folded_string` — so a
+spelling the walk accepts is an edge and one it declines is not; only the
+resolution differs, a name resolving against the module names handed in
+rather than the filesystem, which is what lets the same reader run over a
+control tree that is only a string.
 
-An EDGE is what the walk would FOLLOW. A static import is one, and so is a
-call the walk resolves to the import-by-name operation and hands a LITERAL
-module name: `__import__('_mcp_dead_code')` reaches the same module the
-`import` above it reaches, so a module reached only that way is in the
-component and its sites have to be declared. A name the walk cannot read is
-a REFUSAL at that call rather than an edge, and the derivation follows
-neither: the arm is already one of that module's own sites, and the module
-it might have named is one the walk says it cannot prove. The readers are the
-walk's own — `_mcp_import_closure._dynamic_callees`,
-`_mcp_selection_fold.callee_value`, `is_dynamic_import` and
-`_mcp_import_closure._folded_string` — so a spelling the walk accepts is an
-edge and one it declines is not, and a change to what the walk follows
-changes what is enumerated without a second rule to keep in step. Only the
-resolution differs: a name is resolved against the module names handed in
-rather than against the filesystem, which is what lets the same reader run
-over a control tree that is only a string.
-
-A RAISER is the OBJECT a call reaches, not the letters it is written with.
-`REFUSAL_RAISERS` names the ones the analysers spell out, and to those this
-adds every name one is BOUND to — by a store of another, resolved to a fixed
-point so a chain of stores is a chain rather than an accident of order — and
-every `functools.partial` built from one, which raises the refusal it wraps
-wherever it is called from. An ATTRIBUTE is matched on its own name whatever
-its base, because the analysers hand their raiser to `self`. The message is
-not read at all: an arm whose detail is assembled, passed by keyword,
-forwarded through a local, produced by a helper or raised as an exception
-type nobody anticipated is a site here exactly as one that spells a literal.
+A RAISER is the OBJECT a call reaches: `REFUSAL_RAISERS` names the ones the
+analysers spell out, plus every name one is BOUND to (by a store of
+another, resolved to a fixed point so a chain of stores is a chain) and
+every `functools.partial` built from one. An ATTRIBUTE is matched on its
+own name whatever its base. The MESSAGE is not read at all: an arm whose
+detail is assembled, passed by keyword, forwarded through a local,
+produced by a helper or raised as an unanticipated exception type is a site
+here exactly as one that spells a literal.
 
 This module RAISES nothing and calls no raiser, which is why it is absent
-from the derived set rather than named out of it: a module is in the
-component by what it reaches and is counted by its own arms.
+from the derived set rather than named out of it.
 """
 import ast
 from pathlib import Path
@@ -87,18 +77,13 @@ def arm_sites(source, name):
 
 
 def analyser_modules():
-    """The analyser modules the walk is built from, derived.
-
-    The set is the CONNECTED COMPONENT of the `_mcp_*` module graph the
-    walk's entry belongs to, keeping the members that spell a refusal site
-    at all. That is what two literals could not do: the helpers
+    """The analyser modules the walk is built from, derived: the CONNECTED
+    COMPONENT of the `_mcp_*` module graph the walk's entry belongs to,
+    keeping the members that spell a refusal site at all. The helpers
     `_mcp_code_eval`, `_mcp_dead_code` and `_mcp_selection_fold` are in the
     component and are absent because they raise nothing, rather than by
-    being named out; a module the walk REACHES — through an `import`
-    statement, or through a call of the import-by-name operation carrying a
-    literal name — joins the component and has to be declared, whichever of
-    the two reached it; and an arm added in `_module_guard_sites` is counted
-    rather than absorbed by a set of function names.
+    being named out; a module the walk REACHES joins the component and has
+    to be declared.
     """
     sources = {path.stem: path.read_text(encoding='utf-8')
                for path in sorted(TESTS.glob('_mcp_*.py')) if path.is_file()}

@@ -32,17 +32,14 @@ on the MODULE-SET axis as well as the detail axis, and the derivation is
 asked to find every one of them before it compares anything.
 
 A key is a LINE, the same convention `_mcp_guard_floor` keys its own sites
-on, so an edit above a site in one of these modules moves it and this case
-says exactly where it moved to, with the derived set printed in the failure.
-
-Each arm is stated twice: the refusal, and a NEAR MISS the walk must leave
-alone — the same shape with the one decision that separates the two arms taken
-the other way, so a rule that over-reaches loses as visibly as one that
-under-reaches. An arm with no near miss says so in its row.
-
-The dead-code barrier kinds are the same question asked of POSITIONS, and
-`test_mcp_tools.py` carries the real-tree walk while
-`test_mcp_closure_limits.py` carries the one limit it cannot exercise.
+on, so an edit above a site moves it and this case says exactly where it
+moved to, with the derived set printed in the failure. Each arm is stated
+twice: the refusal, and a NEAR MISS the walk must leave alone — the same
+shape with the one separating decision taken the other way, so a rule that
+over-reaches loses as visibly as one that under-reaches; an arm with no
+near miss says so in its row. The dead-code barrier kinds are the same
+question asked of POSITIONS: `test_mcp_tools.py` carries the real-tree
+walk, `test_mcp_closure_limits.py` the one limit it cannot exercise.
 """
 import sys
 from pathlib import Path
@@ -50,15 +47,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_arm_derivation  # noqa: E402
 import _util  # noqa: E402
-from _mcp_import_fixtures import (_assert_scan_refusal,  # noqa: E402
-                                  _scan_verdict)
+from _mcp_import_fixtures import (  # noqa: E402
+    _assert_scan_refusal, _scan_verdict)
 
-# (the analyser site that spells it, a label, the fixed part of its
-# message, the site the refusal names, the composition the arm refuses).
-# The first column is `(enclosing function, line in the analyser)` — the
-# IDENTITY of the arm, and the only key every table below is compared on —
-# and the message is the label beside it. The composition's own site is a
-# line in its source: the leading newline in every source below puts the
+# (analyser site, label, the FIXED part of its message, the site the
+# refusal names, the composition the arm refuses). The first column
+# `(enclosing function, line)` is the arm's IDENTITY and the only key every
+# table below compares on. The leading newline in every source puts the
 # first real line on line 2.
 ARMS = (
     (('_alias', 219), 'a store binds the import-by-name operation to a name',
@@ -127,9 +122,8 @@ ARMS = (
      '\nimport importlib\n\n\ndef load():\n    return '
      '[[importlib.import_module]]' + '[0]' * 800 + '("pkg.leaf")\n'),
 )
-# (label, the arm it sits beside, the composition the walk must leave
-# alone). The second column is the assertion, not decoration: it names whose
-# near miss this is, so a row cannot read as covering an arm never named.
+# (label, the arm whose near miss this is, the composition the walk must
+# leave alone) — the second column names whose near miss it is.
 NEAR_MISSES = (
     ('a name bound to the module, not the operation', ARMS[0][1],
      '\nimport importlib\n\n\ndef load():\n    kept = importlib.util\n'),
@@ -165,9 +159,8 @@ NEAR_MISSES = (
      '    return [[importlib.import_module]][0][0](4)\n'),
 )
 
-# The sites no composition drives, each with the reason it has no row of its
-# own. They are arms in the sense this file counts, so a table carrying only
-# the driven ones would still let a site appear here without a word.
+# Sites no composition drives, each with the reason; they are arms in the
+# sense this file counts, so omitting them would let a site vanish silently.
 UNDRAWN = (
     (('_refuse', 90), 'the raiser itself: every driven site reaches it, so '
      'a composition names the SITE that called it rather than this one'),
@@ -179,11 +172,10 @@ UNDRAWN = (
      'string reads'),
 )
 
-# The sites in the other two modules the walk's surface is built from, each
-# with the case that drives it. They are counted here rather than left to a
-# set of function names, which is what let an arm added inside
-# `_module_guard_sites` go unseen. The fixture module is in the derived set
-# because it calls the walk.
+# Sites in the other two modules the walk's surface is built from, each
+# with the case that drives it — counted here rather than left to a set of
+# function names, which is what let an arm inside `_module_guard_sites` go
+# unseen.
 FLOOR_ARMS = (
     (('_controlling_test', 196), 'test_mcp_guard_floor.py'
      '::test_a_raise_under_a_match_case_is_refused'),
@@ -199,21 +191,18 @@ FIXTURE_ARMS = (
      'the reader this site is the last assertion of'),
 )
 
-# The table that claims to cover each derived module, so a module found
-# with no table fails and a table naming an unfound module fails too.
+# The table claiming to cover each derived module, both ways.
 COVERED = {
     '_mcp_import_closure.py': ARMS + UNDRAWN,
     '_mcp_guard_floor.py': FLOOR_ARMS,
     '_mcp_import_fixtures.py': FIXTURE_ARMS,
 }
 
-# The negative control the comparison needs, and it is a TREE of two modules
-# rather than one source string. Every arm on both is spelled in a shape the
-# old marker could not see, so the case cannot pass by returning nothing on
-# both sides. The second module is on the axis the control had nothing on:
-# nothing imports it and no arm of `CONTROL` mentions it, so it is in the
-# component only because the WALK follows the one `__import__` call at the
-# FOOT of `CONTROL` — placed there so adding the edge moves no arm.
+# The negative control the comparison needs: a TREE of two modules, the
+# second in the component only because the WALK follows the one
+# `__import__` call at the foot of `CONTROL` — so the control holds on the
+# MODULE-SET axis, not only on the detail axis, and the case cannot pass by
+# returning nothing on both sides.
 CONTROL = '''
 def _refuse(path, root, node, detail):
     raise AssertionError(f'{path}:{node.lineno}: {detail}')
@@ -247,8 +236,8 @@ def by_a_third_exception(node):
 __import__('control_leaf')
 '''
 
-# The sites `CONTROL` spells, by the same `(function, line)` identity every
-# other key uses, in the fixture's own line numbers.
+# The sites `CONTROL` spells, same `(function, line)` identity as every
+# other key, in the fixture's own line numbers.
 CONTROL_SITES = (
     ('_refuse', 3),
     ('by_keyword', 11),
@@ -258,10 +247,9 @@ CONTROL_SITES = (
     ('by_a_third_exception', 28),
 )
 
-# The leaf's arms are the RAISER axis, in the three shapes a name-keyed
-# reader cannot see: a raiser bound to a local, to an attribute whose own
-# name is not one of `REFUSAL_RAISERS`, and to a partial. The store that
-# binds each is not a site, because a store raises nothing.
+# The leaf's arms are the RAISER axis in the three shapes a name-keyed
+# reader cannot see: a raiser reached through a local, an attribute, and a
+# `functools.partial`.
 CONTROL_LEAF = '''import functools
 
 
@@ -298,11 +286,10 @@ CONTROL_LEAF_SITES = (
 )
 
 # The barrier kinds `_mcp_dead_code._BARRIERS` names, plus the `if` whose
-# two branches both leave. Each is the same tree: the call BEFORE the
-# barrier still contributes a module, the one AFTER it does not. Carrying
-# both in one composition is what stops a rule that stopped marking tails
-# (which adds the leaf) and a rule that over-reached (which drops the
-# before) from passing under the same name.
+# two branches both leave. Each is one tree: the call BEFORE the barrier
+# still contributes a module, the one AFTER it does not — so a rule that
+# stopped marking tails and a rule that over-reached both fail under one
+# name.
 BARRIERS = (
     ('a raise', '\nimport importlib\n\n\ndef load():\n'
      '    importlib.import_module("pkg.before")\n'
@@ -332,10 +319,8 @@ BARRIERS = (
      '    importlib.import_module("pkg.leaf")\n'),
 )
 
-# The near miss every barrier kind shares: an `if` with no `else` whose
-# body leaves, so a false condition falls straight through it and the tail
-# is still reachable. Without this the table pins that tails are marked
-# and not that only the leaving ones are.
+# Shared near miss: an `if` with no `else` whose body leaves, so the tail
+# is still reachable — the table pins ONLY-LEAVING blocks, not every block.
 BARRIER_NEAR_MISS = (
     '\nimport importlib\n\n\ndef load(flag):\n'
     '    importlib.import_module("pkg.before")\n'
@@ -343,23 +328,19 @@ BARRIER_NEAR_MISS = (
     '        raise RuntimeError("left")\n'
     '    importlib.import_module("pkg.leaf")\n')
 
-# The package every barrier composition reads against, so a resolved module
-# and a dropped one are the only two answers the walk can give.
+# What every barrier composition reads against.
 BARRIER_TREE = {'pkg/__init__.py': '', 'pkg/before.py': 'before = True\n',
                 'pkg/leaf.py': 'leaf = True\n'}
 BARRIER_NAMES = ['composition.py', 'pkg/__init__.py', 'pkg/before.py']
 
-# The tree a callee answer is read against: a resolvable leaf module, so a
-# closure that resolved the operation carries it and one that declined does
-# not, which is what tells a resolution apart from a silence.
+# The tree a callee answer is read against: carries the leaf iff the
+# operation was resolved, telling a resolution from a silence.
 LEAF_TREE = {'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n'}
 
 # The index axis's own question, asked of the module's own symbol table:
-# `bool` under its own name and under an alias IS the builtin wherever the
-# module leaves the name alone, and a name the module binds to something of
-# its own is not it. `_Scopes.denotes_builtin` is the only declaration in a
-# kept module that answers it, so nothing else in the tree can tell its
-# answer from False.
+# `bool` under its own name and an alias IS the builtin wherever the module
+# leaves the name alone; `_Scopes.denotes_builtin` is the only kept
+# declaration that answers it.
 BOOL_INDEX = (
     ('', 'bool(0)', 'resolved'),
     ('from builtins import bool as b', 'b(0)', 'resolved'),
@@ -369,13 +350,12 @@ BOOL_INDEX = (
     ('from builtins import bool\nbool = print', 'bool(0)', 'refused'),
 )
 
-# The ORDER the module's own statements run in, on the index axis and with
-# the same alias. A `from builtins` binds the builtin ONCE ITS OWN STATEMENT
-# HAS RUN, so a use BEFORE it reads a name the module has not bound yet, and
-# the walk declines the index rather than resolve a module nothing reaches.
-# Every `BOOL_INDEX` row above puts the binding first, so the axis was
-# carried by no row at all; a rule that drops the order resolves both of
-# these and one that declines every alias loses the first.
+# The ORDER the module's statements run in: a `from builtins` binds the
+# builtin once its own statement has run, so a use BEFORE it reads a name
+# the module has not bound yet and the walk declines. Every BOOL_INDEX row
+# puts the binding first, so the axis was carried by no row above; a rule
+# that drops the order resolves both, one that declines every alias loses
+# the first.
 BINDING_ORDER = (
     ('\nimport importlib\nfrom builtins import bool as b\n\n\ndef load():\n'
      '    return [importlib.import_module, 0][b(0)]("pkg.leaf")\n',
@@ -387,12 +367,10 @@ BINDING_ORDER = (
 )
 
 
-# A conditional settles a position only when BOTH its arms settle and they
-# AGREE, so the value is the same whichever one the runtime picks. Agreeing
-# arms are the near miss — a rule that refuses every conditional it meets
-# loses them — and disagreeing arms are what pins the agreement: read either
-# alone and the position resolves, putting a module in a closure that only
-# one of two values ever reaches. No row above carried a conditional index.
+# A conditional settles a position only when BOTH arms settle and AGREE.
+# Agreeing arms are the near miss; disagreeing arms are the positive — read
+# either alone and the position resolves, putting a module in a closure
+# only one of two values ever reaches.
 def _conditional_index(index):
     """A composition whose INDEX is one expression, over a container whose
     second position holds the operation — so a conditional that settles
@@ -408,10 +386,9 @@ CONDITIONAL_INDEX = (
 )
 
 
-# The constant folder's own answers, which are what decide whether a string
-# names the operation: a literal is read, a concatenation of literals folds
-# to the same constant and is read, a field-less f-string is read, and a
-# value COMPUTED at runtime is the declared limit and is not.
+# The constant folder's answers: literal, literal concatenation and
+# field-less f-string fold and are refused; a runtime-computed value is the
+# declared limit and is not.
 FOLDED_STRING = (
     ('"import_module"', 'refused'),
     ("'import_' + 'module'", 'refused'),

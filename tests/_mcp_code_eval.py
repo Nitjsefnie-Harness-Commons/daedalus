@@ -49,23 +49,19 @@ _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
 _COMP_NAMES = {ast.ListComp: 'listcomp', ast.SetComp: 'setcomp',
                ast.DictComp: 'dictcomp', ast.GeneratorExp: 'genexpr'}
 
-# The statement kinds whose body runs only SOMETIMES. A `from builtins`
-# inside one is not a binding at the next statement, so nothing there can be
-# decided from it.
+# Statement kinds whose body runs only SOMETIMES: a `from builtins` inside
+# one is not a binding at the next statement. A comprehension's own `if`
+# clauses cannot bind a name and are not here.
 _GUARDED = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
             ast.With, ast.AsyncWith, ast.Match)
 
 
 class _Scopes:
-    """Which names one reference resolves to, so a builtin is told apart from
-    a same-named local.
-
-    A scope the walk cannot line up with the resolver's is read in its
-    enclosing scope, and every node inside it is marked UNCERTAIN: for a
-    module-level reference the enclosing scope errs toward the builtin and
-    refuses, but a name that is local to the scope the walk lost is not the
-    builtin, and `denotes_builtin` reads the mark and declines instead of
-    answering for a scope it does not have.
+    """Which names one reference resolves to, so a builtin is told apart
+    from a same-named local. A scope the walk cannot line up with the
+    resolver's is read in its enclosing scope and every node inside it is
+    marked UNCERTAIN: a name local to the scope the walk lost is not the
+    builtin, and `denotes_builtin` reads the mark and declines.
     """
 
     def __init__(self, tree, source, filename):
@@ -101,26 +97,19 @@ class _Scopes:
         """The names a NESTED scope binds in the module it belongs to.
 
         A `global b` says `b` belongs to the module, so a binding a nested
-        scope makes under one is a MODULE binding — and the root symbol does
-        not report it, because the store is in a table the resolver does not
-        fold back into its parent. The resolver's answer is on the NESTED side
-        instead, and it is the COMPILER's: a symbol that `is_global()` is not
-        local to the scope it is in, so binding it binds the module's, and the
-        compiler reports every form that binds one — a store, an augmented
-        store, a `del`, an `except ... as`, a `for` or `with` target, a
-        walrus, a `def`, a class and an import all read as `is_assigned()` or
-        `is_imported()`, while a USE, a subscript or attribute store and a
-        bare declaration read as neither. So the set comes from the resolver's
-        own tables rather than from a list of node types, and a binding form
-        nobody thought of is in it for free.
-
-        The ROOT is not walked: a module-level name is global to the resolver
-        and local to the module at once, so taking its own symbols would make
-        every alias a rebinding. A `nonlocal` store is not here either, for
-        the store lands on the NESTED symbol and never marks the enclosing
-        function's own symbol as assigned.
-
-        The cost is one name set: a module-level use standing ABOVE a
+        scope makes under one is a MODULE binding the root symbol does not
+        report — the resolver's answer is on the NESTED side, and it is the
+        COMPILER's: the compiler reports every binding form (a store, an
+        augmented store, a `del`, an `except ... as`, a `for` or `with`
+        target, a walrus, a `def`, a class, an import) as `is_assigned()`
+        or `is_imported()`, while a USE reads as neither. So the set comes
+        from the resolver's own tables, and a binding form nobody thought
+        of is in it for free. The ROOT is not walked (a module-level name
+        is global to the resolver and local to the module at once), and a
+        `nonlocal` store is not here either, for the store lands on the
+        NESTED symbol and never marks the enclosing function's own symbol
+        as assigned. The cost is one name
+        set with no scope on it, so a module-level use standing ABOVE a
         rebinding is refused where the runtime reaches — this walk's cheap
         direction, bounded to names some nested scope binds.
         """
@@ -146,21 +135,17 @@ class _Scopes:
         except that `ast` walks a function's BODY before its decorator list,
         so a scope written ABOVE the `def` is named after one below it. A
         cursor that may only move forwards cannot answer that, so it returns
-        to the start when the line it is at has already passed. That is the
-        one place the cursor discards rather than seeks, and it is bounded by
-        the number of scopes in one table rather than by the module: a rescan
-        is a pass over a symbol table's own children. It cannot produce a
-        wrong answer, because every candidate it re-examines is still matched
-        on its name AND its line — a rewind makes more candidates available to
-        that test, never fewer, and a name the table does not hold at that
-        line is still a miss. A name and a line are not enough on their own
-        either: two sibling scopes can share both — two lambdas separated by
-        `;` — and telling them apart by which is next is what a cursor is for.
-
-        The second answer is the walk's own miss. No scope of that kind here
-        is a real answer (a comprehension the running interpreter has
-        inlined has no scope), and is not one; a scope that IS there and was
-        not taken is a miss, and every node inside it is marked uncertain.
+        to the start when the line it is at has already passed — the one
+        place the cursor discards rather than seeks, bounded by the scopes
+        in one table rather than by the module. It cannot produce a wrong
+        answer: every candidate it re-examines is still matched on its name
+        AND its line — a rewind makes more candidates available to that
+        test, never fewer — and two sibling scopes can share both, so
+        telling them apart by which is next is what a cursor is for. The
+        second answer is the walk's own miss: no scope of that kind here is
+        a real answer (an inlined comprehension has no scope), but a scope
+        that IS there and was not taken is a miss, and every node inside it
+        is marked uncertain.
         """
         children = table.get_children()
         index = self._cursor.get(id(table), 0)

@@ -7,18 +7,6 @@ must not disagree about it. What a value NAMES is the mention property; what
 it PRODUCES is `static_value`, and every other reader in this module is
 routed through that one function.
 
-The mention property is the property, not a list of the shapes that have
-been met: a tracked name anywhere inside an expression is a mention, and
-every type nobody has thought of is read the same way, by its own children.
-Its early returns do NOT answer by their own children, and each is
-accounted for — an attribute, which is the operation exactly when its own
-name is the operation's AND its base mentions the operation; a call, which
-evaluates to whatever its callee returns rather than to the callee; and a
-`getattr` whose KEY this walk cannot read, which may be reading `__call__`
-and so is asked about the object it reads off. A LAMBDA turns on WHO is
-asking, not on the node: read in place it is a function, not its body, and
-delivered to a name it is its body, so it is the `delivered` argument that
-tells the two call sites apart.
 
 `static_value` is the same in kind. It answers ONE question — what value
 does this expression produce — and it has three answers, and every reader
@@ -65,50 +53,38 @@ CONTAINERS = (ast.List, ast.Tuple, ast.Set, ast.Dict,
 # position is genuinely unknown.
 UNSUBSCRIPTED = (ast.Set, ast.SetComp, ast.GeneratorExp)
 
-# The value a decided expression produces when the runtime provably cannot
-# reach through it. A sentinel rather than `None` so a literal `None` — a
-# value a dict key can be and an index cannot — is not read as this.
+# A sentinel rather than `None` so a literal `None` — a value a dict key
+# can be and an index cannot — is not read as unreachable.
 UNREACHABLE = object()
 
-# A value this walk has NOT read, which is not the same as one it read as
-# unreachable: a free name and a slice are both unknown, and a reader that
-# conflated them with `UNREACHABLE` would refuse what it cannot decide.
+# Not the same as UNREACHABLE: a free name and a slice are both unknown,
+# and a reader that conflated them would refuse what it cannot decide.
 UNREAD = object()
 
-# The two names the operation map tracks. `DYNAMIC_ATTRIBUTES` are the
-# operation's own spellings; `REGISTRY_NAMES` are the one tracked name
-# that is NOT a mention, so it is named here beside the property that
-# excludes it rather than beside the registry that reads it.
+# The two names the operation map tracks. `REGISTRY_NAMES` are the one
+# tracked name that is NOT a mention.
 DYNAMIC_ATTRIBUTES = ('import_module', '__import__')
 REGISTRY_NAMES = ('sys', 'registry')
 
-# The arithmetic a settled value is asked of, from Python's own operators
-# rather than from a table this walk keeps beside itself: a value the
-# runtime has already settled is settled here too, and a table is one more
-# spelling to leave out. `/` is here too, and a float it leaves is not a
-# position — which is the value being settled, not the spelling declined.
+# Python's own operators, not a table beside this walk. `/` is here too,
+# and the float it leaves is not a position — the value being settled.
 _ARITHMETIC = {ast.Add: operator.add, ast.Sub: operator.sub,
                ast.Mult: operator.mul, ast.FloorDiv: operator.floordiv,
                ast.Mod: operator.mod, ast.Pow: operator.pow,
                ast.Div: operator.truediv}
 _UNARY = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
-# What this walk will compute WITH, and so ask an operator of. Bounded
-# rather than typed, because the question is the COST of the computation
-# and not the type of the operand: `operator.mul('a', 0)` settles `''` and
-# `operator.pow(2, 10 ** 10)` settles nothing at all. An operand outside
-# the bound leaves the expression UNDETERMINED, which is this walk's
-# declared limit, and never a wait.
+# What this walk computes WITH: bounded rather than typed, because the
+# question is the COST of the computation. An operand outside the bound is
+# UNDETERMINED, never a wait.
 _SETTLED = 1 << 16
 
 
 def _computable(value):
-    """Whether this walk computes with a value rather than carrying it.
-
-    The question is the SIZE of the computation and not the type of the
-    operand, so a value with neither a magnitude nor a length — `None`,
-    `True`, a nested `...` — is computable however strange it is, and the
-    operator's own `TypeError` is what settles it.
+    """Whether this walk computes with a value rather than carrying it:
+    the SIZE of the computation, not the type of the operand — a value
+    with neither a magnitude nor a length is computable however strange it
+    is, and the operator's own `TypeError` settles it.
     """
     if isinstance(value, (int, float)):
         return -_SETTLED <= value <= _SETTLED
@@ -119,11 +95,9 @@ def _computable(value):
 
 def _operator_settled(operation, *operands):
     """What an operator settles, `UNREAD` when this walk will not ask it,
-    and `UNREACHABLE` when the runtime's own settlement is to RAISE.
-
-    A raise is a settlement like any other — `lst[1 // 0]` is settled by
-    the `ZeroDivisionError` before the container is read — and it is
-    `UNREACHABLE` rather than `UNREAD` because the walk knows it.
+    and `UNREACHABLE` when the runtime's own settlement is to RAISE — a
+    raise is a settlement like any other, and it is `UNREACHABLE` rather
+    than `UNREAD` because the walk knows it.
     """
     if any(not _computable(operand) for operand in operands):
         return UNREAD
@@ -142,11 +116,9 @@ def _runtime_settled(node, bound, scopes):
     operator over two settled values, a walrus, a conditional whose two
     arms agree, and `bool` of a settled one are each a value Python has
     computed already, and each is asked of Python's own operator. A
-    parameter is the same fact, read off the scope the name sits in — one
-    no store has taken back carries its own default — and a field-less
-    f-string is the constant the compiler builds it from. A form nobody
-    has met is `UNREAD` here rather than a new arm of this walk's own,
-    which is where a new settled form goes.
+    parameter no store has taken back carries its own default; a
+    field-less f-string is the constant the compiler builds it from. A
+    form nobody has met is `UNREAD` here — where a new settled form goes.
     """
     if isinstance(node, ast.Constant):
         return node.value
@@ -187,13 +159,9 @@ def _runtime_settled(node, bound, scopes):
 
 
 def _is_the_bool_call(node, scopes) -> bool:
-    """Whether this call is a call of the `bool` BUILTIN over one argument.
-
-    What settles the call is the VALUE it produces, so the question is what
-    its callee denotes: a name the module leaves alone is the builtin, a
-    `from builtins import bool [as x]` alias is the same builtin, and a name
-    bound to something of its own is not it. `bound` is not asked, because
-    it tracks the import-by-name operation and carries no builtin to find.
+    """Whether this call is a call of the `bool` BUILTIN over one argument:
+    the question is what its callee denotes, and `bound` is not asked
+    because it tracks the import-by-name operation and carries no builtin.
     """
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and len(node.args) == 1 and not node.keywords
@@ -208,14 +176,11 @@ def _is_getattr(node) -> TypeGuard[ast.Call]:
 
 def _projected(node: ast.expr):
     """The value a WRAPPER projects, or None when this is not one.
-
     `X.__call__` is how Python says "X is callable", and
-    `getattr(X, '__call__')` is its second spelling, so both project X
-    whatever X is. A `getattr` with a different constant does not:
-    `getattr(op, 'other')` raises `AttributeError` and names nothing. A
-    key this walk cannot read is neither — it may be `__call__` and it may
-    be anything else — so the fold declines it and the MENTION property
-    reads it instead.
+    `getattr(X, '__call__')` is its second spelling. A `getattr` with a
+    different constant names nothing, and a key this walk cannot read may
+    be `__call__` or anything else, so the fold declines it to the MENTION
+    property.
     """
     if isinstance(node, ast.Attribute) and node.attr == '__call__':
         return node.value
@@ -253,13 +218,10 @@ def _carried_keys(node, bound, scopes):
 
 
 def _supplied(call, bound, scopes):
-    """The names a call supplies BY NAME, or None when the call does not say.
-
-    A keyword says its own name, and a `**` mapping says the keys the
-    display it reads carries. One of them the walk cannot read leaves the
-    whole call undecided rather than half-bound, because a required
-    parameter it may or may not fill is the question the call is being
-    asked.
+    """The names a call supplies BY NAME, or None when the call does not
+    say. One carrier the walk cannot read leaves the whole call undecided
+    rather than half-bound: a required parameter it may or may not fill is
+    the question the call is being asked.
     """
     names = []
     for keyword in call.keywords:
@@ -278,18 +240,14 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
     what the signature requires, whether it RAISES instead, or `UNREAD` when
     it does not say.
 
-    A parameter is supplied by POSITION or by NAME, and the two are one
-    supply, so the call's arguments are bound to the signature the way
-    Python binds them rather than counted against it. The call raises
-    wherever Python's own binding raises: a second value for one DECLARED
-    parameter — BY POSITION, by name, or through a `**` the walk reads, which
-    are three spellings of one rule and are checked the same way — a name
-    the signature does not have and no `**kwargs` to catch it, or a name for
-    a POSITIONAL-ONLY parameter. A name no parameter declares is one supply
-    too, and a `**kwargs` catches it rather than refusing it, so the catch-all
-    arm carries the same second-supply check the declared arms do. What the
-    call does not say is what a `*args` unpacks to, so that is `UNREAD`, and
-    the caller's own class.
+    A parameter is supplied by POSITION or by NAME, one supply, and the
+    call raises wherever Python's own binding raises: a second value for
+    one DECLARED parameter (by position, by name, or through a `**` the
+    walk reads), a name the signature does not have and no `**kwargs` to
+    catch it, or a name for a POSITIONAL-ONLY parameter. A name no
+    parameter declares is caught by a `**kwargs` rather than refused, and
+    carries the same second-supply check the declared arms do. A `*args`
+    is `UNREAD`, the caller's own class.
     """
     args = func.args
     params = args.posonlyargs + args.args
@@ -416,13 +374,11 @@ def _keyed(node, base, bound, scopes):
     """The value a dict literal's key selects, or `UNREACHABLE` for a key
     the display does not carry.
 
-    A DISPLAY keeps the LAST of two equal keys, because that is what the
-    runtime builds, so a reader that stops at the first reads an entry the
-    display has already replaced — and reads the operation out of a dict
-    that holds something else. The equality is Python's, so `1`, `1.0` and
-    `True` name one entry and `0` and `False` another. A `**` unpack whose
-    display the walk reads merges its entries where the runtime merges
-    them, and one it cannot read puts the keys out of reach.
+    A DISPLAY keeps the LAST of two equal keys — the runtime's rule — and
+    the equality is Python's, so `1`, `1.0` and `True` name one entry and
+    `0` and `False` another. A `**` unpack whose display the walk reads
+    merges its entries where the runtime merges them; one it cannot read
+    puts the keys out of reach.
     """
     entries, raised = _display_entries(base, bound, scopes)
     if raised:
@@ -441,13 +397,10 @@ def _keyed(node, base, bound, scopes):
 
 
 def _is_the_operation(node, bound, scopes):
-    """Whether this expression IS the operation, and so a FUNCTION — the one
-    decided value that is neither a container nor subscriptable.
-
-    A name the map binds to the operation is it, and the operation's own
-    attribute spelling is it. A function has no `__getitem__`, so `op[0]`
-    is the same `TypeError` a set's is, and a chain that runs one step past
-    the operation raises rather than reading anything.
+    """Whether this expression IS the operation, and so a FUNCTION — the
+    one decided value that is neither a container nor subscriptable: a
+    function has no `__getitem__`, so `op[0]` is the same `TypeError` a
+    set's is.
     """
     if isinstance(node, ast.Name):
         return bound.get(node.id) == 'by name'
@@ -460,14 +413,11 @@ def _called(func, call, bound, scopes):
     accepts, `UNREACHABLE` when the call is a raise, and nothing decided
     when the call does not say what it supplies.
 
-    A function's value is its RETURN, so a call of one IS that return and
-    a bare lambda is the function itself. That is the whole of the lambda
-    rule, and it is why a lambda reached by a fold reads the same as one
-    written at the call site. A call this walk cannot account for is
-    UNDETERMINED rather than either verdict, and the value it carries is
-    the BODY it may produce: a refusal reads the mention property over
-    that, which is the direction a question the walk cannot answer has to
-    go.
+    A function's value is its RETURN, so a call of one IS that return —
+    which is why a lambda reached by a fold reads the same as one written
+    at the call site. A call this walk cannot account for is UNDETERMINED,
+    and the value it carries is the BODY a refusal reads the mention
+    property over.
     """
     filled = _fills(func, call, bound, scopes)
     if filled is UNREAD:
@@ -543,11 +493,10 @@ def static_value(node, bound, scopes):
     if isinstance(node, ast.IfExp):
         return _decided_if_value(node, bound, scopes)
     if isinstance(node, ast.Call):
-        # A call's value is what its callee RETURNS, and this walk follows
-        # no call's result — the call-result limit. A lambda's return is
-        # the exception, because that is a rule about a VALUE: the callee
-        # is folded, and a lambda the signature accepts produces its body
-        # however the fold reached it.
+        # A call's value is what its callee RETURNS (the call-result
+        # limit); a lambda's return is the exception, a rule about a VALUE:
+        # the callee is folded, and a lambda the signature accepts produces
+        # its body however the fold reached it.
         callee, decided = static_value(node.func, bound, scopes)
         if decided and isinstance(callee, ast.Lambda):
             return _called(callee, node, bound, scopes)
@@ -561,9 +510,8 @@ def static_value(node, bound, scopes):
             or _is_the_operation(base, bound, scopes):
         return UNREACHABLE, True
     if isinstance(node.slice, ast.Slice):
-        # A slice produces a NEW container — or raises, on a mapping or a
-        # function — and neither is callable, so the answer does not depend
-        # on the bounds or on what the slice is taken of.
+        # A slice produces a NEW container — or raises — and neither is
+        # callable, so the bounds do not matter.
         return UNREACHABLE, True
     if isinstance(base, ast.Dict):
         return _keyed(node, base, bound, scopes)
@@ -600,13 +548,10 @@ def callee_value(call, bound, scopes):
 def unresolvable_callee(call, bound, scopes):
     """The callee a mention refusal reads, or None when there is none.
 
-    Two decided values are none of the refusal's business, and both are
-    decided for the same reason — the call raises before it reaches
-    anything. A container is not callable, so `[op]('x')` calls a list; and
-    a value the runtime provably cannot reach through names nothing at all,
-    so `[op][4]('x')` raises `IndexError` on the expression itself. A
-    container or a position the fold does not decide is the same class one
-    level out, and is still a value the caller may refuse.
+    Two decided values are none of the refusal's business — the call
+    raises before it reaches anything: a container is not callable, and a
+    value the runtime cannot reach through names nothing. A container or a
+    position the fold does not decide is the same class one level out.
     """
     value, decided = static_value(call.func, bound, scopes)
     if not _is_callable(value):
@@ -617,14 +562,11 @@ def unresolvable_callee(call, bound, scopes):
 def is_dynamic_import(func, bound, scopes):
     """A call to import_module or __import__, per the module's own bindings.
 
-    An attribute names the operation by its own name, so one whose attribute
-    is not one of the operation's (`importlib.util`) is readable to a
-    specific other object and is not the operation; one whose attribute IS
-    the operation's is the operation exactly when its base mentions the
-    operation, and that base is read through the same property the store
-    side uses. Loading a module by PATH —
-    `spec_from_file_location`, `SourceFileLoader` — is a different
-    operation and stays outside this recognition.
+    An attribute is the operation exactly when its own name is the
+    operation's AND its base mentions the operation, read through the same
+    property the store side uses. Loading a module by PATH
+    (`spec_from_file_location`, `SourceFileLoader`) is a different
+    operation.
     """
     if isinstance(func, ast.Name):
         return bound.get(func.id) == 'by name'
@@ -640,30 +582,21 @@ def yields_the_operation(value, bound, scopes, delivered=False):
     operation, so a store of it can hand the operation to a name this map
     cannot follow.
 
-    The property, not a list of the shapes that have been met: a tracked
-    name anywhere inside an expression is a mention, and every type nobody
-    has thought of is read the same way, by its own children. A registry
-    name is the one tracked name that is not a mention: the map tracks it
-    so a read of it can be refused. Two early
-    returns do NOT answer by their own children, and each is accounted for.
-    An attribute is one: it is the operation exactly when its own name is
-    the operation's AND its base mentions the operation — a test that reads
-    the whole base however it is spelled, so `importlib.util` is not the
-    operation and `[importlib][0].import_module` is. The OTHER is the
-    property's single limit, a call: a call evaluates to whatever its
-    callee returns, not to the callee, so a name bound to a call's result
-    is followed by neither this map nor these refusals.
+    The property, not a list: a tracked name anywhere inside an expression
+    is a mention, and every type nobody has thought of is read the same
+    way, by its own children. A registry name is the one tracked name that
+    is not a mention. Two early returns do NOT answer by their own
+    children: an attribute is the operation exactly when its own name is
+    the operation's AND its base mentions the operation, and a CALL is the
+    property's single limit — a call evaluates to whatever its callee
+    returns, so a name bound to a call's result is followed by neither
+    this map nor these refusals.
 
-    A LAMBDA is the call's statement about a value READ IN PLACE, and it
-    turns on who is asking. Read in place it is a function, not its body,
-    so `(lambda: op)` reaches nothing — the body is returned, not called.
-    DELIVERED to a name it is the opposite: calling the stored name is what
-    delivers, so the body is read after all. Keying this on the node rather
-    than on the call site's spelling is what makes a lambda reached by a
-    fold read the same as one written there. And a value the fold READ is
-    asked about in place of the spelling that carried it — a projection, a
-    selection, a lambda's own return — so the two halves of this module are
-    asked of the same value and cannot disagree about it.
+    A LAMBDA turns on who is asking: read in place it is a function, not
+    its body; DELIVERED to a name, calling the stored name delivers, so
+    the body is read after all. And a value the fold READ is asked about
+    in place of the spelling that carried it, so the two halves of this
+    module cannot disagree about it.
     """
     wrapped = _projected(value)
     if wrapped is not None:
