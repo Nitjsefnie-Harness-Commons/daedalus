@@ -107,8 +107,7 @@ def test_browser_exit_before_devtools_is_environment_skip(tmp):
     for exit_code in (1, 0):
         process = mock.Mock()
         process.poll.return_value = exit_code
-        clock = mock.Mock(side_effect=(0, 0, 31))
-        sleeper = mock.Mock()
+        clock, sleeper = mock.Mock(side_effect=(0, 0, 31)), mock.Mock()
         with mock.patch.object(_realbrowser.time, 'time', clock), \
                 mock.patch.object(_realbrowser.time, 'sleep', sleeper):
             failure = _call_failure(
@@ -133,9 +132,8 @@ def test_live_browser_reaches_ready_devtools_targets(tmp):
     process = mock.Mock()
     process.poll.return_value = None
     try:
-        with mock.patch.object(
-                _realbrowser, '_devtools_targets',
-                return_value=[page, worker]), \
+        with mock.patch.object(_realbrowser, '_devtools_targets',
+                               return_value=[page, worker]), \
                 mock.patch.object(
                     _realbrowser.time, 'time', side_effect=(0, 0)):
             actual = _realbrowser._wait_for_devtools(
@@ -149,8 +147,7 @@ def test_live_browser_reaches_ready_devtools_targets(tmp):
 def test_devtools_start_deadline_is_environment_skip(tmp):
     process = mock.Mock()
     process.poll.return_value = None
-    with mock.patch.object(
-            _realbrowser.time, 'time', side_effect=(0, 31)), \
+    with mock.patch.object(_realbrowser.time, 'time', side_effect=(0, 31)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         failure = _call_failure(
             lambda: _realbrowser._wait_for_devtools(
@@ -178,8 +175,8 @@ def _worker_timeout_failure(tmp, reached, verdict=None):
     with _fixture_runtime(
             tmp, navigate, subprocess_run=_browser_version), \
             mock.patch.object(_realbrowser, 'ready_worker', unready), \
-            mock.patch.object(
-                _realbrowser, '_devtools_targets', return_value=[]), \
+            mock.patch.object(_realbrowser, '_devtools_targets',
+                              return_value=[]), \
             mock.patch.object(
                 _realbrowser, '_worker_absence_verdict', recording), \
             mock.patch.object(
@@ -265,8 +262,7 @@ def test_answered_control_diagnosis_blames_our_source_and_relaunches(tmp):
 
 
 def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
-    """No control answer — or a diagnosis browser that is gone before it
-    could answer — leaves the skip with the machine."""
+    """No control answer — or a gone diagnosis browser — is a machine skip."""
     outcome, launches, processes = control_diagnosis(
         tmp, [False], mock.Mock(side_effect=(0, 0, 31)))
     assert outcome[0] is False, outcome
@@ -277,8 +273,7 @@ def test_unanswered_control_worker_leaves_the_skip_with_the_machine(tmp):
     processes[0].wait.assert_called_once_with(timeout=BOUND.CLEANUP_TIMEOUT_S)
     (Path(tmp) / 'exited').mkdir()
     exited, launches, processes = control_diagnosis(
-        Path(tmp) / 'exited', [False],
-        mock.Mock(side_effect=(0, 0)), poll=1)
+        Path(tmp) / 'exited', [False], mock.Mock(side_effect=(0, 0)), poll=1)
     assert exited[0] is False, exited
     assert 'exited before any control worker' in exited[1], exited
     assert len(launches) == 1, launches
@@ -301,13 +296,12 @@ def test_unreadable_control_answer_polls_again_instead_of_settling(tmp):
 
 def test_no_browser_never_launches_a_diagnosis(tmp):
     """The diagnosis is reached only after the launch that already happened."""
-    launches = []
+    launches, missing = [], _realbrowser.BrowserEnvironmentSkipped(
+        'no browser on this box')
 
     def popen(*args, **kwargs):
         launches.append(args)
         raise AssertionError('no browser was required here')
-
-    missing = _realbrowser.BrowserEnvironmentSkipped('no browser on this box')
 
     def enter_fixture():
         with _enter_fixture(tmp):
@@ -371,10 +365,10 @@ def test_worker_configuration_failure_is_repository_failure(tmp):
 
     with _fixture_runtime(tmp, _navigate), \
             mock.patch.object(_realbrowser, 'cdp_eval', not_configured), \
-            mock.patch.object(
-                _realbrowser_workers, 'cdp_eval', not_configured), \
-            mock.patch.object(
-                _realbrowser.time, 'time', side_effect=(0, 0, 0, 31)), \
+            mock.patch.object(_realbrowser_workers, 'cdp_eval',
+                              not_configured), \
+            mock.patch.object(_realbrowser.time, 'time',
+                              side_effect=(0, 0, 0, 31)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         failure = _fixture_failure(tmp)
     assert failure.__class__ is AssertionError, failure
@@ -392,9 +386,8 @@ def test_page_readiness_timeout_is_repository_failure(tmp):
 
     with _fixture_runtime(tmp, _navigate), \
             mock.patch.object(_realbrowser, 'cdp_eval', never_ready), \
-            mock.patch.object(
-                _realbrowser.time, 'time',
-                side_effect=(0, 0, 0, 0, 0, 16)), \
+            mock.patch.object(_realbrowser.time, 'time',
+                              side_effect=(0, 0, 0, 0, 0, 16)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         failure = _fixture_failure(tmp)
     assert failure.__class__ is AssertionError, failure
@@ -417,9 +410,8 @@ def test_tab_registration_timeout_is_repository_failure(tmp):
                 _realbrowser, 'cdp_eval', ready_but_unregistered), \
             mock.patch.object(
                 _realbrowser._util, 'get_json', return_value=(200, [])), \
-            mock.patch.object(
-                _realbrowser.time, 'time',
-                side_effect=(0, 0, 0, 0, 0, 0, 0, 16)), \
+            mock.patch.object(_realbrowser.time, 'time',
+                              side_effect=(0, 0, 0, 0, 0, 0, 0, 16)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         failure = _fixture_failure(tmp)
     assert failure.__class__ is AssertionError, failure
@@ -432,8 +424,7 @@ def _delivery_timeout(call):
             return_value=(200, '{"did":"controlled-delivery"}')), \
             mock.patch.object(_realbrowser._util, 'get_json',
                               return_value=(200, {})), \
-            mock.patch.object(
-                _realbrowser.time, 'time', side_effect=(0, 21)):
+            mock.patch.object(_realbrowser.time, 'time', side_effect=(0, 21)):
         return _call_failure(call)
 
 
@@ -469,8 +460,8 @@ def test_extension_matching_delivery_returns_result(tmp):
             return_value=(200, '{"did":"controlled-delivery"}')), \
             mock.patch.object(
                 _realbrowser._util, 'get_json', return_value=(200, result)), \
-            mock.patch.object(
-                _realbrowser.time, 'time', side_effect=(0, 0, 21)), \
+            mock.patch.object(_realbrowser.time, 'time',
+                              side_effect=(0, 0, 21)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         actual = real_ext_command(
             'http://127.0.0.1:1', 'controltoken',
@@ -544,8 +535,8 @@ def test_eval_matching_delivery_returns_and_consumes_result(tmp):
             _realbrowser._util, 'request',
             return_value=(200, '{"did":"controlled-delivery"}')), \
             mock.patch.object(_realbrowser._util, 'get_json', get_json), \
-            mock.patch.object(
-                _realbrowser.time, 'time', side_effect=(0, 0, 21)), \
+            mock.patch.object(_realbrowser.time, 'time',
+                              side_effect=(0, 0, 21)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         actual = real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
@@ -599,12 +590,11 @@ def _assert_shared_bound(node, name, line):
 def test_teardown_wait_rows_read_the_shared_cleanup_bound(tmp):
     """Teardown-wait rows in these two files read BOUND.CLEANUP_TIMEOUT_S.
     CPython interns small ints, so only the parse tree can tell the
-    shared constant from a literal 10. Span: the two files walked, the
-    two recognized shapes (.wait.assert_called_once_with(timeout=X)
-    calls, wait_timeouts comparisons). Limits: a non-once
-    assert_called_with spelling is not policed; a **-splat timeout reds
-    even when it reads the constant; a future non-teardown wait row
-    reds the pin.
+    shared constant from a literal 10. Span: the two files walked; the
+    two shapes (.wait.assert_called_once_with(timeout=X) calls,
+    wait_timeouts comparisons). Limits: non-once assert_called_with
+    spellings are not policed; a **-splat timeout reds even when it
+    reads the constant; a future non-teardown wait row reds the pin.
     """
     del tmp
     here = Path(__file__).resolve().parent
