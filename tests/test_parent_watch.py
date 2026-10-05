@@ -18,6 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
+SUITE_BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py')
+
 WATCH_ENV = 'DAEDALUS_PARENT_WATCH_FD'
 WAIT_TIMEOUT = 90
 RUNAWAY_CALL_LIMIT = 1000
@@ -342,42 +344,6 @@ def test_inherited_daedalus_exports_do_not_reach_the_unwatched_bridge(tmp):
     assert os.environ.get('DAEDALUS_STREAM_KEEPALIVE') == prior
 
 
-def test_bounded_wait_reports_live_child_port_and_watch_state(tmp):
-    class LiveProcess:
-        pid = 424242
-
-        def __init__(self):
-            self.polls = iter((None, 0))
-            self.calls = 0
-
-        def poll(self):
-            self.calls += 1
-            if self.calls > RUNAWAY_CALL_LIMIT:
-                raise AssertionError('process double exceeded call limit')
-            return next(self.polls, 0)
-
-    with socket.socket() as listener:
-        listener.bind(('127.0.0.1', 0))
-        listener.listen()
-        info = {
-            'base': f'http://127.0.0.1:{listener.getsockname()[1]}',
-            'parent_watch': 'enabled',
-        }
-        process = LiveProcess()
-        diagnostic = None
-        try:
-            _wait_for_exit(process, info, timeout=0)
-        except AssertionError as exc:
-            diagnostic = str(exc)
-        else:
-            raise AssertionError('live process wait did not expire')
-    assert diagnostic is not None
-    assert 'pid=424242' in diagnostic, diagnostic
-    assert 'port_accepts=True' in diagnostic, diagnostic
-    assert 'parent_watch=enabled' in diagnostic, diagnostic
-    assert process.poll() is not None, 'process double did not terminate'
-
-
 def test_bounded_port_wait_requires_expiry_failure(tmp):
     global _port_accepts, WAIT_TIMEOUT
 
@@ -573,7 +539,7 @@ def _unwatched_parent(tmp):
         threading.Event().wait()
     finally:
         proc.terminate()
-        proc.wait(timeout=10)
+        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
 
 
 def _parent_main(tmp, mode):

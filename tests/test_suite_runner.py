@@ -25,6 +25,8 @@ import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
+SUITE_BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py')
+
 
 _ALL_SKIPPED_SUITE = """import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -410,10 +412,10 @@ def test_output_close_failure_reaps_the_spawned_suite(tmp):
                 reaped = False
                 spawned[0].terminate()
                 try:
-                    spawned[0].wait(timeout=10)
+                    spawned[0].wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
                 except subprocess.TimeoutExpired:
                     spawned[0].kill()
-                    spawned[0].wait(timeout=10)
+                    spawned[0].wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
 
     assert error is not None, 'the injected close failure was not raised'
     assert reaped, 'spawned suite survived the output close failure'

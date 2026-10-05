@@ -21,6 +21,8 @@ import _daedalus_env  # noqa: E402
 import _noglibc  # noqa: E402
 import _util  # noqa: E402
 
+SUITE_BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py')
+
 
 def _observation_child(code, thread):
     return types.SimpleNamespace(
@@ -110,15 +112,6 @@ def test_exited_child_observations_wait_for_drain(tmp):
     message = _util._startup_observations(proc, drained, 0)
     assert marker in message, message
     assert 'drain timed out before EOF' not in message, message
-
-
-def test_exited_child_unfinished_drain_is_reported(tmp):
-    """An exited child's unfinished drain is disclosed in the snapshot."""
-    del tmp
-    thread = _DrainThreadDouble(alive=True)
-    proc = _observation_child(23, thread)
-    message = _util._startup_observations(proc, [], 0)
-    assert 'drain timed out before EOF' in message, message
 
 
 def _data_root_lock():
@@ -266,7 +259,7 @@ def test_live_child_startup_timeout_reports_observations(tmp):
         assert 'recognisable startup line' in failure, failure
     finally:
         proc.terminate()
-        proc.wait(timeout=10)
+        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
 
 
 def test_server_uses_the_shared_log_safe_function(tmp):

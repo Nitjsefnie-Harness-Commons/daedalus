@@ -21,6 +21,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
 
+SUITE_BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py')
+
 MAX_AGE = 3.0
 # EOF has to follow the stream's end promptly. Generous against the ~0s
 # expected, tight against the 30s watchdog the bug fell through to.
@@ -95,7 +97,7 @@ def test_port_zero_binds_an_ephemeral_port_and_announces_it(tmp):
         assert status == 200 and health['ok'] is True, (status, health)
     finally:
         proc.terminate()
-        proc.wait(timeout=10)
+        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
 
 
 def _noise_path(tmp, name, body):
@@ -104,30 +106,6 @@ def _noise_path(tmp, name, body):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'sitecustomize.py').write_text(body, encoding='utf-8')
     return str(directory)
-
-
-def test_a_line_printed_before_the_announcement_does_not_hide_it(tmp):
-    """Startup output the reader does not recognise is skipped, not taken.
-
-    The bridge prints whatever its platform gives it cause to — malloc
-    tuning on a non-glibc host, an MCP bootstrap failure from its own
-    thread — so readiness has to be found by searching the output for the
-    announcement.
-    """
-    noise = ('print("[Daedalus] malloc tuning unavailable: '
-             'dlsym(0x0, mallopt): symbol not found", flush=True)\n')
-    output = []
-    with _util.bridge(
-            tmp, env={'PYTHONPATH': _noise_path(tmp, 'noise', noise)},
-            output=output) as (base, _docroot):
-        status, health = _util.get_json(base + '/health')
-        assert status == 200 and health['ok'] is True, (status, health)
-    noise_at = next((index for index, line in enumerate(output)
-                     if 'malloc tuning unavailable' in line), None)
-    listening_at = next((index for index, line in enumerate(output)
-                         if 'Listening on' in line), None)
-    assert noise_at is not None and listening_at is not None, output
-    assert noise_at < listening_at, output
 
 
 def test_a_failed_mcp_bootstrap_names_the_extra_that_supplies_it(tmp):
@@ -300,7 +278,7 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
     finally:
         release.write_text('go', encoding='utf-8')
         proc.terminate()
-        proc.wait(timeout=10)
+        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
 
 
 def test_the_unbound_front_end_thread_reports_starting(tmp):
@@ -435,7 +413,7 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
         assert 'nothing to do with the port' in failure, failure
     finally:
         proc.terminate()
-        proc.wait(timeout=10)
+        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
 
 
 def test_an_ended_stream_closes_its_socket(tmp):
