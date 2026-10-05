@@ -313,7 +313,6 @@ def test_a_failed_field_write_leaves_no_entry_behind(tmp):
             contextlib.redirect_stdout(io.StringIO()):
         assert plant.save(str(target), str(store)) == 1
     assert not entry.exists(), 'the working cleanup left the residue'
-    # The wedge this closes, proven end to end: the next save succeeds.
     assert _run_plant('save', str(target), '--store',
                       str(store)).returncode == 0
 
