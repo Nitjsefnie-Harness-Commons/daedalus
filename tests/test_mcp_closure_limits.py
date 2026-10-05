@@ -107,9 +107,7 @@ def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
 
 
 # The five callee families issue 1213 records: each refused at base while
-# the runtime imports the leaf. Where a wrong choice could still pass, the
-# driven values differ (condition runs both routes; defaulted position is
-# 1, not 0).
+# the runtime imports the leaf (driven values differ where it matters).
 _LEAF = {'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n'}
 SETTLED_CALLEES = (
     ('a conditional the default decides, truthy route',

@@ -252,11 +252,11 @@ class _Scopes:
 
     def parameter_default(self, node, name):
         """The default expression of the parameter `name` at the scope `node`
-        sits in, or None when no scope here binds it as a parameter whose
-        value this walk can read. The nearest scope that binds the name owns
-        the answer — a nested scope binding it as its OWN parameter takes it
-        back — and the value it carries is the default evaluated once at the
-        definition. Declined: a scope the walk could not match, a store in
+        sits in, or None when no readable parameter binding owns the name
+        here. The nearest scope that binds it owns the answer — a nested
+        scope binding it as its OWN parameter takes it back — and the value
+        is the default evaluated once at the definition. Declined: a scope
+        the walk could not match, a store in
         the owning scope, a store from a nested one (`nonlocal`, reported
         in the nested scope only), and a default naming any parameter of
         its own signature, the cycle this reader would otherwise follow
