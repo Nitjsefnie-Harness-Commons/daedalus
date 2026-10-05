@@ -553,6 +553,32 @@ def test_tests_concurrency_scopes_runs_per_commit_and_per_pull(tmp):
     }, f'tests concurrency: {concurrency!r}'
 
 
+def test_concurrency_groups_scope_per_commit_and_per_pull(tmp):
+    """Runs without a pull-request number — push, dispatch, schedule —
+    group per commit, so a newer push cannot cancel a landed main SHA's
+    in-flight verdict, and a pull request groups per number, so a
+    superseded head push is still cancelled (issue 1579)."""
+    del tmp
+    groups = {
+        'audit.yml': 'audit',
+        'codeql.yml': 'codeql',
+        'gate-freshness.yml': 'gate-freshness',
+        'secrets.yml': 'secrets',
+        'tests.yml': 'tests',
+        'version.yml': 'version',
+    }
+    for name, prefix in sorted(groups.items()):
+        workflow = (ROOT / '.github' / 'workflows' / name).read_text(
+            encoding='utf-8')
+        group = (prefix + '-${{ github.event.pull_request.number'
+                 ' || github.sha }}')
+        concurrency = workflow_mapping(workflow).get('concurrency')
+        assert concurrency == {
+            'group': group,
+            'cancel-in-progress': 'true',
+        }, f'{name} concurrency: {concurrency!r}'
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='workflowtriggers_')

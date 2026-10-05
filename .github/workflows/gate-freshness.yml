@@ -38,8 +38,11 @@ permissions:
   contents: read
   pull-requests: read
 
+# The non-pull-request fallback is the commit SHA, not the ref, so a newer
+# push cannot cancel a landed main SHA's in-flight verdict (issue #1579).
+# A pull request keeps one group per number.
 concurrency:
-  group: gate-freshness-${{ github.event.pull_request.number || github.ref }}
+  group: gate-freshness-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
