@@ -128,6 +128,11 @@ ARMS = (
      'a constant program is handed to a code-evaluating builtin',
      'is handed to a code-evaluating builtin, which',
      5, '\n\n\ndef load():\n    return eval("importlib")\n'),
+    # Parse ok past depth 2000; a frame per subscript level; no line named.
+    (('composition_scan_set', 124), 'a composition nested deeper '
+     'than the walk follows', 'is too deeply nested to follow', None,
+     '\nimport importlib\n\n\ndef load():\n    return '
+     '[[importlib.import_module]]' + '[0]' * 800 + '("pkg.leaf")\n'),
 )
 # (label, the arm it sits beside, the composition the walk must leave
 # alone). The second column is the assertion, not decoration: it names whose
@@ -162,6 +167,9 @@ NEAR_MISSES = (
     ('a lookup of an ordinary attribute', ARMS[12][1],
      '\nimport importlib\n\n\ndef load():\n'
      '    return getattr(importlib, "util")\n'),
+    ('a chain the walk can follow it leaves alone', ARMS[14][1],
+     '\nimport importlib\n\n\ndef load():\n'
+     '    return [[importlib.import_module]][0][0](4)\n'),
 )
 
 # The sites no composition drives, each with the reason it has no row of its
@@ -170,9 +178,6 @@ NEAR_MISSES = (
 UNDRAWN = (
     (('_refuse', 90), 'the raiser itself: every driven site reaches it, so '
      'a composition names the SITE that called it rather than this one'),
-    (('composition_scan_set', 124), 'the walk\'s own recursion limit, a '
-     'declared limit no composition reaches — the case at the foot of this '
-     'file carries the evidence'),
     (('_refused_bindings', 408), 'the dead-node gate: it forwards a detail it '
      'did not spell and is where the arms behind a barrier are dropped'),
     (('_import_targets', 607), 'the lambda that binds path and root for the '
@@ -582,12 +587,7 @@ def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
     its call is written with, reports half a control and this says which half
     before it compares anything against a table.
 
-    `composition_scan_set` is a site in UNDRAWN and not in ARMS. It is the
-    walk's own recursion limit, and the declared limit of the arms here is
-    that no composition reaches it: CPython's parser refuses the shape
-    first, raising `SyntaxError` at depth 201 or 100 before
-    `_import_targets` is entered, so a control for it could only pin that
-    the walk refuses to parse.
+    The deep-chain arm drives the walk's own recursion limit (site `None`).
 
     `_refuse_default` is one derived site and three rows, which is the arm
     count and the site count disagreeing on purpose: the message names the
@@ -615,8 +615,8 @@ def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
         assert sorted(derived) == claimed, (
             f'{name}: the derived sites are {sorted(derived)}')
         assert len(derived) == len(claimed), (name, len(derived), len(claimed))
-    assert len(ARMS) == 14, len(ARMS)
-    assert len(UNDRAWN) == 5, len(UNDRAWN)
+    assert len(ARMS) == 15, len(ARMS)
+    assert len(UNDRAWN) == 4, len(UNDRAWN)
     assert len(FLOOR_ARMS) == 4, len(FLOOR_ARMS)
     assert len(FIXTURE_ARMS) == 1, len(FIXTURE_ARMS)
     assert len(CONTROL_SITES) == 6, len(CONTROL_SITES)

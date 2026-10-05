@@ -37,7 +37,7 @@ def _assert_scan_refusal(_tmp, source, site, phrase):
         _mcp_import_closure.composition_scan_set(
             Path(_tmp) / 'composition.py', _tmp)
     except AssertionError as raised:
-        assert f'composition:{site}' in str(raised), raised
+        assert site is None or f'composition:{site}' in str(raised), raised
         assert phrase in str(raised), raised
     else:
         raise AssertionError('a computed import was silently skipped')
