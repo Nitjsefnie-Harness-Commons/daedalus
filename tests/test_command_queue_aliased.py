@@ -5,8 +5,8 @@ The queue drain, the legacy drain and poll share the refusal registry: a
 retained, refused candidate logs its ``[STREAM] REFUSED`` line once per object,
 not once per drain pass. The key is the candidate's logical name paired with
 the object's incarnation, and the expiry sweep retires a name it vacates so a
-different object taking that name logs again. How a candidate is read is in
-``test_command_queue_candidates``.
+different object taking that name logs again. The candidate-reading rows
+live with the command-queue lifecycle rows in ``test_command_queue_unit``.
 """
 import contextlib
 import io

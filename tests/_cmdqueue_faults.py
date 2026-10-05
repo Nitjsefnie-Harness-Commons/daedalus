@@ -58,9 +58,8 @@ def _bounded_polls(max_polls, what=None):
 
     The uncounted direction is not pinned at all. No kept suite reads the
     reader's source to ask which APIs it reaches the queue through: with
-    `_poll_queue_reads` rewritten onto `os.listdir`, `test_cmdqueue.py`,
-    `test_queued_command.py`, `test_cmdqueue_clock.py` and
-    `test_cmdqueue_injectors.py` all still pass.
+    `_poll_queue_reads` rewritten onto `os.listdir`, `test_queued_command.py`
+    still passes.
     """
     originals = {name: getattr(Path, name) for name in _QUEUE_PROBES}
     spent = [0]
