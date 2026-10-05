@@ -27,10 +27,10 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _child_ready  # noqa: E402
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
-from _watcher_fixtures import RUNS_QUERY  # noqa: E402
-from _watcher_fixtures import runs_page  # noqa: E402
+from _watcher_fixtures import RUNS_QUERY, runs_page  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -44,8 +44,7 @@ LIFETIME = 60
 ARMED = 'watching'
 
 # Tells the child to save coverage before it ends: `os._exit` runs no
-# atexit hook, so without this its covered lines read as never run. The
-# wrapper saves, then calls the real `os._exit`.
+# atexit hook, so without this its covered lines read as never run.
 SAVE = 'DAEDALUS_SAVE_BEFORE_EXIT'
 
 CHILD = '''import os, sys, time
@@ -54,7 +53,6 @@ if os.environ.get({save!r}):
     _measure = coverage.Coverage()
     _measure.start()
     _ending_process = os._exit
-
     def _exit(code):
         _measure.stop()
         _measure.save()
@@ -70,9 +68,8 @@ time.sleep(300)
 REPORT = ('import os, sys; sys.stdout.write('
           'os.environ.get("DAEDALUS_WATCH_PARENT_FD", ""))')
 
-# A child asked to watch a name that is not a pipe; `regular` is opened
-# by the child itself, a descriptor this process opened not being one
-# the child would have, so the row measures the failure branch.
+# A child asked to watch a name that is not a pipe. `regular` is opened
+# by the child itself: this process's own descriptor is not its copy.
 REFUSER = '''import os, sys
 sys.path.insert(0, {skill!r})
 import gh_client
@@ -175,19 +172,20 @@ def _still_open(descriptor):
 
 
 def _sentinel():
-    """A descriptor, and the two the next `os.pipe` will hand out.
-    `os.pipe` allocates the two lowest free descriptors on both POSIX
-    and the Windows CRT, so a descriptor held open just before the call
-    names the pair exactly."""
+    """A descriptor, and the two the next `os.pipe` will hand out: it
+    allocates the two lowest free descriptors on POSIX and the Windows
+    CRT both, so a descriptor held open just before the call names the
+    pair exactly, without knowing the numbers."""
     held = os.open(os.devnull, os.O_RDONLY)
     return held, held + 1, held + 2
 
 
 def _probe_agrees_with_the_pipe():
-    """Whether the check above can tell a closed descriptor from an open
-    one: without this, a row asserting `not _still_open(n)` passes just
-    as happily when `n` was never open at all. A pipe held then closed
-    answers both ways."""
+    """Whether the check above can tell a closed descriptor from an
+    open one: without it, a row asserting `not _still_open(n)` passes
+    just as happily when `n` was never open at all. A pipe held and
+    then closed answers both ways before any row leans on it.
+    """
     read_fd, write_fd = os.pipe()
     assert _still_open(write_fd), write_fd
     os.close(read_fd)
@@ -199,6 +197,22 @@ def _ended(child):
     if child.poll() is None:
         child.kill()
     return child.wait(timeout=LIFETIME)
+
+
+def _armed_line(child):
+    """The armed line, blocked on from the child's own output, bounded:
+    the read is the awaited primitive (a daemon thread relays the
+    child's stdout, the wait blocks on its arrival object, LIFETIME
+    bounds without driving), on expiry the child is killed and the
+    failure names the bound, the state and the output. Not bounded: a
+    child a kill cannot end, whose drain thread then outlives it."""
+    drained = _child_ready.drain(child)
+    armed = _child_ready.await_line(child, drained, str.strip, LIFETIME)
+    if armed != ARMED:
+        child.kill()
+        raise AssertionError(
+            f'the child never armed its watcher within {LIFETIME}s: '
+            f'returncode {child.poll()!r}, output {drained!r}')
 
 
 def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
@@ -217,8 +231,7 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
         seen['value'] = child.communicate(timeout=LIFETIME)[0]
         assert child.returncode == 0, child.returncode
     finally:
-        # In the `finally`: the row below reads descriptor numbers a
-        # leaked write end would move.
+        # In the `finally`: a leaked write end moves the numbers below.
         os.close(write_fd)
         _ended(child)
 
@@ -253,9 +266,11 @@ def test_the_child_ends_when_the_write_end_closes_and_not_before(tmp):
     """The guarantee, both directions, on a real child: a byte down the
     pipe is not the parent's death and must not end the child; then the
     write end closes and the child ends - the only event a session-line
-    watcher of hours is ended by. The interval between the assertions is
-    the allowed not-yet shape, over a window far longer than ending a
-    process takes; the claim after is bounded so a hang fails."""
+    watcher of hours is ended by.
+
+    The interval between the assertions is the allowed not-yet shape:
+    a claim that something did NOT happen yet, over a window far longer
+    than ending a process could take; after it, a hang is a failure."""
     client = _client()
     child, write_fd = client.spawn_watched(
         [sys.executable, _watcher_child(tmp)],
@@ -263,9 +278,7 @@ def test_the_child_ends_when_the_write_end_closes_and_not_before(tmp):
         stdout=subprocess.PIPE, text=True)
     closed = False
     try:
-        armed = child.stdout.readline().strip()
-        assert armed == ARMED, (
-            f'the child never armed its watcher: {armed!r}')
+        _armed_line(child)
         os.write(write_fd, b'x')
         time.sleep(1.0)
         assert child.poll() is None, 'a byte ended the child'
@@ -306,11 +319,13 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
 
 
 def test_watch_parent_started_by_hand_leaves_the_process_alone(tmp):
-    """`watch_all.py`, the one watcher that does not call
-    `watch_parent`, is the process the other two watch - arming the pipe
-    there would have it watching itself. Nothing in this process sets
-    the name the pipe travels under, so the call returns without
-    starting a thread reading a descriptor nobody will close."""
+    """`watch_all.py`, the one watcher that does not call `watch_parent`,
+    is the process the other two watch - arming the pipe there would
+    have it watching itself. Nothing in this process sets the name the
+    pipe travels under, so the call returns without starting a thread;
+    a reader that started one anyway leaves a thread reading a
+    descriptor nobody will ever close.
+    """
     del tmp
     client = _client()
     before = {thread.name for thread in threading.enumerate()}
@@ -403,9 +418,7 @@ def test_the_in_flight_gh_ends_with_its_watcher(tmp):
         stdout=subprocess.PIPE, text=True)
     closed = False
     try:
-        armed = child.stdout.readline().strip()
-        assert armed == ARMED, (
-            f'the child never armed its watcher: {armed!r}')
+        _armed_line(child)
         deadline = time.monotonic() + LIFETIME
         while not any(entry['stage'] == 'entered'
                       for entry in fake.stages()):
@@ -518,8 +531,7 @@ def test_an_ending_over_a_child_already_gone_is_a_no_op(tmp):
     client = _client()
     done = subprocess.Popen([sys.executable, '-c', 'pass'])
     done.wait()
-    # `setattr`: the module was executed from a path, as in the answers
-    # suite.
+    # `setattr`: the module was executed from a path, as in the answers suite.
     setattr(client, '_INFLIGHT', done)
     with client._INFLIGHT_LOCK:
         client._end_inflight()
@@ -529,9 +541,9 @@ def test_an_ending_over_a_child_already_gone_is_a_no_op(tmp):
 
 def test_the_reap_bound_ends_the_ending_without_the_child(tmp):
     """The reap runs on the thread that must reach `os._exit`, so it is
-    bounded, stood in for the way the timing rule prescribes: a real
-    child whose reaping never completes; the record names the bound,
-    and the ending returns anyway."""
+    bounded, stood in for the way the timing rule prescribes: a real child
+    whose reaping never completes. The record names the bound, and the
+    ending returns anyway - an unbounded reader never appends to `done`."""
 
     client = _client()
     seen = {}
@@ -571,12 +583,12 @@ def _shim_child(tmp, gate, pidfile):
 
 
 def test_an_eof_during_the_spawn_waits_out_the_registration(tmp):
-    """EOF landing between the gh child's birth and its registration must
-    not strand it. The child's Popen is shimmed to hold after the real
-    spawn returns, so the write end can close while the slot is still
-    empty; the ending must wait out the shim, take the registered child
-    and kill it. Without the lock the ending reads the empty slot and
-    leaves, and the mid-spawn gh outlives the process. The mid-row
+    """EOF landing between the gh child's birth and its registration
+    must not strand it. The child's Popen is shimmed to hold after the
+    real spawn returns, so the write end can close while the slot is
+    still empty; the ending must wait out the shim, take the registered
+    child and kill it. Without the lock the ending reads the empty slot
+    and leaves, and the mid-spawn gh outlives the process. The mid-row
     still-here claim is the allowed not-yet kind, over a window far
     longer than ending a process."""
     if os.name == 'nt':
@@ -594,9 +606,7 @@ def test_an_eof_during_the_spawn_waits_out_the_registration(tmp):
     closed = False
     released = False
     try:
-        armed = child.stdout.readline().strip()
-        assert armed == ARMED, (
-            f'the child never armed its watcher: {armed!r}')
+        _armed_line(child)
         deadline = time.monotonic() + LIFETIME
         while not os.path.exists(pidfile):
             assert time.monotonic() < deadline, 'the gh never started'
