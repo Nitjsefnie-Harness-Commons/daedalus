@@ -7,13 +7,12 @@ runtime provably does not execute is not evidence: nothing in its subtree is
 resolved into the scan set and nothing in it draws a refusal, because a
 refusal the runtime can never trigger answers a question nobody asked.
 
-A block is read as a PROPERTY of the field that holds it rather than as a
-list of the node types that happen to carry one, so a block form nobody has
-thought of is the same read again. A statement leaves its block when every
-path through it leaves, and the containers that may or may not run are
-answered by the same fall-through, with the runtime's reason beside it —
-which is what keeps a `try`, a `with`, a loop and a `match` from reading as
-barriers.
+A block is read as a PROPERTY of the field that holds it rather than a
+list of node types, so a block form nobody has thought of is the same read
+again. A statement leaves its block when every path through it leaves, and
+the containers that may or may not run are answered by the same
+fall-through — which is what keeps a `try`, a `with`, a loop and a `match`
+from reading as barriers.
 """
 import ast
 
