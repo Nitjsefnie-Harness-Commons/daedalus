@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Trigger and gate-condition contracts for the workflows in .github/.
-
-The trigger blocks read through the bounded reader, and the shipped jobs'
-own gate conditions and step handles are pinned beside them.
-"""
+"""Trigger and gate-condition contracts for the workflows in .github/."""
 import sys
 import fnmatch
 import re
@@ -42,7 +38,6 @@ def _assert_no_workflow_gates_one_commit_twice(workflows):
 
 
 def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
-    """The double-gate helper must inspect both suffixes and own keys."""
     workflows = Path(tmp) / 'workflows'
     workflows.mkdir()
     (workflows / 'control.yml').write_text(
@@ -70,7 +65,6 @@ def test_double_gate_scan_reads_yaml_and_event_owned_options(tmp):
 
 
 def test_no_workflow_gates_one_commit_twice(tmp):
-    """A pull request's head SHA gets one run per workflow, not two."""
     del tmp
     _assert_no_workflow_gates_one_commit_twice(
         ROOT / '.github' / 'workflows')
@@ -101,13 +95,11 @@ def _assert_workflow_trigger_filters_match(workflows):
 
 
 def test_workflow_trigger_filters_match_between_push_and_pull_request(tmp):
-    """Push and pull_request must make the same path-filtering choice."""
     del tmp
     _assert_workflow_trigger_filters_match(ROOT / '.github' / 'workflows')
 
 
 def test_workflow_reader_accepts_string_controls_and_a_leading_bom(tmp):
-    """Positive scalar controls stay green through the policy helper."""
     workflows = Path(tmp) / 'workflows'
     workflows.mkdir()
     spelling = "[main, 'release', .gitignore, release-candidate, '**/*.md']"
@@ -125,7 +117,6 @@ def test_workflow_reader_accepts_string_controls_and_a_leading_bom(tmp):
 
 def test_workflow_trigger_gate_rejects_quote_collisions_and_accepts_comments(
         tmp):
-    """The gate refuses unequal quote spellings and accepts equal comments."""
     cases = (
         ('flow-quote-collision',
          "    paths-ignore: [don't.md, isn't.md]\n",
@@ -284,7 +275,6 @@ def test_workflow_trigger_filters_accept_string_pairs_and_opposite_quotes(tmp):
 
 
 def test_duplicate_event_options_are_refused(tmp):
-    """A repeated event option is refused rather than read last-wins."""
     del tmp
     for option, first, second in (
             ('branches', '[main]', '[release]'),
@@ -301,7 +291,6 @@ def test_duplicate_event_options_are_refused(tmp):
 
 
 def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
-    """A key below the option indent is not one of the event's options."""
     del tmp
     content = ('name: control\n\non:\n  push:\n'
                '    paths:\n      - src/**\n'
@@ -313,8 +302,7 @@ def test_repeated_key_below_the_option_indent_is_not_an_option(tmp):
 
 
 def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
-    """A coverage gate runs only on a measurement that succeeded.
-    Every shipped gate holds a row here or in a sibling table; a gate
+    """Every shipped gate holds a row here or in a sibling table; a gate
     added later needs its own row — nothing enforces that."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -350,7 +338,6 @@ def test_the_ratchet_is_only_committed_when_it_changed(tmp):
 
 
 def test_the_audit_is_gated_on_a_successful_install(tmp):
-    """The audit runs only where the tool it needs actually installed."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
@@ -361,7 +348,6 @@ def test_the_audit_is_gated_on_a_successful_install(tmp):
 
 
 def test_coverage_matrix_uploads_are_split_by_leg(tmp):
-    """Each matrix leg uploads exactly one leg's coverage data."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
@@ -377,7 +363,6 @@ def test_coverage_matrix_uploads_are_split_by_leg(tmp):
 
 
 def test_journey_budget_steps_are_gated_on_the_steps_before_them(tmp):
-    """The journey job's later steps read the earlier steps' outcomes."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
@@ -444,9 +429,7 @@ def _condition_output_reads(expression):
 
 
 def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
-    """The handles the shipped workflows declare, at the step declaring each.
-    coverage-comment.yml's id set is censused, its rows tied to it, and its
-    conditions' steps-outputs reads pinned to what the handles write;
+    """The handles the shipped workflows declare, at the declaring step.
     tests.yml's and actionlint's rows rely on disclosure alone."""
     del tmp
     tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -499,8 +482,7 @@ def test_shipped_step_ids_are_the_handles_the_workflow_uses(tmp):
 
 
 def _without_call_spacing(expression):
-    """Return an expression with whitespace at `(`, `,` and `)` removed.
-    Quote-blind (`'a, b'` reads as `'a,b'`); safe here: neither quoted
+    """Quote-blind (`'a, b'` reads as `'a,b'`); safe here: neither quoted
     operand holds any of the three."""
     return re.sub(r'\s*([(),])\s*', r'\1', expression)
 
@@ -551,6 +533,24 @@ def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
         'group': 'scorecard-${{ github.ref }}',
         'cancel-in-progress': 'true',
     }, f'scorecard concurrency: {concurrency!r}'
+
+
+def test_tests_concurrency_scopes_runs_per_commit_and_per_pull(tmp):
+    """A landed main SHA's tests verdict must complete: push and dispatch
+    runs group by commit SHA, so neither a newer push nor a re-run of an
+    older SHA cancels another commit's in-flight run (issue 1547), while a
+    pull request keeps one group per number so a superseded head push is
+    still cancelled. The `queue` key is not expressible here; the vendored
+    actionlint build rejects it."""
+    del tmp
+    tests = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
+        encoding='utf-8')
+    concurrency = workflow_mapping(tests).get('concurrency')
+    assert concurrency == {
+        'group':
+        'tests-${{ github.event.pull_request.number || github.sha }}',
+        'cancel-in-progress': 'true',
+    }, f'tests concurrency: {concurrency!r}'
 
 
 def main():
