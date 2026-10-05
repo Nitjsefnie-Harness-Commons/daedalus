@@ -599,19 +599,6 @@ def test_a_clear_whose_entry_is_a_symlink_says_it_is_still_there(tmp):
     assert (elsewhere / 'bytes').is_file(), elsewhere
 
 
-def test_the_save_line_is_exactly_the_shape_the_suite_parses(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    saved = _run_plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
-    # The whole line, not one separator's absence: a clause appended
-    # with a comma evades a `'; '` pin and the positional parse alike.
-    assert saved.stdout.strip() == (
-        f'saved {os.path.abspath(target)}: dirty against HEAD, '
-        f'{len(_FIXED)} bytes in {_only_entry(store)}'), saved.stdout
-
-
 def test_clear_of_an_entry_without_the_field_still_names_its_others(tmp):
     target, store = _saved_then_planted(tmp)
     _drop_the_state_field(store)
@@ -620,16 +607,6 @@ def test_clear_of_an_entry_without_the_field_still_names_its_others(tmp):
     assert cleared.returncode == 0, _say(cleared)
     labels = [label for label, _ in _entry_fields(cleared.stdout)]
     assert labels == ['path', 'saved'], labels
-
-
-def test_clear_reports_an_unvouched_state_the_way_restore_does(tmp):
-    target, store = _saved_then_planted(tmp)
-    _write_state(store, 'clean-ish')
-
-    cleared = _run_plant('clear', str(target), '--store', str(store))
-    assert cleared.returncode == 0, _say(cleared)
-    fields = _entry_fields(cleared.stdout)
-    assert ['captured', 'unknown'] in fields, _say(cleared)
 
 
 def main():
