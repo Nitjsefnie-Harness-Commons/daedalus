@@ -136,11 +136,10 @@ def _profile_args(launches):
 
 
 def _extension_args(launches):
-    return [
-        [Path(item) for item in next(
-            arg.split('=', 1)[1] for arg in launch
-            if arg.startswith('--load-extension=')).split(',')]
-        for launch in launches]
+    loading = [next(arg.split('=', 1)[1] for arg in launch
+                    if arg.startswith('--load-extension='))
+               for launch in launches]
+    return [[Path(item) for item in parsed.split(',')] for parsed in loading]
 
 
 def _assert_diagnosis_processes_settled(processes):
@@ -202,8 +201,7 @@ def test_a_callers_waits_reach_both_ready_waits(tmp):
             _realbrowser.real_extension_page(
                 tmp, 'http://127.0.0.1:1', 'controltoken',
                 'http://127.0.0.1:2/plain.html',
-                worker_ready_patience=2.0,
-                page_ready_timeout=3.0) as fixture:
+                worker_ready_patience=2.0, page_ready_timeout=3.0) as fixture:
         processes, launches, wait_calls = runtime
         assert fixture == (
             'node-for-control', 'ws://page', 'controlled-tab'), fixture
@@ -259,9 +257,8 @@ def test_diagnosis_poll_exception_retires_both_browser_owners(tmp):
     poll_failure = RuntimeError('controlled diagnosis poll failure')
     survived = None
     with _recovery_runtime(tmp, [first_absence], None) as runtime, \
-            mock.patch.object(
-                _realbrowser_workers, '_listed_workers',
-                side_effect=poll_failure):
+            mock.patch.object(_realbrowser_workers, '_listed_workers',
+                              side_effect=poll_failure):
         processes, launches, _wait_calls = runtime
         try:
             with _enter_fixture(tmp):
@@ -311,8 +308,7 @@ def _diagnosis(tmp, ours, control, poll=None):
             item.split('=', 1)[1] for item in args
             if item.startswith('--user-data-dir=')))
         profile.mkdir()
-        (profile / 'DevToolsActivePort').write_text(
-            '9222\n', encoding='utf-8')
+        (profile / 'DevToolsActivePort').write_text('9222\n', encoding='utf-8')
         process = _ProcessDouble()
         if isinstance(poll, (list, tuple)):
             process_poll = poll[min(len(processes), len(poll) - 1)]
@@ -329,9 +325,8 @@ def _diagnosis(tmp, ours, control, poll=None):
     def evaluate(node, target, expression):
         assert node == 'node-for-control', node
         evaluations.append((target, expression))
-        answers = (ours if target == 'ws://ours' else control)[
-            min(active_launch, len(ours if target == 'ws://ours' else control)
-                - 1)]
+        answers = ours if target == 'ws://ours' else control
+        answers = answers[min(active_launch, len(answers) - 1)]
         return answers.pop(0) if len(answers) > 1 else answers[0]
 
     def version(browser):
@@ -344,8 +339,7 @@ def _diagnosis(tmp, ours, control, poll=None):
         nonlocal active_launch
         active_launch = len(launches)
         assert cwd == ROOT, cwd
-        return popen(args, cwd=ROOT, stdin=stdin, stdout=stdout,
-                     stderr=stderr)
+        return popen(args, cwd=ROOT, stdin=stdin, stdout=stdout, stderr=stderr)
 
     patches = (
         mock.patch.object(target.subprocess, 'Popen', launch),
@@ -459,9 +453,8 @@ def test_control_answer_is_preserved_when_diagnosis_browser_exits(tmp):
     outcome, launches, processes, _evaluations = _diagnosis(
         tmp, [False], [True], poll=1)
     assert outcome == (
-        False,
-        'the diagnosis browser exited after the control answered but before '
-        'ours answered',
+        False, 'the diagnosis browser exited after the control answered '
+        'but before ours answered',
     ), outcome
     assert len(launches) == 1, launches
     assert processes[0].wait_timeouts == [BOUND.CLEANUP_TIMEOUT_S], (
