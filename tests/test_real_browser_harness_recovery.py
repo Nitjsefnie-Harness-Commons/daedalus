@@ -2,6 +2,7 @@
 """Browser-free controls for worker-absence recovery and diagnosis."""
 import contextlib
 import errno
+import itertools
 import subprocess
 import sys
 from pathlib import Path
@@ -11,9 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _realbrowser_workers  # noqa: E402
+import _util  # noqa: E402
 from _realbrowser_fixture_controls import (  # noqa: E402
     _ProcessDouble, _browser_requirements, _enter_fixture)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+
+BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                   'recovery_suite_bound')
 
 
 def _process_launches(recovery_failure=None):
@@ -144,7 +149,19 @@ def _extension_args(launches):
 def _assert_diagnosis_processes_settled(processes):
     assert len(processes) == 2, processes
     assert [item.terminated for item in processes] == [True, True]
-    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+    assert [item.wait_timeouts for item in processes] == [
+        [BOUND.CLEANUP_TIMEOUT_S], [BOUND.CLEANUP_TIMEOUT_S]]
+
+
+def _assert_relayed_waits(tmp, launches, processes, wait_calls):
+    """The relaunch re-reads devtools on the recovery profile."""
+    profiles = _profile_args(launches)
+    assert profiles == [
+        str(Path(tmp) / 'chromium-profile'),
+        str(Path(tmp) / 'chromium-profile-recovery')], profiles
+    assert wait_calls == [
+        (Path(profiles[i]), processes[i], 'background.js')
+        for i in (0, 1)], wait_calls
 
 
 def test_contention_relaunch_recovers_the_fixture(tmp):
@@ -152,27 +169,16 @@ def test_contention_relaunch_recovers_the_fixture(tmp):
         'controlled first-launch worker absence')
     verdict = mock.Mock(return_value=(
         True, 'controlled contention evidence'))
-    yielded = []
     with _recovery_runtime(
-            tmp, [first_absence, _ready_targets()], verdict) as runtime:
+            tmp, [first_absence, _ready_targets()], verdict) as runtime, \
+            _enter_fixture(tmp) as fixture:
         processes, launches, wait_calls = runtime
-        with _enter_fixture(tmp) as fixture:
-            yielded.append(fixture)
-
-    assert yielded == [
-        ('node-for-control', 'ws://page', 'controlled-tab')], yielded
+        assert fixture == (
+            'node-for-control', 'ws://page', 'controlled-tab'), fixture
     assert len(launches) == 2, launches
-    profiles = _profile_args(launches)
-    assert profiles == [
-        str(Path(tmp) / 'chromium-profile'),
-        str(Path(tmp) / 'chromium-profile-recovery'),
-    ], profiles
-    assert wait_calls == [
-        (Path(profiles[0]), processes[0], 'background.js'),
-        (Path(profiles[1]), processes[1], 'background.js'),
-    ], wait_calls
+    _assert_relayed_waits(tmp, launches, processes, wait_calls)
     verdict.assert_called_once()
-    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_a_callers_waits_reach_both_ready_waits(tmp):
@@ -181,34 +187,22 @@ def test_a_callers_waits_reach_both_ready_waits(tmp):
         'controlled first-launch worker absence')
     verdict = mock.Mock(return_value=(
         True, 'controlled contention evidence'))
-    yielded = []
     with _recovery_runtime(
             tmp, [_ready_targets(), _ready_targets()], verdict,
             worker_waits=[first_absence, 'ws://worker'],
-            worker_ready_patience=2.0, page_ready_timeout=3.0) as runtime:
-        processes, launches, wait_calls = runtime
-        with _realbrowser.real_extension_page(
+            worker_ready_patience=2.0, page_ready_timeout=3.0) as runtime, \
+            _realbrowser.real_extension_page(
                 tmp, 'http://127.0.0.1:1', 'controltoken',
                 'http://127.0.0.1:2/plain.html',
                 worker_ready_patience=2.0,
                 page_ready_timeout=3.0) as fixture:
-            yielded.append(fixture)
-
-    assert yielded == [
-        ('node-for-control', 'ws://page', 'controlled-tab')], yielded
+        processes, launches, wait_calls = runtime
+        assert fixture == (
+            'node-for-control', 'ws://page', 'controlled-tab'), fixture
     assert len(launches) == 2, launches
-    profiles = _profile_args(launches)
-    assert profiles == [
-        str(Path(tmp) / 'chromium-profile'),
-        str(Path(tmp) / 'chromium-profile-recovery'),
-    ], profiles
-    assert wait_calls == [
-        (Path(profiles[0]), processes[0], 'background.js'),
-        (Path(profiles[1]), processes[1], 'background.js'),
-    ], wait_calls
+    _assert_relayed_waits(tmp, launches, processes, wait_calls)
     verdict.assert_called_once()
-    assert [item.terminated for item in processes] == [True, True], processes
-    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_contention_relaunch_absence_remains_a_skip(tmp):
@@ -234,7 +228,7 @@ def test_contention_relaunch_absence_remains_a_skip(tmp):
     assert 'recovery relaunch' in str(survived), survived
     assert len(launches) == 2, launches
     verdict.assert_called_once()
-    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+    _assert_diagnosis_processes_settled(processes)
 
 
 def test_contention_recovery_launch_failure_is_not_worker_absence(tmp):
@@ -261,7 +255,8 @@ def test_contention_recovery_launch_failure_is_not_worker_absence(tmp):
     assert 'recovery browser could not be launched' in str(survived), survived
     assert len(launches) == 2, launches
     verdict.assert_called_once()
-    assert [item.wait_timeouts for item in processes] == [[10], []]
+    assert [item.wait_timeouts for item in processes] == [
+        [BOUND.CLEANUP_TIMEOUT_S], []]
 
 
 def test_diagnosis_poll_exception_retires_both_browser_owners(tmp):
@@ -283,33 +278,19 @@ def test_diagnosis_poll_exception_retires_both_browser_owners(tmp):
 
     assert survived is poll_failure, survived
     assert len(launches) == 2, launches
-    assert [item.terminated for item in processes] == [True, True]
-    assert [item.wait_timeouts for item in processes] == [[10], [10]]
+    _assert_diagnosis_processes_settled(processes)
 
 
 def _repository_target():
-    return {
-        'type': 'service_worker',
-        'url': 'chrome-extension://ours/background.js',
-        'webSocketDebuggerUrl': 'ws://ours',
-    }
+    return {'type': 'service_worker',
+            'url': 'chrome-extension://ours/background.js',
+            'webSocketDebuggerUrl': 'ws://ours'}
 
 
 def _control_target():
-    return {
-        'type': 'service_worker',
-        'url': 'chrome-extension://control/control-worker.js',
-        'webSocketDebuggerUrl': 'ws://control',
-    }
-
-
-class _PollClock:
-    def __init__(self):
-        self.now = 0.0
-
-    def __call__(self):
-        self.now += 0.01
-        return self.now
+    return {'type': 'service_worker',
+            'url': 'chrome-extension://control/control-worker.js',
+            'webSocketDebuggerUrl': 'ws://control'}
 
 
 def _diagnosis(tmp, ours, control, poll=None):
@@ -378,7 +359,9 @@ def _diagnosis(tmp, ours, control, poll=None):
         mock.patch.object(target, 'cdp_eval', evaluate),
         mock.patch.object(target, '_browser_version', version),
         mock.patch.object(target, 'WORKER_ABSENCE_DEADLINE', 0.05),
-        mock.patch.object(target.time, 'time', _PollClock()),
+        mock.patch.object(
+            target.time, 'time',
+            mock.Mock(side_effect=itertools.count(0, 0.01))),
         mock.patch.object(target.time, 'sleep', return_value=None),
     )
     with contextlib.ExitStack() as stack:
@@ -412,9 +395,7 @@ def test_control_answer_then_retry_ours_answer_returns_contention(tmp):
     assert 'contention' in outcome[1], outcome
     assert 'retry diagnosis launch' in outcome[1], outcome
     assert len(launches) == 2, launches
-    profiles = [next(item.split('=', 1)[1] for item in launch
-                     if item.startswith('--user-data-dir='))
-                for launch in launches]
+    profiles = _profile_args(launches)
     assert all(Path(item).parent == Path(tmp) for item in profiles), profiles
     assert profiles[0] != profiles[1], profiles
     loaded = _extension_args(launches)
@@ -489,7 +470,8 @@ def test_control_answer_is_preserved_when_diagnosis_browser_exits(tmp):
         'ours answered',
     ), outcome
     assert len(launches) == 1, launches
-    assert processes[0].wait_timeouts == [10], processes[0].wait_timeouts
+    assert processes[0].wait_timeouts == [BOUND.CLEANUP_TIMEOUT_S], (
+        processes[0].wait_timeouts)
 
 
 def test_neither_worker_answers_and_both_extensions_are_loaded(tmp):
@@ -504,7 +486,8 @@ def test_neither_worker_answers_and_both_extensions_are_loaded(tmp):
     assert len(loaded[0]) == 2, loaded
     assert EXTENSION_ROOT.resolve() in loaded[0], loaded
     assert loaded[0][1].exists(), loaded
-    assert processes[0].wait_timeouts == [10], processes[0].wait_timeouts
+    assert processes[0].wait_timeouts == [BOUND.CLEANUP_TIMEOUT_S], (
+        processes[0].wait_timeouts)
 
 
 def main():
