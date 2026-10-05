@@ -220,6 +220,42 @@ def test_first_bridge_start_gets_cold_allowance_then_marks_warm(tmp):
         _util._bridge_started = saved_started
 
 
+def test_readiness_get_is_served_only_after_the_mcp_settle(tmp):
+    """The readiness probe is issued only after the front end has settled.
+
+    A probe served while the front-end import and the mcp-server loop are
+    both mid-flight can land on a fresh callgrind thread id nobody
+    recycles — the journey-count high mode (issue 1498). The order is the
+    property, so both events are recorded on the harness's own thread;
+    nothing is timed.
+    """
+    events = []
+    real_get = _util.get
+    real_await = _util._mcp_ready.await_mcp_ready
+
+    def recording_get(url, **kw):
+        status, body = real_get(url, **kw)
+        events.append(('health-get', status))
+        return status, body
+
+    def recording_await(proc, drained, observations, **kw):
+        state = real_await(proc, drained, observations, **kw)
+        events.append(('mcp-settled', state))
+        return state
+
+    _util.get = recording_get
+    _util._mcp_ready.await_mcp_ready = recording_await
+    try:
+        with _util.bridge(tmp, await_mcp=True):
+            pass
+    finally:
+        _util.get = real_get
+        _util._mcp_ready.await_mcp_ready = real_await
+    kinds = [kind for kind, _detail in events]
+    assert kinds == ['mcp-settled', 'health-get'], events
+    assert events[-1] == ('health-get', 200), events
+
+
 def test_live_child_observations_never_wait_for_drain(tmp):
     """A live child's pump cannot delay rendering its observations."""
     del tmp
