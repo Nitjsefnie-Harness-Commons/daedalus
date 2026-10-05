@@ -525,10 +525,9 @@ def _scan(node, bound, scopes, elements):
     projection, choice, selection, return, container) reaches the builtin
     the same way, and one passed to a call or used as a lookup key is a
     hand-off. A sixth spelling is resolved by the same rules, not a branch.
-    Each verdict is asked ONCE: where two arms of one node read the same
-    subtree, the pair is computed in a single descent, and `elements` is the
-    fold that lets a revisited subscript re-read its selection instead of
-    re-walking the chain — so the cost tracks the nodes, not the revisits.
+    Each verdict is asked once: where two arms read one subtree, the pair
+    is computed in a single descent, and `elements` folds an element
+    selection so a revisited level re-reads it instead of re-walking.
     """
     if denotes_code_eval(node, bound, scopes) or _builtin_projection(
             node, bound, scopes):
