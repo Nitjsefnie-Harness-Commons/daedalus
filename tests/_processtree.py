@@ -118,32 +118,6 @@ def process_group(process):
     return os.getpgid(process.pid)
 
 
-def cleanup_process_group(group, cleanup_timeout):
-    """Kill a process group by an id, and report what the kill did.
-
-    The zero signal first says whether anything is left to kill. POSIX
-    only: a reaped pid leaves `taskkill` nothing to name there.
-    """
-    if group is None:
-        return ('no process group to kill: this platform has none, and a '
-                'reaped leader leaves a tree kill nothing to name')
-    if sys.platform == 'win32':
-        return 'process group signals do not exist on Windows'
-    try:
-        os.killpg(group, 0)
-    except ProcessLookupError:
-        return 'process group was already gone before cleanup'
-    except OSError as error:
-        return f'process-group lookup failed: {error}'
-    try:
-        os.killpg(group, signal.SIGKILL)
-    except ProcessLookupError:
-        return f'process group {group} was already gone'
-    except OSError as error:
-        return f'process-group kill failed: {error}'
-    return f'process group {group} killed'
-
-
 def cleanup_process_tree(process, cleanup_timeout):
     """Kill `process`'s tree, reap it, and return what each step did.
 

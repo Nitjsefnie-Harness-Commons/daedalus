@@ -73,13 +73,11 @@ nothing exercises is still better than an answer, but it is not a
 control and should not be counted as one.
 """
 from _dashnode import DOM as _DOM
-from _dashnode import DashboardNodeHarness
 from _dashsection_transport import TRANSPORT as _TRANSPORT
 from _dashshell import dashboard_module as section_path
-from _dashshell import build_harness, run_scenario
+from _dashshell import run_scenario
 
-__all__ = ['SHELL', 'section_harness', 'section_runner',
-           'section_scenario', 'section_path']
+__all__ = ['SHELL', 'section_runner', 'section_path']
 
 
 # The gaps `_dashnode.DOM` carries for a section, and the bus the
@@ -371,26 +369,6 @@ const bus = {
 
 
 SHELL = _DOM + _ELEMENTS + _TRANSPORT
-
-
-def section_harness(scenario: str, *,
-                    sections: tuple[str, ...] = ()
-                    ) -> DashboardNodeHarness:
-    """`build_harness` over the SECTION shell, bound once.
-
-    The two shells differ in the prelude they assemble and not in the
-    process boundary, so the builder is `_dashshell`'s with the prelude
-    named. This is the binding rather than a second builder: a copy would
-    differ from the original in exactly the one line that decides which
-    transport the child gets.
-    """
-    return build_harness(scenario, modules=sections, shell=SHELL)
-
-
-def section_scenario(scenario: str, *,
-                     sections: tuple[str, ...] = ()) -> dict:
-    """`run_scenario` over the section shell; see `section_harness`."""
-    return run_scenario(scenario, modules=sections, shell=SHELL)
 
 
 def section_runner(scenario, sections, *, plan, setup, by_type=None):
