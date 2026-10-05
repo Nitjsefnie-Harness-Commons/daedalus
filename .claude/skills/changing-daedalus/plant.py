@@ -239,6 +239,12 @@ def save(path, store):
         _publish(os.path.join(entry, 'head-state'),
                  f'{state}\n'.encode('ascii'))
     except OSError as why:
+        # The entry here, if any, is this attempt's own: the guard above
+        # refuses a path that already has one, so removing it cannot
+        # destroy an earlier copy.
+        if _remove_entry(entry):
+            return _refuse(f'cannot save {path}: {why}; the half-built '
+                           f'entry is still at {entry}')
         return _refuse(f'cannot save {path}: {why}')
     print(f'saved {path}: {state} against HEAD, '
           f'{len(payload)} bytes in {entry}')

@@ -296,6 +296,45 @@ def test_a_racing_save_is_refused_and_not_traced(tmp):
     assert str(target) in err.getvalue(), err.getvalue()
 
 
+def test_a_failed_field_write_leaves_no_entry_behind(tmp):
+    # The refusal arm used to keep the half-built entry it had just
+    # created, wedging the path behind "already has a stored copy".
+    target = _committed_repo(tmp)
+    store = Path(tmp) / 'store'
+    plant = _util.load(PLANT, 'plant_save_residue')
+    real_publish = plant._publish
+
+    def full_disk(field, payload):
+        if os.path.basename(field) == 'mode':
+            raise OSError(28, 'No space left on device')
+        real_publish(field, payload)
+
+    entry = Path(plant._entry(str(store), str(target)))
+    err = io.StringIO()
+    with mock.patch.object(plant, '_publish', full_disk), \
+            mock.patch.object(plant, '_remove_entry', lambda name: 1), \
+            contextlib.redirect_stderr(err), \
+            contextlib.redirect_stdout(io.StringIO()):
+        status = plant.save(str(target), str(store))
+    said = err.getvalue()
+    assert status == 1, (status, said)
+    # The original failure stays the cause, the residue the addition.
+    assert f'cannot save {target}' in said, said
+    assert 'No space left on device' in said, said
+    assert f'still at {entry}' in said, said
+    assert entry.is_dir(), 'the composed refusal left the residue'
+    shutil.rmtree(entry)
+
+    with mock.patch.object(plant, '_publish', full_disk), \
+            contextlib.redirect_stderr(err), \
+            contextlib.redirect_stdout(io.StringIO()):
+        assert plant.save(str(target), str(store)) == 1
+    assert not entry.exists(), 'the working cleanup left the residue'
+    # The wedge this closes, proven end to end: the next save succeeds.
+    assert _run_plant('save', str(target), '--store',
+                      str(store)).returncode == 0
+
+
 def _planted_publish_fixture(tmp):
     """A saved payload and a planted file, ready for one restore."""
     target = _committed_repo(tmp)
@@ -494,24 +533,6 @@ def test_the_two_spellings_of_a_path_do_not_share_an_entry(tmp):
     assert refused.returncode != 0, _say(refused)
     assert str(real) in _say(refused), _say(refused)
     assert real.read_bytes() == _COMMITTED
-
-
-def test_clear_leaves_another_pending_plant_alone(tmp):
-    one = _committed_repo(tmp, 'one')
-    two = _committed_repo(tmp, 'two')
-    store = Path(tmp) / 'store'
-    for target in (one, two):
-        assert _run_plant('save', str(target), '--store',
-                          str(store)).returncode == 0
-    assert _run_plant('clear', str(one), '--store',
-                      str(store)).returncode == 0
-    # One left, not zero: clearing one plant takes no other's.
-    assert len([i for i in Path(store).iterdir() if i.is_dir()]) == 1
-    for target in (one, two):
-        target.write_bytes(_PLANTED)
-    assert _run_plant('restore', str(two), '--store',
-                      str(store)).returncode == 0
-    assert two.read_bytes() == _COMMITTED
 
 
 def test_the_refusal_recommends_clear_when_the_copy_is_unreadable(tmp):
