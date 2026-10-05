@@ -3,7 +3,8 @@ DECLARED covers stored action destinations and parser defaults; GUARANTEED adds
 required and non-suppressed values. A required mutually exclusive group
 guarantees a destination only when every member stores that same non-SUPPRESS
 destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
-Namespace stores are refused as namespace store escapes.
+Namespace stores are admitted; an augmented assignment target is checked as
+the read it is, a del is refused, and a store never satisfies a read.
 A frame read is refused in every statement of every daedalus_cli module the
 walk reaches, and every member of the interpreter's frame set is refused, not
 only the ones this file names. A read in a helper a handler calls is in that
@@ -24,8 +25,7 @@ sys.path.insert(0, str(_util.ROOT))
 resolver = audit_support.resolver
 
 
-_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
-           ast.ClassDef)
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
 def _binding_names(target):
@@ -206,15 +206,16 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
             violations.append(f'namespace escape: {ast.unparse(selection)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
-            permitted = resolver.permitted_namespace_read(
-                node, function, handler_globals, _scope_binds,
-                _comprehension_shadows)
-            if permitted is None:
-                kind = ('namespace store escape' if isinstance(
-                    getattr(node._parent, 'ctx', None), ast.Store)
-                    else 'namespace escape')
-                violations.append(f'{kind}: {ast.unparse(node._parent)}')
-            else:
+            parent = node._parent
+            permitted = None
+            if isinstance(getattr(parent, 'ctx', None), ast.Store):
+                if isinstance(parent._parent, ast.AugAssign):
+                    permitted = parent.attr, parent, True
+            elif (permitted := resolver.permitted_namespace_read(
+                    node, function, handler_globals, _scope_binds,
+                    _comprehension_shadows)) is None:
+                violations.append(f'namespace escape: {ast.unparse(parent)}')
+            if permitted is not None:
                 attribute, construct, needs_presence = permitted
                 rendered = ast.unparse(construct)
                 reads.setdefault(attribute, set()).add(rendered)
@@ -368,10 +369,9 @@ def test_cli_real_dispatch_helper_neutralizes_bridge(tmp):
 
 def test_cli_audit_excludes_dest_suppress_action(tmp):
     from daedalus_cli.parser import build_parser
-    parser = build_parser()
-    declared, guaranteed = _tabs_namespace_dests(parser)
-    violations = _audit_fake_handler('args.version', declared, guaranteed)
-    assert violations == ['args.version'], violations
+    declared, guaranteed = _tabs_namespace_dests(build_parser())
+    assert _audit_fake_handler('args.version', declared, guaranteed) == [
+        'args.version'], 'args.version'
 
 
 def test_cli_audit_excludes_default_suppress_action(tmp):
@@ -419,9 +419,8 @@ def test_cli_audit_includes_parser_set_defaults(tmp):
     parser.set_defaults(from_defaults=False)
     assert vars(parser.parse_args([])) == {'from_defaults': False}
     declared, guaranteed = resolver.namespace_dests(parser)
-    violations = _audit_fake_handler(
-        'args.from_defaults', declared, guaranteed)
-    assert violations == [], violations
+    assert _audit_fake_handler(
+        'args.from_defaults', declared, guaranteed) == []
 
 
 def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
@@ -431,17 +430,22 @@ def test_cli_audit_checks_permitted_reads_by_attribute(tmp):
         assert _audit_fake_handler(undeclared) == [undeclared], undeclared
 
 
-def test_cli_audit_store_semantics_are_fail_closed(tmp):
+def test_cli_audit_admits_namespace_stores_that_satisfy_no_read(tmp):
     probe = 'args.undeclared_probe'
-    store = [f'namespace store escape: {probe}']
     inner = f'def inner():\n    global args\n    {probe}%s\ninner()'
-    store_only = (f'{probe} = False', f'{probe}: bool = False',
-                  f'{probe} += 1', f'{probe}, other = values',
-                  inner % ' = False', inner % ': bool = False')
-    for body, expected in tuple((body, store) for body in store_only) + (
-            (f'if False:\n    {probe} = False\n{probe}', store + [probe]),
-            (f'{probe} = {probe} or False', store + [probe]),
-            (probe, [probe]), (f'{probe} = False\n{probe}', store + [probe])):
+    admitted = (
+        f'{probe} = False', f'{probe}: bool = False',
+        f'{probe}, other = values', f'other = {probe} = False',
+        f'for {probe} in values:\n    pass', 'args.json = True',
+        'args.json += 1', inner % ' = False', inner % ': bool = False')
+    refused = (
+        (probe, [probe]), (f'{probe} += 1', [probe]),
+        (f'del {probe}', [f'namespace escape: {probe}']),
+        (inner % ' += 1', [probe]),
+        (f'if False:\n    {probe} = False\n{probe}', [probe]),
+        (f'{probe} = {probe} or False', [probe]),
+        (f'{probe} = False\n{probe}', [probe]))
+    for body, expected in tuple((body, []) for body in admitted) + refused:
         assert (actual := _audit_fake_handler(body)) == expected, body
         assert not any(' read ' in message for message in actual), body
 
@@ -529,9 +533,8 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
     # A call's second argument names a member, not a mapping key.
     assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
-    # A name a LOCAL scope binds is not an origin the audit can see, so a
-    # dict literal built in the handler and read by key is refused. Stated in
-    # the resolver's docstring because it is the one over-refusal here.
+    # A name a LOCAL scope binds is not an origin the audit can see — the
+    # resolver's one stated over-refusal — so this read by key is refused.
     local = "data = {'f_locals': 1}\nreturn data['f_locals']"
     assert _audit_fake_handler(local) == [
         "namespace escape: data['f_locals']"], local
@@ -544,8 +547,7 @@ def test_cli_audit_reads_the_namespace_key_from_the_handler(tmp):
         for key in (parameter, 'args'):
             body = f"holder = helper()\n_ = holder['{key}'].undeclared_probe"
             escape = f'namespace escape: holder[{key!r}]'
-            assert _audit_fake_handler(
-                body, parameter=parameter) == (
+            assert _audit_fake_handler(body, parameter=parameter) == (
                 [] if key != parameter else [escape]), (parameter, key)
 
 
