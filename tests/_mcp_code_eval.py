@@ -22,8 +22,8 @@ entry. `denotes_builtin` asks the alias question at full strength, and a
 whether that binding has been ESTABLISHED at the use is read off the source,
 because `symtable` is a static grammar and cannot answer it — a binding the
 module may not have executed yet is not one, and a scope the walk cannot
-line up with the resolver's is not one either. Both are refusals, which is
-the direction a false negative is cheap in.
+line up with the resolver's is not one either — both are refusals, the
+direction a false negative is cheap in.
 
 The same grammar does not answer the SHADOW question either: a store under a
 `global` declaration is a module binding that leaves the root symbol imported
@@ -50,8 +50,7 @@ _COMP_NAMES = {ast.ListComp: 'listcomp', ast.SetComp: 'setcomp',
                ast.DictComp: 'dictcomp', ast.GeneratorExp: 'genexpr'}
 
 # Statement kinds whose body runs only SOMETIMES: a `from builtins` inside
-# one is not a binding at the next statement. A comprehension's own `if`
-# clauses cannot bind a name and are not here.
+# one is not a binding at the next statement.
 _GUARDED = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
             ast.With, ast.AsyncWith, ast.Match)
 
@@ -80,8 +79,8 @@ class _Scopes:
         self._alias = {}
         self._uncertain = {}
         # The AST node each matched scope table belongs to, so the value a
-        # parameter carries at entry — its own default — is readable off the
-        # tree the scope was matched from.
+        # parameter carries at entry — its own default — is readable off
+        # the tree the scope was matched from.
         self._scope_ast = {}
         # The names a NESTED scope rebinds in the MODULE, read off the
         # resolver's tables — `_rebindings` owns the why.
@@ -344,9 +343,8 @@ class _Scopes:
 
         A `from builtins import bool` under its own name binds the builtin
         to itself, so it is not a shadow of the name whichever way the
-        statement goes: whether it runs or not, and whether it runs before
-        the use or after, the name is the builtin. Only a store over the
-        same name takes it back.
+        statement goes — running or not, before or after the use. Only a
+        store over the same name takes it back.
         """
         bound = self._alias.get(id(self._root), {}).get(name)
         return (bound is not None and bound[0] == name
@@ -607,7 +605,7 @@ def yields_code_eval(value, bound, scopes):
     when that value is the builtin or hands it on (an argument, a lookup key,
     a builtin in a bound container). A store binding a call's RESULT binds no
     builtin — a builtin that is the effective callee is a USE the declared
-    call-result limit covers — which is the same value-resolution the call arm
-    uses, so a constant program reaches the builtin however it is spelled."""
+    call-result limit covers — so a constant program reaches the builtin
+    however it is spelled."""
     is_builtin, holds = _scan(value, bound, scopes, {})
     return is_builtin or holds
