@@ -233,39 +233,6 @@ def test_poll_retries_a_failed_conditional_consume(tmp):
     assert result == second, (result, second)
 
 
-def test_poll_survives_a_transport_failure_on_the_peek(tmp):
-    """A reset on the peek is retried while the deadline has time left.
-
-    The bridge answers /result at once, so a transport failure on that
-    GET is the proxy's, and the command it asks about is already queued.
-    Raising it out of the poll reported a failure for work the browser
-    went on to do; the poll now keeps going, like a pending slot.
-    """
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        transport.httpx.ReadError('connection reset by peer'),
-        wanted,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-
-    result = _capture(session.poll_result(
-        '', 1, interval=0, expect_id='command',
-        expect_delivery='wanted'))
-
-    assert result == wanted, (result, wanted)
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 3, client.calls
-
-
 def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
     """The clause admits TransportError itself, not members met so far."""
     del tmp

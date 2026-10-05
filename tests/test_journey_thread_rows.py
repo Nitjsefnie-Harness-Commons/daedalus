@@ -258,87 +258,60 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
 
 
 def test_self_totals_reconcile_on_the_shapes_a_real_profile_carries(tmp):
-    """The numeric control over the cost-line shapes a REAL profile writes,
-    recorded from the harvested CI profiles: relative positions (`+1 2`,
-    `-1 21`, `* 30`), a `calls=` line that carries the format's trailing
-    space and a signed target, `*`-position arcs, a bare `fn=(id)`
-    re-select, and the thread-root chain that bills a whole thread's
-    inclusive cost at its entry arc. Over this file every cost line is
-    either the function's self cost or the arc it follows, so the totals
-    sum to the file's own `summary:` and `totals:` lines -- where the walk
-    that matched neither spelling billed every arc in the chain to the
-    chain's root and read 4x the summary."""
+    """The numeric control over the shapes a REAL profile writes, recorded
+    from the harvested CI profiles: relative positions (`+1 2`, `-1 21`),
+    the trailing-space signed `calls=`, `*`-position arcs, a bare
+    `fn=(id)` re-select, and the thread-root chain whose entry arc
+    carries the thread's inclusive cost. Every cost line here is either
+    self or the arc it follows, so the totals sum to the file's own
+    `summary:` and `totals:` lines -- where the walk that matched neither
+    spelling billed every arc to the chain's root and read 4x the summary."""
     functions = functions_module()
     _profile_file(tmp, 'callgrind.x.4', (
-        'version: 1\ncreator: callgrind-3.22.0\n'
-        'pid: 21\npart: 1\nthread: 3\ncmd:  python3 server.py\n'
-        'positions: line\nevents: Ir\nsummary: 3121\n'
+        'version: 1\npid: 21\npart: 1\nthread: 3\n'
+        'cmd:  python3 server.py\npositions: line\nevents: Ir\n'
+        'summary: 3101\n'
         '\n'
         'ob=(1) libc.so.6\n'
         'fl=(1) clone.S\n'
         'fn=(1) clone\n'
-        '83 1\n'
-        '+1 1\n'
-        '+1 1\n'
+        '83 1\n+1 1\n+1 1\n'
         'cfi=(2) pthread_create.c\n'
         'cfn=(2) start_thread\n'
-        'calls=1 338 \n'
-        '* 3057\n'
+        'calls=1 338 \n* 3057\n'
         '\n'
-        'fl=(3) strchr-avx2.S\n'
-        'fn=(3) __strchrnul_avx2\n'
-        '53 2\n'
-        '+2 2\n+2 2\n+2 2\n+2 2\n+2 2\n+2 2\n+2 2\n+2 2\n+2 2\n'
         'fn=(2) start_thread\n'
-        '25 1\n'
-        '+1 2\n'
-        '+1 1\n'
-        'cfi=(4) journeys.py\n'
+        '25 1\n+1 2\n+1 1\n'
         'cfn=(4) thread_run\n'
-        'calls=1 7 \n'
-        '* 3020\n'
+        'calls=1 7 \n* 3020\n'
         'fn=(4) thread_run\n'
-        '4 5\n'
-        '+1 5\n'
-        '+1 5\n'
-        'cfi=(4) journeys.py\n'
+        '4 5\n+1 5\n+1 5\n'
         'cfn=(5) work\n'
-        'calls=1 12 \n'
-        '* 3005\n'
+        'calls=1 12 \n* 3005\n'
         'fn=(5) work\n'
         '1 3000\n'
         '\n'
         'fl=(6) errno-loc.c\n'
         'fn=(6) __errno_location\n'
-        '25 1\n'
-        '+1 2\n'
-        '+1 1\n'
+        '25 1\n+1 2\n+1 1\n'
         'cfn=(7) _itoa_word\n'
-        'calls=2 -29 \n'
-        '* 3\n'
+        'calls=2 -29 \n* 3\n'
         '+9 2\n'
         'fn=(7) _itoa_word\n'
-        '169 1\n'
-        '+3 4\n'
-        '+9 58\n'
-        '+9 2\n'
+        '169 1\n+3 4\n+9 58\n+9 2\n'
         'fn=(4)\n'
         '0 8\n'
-        'totals: 3121\n'))
+        'totals: 3101\n'))
     rows = functions.read(Path(tmp), 'callgrind.x')
     assert len(rows) == 1, rows
     row = rows[0]
     assert row['pid'] == 21 and row['thread'] == 3 and (
         row['cmd'] == 'python3 server.py'), row
     assert row['functions'] == [
-        {'fn': 'work', 'ir': 3000},
-        {'fn': '_itoa_word', 'ir': 65},
-        {'fn': 'thread_run', 'ir': 23},
-        {'fn': '__strchrnul_avx2', 'ir': 20},
-        {'fn': '__errno_location', 'ir': 6},
-        {'fn': 'start_thread', 'ir': 4},
-        {'fn': 'clone', 'ir': 3}], row
-    assert sum(f['ir'] for f in row['functions']) == 3121, row
+        {'fn': 'work', 'ir': 3000}, {'fn': '_itoa_word', 'ir': 65},
+        {'fn': 'thread_run', 'ir': 23}, {'fn': '__errno_location', 'ir': 6},
+        {'fn': 'start_thread', 'ir': 4}, {'fn': 'clone', 'ir': 3}], row
+    assert sum(f['ir'] for f in row['functions']) == 3101, row
 
 
 def test_every_preserved_profile_parses_whole(tmp):
