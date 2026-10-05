@@ -2,15 +2,12 @@
 """The one import-closure limit the real `daedalus_mcp` tree cannot show.
 
 The refusal pass in `test_mcp_tools.py` walks the real tree, so it can only
-witness a closure property the tree actually presents. Each shape below is
-one it does not present, driven on a synthetic composition instead, and the
-arms of the walk are enumerated in `test_mcp_import_refusals.py`.
-
-This file carried three such shapes and now carries one. Each of the other
-two was removed because a mutant that kills its case here ALSO reds a case
-in `test_mcp_import_refusals.py`, so the file was not the only place the
-defect showed and the shape was breadth rather than cover. The mutants, so
-the measurement can be repeated:
+witness a closure property the tree actually presents; each shape below is
+one it does not present, and the walk's arms are enumerated in
+`test_mcp_import_refusals.py`. This file carried three such shapes and now
+carries one: the other two were removed because a mutant that kills its
+case here ALSO reds a case there, so the shape was breadth rather than
+cover. The mutants, so the measurement can be repeated:
 
 - the dead-code barrier: `dead_nodes` returning an empty set reds this
   file's barrier case and `test_mcp_import_refusals.py`'s
@@ -26,11 +23,10 @@ the measurement can be repeated:
   `NEAR_MISSES`' "a builtin that evaluates nothing" row and the real tree's
   own `server.py` answer.
 
-The case below is the one that stayed, and it stayed on a measurement rather
-than on a preference: dropping the lambda arm from `static_value` reds it
-and leaves `test_mcp_import_refusals.py` 9/9 and `test_mcp_tools.py`
-21/21. Nothing else on this tree catches a call's callee being read as a
-VALUE.
+The case below stayed on a measurement, not a preference: dropping the
+lambda arm from `static_value` reds it and leaves
+`test_mcp_import_refusals.py` 9/9 and `test_mcp_tools.py` 21/21. Nothing
+else on this tree catches a call's callee being read as a VALUE.
 """
 import sys
 from pathlib import Path
@@ -86,30 +82,44 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
 
 def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
     """A depth-20 chain costs at most a small constant times a depth-10
-    one; re-asking a subtree's verdict twice per level scores x2 here. The
-    set is the composition alone: the chain folds to UNREACHABLE past it."""
+    one; re-asking a subtree's verdict twice per level scores x2 here, in
+    whichever arm the descent runs — subscript nesting, or nested calls.
+    Each depth's set is asserted, so the composition alone must be the
+    answer at every depth, not only the last one's."""
     real_scan, real_element = (_mcp_code_eval._scan,
                                _mcp_code_eval._element_node)
-    calls, counts = [0], {}
+    tally, counts, names = [0], {}, {}
 
     def surrogate(real):
         def counting(*args):
-            calls[0] += 1
+            tally[0] += 1
             return real(*args)
         return counting
 
+    def subscript(depth):
+        return ('\nimport importlib\n\n\ndef load():\n'
+                '    return [[importlib.import_module]]'
+                f'{"[0]" * (depth - 1)}("pkg.leaf")\n')
+
+    def calls(depth):
+        return ('\nimport importlib\n\n\ndef load():\n'
+                f'    return {"f(" * depth}importlib.import_module'
+                f'{")" * depth}("pkg.leaf")\n')
+
+    shapes = {'subscript': subscript, 'call': calls}
     with mock.patch.multiple(
             _mcp_code_eval, _scan=surrogate(real_scan),
             _element_node=surrogate(real_element)):
-        for depth in (10, 20):
-            calls[0] = 0
-            names = _composition_names(_tmp, {
-                'composition.py': '\nimport importlib\n\n\ndef load():\n'
-                                  '    return [[importlib.import_module]]'
-                                  f'{"[0]" * (depth - 1)}("pkg.leaf")\n'})
-            counts[depth] = calls[0]
-    assert counts[20] <= 3 * counts[10], counts
-    assert names == {'composition.py'}, names
+        for label, build in shapes.items():
+            for depth in (10, 20):
+                tally[0] = 0
+                names[label, depth] = _composition_names(
+                    _tmp, {'composition.py': build(depth)})
+                counts[label, depth] = tally[0]
+    for label in shapes:
+        assert counts[label, 20] <= 3 * counts[label, 10], counts
+        assert names[label, 10] == names[label, 20] == {'composition.py'}, \
+            names
 
 
 if __name__ == '__main__':
