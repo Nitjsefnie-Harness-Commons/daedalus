@@ -1,11 +1,7 @@
 """Fault-injection controls for test-side command queue readers."""
 import ast
 import contextlib
-import inspect
-import io
-import json
 import math
-import os
 import sys
 from pathlib import Path
 
@@ -157,92 +153,6 @@ class _ModuleDefault:
     """
 
 
-def _queued_file(tmp, name='1700000000000_000001.json'):
-    queue = Path(tmp) / 'queue'
-    queue.mkdir(exist_ok=True)
-    queued = queue / name
-    queued.write_text(json.dumps({'id': 'queued', 'type': 'reload'}),
-                      encoding='utf-8')
-    return queue, queued
-
-
-def _target_key(candidate):
-    """Decode path spellings so str and bytes receivers share one key."""
-    try:
-        return os.fsdecode(os.fspath(candidate))
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except BaseException:
-        return None
-
-
-def _plain_read(handle, args, kwargs):
-    mode = kwargs.get('mode', args[0] if args else 'r')
-    return handle.readable() and not any(
-        str.__contains__(mode, marker) for marker in 'wax')
-
-
-def _native_read_handle(original, candidate, args, kwargs):
-    """Return a non-readable open for the caller; None for a real read."""
-    handle = original(candidate, *args, **kwargs)
-    if _plain_read(handle, args, kwargs):
-        handle.close()
-        return None
-    return handle
-
-
-@contextlib.contextmanager
-def _refuse_path_operation(path, operation, failures, clock=None):
-    # Path.open and Path.read_text both delegate through io.open.
-    read_operation = operation in ('open', 'read_text')
-    original = io.open if read_operation else getattr(Path, operation)
-    signature = inspect.signature(original)
-    target_key = _target_key(path)
-    remaining = [failures]
-    calls = [0]
-
-    def refused(candidate, *args, **kwargs):
-        candidate_key = _target_key(candidate)
-        if (read_operation and candidate_key == target_key
-                and remaining[0]):
-            handle = _native_read_handle(original, candidate, args, kwargs)
-            if handle is not None:
-                return handle
-        elif operation != 'open':
-            try:
-                signature.bind(candidate, *args, **kwargs)
-            except TypeError:
-                return original(candidate, *args, **kwargs)
-        if candidate_key == target_key:
-            if remaining[0]:
-                remaining[0] -= 1
-                calls[0] += 1
-                if clock is not None:
-                    clock.record_read()
-                raise PermissionError(32, 'injected sharing violation')
-            result = original(candidate, *args, **kwargs)
-            if read_operation and not _plain_read(
-                    result, args, kwargs):
-                return result
-            calls[0] += 1
-            if clock is not None:
-                clock.record_read()
-            return result
-        return original(candidate, *args, **kwargs)
-
-    if read_operation:
-        io.open = refused
-    else:
-        setattr(Path, operation, refused)
-    try:
-        yield calls
-    finally:
-        if read_operation:
-            io.open = original
-        else:
-            setattr(Path, operation, original)
-
-
 @contextlib.contextmanager
 def _virtual_cmdqueue_clock(
         max_sleeps=None,
@@ -256,13 +166,16 @@ def _virtual_cmdqueue_clock(
     if budget is not None and (not math.isfinite(budget) or budget < 0):
         raise ValueError('wall budget must be non-negative and finite')
     original = _cmdqueue.time
+    # An opted-out clock reads no real time, not even for this start mark.
     wall_started = 0.0 if budget is None else original.perf_counter()
+    # A large power-of-two origin exposes sleeps too small to move the clock.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
     elapsed = [0.0]
     correction = [0.0]
     events = []
     sleep_count = [0]
     no_progress_count = [0]
+    # Read cost exposes stale deadline samples; the fallback avoids underflow.
     read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
     def accumulated(seconds):
@@ -328,119 +241,3 @@ def _virtual_cmdqueue_clock(
         yield clock, events, origin
     finally:
         _cmdqueue.time = original
-
-
-@contextlib.contextmanager
-def _vanish_during_unlink(path):
-    original = Path.unlink
-    armed = [True]
-
-    def vanished(candidate, *args, **kwargs):
-        if candidate == path and armed[0]:
-            armed[0] = False
-            original(candidate, *args, **kwargs)
-            raise FileNotFoundError(2, 'injected disappearance', str(path))
-        return original(candidate, *args, **kwargs)
-
-    Path.unlink = vanished
-    try:
-        yield
-    finally:
-        Path.unlink = original
-
-
-@contextlib.contextmanager
-def _vanish_during_read(path, clock, remove_queue=False):
-    original = io.open
-    target_key = _target_key(path)
-    armed = [True]
-
-    def vanished(candidate, *args, **kwargs):
-        if _target_key(candidate) == target_key and armed[0]:
-            handle = _native_read_handle(original, candidate, args, kwargs)
-            if handle is not None:
-                return handle
-            armed[0] = False
-            clock.record_read()
-            path.unlink()
-            if remove_queue:
-                path.parent.rmdir()
-            return original(candidate, *args, **kwargs)
-        return original(candidate, *args, **kwargs)
-
-    io.open = vanished
-    try:
-        yield
-    finally:
-        io.open = original
-
-
-@contextlib.contextmanager
-def _disappear_on_first_open(path):
-    with _rewrite_on_first_read(
-            path, FileNotFoundError(2, 'injected disappearance', str(path)),
-            ()):
-        yield
-
-
-@contextlib.contextmanager
-def _rewrite_on_first_read(path, error, rewrites):
-    """Rewrite queue files at the moment of the refusal, so only a whole-set
-    retry can return the rewritten content."""
-    original = io.open
-    target_key = _target_key(path)
-    armed = [True]
-
-    def refused(candidate, *args, **kwargs):
-        if _target_key(candidate) == target_key and armed[0]:
-            handle = _native_read_handle(original, candidate, args, kwargs)
-            if handle is not None:
-                return handle
-            armed[0] = False
-            for queued, command in rewrites:
-                queued.write_text(json.dumps(command), encoding='utf-8')
-            raise error
-        return original(candidate, *args, **kwargs)
-
-    io.open = refused
-    try:
-        yield
-    finally:
-        io.open = original
-
-
-@contextlib.contextmanager
-def _refuse_first_queue_read(queue):
-    original = io.open
-    queue_key = _target_key(queue)
-    refused_path = [None]
-
-    def refused(candidate, *args, **kwargs):
-        candidate_key = _target_key(candidate)
-        if (refused_path[0] is None and candidate_key is not None
-                and os.path.dirname(candidate_key) == queue_key
-                and os.path.splitext(candidate_key)[1] == '.json'):
-            handle = _native_read_handle(original, candidate, args, kwargs)
-            if handle is not None:
-                return handle
-            refused_path[0] = candidate_key
-        if candidate_key is not None and candidate_key == refused_path[0]:
-            refused_path[0] = False
-            raise PermissionError(32, 'injected sharing violation')
-        return original(candidate, *args, **kwargs)
-
-    io.open = refused
-    try:
-        yield
-    finally:
-        io.open = original
-
-
-def _path_open_failure(path, *args, **kwargs):
-    try:
-        with path.open(*args, **kwargs):
-            pass
-    except (FileNotFoundError, PermissionError,
-            TypeError, ValueError) as caught:
-        return type(caught), str(caught)
-    raise AssertionError('Path.open accepted the refused arguments')
