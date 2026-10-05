@@ -3,7 +3,8 @@ action destinations and parser defaults; GUARANTEED adds required and
 non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
 Guarded or defaulted reads require DECLARED; direct reads require GUARANTEED.
-Namespace stores are refused as namespace store escapes.
+A namespace store is admitted but satisfies no read; an augmented assignment
+target is checked as the read it is, and a del is still refused.
 FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
 namespace, planted into a real module and read one per row here. They are
 plants, not the rule's inputs: the rule answers the operation once, from
@@ -478,9 +479,8 @@ def assert_every_frame_member_refused(read_module, base):
         body = (f'def do_reload(args):\n    _ = sys._getframe(1).{member}'
                 "['undeclared_probe']\n")
         escapes = read_module({'commands_eval': plant_in_reload(base, body)})
-        assert escapes == [
-            f'commands_eval.do_reload: sys._getframe(1).{member}'], (
-                member, escapes)
+        expected = f'commands_eval.do_reload: sys._getframe(1).{member}'
+        assert escapes == [expected], (member, escapes)
 
 
 def assert_namespace_key_call_accepted(read_module, base):
@@ -573,9 +573,8 @@ def add_storage_probe(parser, shape, dest='probe'):
     nargs = {
         'remainder': argparse.REMAINDER, 'star': '*', 'plus': '+',
         'question': '?', 'positional': None}[shape]
-    if nargs is None:
-        return parser.add_argument(dest, **options)
-    return parser.add_argument(dest, nargs=nargs, **options)
+    return parser.add_argument(dest, **(options if nargs is None else
+                                       {**options, 'nargs': nargs}))
 
 
 def assert_argparse_storage_contract(audit_handler):
@@ -631,10 +630,8 @@ def _assert_parse_namespace(parser, argv, expected, shape):
 
 def _assert_mutex_claim(audit_handler, shape, declared, guaranteed):
     for dest in declared:
-        expression = f'args.{dest}'
-        expected = [] if dest in guaranteed else [expression]
-        assert audit_handler(
-            expression, declared, guaranteed) == expected, (shape, dest)
+        assert audit_handler(f'args.{dest}', declared, guaranteed) == (
+            [] if dest in guaranteed else [f'args.{dest}']), (shape, dest)
 
 
 def assert_argparse_mutex_storage_contract(audit_handler):
