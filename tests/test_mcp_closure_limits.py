@@ -31,11 +31,17 @@ than on a preference: dropping the lambda arm from `static_value` reds it
 and leaves `test_mcp_import_refusals.py` 10/10 and `test_mcp_tools.py`
 21/21. Nothing else on this tree catches a call's callee being read as a
 VALUE.
+
+Beside it a second case pins a cost class instead of a shape: the code-eval
+scan's own recursion on a deep subscript chain, counted structurally so a
+walk that re-asks one subtree's verdict twice per level fails it while a
+walk whose cost tracks the tree it covers passes.
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mcp_code_eval  # noqa: E402
 import _mcp_import_closure  # noqa: E402
 import _util  # noqa: E402
 from _mcp_import_fixtures import _write_tree  # noqa: E402
@@ -80,6 +86,46 @@ def test_a_nullary_lambda_callee_of_the_operation_resolves_the_module(_tmp):
                           '("pkg.leaf")\n',
         'pkg/__init__.py': '',
         'pkg/leaf.py': 'leaf = True\n'}) == {'composition.py'}
+
+
+def _scan_call_count(_tmp, depth):
+    """The `_scan` invocations one depth-`depth` subscript chain costs, and
+    the scan set that came with them. The count is taken by a pass-through
+    surrogate on the module attribute the recursion itself resolves, so
+    every re-entry of the walk is counted wherever it re-enters."""
+    real = _mcp_code_eval._scan
+    calls = [0]
+
+    def counting(*args):
+        calls[0] += 1
+        return real(*args)
+
+    _mcp_code_eval._scan = counting
+    try:
+        names = _composition_names(_tmp, {
+            'composition.py': '\nimport importlib\n\n\ndef load():\n'
+                              '    return [[importlib.import_module]]'
+                              f'{"[0]" * (depth - 1)}("pkg.leaf")\n',
+            'pkg/__init__.py': '',
+            'pkg/leaf.py': 'leaf = True\n'})
+    finally:
+        _mcp_code_eval._scan = real
+    return calls[0], names
+
+
+def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
+    """The scan's cost grows with the tree it walks, not with the chain's
+    shape: a depth-20 subscript chain costs at most a small constant times a
+    depth-10 one, where code that re-asks a subtree's verdict twice per
+    level scores x2 per level (~x1024 over this span). The result set is
+    read beside the ratio, so a scan that stopped walking cannot satisfy
+    the pin either.
+    """
+    shallow, _ = _scan_call_count(_tmp, 10)
+    deep, names = _scan_call_count(_tmp, 20)
+    assert deep <= 8 * shallow, (shallow, deep)
+    assert names == {
+        'composition.py', 'pkg/__init__.py', 'pkg/leaf.py'}, names
 
 
 if __name__ == '__main__':
