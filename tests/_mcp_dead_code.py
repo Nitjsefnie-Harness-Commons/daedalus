@@ -1,11 +1,10 @@
 """A position the runtime provably cannot reach: the nodes nothing executes.
 
 The walk applies one rule to every VALUE it reads — a value the runtime
-provably cannot reach through is CLEAN rather than suspicious, whatever the
-spelling — and this module is the same rule asked of POSITIONS. A node the
-runtime provably does not execute is not evidence: nothing in its subtree is
-resolved into the scan set and nothing in it draws a refusal, because a
-refusal the runtime can never trigger answers a question nobody asked.
+provably cannot reach through is CLEAN rather than suspicious — and this
+module is the same rule asked of POSITIONS: a node the runtime provably
+does not execute is not evidence, so nothing in its subtree resolves into
+the scan set and nothing in it draws a refusal.
 
 A block is read as a PROPERTY of the field that holds it rather than a
 list of node types, so a block form nobody has thought of is the same read

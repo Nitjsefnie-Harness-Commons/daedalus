@@ -1,10 +1,8 @@
 """The bridge command each registered MCP tool is pinned to put on the bridge.
 
-One entry per registered tool, keyed by the name it registers under. A case is
-(argument overrides, expected bridge calls): the tool's required parameters are
-filled from the suite's REQUIRED_ARGUMENTS, the overrides are applied, and the
-expected calls are the exact (surface, details) pairs the call must record on
-the probe bridge, in order.
+One entry per registered tool: a case is (argument overrides, expected
+bridge calls), filled from REQUIRED_ARGUMENTS and asserted in order on the
+probe bridge.
 
 A parameter no case exercises is named in UNPINNED_PARAMETERS with the
 reason it is safe to leave unwitnessed. The raise site every refusal case
