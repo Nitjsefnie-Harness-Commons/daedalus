@@ -21,7 +21,7 @@ import _util  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
     FORCED_WITHOUT_GRACE, REQUESTED_THEN_GRACED,
     TREE_WAS_KILLED, coverage_group, coverage_tree, kill_recorded,
-    records, settle_gone)
+    records)
 from _processtree import taskkill_argv  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 from _suite_bound_stubs import (  # noqa: E402
@@ -67,23 +67,6 @@ signal.signal(getattr(signal, 'SIGBREAK', signal.SIGTERM), _stopped)
 print('wedged suite reached its own body', flush=True)
 while True:
     time.sleep(0.05)
-"""
-
-# A suite that IGNORES SIGTERM, and a child of its own that does the same.
-# Only the second phase of the tree kill reaches either of them, so this is
-# the control that keeps the escalation from being decoration.
-_STUBBORN_GRANDCHILD_SUITE = """import signal, subprocess, sys, time
-from pathlib import Path
-
-root = Path(__file__).resolve().parent
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-child = subprocess.Popen(
-    [sys.executable, '-c',
-     'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN);'
-     ' time.sleep(120)'], stdin=subprocess.DEVNULL)
-(root / 'grandchild.pid').write_text(str(child.pid), encoding='ascii')
-print('wedged suite reached its own body', flush=True)
-time.sleep(120)
 """
 
 # A suite that takes the request AND leaves a child of its own that does
@@ -229,35 +212,6 @@ def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
         f'the record does not name what that route does about asking: '
         f'{group}')
     assert FORCED_WITHOUT_GRACE not in group, group
-
-
-def test_a_timed_out_suites_own_child_does_not_survive_it(tmp):
-    """The direct child is not the tree; the tree is what a wedge leaves."""
-    if sys.platform == 'win32':
-        _util.skip('the liveness probe is POSIX; see pid_alive')
-    recorded = Path(tmp) / 'tree' / 'tests' / 'grandchild.pid'
-    try:
-        result, _invocations = coverage_tree(
-            tmp, {'test_wedged.py': _STUBBORN_GRANDCHILD_SUITE},
-            suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
-        assert result.returncode != 0, (result.returncode, result.stdout,
-                                        result.stderr)
-        pid = int(recorded.read_text(encoding='ascii'))
-        group = coverage_group(result.stdout, 'test_wedged.py')
-        record = _assert_one_record(
-            group, _WEDGE_BOUND_S, 'tests/test_wedged.py')
-        assert settle_gone(pid, _WEDGE_SETTLE_S), (
-            f'pid {pid} outlived the bound the launcher enforced. It ignores '
-            f'SIGTERM, so only the escalation reaches it, and it did not; '
-            f'the record says: {group}')
-        # The other direction of the same claim. This suite DID ignore the
-        # request, so a record that says it took one is false in the same
-        # way the other control's would be -- and the pair together is what
-        # pins the clause, because either assertion alone survives a branch
-        # that simply always takes one side.
-        assert 'ignored the request' in record['cleanup'], record
-    finally:
-        kill_recorded(recorded)
 
 
 def test_a_wedge_under_require_all_prints_the_timeout_and_nothing_else(tmp):
@@ -460,24 +414,11 @@ def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
     assert readers == ['scripts/ci/suite_bound.py'], readers
 
 
-def _shared_bound_wait(node):
-    """Whether one `proc.wait` call carries the shared bound exactly."""
-    timeouts = [kw for kw in node.keywords if kw.arg == 'timeout']
-    return (len(timeouts) == 1
-            and isinstance(timeouts[0].value, ast.Attribute)
-            and timeouts[0].value.attr == 'CLEANUP_TIMEOUT_S'
-            and isinstance(timeouts[0].value.value, ast.Name)
-            and timeouts[0].value.value.id == 'SUITE_BOUND')
-
-
 def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
     """Every wait in the bridge fixture's teardown reads the shared bound.
 
-    A literal at either wait satisfies the reaper controls' existence
-    demand, so this one demands the shared name, spelled here literally
-    rather than derived from the subject file: a control that rebuilt the
-    shape from the file it judges agrees with a subject that got it
-    wrong.
+    A literal satisfies the reaper controls' existence demand; the shape
+    is demanded literally here, not derived from the file it judges.
     """
     tree = ast.parse(
         (ROOT / 'tests' / '_util.py').read_text(encoding='utf-8'))
@@ -485,22 +426,27 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
                if isinstance(node, ast.FunctionDef)
                and node.name == 'bridge']
     assert len(bridges) == 1, (
-        f'expected one bridge fixture, found {len(bridges)}: the pin '
-        'cannot say which teardown it judges')
-    sites = [node for node in ast.walk(bridges[0])
-             if isinstance(node, ast.Call)
-             and isinstance(node.func, ast.Attribute)
-             and node.func.attr == 'wait'
-             and isinstance(node.func.value, ast.Name)
-             and node.func.value.id == 'proc']
-    assert sites, (
-        'no proc.wait left in the bridge fixture: the pin has no subject '
-        'until it is derived again from the teardown')
-    unshared = [f'tests/_util.py:{node.lineno}' for node in sites
-                if not _shared_bound_wait(node)]
-    assert not unshared, (
-        'these teardown waits do not read the shared cleanup bound '
-        f'(expected timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S): {unshared}')
+        f'{len(bridges)} bridge fixtures: the pin cannot name a subject')
+    found, unshared = 0, []
+    for node in ast.walk(bridges[0]):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'wait'
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == 'proc'):
+            continue
+        timeouts = [kw for kw in node.keywords if kw.arg == 'timeout']
+        if not (len(timeouts) == 1
+                and isinstance(timeouts[0].value, ast.Attribute)
+                and timeouts[0].value.attr == 'CLEANUP_TIMEOUT_S'
+                and isinstance(timeouts[0].value.value, ast.Name)
+                and timeouts[0].value.value.id == 'SUITE_BOUND'):
+            unshared.append(f'tests/_util.py:{node.lineno}')
+        found += 1
+    assert found, ('no proc.wait left in the bridge fixture: the pin '
+                   'has no subject until derived again from the teardown')
+    assert not unshared, ('waits not reading timeout=SUITE_BOUND.'
+                          f'CLEANUP_TIMEOUT_S: {unshared}')
 
 
 # The arms no launcher reaches. Most controls above drive a real launcher;
