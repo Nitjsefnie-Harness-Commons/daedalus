@@ -10,6 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
+SUITE_BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py')
+
 
 def _await_mcp_listener(proc, output, timeout):
     started = time.time()
@@ -34,10 +36,10 @@ def _await_mcp_listener(proc, output, timeout):
 def _cleanup_mcp(proc):
     proc.terminate()
     try:
-        proc.wait(timeout=10)
+        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         proc.kill()
-        proc.wait(timeout=10)
+        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
     proc._daedalus_drain_thread.join()
     proc.stdout.close()
 

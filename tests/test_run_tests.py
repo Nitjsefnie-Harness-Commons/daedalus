@@ -553,6 +553,45 @@ def test_the_reap_waits_name_the_shared_cleanup_bound(tmp):
             'CLEANUP_TIMEOUT_S')
 
 
+def test_the_suites_own_reap_waits_read_the_shared_cleanup_bound(tmp):
+    """The suites' teardown reaps read SUITE_BOUND.CLEANUP_TIMEOUT_S,
+    pinned by shape: CPython interns small ints, so no runtime check
+    tells the Name from a literal 10."""
+    del tmp
+    for name in ('test_bridge_startup.py', 'test_mcp_entry_point.py',
+                 'test_parent_watch.py', 'test_stream_lifecycle.py',
+                 'test_suite_runner.py'):
+        tree = ast.parse((Path(__file__).resolve().parent / name)
+                         .read_text(encoding='utf-8'))
+        arms = []
+        for scope in ast.walk(tree):
+            if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            signals = {}
+            for node in ast.walk(scope):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)):
+                    continue
+                receiver = ast.dump(node.func.value)
+                if node.func.attr in ('terminate', 'kill'):
+                    signals.setdefault(receiver, node.lineno)
+                elif (node.func.attr == 'wait'
+                        and receiver in signals
+                        and signals[receiver] <= node.lineno):
+                    arms.append(node)
+        assert arms, f'{name}: no reap arms - the ANCHOR changed shape'
+        for wait in arms:
+            bound = next((keyword.value for keyword in wait.keywords
+                          if keyword.arg == 'timeout'), None)
+            assert (isinstance(bound, ast.Attribute)
+                    and bound.attr == 'CLEANUP_TIMEOUT_S'
+                    and isinstance(bound.value, ast.Name)
+                    and bound.value.id == 'SUITE_BOUND'), (
+                f'{name}:{wait.lineno}: the teardown reap wait is not '
+                'bound to SUITE_BOUND.CLEANUP_TIMEOUT_S: '
+                + ast.dump(bound if bound is not None else wait))
+
+
 def test_a_summaries_refused_once_is_retried_and_the_verdict_stands(tmp):
     root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE},
                     refuse_rmtree=False)
