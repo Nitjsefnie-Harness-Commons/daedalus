@@ -140,9 +140,12 @@ def _runtime_settled(node, bound, scopes):
     SETTLED is a property and not a list: a constant, a unary or binary
     operator over two settled values, a walrus, a conditional whose two
     arms agree, and `bool` of a settled one are each a value Python has
-    computed already, and each is asked of Python's own operator. A form
-    nobody has met is `UNREAD` here rather than a new arm of this walk's
-    own, which is where a new settled form goes.
+    computed already, and each is asked of Python's own operator. A
+    parameter is the same fact, read off the scope the name sits in — one
+    no store has taken back carries its own default — and a field-less
+    f-string is the constant the compiler builds it from. A form nobody
+    has met is `UNREAD` here rather than a new arm of this walk's own,
+    which is where a new settled form goes.
     """
     if isinstance(node, ast.Constant):
         return node.value
@@ -171,6 +174,14 @@ def _runtime_settled(node, bound, scopes):
     if _is_the_bool_call(node, scopes):
         value = _runtime_settled(node.args[0], bound, scopes)
         return UNREAD if not _computable(value) else int(bool(value))
+    if isinstance(node, ast.Name):
+        default = scopes.parameter_default(node, node.id)
+        if default is None:
+            return UNREAD
+        return _runtime_settled(default, bound, scopes)
+    if isinstance(node, ast.JoinedStr) and all(
+            isinstance(part, ast.Constant) for part in node.values):
+        return ''.join(part.value for part in node.values)
     return UNREAD
 
 
@@ -377,6 +388,35 @@ def _settled_position(node, bound, scopes):
     return value
 
 
+def _display_entries(base, bound, scopes):
+    """The entries a dict display CARRIES, `None` when the walk cannot read
+    them, and a `raises` answer for a display that provably never finishes
+    building: the entries are one list in build order, so the last of two
+    equal keys wins wherever the pair was spelled.
+    """
+    entries = []
+    for key, value in zip(base.keys, base.values):
+        if key is None:
+            produced, decided = static_value(value, bound, scopes)
+            if not decided or not isinstance(produced, ast.Dict):
+                return None, False
+            inner, raised = _display_entries(produced, bound, scopes)
+            if inner is None or raised:
+                return None, raised
+            entries.extend(inner)
+            continue
+        if isinstance(key, (ast.List, ast.Set, ast.Dict,
+                            ast.DictComp, ast.SetComp)):
+            return None, True
+        settled = _settled_position(key, bound, scopes)
+        if settled is UNREACHABLE:
+            return None, True
+        if settled is UNREAD:
+            return None, False
+        entries.append((settled, value))
+    return entries, False
+
+
 def _keyed(node, base, bound, scopes):
     """The value a dict literal's key selects, or `UNREACHABLE` for a key
     the display does not carry.
@@ -385,27 +425,15 @@ def _keyed(node, base, bound, scopes):
     runtime builds, so a reader that stops at the first reads an entry the
     display has already replaced — and reads the operation out of a dict
     that holds something else. The equality is Python's, so `1`, `1.0` and
-    `True` name one entry and `0` and `False` another.
-
-    A `**` unpack puts keys out of reach, and a key this walk does not read
-    does the same. Either is UNDETERMINED rather than a guess.
+    `True` name one entry and `0` and `False` another. A `**` unpack whose
+    display the walk reads merges its entries where the runtime merges
+    them, and one it cannot read puts the keys out of reach.
     """
-    entries = []
-    for key, value in zip(base.keys, base.values):
-        if key is None:
-            return node, False
-        if isinstance(key, (ast.List, ast.Set, ast.Dict,
-                            ast.DictComp, ast.SetComp)):
-            # A key must be HASHABLE and a mutable literal never is, so the
-            # display raises `TypeError` before it is built at all — the
-            # same decision an index the runtime cannot satisfy is.
-            return UNREACHABLE, True
-        settled = _settled_position(key, bound, scopes)
-        if settled is UNREACHABLE:
-            return UNREACHABLE, True
-        if settled is UNREAD:
-            return node, False
-        entries.append((settled, value))
+    entries, raised = _display_entries(base, bound, scopes)
+    if raised:
+        return UNREACHABLE, True
+    if entries is None:
+        return node, False
     wanted = _settled_position(node.slice, bound, scopes)
     if wanted is UNREAD:
         return node, False
@@ -456,6 +484,44 @@ def _called(func, call, bound, scopes):
     return static_value(func.body, bound, scopes)
 
 
+def _boolop_value(node, bound, scopes):
+    """The value an `and`/`or` produces: the first operand whose truth
+    short-circuits it, else the last operand's value. `wanted` is the truth
+    that takes the branch — truthy for an `or`, falsy for an `and` — and an
+    undecided operand leaves the whole expression undecided. A known truth
+    is a constant's `bool` and the truth of the operation or a lambda.
+    """
+    wanted = isinstance(node.op, ast.Or)
+    for value in node.values[:-1]:
+        produced, decided = static_value(value, bound, scopes)
+        if produced is UNREACHABLE:
+            return UNREACHABLE, True
+        truth = None
+        if decided and not isinstance(produced, ast.AST):
+            truth = bool(produced)
+        elif decided and (_is_the_operation(produced, bound, scopes)
+                          or isinstance(produced, ast.Lambda)):
+            truth = True
+        if truth is None:
+            return node, False
+        if truth == wanted:
+            return produced, True
+    return static_value(node.values[-1], bound, scopes)
+
+
+def _decided_if_value(node, bound, scopes):
+    """The value a conditional produces when its condition settles: the
+    chosen arm's value. A raising condition raises the whole expression,
+    and one this walk cannot settle leaves the choice a runtime value.
+    """
+    test = _runtime_settled(node.test, bound, scopes)
+    if test is UNREACHABLE:
+        return UNREACHABLE, True
+    if test is UNREAD or not _computable(test):
+        return node, False
+    return static_value(node.body if test else node.orelse, bound, scopes)
+
+
 def static_value(node, bound, scopes):
     """The value an expression produces, and whether this walk decided it.
 
@@ -479,6 +545,10 @@ def static_value(node, bound, scopes):
     if settled is not UNREAD:
         return ((UNREACHABLE, True) if settled is UNREACHABLE
                 else (settled, True))
+    if isinstance(node, ast.BoolOp):
+        return _boolop_value(node, bound, scopes)
+    if isinstance(node, ast.IfExp):
+        return _decided_if_value(node, bound, scopes)
     if isinstance(node, ast.Call):
         # A call's value is what its callee RETURNS, and this walk follows
         # no call's result — the call-result limit. A lambda's return is
