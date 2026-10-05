@@ -29,8 +29,8 @@ import _util  # noqa: E402
 from _ratchet_fixture import _git  # noqa: E402
 from _plant_fixture import (  # noqa: E402
     PLANT, _COMMITTED, _FIXED, _PLANTED, _as_nobody, _committed_repo,
-    _only_entry, _open_the_entry, _reported_state, _run_plant, _say,
-    _unreadable_as_bytes)
+    _only_entry, _open_the_entry, _reported_state, _run_plant, _saved_pair,
+    _say, _unreadable_as_bytes)
 
 SKILL_SOURCE = (_util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
                 / 'SKILL.md')
@@ -38,14 +38,9 @@ SKILL_SOURCE = (_util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
 
 def test_restore_returns_the_uncommitted_work_and_the_planted_bytes_are_gone(
         tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
     # The uncommitted "fix": `_FIXED` differs from the committed byte, so
     # the equality below proves it survived.
-    target.write_bytes(_FIXED)
-
-    saved = _run_plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
+    target, store = _saved_pair(tmp, _FIXED)
     target.write_bytes(_PLANTED)
     assert target.read_bytes() == _PLANTED
 
@@ -72,10 +67,7 @@ def test_restore_without_a_prior_save_refuses_and_changes_nothing(tmp):
 
 
 def test_a_second_save_refuses_and_leaves_the_stored_bytes_alone(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    first = _run_plant('save', str(target), '--store', str(store))
-    assert first.returncode == 0, _say(first)
+    target, store = _saved_pair(tmp)
     target.write_bytes(_PLANTED)
     second = _run_plant('save', str(target), '--store', str(store))
     assert second.returncode != 0, _say(second)
@@ -88,10 +80,7 @@ def test_a_second_save_refuses_and_leaves_the_stored_bytes_alone(tmp):
 
 
 def test_the_refusal_does_not_advise_overwriting_a_changed_file(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    first = _run_plant('save', str(target), '--store', str(store))
-    assert first.returncode == 0, _say(first)
+    target, store = _saved_pair(tmp)
     target.write_bytes(_FIXED)
     again = _run_plant('save', str(target), '--store', str(store))
     assert again.returncode != 0, _say(again)
@@ -107,10 +96,7 @@ def test_the_refusal_does_not_advise_overwriting_a_changed_file(tmp):
 
 
 def test_the_refusal_offers_a_restore_when_the_file_has_not_moved_on(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    first = _run_plant('save', str(target), '--store', str(store))
-    assert first.returncode == 0, _say(first)
+    target, store = _saved_pair(tmp)
     again = _run_plant('save', str(target), '--store', str(store))
     assert again.returncode != 0, _say(again)
     advice = _say(again).split('; ', 1)[-1]
@@ -120,10 +106,7 @@ def test_the_refusal_offers_a_restore_when_the_file_has_not_moved_on(tmp):
 
 
 def test_clear_discards_the_entry_it_names(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    first = _run_plant('save', str(target), '--store', str(store))
-    assert first.returncode == 0, _say(first)
+    target, store = _saved_pair(tmp)
     cleared = _run_plant('clear', str(target), '--store', str(store))
     assert cleared.returncode == 0, _say(cleared)
     # Proven by what the tool does next, never by a status word.
@@ -167,8 +150,7 @@ def test_a_clear_of_an_entry_already_gone_is_a_discard(tmp):
     assert said.getvalue().startswith('discarded '), said.getvalue()
 
 
-# Read-only on BOTH platforms - Windows has no execute bit and honours
-# only this flag. The polarity below is pinned to it by its own test.
+# Read-only on BOTH platforms; the polarity below is pinned by its test.
 RECORDED_MODE = 0o400
 
 
@@ -294,11 +276,12 @@ def test_a_racing_save_is_refused_and_not_traced(tmp):
     assert state['raced'], 'the race was never reached'
     assert status == 1, status
     assert str(target) in err.getvalue(), err.getvalue()
+    # The raced loser must leave the winner's complete copy to restore.
+    assert (Path(entry) / 'bytes').is_file(), 'the raced save took the entry'
 
 
 def test_a_failed_field_write_leaves_no_entry_behind(tmp):
-    # The refusal arm used to keep the half-built entry it had just
-    # created, wedging the path behind "already has a stored copy".
+    # A failed field write used to leave the entry, wedging the path.
     target = _committed_repo(tmp)
     store = Path(tmp) / 'store'
     plant = _util.load(PLANT, 'plant_save_residue')
@@ -336,12 +319,7 @@ def test_a_failed_field_write_leaves_no_entry_behind(tmp):
 
 
 def _planted_publish_fixture(tmp):
-    """A saved payload and a planted file, ready for one restore."""
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_PAYLOAD)
-    assert _run_plant('save', str(target), '--store',
-                      str(store)).returncode == 0
+    target, store = _saved_pair(tmp, _PAYLOAD)
     target.write_bytes(_PLANTED)
     return target, store
 
@@ -455,11 +433,7 @@ def test_restore_writes_through_a_symlinked_target(tmp):
 
 
 def test_restore_refuses_a_store_whose_mode_record_is_gone(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    target.write_bytes(_FIXED)
-    assert _run_plant('save', str(target), '--store',
-                      str(store)).returncode == 0
+    target, store = _saved_pair(tmp, _FIXED)
     entry = _only_entry(store)
     (entry / 'mode').unlink()
     out = _run_plant('restore', str(target), '--store', str(store))
@@ -471,10 +445,7 @@ def test_restore_refuses_a_store_whose_mode_record_is_gone(tmp):
 
 
 def test_a_restore_onto_a_directory_refuses_and_leaves_no_temp_behind(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    saved = _run_plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
+    target, store = _saved_pair(tmp)
     # A path that has become a directory: `os.replace` cannot install a
     # file over one, so the publish fails with its temp already written.
     target.unlink()
@@ -497,13 +468,18 @@ def test_a_restore_onto_a_directory_refuses_and_leaves_no_temp_behind(tmp):
         '.git', 'target.py'], sorted(p.name for p in target.parent.iterdir())
 
 
-def test_restore_leaves_another_pending_plant_alone(tmp):
+def _two_pending_plants(tmp):
     one = _committed_repo(tmp, 'one')
     two = _committed_repo(tmp, 'two')
     store = Path(tmp) / 'store'
     for target in (one, two):
         assert _run_plant('save', str(target), '--store',
                           str(store)).returncode == 0
+    return one, two, store
+
+
+def test_restore_leaves_another_pending_plant_alone(tmp):
+    one, two, store = _two_pending_plants(tmp)
     one.write_bytes(_PLANTED)
     assert _run_plant('restore', str(one), '--store',
                       str(store)).returncode == 0
@@ -535,6 +511,19 @@ def test_the_two_spellings_of_a_path_do_not_share_an_entry(tmp):
     assert real.read_bytes() == _COMMITTED
 
 
+def test_clear_leaves_another_pending_plant_alone(tmp):
+    one, two, store = _two_pending_plants(tmp)
+    assert _run_plant('clear', str(one), '--store',
+                      str(store)).returncode == 0
+    # One left, not zero: clearing one plant takes no other's.
+    assert len([i for i in Path(store).iterdir() if i.is_dir()]) == 1
+    for target in (one, two):
+        target.write_bytes(_PLANTED)
+    assert _run_plant('restore', str(two), '--store',
+                      str(store)).returncode == 0
+    assert two.read_bytes() == _COMMITTED
+
+
 def test_the_refusal_recommends_clear_when_the_copy_is_unreadable(tmp):
     target = _committed_repo(tmp)
     store = Path(tmp) / 'store'
@@ -546,9 +535,8 @@ def test_the_refusal_recommends_clear_when_the_copy_is_unreadable(tmp):
     advice = _say(again).split('; ', 1)[-1]
     assert f'plant.py clear {target}' in advice, advice
     assert 'plant.py restore' not in advice, advice
-    # WHICH advice, not just that both branches name `clear`: a store
-    # that cannot open its own bytes is not evidence that the file
-    # moved on, and the "it has changed" wording claims exactly that.
+    # WHICH advice, not just that both branches name `clear`: unreadable
+    # bytes are not evidence the file moved on; the "changed" wording does.
     assert 'has changed since that copy was taken' not in advice, advice
     assert 'neither that copy nor the file could be read' in advice, advice
 

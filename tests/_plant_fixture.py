@@ -55,6 +55,17 @@ def _committed_repo(tmp, name='plantrepo'):
     return target
 
 
+def _saved_pair(tmp, payload=None):
+    """A target saved at `payload` (or its committed bytes) with its store."""
+    target = _committed_repo(tmp)
+    store = Path(tmp) / 'store'
+    if payload is not None:
+        target.write_bytes(payload)
+    saved = _run_plant('save', str(target), '--store', str(store))
+    assert saved.returncode == 0, _say(saved)
+    return target, store
+
+
 def _say(result):
     return result.stdout + result.stderr
 
@@ -73,13 +84,10 @@ def _only_entry(store):
 
 
 def _unreadable_as_bytes(entry):
-    """Make a stored copy unreadable as bytes, on every platform.
-
-    A directory where a file is expected refuses the open everywhere -
-    IsADirectoryError on POSIX, PermissionError on Windows - so the class
-    is the platform's and only OSError may be relied on. It is a claim
-    about the OPEN, so it holds where the open is reached: the advice
-    path has no presence guard, the restore path does.
+    """Make a stored copy unreadable as bytes, on every platform: a
+    directory where a file is expected refuses the open everywhere -
+    IsADirectoryError on POSIX, PermissionError on Windows - so only
+    OSError may be relied on. A claim about the OPEN, not the read.
     """
 
     payload = entry / 'bytes'
@@ -121,8 +129,7 @@ def _open_the_entry(store, target):
     for directory in (target.parent, store, entry):
         for ancestor in (directory, *directory.parents):
             os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
-    # 0o700 makes the child the OWNER of each, so owner bits are all it
-    # needs and group and other are nobody.
+    # 0o700 makes the child the owner of each; owner bits are all it needs.
     for owned in (target.parent.parent, target.parent, store, entry,
                   *entry.iterdir(), target):
         os.chown(owned, 65534, 65534)
