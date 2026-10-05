@@ -47,11 +47,12 @@ neighbour. On the synthetic file the suite drives, whose `summary:` is
 written as the sum of the self totals with the arc excluded, the self
 totals sum to the file's own `summary:` line; that equality is the
 numeric control, and the real profiles the CI artifacts hold measure
-the same way: their cost lines carry the relative positions and the
-trailing-space signed `calls=` spellings the two matchers below accept,
-arcs are excluded from both of a file's own total lines, and the self
-totals sum to the file's `totals:` line exactly -- and to its
-`summary:` line wherever callgrind writes the two equal.
+the same way: their cost lines carry relative positions, every real
+`calls=` line carries the trailing space the CALLS matcher matched
+zero harvest lines of, an arc is one of the inclusive costs callgrind
+excludes from `summary:` and `totals:` alike, and the self totals sum
+to the file's `totals:` line exactly -- and to its `summary:` line
+wherever callgrind writes the two equal.
 """
 import os
 import re
@@ -65,13 +66,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_thread_rows  # noqa: E402  pylint: disable=wrong-import-position
 import journey_threads  # noqa: E402  pylint: disable=wrong-import-position
 
-# A `calls=` line carries the call count and the target position the real
-# profiles write -- signed or `*`, with the format's trailing space -- and
-# the cost line after it prices the call itself.
+# Real profiles write the target signed or `*`, with the format's
+# trailing space; the cost line after a `calls=` prices the call itself.
 CALLS = re.compile(r'^calls=\d+(?:[ \t]+[*+\-\d]+)*[ \t]*$')
-# A cost line is the position columns and then the event count; the
-# positions are absolute, relative (`+1`, `-1`) or `*`, and under
-# `events: Ir` the last integer is the instruction count.
+# Positions are absolute, relative or `*`; the last integer is the
+# instruction count.
 COST = re.compile(r'^[*+\-\d]+(?:[ \t]+[*+\-\d]+)*$')
 # The format compresses a repeated name to a bare `fn=(id)` / `cfn=(id)`
 # line that re-selects the function the id was declared for.
