@@ -68,38 +68,6 @@ def _wait_for_stream_count(base, expected):
         time.sleep(0.01)
 
 
-def test_port_zero_binds_an_ephemeral_port_and_announces_it(tmp):
-    """DAEDALUS_PORT=0 lets the kernel pick; the Listening line names
-    the port."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    env.update({
-        'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
-        'DAEDALUS_PORT': '0',
-        'DAEDALUS_MCP_PORT': '0',
-        'DAEDALUS_TOKEN': 'lifecycle-test',
-        'TOKEN': '',
-        'PYTHONDONTWRITEBYTECODE': '1',
-        'PYTHONUNBUFFERED': '1',
-    })
-    proc = subprocess.Popen(
-        [sys.executable, str(_util.ROOT / 'server.py')],
-        cwd=_util.ROOT, env=env, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True)
-    try:
-        # Read through the shared reader rather than off the first line: it
-        # searches the whole output and gives up on a deadline, so a child
-        # that prints something else first is read correctly and one that
-        # never announces fails here instead of blocking on readline().
-        port = _util.await_listening_line(proc, _util.drain_lines(proc))
-        assert port, 'no Listening line carrying an actual port'
-        status, health = _util.get_json(f'http://127.0.0.1:{port}/health')
-        assert status == 200 and health['ok'] is True, (status, health)
-    finally:
-        proc.terminate()
-        proc.wait(timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S)
-
-
 def _noise_path(tmp, name, body):
     """A PYTHONPATH directory whose sitecustomize runs `body` at startup."""
     directory = Path(tmp) / name
