@@ -7,14 +7,12 @@ one become, and the wait a refusal with no instant behind it turns
 into. The neighbours hold the subjects around it, and this file is the
 middle - not the published-verdict predicate,
 `test_ci_wait_published.py`'s subject; `ci_state` is here because it
-is the client's.
-
-Every row drives the REAL loaded module against the fake `gh` in
-`_fake_gh.py`, so the answer is a real `gh` process and only the
-transport behind it is a double. `RateLimited` is deliberately not
-caught anywhere in this file: a pause is the classifier's verdict, and
-a row here expecting one would read another suite's subject through
-this one's client.
+is the client's. Every row drives the REAL loaded module against the
+fake `gh` in `_fake_gh.py`, so the answer is a real `gh` process and
+only the transport behind it is a double. `RateLimited` is deliberately
+not caught anywhere in this file: a pause is the classifier's verdict,
+and a row here expecting one would read another suite's subject
+through this one's client.
 """
 import contextlib
 import os
@@ -162,15 +160,15 @@ def test_a_response_with_no_header_block_is_not_an_answer(tmp):
     This row is on `_parse` itself, forced rather than chosen:
     `_fake_gh` terminates every run it writes with a newline, so no
     fixture of its own can reach this arm. The rows beside it are the
-    boundary in both directions; the last is the line-by-line reason the
-    parser reads this way at all: a re-translated ending carries a `\r`
-    on every line, and a reader that cut at the first blank-line byte
-    pair would take the block's last header for the body's first line.
-    The whitespace-only separator separates a line that is BLANK from
-    one that is merely whitespace - the same line to a caller, not to a
-    reader testing `line == ''`: that one walks past it, reads it as a
-    header, reaches the end and raises over a `gh` that answered in
-    pieces."""
+    boundary in both directions; the last is the line-by-line reason
+    the parser reads this way at all: a re-translated ending carries a
+    `\r` on every line, and a reader that cut at the first blank-line
+    byte pair would take the block's last header for the body's first
+    line. The whitespace-only separator separates a line that is BLANK
+    from one that is merely whitespace - the same line to a caller, not
+    to a reader testing `line == ''`: that one walks past it, reads it
+    as a header, reaches the end and raises over a `gh` that answered
+    in pieces."""
     del tmp
     client = _util.load(SKILL / 'gh_client.py', 'gh_client_answers')
     try:

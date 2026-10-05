@@ -7,16 +7,15 @@ ships rest on this guarantee, and nothing measured it. The guarantee is
 the pipe's, not a parent id's - a pid against `os.getppid()` is
 re-parented on POSIX and historical on Windows, and a process-group kill
 orphans rather than ends - so the rows here are its two directions, on
-a real child: write end open and child alive, write end closed and gone.
-
-The platform arms are not faked: `os.name` is never patched, because
-patching it would claim a runtime this run is not. The coverage matrix
-unions the three platforms, so a row written for the platform it runs
-on measures the `nt` arms there and the POSIX arms here; what the
-Windows half cannot see is stated in the PR body. Five
-rows reach inside the module, direct calls - a stray `os._exit` here
-takes the suite down: the `watch_parent` refusals and the four ending
-rows on `_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`.
+a real child: write end open and child alive, write end closed and
+gone. The platform arms are not faked: `os.name` is never patched,
+because patching it would claim a runtime this run is not. The coverage
+matrix unions the three platforms, so a row written for the platform it
+runs on measures the `nt` arms there and the POSIX arms here; what the
+Windows half cannot see is stated in the PR body. Five rows reach
+inside the module, direct calls - a stray `os._exit` here takes the
+suite down: the `watch_parent` refusals and the four ending rows on
+`_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`.
 """
 import contextlib
 import errno
@@ -101,10 +100,9 @@ while True:
     time.sleep(0.05)
 '''
 
-# The spawn-shim child: the poller with `subprocess.Popen` replaced by a
-# subclass that records the child's pid the moment the real spawn
-# returns, then holds until a gate file appears - the mid-spawn window,
-# held open deterministically.
+# The spawn-shim child: the poller with `subprocess.Popen` replaced by
+# a subclass that records the child's pid the moment the real spawn
+# returns, then holds until a gate file appears - the mid-spawn window.
 SHIM_POLLER = '''import os, subprocess, sys, time
 sys.path.insert(0, {skill!r})
 _real_popen = subprocess.Popen
@@ -190,7 +188,7 @@ def _probe_agrees_with_the_pipe():
     """Whether the check above can tell a closed descriptor from an open
     one: without this, a row asserting `not _still_open(n)` passes just
     as happily when `n` was never open at all. A pipe held then closed
-    answers both ways before any row leans on it."""
+    answers both ways."""
     read_fd, write_fd = os.pipe()
     assert _still_open(write_fd), write_fd
     os.close(read_fd)
@@ -205,11 +203,11 @@ def _ended(child):
 
 
 def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
-    """One pipe per child, both ends accounted for: the child is handed
-    the read end in its environment, this process keeps the write end,
-    and its own copy of the read end is closed. The near miss is `env`:
-    `spawn_watched` takes it as a replacement, not an addition, so the
-    read-back is two-sided, one name short of this process's."""
+    """One pipe per child: the child is handed the read end in its
+    environment, this process keeps the write end, and its own copy of
+    the read end is closed. The near miss is `env`: `spawn_watched`
+    takes it as a replacement, not an addition, so the read-back is
+    two-sided, one name short of this process's."""
     client = _client()
     report = [sys.executable, '-c', REPORT]
     seen = {}
@@ -435,17 +433,16 @@ def test_on_windows_an_eof_ends_a_watcher_blocked_in_a_gh_call(tmp):
     """The Windows arm of the in-flight EOF ending: a watcher held inside
     a `gh` call when the pipe closes ends through the module's own
     ending - the wrapper this child installs writes the line then calls
-    `_end_inflight`, so the line witnesses the production ending - and
-    the process is gone at the row's own bound. Not pinned: the gh
-    process's death, the pid the fake logs naming the python grandchild
-    under `cmd.exe`, read only so cleanup can end it. The POSIX twin,
-    which skips the legs this row completes, is
+    `_end_inflight`, witnessing the production ending - and the process
+    is gone at the row's own bound. Not pinned: the gh process's death,
+    the pid the fake logs naming the python grandchild under `cmd.exe`,
+    read only so cleanup can end it. The POSIX twin, which skips the
+    legs this row completes, is
     `test_the_in_flight_gh_ends_with_its_watcher`.
     """
     if os.name != 'nt':
         _util.skip('the POSIX twin test_the_in_flight_gh_ends_with_its_'
-                   'watcher proves this scenario; this row is its Windows '
-                   'leg')
+                   'watcher proves this; this row is its Windows leg')
     client = _client()
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page([])}, gate=True)
     pid = None
@@ -455,7 +452,18 @@ def test_on_windows_an_eof_ends_a_watcher_blocked_in_a_gh_call(tmp):
         stdout=subprocess.PIPE, text=True)
     closed = False
     try:
-        armed = child.stdout.readline().strip()
+        armed_box = []
+        reader = threading.Thread(
+            target=lambda: armed_box.append(child.stdout.readline()),
+            daemon=True)
+        reader.start()
+        reader.join(LIFETIME)
+        if reader.is_alive():
+            child.kill()
+            raise AssertionError(
+                f'no arm within the {LIFETIME}s bound; '
+                f'fake stages={fake.stages()}')
+        armed = armed_box[0].strip()
         assert armed == ARMED, (
             f'the child never armed its watcher: {armed!r}')
         deadline = time.monotonic() + LIFETIME
