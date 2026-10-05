@@ -647,9 +647,7 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
 
 def test_every_run_step_names_only_tracked_paths(tmp):
     """A `run:` naming an untracked repo path is refused; the walk is live.
-
-    Paths under a download-artifact step's `path:` are runtime data the
-    checkout will not hold, so they are not unresolved.
+    Paths under a download-artifact step's `path:` are runtime data.
     """
     del tmp
     listed = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '-z'],
