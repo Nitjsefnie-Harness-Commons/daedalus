@@ -431,7 +431,8 @@
 !/tests/test_bridge_credentials.py
 !/tests/test_bridge_fake_oracle.py
 !/tests/test_bridge_requests.py
-!/tests/test_bridge_results.py
+!/tests/test_bridge_results_deliveries.py
+!/tests/test_bridge_results_slots.py
 !/tests/test_bridge_results_stripes.py
 !/tests/test_bridge_startup.py
 !/tests/test_bridge_streams.py
