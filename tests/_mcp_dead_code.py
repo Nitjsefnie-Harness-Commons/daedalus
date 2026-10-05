@@ -57,14 +57,11 @@ def _descend(node, dead):
 def _blocks(node):
     """Every list of statements a node holds: a BLOCK, however it is spelled.
 
-    A block is a property of the FIELD that holds its statements, not of the
-    node types that happen to carry one, so `Module.body`, a definition's
-    `body`, an `if`'s `body` and `orelse`, a `with`'s, a `try`'s `body`,
-    `orelse` and `finalbody`, an `except` handler's `body` and a `match`
-    case's `body` are one read here rather than a list of them. A list whose
-    members are not all statements is a different list — a `try`'s
-    `handlers`, a signature's arguments — and is no block at all; an empty
-    one is a block of no statements and marks nothing.
+    A block is a property of the FIELD that holds its statements, not of
+    the node types that happen to carry one — a list whose members are not
+    all statements (a `try`'s `handlers`, a signature's arguments) is no
+    block at all, and an empty one is a block of no statements and marks
+    nothing.
     """
     for _, value in ast.iter_fields(node):
         if isinstance(value, list) and all(

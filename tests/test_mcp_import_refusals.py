@@ -29,17 +29,14 @@ spell a refusal site at all. The comparison cannot pass by returning nothing
 on both sides: `CONTROL` and `CONTROL_LEAF` are a two-module TREE, the second
 reached from the first by nothing but a `__import__` call, so the control is
 on the MODULE-SET axis as well as the detail axis, and the derivation is
-asked to find every one of them before it compares anything.
-
-A key is a LINE, the same convention `_mcp_guard_floor` keys its own sites
-on, so an edit above a site moves it and this case says exactly where it
-moved to, with the derived set printed in the failure. Each arm is stated
-twice: the refusal, and a NEAR MISS the walk must leave alone — the same
-shape with the one separating decision taken the other way, so a rule that
+asked to find every one of them before it compares anything. A key is a
+LINE, the same convention `_mcp_guard_floor` keys its own sites on, so an
+edit above a site moves it and this case says exactly where it moved to,
+with the derived set printed in the failure. Each arm is stated twice: the
+refusal, and a NEAR MISS the walk must leave alone — the same shape with
+the one separating decision taken the other way, so a rule that
 over-reaches loses as visibly as one that under-reaches; an arm with no
-near miss says so in its row. The dead-code barrier kinds are the same
-question asked of POSITIONS: `test_mcp_tools.py` carries the real-tree
-walk, `test_mcp_closure_limits.py` the one limit it cannot exercise.
+near miss says so in its row.
 """
 import sys
 from pathlib import Path
@@ -433,14 +430,10 @@ def test_every_refusal_arm_has_a_near_miss_the_walk_leaves_alone(_tmp):
 
 
 def test_a_callee_the_fold_cannot_read_is_refused_where_it_reads_one(_tmp):
-    """The fold answers one question with three answers, and each is read.
-
-    A callee the fold reads is the operation and resolves the module; a
-    position the runtime cannot reach raises on the expression and is
-    SILENT; a position the fold cannot read is undecided, and the walk then
-    refuses because the callee still mentions the operation. The middle
-    answer is the one a rule that over-reaches loses, and the third is the
-    one a rule that treats "not read" as "unreachable" loses.
+    """The fold answers one question with three answers, and each is read
+    (`_mcp_selection_fold` states the taxonomy): the middle answer is the
+    one a rule that over-reaches loses, and the third is the one a rule
+    that treats "not read" as "unreachable" loses.
     """
     for callee, spoken in (('importlib.import_module', 'resolved'),
                            ('(0, importlib.import_module)[4]', 'silent'),
@@ -452,12 +445,10 @@ def test_a_callee_the_fold_cannot_read_is_refused_where_it_reads_one(_tmp):
 
 def test_a_bool_index_reads_the_position_it_names(_tmp):
     """`bool` settles an index under its own name and under an alias, and a
-    name bound to something of its own does not settle it at all.
-
-    The answer is read in all three words, and the rows carry both sides: a
-    rule that stopped recognising the builtin refuses the rows the walk
-    resolves, and one that recognised any name at all resolves rows it must
-    refuse.
+    name bound to something of its own does not settle it at all: a rule
+    that stopped recognising the builtin refuses the rows the walk
+    resolves, and one that recognised any name at all resolves rows it
+    must refuse.
     """
     wrong = []
     for bindings, call, spoken in BOOL_INDEX:
@@ -470,27 +461,20 @@ def test_a_bool_index_reads_the_position_it_names(_tmp):
 
 
 def test_an_alias_the_module_has_not_run_yet_is_not_the_builtin(_tmp):
-    """A `from builtins` binds the builtin ONCE ITS OWN STATEMENT HAS RUN,
-    and the order the module's statements run in is what says whether it
-    has.
-
-    The pair is one axis at its two ends: the same binding and the same use,
-    written in the two orders. The row that has to refuse NAMES the arm it
-    enters, because a rule that reads the binding and drops the order
-    resolves it and a rule that declines every alias loses the other row.
+    """A `from builtins` binds the builtin ONCE ITS OWN STATEMENT HAS RUN:
+    the pair is the same binding and the same use written in the two
+    orders, and the refusing row names the arm it enters — a rule that
+    reads the binding and drops the order resolves it, one that declines
+    every alias loses the other row.
     """
     assert not _index_verdicts(_tmp, BINDING_ORDER)
 
 
 def test_a_conditional_index_settles_only_when_its_two_arms_agree(_tmp):
     """A conditional is a RUNTIME choice, so it settles a value only when
-    both of its arms settle to the same one.
-
-    The agreeing arms are the near miss — a rule that refuses every
-    conditional it meets loses them — and the disagreeing arms are the
-    positive: read either alone and the position resolves, so the closure
-    carries a module only one of two values ever reaches. The refusal is
-    read against the arm it enters for the same reason.
+    both of its arms settle to the same one. The refusal is read against
+    the arm it enters, so a rule that reads the binding and drops the
+    agreement resolves a module only one of two values ever reaches.
     """
     assert not _index_verdicts(_tmp, CONDITIONAL_INDEX)
 
@@ -498,12 +482,9 @@ def test_a_conditional_index_settles_only_when_its_two_arms_agree(_tmp):
 def test_a_string_the_folder_can_fold_is_refused_like_a_literal(_tmp):
     """The constant folder decides the string axis, and it folds a
     concatenation of literals and a field-less f-string to the same constant
-    a literal already is.
-
-    The row that must stay CLEAN is the declared limit beside them: a
-    string assembled from a runtime value folds to nothing, so the walk
-    follows nothing and the closure is quietly short. It is read here so the
-    three refusals are not a rule that refuses every string it meets.
+    a literal already is; the clean row is the declared limit beside them,
+    read here so the three refusals are not a rule that refuses every
+    string it meets.
     """
     wrong = []
     for statement, spoken in FOLDED_STRING:
@@ -516,10 +497,8 @@ def test_a_string_the_folder_can_fold_is_refused_like_a_literal(_tmp):
 
 def test_every_dead_code_barrier_kind_marks_the_tail_behind_it(_tmp):
     """Raise, return, break, continue and a two-leaving `if` each end a
-    block, and the call before the barrier still contributes a module.
-
-    Both halves ride in one tree, so a rule that stopped marking tails
-    adds `pkg/leaf.py` and a rule that over-reached drops
+    block. Both halves ride in one tree, so a rule that stopped marking
+    tails adds `pkg/leaf.py` and a rule that over-reached drops
     `pkg/before.py`; the assertion reads the whole set, not a membership.
     """
     over = []
