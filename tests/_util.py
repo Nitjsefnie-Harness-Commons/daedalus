@@ -447,11 +447,12 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
         timeout = startup_timeout()
         port = await_listening_line(proc, drained, timeout=timeout)
         base = f'http://127.0.0.1:{port}'
-        # ONE request, because the request is the event. The socket is bound
-        # before the announcement above, so a connection made now waits in
-        # the backlog until `serve_forever` accepts it — and a poll loop here
-        # only ever measured how long that took, at a number of instructions
-        # per tick.
+        if await_mcp:
+            _mcp_ready.await_mcp_ready(proc, drained,
+                                       _startup_observations)
+        # ONE request, because the request is the event: a poll loop here
+        # only ever measured how long the answer took, at a number of
+        # instructions per tick.
         started = time.monotonic()
         try:
             get(base + '/health', timeout=timeout)
@@ -460,9 +461,6 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
                 f'bridge did not answer /health in {timeout}s: '
                 + _startup_observations(
                     proc, drained, time.monotonic() - started)) from exc
-        if await_mcp:
-            _mcp_ready.await_mcp_ready(proc, drained,
-                                       _startup_observations)
         _bridge_started = True
         yield base, docroot
     finally:

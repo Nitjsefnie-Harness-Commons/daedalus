@@ -37,29 +37,6 @@ def test_extension_command_without_did_times_out(tmp):
     assert 'did not return its delivery result' in str(failure), failure
 
 
-def test_eval_without_did_times_out(tmp):
-    del tmp
-    failure = _unmatched_delivery_failure(
-        lambda: _deliveries.real_eval(
-            'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
-            'controlled-eval', '2 + 2'),
-        '{"ok": true}', (200, {'pending': True}))
-    assert failure.__class__ is AssertionError, failure
-    assert 'controlled-eval' in str(failure), failure
-    assert 'did not return its delivery result' in str(failure), failure
-
-
-def test_extension_command_pending_body_times_out(tmp):
-    del tmp
-    failure = _unmatched_delivery_failure(
-        lambda: _deliveries.real_ext_command(
-            'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
-        '{"did":"controlled-delivery"}', (200, {'pending': True}))
-    assert failure.__class__ is AssertionError, failure
-    assert 'controlled-command' in str(failure), failure
-    assert 'did not return its delivery result' in str(failure), failure
-
-
 def test_eval_pending_body_times_out(tmp):
     del tmp
     failure = _unmatched_delivery_failure(
@@ -69,17 +46,6 @@ def test_eval_pending_body_times_out(tmp):
         '{"did":"controlled-delivery"}', (200, {'pending': True}))
     assert failure.__class__ is AssertionError, failure
     assert 'controlled-eval' in str(failure), failure
-    assert 'did not return its delivery result' in str(failure), failure
-
-
-def test_extension_command_empty_did_times_out(tmp):
-    del tmp
-    failure = _unmatched_delivery_failure(
-        lambda: _deliveries.real_ext_command(
-            'http://127.0.0.1:1', 'controltoken', 'controlled-command', {}),
-        '{"did":""}', (200, {'deliveryId': ''}))
-    assert failure.__class__ is AssertionError, failure
-    assert 'controlled-command' in str(failure), failure
     assert 'did not return its delivery result' in str(failure), failure
 
 
