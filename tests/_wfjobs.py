@@ -74,18 +74,17 @@ def workflow_files(directory=None):
     return paths
 
 
-_RUN_PATH_TOKEN = re.compile(r'^[A-Za-z0-9_.][A-Za-z0-9_./-]*$')
+_RUN_PATH_TOKEN = re.compile(r'^[A-Za-z0-9_./-]*$')
 
 
 def run_path_candidates(run_text):
     """Every repo-relative path a decoded `run:` text names.
 
     The grammar: split the text on whitespace, strip edge `"` `'` `(` `)`
-    `;` `,` characters from each token, then admit a token whose first
-    character is a letter, digit, underscore or dot, whose every character
-    is one of those or a slash or a dash, that carries at least one `/`,
-    that does not begin `./`, `../` or `/`, and that does not end with
-    `/`. Output is sorted, without duplicates.
+    `;` `,` characters from each token, then admit a token whose every
+    character is a letter, digit, underscore, dot, slash or dash, that
+    carries at least one `/`, that does not begin `./`, `../` or `/`, and
+    that does not end with `/`. Output is sorted, without duplicates.
 
     The boundary: a green proves each named path is a tracked file at a
     root checkout's layout; it does not prove the step executes, and every
