@@ -663,7 +663,8 @@ def test_every_run_step_names_only_tracked_paths(tmp):
                 if step.get('uses', '').startswith(
                     'actions/download-artifact')
                 and isinstance(step.get('with', {}).get('path'), str))
-            assert not 'coverage-data-evil/x'.startswith(roots), 'near-miss'
+            assert not 'coverage-data-evil/x'.startswith(roots), (
+                f'near-miss: coverage-data-evil/x vs {roots}')
             for index, step in enumerate(job.get('steps', [])):
                 run_text = step.get('run', '')
                 if not run_text:
