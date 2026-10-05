@@ -17,8 +17,7 @@ it, and `gh: API rate limit already exceeded ...` on stderr. So an answer
 may also state the exit code, the stderr and the stdout `gh` leaves behind,
 and a shape the fake cannot render is REFUSED BY NAME, never answered
 plausibly: a double that fills in what it was not told is a control with no
-opinion on the case it stands in for.
-"""
+opinion on the case it stands in for."""
 
 import contextlib
 import json
@@ -93,8 +92,7 @@ def _hold():
 def _recorded(stage, path):
     """Leave one line saying a hold began or ended, for a reader to
     have. Absent when no record was named, so a fake that is not
-    holding writes nothing anywhere; the call log stays the record.
-    """
+    holding writes nothing anywhere; the call log stays the record."""
     log = os.environ.get(RELEASES)
     if log is None:
         return
@@ -147,8 +145,7 @@ def _fixture(answers, request):
     Successive pages are a list, consumed in order and the last
     repeated, so a two-page answer needs no counter that could race
     between two watcher processes; the count is taken before this call
-    is logged, so the first request gets the first page.
-    """
+    is logged, so the first request gets the first page."""
     for fragment, answer in answers.items():
         if fragment in request:
             if isinstance(answer, list):
@@ -262,8 +259,7 @@ def _respond(response, argv):
 class FakeGh:
     """One installed fake: a launcher, an answers file and a call log.
     The launcher is proved executable here, so a suite never learns
-    about a platform difference from a watcher that could not start.
-    """
+    about a platform difference from a watcher that could not start."""
 
     def __init__(self, directory, answers=None, gate=False):
         self.dir = Path(directory)
