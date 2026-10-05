@@ -28,9 +28,8 @@ comparison cannot pass by returning nothing on both sides: `CONTROL` and
 reached from the first by nothing but a `__import__` call, so the control is
 on the MODULE-SET axis as well as the detail axis, and the derivation is
 asked to find every one of them before it compares anything. A key is a
-LINE, the convention `_mcp_guard_floor` keys its own sites on, so an edit
-above a site moves it and this case says where it moved to, the derived
-set printed in the failure. Each arm is stated twice: the refusal, and a
+LINE, the convention `_mcp_guard_floor` keys its own sites on. Each arm is
+stated twice: the refusal, and a
 NEAR MISS the walk must leave alone — the same shape with the separating
 decision taken the other way, so a rule that over-reaches loses as
 visibly as one that under-reaches; an arm with no near miss says so.

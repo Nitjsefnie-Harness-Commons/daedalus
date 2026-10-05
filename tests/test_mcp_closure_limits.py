@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Import-closure shapes the real `daedalus_mcp` tree cannot show: the
-refusal pass in `test_mcp_tools.py` walks the real tree, so it can only
-witness a property the tree presents; each shape below is driven on a
-synthetic composition, and the walk's arms are enumerated in
-`test_mcp_import_refusals.py`. The lambda case stays because dropping the
-lambda arm from `static_value` reds it alone; the settled-callee families
-and their bounds are the callee-value question at the five forms issue
-1213 records.
+"""Import-closure shapes the real `daedalus_mcp` tree cannot show (the
+walk's arms are enumerated in `test_mcp_import_refusals.py`). The lambda
+case stays because dropping the lambda arm from `static_value` reds it
+alone; the settled-callee families and their bounds are the callee-value
+question at the five forms issue 1213 records.
 """
 import sys
 from pathlib import Path
