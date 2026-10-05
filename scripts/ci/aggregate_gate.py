@@ -3,10 +3,9 @@
 
 A `cancelled` dependency used to fail the aggregate blindly: with
 `cancel-in-progress` on, every superseding push left a red aggregate on
-the old SHA. The rule ci_wait.py settled holds here, computed on the
-ordering helpers `ci_gate` publishes and this module imports rather than
-copies: a cancelled run with a strictly newer run of the same workflow
-gates nothing, while a deliberate cancel stays a failure.
+the old SHA. The rule ci_wait.py settled holds here: a cancelled run
+with a strictly newer run of the same workflow gates nothing, while a
+deliberate cancel stays a failure.
 
 The supersession query reads the head branch from
 `github.event.pull_request.head.ref || github.ref_name` — the pushed
