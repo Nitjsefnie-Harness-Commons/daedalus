@@ -37,7 +37,7 @@ def test_tabs_encodes_every_accepted_custom_token(tmp):
         with _util.bridge(
                 case,
                 env={'DAEDALUS_TOKEN': custom_token,
-                    'TOKEN': ''}) as (base, _docroot):
+                     'TOKEN': ''}) as (base, _docroot):
             status, body = _util.post_json(base + '/sync-tabs', {
                 'token': custom_token,
                 'tabs': [{'tabId': str(index),
