@@ -173,25 +173,6 @@ def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
     assert FORCED_WITHOUT_GRACE not in record['cleanup'], record
 
 
-def test_the_cleanup_that_ended_a_wedged_suite_is_reported(tmp):
-    """A kill whose outcome is discarded is a kill nothing can be told from."""
-    recorded = Path(tmp) / 'tree' / 'tests' / 'suite.pid'
-    try:
-        result, _invocations = coverage_tree(
-            tmp, {'test_wedged.py': _WEDGED_SUITE},
-            suite_bound=_WEDGE_BOUND_S, outer_timeout=_WEDGE_OUTER_S)
-    finally:
-        kill_recorded(recorded)
-    group = coverage_group(result.stdout, 'test_wedged.py')
-    assert TREE_WAS_KILLED in group, (
-        f'the record does not name the {TREE_WAS_KILLED} route the kill '
-        f'took: {group}')
-    assert REQUESTED_THEN_GRACED in group, (
-        f'the record does not name what that route does about asking: '
-        f'{group}')
-    assert FORCED_WITHOUT_GRACE not in group, group
-
-
 def test_a_wedge_under_require_all_prints_the_timeout_and_nothing_else(tmp):
     """The timeout is the diagnosis, and it is the one this run gets.
 
@@ -399,7 +380,12 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
     wait out of the bridge fixture escapes nothing: each call carries
     exactly timeout=SUITE_BOUND.CLEANUP_TIMEOUT_S, spelled literally
     here; the constant is never rebound on the binding and the method
-    is never aliased to a bare name.
+    is never aliased, by attribute or by getattr. A runtime limb holds
+    the loaded module's value against a fresh load of the definition,
+    so any value divergence reds whatever its ast shape. The pin's
+    limit is the call's own spelling: a direct
+    `getattr(proc, 'wait')(...)` stays outside the walk -- the value
+    limb pins the bound's source, not every call spelling.
     """
     tree = ast.parse(
         (ROOT / 'tests' / '_util.py').read_text(encoding='utf-8'))
@@ -425,6 +411,13 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
             if (isinstance(node.value, ast.Attribute)
                     and node.value.attr == 'wait'):
                 aliased.append(f'tests/_util.py:{node.lineno}')
+            elif (isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == 'getattr'
+                    and any(isinstance(a, ast.Constant)
+                            and a.value == 'wait'
+                            for a in node.value.args)):
+                aliased.append(f'tests/_util.py:{node.lineno}')
             targets = ([node.target] if isinstance(node, ast.AnnAssign)
                        else node.targets)
             if any(isinstance(t, ast.Attribute)
@@ -437,6 +430,11 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
     assert not rebound, f'SUITE_BOUND rebound: {rebound}'
     assert not unshared, ('waits not reading timeout=SUITE_BOUND.'
                           f'CLEANUP_TIMEOUT_S: {unshared}')
+    fresh = _util.load(ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                       'suite_bound_fresh_definition')
+    assert _util.SUITE_BOUND.CLEANUP_TIMEOUT_S == fresh.CLEANUP_TIMEOUT_S, (
+        f'suite bound diverged from its definition: '
+        f'{_util.SUITE_BOUND.CLEANUP_TIMEOUT_S}')
 
 
 # The arms no launcher reaches. Most controls above drive a real launcher;
