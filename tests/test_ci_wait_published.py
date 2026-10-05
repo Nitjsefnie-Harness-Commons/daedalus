@@ -235,8 +235,8 @@ def test_the_bound_report_names_both_kinds_of_absence(tmp):
     """The exit-2 line, where BOTH gates are absent. The grace refusal
     beside it is already driven with both missing; this one is not, and
     it is the line a bound shorter than the grace prints instead - a
-    report naming only the first absence would read correctly there and
-    lie here."""
+    report naming only the first absence would read right there, lie
+    here."""
     mod = _ci_wait()
     clock = _Clock()
     fake = _fake_gh.FakeGh(tmp, _answers(_green('CodeQL')))
@@ -379,8 +379,8 @@ def test_red_published_names_only_an_exact_match(tmp):
 
 def test_red_published_returns_whole_checks_for_the_offender_line(tmp):
     """The offender loop prints a run's name, conclusion and URL, so the
-    answer is the check itself rather than a name: a control that wanted
-    only the names would rebuild them here."""
+    answer is the check itself, not a name: a names-only control would
+    rebuild them here."""
     del tmp
     mod = _ci_gate()
     offenders = mod.red_published([_check(PUBLISHED, 'failure')])
@@ -484,9 +484,9 @@ def test_an_unconcluded_check_is_a_wait_not_a_red_verdict(tmp):
     the asymmetry: `conclusion: None` fails the acceptable-set test, so
     the offender line would print `gate freshness: None <url>` and the
     exit would be 1 - a red verdict for a check the publisher had not
-    finished writing. Not reachable on this repository today, the
-    publisher POSTing status and conclusion in one call; the SHAPE, not
-    this publisher, is what a reader must survive."""
+    finished writing. Not reachable today, the publisher POSTing status
+    and conclusion in one call; the SHAPE, not this publisher, is what
+    a reader must survive."""
     mod = _ci_wait()
     running = [_check(PUBLISHED, None, status='in_progress')]
     assert mod.verdict([_head_run('tests')], running) == (
@@ -508,9 +508,9 @@ def test_a_red_verdict_is_not_swallowed_by_a_running_one_of_its_name(tmp):
     read. A publisher that PATCHes rather than adding a second run is
     why this is not reachable on this repository, and a reader that
     cannot survive the shape reads a shape it should not depend on
-    being absent. The remedy is in the predicate, not `verdict`: a
-    check that has not concluded cannot be red, so `red_published` asks
-    both and the guard stays where it is."""
+    being absent. The remedy is in the predicate, not `verdict`: an
+    unconcluded check cannot be red, so `red_published` asks both and
+    the guard stays where it is."""
     del tmp
     mod = _ci_wait()
     checks = [_check(PUBLISHED, 'failure'), _check(PUBLISHED, None,

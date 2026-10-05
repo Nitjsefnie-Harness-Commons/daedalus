@@ -1,12 +1,10 @@
 """An executable double for `gh`, and the environment that puts it on PATH.
 
 Its consumers shell out to `gh`, so a `gh` earlier on PATH is a complete
-seam: they drive real `gh` processes with no network in the loop. Each
-call is answered from a JSON fixture file and appended to a call log,
-which is what makes the request budget measurable: the log, not a
-claim, is the number.
-
-The launcher is written per platform rather than assumed: a POSIX script
+seam: they drive real `gh` processes, no network in the loop. Each call
+is answered from a JSON fixture and appended to a call log, which makes
+the request budget measurable: the log, not a claim, is the number. The
+launcher is written per platform rather than assumed: a POSIX script
 named `gh` is executable on Linux and macOS and nothing on Windows,
 where the launcher is a `.bat` the client is pointed at by absolute
 path (`DAEDALUS_GH`). The launcher finds this file relative to itself,
@@ -20,7 +18,7 @@ limit already exceeded ...` on stderr. So an answer may also state the
 exit code, the stderr and the stdout `gh` leaves behind, and a shape
 the fake cannot render is REFUSED BY NAME, never answered plausibly:
 a double that fills in what it was not told is a control with no
-opinion on the case it is standing in for.
+opinion on the case it stands in for.
 """
 
 import contextlib
@@ -79,9 +77,9 @@ def _hold():
     path = os.environ.get(GATE)
     if path is None:
         return
-    # Inside the wait, once: a record written above the loop says the call
-    # arrived, not that it is held, so a hold skipped for exactly the
-    # watcher's own calls would satisfy a reader counting entries.
+    # Inside the wait, once: a record written above the loop says the
+    # call arrived, not that it is held, so a hold skipped for exactly
+    # the watcher's own calls would satisfy a reader counting entries.
     # Unconditional in the loop, it would record once per poll and the
     # count would stop being a count.
     entered = False
@@ -96,8 +94,7 @@ def _hold():
 def _recorded(stage, path):
     """Leave one line saying a hold began or ended, for a reader to
     have. Absent when no record was named, so a fake that is not
-    holding writes nothing anywhere and the call log stays the whole
-    record.
+    holding writes nothing anywhere; the call log stays the record.
     """
     log = os.environ.get(RELEASES)
     if log is None:
@@ -148,10 +145,10 @@ def _entries(log):
 
 def _fixture(answers, request):
     """The first fragment the request carries, its key, and its response.
-    Successive pages of one connection are a list, consumed in order and
-    the last repeated, so a two-page answer needs no counter that could
-    race between two watcher processes; the count is taken before this
-    call is logged, so the first request gets the first page.
+    Successive pages are a list, consumed in order and the last
+    repeated, so a two-page answer needs no counter that could race
+    between two watcher processes; the count is taken before this call
+    is logged, so the first request gets the first page.
     """
     for fragment, answer in answers.items():
         if fragment in request:
