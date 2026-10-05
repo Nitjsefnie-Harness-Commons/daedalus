@@ -458,9 +458,8 @@ def assert_domain_covers_a_second_module(read_module, package):
     source = (package / 'transport.py').read_text(encoding='utf-8')
     anchor = 'def token():\n'
     assert source.count(anchor) == 1
-    body = ("def _read_namespace():\n"
-            "    return sys._getframe()['f_locals']\n\n\n"
-            'def token():\n')
+    body = ("def _read_namespace():\n    return sys._getframe()['f_locals']"
+            '\n\n\ndef token():\n')
     escapes = read_module(
         {'transport': source.replace(anchor, body, 1)})
     assert escapes == [
