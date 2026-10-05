@@ -173,19 +173,10 @@ def _target_key(candidate):
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException:
-        # This probe's own failure stays here. An interrupt is never
-        # suppressed, even one a receiver itself raised.
         return None
 
 
 def _plain_read(handle, args, kwargs):
-    """A call that creates or truncates is not the read an injector faults.
-
-    The real API has already accepted this call, so its mode is a valid
-    spelling and only has to be searched, never parsed. The handle cannot
-    answer instead: a truncating `wb+` reports its mode as `rb+`. The search
-    must not go through the mode object's own protocol.
-    """
     mode = kwargs.get('mode', args[0] if args else 'r')
     return handle.readable() and not any(
         str.__contains__(mode, marker) for marker in 'wax')
@@ -214,7 +205,6 @@ def _refuse_path_operation(path, operation, failures, clock=None):
         candidate_key = _target_key(candidate)
         if (read_operation and candidate_key == target_key
                 and remaining[0]):
-            # Native validation adds one open per faulted call.
             handle = _native_read_handle(original, candidate, args, kwargs)
             if handle is not None:
                 return handle
@@ -230,8 +220,6 @@ def _refuse_path_operation(path, operation, failures, clock=None):
                 if clock is not None:
                     clock.record_read()
                 raise PermissionError(32, 'injected sharing violation')
-            # A call the real API refuses performed no operation, so it is
-            # neither counted nor recorded as one.
             result = original(candidate, *args, **kwargs)
             if read_operation and not _plain_read(
                     result, args, kwargs):
@@ -268,16 +256,13 @@ def _virtual_cmdqueue_clock(
     if budget is not None and (not math.isfinite(budget) or budget < 0):
         raise ValueError('wall budget must be non-negative and finite')
     original = _cmdqueue.time
-    # An opted-out clock reads no real time, not even for this start mark.
     wall_started = 0.0 if budget is None else original.perf_counter()
-    # A large power-of-two origin exposes sleeps too small to move the clock.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
     elapsed = [0.0]
     correction = [0.0]
     events = []
     sleep_count = [0]
     no_progress_count = [0]
-    # Read cost exposes stale deadline samples; the fallback avoids underflow.
     read_cost = _cmdqueue.POLL_DELAY / 10 or _cmdqueue.POLL_DELAY
 
     def accumulated(seconds):
