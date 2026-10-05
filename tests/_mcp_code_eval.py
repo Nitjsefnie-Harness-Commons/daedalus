@@ -87,6 +87,10 @@ class _Scopes:
         self._local = {}
         self._alias = {}
         self._uncertain = {}
+        # The AST node each matched scope table belongs to, so the value a
+        # parameter carries at entry — its own default — is readable off the
+        # tree the scope was matched from.
+        self._scope_ast = {}
         # The names a NESTED scope rebinds in the MODULE, read off the
         # resolver's tables — `_rebindings` owns the why.
         self._rebound = self._rebindings()
@@ -211,6 +215,7 @@ class _Scopes:
                 else node.name)
             child, missed = self._match(table, name, node.lineno)
             if child is not None:
+                self._scope_ast[id(child)] = node
                 self._enclosing[id(child)] = table
                 self._local[id(child)] = {symbol.get_name() for symbol
                                           in child.get_symbols()
@@ -269,6 +274,48 @@ class _Scopes:
                 return table
             table = self._enclosing.get(id(table))
         return None
+
+    def parameter_default(self, node, name):
+        """The default expression of the parameter `name` at the scope `node`
+        sits in, or None when no scope here binds it as a parameter whose
+        value this walk can read.
+
+        The nearest scope that binds the name owns the answer — a nested
+        scope binding it as its OWN parameter takes it back — and the value
+        it carries is the default evaluated once at the definition, so it is
+        what any use inside reads unless a store has taken it back. A scope
+        the walk could not match is declined, a store in the owning scope or
+        from a nested one (`nonlocal`) declines, and so does a default that
+        names a parameter of its own signature, which is the one cycle this
+        reader can otherwise follow into forever.
+        """
+        if self._uncertain.get(id(node)):
+            return None
+        table = self._owner(self._scope_of.get(id(node)), name)
+        definition = self._scope_ast.get(id(table)) if table else None
+        if definition is None:
+            return None
+        symbol = self._symbols(table).get(name)
+        if symbol is None or not symbol.is_parameter() \
+                or symbol.is_assigned() \
+                or self._stored_from_nested(table, name):
+            return None
+        return _default_of(definition.args, name)
+
+    def _stored_from_nested(self, table, name):
+        """Whether any scope nested in `table` stores `name` through a free
+        binding — the `nonlocal` store `is_parameter and not is_assigned`
+        cannot see, because the store is reported in the nested scope only.
+        """
+        pending = list(table.get_children())
+        while pending:
+            child = pending.pop()
+            pending.extend(child.get_children())
+            symbol = self._symbols(child).get(name)
+            if symbol is not None and symbol.is_assigned() \
+                    and symbol.is_free():
+                return True
+        return False
 
     def denotes_builtin(self, node, name) -> bool:
         """Whether a name reference IS the builtin `name` at its own scope.
@@ -348,6 +395,18 @@ class _Scopes:
         if node.id not in self._root_binds:
             return True
         return self._binds_itself(node.id)
+
+
+def _default_of(args, name):
+    """The default expression of parameter `name`, or None when it has none."""
+    positional = args.posonlyargs + args.args
+    for parameter, default in zip(
+            positional[len(positional) - len(args.defaults):], args.defaults):
+        if parameter.arg == name:
+            return default
+    return next((default for parameter, default
+                 in zip(args.kwonlyargs, args.kw_defaults)
+                 if parameter.arg == name and default is not None), None)
 
 
 def scopes_for(tree, source, filename):
