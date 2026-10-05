@@ -28,7 +28,7 @@ the measurement can be repeated:
 
 The case below is the one that stayed, and it stayed on a measurement rather
 than on a preference: dropping the lambda arm from `static_value` reds it
-and leaves `test_mcp_import_refusals.py` 10/10 and `test_mcp_tools.py`
+and leaves `test_mcp_import_refusals.py` 9/9 and `test_mcp_tools.py`
 21/21. Nothing else on this tree catches a call's callee being read as a
 VALUE.
 """
