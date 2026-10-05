@@ -24,6 +24,9 @@ from _realbrowser_fixture_controls import (  # noqa: E402
     _browser_requirements, _browser_version, _enter_fixture,
     _fixture_runtime, _popen_double, _ProcessDouble)
 
+BOUND = _util.load(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                   'harness_suite_bound')
+
 
 def test_the_process_double_keeps_the_refusals_a_popen_has(tmp):
     """A shared double is only a model of Popen while it keeps its refusals.
@@ -192,7 +195,8 @@ def test_browser_launch_passes_basic_password_store_flag(tmp):
     args = launches[0]
     assert (args[0], args[-1]) == ('/controlled/chromium', 'about:blank'), args
     assert args.count('--password-store=basic') == 1, args
-    assert process.wait_timeouts == [10], process.wait_timeouts
+    assert process.wait_timeouts == [BOUND.CLEANUP_TIMEOUT_S], (
+        process.wait_timeouts)
 
 
 def test_cdp_call_derives_both_deadline_carriers_from_constant(tmp):
