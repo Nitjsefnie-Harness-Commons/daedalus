@@ -551,8 +551,7 @@ def test_the_reap_waits_name_the_shared_cleanup_bound(tmp):
 
 
 def test_the_suites_own_reap_waits_read_the_shared_cleanup_bound(tmp):
-    """The suites' reaps read SUITE_BOUND.CLEANUP_TIMEOUT_S, pinned by
-    shape: CPython interns small ints, so no runtime check can tell."""
+    """Suite reaps read SUITE_BOUND.CLEANUP_TIMEOUT_S, pinned by shape."""
     del tmp
     for name in ('test_bridge_startup.py', 'test_mcp_entry_point.py',
                  'test_parent_watch.py', 'test_stream_lifecycle.py',
@@ -564,7 +563,8 @@ def test_the_suites_own_reap_waits_read_the_shared_cleanup_bound(tmp):
                 continue
             signals = {}
             for node in ast.walk(scope):
-                if not isinstance(getattr(node, 'func', None), ast.Attribute):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)):
                     continue
                 receiver = ast.dump(node.func.value)
                 if node.func.attr in ('terminate', 'kill'):
