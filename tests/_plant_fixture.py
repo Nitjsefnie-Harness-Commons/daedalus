@@ -87,7 +87,9 @@ def _unreadable_as_bytes(entry):
     """Make a stored copy unreadable as bytes, on every platform: a
     directory where a file is expected refuses the open everywhere -
     IsADirectoryError on POSIX, PermissionError on Windows - so only
-    OSError may be relied on. A claim about the OPEN, not the read.
+    OSError may be relied on. A claim about the OPEN, so it holds
+    where the open is reached: the advice path has no presence guard,
+    the restore path does.
     """
 
     payload = entry / 'bytes'
