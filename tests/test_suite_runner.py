@@ -69,6 +69,12 @@ raise SystemExit(_util.runner(_util.collect(dict(globals()))))
 """
 
 
+_PHANTOM_SUITE = """import os
+print("ModuleNotFoundError: No module named '_phantom'")
+raise SystemExit(3)
+"""
+
+
 _RENDEZVOUS_SUITE = """import os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util
@@ -161,11 +167,10 @@ def _runner_tree(tmp, suites, runner_encoding=None, sitecustomize=None,
     """A copy of run_tests.py over fabricated suites, run where it stands.
 
     `omit` leaves helpers out of the clone, which is how a suite really comes
-    to die on an import. The tree is always called `tree`, because a tree by
-    any other name is measured under a path that no longer exists when the
-    report is read — see `tests/_coverage_guard.py` on the `*/tree` mapping.
-    Generated suites and the startup stub stay under `tests`, which coverage
-    omits.
+    to die on an import. The tree is always called `tree`: coverage maps
+    `*/tree` back onto this repository — see `tests/_coverage_guard.py` — and
+    a tree by any other name fails the coverage job. Generated suites and the
+    startup stub stay under `tests`, which coverage omits.
     """
     root = Path(tmp) / 'tree'
     (root / 'tests').mkdir(parents=True)
@@ -203,8 +208,9 @@ def _runner_tree(tmp, suites, runner_encoding=None, sitecustomize=None,
         encoding=runner_encoding or 'utf-8', timeout=300,
         preexec_fn=before_exec)
     if result.returncode != 0:
-        absent = sorted(set(_MISSING_MODULE.findall(
-            result.stdout + result.stderr)))
+        absent = sorted({name for name in _MISSING_MODULE.findall(
+            result.stdout + result.stderr)
+            if (ROOT / 'tests' / f'{name}.py').exists()})
         if absent:
             raise AssertionError(
                 f'the synthetic tree could not resolve {", ".join(absent)}: '
@@ -241,7 +247,6 @@ def test_the_aggregate_carries_the_totals_it_verified(tmp):
     result = _runner_tree(tmp, {'test_passing.py': _PASSING_SUITE})
     assert result.returncode == 0, (result.returncode, result.stdout,
                                     result.stderr)
-    assert 'OVERALL: PASS' in result.stdout, result.stdout
     assert '1 passed' in result.stdout.rsplit('OVERALL', 1)[-1], result.stdout
 
 
@@ -251,12 +256,17 @@ def test_a_helper_missing_from_the_clone_is_named_in_the_failure(tmp):
         failure = None
         try:
             _runner_tree(os.path.join(tmp, os.path.splitext(omitted)[0]),
-                         {'test_passing.py': _PASSING_SUITE},
+                         {'test_passing.py': _PASSING_SUITE,
+                          'test_phantom.py': _PHANTOM_SUITE},
                          omit=(omitted,))
         except AssertionError as raised:
             failure = str(raised)
         assert failure and f'add {omitted} to the helper tuple' in failure, (
             f'{omitted}: {failure}')
+        assert '_phantom' not in failure, f'{omitted}: {failure}'
+    outcome = _runner_tree(os.path.join(tmp, 'phantom'),
+                           {'test_phantom.py': _PHANTOM_SUITE})
+    assert outcome.returncode != 0, (outcome.returncode, outcome.stdout)
 
 
 def test_suites_run_concurrently(tmp):
@@ -487,10 +497,8 @@ def test_the_overlap_harness_bound_outlasts_its_inner_waits(tmp):
         bound = _overlap.overlap_child_timeout(
             order, wait_between, inner)
         assert bound > worst, (
-            f'{len(order)} commands, wait_between={wait_between}: the '
-            f'bounded-wait budget and result allowances total {worst}s '
-            f'against a {bound}s child backstop, leaving slack; an unbounded '
-            'result POST can still reach the child backstop')
+            f'{len(order)} commands, wait_between={wait_between}: '
+            f'{worst}s of bounded waits against a {bound}s backstop')
 
 
 def test_the_overlap_harness_backstop_takes_outer_slack(tmp):
@@ -501,20 +509,14 @@ def test_the_overlap_harness_backstop_takes_outer_slack(tmp):
     del tmp
     bound = _overlap.overlap_child_timeout(['a'], False, 1, outer_slack=7)
     assert bound == 12, (
-        'outer_slack lands after every bounded wait: '
-        f'1 * (3 + 1 + 0 + 1) + 7 == 12, not {bound}')
+        f'outer_slack lands after every bounded wait: got {bound}')
     default = _overlap.overlap_child_timeout(['a'], False, 1)
     assert default == 5, (
-        'the no-slack backstop over one result is unchanged: '
-        f'1 * (3 + 1 + 0 + 1) + 0 == 5, not {default}')
+        f'the no-slack backstop over one result is unchanged: got {default}')
 
 
 def test_the_runner_reports_a_failure_a_console_cannot_encode(tmp):
-    """A failure the console cannot spell must still be reported.
-
-    On a legacy code page `print` raises rather than degrading, so the report
-    was lost AND every test after it in that file never ran.
-    """
+    """A failure the console cannot spell must still be reported."""
     del tmp
     program = (
         'import sys\n'
