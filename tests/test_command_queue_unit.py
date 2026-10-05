@@ -32,6 +32,28 @@ def test_queue_naming_contract_is_pinned(tmp):
         'tok_tab', 'tok_tab.json')
 
 
+def test_a_missing_name_is_absence_not_a_refusal(tmp):
+    queue = _load_queue('unit_missing_candidate_absence')
+    opened = queue.open_command_candidate(Path(tmp) / 'absent.json')
+    assert opened == (None, None, None), opened
+
+
+def test_a_directory_candidate_is_refused_with_its_reason(tmp):
+    queue = _load_queue('unit_directory_candidate_reason')
+    entry = Path(tmp) / 'tok' / '0000000000001_000001.json'
+    entry.parent.mkdir(parents=True)
+    entry.mkdir()
+    stream, reason, _ = queue.open_command_candidate(entry)
+    if stream is not None:
+        stream.close()
+    assert stream is None and reason, (stream, reason)
+    if os.name == 'nt':
+        assert reason.startswith('cannot open'), reason
+    else:
+        assert reason == 'candidate is not a regular file', reason
+    assert entry.is_dir(), 'the refusal removed the candidate'
+
+
 def test_path_safety_helpers_stay_under_the_module_namespace(_tmp):
     queue = _load_queue('command_queue_path_safety_namespace')
     assert queue.path_safety.derived_component is not None
