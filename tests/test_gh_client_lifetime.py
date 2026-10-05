@@ -14,8 +14,7 @@ a row written for the platform it runs on measures the `nt` arms there and
 the POSIX arms here; what the Windows half cannot see is stated in the PR
 body. Five rows reach inside the module, direct calls - a stray `os._exit`
 here takes the suite down: the `watch_parent` refusals and the four ending
-rows on `_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`.
-"""
+rows on `_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`."""
 import contextlib
 import errno
 import os
@@ -181,11 +180,10 @@ def _sentinel():
 
 
 def _probe_agrees_with_the_pipe():
-    """Whether the check above can tell a closed descriptor from an
-    open one: without it, a row asserting `not _still_open(n)` passes
-    just as happily when `n` was never open at all. A pipe held and
-    then closed answers both ways before any row leans on it.
-    """
+    """Whether the check above can tell a closed descriptor from an open one:
+    without it, a row asserting `not _still_open(n)` passes just as happily
+    when `n` was never open at all. A pipe held and then closed answers both
+    ways before any row leans on it."""
     read_fd, write_fd = os.pipe()
     assert _still_open(write_fd), write_fd
     os.close(read_fd)
@@ -200,12 +198,17 @@ def _ended(child):
 
 
 def _armed_line(child):
-    """The armed line, blocked on from the child's own output, bounded:
-    the read is the awaited primitive (a daemon thread relays the
-    child's stdout, the wait blocks on its arrival object, LIFETIME
-    bounds without driving), on expiry the child is killed and the
-    failure names the bound, the state and the output. Not bounded: a
-    child a kill cannot end, whose drain thread then outlives it."""
+    """The armed line, blocked on from the child's own output, bounded: the
+    read is the awaited primitive (a daemon thread relays the child's stdout,
+    the wait blocks on its arrival object, LIFETIME bounds without driving), on
+    expiry the child is killed and the failure names the bound, the state and
+    the output. Not bounded: a child a kill cannot end, whose drain thread then
+    outlives it. First line wins: `await_line` returns the first line whose
+    `matches` result is not `None`, and `str.strip` never returns `None`, so
+    the value compared against `ARMED` is the first captured line, stripped; a
+    diagnostic the child prints before arming therefore fails the row, the
+    discrimination the suite wants (an any-line predicate would pass such a
+    child silently; a plant measured exactly that as a silent 10/10)."""
     drained = _child_ready.drain(child)
     armed = _child_ready.await_line(child, drained, str.strip, LIFETIME)
     if armed != ARMED:
@@ -319,13 +322,11 @@ def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
 
 
 def test_watch_parent_started_by_hand_leaves_the_process_alone(tmp):
-    """`watch_all.py`, the one watcher that does not call `watch_parent`,
-    is the process the other two watch - arming the pipe there would
-    have it watching itself. Nothing in this process sets the name the
-    pipe travels under, so the call returns without starting a thread;
-    a reader that started one anyway leaves a thread reading a
-    descriptor nobody will ever close.
-    """
+    """`watch_all.py`, the one watcher that does not call `watch_parent`, is
+    the process the other two watch - arming the pipe there would have it
+    watching itself. Nothing in this process sets the name the pipe travels
+    under, so the call returns without starting a thread; a reader that started
+    one anyway leaves a thread reading a descriptor nobody will ever close."""
     del tmp
     client = _client()
     before = {thread.name for thread in threading.enumerate()}
@@ -400,12 +401,11 @@ def _alive_on_windows(pid):
 
 
 def test_the_in_flight_gh_ends_with_its_watcher(tmp):
-    """Issue 1389's defect on the real surfaces: a watcher process with
-    a `gh` call held in flight by the fake's gate, and the write end
-    closing under it - the `gh` process must end with its watcher, and
-    the pid from the fake's call log is what shows it. Off Windows:
-    there the `gh` is `cmd.exe`, whose python grandchild the ending's
-    direct-child kill does not reach."""
+    """Issue 1389's defect on the real surfaces: a watcher process with a `gh`
+    call held in flight by the fake's gate, and the write end closing under it
+    - the `gh` process must end with its watcher, and the pid from the fake's
+    call log is what shows it. Off Windows: there the `gh` is `cmd.exe`, whose
+    python grandchild the ending's direct-child kill does not reach."""
     if os.name == 'nt':
         _util.skip('the gh process on Windows is cmd.exe, and the pid this '
                    'row can learn names its python grandchild instead')
@@ -441,16 +441,14 @@ def test_the_in_flight_gh_ends_with_its_watcher(tmp):
 
 
 def test_on_windows_an_eof_ends_a_watcher_blocked_in_a_gh_call(tmp):
-    """The Windows arm of the in-flight EOF ending: a watcher held inside
-    a `gh` call when the pipe closes ends through the module's own
-    ending - the wrapper this child installs writes the line then calls
-    `_end_inflight`, witnessing the production ending - and the process
-    is gone at the row's own bound. Not pinned: the gh process's death,
-    the pid the fake logs naming the python grandchild under `cmd.exe`,
-    read only so cleanup can end it. The POSIX twin, which skips the
-    legs this row completes, is
-    `test_the_in_flight_gh_ends_with_its_watcher`.
-    """
+    """The Windows arm of the in-flight EOF ending: a watcher held inside a
+    `gh` call when the pipe closes ends through the module's own ending - the
+    wrapper this child installs writes the line then calls `_end_inflight`,
+    witnessing the production ending - and the process is gone at the row's own
+    bound. Not pinned: the gh process's death, the pid the fake logs naming the
+    python grandchild under `cmd.exe`, read only so cleanup can end it. The
+    POSIX twin, which skips the legs this row completes, is
+    `test_the_in_flight_gh_ends_with_its_watcher`."""
     if os.name != 'nt':
         _util.skip('the POSIX twin test_the_in_flight_gh_ends_with_its_'
                    'watcher proves this; this row is its Windows leg')
@@ -522,10 +520,9 @@ def test_an_ending_without_a_child_in_flight_is_a_no_op(tmp):
 
 
 def test_an_ending_over_a_child_already_gone_is_a_no_op(tmp):
-    """A `gh` that completed before the EOF sits in the slot as a
-    finished process; the ending over it must be the harmless thing that
-    is - kill sends nothing at a reaped child, the wait returns at
-    once."""
+    """A `gh` that completed before the EOF sits in the slot as a finished
+    process; the ending over it must be the harmless thing that is - kill sends
+    nothing at a reaped child, the wait returns at once."""
 
     del tmp
     client = _client()
@@ -583,14 +580,13 @@ def _shim_child(tmp, gate, pidfile):
 
 
 def test_an_eof_during_the_spawn_waits_out_the_registration(tmp):
-    """EOF landing between the gh child's birth and its registration
-    must not strand it. The child's Popen is shimmed to hold after the
-    real spawn returns, so the write end can close while the slot is
-    still empty; the ending must wait out the shim, take the registered
-    child and kill it. Without the lock the ending reads the empty slot
-    and leaves, and the mid-spawn gh outlives the process. The mid-row
-    still-here claim is the allowed not-yet kind, over a window far
-    longer than ending a process."""
+    """EOF landing between the gh child's birth and its registration must not
+    strand it. The child's Popen is shimmed to hold after the real spawn
+    returns, so the write end can close while the slot is still empty; the
+    ending must wait out the shim, take the registered child and kill it.
+    Without the lock the ending reads the empty slot and leaves, and the
+    mid-spawn gh outlives the process. The mid-row still-here claim is the
+    allowed not-yet kind, over a window far longer than ending a process."""
     if os.name == 'nt':
         _util.skip('the gh process on Windows is cmd.exe, and the pid this '
                    'row can learn names its python grandchild instead')
