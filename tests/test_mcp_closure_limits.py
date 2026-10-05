@@ -124,8 +124,10 @@ def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
     shallow, _ = _scan_call_count(_tmp, 10)
     deep, names = _scan_call_count(_tmp, 20)
     assert deep <= 8 * shallow, (shallow, deep)
-    assert names == {
-        'composition.py', 'pkg/__init__.py', 'pkg/leaf.py'}, names
+    # Past the operation the chain folds to UNREACHABLE, so the correct set
+    # is the composition alone; the arm is there so a scan that stopped
+    # walking, refused or raised cannot pass the ratio.
+    assert names == {'composition.py'}, names
 
 
 if __name__ == '__main__':
