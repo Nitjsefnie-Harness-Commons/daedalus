@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Every typed subcommand's wire payload, in one table.
+"""The typed subcommands' wire payloads, in one table.
 
-One control walks every typed subcommand and checks the command the
-bridge enqueues: the `type` the extension dispatches on and the fields
-it reads off the command.
+One control walks every typed subcommand but the three segment-origin
+ones and checks the command the bridge enqueues: the `type` the
+extension dispatches on and the fields it reads off the command.
+allow-segment-origin, revoke-segment-origin and list-segment-origins
+are pinned per-control in tests/test_cli_segment_origins.py instead.
 """
 import sys
 from pathlib import Path
