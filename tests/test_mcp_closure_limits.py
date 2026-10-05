@@ -122,91 +122,73 @@ def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
 # parameter default decides, a boolean whose left operand is the operation,
 # a projection read through a defaulted position, a display carrying a `**`
 # merge, and a field-less f-string key. Where a wrong choice could still
-# pass, the driven values differ: the position that picks the operation is
-# 1 and not 0, the settled condition runs on both routes, and a display
-# merging one key twice reads the LAST entry, so a first-wins mutant loses
-# the second merge row.
+# pass, the driven values differ: the settled condition runs on both
+# routes, the defaulted position is 1 and not 0, and both boolean spellings
+# reach the operation by the route their rule names.
 _LEAF = {'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n'}
 SETTLED_CALLEES = (
     ('a conditional the default decides, truthy route',
      '\nimport importlib\n\n\ndef load(c=True):\n'
-     '    return ([0, importlib.import_module][1] if c else print)'
+     '    return ([importlib.import_module][0] if c else print)'
      '("pkg.leaf")\n'),
     ('a conditional the default decides, falsy route',
-     '\nimport importlib\n\n\ndef load(c=False):\n'
-     '    return ([0, importlib.import_module][1] if c '
-     'else importlib.import_module)("pkg.leaf")\n'),
-    ('a boolean whose left operand is the operation',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ([importlib.import_module][0] or print)("pkg.leaf")\n'),
-    ('a boolean that falls through to the operation',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return (0 or [0, importlib.import_module][1])("pkg.leaf")\n'),
-    ('an `and` that falls through to the operation',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return (1 and [0, importlib.import_module][1])("pkg.leaf")\n'),
-    ('a projection read through a defaulted position',
-     '\nimport importlib\n\n\ndef load(i=1):\n'
-     '    return (getattr([print, importlib.import_module][i], "__call__"))'
+     '\n\ndef load(c=False):\n    return (0 if c else __import__)'
      '("pkg.leaf")\n'),
+    ('a boolean whose left operand is the operation',
+     '\n\ndef load():\n    return ([__import__][0] or print)("pkg.leaf")\n'),
+    ('a boolean that falls through to the operation',
+     '\n\ndef load():\n    return (0 or __import__)("pkg.leaf")\n'),
+    ('an `and` that falls through to the operation',
+     '\n\ndef load():\n    return (1 and __import__)("pkg.leaf")\n'),
+    ('a projection read through a defaulted position',
+     '\n\ndef load(i=1):\n'
+     '    return getattr([print, __import__][i], "__call__")("pkg.leaf")\n'),
     ('a display carrying a `**` merge',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ({**{0: 1}, "a": importlib.import_module}["a"])'
+     '\n\ndef load():\n    return ({**{0: 1}, "a": __import__}["a"])'
      '("pkg.leaf")\n'),
     ('a field-less f-string key',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ({f"a": importlib.import_module}[f"a"])("pkg.leaf")\n'),
+     '\n\ndef load():\n    return ({f"a": __import__}[f"a"])("pkg.leaf")\n'),
 )
 
 # The same widening's negative space. The first two rows are the direction
-# the short-circuit rules take AWAY from the operation, so an over-wide
-# boolean that reads the last operand first loses them; the rest are the
-# raise positions the runtime settles to a KeyError or a ZeroDivisionError,
-# which name nothing and must never enter the set either way.
+# the short-circuit and last-wins rules take AWAY from the operation, so an
+# over-wide arm that reads the other operand or entry first loses them; the
+# rest are the raise positions the runtime settles to a KeyError or a
+# ZeroDivisionError, which name nothing and never enter the set either way.
 BOUNDS = (
     ('a boolean that short-circuits away from the operation',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ([importlib.import_module][0] and print)("pkg.leaf")\n'),
+     '\n\ndef load():\n    return ([__import__][0] and print)("pkg.leaf")\n'),
     ('a merge whose repeated key the last entry replaces',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ({"a": importlib.import_module, **{"a": print}}["a"])'
-     '("pkg.leaf")\n'),
+     '\n\ndef load():\n'
+     '    return ({"a": __import__, **{"a": print}}["a"])("pkg.leaf")\n'),
     ('an f-string key the display does not carry',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ({0: 1, "a": importlib.import_module}[f"b"])("pkg.leaf")\n'),
+     '\n\ndef load():\n    return ({0: 1, "a": __import__}[f"b"])'
+     '("pkg.leaf")\n'),
     ('a merge display that does not carry the key',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ({**{0: 1}, "a": importlib.import_module}["b"])'
+     '\n\ndef load():\n    return ({**{0: 1}, "a": __import__}["b"])'
      '("pkg.leaf")\n'),
     ('a merge whose carried display raises on its own key',
-     '\nimport importlib\n\n\ndef load():\n'
-     '    return ({**{1 // 0: 2}, "a": importlib.import_module}["a"])'
-     '("pkg.leaf")\n'),
+     '\n\ndef load():\n'
+     '    return ({**{1 // 0: 2}, "a": __import__}["a"])("pkg.leaf")\n'),
     ('a store that takes the defaulted parameter back',
-     '\nimport importlib\n\n\ndef load(c=True):\n'
-     '    c = False\n'
-     '    return ([0, importlib.import_module][1] if c else print)'
-     '("pkg.leaf")\n'),
+     '\n\ndef load(c=True):\n    c = False\n'
+     '    return ([__import__][0] if c else print)("pkg.leaf")\n'),
 )
 
 # The genuinely-undecidable forms beside them: a callee the fold cannot
 # decide still mentions the operation, and that refusal is the fail-closed
-# default the widening must not soften. Each row names the ingredient whose
-# unreadability the refusal rests on.
+# default the widening must not soften.
 UNDECIDED_CALLEES = (
     ('a conditional whose condition does not settle',
-     '\nimport importlib\n\n\ndef load(c):\n'
-     '    return ([0, importlib.import_module][1] if c else print)'
-     '("pkg.leaf")\n'),
+     '\n\ndef load(c):\n'
+     '    return ([__import__][0] if c else print)("pkg.leaf")\n'),
     ('a boolean whose left operand declines',
-     '\nimport importlib\n\n\ndef load(i):\n'
-     '    return ([0, importlib.import_module][i] or print)("pkg.leaf")\n'),
+     '\n\ndef load(i):\n    return ([__import__][i] or print)("pkg.leaf")\n'),
     ('an index whose key the display cannot be asked',
-     '\nimport importlib\n\n\ndef load(k):\n'
-     '    return ({"a": importlib.import_module}[k])("pkg.leaf")\n'),
+     '\n\ndef load(k):\n    return ({"a": __import__}[k])("pkg.leaf")\n'),
     ('a projection whose key does not fold to `__call__`',
-     '\nimport importlib\n\n\ndef load(k):\n'
-     '    return (getattr([importlib.import_module][0], k))("pkg.leaf")\n'),
+     '\n\ndef load(k):\n'
+     '    return getattr([__import__][0], k)("pkg.leaf")\n'),
 )
 
 

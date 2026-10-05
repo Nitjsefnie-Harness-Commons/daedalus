@@ -17,17 +17,13 @@ import X` binds the builtin ITSELF and is not a shadow either.
 `is_code_evaluating` deliberately asks the looser question, over every alias
 in the module rather than over the one the use resolves to: a false
 positive there costs a refusal, and a false negative would cost a closure
-entry. The two directions are not the same, so they are not the same answer.
-
-`denotes_builtin` asks the alias question at full strength, and a `from
-builtins` binding is EVIDENCE of a builtin rather than a fact of one. Which
-scope binds the name is half the question; the other half is whether that
-binding has been ESTABLISHED at the use, and `symtable` is a static grammar
-and cannot answer it, so the walk reads it off the source: a binding the
-module may not have executed yet — one ordered after the use, or one inside a
-statement that runs only sometimes — is not one, and the name is not the
-builtin there. A scope the walk cannot line up with the resolver's is not one
-either. Both are refusals, which is the direction a false negative is cheap in.
+entry. `denotes_builtin` asks the alias question at full strength, and a
+`from builtins` binding is EVIDENCE of a builtin rather than a fact of one:
+whether that binding has been ESTABLISHED at the use is read off the source,
+because `symtable` is a static grammar and cannot answer it — a binding the
+module may not have executed yet is not one, and a scope the walk cannot
+line up with the resolver's is not one either. Both are refusals, which is
+the direction a false negative is cheap in.
 
 The same grammar does not answer the SHADOW question either: a store under a
 `global` declaration is a module binding that leaves the root symbol imported
@@ -278,15 +274,14 @@ class _Scopes:
     def parameter_default(self, node, name):
         """The default expression of the parameter `name` at the scope `node`
         sits in, or None when no scope here binds it as a parameter whose
-        value this walk can read.
-
-        The nearest scope that binds the name owns the answer — a nested
-        scope binding it as its OWN parameter takes it back — and the value
-        it carries is the default evaluated once at the definition, so it is
-        what any use inside reads unless a store has taken it back. A scope
-        the walk could not match is declined, a store in the owning scope or
-        from a nested one (`nonlocal`) declines, and so does a default that
-        names a parameter of its own signature, which is the one cycle this
+        value this walk can read. The nearest scope that binds the name owns
+        the answer — a nested scope binding it as its OWN parameter takes it
+        back — and the value it carries is the default evaluated once at the
+        definition, so it is what any use inside reads unless a store has
+        taken it back: a scope the walk could not match is declined, a store
+        in the owning scope declines, a store from a nested one (`nonlocal`,
+        reported in the nested scope only) declines, and so does a default
+        that names a parameter of its own signature, the one cycle this
         reader can otherwise follow into forever.
         """
         if self._uncertain.get(id(node)):
@@ -297,25 +292,17 @@ class _Scopes:
             return None
         symbol = self._symbols(table).get(name)
         if symbol is None or not symbol.is_parameter() \
-                or symbol.is_assigned() \
-                or self._stored_from_nested(table, name):
+                or symbol.is_assigned():
             return None
-        return _default_of(definition.args, name)
-
-    def _stored_from_nested(self, table, name):
-        """Whether any scope nested in `table` stores `name` through a free
-        binding — the `nonlocal` store `is_parameter and not is_assigned`
-        cannot see, because the store is reported in the nested scope only.
-        """
         pending = list(table.get_children())
         while pending:
             child = pending.pop()
             pending.extend(child.get_children())
-            symbol = self._symbols(child).get(name)
-            if symbol is not None and symbol.is_assigned() \
-                    and symbol.is_free():
-                return True
-        return False
+            nested = self._symbols(child).get(name)
+            if nested is not None and nested.is_assigned() \
+                    and nested.is_free():
+                return None
+        return _default_of(definition.args, name)
 
     def denotes_builtin(self, node, name) -> bool:
         """Whether a name reference IS the builtin `name` at its own scope.
