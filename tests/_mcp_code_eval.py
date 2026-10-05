@@ -446,16 +446,26 @@ def _builtin_projection(node, bound, scopes):
     return False
 
 
-def _element_node(subscript, bound, scopes):
-    """The expression a subscript SELECTS, resolved through the container
-    and key by their values and through any further subscript it lands on;
-    None when the selected value is not readable. An int key reads a sequence
-    element, a str key a mapping value, so a two-level or string-key
-    selection resolves by the same rule as a one-level one."""
+def _element_node(subscript, bound, scopes, elements):
+    """The expression a subscript SELECTS, resolved once per node: the first
+    ask walks the chain and folds each level's answer into `elements`, and a
+    walk that revisits the level reads the fold. None when the selected value
+    is not readable."""
+    if subscript not in elements:
+        elements[subscript] = _select_element(
+            subscript, bound, scopes, elements)
+    return elements[subscript]
+
+
+def _select_element(subscript, bound, scopes, elements):
+    """The element one subscript names, or None when it is not readable. An
+    int key reads a sequence element, a str key a mapping value, so a
+    two-level or string-key selection resolves by the same rule as a
+    one-level one."""
     key = subscript.slice
     container = subscript.value
     if isinstance(container, ast.Subscript):
-        container = _element_node(container, bound, scopes)
+        container = _element_node(container, bound, scopes, elements)
         if container is None:
             return None
     if isinstance(key, ast.Constant) and isinstance(key.value, int) \
@@ -504,7 +514,7 @@ def _holds_code_eval(node, bound, scopes):
     return False
 
 
-def _scan(node, bound, scopes):
+def _scan(node, bound, scopes, elements):
     """What value does this expression hold, and does it HAND a builtin on?
 
     Returns `(is_builtin, holds)`: `is_builtin` is true when the value is,
@@ -515,6 +525,10 @@ def _scan(node, bound, scopes):
     projection, choice, selection, return, container) reaches the builtin
     the same way, and one passed to a call or used as a lookup key is a
     hand-off. A sixth spelling is resolved by the same rules, not a branch.
+    Each verdict is asked ONCE: where two arms of one node read the same
+    subtree, the pair is computed in a single descent, and `elements` is the
+    fold that lets a revisited subscript re-read its selection instead of
+    re-walking the chain — so the cost tracks the nodes, not the revisits.
     """
     if denotes_code_eval(node, bound, scopes) or _builtin_projection(
             node, bound, scopes):
@@ -522,11 +536,12 @@ def _scan(node, bound, scopes):
     if isinstance(node, ast.Lambda):
         return False, False
     if isinstance(node, ast.IfExp):
-        body = _scan(node.body, bound, scopes)
-        orelse = _scan(node.orelse, bound, scopes)
+        body = _scan(node.body, bound, scopes, elements)
+        orelse = _scan(node.orelse, bound, scopes, elements)
         return body[0] or orelse[0], body[1] or orelse[1]
     if isinstance(node, ast.BoolOp):
-        results = [_scan(value, bound, scopes) for value in node.values]
+        results = [_scan(value, bound, scopes, elements)
+                   for value in node.values]
         return any(r[0] for r in results), any(r[1] for r in results)
     if isinstance(node, ast.Subscript):
         if _is_builtins_namespace(node.value, bound) \
@@ -535,34 +550,34 @@ def _scan(node, bound, scopes):
             # a constant key selects the builtin out of the builtins
             # namespace, the `__dict__` route the operation axis reads
             return True, False
-        key_is, key_holds = _scan(node.slice, bound, scopes)
-        element = _element_node(node, bound, scopes)
+        key_is, key_holds = _scan(node.slice, bound, scopes, elements)
+        element = _element_node(node, bound, scopes, elements)
         if element is not None:
-            value_is, value_holds = _scan(element, bound, scopes)
+            value_is, value_holds = _scan(element, bound, scopes, elements)
         else:
             # An unreadable key selects a value the walk cannot name; the
             # fail-closed answer reads the container's OWN value.
+            container = _scan(node.value, bound, scopes, elements)
             value_is = _holds_code_eval(node.value, bound, scopes) \
-                or _scan(node.value, bound, scopes)[0] \
-                or _scan(node.value, bound, scopes)[1]
+                or container[0] or container[1]
             value_holds = False
         return value_is, value_holds or key_is or key_holds
     if isinstance(node, ast.Call):
         result = _is_plain_lambda(node.func) and not _arguments(node) \
-            and _scan(node.func.body, bound, scopes)[0]
-        handed = any(_scan(argument, bound, scopes)[0]
-                     or _scan(argument, bound, scopes)[1]
+            and _scan(node.func.body, bound, scopes, elements)[0]
+        handed = any((pair := _scan(argument, bound, scopes, elements))[0]
+                     or pair[1]
                      for argument in _arguments(node))
-        return result, handed or _scan(node.func, bound, scopes)[1]
-    return False, any(
-        _scan(child, bound, scopes)[0] or _scan(child, bound, scopes)[1]
-        for child in ast.iter_child_nodes(node))
+        return result, handed or _scan(node.func, bound, scopes, elements)[1]
+    return False, any((pair := _scan(child, bound, scopes, elements))[0]
+                      or pair[1]
+                      for child in ast.iter_child_nodes(node))
 
 
 def may_be_code_eval(node, bound, scopes):
     """The EFFECTIVE callee, however it is spelled: does this expression
     evaluate, or may it evaluate, to a code-evaluating builtin?"""
-    return _scan(node, bound, scopes)[0]
+    return _scan(node, bound, scopes, {})[0]
 
 
 def yields_code_eval(value, bound, scopes):
@@ -573,5 +588,5 @@ def yields_code_eval(value, bound, scopes):
     builtin — a builtin that is the effective callee is a USE the declared
     call-result limit covers — which is the same value-resolution the call arm
     uses, so a constant program reaches the builtin however it is spelled."""
-    is_builtin, holds = _scan(value, bound, scopes)
+    is_builtin, holds = _scan(value, bound, scopes, {})
     return is_builtin or holds
