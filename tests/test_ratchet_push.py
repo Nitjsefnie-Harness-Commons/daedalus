@@ -20,7 +20,7 @@ The script is copied INTO the tree and the copy is what runs, because that
 is the only shape the collector can see. `source = ["."]` resolves against
 the child's working directory, so a script left at its repository path and
 run from a temporary tree is measured under a `source` that excludes it, and
-`tests/_suite_runner.py::_runner_tree` copies for the same reason. The tree
+`tests/test_suite_runner.py::_runner_tree` copies for the same reason. The tree
 root is the checkout here, so the copy sits at `scripts/ci/ratchet_push.py`
 inside it and `[tool.coverage.paths]`'s `*/tree` maps that back onto the
 repository's own file.
