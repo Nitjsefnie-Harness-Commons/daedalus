@@ -3,8 +3,9 @@ action destinations and parser defaults; GUARANTEED adds required and
 non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
 Guarded or defaulted reads require DECLARED; direct reads require GUARANTEED.
-A namespace store is admitted but satisfies no read; an augmented assignment
-target is checked as the read it is, and a del is still refused.
+A store to an attribute of the namespace parameter is admitted; a rebind of
+the name or a non-attribute store is refused; an augmented attribute target
+is read-checked; a del is refused; a store never satisfies a read.
 FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
 namespace, planted into a real module and read one per row here. They are
 plants, not the rule's inputs: the rule answers the operation once, from
@@ -303,8 +304,7 @@ REFLECTIVE_ESCAPE_CASES = (
     ('holder = helper()\n_ = holder[\'args\'].undeclared_probe',
      "holder['args']"),)
 # Each row splices into the real daedalus_cli/commands_eval.py: the prelude
-# after its first import, the replacement for the anchor. The last field is
-# the receiver the refusal must name. These are plants, not the rule's inputs.
+# after its first import, the replacement for the anchor, the named receiver.
 
 FRAME_NAMESPACE_PLANTS = (
     ('attribute getter', 'import operator\n', 'def do_reload(args):\n',
@@ -415,8 +415,6 @@ FRAME_NAMESPACE_PLANTS = (
 
 CLI_ANCHOR = 'def do_reload(args):\n'
 _FRAME_DESCRIPTORS = (types.GetSetDescriptorType, types.MemberDescriptorType)
-# Computed from the interpreter, never read out of the resolver: a hand-written
-# set that dropped members has to fail the loop below, not pass it quietly.
 FRAME_MEMBERS = tuple(sorted(
     name for name, member in vars(types.FrameType).items()
     if isinstance(member, _FRAME_DESCRIPTORS)))
@@ -509,11 +507,8 @@ def assert_namespace_key_call_accepted(read_module, base):
 
 
 def assert_resolved_frame_receiver_refused(read_module, base, frame):
-    """A receiver the audit resolves to a live frame is refused on that count.
-
-    The only case in which a name the audit CAN see still has to be refused,
-    and the one that keeps the frame-type test load-bearing.
-    """
+    """A receiver the audit resolves to a live frame is refused on that
+    count — the one case that keeps the frame-type test load-bearing."""
     body = ("def do_reload(args):\n"
             "    _ = HELD.f_locals.get('args').undeclared_probe\n")
     escapes = read_module(
