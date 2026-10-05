@@ -399,9 +399,15 @@ def test_the_bounded_exit_wait_expires_naming_the_child(tmp):
 
     class LiveProcess:
         pid = 424242
-        polls = iter((None, 0))
+
+        def __init__(self):
+            self.polls = iter((None, 0))
+            self.calls = 0
 
         def poll(self):
+            self.calls += 1
+            if self.calls > RUNAWAY_CALL_LIMIT:
+                raise AssertionError('process double exceeded call limit')
             return next(self.polls, 0)
 
     with socket.socket() as listener:
