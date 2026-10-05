@@ -55,8 +55,7 @@ def test_indeterminate_e2big_diagnostics_are_harness_failures(tmp):
     # subclass of the one pinned here, and its control owns that figure.
     outcomes = (
         OSError(errno.ENOENT, 'controlled diagnostic start failure'),
-        subprocess.CompletedProcess(['controlled-diagnostic'], 1),
-    )
+        subprocess.CompletedProcess(['controlled-diagnostic'], 1))
     for outcome in outcomes:
         behavior = {'side_effect': outcome} if isinstance(
             outcome, BaseException) else {'return_value': outcome}
@@ -93,9 +92,9 @@ def test_missing_declared_worker_is_repository_failure(tmp):
 
     launch = mock.Mock(side_effect=AssertionError(
         'browser launched before the declared worker was checked'))
-    with mock.patch.object(
-            _realbrowser, 'browser_requirements',
-            return_value=('node-for-control', '/controlled/chromium')), \
+    with mock.patch.object(_realbrowser, 'browser_requirements',
+                           return_value=('node-for-control',
+                                         '/controlled/chromium')), \
             mock.patch.object(_realbrowser.subprocess, 'Popen', launch):
         failure = _call_failure(enter_fixture)
     assert failure.__class__ is AssertionError, failure
@@ -145,8 +144,7 @@ def test_live_browser_reaches_ready_devtools_targets(tmp):
 
 
 def test_devtools_start_deadline_is_environment_skip(tmp):
-    process = mock.Mock()
-    process.poll.return_value = None
+    process = mock.Mock(**{'poll.return_value': None})
     with mock.patch.object(_realbrowser.time, 'time', side_effect=(0, 31)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
         failure = _call_failure(
@@ -156,12 +154,10 @@ def test_devtools_start_deadline_is_environment_skip(tmp):
 
 
 def _worker_timeout_failure(tmp, reached, verdict=None):
-    def navigate(node, target, method, params):
-        del node, target, method, params
+    def navigate(*_args):
         return {}
 
-    def unready(node, workers):
-        del node, workers
+    def unready(*_args):
         return None, reached, 'controlled worker timeout'
 
     if verdict is None:
@@ -177,8 +173,8 @@ def _worker_timeout_failure(tmp, reached, verdict=None):
             mock.patch.object(_realbrowser, 'ready_worker', unready), \
             mock.patch.object(_realbrowser, '_devtools_targets',
                               return_value=[]), \
-            mock.patch.object(
-                _realbrowser, '_worker_absence_verdict', recording), \
+            mock.patch.object(_realbrowser, '_worker_absence_verdict',
+                              recording), \
             mock.patch.object(
                 _realbrowser.time, 'time',
                 # The wait reads the clock to start it, once per loop check,
@@ -195,10 +191,8 @@ def test_answering_unready_worker_is_repository_failure(tmp):
 
 
 def test_control_extension_turns_worker_absence_into_failure(tmp):
-    def guilty(*args):
-        del args
-        raise AssertionError(
-            'controlled: our source, not the machine')
+    def guilty(*_args):
+        raise AssertionError('controlled: our source, not the machine')
 
     failure, attempts = _worker_timeout_failure(tmp, False, verdict=guilty)
     assert failure.__class__ is AssertionError, failure
@@ -209,8 +203,7 @@ def test_control_extension_turns_worker_absence_into_failure(tmp):
 def test_machine_skip_carries_observation_and_diagnosis_payload(tmp):
     """The machine verdict is a skip carrying the diagnosis's observation
     and arguments; a byte-identical skip would be unevidenced."""
-    def observed(*args):
-        del args
+    def observed(*_args):
         return False, 'controlled: the control worker never answered either'
 
     failure, attempts = _worker_timeout_failure(tmp, False, verdict=observed)
@@ -335,10 +328,8 @@ def test_ready_page_and_listed_tab_yield_fixture(tmp):
             return None
         raise AssertionError('unexpected successful-fixture evaluation')
 
-    moments = iter((0, 0, 0, 0, 0, 16, 16))
-
-    def clock():
-        return next(moments, 32)
+    def clock(_moments=iter((0, 0, 0, 0, 0, 16, 16))):
+        return next(_moments, 32)
 
     tabs = [{'tabId': 'controlled-tab', 'url': page_url}]
     with _fixture_runtime(tmp, _navigate) as (process, launches), \
@@ -406,10 +397,10 @@ def test_tab_registration_timeout_is_repository_failure(tmp):
         raise AssertionError('unexpected evaluation before tab timeout')
 
     with _fixture_runtime(tmp, _navigate), \
-            mock.patch.object(
-                _realbrowser, 'cdp_eval', ready_but_unregistered), \
-            mock.patch.object(
-                _realbrowser._util, 'get_json', return_value=(200, [])), \
+            mock.patch.object(_realbrowser, 'cdp_eval',
+                              ready_but_unregistered), \
+            mock.patch.object(_realbrowser._util, 'get_json',
+                              return_value=(200, [])), \
             mock.patch.object(_realbrowser.time, 'time',
                               side_effect=(0, 0, 0, 0, 0, 0, 0, 16)), \
             mock.patch.object(_realbrowser.time, 'sleep'):
@@ -437,9 +428,9 @@ def test_extension_command_delivery_timeout_is_repository_failure(tmp):
 
 def test_extension_command_submission_failure_is_repository_failure(tmp):
     del tmp
-    with mock.patch.object(
-            _realbrowser._util, 'request',
-            return_value=(503, 'controlled extension rejection')):
+    with mock.patch.object(_realbrowser._util, 'request',
+                           return_value=(503,
+                                         'controlled extension rejection')):
         failure = _call_failure(lambda: real_ext_command(
             'http://127.0.0.1:1', 'controltoken',
             'controlled-command', {}))
@@ -450,11 +441,8 @@ def test_extension_command_submission_failure_is_repository_failure(tmp):
 
 def test_extension_matching_delivery_returns_result(tmp):
     del tmp
-    result = {
-        'deliveryId': 'controlled-delivery',
-        'resultGeneration': 'controlled-generation',
-        'value': 4,
-    }
+    result = {'deliveryId': 'controlled-delivery',
+              'resultGeneration': 'controlled-generation', 'value': 4}
     with mock.patch.object(
             _realbrowser._util, 'request',
             return_value=(200, '{"did":"controlled-delivery"}')), \
@@ -479,9 +467,8 @@ def test_eval_delivery_timeout_is_repository_failure(tmp):
 
 def test_eval_submission_failure_is_repository_failure(tmp):
     del tmp
-    with mock.patch.object(
-            _realbrowser._util, 'request',
-            return_value=(503, 'controlled eval rejection')):
+    with mock.patch.object(_realbrowser._util, 'request',
+                           return_value=(503, 'controlled eval rejection')):
         failure = _call_failure(lambda: real_eval(
             'http://127.0.0.1:1', 'controltoken', 'controlled-tab',
             'controlled-eval', '2 + 2'))
@@ -492,11 +479,8 @@ def test_eval_submission_failure_is_repository_failure(tmp):
 
 def test_eval_consume_failure_is_repository_failure(tmp):
     del tmp
-    result = {
-        'deliveryId': 'controlled-delivery',
-        'resultGeneration': 'controlled-generation',
-        'value': 4,
-    }
+    result = {'deliveryId': 'controlled-delivery',
+              'resultGeneration': 'controlled-generation', 'value': 4}
 
     def get_json(url):
         if 'consume=1' in url:
@@ -518,11 +502,8 @@ def test_eval_consume_failure_is_repository_failure(tmp):
 
 def test_eval_matching_delivery_returns_and_consumes_result(tmp):
     del tmp
-    result = {
-        'deliveryId': 'controlled-delivery',
-        'resultGeneration': 'controlled-generation',
-        'value': 4,
-    }
+    result = {'deliveryId': 'controlled-delivery',
+              'resultGeneration': 'controlled-generation', 'value': 4}
     reads = []
 
     def get_json(url):
@@ -549,8 +530,7 @@ def test_eval_matching_delivery_returns_and_consumes_result(tmp):
 
 def test_hostile_page_setup_failure_is_repository_failure(tmp):
     @contextlib.contextmanager
-    def bridge(*args, **kwargs):
-        del args, kwargs
+    def bridge(*_args, **_kwargs):
         yield 'http://127.0.0.1:1', Path('/controlled/docroot')
 
     @contextlib.contextmanager
@@ -558,8 +538,7 @@ def test_hostile_page_setup_failure_is_repository_failure(tmp):
         yield 'http://127.0.0.1:2'
 
     @contextlib.contextmanager
-    def page(*args, **kwargs):
-        del args, kwargs
+    def page(*_args, **_kwargs):
         yield 'node-for-control', 'ws://page', 'controlled-tab'
 
     with mock.patch.object(_realbrowser._util, 'bridge', bridge), \
@@ -588,19 +567,30 @@ def _assert_shared_bound(node, name, line):
 
 
 def test_teardown_wait_rows_read_the_shared_cleanup_bound(tmp):
-    """Teardown-wait rows in these two files read BOUND.CLEANUP_TIMEOUT_S.
+    """Teardown-wait rows in these three files read BOUND.CLEANUP_TIMEOUT_S.
     CPython interns small ints, so only the parse tree can tell the
-    shared constant from a literal 10. Span: the two files walked; the
-    two shapes (.wait.assert_called_once_with(timeout=X) calls,
-    wait_timeouts comparisons). Limits: non-once assert_called_with
-    spellings are not policed; a **-splat timeout reds even when it
-    reads the constant; a future non-teardown wait row reds the pin.
+    shared constant from a literal 10. Span: the classification and
+    recovery files whole; the harness file only within its launch-row
+    anchor function (the double's contract rows there pin their own
+    sample values, not the bound). Shapes: the wait-assert shape and
+    wait_timeouts comparisons, flat single lists included. Limits:
+    non-once spellings unpoliced; splat timeouts red even reading the
+    constant; rows outside the span unpoliced.
     """
     del tmp
     here = Path(__file__).resolve().parent
     for name in ('test_real_browser_classification.py',
-                 'test_real_browser_harness_recovery.py'):
+                 'test_real_browser_harness_recovery.py',
+                 'test_real_browser_harness.py'):
         tree = ast.parse((here / name).read_text(encoding='utf-8'))
+        if name == 'test_real_browser_harness.py':
+            tree = next((node for node in ast.walk(tree)
+                         if isinstance(node, ast.FunctionDef)
+                         and node.name == ('test_browser_launch_passes_'
+                                           'basic_password_store_flag')),
+                        None)
+            assert tree is not None, (
+                'the harness launch-row anchor changed shape')
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Attribute)

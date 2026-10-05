@@ -174,8 +174,8 @@ def _survived_skip(tmp, waits, verdict, **kwargs):
 def test_contention_relaunch_recovers_the_fixture(tmp):
     first_absence = _realbrowser.BrowserEnvironmentSkipped(
         'controlled first-launch worker absence')
-    verdict = mock.Mock(return_value=(
-        True, 'controlled contention evidence'))
+    verdict = mock.Mock(return_value=(True,
+                                      'controlled contention evidence'))
     with _recovery_runtime(
             tmp, [first_absence, _ready_targets()], verdict) as runtime, \
             _enter_fixture(tmp) as fixture:
@@ -192,8 +192,8 @@ def test_a_callers_waits_reach_both_ready_waits(tmp):
     """A caller's patience and page timeout survive the entry point."""
     first_absence = _realbrowser.BrowserEnvironmentSkipped(
         'controlled first-launch worker absence')
-    verdict = mock.Mock(return_value=(
-        True, 'controlled contention evidence'))
+    verdict = mock.Mock(return_value=(True,
+                                      'controlled contention evidence'))
     with _recovery_runtime(
             tmp, [_ready_targets(), _ready_targets()], verdict,
             worker_waits=[first_absence, 'ws://worker'],
@@ -216,8 +216,8 @@ def test_contention_relaunch_absence_remains_a_skip(tmp):
         'controlled first-launch worker absence')
     recovery_absence = _realbrowser.BrowserEnvironmentSkipped(
         'controlled recovery worker absence')
-    verdict = mock.Mock(return_value=(
-        True, 'controlled contention evidence'))
+    verdict = mock.Mock(return_value=(True,
+                                      'controlled contention evidence'))
     survived, processes, launches = _survived_skip(
         tmp, [first_absence, recovery_absence], verdict)
 
@@ -235,8 +235,8 @@ def test_contention_recovery_launch_failure_is_not_worker_absence(tmp):
         'controlled first-launch worker absence')
     recovery_failure = OSError(
         errno.ENOENT, 'controlled recovery launch failure')
-    verdict = mock.Mock(return_value=(
-        True, 'controlled contention evidence'))
+    verdict = mock.Mock(return_value=(True,
+                                      'controlled contention evidence'))
     survived, processes, launches = _survived_skip(
         tmp, [first_absence], verdict,
         recovery_failure=recovery_failure)
