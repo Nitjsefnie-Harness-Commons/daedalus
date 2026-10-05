@@ -181,7 +181,7 @@ def _call(query, variables):
         raise QueryError(f'gh failed: {exc}') from exc
     try:
         out, complained = proc.communicate(payload, timeout=GH_TIMEOUT)
-    except subprocess.TimeoutExpired as exc:
+    except (subprocess.TimeoutExpired, OSError) as exc:
         proc.kill()
         proc.communicate()
         raise QueryError(f'gh failed: {exc}') from exc

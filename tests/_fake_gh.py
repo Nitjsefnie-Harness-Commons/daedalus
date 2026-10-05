@@ -53,8 +53,8 @@ REASONS = {200: 'OK', 400: 'Bad Request', 403: 'Forbidden',
 GRAPHQL_MARK = 'graphql'
 
 # The name a watcher publishes its poll index under, recorded beside every
-# request so a poll is a group in the log. Nothing TRACKED publishes it;
-# the field is kept for the untracked watcher that still sets it.
+# request so a poll is a group in the log. Kept for the untracked watcher
+# that still sets it.
 POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
 # A path whose existence releases the calls this fake is holding; every
@@ -70,21 +70,16 @@ def _hold():
     """Withhold this answer until the gate the caller named exists.
 
     The call is logged before this runs, so a reader counting entries
-    can see a call entered and still open - a state, not an instant. It
-    cannot RETURN from the call, and that is all: a signal, or a
-    `gh_client` watchdog whose `os._exit` runs on any thread, still
-    removes it - so a case reading liveness here must name the parent it
-    is reading about, or a parent that dies takes the reading with it.
+    can see a call entered and still open. It cannot RETURN from the
+    call, and that is all: a signal removes it, so a case reading
+    liveness here must name the parent it is reading about.
 
-    There is no bound in here, and that is the point: a bound would turn
-    the hold into a guess, and a guess that expires silently reinstates
-    the sample it exists to replace. Two sit outside it. The client's
-    own GH_TIMEOUT (120 s) bounds the call the caller is blocked in, so
-    a hold does expire on a subject slow enough to reach it. And the
-    gate is opened by the caller's `finally`, so a caller SIGKILLed
-    outright leaves the fake here for the life of the box - measured at
-    42 s of CPU over 97 minutes, and its tmp tree is never cleaned.
-    """
+    No bound in here, and that is the point: a bound would turn the hold
+    into a guess that expires silently. Two sit outside it: the client's
+    GH_TIMEOUT bounds the call the caller is blocked in, and the gate is
+    opened by the caller's `finally` - so a caller SIGKILLed outright
+    leaves the fake here for the life of the box, and its tmp tree is
+    never cleaned."""
     path = os.environ.get(GATE)
     if path is None:
         return
@@ -183,12 +178,9 @@ def _response(answer):
 
     `status`, `headers` and `body` are the response; `exit` and `stderr`
     are what `gh` leaves behind it, and `stdout` replaces the rendered
-    response outright. A bare string, or a JSON object naming none of
-    these fields, is a 200 whose body is that value: the shape most
-    fixtures use. The file is data, so each field is checked for the
-    type its renderer needs and a value of the wrong type is refused by
-    name rather than defaulted.
-    """
+    response outright. A bare string is a 200 whose body is that value.
+    Each field is checked for the type its renderer needs and a value of
+    the wrong type is refused by name rather than defaulted."""
     spec = (answer if isinstance(answer, dict)
             and set(answer) & (RESPONSE | OUTCOME)
             else {'body': answer})
@@ -243,14 +235,12 @@ def main(argv):
 
 
 def _respond(response, argv):
-    """Write one answered run: its stdout, its stderr and the code it exits.
-
-    `gh` exits 1 on any error status and writes `gh: ... (HTTP NNN)` to
-    stderr, and a suite overrides that pair with `exit` and `stderr`
-    because a throttled GraphQL query is a 200 that exits 1 over a
-    message naming the limit (issue 1338) - a shape the status alone
-    cannot produce.
-    """
+    """Write one answered run: its stdout, its stderr and the code it
+    exits. `gh` exits 1 on any error status and writes
+    `gh: ... (HTTP NNN)` to stderr; a suite overrides that pair with
+    `exit` and `stderr` because a throttled GraphQL query is a 200 that
+    exits 1 over a limit (issue 1338) - a shape the status alone cannot
+    produce."""
     spec = _response(response)
     status = spec['status']
     text = (spec['body'] if isinstance(spec['body'], str)
@@ -355,12 +345,9 @@ class FakeGh:
         return _entries(self.releases_path)
 
     def open_gate(self):
-        """Release every call this fake is holding.
-
-        The release is a path appearing rather than a signal, so a caller
-        that opens it releases the calls already waiting and every one that
-        arrives after, with nothing to pair up.
-        """
+        """Release every call this fake is holding: the release is a path
+        appearing, so the calls already waiting and every one after are
+        released, with nothing to pair up."""
         self.gate_path.write_text('', encoding='utf-8')
 
     @contextlib.contextmanager

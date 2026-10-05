@@ -3,24 +3,21 @@
 
 `gh_client.spawn_watched` and `gh_client.watch_parent` are the half of
 the module that has no `ci_wait` in it: the untracked watchers the skill
-ships to the box (`watch_all.py`, `ci_watch.py`, `pr_comment_watch.py`)
-rest on this guarantee and nothing measured it. The guarantee is the
-pipe's, not a parent id's: a pid compared with `os.getppid()` is
-re-parented on POSIX and historical on Windows, and a process-group kill
-orphans rather than ends. So the rows here are its two directions, both
-on a real child: the write end open and the child alive, the write end
-closed and the child gone.
+ships to the box rest on this guarantee and nothing measured it. The
+guarantee is the pipe's, not a parent id's - a pid compared with
+`os.getppid()` is re-parented on POSIX and historical on Windows, and a
+process-group kill orphans rather than ends - so the rows here are its
+two directions, both on a real child: the write end open and the child
+alive, the write end closed and the child gone.
 
 The platform arms are not faked: `os.name` is never patched, because
 patching it would claim a runtime this run is not. The coverage matrix
 unions the three platforms, so a row written for the platform it runs
 on measures the `nt` arms there and the POSIX arms here; what the
-Windows half cannot see is stated in the PR body, not papered over.
-
-One row reaches inside the module, and it is the two refusals
-`watch_parent` makes before it starts anything - a direct call because
-the process running them is this one, and a thread that reached
-`os._exit` from inside it would take the suite down with it.
+Windows half cannot see is stated in the PR body, not papered over. One
+row reaches inside the module: the two refusals `watch_parent` makes
+before it starts anything, a direct call because a thread that reached
+`os._exit` from inside would take the suite down with it.
 """
 import errno
 import os
@@ -90,9 +87,37 @@ print('accepted', flush=True)
 '''
 
 # The poller child: a watcher holding one `gh` call in flight against the
-# fake, so EOF arrives while a `gh` is the direct child the ending reaches.
+# fake, so EOF finds a `gh` that is the direct child the ending reaches.
 GH_POLLER = '''import os, sys, time
 sys.path.insert(0, {skill!r})
+import gh_client
+gh_client.watch_parent()
+print({armed!r}, flush=True)
+while True:
+    try:
+        gh_client.graphql(gh_client.RUNS_QUERY)
+    except Exception:
+        pass
+    time.sleep(0.05)
+'''
+
+# The spawn-shim child: the poller with `subprocess.Popen` replaced by a
+# subclass that records the child's pid the moment the real spawn returns
+# and then holds, until a gate file appears - the mid-spawn window, held
+# open deterministically.
+SHIM_POLLER = '''import os, subprocess, sys, time
+sys.path.insert(0, {skill!r})
+_real_popen = subprocess.Popen
+
+class HeldPopen(_real_popen):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        with open({pidfile!r}, 'w', encoding='utf-8') as handle:
+            handle.write(str(self.pid))
+        while not os.path.exists({gate!r}):
+            time.sleep(0.02)
+
+subprocess.Popen = HeldPopen
 import gh_client
 gh_client.watch_parent()
 print({armed!r}, flush=True)
@@ -130,9 +155,7 @@ def _sentinel():
 
     `os.pipe` allocates the two lowest free descriptors on both POSIX
     and the Windows CRT, so a descriptor held open just before the call
-    names the pair exactly, and a row can read both ends back without
-    knowing the numbers.
-    """
+    names the pair exactly, without knowing the numbers."""
     held = os.open(os.devnull, os.O_RDONLY)
     return held, held + 1, held + 2
 
@@ -159,15 +182,11 @@ def _ended(child):
 def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
     """One pipe per child, both ends accounted for: the child is handed
     the read end in its environment, this process keeps the write end,
-    and its own copy of the read end is closed - a parent still holding
-    it could not tell the child's death from its own.
+    and its own copy of the read end is closed.
 
     The near miss is `env`: `spawn_watched` takes it as a replacement,
     not an addition, so the read-back is two-sided and one name short of
-    this process's - passing this process's own environment and reading
-    back the one name added would say nothing, because a reader that
-    merged carries that too.
-    """
+    this process's - a reader that merged carries that too."""
     client = _client()
     report = [sys.executable, '-c', REPORT]
     seen = {}
@@ -211,16 +230,15 @@ def test_a_spawn_hands_the_child_the_pipe_and_holds_the_other_end(tmp):
 
 
 def test_the_child_ends_when_the_write_end_closes_and_not_before(tmp):
-    """The guarantee, both directions, on a real child. A byte down the
+    """The guarantee, both directions, on a real child: a byte down the
     pipe is not the parent's death and must not end the child; then the
-    write end closes, the last copy of it goes with it, and the child
-    ends - the only event a session-line watcher of hours is ended by.
+    write end closes and the child ends - the only event a session-line
+    watcher of hours is ended by.
 
     The interval between the assertions is the allowed shape: a claim
     that something did NOT happen yet, over a window far longer than
-    ending a process could take; the claim after it is the other kind,
-    bounded so a hang is a failure.
-    """
+    ending a process could take; the claim after it is bounded so a hang
+    is a failure."""
     client = _client()
     child, write_fd = client.spawn_watched(
         [sys.executable, _watcher_child(tmp)],
@@ -244,16 +262,14 @@ def test_the_child_ends_when_the_write_end_closes_and_not_before(tmp):
 
 
 def test_a_spawn_that_could_not_start_leaks_no_descriptor(tmp):
-    """The refusal path, and both halves of it. The exception is the
-    caller's to see - a spawn that swallowed it would hand back a child
-    that was never born - and the write end is closed before it travels:
-    a caller that caught the failure and carried on would hold a pipe to
-    a process that does not exist, one the watcher never gives back.
+    """The refusal path, and both halves of it: the exception is the
+    caller's to see, and the write end is closed before it travels - a
+    caller that caught the failure and carried on would hold a pipe to a
+    process that does not exist, one the watcher never gives back.
 
     Both ends are read back by number, from a descriptor held open
     across the call so the numbers are known; a row that checked only
-    the write end would pass a module that gave neither back.
-    """
+    the write end would pass a module that gave neither back."""
     client = _client()
     _probe_agrees_with_the_pipe()
     absent = os.path.join(tmp, 'gh-that-was-never-installed')
@@ -290,15 +306,13 @@ def test_watch_parent_started_by_hand_leaves_the_process_alone(tmp):
 def test_a_name_that_is_not_an_inherited_pipe_is_refused(tmp):
     """Every way the name can fail to be a pipe, each ending the watcher
     rather than carrying on: not a descriptor at all, not a number, and
-    - the easy one to get wrong - a perfectly good descriptor that
-    belongs to a file, where a child that accepted it would read
-    somebody's file to its end and exit on the next close that was
-    nobody's parent.
+    a perfectly good descriptor that belongs to a file, where a child
+    that accepted it would read somebody's file to its end and exit on
+    the next close that was nobody's parent.
 
     Each one runs in a child, the only place the third can be driven:
-    accepting it starts the very thread whose `os._exit` would take this
-    process down, so an in-process row could never be shown to fail.
-    """
+    accepting it starts the thread whose `os._exit` would take this
+    process down."""
     client = _client()
     plain = os.path.join(tmp, 'not-a-pipe')
     with open(plain, 'w', encoding='utf-8') as handle:
@@ -340,8 +354,7 @@ def test_the_in_flight_gh_ends_with_its_watcher(tmp):
     closing under it - the `gh` process must end with its watcher, and
     the pid from the fake's call log is what shows it. Off Windows:
     there the `gh` is `cmd.exe`, whose python grandchild the fix's
-    direct-child ending does not reach.
-    """
+    direct-child ending does not reach."""
     if os.name == 'nt':
         _util.skip('the gh process on Windows is cmd.exe, and the pid this '
                    'row can learn names its python grandchild instead')
@@ -441,6 +454,72 @@ def test_the_reap_bound_ends_the_ending_without_the_child(tmp):
     assert seen['bound'] == client.REAP_LIMIT, seen
     assert client._INFLIGHT is None
     subprocess.Popen.wait(child, timeout=LIFETIME)
+
+
+def _shim_child(tmp, gate, pidfile):
+    """The watcher whose spawn is held just after the real one returns."""
+    path = os.path.join(tmp, 'shimmed_watcher.py')
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write(SHIM_POLLER.format(skill=str(SKILL), armed=ARMED,
+                                        gate=gate, pidfile=pidfile))
+    return path
+
+
+def test_an_eof_during_the_spawn_waits_out_the_registration(tmp):
+    """EOF landing between the gh child's birth and its registration must
+    not strand it. The child's Popen is shimmed to hold after the real
+    spawn returns, so the write end can close while the slot is still
+    empty; the ending must wait out the shim, take the registered child
+    and kill it. Without the lock the ending reads the empty slot and
+    leaves, and the mid-spawn gh outlives the process. The mid-row
+    still-here claim is the allowed not-yet kind, over a window far
+    longer than ending a process could take."""
+    if os.name == 'nt':
+        _util.skip('the gh process on Windows is cmd.exe, and the pid this '
+                   'row can learn names its python grandchild instead')
+    client = _client()
+    fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page([])}, gate=True)
+    shim_gate = os.path.join(tmp, 'shim-gate')
+    pidfile = os.path.join(tmp, 'shim-pid')
+    pid = None
+    child, write_fd = client.spawn_watched(
+        [sys.executable, _shim_child(tmp, shim_gate, pidfile)],
+        env=fake.env(dict(os.environ, **{SAVE: '1'})),
+        stdout=subprocess.PIPE, text=True)
+    closed = False
+    released = False
+    try:
+        armed = child.stdout.readline().strip()
+        assert armed == ARMED, (
+            f'the child never armed its watcher: {armed!r}')
+        deadline = time.monotonic() + LIFETIME
+        while not os.path.exists(pidfile):
+            assert time.monotonic() < deadline, 'the gh never started'
+            time.sleep(0.05)
+        with open(pidfile, encoding='utf-8') as handle:
+            pid = int(handle.read())
+        os.close(write_fd)
+        closed = True
+        time.sleep(1.0)
+        if child.poll() is not None:
+            raise AssertionError(
+                f'the mid-spawn gh outlived its watcher: {pid}')
+        with open(shim_gate, 'w', encoding='utf-8') as handle:
+            handle.write('go')
+        released = True
+        assert child.wait(timeout=LIFETIME) == 0, child.returncode
+        assert _pid_gone(pid), (
+            f'the gh child outlived its watcher: {pid}')
+    finally:
+        if not released:
+            with open(shim_gate, 'w', encoding='utf-8') as handle:
+                handle.write('go')
+        fake.open_gate()
+        if pid is not None and not _pid_gone(pid, LIFETIME):
+            os.kill(pid, signal.SIGKILL)
+        if not closed:
+            os.close(write_fd)
+        _ended(child)
 
 
 def main():
