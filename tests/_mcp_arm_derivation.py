@@ -28,8 +28,7 @@ detail is assembled, passed by keyword, forwarded through a local,
 produced by a helper or raised as an unanticipated exception type is a site
 here exactly as one that spells a literal.
 
-This module RAISES nothing and calls no raiser, which is why it is absent
-from the derived set rather than named out of it.
+This module RAISES nothing, hence absent from the derived set.
 """
 import ast
 from pathlib import Path

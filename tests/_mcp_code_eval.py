@@ -6,13 +6,11 @@ tracked-name map left open. This module owns that axis so the guard's shared
 store grammar (`_hidden`) routes the code-eval store through the same
 decision it routes the operation and the registry through.
 
-It also owns the SCOPE model both axes resolve a name against, because there
-is one question behind both: does this name resolve to the builtin here?
-`_Scopes.denotes_builtin` answers it for any builtin, and the fold asks it
-about `bool` — the builtin whose value the index axis computes. The shadow
-test is a PROPERTY, not a list: `symtable` is Python's own binding grammar,
-so a name no enclosing scope binds is the builtin, and a `from builtins
-import X` binds the builtin ITSELF and is not a shadow either.
+It also owns the SCOPE model both axes resolve a name against, because
+there is one question behind both: does this name resolve to the builtin
+here? The shadow test is a PROPERTY, not a list: `symtable` is Python's
+own binding grammar, so a name no enclosing scope binds is the builtin,
+and a `from builtins import X` binds the builtin ITSELF.
 
 `is_code_evaluating` deliberately asks the looser question, over every alias
 in the module rather than over the one the use resolves to: a false
