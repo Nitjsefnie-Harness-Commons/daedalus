@@ -182,6 +182,11 @@ BOUNDS = (
      '\nimport importlib\n\n\ndef load():\n'
      '    return ({**{1 // 0: 2}, "a": importlib.import_module}["a"])'
      '("pkg.leaf")\n'),
+    ('a store that takes the defaulted parameter back',
+     '\nimport importlib\n\n\ndef load(c=True):\n'
+     '    c = False\n'
+     '    return ([0, importlib.import_module][1] if c else print)'
+     '("pkg.leaf")\n'),
 )
 
 # The genuinely-undecidable forms beside them: a callee the fold cannot
