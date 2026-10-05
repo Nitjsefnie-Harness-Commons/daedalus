@@ -2,21 +2,17 @@
 """The published `gate freshness` verdict, which is a check-run and not a run.
 
 Issue 1360: `ci_wait.py` certified a head whose `gate freshness` CHECK-RUN
-was red. The `gate freshness` workflow's own run concludes `success` on
-every such head, because publishing the verdict is that run's job - the
-publisher writes a check run of its own through the Checks API, and the
-rulesets read the check, not the run. So the run that had to be read was
-the one nothing gates on, and every seat on this fleet read exit 0.
-
-`8ddfec21f32d484657e7ebc56c46a1b395670ca9` is the shape: all seven of its
-workflow runs concluded `success` and its `gate freshness` check concluded
-FAILURE. Every control here drives the REAL `ci_wait.py` as a process
-against the fake `gh` in `_fake_gh.py`, so the query, the read and the
-verdict are the shipped ones and only the transport is a double.
-
-The suite-level controls sit here beside the end-to-end ones because they
-are the same question asked of a smaller surface: the predicate and the
-read that both waiters would otherwise have to grow their own.
+was red - publishing the verdict is that workflow's own run's job, the
+publisher writes a check run through the Checks API and the rulesets
+read the check, not the run; the run read was the one nothing gates on.
+`8ddfec21f32d484657e7ebc56c46a1b395670ca9` is the shape: seven workflow
+runs concluded `success` and the `gate freshness` check concluded FAILURE.
+Every control here drives the REAL `ci_wait.py` as a process against the
+fake `gh` in `_fake_gh.py`, so the query, the read and the verdict are
+the shipped ones and only the transport is a double. The suite-level
+controls sit beside the end-to-end ones, the same question smaller:
+the predicate and the read both waiters would otherwise have to grow
+their own.
 """
 import contextlib
 import io
@@ -42,8 +38,7 @@ SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 SOURCE = SKILL / 'ci_wait.py'
 OTHER_REPO = 'example/other'
 PUBLISHED = 'gate freshness'
-# The check run the publisher POSTs, and the one every control below is
-# about: id 7 and the run URL the live verdict carried.
+# The check run the publisher POSTs: id 7 and the live verdict's URL.
 VERDICT_URL = 'https://github.com/o/r/runs/7'
 
 
@@ -65,13 +60,11 @@ def _check(name, conclusion: str | None = 'success', status='completed',
 
 
 def _verdict_suite(conclusion: str | None = 'SUCCESS'):
-    """The suite the Checks API creates for the verdict a publisher writes.
-
-    It is not a workflow run's suite: the publisher POSTs a check run of
-    its own, so the suite carries no `workflowRun` and the run list never
-    sees it. That is the whole defect - the run says success and the gate
-    is the check.
-    """
+    """The suite the Checks API creates for the verdict a publisher
+    writes. It is not a workflow run's suite: the publisher POSTs a
+    check run of its own, so the suite carries no `workflowRun` and the
+    run list never sees it. That is the whole defect - the run says
+    success and the gate is the check."""
     return suite(7, conclusion=conclusion, workflow=None, check_runs=[
         _node(7, PUBLISHED, conclusion)])
 
@@ -105,14 +98,11 @@ def _green(*names):
 
 def test_a_red_published_verdict_fails_a_head_of_green_runs(tmp):
     """The live shape, unchanged: the `gate freshness` run concludes
-    SUCCESS - publishing the verdict is that run's job and it did it - and
-    the check it published is FAILURE. Reading only runs certifies this
-    head, which is issue 1360.
-
-    What is asserted is the correct contract, not the defect's: exit 1, and
-    the line naming the check, its conclusion and its URL, so a reader can
-    go and look at it.
-    """
+    SUCCESS - publishing the verdict is that run's job and it did it -
+    and the check it published is FAILURE. Reading only runs certifies
+    this head, issue 1360. What is asserted is the correct contract:
+    exit 1, and the line naming the check, its conclusion and its URL,
+    so a reader can go and look."""
     done, _ = _wait(tmp, [], _green('tests', PUBLISHED)
                     + [_verdict_suite(conclusion='FAILURE')])
     text = done.stdout
@@ -120,7 +110,7 @@ def test_a_red_published_verdict_fails_a_head_of_green_runs(tmp):
     assert f'{PUBLISHED}: failure' in text, text
     assert VERDICT_URL in text, text
     # Not merely a nonzero exit: the head must not be certified, and the
-    # run that concluded SUCCESS must not be what the line names.
+    # SUCCESS run must not be what the line names.
     assert 'acceptable' not in text, text
     assert 'failure' in text, text
 
@@ -137,10 +127,10 @@ def test_a_green_published_verdict_certifies_the_same_head(tmp):
 
 
 def test_a_red_verdict_outranks_a_missing_required_run(tmp):
-    """The ordering, which is the whole reason the conclusion is judged
-    before the set: the `tests` run is absent, so the exit-4 refusal is
-    reachable, and a refusal for an absent gate must never swallow a real
-    failure. Exit 1, not exit 4."""
+    """The ordering, the whole reason the conclusion is judged before
+    the set: the `tests` run is absent, so the exit-4 refusal is
+    reachable, and a refusal for an absent gate must never swallow a
+    real failure. Exit 1, not exit 4."""
     done, _ = _wait(tmp, ['--grace', '1'], _green(PUBLISHED)
                     + [_verdict_suite(conclusion='FAILURE')])
     text = done.stdout
@@ -152,9 +142,9 @@ def test_a_red_verdict_outranks_a_missing_required_run(tmp):
 def test_a_job_check_is_not_a_published_verdict(tmp):
     """The selection is by name, so the job checks a `pull_request` run's
     suites carry are not the required check. A red job check beside a
-    green published verdict is the run's own business, and treating every
-    check run as a gate would refuse a head over a failed job the matrix
-    already reported."""
+    green published verdict is the run's own business, and treating
+    every check run as a gate would refuse a head over a job failure
+    the matrix already reported."""
     del tmp
     mod = _ci_wait()
     checks = [_check('tests (3.13, ubuntu-24.04)', 'failure'),
@@ -165,29 +155,25 @@ def test_a_job_check_is_not_a_published_verdict(tmp):
 
 def test_a_bare_verdict_call_still_demands_the_published_check(tmp):
     """The shipped DEFAULT, which the rest of this family routes around.
-
     Every other case here passes `checks` or opts out with
     `required_checks=frozenset()`, so a default weakened to `frozenset()`
     left this suite green - while `verdict(runs)` is exactly the call a
-    second reader would write, and it is the call that must NOT certify a
-    head whose publisher has written nothing. The default `checks=()` and
-    the default `required_checks` disagree in the safe direction, and
-    that is a property of the two defaults together, so it is asserted
-    here with neither overridden.
-    """
+    second reader would write, and the one that must NOT certify a head
+    whose publisher has written nothing. The two defaults disagree in
+    the safe direction, a property of the pair, so it is asserted here
+    with neither overridden."""
     del tmp
     mod = _ci_wait()
     assert mod.verdict([_head_run('tests')]) == ('incomplete', [])
 
 
 def test_a_red_verdict_outranks_a_missing_run_at_the_predicate(tmp):
-    """The load-bearing order, without the subprocess in the way.
-
-    The subprocess control proves it end to end; this row asks `verdict`
+    """The load-bearing order, without the subprocess in the way. The
+    subprocess control proves it end to end; this row asks `verdict`
     alone, so the order cannot be right by accident in the wait loop's
-    plumbing. The `tests` run is ABSENT - which is the state that earns
-    the exit-4 refusal - and the published check is RED, so the only
-    answer that judges the conclusion before the set is exit 1.
+    plumbing. The `tests` run is ABSENT - the state that earns the exit-4
+    refusal - and the published check is RED, so the only answer that
+    judges the conclusion before the set is exit 1.
     """
     del tmp
     mod = _ci_wait()
@@ -200,19 +186,15 @@ def test_a_red_verdict_outranks_a_missing_run_at_the_predicate(tmp):
 
 def test_the_offenders_are_the_runs_or_the_checks_never_both(tmp):
     """The list a run failure returns carries no check, and that is only
-    the docstring's word until a control holds it.
-
-    Both surfaces fail here - a red `tests` run beside a red published
-    check - because that is the only state in which "never both" is a
-    claim about anything. The offenders are the run alone, so this catches
-    a mutant that APPENDS the published offenders to the run offenders
-    before the early return, which reads as harmless since the exit code
-    is 1 either way.
-
-    The placement this cannot catch is after that return, and it needs
-    no control: with a run red the return has already answered, so the
-    line is unreachable and no fixture can reach it.
-    """
+    the docstring's word until a control holds it. Both surfaces fail
+    here - a red `tests` run beside a red published check - because that
+    is the only state in which "never both" is a claim about anything.
+    The offenders are the run alone, so this catches a mutant that
+    APPENDS the published offenders to the run offenders before the
+    early return, which reads as harmless since the exit code is 1
+    either way. The placement this cannot catch is after that return,
+    and it needs no control: with a run red the return has answered, so
+    the line is unreachable and no fixture reaches it."""
     del tmp
     mod = _ci_wait()
     runs = [_head_run('tests', 'failure')]
@@ -225,15 +207,13 @@ def test_the_offenders_are_the_runs_or_the_checks_never_both(tmp):
 # ---- an absent verdict: waited out, then refused ----
 
 def test_an_absent_published_verdict_is_waited_out_and_then_refused(tmp):
-    """A head whose publisher has not written its check yet is a wait, not
-    a pass and not a red: on a mergeable head the publisher's own run is
-    still going. The same grace that governs an absent workflow governs it,
-    and past the grace the refusal names the CHECK, not only the run.
-
-    The clock is the frozen one the other ci_wait suites drive, so what is
-    asserted is what the wait DID - the polls it spent and the instant it
-    stopped - rather than a margin against a real clock.
-    """
+    """A head whose publisher has not written its check yet is a wait,
+    not a pass and not a red: on a mergeable head the publisher's own
+    run is still going. The same grace that governs an absent workflow
+    governs it, and past the grace the refusal names the CHECK, not
+    only the run. The clock is the frozen one the other ci_wait suites
+    drive: what is asserted is what the wait DID, not a margin against
+    a real clock."""
     mod = _ci_wait()
     clock = _Clock()
     fake = _fake_gh.FakeGh(tmp, _answers(_green('tests')))
@@ -252,13 +232,11 @@ def test_an_absent_published_verdict_is_waited_out_and_then_refused(tmp):
 
 
 def test_the_bound_report_names_both_kinds_of_absence(tmp):
-    """The exit-2 line, where BOTH gates are absent.
-
-    The grace refusal beside it is already driven with both missing; this
-    one is not, and it is the line a bound shorter than the grace prints
-    instead - so a report that named only the first absence would read
-    correctly on one exit and lie on the other.
-    """
+    """The exit-2 line, where BOTH gates are absent. The grace refusal
+    beside it is already driven with both missing; this one is not, and
+    it is the line a bound shorter than the grace prints instead - a
+    report naming only the first absence would read correctly there and
+    lie here."""
     mod = _ci_wait()
     clock = _Clock()
     fake = _fake_gh.FakeGh(tmp, _answers(_green('CodeQL')))
@@ -268,20 +246,17 @@ def test_the_bound_report_names_both_kinds_of_absence(tmp):
         code = mod.wait(DEFAULT_REPO, SHA, 10, 30, out, grace=300)
     text = out.getvalue()
     assert code == 2, text
-    # This line has no `on <sha>` clause - it already named the SHA -
-    # so what is asserted is the two absences joined, which is the
-    # half a `missing[0]`-only report would drop.
+    # No `on <sha>` clause - it already named the SHA - so the assertion
+    # is the two absences joined, the half a `missing[0]`-only report
+    # would drop.
     assert 'no tests run and no gate freshness check and' in text, text
 
 
 def test_the_conflict_refusal_names_the_check_it_publishes(tmp):
     """The other exit-4 line, and the clause that says a conflicting pull
     request dispatches neither the workflow nor the check it publishes.
-
     Driven with both absent, so the line has both to name and a report
-    that dropped the check half is caught rather than merely
-    unexercised.
-    """
+    that dropped the check half is caught, not merely unexercised."""
     mod = _ci_wait()
     clock = _Clock()
     fake = _fake_gh.FakeGh(tmp, _answers(
@@ -316,10 +291,11 @@ def test_a_missing_run_and_a_missing_check_are_named_together(tmp):
 # ---- the direction rule (issue #1318, applied to the check) ----
 
 def test_another_repository_requires_no_published_check(tmp):
-    """`gate freshness` is THIS repository's published gate, and on another
-    repository the name is a guess - exactly the position `tests` is in, so
-    the same asymmetry: a foreign repository with no published check is not
-    refused for it, and the tool's own gate is named by `--required`."""
+    """`gate freshness` is THIS repository's published gate, and on
+    another repository the name is a guess - exactly the position
+    `tests` is in, so the same asymmetry: a foreign repository with no
+    published check is not refused for it, and the tool's own gate is
+    named by `--required`."""
     done, _ = _wait(tmp, ['--repo', OTHER_REPO, '--required', 'ci'],
                     _green('ci'))
     text = done.stdout
@@ -329,9 +305,9 @@ def test_another_repository_requires_no_published_check(tmp):
 
 def test_the_note_says_a_foreign_repository_checks_no_published_check(tmp):
     """The refusal a foreign repository earns for its absent workflow
-    carries the note, and the note is what tells the caller the published
-    check is not among the defaults - so it must not claim otherwise, and
-    the refusal must not name a check this repository never required."""
+    carries the note, and the note tells the caller the published check
+    is not among the defaults - so it must not claim otherwise, and no
+    check is named that this repository never required."""
     done, _ = _wait(tmp, ['--repo', OTHER_REPO, '--grace', '1'],
                     _green('ci'))
     text = done.stdout
@@ -343,7 +319,7 @@ def test_the_note_says_a_foreign_repository_checks_no_published_check(tmp):
 def test_this_repository_cannot_switch_the_published_check_off(tmp):
     """The half of the asymmetry that protects the false green: on this
     repository no argument removes the check from the required set, and
-    `--required` only ever ADDS. The fixture carries every run green and a
+    `--required` only ADDS. The fixture carries every run green and a
     red check, and the refusal is still the check's."""
     done, _ = _wait(tmp, ['--required', 'ci'], _green('ci', 'tests')
                     + [_verdict_suite(conclusion='FAILURE')])
@@ -354,20 +330,15 @@ def test_this_repository_cannot_switch_the_published_check_off(tmp):
 
 def test_either_spelling_of_this_repository_keeps_the_published_check(tmp):
     """The direction rule's two halves must agree, and only the workflow
-    half was proven case-insensitive.
-
-    `test_every_spelling_of_this_repository_is_still_the_default` claims
-    the property in general, but its discriminating row drives a MISSING
-    WORKFLOW, which `required_workflows` answers: a `required_published`
-    that compared `repo == DEFAULT_REPO` would leave every control green
-    while a caller spelling this repository in either case stops reading
-    the gate it exists to read, and the head refuses at exit 4 forever
-    having never seen a red verdict.
-
-    Both halves are therefore driven apart on purpose - the repository is
-    spelled in lower case and in upper case, and the published check is
-    RED in both, so only the published half can produce the exit 1.
-    """
+    half was proven case-insensitive. The discriminating row of
+    `test_every_spelling_of_this_repository_is_still_the_default` drives
+    a MISSING WORKFLOW, which `required_workflows` answers: a
+    `required_published` that compared `repo == DEFAULT_REPO` would
+    leave every control green while a caller spelling this repository
+    in either case stops reading the gate it exists to read, refusing
+    at exit 4 forever having never seen a red verdict. Both halves are
+    driven apart on purpose - lower case and upper case, the published
+    check RED in both, so only the published half can produce exit 1."""
     for spelling in (DEFAULT_REPO.lower(), DEFAULT_REPO.upper()):
         done, _ = _wait(tmp, ['--repo', spelling], _green('tests')
                         + [_verdict_suite(conclusion='FAILURE')])
@@ -392,10 +363,10 @@ def test_once_prints_the_published_check_run(tmp):
 # ---- the predicate, on its own ----
 
 def test_red_published_names_only_an_exact_match(tmp):
-    """The same exact-name rule `missing_required` reads workflows by: a
-    case difference or a decorated spelling is a different check, and
-    treating it as the gate would refuse a head over a check that is not
-    this repository's."""
+    """The exact-name rule `missing_required` reads workflows by: a case
+    difference or a decorated spelling is a different check, and
+    treating it as the gate would refuse a head over a check that is
+    not this repository's."""
     del tmp
     mod = _ci_gate()
     assert [c['name'] for c in mod.red_published(
@@ -409,7 +380,7 @@ def test_red_published_names_only_an_exact_match(tmp):
 def test_red_published_returns_whole_checks_for_the_offender_line(tmp):
     """The offender loop prints a run's name, conclusion and URL, so the
     answer is the check itself rather than a name: a control that wanted
-    only the names would have to build them again here."""
+    only the names would rebuild them here."""
     del tmp
     mod = _ci_gate()
     offenders = mod.red_published([_check(PUBLISHED, 'failure')])
@@ -427,57 +398,46 @@ def test_missing_published_names_the_absent_check(tmp):
 
 def test_the_required_check_is_the_name_the_publisher_publishes(tmp):
     """A shared literal needs a control that spans BOTH modules.
-
-    `PUBLISHED_CHECKS` and `scripts/ci/gate_freshness.py`'s `NAME` are two
-    spellings of one string in two files, and every other control here
-    compares against THIS suite's own `PUBLISHED`, so a rename of either
-    - the honest kind, updating every occurrence a real rename touches -
-    left 101/101 green across the ci_wait family and the two suites that
-    pin the publisher's `NAME` green too: nothing spanned the pair.
-
-    The consequence is not a typo. A name the publisher no longer writes
-    is a gate `ci_wait` never finds, so every head of this repository
-    refuses at exit 4 forever having never read a red verdict.
-
-    The comparison is by VALUE against the publisher's own constant, not
-    by spelling either side here - which is how the sibling `ACCEPTABLE`
-    is already held.
-    """
+    `PUBLISHED_CHECKS` and `scripts/ci/gate_freshness.py`'s `NAME` are
+    two spellings of one string in two files, and every other control
+    here compares against THIS suite's own `PUBLISHED`, so a rename of
+    either - the honest kind, updating every occurrence a real rename
+    touches - left 101/101 green across the ci_wait family and the two
+    suites that pin the publisher's `NAME` green too: nothing spanned
+    the pair. The consequence is not a typo: a name the publisher no
+    longer writes is a gate `ci_wait` never finds, so every head of
+    this repository refuses at exit 4 forever, no red verdict ever
+    read. The comparison is by VALUE against the publisher's own
+    constant, not by spelling either side here - how the sibling
+    `ACCEPTABLE` is held."""
     del tmp
     publisher = _util.load(ROOT / 'scripts' / 'ci' / 'gate_freshness.py',
                            'gate_freshness_publisher')
     assert _ci_gate().PUBLISHED_CHECKS == frozenset({publisher.NAME}), (
         'ci_wait would wait for a check the publisher does not write')
-    # And the other two constants of the same publisher, for the same
-    # reason: a stale `EXTERNAL_ID` or `APP_SLUG` makes the writer PATCH
-    # nothing and POST a second check, so the read above is what the
-    # rulesets see.
+    # The other two constants of the same publisher, same reason: a
+    # stale `EXTERNAL_ID` or `APP_SLUG` makes the writer PATCH nothing,
+    # POSTing a second check, so the read above is what the rulesets see.
     assert publisher.EXTERNAL_ID == 'daedalus-gate-freshness/v1'
     assert publisher.APP_SLUG == 'github-actions'
 
 
 def test_the_predicate_ignores_which_conclusions_are_acceptable(tmp):
     """The set of acceptable conclusions is `ci_wait`'s and not a second
-    copy: `ci_gate.ACCEPTABLE` is the one definition and `ci_wait`'s name
-    is an alias of the same object, read here through identity.
-
+    copy: `ci_gate.ACCEPTABLE` is the one definition and `ci_wait`'s
+    name is an alias of the same object, read here through identity.
     Identity within the ONE loaded world, not across two loads: a suite
-    that loaded each module separately would be comparing two equally
-    named constants living in two module objects, which says nothing
-    about whether either is a copy of the other.
-    """
+    loading each module separately would compare two equally named
+    constants in two module objects, saying nothing about a copy."""
     del tmp
     mod = _ci_gate()
     wait = _ci_wait()
     assert wait.ACCEPTABLE is wait.ci_gate.ACCEPTABLE, (
         'ci_wait.ACCEPTABLE is a copy, so the two sets can drift')
-    # The THIRD name, and the one a spelling cannot hold: `gh_client`
-    # spells its own because a suite extracts that module WITHOUT its
-    # siblings and could not import `ci_gate` from the copy, so the two
-    # are held EQUAL here rather than by an import. Proven: dropping
-    # 'skipped' from the client's literal left all three of these suites
-    # green, because `_run_from_suites` and `_check_run` both read
-    # whatever set that module holds.
+    # The THIRD name, the one a spelling cannot hold: `gh_client` spells
+    # its own because a suite extracts that module WITHOUT its siblings
+    # and could not import `ci_gate` from the copy, so the two are held
+    # EQUAL rather than by an import.
     assert wait.gh_client.ACCEPTABLE == wait.ci_gate.ACCEPTABLE, (
         'gh_client.ACCEPTABLE has drifted, so the run filter and the '
         'check filter are judged by two different sets')
@@ -494,7 +454,7 @@ def test_the_predicate_ignores_which_conclusions_are_acceptable(tmp):
 def test_ci_state_answers_both_questions_from_one_walk(tmp):
     """One query, two answers. `ci_wait` must not read the runs and then
     the checks over a second request, so the call count is the control:
-    a single page of suites, and a single `gh` call to read it."""
+    a single page of suites, one `gh` call to read it."""
     client = _client()
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page([
         suite(1, name='tests', check_runs=[
@@ -506,8 +466,8 @@ def test_ci_state_answers_both_questions_from_one_walk(tmp):
                                     for call in fake.calls()]
     assert [run['id'] for run in runs] == [1], runs
     # Normalised to the keys the run dicts already use, so one offender
-    # loop prints either, and lowercased, because the API spells them in
-    # caps: the printed conclusion is compared against ACCEPTABLE.
+    # loop prints either, and lowercased, the API spelling caps where
+    # the printed conclusion is compared against ACCEPTABLE.
     assert [(c['name'], c['conclusion'], c['status'], c['html_url'])
             for c in checks] == [
                 ('tests (3.13, ubuntu-24.04)', 'success', 'completed',
@@ -519,18 +479,14 @@ def test_ci_state_answers_both_questions_from_one_walk(tmp):
 def test_an_unconcluded_check_is_a_wait_not_a_red_verdict(tmp):
     """A check with no conclusion has not reached a verdict, and reading
     it as a red one is a failure reported for a check still running.
-
-    The run limb has always had a status check for exactly this, and the
-    check limb reading a conclusion with no status beside it was the
-    asymmetry: `conclusion: None` fails the acceptable-set test, so the
-    offender line would print `gate freshness: None <url>` and the exit
-    would be 1 - a red verdict for a check the publisher had not
-    finished writing.
-
-    Not reachable on this repository today, since the publisher POSTs
-    the status and the conclusion in one call; it is the SHAPE, not this
-    publisher, that a reader has to survive.
-    """
+    The run limb has always had a status check for exactly this, and
+    the check limb reading a conclusion with no status beside it was
+    the asymmetry: `conclusion: None` fails the acceptable-set test, so
+    the offender line would print `gate freshness: None <url>` and the
+    exit would be 1 - a red verdict for a check the publisher had not
+    finished writing. Not reachable on this repository today, the
+    publisher POSTing status and conclusion in one call; the SHAPE, not
+    this publisher, is what a reader must survive."""
     mod = _ci_wait()
     running = [_check(PUBLISHED, None, status='in_progress')]
     assert mod.verdict([_head_run('tests')], running) == (
@@ -545,20 +501,16 @@ def test_an_unconcluded_check_is_a_wait_not_a_red_verdict(tmp):
 
 
 def test_a_red_verdict_is_not_swallowed_by_a_running_one_of_its_name(tmp):
-    """Two check runs of ONE name, one red and one still running.
-
-    The status guard in `verdict` sits before the red-check limb, which is
-    right when the unconcluded check is alone and wrong here: the running
-    one answers `waiting` and the red one beside it is never read. A
-    publisher that PATCHes rather than adding a second run is the reason
-    this is not reachable on this repository, and a reader that cannot
-    survive the shape is reading a shape it should not depend on being
-    absent.
-
-    The remedy is in the predicate rather than in `verdict`: a check that
-    has not concluded cannot be red, so `red_published` asks both and the
-    guard stays where it is.
-    """
+    """Two check runs of ONE name, one red and one still running. The
+    status guard in `verdict` sits before the red-check limb, which is
+    right when the unconcluded check is alone and wrong here: the
+    running one answers `waiting` and the red one beside it is never
+    read. A publisher that PATCHes rather than adding a second run is
+    why this is not reachable on this repository, and a reader that
+    cannot survive the shape reads a shape it should not depend on
+    being absent. The remedy is in the predicate, not `verdict`: a
+    check that has not concluded cannot be red, so `red_published` asks
+    both and the guard stays where it is."""
     del tmp
     mod = _ci_wait()
     checks = [_check(PUBLISHED, 'failure'), _check(PUBLISHED, None,
@@ -569,17 +521,14 @@ def test_a_red_verdict_is_not_swallowed_by_a_running_one_of_its_name(tmp):
 
 
 def test_the_bound_report_names_the_check_that_is_still_running(tmp):
-    """The exit-2 line for the state the status guard introduced.
-
-    An unconcluded required check makes `verdict` answer `waiting`, which
-    never sets `missing` - so the bound expires on the branch that names
-    the runs still open, every one of which HAS concluded, and the line
-    reads `still open:` with nothing after it. That is precisely the case
-    `_timeout_report`'s own docstring gives a separate line for.
-
-    Named from the same data the state is read from, so the line and the
-    verdict cannot drift.
-    """
+    """The exit-2 line for the state the status guard introduced. An
+    unconcluded required check makes `verdict` answer `waiting`, which
+    never sets `missing` - so the bound expires on the branch that
+    names the runs still open, every one of which HAS concluded, and
+    the line reads `still open:` with nothing after it. That is
+    precisely the case `_timeout_report`'s docstring gives a separate
+    line for. Named from the same data the state reads, so line and
+    verdict cannot drift."""
     mod = _ci_wait()
     clock = _Clock()
     suites = _green('tests') + [suite(7, workflow=None, check_runs=[
@@ -599,7 +548,7 @@ def test_the_bound_report_names_the_check_that_is_still_running(tmp):
 def test_a_check_run_still_running_normalises_to_no_conclusion(tmp):
     """`conclusion` is null until a check concludes, and a reader that
     left the API's null in place would compare None against the
-    acceptable set by accident rather than by decision."""
+    acceptable set by accident, not by decision."""
     client = _client()
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page([
         suite(1, name='tests', check_runs=[
@@ -612,8 +561,8 @@ def test_a_check_run_still_running_normalises_to_no_conclusion(tmp):
 
 def test_a_check_run_past_the_first_page_is_still_read(tmp):
     """The published verdict is a suite of its own, so on a head whose
-    matrix is large it can sit on a later page than the runs. Reading only
-    the first page is the read that found every run and no gate."""
+    matrix is large it can sit on a later page than the runs. Reading
+    only the first page found every run and no gate."""
     client = _client()
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: [
         _page([suite(1, name='tests')], has_next=True, cursor='CURSOR-1'),
@@ -626,10 +575,10 @@ def test_a_check_run_past_the_first_page_is_still_read(tmp):
 
 
 def test_a_suite_carrying_no_check_runs_reads_as_none(tmp):
-    """A suite whose check-runs the query did not answer is no evidence of
-    an absent gate - it is the shape every suite has before the
-    connection exists, and reading it as an empty list would refuse every
-    head the moment one suite answers no nodes."""
+    """A suite whose check-runs the query did not answer is no evidence
+    of an absent gate - the shape every suite has before the connection
+    exists, and reading it as an empty list would refuse every head the
+    moment one suite answers no nodes."""
     client = _client()
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page(
         [suite(1, name='tests')])})
@@ -640,8 +589,8 @@ def test_a_suite_carrying_no_check_runs_reads_as_none(tmp):
 
 
 def test_workflow_runs_is_the_first_answer_and_not_a_second_query(tmp):
-    """A reader that asks only for the runs must not pay for the checks it
-    does not ask about: the same answer, off the same one request."""
+    """A reader that asks only for the runs must not pay for the checks
+    it does not ask about: the same answer, off the one request."""
     client = _client()
     fake = _fake_gh.FakeGh(tmp, {RUNS_QUERY: runs_page(
         [suite(1, name='tests'), _verdict_suite()])})
