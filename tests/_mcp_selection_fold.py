@@ -27,8 +27,9 @@ here reads one of them:
 - an EXPRESSION this walk carries, or a value it computed from a literal.
   A WRAPPER produces the value it wraps, a LITERAL's selection produces the
   element or entry it names, and a form the runtime has already SETTLED
-  produces the value Python computes for it. A lambda is a FUNCTION; a
-  call's value is whatever that function returns.
+  produces the value Python computes for it. A conditional or boolean whose
+  condition or decided operand picks the arm produces the arm's value. A
+  lambda is a FUNCTION; a call's value is whatever that function returns.
 - `UNREACHABLE`, a value the runtime provably cannot reach through: an
   out-of-range position, a key the display does not carry, a base no
   subscript reads, a lambda the call cannot fill, an operator that raises.
@@ -228,14 +229,11 @@ def _projected(node: ast.expr):
 
 def _carried_keys(node, bound, scopes):
     """The names a `**` mapping supplies, or None when the walk cannot read
-    them.
-
-    A dict DISPLAY settles its own entries — the last of two equal keys, and
-    the equality is Python's — so `**{'x': 1}` supplies exactly the keys it
-    carries. Anything else is a runtime value this walk cannot read, and a
-    call that carries one supplies an UNKNOWN set of names rather than none:
-    `d` empty raises and `d` holding the key reaches, and the walk is not
-    entitled to pick one.
+    them. A dict DISPLAY settles its own entries — the last of two equal
+    keys, and the equality is Python's — so `**{'x': 1}` supplies exactly
+    the keys it carries. Anything else is a runtime value this walk cannot
+    read, and a call that carries one supplies an UNKNOWN set of names
+    rather than none: `d` empty raises and `d` holding the key reaches.
     """
     if not isinstance(node, ast.Dict):
         return None
@@ -353,13 +351,10 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
 
 def _expanded_elts(base):
     """A literal container's elements, every starred literal expanded in
-    place.
-
-    The expansion RECURSES because a star is a star wherever it sits:
-    `(*(*[op],),)` unpacks the one-element tuple the inner star produces,
-    and the position an index names is then the inner list's to read.
-    Declining a nested star instead put a value the walk already holds out
-    of reach. None only when a star carries a value this walk cannot read,
+    place. The expansion RECURSES because a star is a star wherever it
+    sits: `(*(*[op],),)` unpacks the one-element tuple the inner star
+    produces, and the position an index names is then the inner list's to
+    read. None only when a star carries a value this walk cannot read,
     which is the one container shape that puts the other positions out of
     reach.
     """
@@ -468,13 +463,11 @@ def _called(func, call, bound, scopes):
     A function's value is its RETURN, so a call of one IS that return and
     a bare lambda is the function itself. That is the whole of the lambda
     rule, and it is why a lambda reached by a fold reads the same as one
-    written at the call site: the fold produces the lambda, and the call
-    of a produced lambda is the same call.
-
-    A call this walk cannot account for is UNDETERMINED rather than either
-    verdict, and the value it carries is the BODY it may produce: a refusal
-    reads the mention property over that, which is the direction a question
-    the walk cannot answer has to go.
+    written at the call site. A call this walk cannot account for is
+    UNDETERMINED rather than either verdict, and the value it carries is
+    the BODY it may produce: a refusal reads the mention property over
+    that, which is the direction a question the walk cannot answer has to
+    go.
     """
     filled = _fills(func, call, bound, scopes)
     if filled is UNREAD:
@@ -667,12 +660,10 @@ def yields_the_operation(value, bound, scopes, delivered=False):
     DELIVERED to a name it is the opposite: calling the stored name is what
     delivers, so the body is read after all. Keying this on the node rather
     than on the call site's spelling is what makes a lambda reached by a
-    fold read the same as one written there.
-
-    A value the fold READ is asked about in place of the spelling that
-    carried it — a projection, a selection, a lambda's own return — so the
-    two halves of this module are asked of the same value and cannot
-    disagree about it.
+    fold read the same as one written there. And a value the fold READ is
+    asked about in place of the spelling that carried it — a projection, a
+    selection, a lambda's own return — so the two halves of this module are
+    asked of the same value and cannot disagree about it.
     """
     wrapped = _projected(value)
     if wrapped is not None:
