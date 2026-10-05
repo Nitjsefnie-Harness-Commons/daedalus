@@ -448,16 +448,15 @@ def test_every_refusal_arm_is_refused_with_its_own_message(_tmp):
 def test_every_refusal_arm_has_a_near_miss_the_walk_leaves_alone(_tmp):
     """Each arm's neighbour is clean, so an over-reaching rule loses too.
 
-    The `_scan_verdict` answer is READ rather than merely not an
-    exception: a composition that raised some other arm's refusal would
-    answer `refused` here, which is the failure this row exists to catch.
-    The failures are collected, for the same reason the refusal case
-    collects them.
+    The whole `_scan_verdict` answer is READ — verdict and names — the
+    pair the barriers case already reads, so a walk that over-delivers
+    loses this case the way it already loses that one. The failures are
+    collected, for the same reason the refusal case collects them.
     """
     reached = []
     for label, beside, source in NEAR_MISSES:
         verdict, detail = _scan_verdict(_tmp, {'composition.py': source})
-        if verdict != 'clean':
+        if (verdict, detail) != ('clean', ['composition.py']):
             reached.append(
                 f'{label} (near miss of {beside}) was {verdict}: {detail}')
     assert not reached, '; '.join(reached)
