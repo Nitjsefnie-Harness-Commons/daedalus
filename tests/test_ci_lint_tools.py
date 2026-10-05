@@ -76,13 +76,6 @@ LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 # through one of these at all. What each entry owes is that its list stays
 # true — the suites it names are the suites it runs — and nothing about
 # installing tools, because nothing new can arrive through it.
-#
-# This is the residue of a DERIVED set, not a second copy of it. Every
-# other route is either a `RUNNER` door, which the control below holds to
-# the installer step, or a door this walk cannot see at all: a step whose
-# reach is decided by a composite action or a container entry point has no
-# source in this repository to read. That bound is the walk's, stated here
-# where the table meets it.
 SUITE_DOORS: dict[tuple[str, str], str] = {}
 
 

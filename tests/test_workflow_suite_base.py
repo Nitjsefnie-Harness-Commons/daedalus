@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Every job this guard identifies must be able to read the merge base.
-
-The branch-boundary control a retired reserved-name suite carried read
-the merge base's own declarations over both allowance tables, and a
-checkout that resolved neither `origin/main` nor a local `main` made
-it take its refusal arm. In a job that turns a failing suite red, the
-consequence is already visible; in a job that runs the suites without
-failing on one it is quieter and worse — the branch's central guarantee
-goes unevaluated in a job that runs it, and nothing reports that.
-
-The job set is DERIVED. A tracked script is a suite runner when, as an
-AST fact, it launches a suite; a job runs the suites when one of its
-steps invokes one. That replaced a hand-written job list, which was a
-second statement of the same fact and could drift from the first.
-"""
+"""Every job this guard identifies must be able to read the merge base."""
 import ast
 import fnmatch
 import subprocess
@@ -33,7 +19,6 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 # second statement of the same fact, and a matrix leg added beside the
 # jobs it replaces would leave both boundary controls unevaluated there
 # without any of this noticing.
-#
 def _is_the_tests_directory(node):
     """Whether this expression IS the tests directory, read as a node.
 
