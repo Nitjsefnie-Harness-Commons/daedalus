@@ -66,7 +66,11 @@ from daedalus_bridge import path_safety, result_store
 
 res_dir = Path(os.environ['DAEDALUS_DIR']) / 'results'
 delivery_root = result_store.delivery_root(res_dir)
-key = result_store.result_key('tok', 'extension')
+# The credential is nine characters so it cannot occur inside the runner's
+# 8-character random temp suffix: the refusal line's redaction replaces the
+# secret anywhere in the rendered evidence, so a shorter one could randomize
+# the expected root/attempts spellings.
+key = result_store.result_key('toktoktok', 'extension')
 delivery_dir = delivery_root / key
 delivery_file = delivery_dir / '123_1.json'
 degraded_root = Path(os.environ['DAEDALUS_DIR']) / 'RESULT~1' / 'deliveries'
@@ -87,7 +91,7 @@ def call_with(answers):
     try:
         with contextlib.redirect_stdout(output):
             paths = result_store.delivery_result_paths(
-                res_dir, 'tok', 'extension', '123_1')
+                res_dir, 'toktoktok', 'extension', '123_1')
     finally:
         path_safety.os.path.realpath = realpath
     return paths, calls, output.getvalue()
@@ -118,7 +122,7 @@ try:
     with contextlib.redirect_stdout(stable_log):
         try:
             result_store.delivery_result_paths(
-                res_dir, 'tok', 'extension', '123_1')
+                res_dir, 'toktoktok', 'extension', '123_1')
         except ValueError:
             stable = 'refused'
         else:
@@ -167,23 +171,9 @@ def test_the_alias_refusal_redacts_the_credential(tmp):
     store = _util.load(
         _util.ROOT / 'daedalus_bridge' / 'result_store.py',
         'fixture_alias_secret')
-    root = Path(tmp) / 'results' / 'deliveries'
-    try:
-        (root / 'aliascredential_real').mkdir(parents=True)
-        (root / 'aliascredential_ext').symlink_to(
-            root / 'aliascredential_real', target_is_directory=True)
-    except (OSError, NotImplementedError) as why:
-        _util.skip(f'this filesystem will not hold a symlink: {why}')
-    output = io.StringIO()
-    refused = False
-    with contextlib.redirect_stdout(output):
-        try:
-            store.delivery_result_paths(
-                Path(tmp) / 'results', 'aliascredential', 'ext', '123_1')
-        except ValueError:
-            refused = True
-    assert refused, output.getvalue()
-    line = output.getvalue()
+    res_dir, _real, _alias = _symlinked_alias(tmp, 'aliascredential')
+    refused, line = _refused_alias(store, res_dir, 'aliascredential', 'ext')
+    assert refused, line
     assert 'aliascredential' not in line, line
     assert "parts=('aliascre…_ext',)" in line, line
 
@@ -244,7 +234,7 @@ def test_delivery_paths_use_the_retrying_parent_comparison(tmp):
     assert len(marked) == 1, (proc.stdout, proc.stderr)
     answer = json.loads(marked[0][len('DELIVERY_PATH '):])
     delivery_root = docroot / 'results' / 'deliveries'
-    delivery_dir = delivery_root / 'tok_extension'
+    delivery_dir = delivery_root / 'toktoktok_extension'
     delivery_file = delivery_dir / '123_1.json'
     wrong_root = docroot / 'wrong' / 'deliveries'
     assert answer['paths'] == [str(delivery_dir), str(delivery_file)], answer
@@ -265,7 +255,7 @@ def test_delivery_paths_use_the_retrying_parent_comparison(tmp):
     assert len(stable_lines) == 1, answer
     assert stable_lines[0].startswith('[PATH-REFUSAL] kind=alias '), answer
     assert f'root={str(delivery_root)!r}' in stable_lines[0], answer
-    assert "parts=('tok…_extension',)" in stable_lines[0], answer
+    assert "parts=('toktokto…_extension',)" in stable_lines[0], answer
     stable_attempts = (
         (str(wrong_root), str(delivery_root)),
         (str(wrong_root), str(delivery_root)),
