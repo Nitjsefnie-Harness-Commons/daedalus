@@ -574,7 +574,7 @@ def add_storage_probe(parser, shape, dest='probe'):
         'remainder': argparse.REMAINDER, 'star': '*', 'plus': '+',
         'question': '?', 'positional': None}[shape]
     return parser.add_argument(dest, **(options if nargs is None else
-                                       {**options, 'nargs': nargs}))
+                                        {**options, 'nargs': nargs}))
 
 
 def assert_argparse_storage_contract(audit_handler):
