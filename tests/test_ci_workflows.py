@@ -41,6 +41,8 @@ from _wfpins import (  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _job_section, _tests_yml)
+from _wfjobs import (  # noqa: E402
+    load, run_path_candidates, workflow_files)
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
 from _yamlread import job_mapping, step_scalar  # noqa: E402
@@ -641,6 +643,42 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     assert required, 'the repository tracks no dependency manifest at all'
     for ecosystem in sorted(required):
         assert f'package-ecosystem: {ecosystem}' in config, ecosystem
+
+
+def test_every_run_step_names_only_tracked_paths(tmp):
+    """A `run:` naming an untracked repo path is refused; the walk is live.
+
+    Paths under a download-artifact step's `path:` are runtime data the
+    checkout will not hold, so they are not unresolved.
+    """
+    del tmp
+    listed = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '-z'],
+                            capture_output=True, check=True)
+    tracked = {os.fsdecode(entry)
+               for entry in listed.stdout.split(b'\0') if entry}
+    examined, produced, unresolved = 0, set(), []
+    for path in workflow_files():
+        for job_name, job in load(path).jobs.items():
+            roots = tuple(
+                step['with']['path'].rstrip('/') + '/'
+                for step in job.get('steps', [])
+                if step.get('uses', '').startswith(
+                    'actions/download-artifact')
+                and isinstance(step.get('with', {}).get('path'), str))
+            for index, step in enumerate(job.get('steps', [])):
+                run_text = step.get('run', '')
+                if not run_text:
+                    continue
+                examined += 1
+                found = run_path_candidates(run_text)
+                produced.update(found)
+                label = step.get('name') or step.get('uses') or index
+                unresolved.extend(
+                    f'{path.name}: job {job_name}: step {label}: {name}'
+                    for name in found
+                    if name not in tracked and not name.startswith(roots))
+    assert examined >= 1 and produced, (examined, sorted(produced))
+    assert not unresolved, '\n'.join(unresolved)
 
 
 def test_threshold_push_comment_matches_current_trigger_policy(tmp):
