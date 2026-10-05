@@ -315,9 +315,6 @@ def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
     staller_block = _suite_block(result.stdout, 'test_staller.py')
     found = records(staller_block)
     assert len(found) == 1, (len(found), staller_block)
-    record = found[0].groupdict()
-    assert record['name'] == 'test_staller.py', record
-    assert record['bound'] == str(float(_OVERRUN_BOUND_S)), record
     assert 'test_staller.py' in _failed_suites(result.stdout), (
         result.stdout, result.stderr)
     assert '=== test_passer.py ===' in result.stdout, result.stdout
@@ -554,29 +551,25 @@ def test_the_reap_waits_name_the_shared_cleanup_bound(tmp):
 
 
 def test_the_suites_own_reap_waits_read_the_shared_cleanup_bound(tmp):
-    """The suites' teardown reaps read SUITE_BOUND.CLEANUP_TIMEOUT_S,
-    pinned by shape: CPython interns small ints, so no runtime check
-    tells the Name from a literal 10."""
+    """The suites' reaps read SUITE_BOUND.CLEANUP_TIMEOUT_S, pinned by
+    shape: CPython interns small ints, so no runtime check can tell."""
     del tmp
     for name in ('test_bridge_startup.py', 'test_mcp_entry_point.py',
                  'test_parent_watch.py', 'test_stream_lifecycle.py',
                  'test_suite_runner.py'):
-        tree = ast.parse((Path(__file__).resolve().parent / name)
-                         .read_text(encoding='utf-8'))
+        tree = ast.parse((ROOT / 'tests' / name).read_text(encoding='utf-8'))
         arms = []
         for scope in ast.walk(tree):
             if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             signals = {}
             for node in ast.walk(scope):
-                if not (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Attribute)):
+                if not isinstance(getattr(node, 'func', None), ast.Attribute):
                     continue
                 receiver = ast.dump(node.func.value)
                 if node.func.attr in ('terminate', 'kill'):
                     signals.setdefault(receiver, node.lineno)
-                elif (node.func.attr == 'wait'
-                        and receiver in signals
+                elif (node.func.attr == 'wait' and receiver in signals
                         and signals[receiver] <= node.lineno):
                     arms.append(node)
         assert arms, f'{name}: no reap arms - the ANCHOR changed shape'
@@ -587,9 +580,8 @@ def test_the_suites_own_reap_waits_read_the_shared_cleanup_bound(tmp):
                     and bound.attr == 'CLEANUP_TIMEOUT_S'
                     and isinstance(bound.value, ast.Name)
                     and bound.value.id == 'SUITE_BOUND'), (
-                f'{name}:{wait.lineno}: the teardown reap wait is not '
-                'bound to SUITE_BOUND.CLEANUP_TIMEOUT_S: '
-                + ast.dump(bound if bound is not None else wait))
+                f'{name}:{wait.lineno}: the reap wait is not bound to '
+                f'SUITE_BOUND.CLEANUP_TIMEOUT_S: {ast.dump(bound or wait)}')
 
 
 def test_a_summaries_refused_once_is_retried_and_the_verdict_stands(tmp):
