@@ -13,7 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _repo  # noqa: E402
 import _util  # noqa: E402
-import test_cli  # noqa: E402
+import test_cli_result_wait as test_cli  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
