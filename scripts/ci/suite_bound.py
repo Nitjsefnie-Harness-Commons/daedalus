@@ -24,7 +24,7 @@ flag for whatever did not answer.
 
 `tests/_processtree.py` is the same shape for the suites' own children. It
 is followed here rather than imported: a shipped launcher must not depend
-on a test module, and that file is held by an open pull request.
+on a test module.
 """
 import math
 import os
