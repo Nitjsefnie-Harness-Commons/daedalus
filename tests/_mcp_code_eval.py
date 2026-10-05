@@ -39,10 +39,10 @@ from typing import TypeGuard
 # The builtins that evaluate a program; one set reads every direct reach.
 CODE_EVAL_BUILTINS = ('eval', 'exec', 'compile')
 
-# The scope kinds a name can be local to, INCLUDING the comprehensions: a
-# generator's body is its own scope. Which of them the running interpreter
-# actually gives a scope of its own is the resolver's answer and not this
-# table's, so a comprehension with no scope is simply not matched.
+# The scope kinds a name can be local to, INCLUDING the comprehensions:
+# which of them the running interpreter actually gives a scope of its own
+# is the resolver's answer and not this table's, so one with no scope is
+# simply not matched.
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
                 ast.Lambda) + _COMPREHENSIONS
@@ -209,9 +209,7 @@ class _Scopes:
                 uncertain = uncertain or missed
         inside = guarded or isinstance(node, _GUARDED)
         # A comprehension's FIRST iterable and a `def`'s decorators run in
-        # the scope that ENCLOSES them (the function's own scope does not
-        # exist while its decorators evaluate), so those children are walked
-        # where the runtime reads them.
+        # the scope that ENCLOSES them, so they are walked there.
         outside = {id(node.generators[0].iter)} \
             if isinstance(node, _COMPREHENSIONS) else set()
         outside.update(id(decorator)
@@ -223,12 +221,10 @@ class _Scopes:
     def _record_builtin_alias(self, node, table, guarded):
         """A `from builtins import X [as y]` binds the builtin ITSELF, so `y`
         is the builtin and not a shadow of it — once the statement has RUN.
-
-        Recorded against the scope the statement is in rather than against
-        the module, because a nearer binding is what takes it back, and a
-        name this walk resolves to a nearer scope's alias is that alias.
-        `guarded` says the statement sits inside a body that runs only
-        sometimes, so the binding is possible at a use and not established.
+        Recorded against the scope the statement is in, because a nearer
+        binding is what takes it back. `guarded` says the statement sits
+        inside a body that runs only sometimes, so the binding is possible
+        at a use and not established.
         """
         aliases = self._alias.setdefault(id(table), {})
         for alias in node.names:
@@ -263,11 +259,14 @@ class _Scopes:
         the answer — a nested scope binding it as its OWN parameter takes it
         back — and the value it carries is the default evaluated once at the
         definition, so it is what any use inside reads unless a store has
-        taken it back: a scope the walk could not match is declined, a store
-        in the owning scope declines, a store from a nested one (`nonlocal`,
-        reported in the nested scope only) declines, and so does a default
-        that names a parameter of its own signature, the one cycle this
-        reader can otherwise follow into forever.
+        taken it back. Declined: a scope the walk could not match, a store
+        in the owning scope, a store from a nested one (`nonlocal`,
+        reported in the nested scope only), and a default naming any
+        parameter of its own signature, the cycle this reader would
+        otherwise follow into the walk's recursion backstop. The answer is
+        the parameter's ENTRY value: a call-site override makes the runtime
+        value differ, which can admit a leaf the runtime does not import —
+        the fail-safe direction for a closure.
         """
         if self._uncertain.get(id(node)):
             return None
@@ -287,7 +286,16 @@ class _Scopes:
             if nested is not None and nested.is_assigned() \
                     and nested.is_free():
                 return None
-        return _default_of(definition.args, name)
+        default = _default_of(definition.args, name)
+        if default is None:
+            return None
+        parameters = {argument.arg for argument in
+                      definition.args.posonlyargs + definition.args.args
+                      + definition.args.kwonlyargs}
+        if any(isinstance(child, ast.Name) and child.id in parameters
+               for child in ast.walk(default)):
+            return None
+        return default
 
     def denotes_builtin(self, node, name) -> bool:
         """Whether a name reference IS the builtin `name` at its own scope.

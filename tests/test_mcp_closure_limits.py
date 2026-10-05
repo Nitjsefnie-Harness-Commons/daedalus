@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Import-closure shapes the real `daedalus_mcp` tree cannot show.
-
-The refusal pass in `test_mcp_tools.py` walks the real tree, so it can only
-witness a closure property the tree actually presents. Each shape below is
-one it does not present, driven on a synthetic composition instead, and the
-arms of the walk are enumerated in `test_mcp_import_refusals.py`. The
-lambda case stays because dropping the lambda arm from `static_value` reds
-it alone — nothing else on this tree catches a call's callee being read as
-a VALUE. The settled-callee families and their bounds are the callee-value
-question at the five forms issue 1213 records.
+"""Import-closure shapes the real `daedalus_mcp` tree cannot show: the
+refusal pass in `test_mcp_tools.py` walks the real tree, so it can only
+witness a property the tree presents; each shape below is driven on a
+synthetic composition, and the walk's arms are enumerated in
+`test_mcp_import_refusals.py`. The lambda case stays because dropping the
+lambda arm from `static_value` reds it alone — nothing else on this tree
+catches a call's callee being read as a VALUE. The settled-callee families
+and their bounds are the callee-value question at the five forms issue
+1213 records.
 """
 import sys
 from pathlib import Path
@@ -144,24 +143,29 @@ SETTLED_CALLEES = (
 # ZeroDivisionError, which name nothing and never enter the set either way.
 BOUNDS = (
     ('a boolean that short-circuits away from the operation',
-     '\n\ndef load():\n    return ([__import__][0] and print)("pkg.leaf")\n'),
+     '\n\ndef load():\n    return ([__import__][0] and print)("pkg.leaf")\n',
+     'clean'),
     ('a merge whose repeated key the last entry replaces',
      '\n\ndef load():\n'
-     '    return ({"a": __import__, **{"a": print}}["a"])("pkg.leaf")\n'),
+     '    return ({"a": __import__, **{"a": print}}["a"])("pkg.leaf")\n',
+     'clean'),
+    ('an f-string key the display does not carry',
+     '\n\ndef load():\n    return ({0: 1, "a": __import__}[f"b"])'
+     '("pkg.leaf")\n', 'clean'),
     ('a merge display that does not carry the key',
      '\n\ndef load():\n    return ({**{0: 1}, "a": __import__}["b"])'
-     '("pkg.leaf")\n'),
+     '("pkg.leaf")\n', 'clean'),
     ('a merge whose carried display raises on its own key',
      '\n\ndef load():\n'
-     '    return ({**{1 // 0: 2}, "a": __import__}["a"])("pkg.leaf")\n'),
+     '    return ({**{1 // 0: 2}, "a": __import__}["a"])("pkg.leaf")\n',
+     'clean'),
     ('a store that takes the defaulted parameter back',
      '\n\ndef load(c=True):\n    c = False\n'
-     '    return ([__import__][0] if c else print)("pkg.leaf")\n'),
+     '    return ([__import__][0] if c else print)("pkg.leaf")\n',
+     'refused'),
 )
 
-# The genuinely-undecidable forms beside them: a callee the fold cannot
-# decide still mentions the operation, and that refusal is the fail-closed
-# default the widening must not soften.
+# The genuinely-undecidable forms beside them.
 UNDECIDED_CALLEES = (
     ('a conditional whose condition does not settle',
      '\n\ndef load(c):\n'
@@ -173,6 +177,9 @@ UNDECIDED_CALLEES = (
     ('a projection whose key does not fold to `__call__`',
      '\n\ndef load(k):\n'
      '    return getattr([__import__][0], k)("pkg.leaf")\n'),
+    ('a default that names its own parameter',
+     '\n\ndef load(c=c):\n'
+     '    return ([__import__][0] if c else print)("pkg.leaf")\n'),
 )
 
 
@@ -194,16 +201,18 @@ def test_the_settled_callee_families_resolve_their_module(_tmp):
 
 def test_the_short_circuit_and_raise_positions_keep_the_leaf_out(_tmp):
     """The widening's bound: no raise position and no short-circuit away
-    from the operation puts the leaf in the set. A raise position names
-    nothing, so the leaf's absence is the witness on both sides of the fix;
-    a boolean that hands out the WRONG operand is the over-wide mutant of
-    the family above.
+    from the operation puts the leaf in the set, and the raise positions
+    are CLEAN — the fold's raise semantics, which a mutant restoring the
+    base's decline would flip to a refusal. A boolean that hands out the
+    WRONG operand is the over-wide mutant of the family above, and the
+    store row stays refused because the store leaves the condition
+    undecidable.
     """
     wrong = []
-    for label, source in BOUNDS:
+    for label, source, spoken in BOUNDS:
         verdict, detail = _scan_verdict(
             _tmp, {'composition.py': source, **_LEAF})
-        if 'pkg/leaf.py' in detail:
+        if verdict != spoken or 'pkg/leaf.py' in detail:
             wrong.append(f'{label}: {verdict}')
     assert not wrong, f'leaf reached: {"; ".join(wrong)}'
 

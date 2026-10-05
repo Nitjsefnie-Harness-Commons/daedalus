@@ -4,10 +4,7 @@
 Every guard the tools reach is witnessed on a healthy tree, so the
 registration-driven pass in test_mcp_tools.py never sees a gap; these
 drive the floor directly, the only way its detection is banked. The
-import closure closes the module set the floor scans; the closure limit
-the real tree never presents is carried in `test_mcp_closure_limits.py`,
-enumerated in `test_mcp_import_refusals.py`. The shapes
-`_mcp_import_closure` declares ACCEPTED (a call's result, a handed
+shapes `_mcp_import_closure` declares ACCEPTED (a call's result, a handed
 tracked module, a runtime-computed value) are pinned by no control, for
 a control that pinned them would forbid closing them.
 """

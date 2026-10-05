@@ -39,18 +39,15 @@ import ast
 import operator
 from typing import TypeGuard
 
-# The container literals a folded value can BE. A call on one raises before
-# it reaches anything, so a callee the fold DECIDED to be one is clean
-# however much of the operation its container carries.
+# The container literals a folded value can BE: a call on one raises
+# before it reaches anything, however much of the operation it carries.
 CONTAINERS = (ast.List, ast.Tuple, ast.Set, ast.Dict,
               ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 # The decided base values no subscript can reach at all, whatever key or
-# position it names: a set is not a sequence and a generator is not either,
-# so `s[0]`, `s['a']` and `s[i]` are one `TypeError` between them. A DICT
-# comprehension is not here — it is a mapping, and a key reaches into it —
-# nor is a LIST comprehension, whose length is a runtime value and whose
-# position is genuinely unknown.
+# position it names — one `TypeError` between them. A DICT comprehension is
+# a mapping and a LIST comprehension's length is a runtime value, so
+# neither is here.
 UNSUBSCRIPTED = (ast.Set, ast.SetComp, ast.GeneratorExp)
 
 # A sentinel rather than `None` so a literal `None` — a value a dict key
@@ -253,11 +250,8 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
     params = args.posonlyargs + args.args
     at = {argument.arg: index for index, argument in enumerate(params)}
     only = {argument.arg for argument in args.posonlyargs}
-    # Every parameter the signature DECLARES, and separately the ones it
-    # REQUIRES: a default says a parameter may go unfilled, not that naming
-    # it is an error, so the two sets are not the same and conflating them
-    # reads a defaulted keyword-only parameter as a name the signature does
-    # not have.
+    # DECLARED and REQUIRED are not the same set: a default says a
+    # parameter may go unfilled, not that naming it is an error.
     keyword_only = {argument.arg for argument in args.kwonlyargs}
     wanted = {argument.arg for argument, default
               in zip(args.kwonlyargs, args.kw_defaults) if default is None}
@@ -596,7 +590,7 @@ def yields_the_operation(value, bound, scopes, delivered=False):
     its body; DELIVERED to a name, calling the stored name delivers, so
     the body is read after all. And a value the fold READ is asked about
     in place of the spelling that carried it, so the two halves of this
-    module cannot disagree about it.
+    module cannot disagree.
     """
     wrapped = _projected(value)
     if wrapped is not None:
