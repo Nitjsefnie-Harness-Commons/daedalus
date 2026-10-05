@@ -3,8 +3,9 @@ DECLARED covers stored action destinations and parser defaults; GUARANTEED adds
 required and non-suppressed values. A required mutually exclusive group
 guarantees a destination only when every member stores that same non-SUPPRESS
 destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
-Namespace stores are admitted; an augmented assignment target is checked as
-the read it is, a del is refused, and a store never satisfies a read.
+A store to an attribute of the namespace parameter is admitted; a rebind of
+the name or a non-attribute store is refused; an augmented attribute target
+is read-checked; a del is refused; a store never satisfies a read.
 A frame read is refused in every statement of every daedalus_cli module the
 walk reaches, and every member of the interpreter's frame set is refused, not
 only the ones this file names. A read in a helper a handler calls is in that
@@ -208,7 +209,8 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
         if isinstance(node, ast.Name) and node.id == args_name:
             parent = node._parent
             permitted = None
-            if isinstance(getattr(parent, 'ctx', None), ast.Store):
+            if (isinstance(parent, ast.Attribute)
+                    and isinstance(parent.ctx, ast.Store)):
                 if isinstance(parent._parent, ast.AugAssign):
                     permitted = parent.attr, parent, True
             elif (permitted := resolver.permitted_namespace_read(
@@ -250,9 +252,7 @@ def _package_roots(tree):
     """Yield the one walk root a package module has: the module itself.
 
     The domain is the module, so the walk starts there and a callable opens a
-    label inside it rather than being where the walk starts. Enumerating the
-    containers that hold a callable is the narrowing that left a class body and
-    a module-level statement outside the domain.
+    label inside it rather than being where the walk starts.
     """
     yield '', tree
 
@@ -441,6 +441,9 @@ def test_cli_audit_admits_namespace_stores_that_satisfy_no_read(tmp):
     refused = (
         (probe, [probe]), (f'{probe} += 1', [probe]),
         (f'del {probe}', [f'namespace escape: {probe}']),
+        ('args, = values', ['namespace escape: (args,)']),
+        ("args['k'] = 1", ["namespace escape: args['k']"]),
+        ("args['k'] += 1", ["namespace escape: args['k']"]),
         (inner % ' += 1', [probe]),
         (inner % ' = False' + f'\n{probe}', [probe]),
         (f'{probe}: bool = False\n{probe}', [probe]),
@@ -450,6 +453,8 @@ def test_cli_audit_admits_namespace_stores_that_satisfy_no_read(tmp):
     for body, expected in tuple((body, []) for body in admitted) + refused:
         assert (actual := _audit_fake_handler(body)) == expected, body
         assert not any(' read ' in message for message in actual), body
+    assert _audit_fake_handler(
+        'args.cmd += 1', dests=('cmd',), present=()) == ['args.cmd']
 
 
 def test_cli_audit_reports_namespace_escapes(tmp):
@@ -525,11 +530,8 @@ def test_cli_audit_resolver_only_resolves_exact_module_vars(tmp):
 
 
 def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
-    """A frame member read on a value the audit can see is left alone.
-
-    Without this, widening the member set would refuse correct code and a
-    later round would narrow the rule back.
-    """
+    """A frame member read on a value the audit can see is left alone:
+    widening the member set would refuse correct code."""
     scope = {'ROUTES': {'f_locals': 1}, **globals()}
     assert _audit_fake_handler("ROUTES['f_locals']", scope=scope) == []
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
@@ -543,8 +545,7 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
 
 
 def test_cli_audit_reads_the_namespace_key_from_the_handler(tmp):
-    """A handler whose parameter is called something else is judged by that
-    name; if the rule ever hard-codes ``args`` again, the first pair fails."""
+    """Judge a handler by its own parameter name; a hard-coded args fails."""
     for parameter in ('args', 'namespace'):
         for key in (parameter, 'args'):
             body = f"holder = helper()\n_ = holder['{key}'].undeclared_probe"
