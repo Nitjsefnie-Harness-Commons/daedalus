@@ -442,6 +442,8 @@ def test_cli_audit_admits_namespace_stores_that_satisfy_no_read(tmp):
         (probe, [probe]), (f'{probe} += 1', [probe]),
         (f'del {probe}', [f'namespace escape: {probe}']),
         (inner % ' += 1', [probe]),
+        (inner % ' = False' + f'\n{probe}', [probe]),
+        (f'{probe}: bool = False\n{probe}', [probe]),
         (f'if False:\n    {probe} = False\n{probe}', [probe]),
         (f'{probe} = {probe} or False', [probe]),
         (f'{probe} = False\n{probe}', [probe]))
@@ -648,9 +650,8 @@ def test_cli_handlers_read_only_declared_args(tmp):
                                  'args_name': args_name}
         violations.extend((name, construct, handler.__qualname__)
                           for construct in handler_violations)
-    key_names = {details['args_name'] for details in handler_details.values()}
-    assert len(key_names) == 1, (
-        f'handlers disagree on the namespace name: {sorted(key_names)}')
+    key_names = {d['args_name'] for d in handler_details.values()}
+    assert len(key_names) == 1, f'handlers disagree: {sorted(key_names)}'
     for command, attribute, handler_name in \
             audit_support.KNOWN_INDIRECT_ARG_READS:
         detail = handler_details.get(command)
