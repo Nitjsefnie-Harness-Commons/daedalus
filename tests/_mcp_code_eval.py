@@ -44,10 +44,9 @@ from typing import TypeGuard
 CODE_EVAL_BUILTINS = ('eval', 'exec', 'compile')
 
 # The scope kinds a name can be local to, INCLUDING the comprehensions: a
-# generator's body is its own scope, and a list or dict comprehension is one
-# on every interpreter that has not inlined it. Which of them the running
-# interpreter actually gives a scope of its own is the resolver's answer and
-# not this table's, so a comprehension with no scope is simply not matched.
+# generator's body is its own scope. Which of them the running interpreter
+# actually gives a scope of its own is the resolver's answer and not this
+# table's, so a comprehension with no scope is simply not matched.
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
                 ast.Lambda) + _COMPREHENSIONS
@@ -56,8 +55,7 @@ _COMP_NAMES = {ast.ListComp: 'listcomp', ast.SetComp: 'setcomp',
 
 # The statement kinds whose body runs only SOMETIMES. A `from builtins`
 # inside one is not a binding at the next statement, so nothing there can be
-# decided from it. A comprehension's own `if` clauses cannot bind a name and
-# are not here.
+# decided from it.
 _GUARDED = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
             ast.With, ast.AsyncWith, ast.Match)
 
@@ -83,19 +81,14 @@ class _Scopes:
         self._scope_of = {}
         self._from_builtins = set()
         self._module_bind_line = {}
-        # The scope model the alias question is read off: which table
-        # encloses which, which names each binds of its own, what each one
-        # bound from `builtins` and under which name, and whether that
-        # statement runs every time the scope does.
+        # The scope model the alias question is read off: enclosure, local
+        # names, `from builtins` aliases, and whether each import has run.
         self._enclosing = {}
         self._local = {}
         self._alias = {}
         self._uncertain = {}
         # The names a NESTED scope rebinds in the MODULE, read off the
-        # resolver's own tables before the walk rather than off the nodes it
-        # walks. `symtable` is the compiler's answer to "does this scope bind
-        # this name", and it is an answer about every binding form rather than
-        # about the ones an AST walk enumerates — see `_rebindings`.
+        # resolver's tables — `_rebindings` owns the why.
         self._rebound = self._rebindings()
         # How far into each table's children the walk has read. The resolver
         # builds them in source order, and so does this walk EXCEPT that a
@@ -127,10 +120,9 @@ class _Scopes:
         the reason it never needed to be: the resolver reports the ENCLOSING
         function's own symbol as assigned.
 
-        The cost is one name set with no scope on it, so a module-level use
-        standing ABOVE a rebinding is refused where the runtime reaches. That
-        is this walk's cheap direction, and it is bounded: only a name some
-        nested scope binds is in it.
+        The cost is one name set: a module-level use standing ABOVE a
+        rebinding is refused where the runtime reaches — this walk's cheap
+        direction, bounded to names some nested scope binds.
         """
         rebound = set()
         pending = list(self._root.get_children())
@@ -207,8 +199,7 @@ class _Scopes:
         if uncertain:
             self._uncertain[id(node)] = True
         if table is self._root:
-            # Only module-scope forms count; a nested function or
-            # comprehension body is its own scope and is not walked as root.
+            # Only module-scope forms count.
             self._record_module_binding(node)
         if isinstance(node, ast.ImportFrom) and node.module == 'builtins' \
                 and not node.level:
@@ -231,11 +222,10 @@ class _Scopes:
             else:
                 uncertain = uncertain or missed
         inside = guarded or isinstance(node, _GUARDED)
-        # Python evaluates a comprehension's FIRST iterable in the scope that
-        # ENCLOSES it and every other part inside its own, so the iterable is
-        # walked where the runtime reads it. A DECORATOR is the same: it runs
-        # where the `def` it decorates is written, and the function's own
-        # scope does not exist while its decorators are evaluated.
+        # A comprehension's FIRST iterable and a `def`'s decorators run in
+        # the scope that ENCLOSES them (the function's own scope does not
+        # exist while its decorators evaluate), so those children are walked
+        # where the runtime reads them.
         outside = {id(node.generators[0].iter)} \
             if isinstance(node, _COMPREHENSIONS) else set()
         outside.update(id(decorator)
@@ -303,9 +293,6 @@ class _Scopes:
         bound = self._alias.get(id(owner), {}).get(node.id)
         if bound is None or bound[0] != name:
             return False
-        # The binding has to have RUN by the time the name is read: a
-        # statement the module may skip leaves the name unbound, and one
-        # ordered after the use has not run either. Neither is a builtin.
         return not bound[2] and node.lineno >= bound[1]
 
     def _is_the_import(self, table, name):
@@ -358,9 +345,6 @@ class _Scopes:
                 node.id, float('inf'))
         if symbol.is_local() or symbol.is_free():
             return False
-        # A reference inside a function runs after the module has loaded, so
-        # any module binding shadows it and order is irrelevant there — with
-        # the one exception, which is a binding that is not a shadow at all.
         if node.id not in self._root_binds:
             return True
         return self._binds_itself(node.id)
