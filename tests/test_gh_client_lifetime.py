@@ -14,10 +14,10 @@ The platform arms are not faked: `os.name` is never patched, because
 patching it would claim a runtime this run is not. The coverage matrix
 unions the three platforms, so a row written for the platform it runs
 on measures the `nt` arms there and the POSIX arms here; what the
-Windows half cannot see is stated in the PR body, not papered over. One
-row reaches inside the module: the two refusals `watch_parent` makes
-before it starts anything, a direct call because a thread that reached
-`os._exit` from inside would take the suite down with it.
+Windows half cannot see is stated in the PR body, not papered over. Five
+rows reach inside the module, direct calls - a stray `os._exit` here
+takes the suite down: the `watch_parent` refusals and the four ending
+rows on `_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`.
 """
 import errno
 import os
