@@ -223,12 +223,14 @@ def save(path, store):
     if os.path.exists(entry):
         return _refuse(f'{path} already has a stored copy at {entry}; '
                        f'{_entry_advice(path, entry)}')
+    created = False
     try:
         with open(path, 'rb') as handle:
             payload = handle.read()
         mode = stat.S_IMODE(os.stat(path).st_mode)
         state = _head_state(path)
         os.makedirs(entry)
+        created = True
         _publish(os.path.join(entry, 'bytes'), payload)
         _publish(os.path.join(entry, 'mode'), f'{mode:o}\n'.encode('ascii'))
         _publish(os.path.join(entry, 'path'),
@@ -239,10 +241,10 @@ def save(path, store):
         _publish(os.path.join(entry, 'head-state'),
                  f'{state}\n'.encode('ascii'))
     except OSError as why:
-        # The entry here, if any, is this attempt's own: the guard above
-        # refuses a path that already has one, so removing it cannot
-        # destroy an earlier copy.
-        if _remove_entry(entry):
+        # Only an entry this attempt created is removed: a raced second
+        # save can pass the guard above and lose at makedirs, and the
+        # entry there is the first save's complete copy.
+        if created and _remove_entry(entry):
             return _refuse(f'cannot save {path}: {why}; the half-built '
                            f'entry is still at {entry}')
         return _refuse(f'cannot save {path}: {why}')
