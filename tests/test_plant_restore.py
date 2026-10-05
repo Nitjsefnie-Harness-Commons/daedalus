@@ -293,6 +293,7 @@ def test_a_failed_field_write_leaves_no_entry_behind(tmp):
         real_publish(field, payload)
 
     entry = Path(plant._entry(str(store), str(target)))
+    residue = f'still at {entry}'
     err = io.StringIO()
     with mock.patch.object(plant, '_publish', full_disk), \
             mock.patch.object(plant, '_remove_entry', lambda name: 1), \
@@ -304,15 +305,19 @@ def test_a_failed_field_write_leaves_no_entry_behind(tmp):
     # The original failure stays the cause, the residue the addition.
     assert f'cannot save {target}' in said, said
     assert 'No space left on device' in said, said
-    assert f'still at {entry}' in said, said
+    assert residue in said, said
     assert entry.is_dir(), 'the composed refusal left the residue'
     shutil.rmtree(entry)
 
+    err = io.StringIO()
     with mock.patch.object(plant, '_publish', full_disk), \
             contextlib.redirect_stderr(err), \
             contextlib.redirect_stdout(io.StringIO()):
         assert plant.save(str(target), str(store)) == 1
+    said = err.getvalue()
     assert not entry.exists(), 'the working cleanup left the residue'
+    # Cleanup succeeded, so the refusal names no residue that is gone.
+    assert residue not in said, said
     assert _run_plant('save', str(target), '--store',
                       str(store)).returncode == 0
 
@@ -372,11 +377,7 @@ def test_the_control_catches_a_publish_that_is_not_atomic(tmp):
 
 
 def test_restore_returns_the_mode_it_recorded(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    target.chmod(RECORDED_MODE)
-    saved = _run_plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
+    target, store = _saved_pair(tmp, chmod=RECORDED_MODE)
     target.chmod(0o600)
     restored = _run_plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
@@ -390,11 +391,7 @@ def test_restore_returns_the_mode_it_recorded(tmp):
 
 
 def test_restore_returns_a_target_that_was_saved_read_only(tmp):
-    target = _committed_repo(tmp)
-    store = Path(tmp) / 'store'
-    target.chmod(0o444)
-    saved = _run_plant('save', str(target), '--store', str(store))
-    assert saved.returncode == 0, _say(saved)
+    target, store = _saved_pair(tmp, chmod=0o444)
     if hasattr(os, 'geteuid') and os.geteuid() == 0:
         try:
             _open_the_entry(store, target)
