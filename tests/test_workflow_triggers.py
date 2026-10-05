@@ -535,42 +535,18 @@ def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
     }, f'scorecard concurrency: {concurrency!r}'
 
 
-def test_tests_concurrency_scopes_runs_per_commit_and_per_pull(tmp):
-    """A landed main SHA's tests verdict must complete: push and dispatch
-    runs group by commit SHA, so neither a newer push nor a re-run of an
-    older SHA cancels another commit's in-flight run (issue 1547), while a
-    pull request keeps one group per number so a superseded head push is
-    still cancelled. The `queue` key is not expressible here; the vendored
-    actionlint build rejects it."""
-    del tmp
-    tests = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    concurrency = workflow_mapping(tests).get('concurrency')
-    assert concurrency == {
-        'group':
-        'tests-${{ github.event.pull_request.number || github.sha }}',
-        'cancel-in-progress': 'true',
-    }, f'tests concurrency: {concurrency!r}'
-
-
 def test_concurrency_groups_scope_per_commit_and_per_pull(tmp):
-    """Runs without a pull-request number — push, dispatch, schedule —
-    group per commit, so a newer push cannot cancel a landed main SHA's
-    in-flight verdict, and a pull request groups per number, so a
-    superseded head push is still cancelled (issue 1579)."""
+    """Runs without a pull-request number group per commit, so a newer
+    push cannot cancel a landed main SHA's in-flight verdict; a pull
+    request groups per number, so a superseded head push is still
+    cancelled — tests.yml under issue 1547, the rest under issue 1579 —
+    and the `queue` key stays inexpressible (vendored actionlint)."""
     del tmp
-    groups = {
-        'audit.yml': 'audit',
-        'codeql.yml': 'codeql',
-        'gate-freshness.yml': 'gate-freshness',
-        'secrets.yml': 'secrets',
-        'tests.yml': 'tests',
-        'version.yml': 'version',
-    }
-    for name, prefix in sorted(groups.items()):
+    for name in ('audit.yml', 'codeql.yml', 'gate-freshness.yml',
+                 'secrets.yml', 'tests.yml', 'version.yml'):
         workflow = (ROOT / '.github' / 'workflows' / name).read_text(
             encoding='utf-8')
-        group = (prefix + '-${{ github.event.pull_request.number'
+        group = (name[:-4] + '-${{ github.event.pull_request.number'
                  ' || github.sha }}')
         concurrency = workflow_mapping(workflow).get('concurrency')
         assert concurrency == {
