@@ -1,4 +1,4 @@
-"""JavaScript property-key values shared by routing analysis."""
+"""JavaScript string-literal decoding for the console-argument policy."""
 import re
 
 
