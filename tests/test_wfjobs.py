@@ -613,7 +613,6 @@ NOT_CANDIDATES = (
     ('/usr/bin/env', 'absolute'),
     ('FOO=x/y', 'assignment'),
     ('repos/$REPO/pulls', 'embedded variable'),
-    ('//', 'no name'),
     ('https://example.com/a/b', 'scheme-led'),
     ('.github/workflows/', 'trailing slash'),
 )

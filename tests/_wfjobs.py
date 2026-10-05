@@ -78,7 +78,7 @@ _RUN_PATH_TOKEN = re.compile(r'^[A-Za-z0-9_./-]*$')
 
 
 def run_path_candidates(run_text):
-    """Every repo-relative path a decoded `run:` text names.
+    """The repo-relative path candidates a decoded `run:` text carries.
 
     The grammar: whitespace tokens, stripped of edge `"` `'` `(` `)` `;` `,`,
     are candidates when every character is a letter, digit, underscore,
