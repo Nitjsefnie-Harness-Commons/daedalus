@@ -8,8 +8,8 @@ the name or a non-attribute store is refused; an augmented attribute target
 is read-checked; a del is refused; a store never satisfies a read.
 A frame read is refused in every statement of every daedalus_cli module
 the walk reaches, and every member of the interpreter's frame set, not
-only the ones this file names. A read in a helper a handler calls is in that
-domain; a read in a module the walk does not reach is not. Aliases follow
+only the ones this file names. A read in a helper a handler calls is in
+that domain; one in a module the walk does not reach is not. Aliases follow
 prefixes; headers use outer scope. Other parameters escape."""
 import argparse
 import ast
@@ -126,11 +126,10 @@ def _origin(node, function, handler_globals):
 def _frame_escapes(node, scope, handler_globals, key, label, found):
     """Report every frame read under a node, wherever the node sits.
 
-    Applied in two places, one per walk, and each is pinned: removing this
-    copy or the inline one reds four controls apiece — what holds the two
-    copies to one rule. ``scope`` is the innermost callable enclosing the
-    node, or the module — what a name resolves against, changed with the
-    label on entering a callable.
+    Applied in two places, one per walk, each pinned: removing either
+    copy reds four controls apiece — what holds the two copies to one
+    rule. ``scope`` is the innermost callable enclosing the node, or the
+    module, and is what a name resolves against.
     """
     context = (scope, handler_globals, _scope_binds,
                _comprehension_shadows)
@@ -248,11 +247,10 @@ def _package_roots(tree):
 
 
 def audited_namespace_key():
-    """The name the audited namespace is stored under, read off the handlers.
-
-    The handler walk derives it from each handler's own AST; this reads the
-    same name from the dispatch table; a disagreement is raised in the
-    whole-tree test.
+    """The name the audited namespace is stored under, read off the
+    handlers: the handler walk derives it from each handler's own AST,
+    this reads it from the dispatch table, and a disagreement is raised
+    in the whole-tree test.
     """
     from daedalus_cli.cli import DISPATCH
     names = {next(iter(inspect.signature(handler).parameters))
@@ -264,8 +262,7 @@ def package_frame_escapes(overrides=None, extra_globals=None):
     """Refuse a frame read anywhere in the CLI package, helper included.
 
     The domain is the package, so a read in a helper a handler calls is
-    refused even when the handler names no frame; the reflective branch is
-    per handler and stops at the callable boundary. Names ``overrides`` adds
+    refused even when the handler names no frame. Names ``overrides`` adds
     stay unproven — what the rule refuses; ``extra_globals`` adds a binding
     altered source cannot hold.
     """
@@ -567,9 +564,9 @@ def test_cli_audit_refuses_a_resolved_frame_receiver(tmp):
         package_frame_escapes, base, sys._getframe())
 
 
-def test_cli_audit_accepts_a_real_call_naming_the_namespace_key(tmp):
+def test_cli_audit_admits_negative_call_shapes(tmp):
     base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
-    audit_support.assert_namespace_key_call_accepted(
+    audit_support.assert_admitted_call_shapes(
         package_frame_escapes, base)
 
 

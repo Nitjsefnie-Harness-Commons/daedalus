@@ -1,11 +1,11 @@
 """Resolver tables and isolated CLI dispatch controls; the namespace-storage
 contract is stated in test_cli_arg_audit.py's own docstring.
 FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
-namespace, planted into a real module and read one per row here; they are
-plants, not the rule's inputs — the rule answers once, from the member set
-read off types.FrameType. Three rows are each the sole plant that dies
-with one arm — the callee that is itself a call, the starred expansion,
-and the getattr whose name is an expression; removing any arm reds
+namespace, planted into a real module and read one per row; they are
+plants, not the rule's inputs — the rule answers once, from the member
+set read off types.FrameType. Three rows are each the sole plant dying with
+one arm — the callee that is itself a call, the starred expansion, and
+the getattr whose name is an expression; removing any arm reds
 test_cli_audit_refuses_every_frame_namespace_plant on its row. The
 unreadable-subscript arm is pinned on both sides: four rows are the sole
 catchers of its refusal, and the real tree reds on the eleven correct
@@ -426,10 +426,9 @@ def plant_in_reload(base, replacement, prelude=''):
 
 
 def assert_every_frame_namespace_plant_refused(read_module, base):
-    """Each plant, spliced into the real handler module, is refused once.
-
-    The plants run through the real package walk, not a synthetic tree, so
-    a fixture-only rule cannot pass this.
+    """Each plant, spliced into the real handler module, is refused once
+    — the plants run through the real package walk, not a synthetic tree,
+    so a fixture-only rule cannot pass this.
     """
     for name, prelude, _anchor, replacement, receiver in \
             FRAME_NAMESPACE_PLANTS:
@@ -443,8 +442,8 @@ def assert_domain_covers_a_second_module(read_module, package):
     """A frame read in a module other than the handler's is refused.
 
     Every other plant splices into the handler's own module, so a walk
-    narrowed to it satisfies all of them; this module holds no handler, so
-    the plant can only be catching the walk's coverage.
+    narrowed to it satisfies all of them; this handler-less module can
+    only be caught by the walk's coverage.
     """
     source = (package / 'transport.py').read_text(encoding='utf-8')
     anchor = 'def token():\n'
@@ -458,9 +457,8 @@ def assert_domain_covers_a_second_module(read_module, package):
 
 
 def assert_every_frame_member_refused(read_module, base):
-    """Each member types.FrameType carries, planted, is refused once.
-
-    The member list is this module's own reading of the interpreter, so a
+    """Each member types.FrameType carries, planted, is refused once —
+    the member list is this module's own reading of the interpreter, so a
     short literal derivation fails here on the members lost.
     """
     for member in FRAME_MEMBERS:
@@ -471,15 +469,11 @@ def assert_every_frame_member_refused(read_module, base):
         assert escapes == [expected], (member, escapes)
 
 
-def assert_namespace_key_call_accepted(read_module, base):
-    """A call naming the namespace key is a path, not a read.
-
-    The negative control on the tree the guard runs over: 131 calls in the
-    CLI pass a constant string as a second argument and the call arm has to
-    leave every one of them alone. Two receivers, exempt by different
-    rules; only the second exercises the arm's member test, a literal
-    receiver being decided by the origin resolver; the other-dunder row
-    pins the dunder equality against its cheaper prefix readings.
+def assert_admitted_call_shapes(read_module, base):
+    """Call shapes the arm admits, one row each: the 131 constant-
+    second-argument CLI calls stay out of the answer; the other-dunder
+    row pins the dunder equality, the shadowed-object row the protocol
+    store's veto, which keeps the callee unproven.
     """
     shapes = {
         'literal receiver, namespace key':
@@ -492,7 +486,12 @@ def assert_namespace_key_call_accepted(read_module, base):
         'unproven receiver, a frame member':
             "def do_reload(args):\n    send('t', 'f_code')\n",
         'other dunder, unproven receiver':
-            "def do_reload(args):\n    _ = UNSEEN.__len__(member)\n"}
+            "def do_reload(args):\n    _ = UNSEEN.__len__(member)\n",
+        'shadowed object, aliased protocol':
+            'def do_reload(args):\n    object = type\n'
+            "    getattr = object.__getattribute__\n"
+            "    _ = getattr(sys._getframe(), 'f_' + 'locals')"
+            ".get('args').undeclared_probe\n"}
     for name, body in shapes.items():
         escapes = read_module({'commands_eval': plant_in_reload(base, body)})
         assert escapes == [], (name, escapes)

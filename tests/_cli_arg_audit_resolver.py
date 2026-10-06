@@ -1,8 +1,8 @@
 """Static argparse, builtin-identity, and origin helpers. The DECLARED and
 GUARANTEED storage contract lives in test_cli_arg_audit.py's own docstring.
 An origin the audit can see is a module-level name, a literal, or an
-attribute of such a value; a locally bound name is unproven, and unproven
-is the refusal. A frame read is refused when the audit cannot see its
+attribute of such a value; a locally bound name is unproven, and
+unproven refuses. A frame read is refused when the audit cannot see its
 receiver; ``frame_read`` and ``reads_frame_namespace`` own that rule."""
 import argparse
 import ast
@@ -182,9 +182,12 @@ def _update_builtin_bindings(statement, bindings, handler_globals,
         _statement_binding_writes(statement)
     for name in names:
         bindings[name] = unresolved
+    # a local ``object`` rebind makes the spelled value unprovable — the
+    # alias may name the shadow's __getattribute__; the value is withheld
+    # and the callee stays unproven rather than refused.
     if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
             and isinstance(statement.targets[0], ast.Name)
-            and _protocol_value(statement.value)
+            and _is_object_getattribute(statement.value)
             and not scope_binds(function, 'object')):
         bindings[statement.targets[0].id] = object.__getattribute__
     for name in module_names:
@@ -294,11 +297,17 @@ def _static_attribute(base, attribute, unresolved):
             base.__dict__.get(attribute, unresolved))
 
 
-def _protocol_value(node):
+def _is_object_getattribute(node):
     return (isinstance(node, ast.Attribute)
             and node.attr == '__getattribute__'
             and isinstance(node.value, ast.Name)
             and node.value.id == 'object')
+
+
+def _bound_protocol_call(call):
+    # one-argument ``x.__getattribute__(name)``: the receiver is func.value
+    return (len(call.args) == 1 and isinstance(call.func, ast.Attribute)
+            and call.func.attr == '__getattribute__')
 
 
 def resolve_origin(node, function, handler_globals, unresolved, scope_binds,
@@ -309,9 +318,8 @@ def resolve_origin(node, function, handler_globals, unresolved, scope_binds,
     then through the scope it reads; an attribute resolves through a base
     it has already resolved; a literal resolves to itself. Every other
     expression is unproven, its value produced by running code the audit
-    does not run. A literal receiver is the cheap half of the frame rule's
-    selectivity — refusing one would refuse the CLI's own
-    ``api('GET', path)`` calls.
+    does not run. A literal receiver is the frame rule's cheap half —
+    refusing one would refuse the CLI's own ``api('GET', path)`` calls.
     """
     if isinstance(node, ast.Constant):
         return node.value
@@ -461,26 +469,23 @@ def frame_read(node, namespace_key, *context):
 
 
 def selection_base(selection):
-    """The value a member selection is made from — what has to be a frame.
-
-    A one-argument ``__getattribute__`` call is the bound spelling and
-    selects from the object the dunder is read from; every other call
-    selection takes its first argument.
+    """The value a member selection is made from — what has to be a
+    frame: a one-argument ``__getattribute__`` call selects from the
+    object the dunder is read from, every other call selection takes its
+    first argument.
     """
     if isinstance(selection, ast.Call):
-        func = selection.func
-        if (len(selection.args) == 1 and isinstance(func, ast.Attribute)
-                and func.attr == '__getattribute__'):
-            return func.value
+        if _bound_protocol_call(selection):
+            return selection.func.value
         return selection.args[0] if selection.args else selection.func
     return selection.value
 
 
 def _subscript_read(node, namespace_key):
-    """A subscript names a member by its key; an unreadable key names one
-    too. A constant the audit can read is decided, a range or tuple key is
-    a position rather than a name, and an expression is a member the
-    source does not spell.
+    """A subscript names a member by its key; an unreadable key names
+    one too — a constant the audit can read is decided, a range or tuple
+    key is a position, and an expression is a member the source does not
+    spell.
     """
     if isinstance(node.slice, ast.Constant):
         key = constant_string(node.slice)
@@ -508,13 +513,13 @@ def _call_read(node, function, handler_globals, scope_binds,
     cannot see, and a proven builtin ``getattr`` or attribute-protocol
     callee whose name is an expression selects what the source does not
     spell; a one-argument visible-callee call is not a selection —
-    ``value.lower()``, ``res.get('result', [])`` stay out. The protocol
-    proof admits exactly three spellings — the bound
+    ``value.lower()``, ``res.get('result', [])`` stay out of it. The
+    protocol proof admits three spellings — the bound
     ``x.__getattribute__``, proven by the dunder name itself; the unbound
     ``object.__getattribute__``, whose base is proven through the
     builtin-reference machinery; and a callee name the builtin table binds
-    to it, the alias — refusing an unreadable name argument exactly as
-    builtin getattr does.
+    to it, the alias, refusing an unreadable name argument as builtin
+    getattr does.
     """
     visible = [argument for argument in node.args
                if isinstance(argument, ast.Constant)
@@ -530,13 +535,13 @@ def _call_read(node, function, handler_globals, scope_binds,
     if node.keywords or not node.args or isinstance(
             node.args[-1], ast.Constant):
         return None
+    if _bound_protocol_call(node):
+        return node
     func = node.func
     if isinstance(func, ast.Attribute) \
             and func.attr == '__getattribute__':
-        if len(node.args) == 1:
-            return node
-        return node if (_protocol_value(func) and len(node.args) == 2
-                        and is_builtin_reference(
+        return node if (_is_object_getattribute(func)
+                        and len(node.args) == 2 and is_builtin_reference(
                             func.value, 'object', function, handler_globals,
                             scope_binds, comprehension_shadows)) else None
     return node if (isinstance(func, ast.Name) and len(node.args) == 2
@@ -555,8 +560,8 @@ def reads_frame_namespace(selection, origin):
 
     ``selection`` is the expression a reader has to look at; ``origin`` is
     what the audit can see the receiver to be, or ``UNPROVEN`` — a live
-    frame refuses on the frame's own account, the one case a name the audit
-    CAN see still has to refuse. The selection is returned because the
+    frame refuses on the frame's own account, the one case a name the
+    audit CAN see still refuses. The selection is returned because the
     receiver's position is the callee's to choose.
     """
     if origin is not UNPROVEN and not isinstance(origin, types.FrameType):
@@ -565,9 +570,8 @@ def reads_frame_namespace(selection, origin):
 
 
 def assert_exact_module_vars():
-    """A module attribute is the one attribute the audit can see through.
-
-    Drives ``resolve_origin`` on a real attribute of a real module, so a
+    """A module attribute is the one attribute the audit can see through
+    — drives ``resolve_origin`` on a real attribute of a real module, so a
     resolver that stopped reading modules fails here rather than widening
     every attribute.
     """
