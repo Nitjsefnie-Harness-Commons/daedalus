@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mcp_load  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -108,6 +109,39 @@ def test_closing_every_client_cleanly_returns_normally(tmp):
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='mcptransportclose_')
+
+
+def test_mcp_lifespan_closes_loop_clients(tmp):
+    """The MCP app closes bridge clients when its own lifespan shuts down."""
+    del tmp
+    _mcp_load._need_deps()
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
+    app_box = {}
+    original_factory = mod.mcp.streamable_http_app
+
+    def capture_app(**settings):
+        app_box['value'] = original_factory(**settings)
+        return app_box['value']
+
+    mod.mcp.streamable_http_app = capture_app
+
+    handed, banner, _built = _mcp_load._serve_with_fake_uvicorn(mod)
+    for server_socket in handed:
+        server_socket.close()
+    mod.mcp.streamable_http_app = original_factory
+
+    assert not mod.startup_error, mod.startup_error
+    assert f'127.0.0.1:{mod.bound_port}' in banner, banner
+    app = app_box['value']
+
+    async def drive_lifespan():
+        loop = asyncio.get_running_loop()
+        async with app.router.lifespan_context(app):
+            mod.BridgeTransport('http://127.0.0.1:1').client()
+            assert len(mod.BridgeTransport.clients[loop]) == 1
+        return not mod.BridgeTransport.clients.get(loop)
+
+    assert asyncio.run(drive_lifespan())
 
 
 if __name__ == '__main__':

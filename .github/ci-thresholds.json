@@ -11,12 +11,10 @@
     }
   },
   "module_size_baseline": {
-    "tests/test_mcp_server.py": 1487
   },
   "long_line_baseline": {
     "scripts/check_versions.py": 9,
     "tests/test_bridge_startup.py": 2,
-    "tests/test_mcp_server.py": 16,
     "tests/test_segment_jobs.py": 14,
     "tests/test_version_contract.py": 20
   },
@@ -58,7 +56,6 @@
     "tests/test_line_lengths.py": 6,
     "tests/test_mcp_entry_point.py": 1,
     "tests/test_mcp_guard_floor.py": 4,
-    "tests/test_mcp_server.py": 4,
     "tests/test_mcp_transport_close.py": 1,
     "tests/test_parent_watch.py": 5,
     "tests/test_real_browser_harness.py": 6,

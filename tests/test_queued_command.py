@@ -247,38 +247,49 @@ def test_mcp_suite_has_no_json_loads_of_read_text_results(tmp):
     `json.load(path.open())` remains outside its scope.
     """
     del tmp
-    source_path = Path(__file__).with_name('test_mcp_server.py')
-    tree = ast.parse(source_path.read_text(encoding='utf-8'))
-    scope_by_node = _scope_map(tree)
-    assigned_reads = {
-        (scope_by_node[assignment], target.id)
-        for assignment in ast.walk(tree)
-        if (isinstance(assignment, ast.Assign)
-            and isinstance(assignment.value, ast.Call)
-            and isinstance(assignment.value.func, ast.Attribute)
-            and assignment.value.func.attr == 'read_text')
-        for target in assignment.targets
-        if isinstance(target, ast.Name)
-    }
+    successors = (
+        'test_mcp_server_load.py',
+        'test_mcp_server_serve.py',
+        'test_mcp_server_config.py',
+        'test_mcp_live_port.py',
+        'test_mcp_path_authority.py',
+        'test_mcp_auth.py',
+        'test_mcp_live_tools.py',
+        'test_mcp_transport_close.py',
+    )
     violations = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == 'loads'
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == 'json'):
-            continue
-        nested_read = any(
-            isinstance(child, ast.Call)
-            and isinstance(child.func, ast.Attribute)
-            and child.func.attr == 'read_text'
-            for argument in node.args for child in ast.walk(argument))
-        assigned_read = any(
-            isinstance(argument, ast.Name)
-            and (scope_by_node[node], argument.id) in assigned_reads
-            for argument in node.args)
-        if nested_read or assigned_read:
-            violations.append(node.lineno)
+    for name in successors:
+        source_path = Path(__file__).with_name(name)
+        tree = ast.parse(source_path.read_text(encoding='utf-8'))
+        scope_by_node = _scope_map(tree)
+        assigned_reads = {
+            (scope_by_node[assignment], target.id)
+            for assignment in ast.walk(tree)
+            if (isinstance(assignment, ast.Assign)
+                and isinstance(assignment.value, ast.Call)
+                and isinstance(assignment.value.func, ast.Attribute)
+                and assignment.value.func.attr == 'read_text')
+            for target in assignment.targets
+            if isinstance(target, ast.Name)
+        }
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'loads'
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == 'json'):
+                continue
+            nested_read = any(
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr == 'read_text'
+                for argument in node.args for child in ast.walk(argument))
+            assigned_read = any(
+                isinstance(argument, ast.Name)
+                and (scope_by_node[node], argument.id) in assigned_reads
+                for argument in node.args)
+            if nested_read or assigned_read:
+                violations.append((name, node.lineno))
     assert not violations, (
         'MCP suite json.loads calls must not consume read_text results; '
         'json.load(path.open()) is outside this syntactic rule: '

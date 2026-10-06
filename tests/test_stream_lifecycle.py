@@ -158,7 +158,7 @@ def test_an_mcp_bind_crash_surfaces_in_the_health_payload(tmp):
     one. The squatted port is the issue's own repro, and the squatter
     carries no SO_REUSEADDR: on Windows that flag would let the child's own
     bind coexist with it and the injected crash never happens — the shape
-    the collision test in tests/test_mcp_server.py pins.
+    the collision test in tests/test_mcp_server_serve.py pins.
     """
     if not all(importlib.util.find_spec(name) is not None
                for name in ('httpx', 'mcp', 'starlette')):

@@ -576,12 +576,16 @@
 !/tests/test_mcp_guard_floor.py
 !/tests/test_mcp_hotfix_scope.py
 !/tests/test_mcp_import_refusals.py
+!/tests/test_mcp_live_port.py
 !/tests/test_mcp_live_tools.py
+!/tests/test_mcp_path_authority.py
 !/tests/test_mcp_poll_matching.py
 !/tests/test_mcp_poll_pause.py
 !/tests/test_mcp_probe.py
 !/tests/test_mcp_refusal_drain.py
-!/tests/test_mcp_server.py
+!/tests/test_mcp_server_config.py
+!/tests/test_mcp_server_load.py
+!/tests/test_mcp_server_serve.py
 !/tests/test_mcp_tools.py
 !/tests/test_mcp_transport.py
 !/tests/test_mcp_transport_close.py
