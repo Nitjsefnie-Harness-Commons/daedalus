@@ -273,6 +273,7 @@
 # ─── tests ───
 !/tests/
 !/tests/_actionlint.py
+!/tests/_block_field_probes.py
 !/tests/_boundary.py
 !/tests/_boundary_env.py
 !/tests/_boundary_scenarios.py

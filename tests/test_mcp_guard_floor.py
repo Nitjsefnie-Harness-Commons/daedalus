@@ -35,9 +35,8 @@ def test_the_guard_scan_reads_every_raise_shape_the_tools_use(_tmp):
 def test_the_witness_names_the_innermost_raise_site(_tmp):
     """The innermost scanned raise site on the traceback is the one credited.
 
-    The middle call shares its line with a scanned raise, making that line a
-    site the walk meets: stopping at the first match would credit a raise
-    that never fired.
+    The middle call shares its line with a scanned raise: stopping at the
+    first match would credit a raise that never fired.
     """
     sites, module = _mcp_guard_floor.guard_shape_probe(
         _tmp, _mcp_guard_floor.SELECT_SHAPES, 'select_shapes')
@@ -65,8 +64,7 @@ def test_two_sites_spelling_one_condition_are_refused(_tmp):
 
     The two handlers below raise the same message, so their site keys spell
     one condition text in one (module, function); the scan refuses them
-    instead of silently merging, and the remedy is distinct messages — the
-    text key, where the message is the whole of what distinguishes the two.
+    rather than silently merging.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(
@@ -93,9 +91,9 @@ def twin(value):
 def test_two_sites_under_one_predicate_name_a_remedy_that_moves_the_key(_tmp):
     """Two sites the predicate keys name the remedy the predicate can take.
 
-    The bare re-raise carries no message, so a text key could only be
-    restored by distinct messages, which it cannot be given. The refusal
-    fires only while it takes the `if`'s key, so this dies with that clause.
+    The bare re-raise carries no message, so a text key cannot be restored;
+    the refusal fires only while it takes the `if`'s key, so this dies with
+    that clause.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(
@@ -121,10 +119,8 @@ def armed(first, second):
 def test_a_reached_or_guard_is_refused(_tmp):
     """A raise a tool reaches refuses on one condition only.
 
-    The unit of witnessing is the raise site, so a guard whose test is an
-    `or` of two conditions is refused rather than witnessed: the remedy is
-    one raise per condition, because one witness cannot answer for two
-    conditions on one line.
+    The unit of witnessing is the raise site, so an `or` of two conditions
+    is refused rather than witnessed.
     """
     sites, module = _mcp_guard_floor.guard_shape_probe(
         _tmp, OR_SHAPES, 'or_shapes')
@@ -354,10 +350,9 @@ def blocked(values):
 def test_every_transparent_statement_is_pinned_by_its_own_plant(_tmp):
     """Each entry the walk is transparent through is a control, not a name.
 
-    The same source is read twice: shipped, where the whole site is the
-    surrounding `if`'s — key and `or` test, the loops' iterables carrying
-    an `or` of their own that is not read — and with its own entry gone,
-    where the walk can no longer classify it and refuses.
+    The same source is read twice: shipped, where the site is the
+    surrounding `if`'s, and with its own entry gone, where the walk can no
+    longer classify it and refuses.
     """
     for name, source in TRANSPARENT_SOURCES.items():
         path = Path(_tmp) / f'{name.lower()}_shapes.py'
@@ -407,10 +402,8 @@ def twin(value):
 def test_two_raises_on_one_line_are_refused(_tmp):
     """A traceback names the line, not the statement.
 
-    The two raises are unguarded and spell distinct messages, so sharing one
-    physical line is the only shape at fault. The remedy names no further
-    requirement: asking each raise for a condition of its own would change
-    when these two fire.
+    The two raises are unguarded and spell distinct messages, so sharing
+    one physical line is the only shape at fault.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(_tmp, TWIN_SHAPES, 'twin_shapes')
@@ -438,8 +431,7 @@ def test_a_module_global_helper_site_is_reached(_tmp):
     """A tool reaches a guard through a module-global function.
 
     A guard moved into a module-global helper stays on the tool's reach;
-    otherwise the ordinary refactor could declare it off-surface and have
-    its pins deleted, with no refusal case.
+    otherwise the ordinary refactor could declare it off-surface.
     """
     sites, module = _mcp_guard_floor.guard_shape_probe(
         _tmp, HELPER_TREE, 'helper_tree')
@@ -549,10 +541,9 @@ def test_a_guard_outside_the_tool_surface_is_not_covered_by_reachability(_tmp):
 def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     """A citation is data, so a renamed or deleted test goes red here.
 
-    The assertion on the real table alone would pass vacuously the moment
-    the check behind it broke, so the negative controls feed it tables
-    that must be reported: a function absent from a real suite, and a
-    suite path that does not exist.
+    The real-table assertion alone would pass vacuously the moment the
+    check behind it broke, so the negative controls feed it tables that
+    must be reported.
     """
     del _tmp
     assert _mcp_guard_floor.missing_citations(
@@ -608,8 +599,7 @@ def test_a_stated_gap_is_data_the_suite_holds_true(_tmp):
     """The stated-gap class is data, and the data is held both ways.
 
     Retiring a citation to None is the polite deletion, so None is not
-    free: a None row no STATED_GAPS entry covers reports, and a
-    STATED_GAPS entry whose row cites a test or is gone reports as stale.
+    free: an uncovered None row reports, and a stale entry reports.
     """
     del _tmp
     unaccounted = ('m', 'f', 'c', None)

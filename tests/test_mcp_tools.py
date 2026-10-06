@@ -197,11 +197,9 @@ def test_every_registered_tool_keeps_its_own_bridge(_tmp):
 
     All registered tools run once on the harness-selected paths, including
     ``screenshot(include_image=True)``. The first bridge must have no weak
-    alias, and its observation weak reference must be cleared after collection.
-    The check cannot see independently usable derivatives, such as a cached
-    authentication dictionary or a copied bridge. Cyclic finalization can
-    resurrect the bridge after clearing that weak reference, so the assertion
-    establishes only that the observation weak reference was cleared.
+    alias, and its observation weak reference must be cleared after
+    collection; cyclic finalization can resurrect the bridge after that, so
+    the assertion establishes only the clearing.
     """
     first_composition = _load_composition('first')
     assert hasattr(first_composition, 'tool_module_inventory'), (
@@ -252,14 +250,9 @@ def test_screenshot_default_returns_metadata_without_fetching_image(_tmp):
 def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
     """No registered tool lexically reaches composition-authored behavior.
 
-    The check follows the callable's own and nested code, functions in closure
-    cells, direct function-valued positional and keyword defaults,
-    ``__wrapped__`` links, and module-level functions its code names in its
-    own module globals. Functions held inside default containers are outside
-    the property, as are composition-authored functions found dynamically at
-    call time through module attributes, ``getattr``, or
-    dictionaries. Code objects with deliberately forged origins are also
-    outside the property.
+    The check follows the callable's own and nested code, functions in
+    closure cells, direct function-valued defaults, ``__wrapped__`` links,
+    and module-level functions its code names in its own module globals.
     """
     composition = _load_composition('composition-origin')
     composition_path = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
@@ -505,17 +498,13 @@ def test_a_ping_that_does_not_wait_reports_its_command(_tmp):
     """The eval answer shape, on `ping`'s own put-and-poll.
 
     `exec` reaches its command through `_send_eval` and the typed tools
-    through `ext_cmd`, so a hand-reconstructed command on either is caught.
-    `ping` owns neither: it puts and polls inline, and wave 1 gave it `wait`
-    on its own. A reconstruction there survives every other case in the tree,
-    so the shape is pinned here too.
+    through `ext_cmd`, so a hand-reconstructed command on either is caught;
+    `ping` owns neither, so the shape is pinned here too.
     """
     composition = _load_composition(_mcp_tool_commands.MARKER)
-    # The bridge answers with the QUEUE FILE's content, which is the
-    # submitted body without the routing `tab` and with the bridge's own
-    # stamp. A tool that rebuilt the command from what it sent would have
-    # to invent both, so this answer is the one shape a reconstruction
-    # cannot produce.
+    # The bridge answers with the QUEUE FILE's content: the submitted body
+    # without the routing `tab`, plus the bridge's own stamp, which a
+    # reconstruction cannot invent.
     composition.bridge.put_bodies['/command'] = {
         'ok': True, 'did': 'stamp', 'command': {
             'id': '_ping', 'code': 'document.title', '_did': 'stamp',
@@ -535,12 +524,9 @@ def test_a_waited_send_still_answers_its_result(_tmp):
     """The load-bearing compatibility property, on the eval path.
 
     A no-wait branch that leaked into the waited path would drop the poll
-    and answer the command instead of the result, so the waited call is
-    pinned against the same probe the no-wait cases use. `_send_eval` is
-    real code under this probe; the TYPED path is not — `ext_cmd` is
-    replaced wholesale, so a case written here cannot see it and the typed
-    waited return is pinned in `tests/test_mcp_transport.py`
-    against the real method instead.
+    and answer the command instead of the result. `_send_eval` is real code
+    under this probe; the typed path is not — the typed waited return is
+    pinned in `tests/test_mcp_transport.py` against the real method.
     """
     composition = _load_composition(_mcp_tool_commands.MARKER)
     marker = _mcp_tool_commands.MARKER
