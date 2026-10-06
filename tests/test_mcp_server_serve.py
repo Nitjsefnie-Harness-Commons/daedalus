@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Starting and serving the MCP front end in process.
 
-Split from tests/test_mcp_server.py: the start_in_thread contract, the
-serve crash line's hostile-str survival, the port announcement and the
-collision surfaces.
+Split from tests/test_mcp_server.py.
 """
 import asyncio
 import contextlib

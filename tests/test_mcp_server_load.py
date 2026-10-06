@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Loading daedalus_mcp.server against the shared load-and-drive fixture.
 
-Split from tests/test_mcp_server.py: the one shared dependency check,
-the readiness probe, the import surface and LOCAL_URL derivation, and
-the per-load transport identity the loader hands every caller.
+Split from tests/test_mcp_server.py.
 """
 import asyncio
 import importlib.util

@@ -9,9 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_load  # noqa: E402
-# The absorbed controls spell the shared module as _mcp_load; this
-# suite's own controls keep their existing binding of the same module
-# object.
+# The absorbed controls spell the shared module as _mcp_load; the suite's
+# own controls keep the binding they already carried.
 # pylint: disable-next=reimported
 import _mcp_load as test_mcp_server  # noqa: E402
 import _util  # noqa: E402
