@@ -2,7 +2,6 @@
 """Contracts for the shared CI threshold document reader and writer."""
 import json
 import os
-import shutil
 import stat
 import subprocess
 import sys
@@ -12,6 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _ci_reseed_fixtures import (  # noqa: E402
+    _ci_reseed_budget_repo, _ci_reseed_commit, _ci_reseed_merge,
+    _ci_reseed_module, _ci_reseed_repo, _ci_reseed_shallow)
 from _ratchet_fixture import _git, _normalised  # noqa: E402
 
 
@@ -20,7 +22,6 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 SCRIPT = ROOT / 'scripts' / 'ci' / 'thresholds.py'
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
-RESEED_SOURCE = ROOT / 'scripts' / 'ci' / 'reseed.py'
 DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 # The budget fixtures' children run outside the coverage paths.
@@ -36,10 +37,6 @@ def _thresholds():
 
 def _valid():
     return json.loads(DATA_PATH.read_text(encoding='utf-8'))
-
-
-def _reseed():
-    return _util.load(RESEED_SOURCE, 'thresholds_reseed')
 
 
 def _rowless():
@@ -435,36 +432,6 @@ def test_lifecycle_accepts_a_calibration_the_ratchet_cannot_move(tmp):
             'floor': measured - ratchet.CALIBRATION_GAP}
 
 
-def _line_budget_fixture(tmp, files, budget, name):
-    """A committed repository of ``files`` with a document; ``budget``
-    None builds the re-seed window itself, the commit message carrying
-    the marker the child's own loader walks."""
-    repo = Path(tmp) / name
-    (repo / 'scripts' / 'ci').mkdir(parents=True)
-    for rel, content in files.items():
-        path = repo / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-    for source in (POLICY_SOURCE, SCRIPT, RESEED_SOURCE):
-        shutil.copy2(source, repo / 'scripts' / 'ci' / source.name)
-    candidate = _valid()
-    marker = ''
-    if budget is None:
-        del candidate['tests_line_baseline']
-        marker = f' {_reseed().MARKER}'
-    else:
-        candidate['tests_line_baseline'] = budget
-    target = repo / '.github' / 'ci-thresholds.json'
-    target.parent.mkdir(parents=True)
-    _thresholds().write(target, candidate, True)
-    _git(repo, 'init', '-q')
-    _git(repo, 'config', 'user.email', 'tests@example.invalid')
-    _git(repo, 'config', 'user.name', 'Tests')
-    _git(repo, 'add', '.')
-    _git(repo, 'commit', '-qm', f'base{marker}')
-    return repo, target
-
-
 def _tests_files(first, second):
     return {'tests/first.py': b'x = 1\n' * first,
             'tests/second.py': b'x = 1\n' * second}
@@ -503,7 +470,7 @@ def test_tests_line_budget_is_a_positive_integer_that_round_trips(tmp):
 
 
 def test_tests_line_budget_fails_naming_both_numbers_and_the_remedy(tmp):
-    repo, _target = _line_budget_fixture(
+    repo, _target = _ci_reseed_budget_repo(
         tmp, _tests_files(5, 4), 8, 'grown')
     done = _run_lines_cli(repo)
     assert done.returncode != 0, (done.stdout, done.stderr)
@@ -515,7 +482,7 @@ def test_tests_line_budget_fails_naming_both_numbers_and_the_remedy(tmp):
 def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
     """Compared as `load` normalises it, not raw JSON: a raw float and
     the Decimal it becomes are not equal."""
-    repo, target = _line_budget_fixture(tmp, _tests_files(4, 3), 20, 'drop')
+    repo, target = _ci_reseed_budget_repo(tmp, _tests_files(4, 3), 20, 'drop')
     source = _thresholds().load(target)
     done = _run_lines_cli(repo, '--tighten')
     assert done.returncode == 0, (done.stdout, done.stderr)
@@ -524,7 +491,7 @@ def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
     for member in ('coverage', *_BASELINE_ACCESSORS):
         assert after[member] == source[member], member
     for budget in (7, 2):
-        other, other_target = _line_budget_fixture(
+        other, other_target = _ci_reseed_budget_repo(
             tmp, _tests_files(4, 3), budget, f'steady-{budget}')
         before = other_target.read_bytes()
         done = _run_lines_cli(other, '--tighten')
@@ -536,7 +503,7 @@ def test_the_budget_counts_every_tracked_text_file_under_tests(tmp):
     """The counting definition gets its own oracle: a non-`.py` text
     file (which a `tests/*.py` pathspec drops), a binary one (which a
     missing `-I` counts) and files outside `tests/`."""
-    repo, _target = _line_budget_fixture(
+    repo, _target = _ci_reseed_budget_repo(
         tmp, _mixed_tests_files(4, 3), 7, 'mixed')
     policy = _util.load(POLICY_SOURCE, 'tests_lines_definition')
     assert policy.tracked_test_lines(repo) == 7
@@ -570,7 +537,7 @@ def test_the_real_tests_tree_is_within_its_recorded_line_budget(tmp):
 def test_the_reseed_verdict_is_a_required_bool_buying_only_absence(tmp):
     """The verdict is the tree's answer, asked at one named place."""
     thresholds = _thresholds()
-    reseed = _reseed()
+    reseed = _ci_reseed_module()
     strict = thresholds.normalise(_valid(), False)
     _assert_refused_by(lambda: thresholds.normalise(_valid(), None),
                        'reseed_in_flight must be a bool')
@@ -596,71 +563,38 @@ def test_the_reseed_verdict_is_a_required_bool_buying_only_absence(tmp):
     assert thresholds._SCALAR_FIELDS == (reseed._SCALAR_FIELD,)
 
 
-def _walk_repo(tmp, name):
-    """A committed repository the walk reads, and nothing else in it."""
-    repo = Path(tmp) / name
-    (repo / '.github').mkdir(parents=True)
-    _git(repo, 'init', '-q')
-    _git(repo, 'config', 'user.email', 'tests@example.invalid')
-    _git(repo, 'config', 'user.name', 'Tests')
-    return repo
-
-
-def _walk_commit(repo, message, row):
-    """One commit; complete minus the row exactly when ``row`` is false."""
-    document = _valid() if row else _rowless()
-    _thresholds().write(repo / '.github' / 'ci-thresholds.json', document,
-                        True)
-    _git(repo, 'add', '-A')
-    _git(repo, 'commit', '-q', '--allow-empty', '-m', message)
-
-
 def test_the_walk_reads_the_marker_through_bounded_ancestry(tmp):
     """The marker survives commits landing on the delete, a GitHub merge,
     and the visit cap; a present row and a shallow boundary close it."""
-    reseed = _reseed()
-    repo = _walk_repo(tmp, 'walk')
-    _walk_commit(repo, f'base {reseed.MARKER}', row=False)
+    reseed = _ci_reseed_module()
+    repo = _ci_reseed_repo(tmp, 'walk')
+    _ci_reseed_commit(repo, f'base {reseed.MARKER}', row=False)
     reseed.clear_cache()
     assert reseed.in_flight(repo) is True
-    _walk_commit(repo, 'a publisher lands', row=False)
+    _ci_reseed_commit(repo, 'a publisher lands', row=False)
     reseed.clear_cache()
     assert reseed.in_flight(repo) is True
-    _walk_commit(repo, 'the seed restores the row', row=True)
+    _ci_reseed_commit(repo, 'the seed restores the row', row=True)
     reseed.clear_cache()
     assert reseed.in_flight(repo) is False
 
-    named = subprocess.run(
-        ('git', '-C', str(repo), 'branch', '--show-current'),
-        check=True, capture_output=True, env=_CHILD_ENV)
-    base = named.stdout.decode().strip()
-    _git(repo, 'checkout', '-qb', 'line')
-    _walk_commit(repo, f'delete {reseed.MARKER}', row=False)
-    _git(repo, 'checkout', '-q', base)
-    _walk_commit(repo, 'unrelated fill', row=False)
-    _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #1',
-         'line')
+    _ci_reseed_merge(repo, reseed.MARKER)
     reseed.clear_cache()
     assert reseed.in_flight(repo) is True
 
     for fillers, expected in ((9, True), (10, False)):
-        bound = _walk_repo(tmp, f'bound-{fillers}')
-        _walk_commit(bound, f'delete {reseed.MARKER}', row=False)
+        bound = _ci_reseed_repo(tmp, f'bound-{fillers}')
+        _ci_reseed_commit(bound, f'delete {reseed.MARKER}', row=False)
         for _ in range(fillers):
-            _walk_commit(bound, 'filler', row=False)
+            _ci_reseed_commit(bound, 'filler', row=False)
         reseed.clear_cache()
         assert reseed.in_flight(bound) is expected
 
 
 def test_the_walk_fails_closed_and_the_loader_gates_the_same_answer(tmp):
-    reseed = _reseed()
+    reseed = _ci_reseed_module()
     thresholds = _thresholds()
-    repo = _walk_repo(tmp, 'source')
-    _walk_commit(repo, f'delete {reseed.MARKER}', row=False)
-    _walk_commit(repo, 'publisher lands', row=False)
-    clone = Path(tmp) / 'shallow'
-    _git(tmp, 'clone', '--no-local', '--depth', '1', '-q',
-         str(repo), str(clone))
+    clone = _ci_reseed_shallow(tmp, reseed.MARKER)
     reseed.clear_cache()
     assert reseed.in_flight(clone) is False
     document = clone / '.github' / 'ci-thresholds.json'
@@ -678,7 +612,7 @@ def test_the_walk_fails_closed_and_the_loader_gates_the_same_answer(tmp):
     reseed.clear_cache()
     assert answer is False
 
-    broken = _walk_repo(tmp, 'broken')
+    broken = _ci_reseed_repo(tmp, 'broken')
     (broken / '.github' / 'ci-thresholds.json').write_bytes(b'{')
     _git(broken, 'add', '-A')
     _git(broken, 'commit', '-qm', 'broken')
@@ -686,7 +620,7 @@ def test_the_walk_fails_closed_and_the_loader_gates_the_same_answer(tmp):
 
 
 def test_the_window_skips_the_line_gate_and_the_tighten(tmp):
-    repo, target = _line_budget_fixture(
+    repo, target = _ci_reseed_budget_repo(
         tmp, _tests_files(4, 3), None, 'window')
     before = target.read_bytes()
     done = _run_lines_cli(repo)
