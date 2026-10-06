@@ -192,6 +192,14 @@ def _update_builtin_bindings(statement, bindings, handler_globals,
         _statement_binding_writes(statement)
     for name in names:
         bindings[name] = unresolved
+    if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and isinstance(statement.value, ast.Attribute)
+            and statement.value.attr == '__getattribute__'
+            and isinstance(statement.value.value, ast.Name)
+            and statement.value.value.id == 'object'
+            and not scope_binds(function, 'object')):
+        bindings[statement.targets[0].id] = object.__getattribute__
     for name in module_names:
         if name is _UNKNOWN_MODULE_BINDING:
             bindings[name] = unresolved
@@ -330,8 +338,9 @@ def resolve_origin(node, function, handler_globals, unresolved, scope_binds,
 
 
 def is_builtin_reference(node, name, function, handler_globals,
-                         scope_binds, comprehension_shadows):
-    expected = getattr(builtins, name)
+                         scope_binds, comprehension_shadows, *,
+                         expected=None):
+    expected = getattr(builtins, name) if expected is None else expected
     unresolved = object()
     bindings = _builtin_bindings_at(
         node, function, handler_globals, unresolved, scope_binds)
@@ -500,10 +509,12 @@ def _call_read(node, function, handler_globals, scope_binds,
     member be named through a shadowed one — the false green I-1 closed.
     What the audit cannot read is a read too: a starred expansion hides the
     whole argument list, a callee that is itself a call has a value the audit
-    cannot see, and a proven builtin ``getattr`` whose name is an expression
-    selected a member the source does not spell. A one-argument call with a
-    callee the audit can see is not a selection, which keeps ``value.lower()``
-    and ``res.get('result', [])`` out of the answer.
+    cannot see, and a proven builtin ``getattr`` or attribute-protocol callee
+    whose name is an expression selected a member the source does not spell;
+    ``_protocol_selection`` owns the protocol's three spellings. A
+    one-argument call with a callee the audit can see is not a selection,
+    which keeps ``value.lower()`` and ``res.get('result', [])`` out of the
+    answer.
     """
     visible = [argument for argument in node.args
                if isinstance(argument, ast.Constant)
@@ -516,11 +527,44 @@ def _call_read(node, function, handler_globals, scope_binds,
                 node.func, 'getattr', function, handler_globals,
                 scope_binds, comprehension_shadows)):
         return node
+    if _protocol_selection(node, function, handler_globals, scope_binds,
+                           comprehension_shadows):
+        return node
     return None
 
 
 def _has_starred(node):
     return any(isinstance(argument, ast.Starred) for argument in node.args)
+
+
+def _protocol_selection(node, function, handler_globals, scope_binds,
+                        comprehension_shadows):
+    """A proven attribute-protocol callee selecting by an unreadable name.
+
+    The bound ``x.__getattribute__`` spelling is proven by the dunder name
+    itself; the unbound ``object.__getattribute__`` is proven against the
+    interpreter's own ``object``; a callee name the builtin table binds to
+    it is the alias. The name argument is the member, so a constant is
+    decided by the member test upstream and an expression is a read. The
+    protocol takes no keywords and no default argument, so the bound
+    spelling carries one positional argument, the other two two.
+    """
+    if node.keywords or not node.args \
+            or isinstance(node.args[-1], ast.Constant):
+        return False
+    if isinstance(node.func, ast.Attribute) \
+            and node.func.attr == '__getattribute__':
+        if isinstance(node.func.value, ast.Name) \
+                and node.func.value.id == 'object':
+            return (len(node.args) == 2 and is_builtin_reference(
+                node.func.value, 'object', function, handler_globals,
+                scope_binds, comprehension_shadows))
+        return len(node.args) == 1
+    return (isinstance(node.func, ast.Name) and len(node.args) == 2
+            and is_builtin_reference(
+                node.func, node.func.id, function, handler_globals,
+                scope_binds, comprehension_shadows,
+                expected=object.__getattribute__))
 
 
 def reads_frame_namespace(selection, origin):
