@@ -10,8 +10,7 @@
       "floor": 89.6
     }
   },
-  "module_size_baseline": {
-  },
+  "module_size_baseline": {},
   "long_line_baseline": {
     "scripts/check_versions.py": 9,
     "tests/test_bridge_startup.py": 2,
@@ -94,5 +93,5 @@
     "extension/worker/segment_mint.js": 4,
     "extension/worker/stream.js": 6
   },
-  "tests_line_baseline": 143503
+  "tests_line_baseline": 143502
 }
