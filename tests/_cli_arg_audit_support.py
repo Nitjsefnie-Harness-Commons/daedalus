@@ -1,43 +1,21 @@
-"""Resolver tables and isolated CLI dispatch controls. DECLARED covers stored
-action destinations and parser defaults; GUARANTEED adds required and
-non-suppressed values. A required mutually exclusive group guarantees a
-destination only when every member stores that same non-SUPPRESS destination.
-Guarded or defaulted reads require DECLARED; direct reads require GUARANTEED.
-A store to an attribute of the namespace parameter is admitted; a rebind of
-the name or a non-attribute store is refused; an augmented attribute target
-is read-checked; a del is refused; a store never satisfies a read.
-FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
-namespace, planted into a real module and read one per row here. They are
-plants, not the rule's inputs: the rule answers the operation once, from
-the member set the resolver reads off types.FrameType. Three rows are each
-the sole plant that dies with one arm — the callee that is itself a call,
-the starred expansion, and the getattr whose name is an expression — and
-the attribute-protocol rows share the last arm's structure, spelling the
-same selection through the bound, unbound and aliased __getattribute__
-instead of builtin getattr. Removing any of the three arms reds
+"""Resolver tables and isolated CLI dispatch controls; the namespace-storage
+contract is stated in test_cli_arg_audit.py's own docstring.
+FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a
+frame's namespace, planted into a real module and read one per row here;
+they are plants, not the rule's inputs — the rule answers once, from the
+member set the resolver reads off types.FrameType. Three rows are each the
+sole plant that dies with one arm — the callee that is itself a call, the
+starred expansion, and the getattr whose name is an expression. Removing
+any of the three arms reds
 test_cli_audit_refuses_every_frame_namespace_plant on the row that names
-the arm. The starred expansion is also an escape case read by
-test_cli_audit_reports_namespace_escapes, so it is not sole among the
-controls. The unreadable-subscript arm is pinned on both sides, by
-different controls: four rows below are the sole catchers of its refusal,
-read by that same control with the refusal removed, the first of them
-'computed key, concatenation'; and the real tree is the control for its
-exemption, test_cli_audit_refuses_frame_namespaces_in_the_real_package,
-which reds on exactly the eleven correct slices the CLI already has when
-the range-and-tuple exemption is removed.
-What these controls cannot see is the other direction. A guard operand ADDED
-to the resolver fires nothing here: the completeness assertion holding the
-condition set derived from the resolver's AST against a ledger's rows went
-with the deleted ledger. Two resolver mutations measured here both leave
-tests/test_cli_arg_audit.py 31/31 — a NamedExpr arm ADDED to frame_read,
-deciding nothing the fallthrough did not, and the `key is not None` conjunct
-dropped from _subscript_read. The first is inert; the second is equivalent on
-every reachable state rather than caught, because constant_string's range is
-{str, None} and namespace_key is a non-empty str at every call site. Two
-samples are not a rule for every addition. One blind spot survives the
-deletion: no control DISTINGUISHES frame_read's attribute arm from the member
-test inside it — the two tests that die with the whole arm removed both die
-among twenty-four when only the member test goes."""
+the arm. The unreadable-subscript arm is pinned on both sides: four rows
+are the sole catchers of its refusal, and the real tree is the control for
+its exemption, reding on the eleven correct slices the CLI already has
+when the exemption is removed.
+A guard operand ADDED to the resolver may fire nothing here, and one blind
+spot survives: no control DISTINGUISHES frame_read's attribute arm from the
+member test inside it — the two tests that die with the whole arm removed
+die among twenty-four when only the member test goes."""
 import argparse
 import builtins
 import contextlib
@@ -306,9 +284,7 @@ REFLECTIVE_ESCAPE_CASES = (
     ('holder = helper()\n_ = holder[\'args\'].undeclared_probe',
      "holder['args']"),)
 _PROTOCOL_PLANTS = (
-    # Three spellings of one attribute protocol, each naming a frame member
-    # by an expression only a proven protocol callee catches; the builtin
-    # getattr spelling above is the control for the same selection.
+    # The builtin getattr row above is the control for this selection.
     ('aliased object.__getattribute__',
      'def do_reload(args):\n    getattr = object.__getattribute__\n'
      "    _ = getattr(sys._getframe(), 'f_' + 'locals')"
@@ -323,8 +299,7 @@ _PROTOCOL_PLANTS = (
      "frame(), 'f_' + 'locals').get('args').undeclared_probe\n",
      "object.__getattribute__(sys._getframe(), 'f_' + 'locals')"))
 
-# Each row splices into the real daedalus_cli/commands_eval.py: the prelude
-# after its first import, the replacement for the anchor, the named receiver.
+# Each row: prelude, anchor replacement, named receiver in commands_eval.py.
 CLI_ANCHOR = 'def do_reload(args):\n'
 
 FRAME_NAMESPACE_PLANTS = (
@@ -454,9 +429,8 @@ def plant_in_reload(base, replacement, prelude=''):
 def assert_every_frame_namespace_plant_refused(read_module, base):
     """Each plant, spliced into the real handler module, is refused once.
 
-    The plants run against the real ``commands_eval.py`` through the real
-    package walk, not against a synthetic tree, so a rule that only fires on a
-    fixture's shape cannot pass this.
+    The plants run through the real package walk, not a synthetic tree, so a
+    rule that only fires on a fixture's shape cannot pass this.
     """
     for name, prelude, _anchor, replacement, receiver in \
             FRAME_NAMESPACE_PLANTS:
@@ -469,10 +443,9 @@ def assert_every_frame_namespace_plant_refused(read_module, base):
 def assert_domain_covers_a_second_module(read_module, package):
     """A frame read in a module other than the handler's is refused.
 
-    The headline claim is the package, and every other plant splices into the
-    handler's own module, so a walk narrowed to that one module satisfies all
-    of them. This plants into a module that holds no handler, so the only thing
-    it can be catching is the walk's module coverage.
+    Every other plant splices into the handler's own module, so a walk
+    narrowed to that one module satisfies all of them; this module holds no
+    handler, so what the plant can be catching is the walk's coverage.
     """
     source = (package / 'transport.py').read_text(encoding='utf-8')
     anchor = 'def token():\n'
@@ -488,10 +461,9 @@ def assert_domain_covers_a_second_module(read_module, package):
 def assert_every_frame_member_refused(read_module, base):
     """Each member types.FrameType carries, planted, is refused once.
 
-    The member list is this module's own reading of the interpreter, so
-    replacing the resolver's derivation with a short literal drops the members
-    it lost and fails here — which is the control the closed-domain claim
-    needs and a hand run of the same loop is not.
+    The member list is this module's own reading of the interpreter, so a
+    short literal replacing the derivation fails here on the members it
+    lost.
     """
     for member in FRAME_MEMBERS:
         body = (f'def do_reload(args):\n    _ = sys._getframe(1).{member}'
@@ -504,13 +476,12 @@ def assert_every_frame_member_refused(read_module, base):
 def assert_namespace_key_call_accepted(read_module, base):
     """A call naming the namespace key is a path, not a read.
 
-    The negative control on the tree the guard actually runs over: 131 calls
-    in the CLI pass a constant string as a second argument and the call arm
-    has to leave every one of them alone. Two receivers, because they are
-    exempt by different rules and only the second exercises the arm's member
-    test — a literal receiver is decided by the origin resolver, so a control
-    with only that shape passes with the arm admitting the key, which is a
-    control that stopped testing what it names.
+    The negative control on the tree the guard runs over: 131 calls in the
+    CLI pass a constant string as a second argument and the call arm has to
+    leave every one of them alone. Two receivers, because they are exempt by
+    different rules and only the second exercises the arm's member test — a
+    literal receiver is decided by the origin resolver, so a control with
+    only that shape passes with the arm admitting the key.
     """
     shapes = {
         'literal receiver, namespace key':
