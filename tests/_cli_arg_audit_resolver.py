@@ -470,9 +470,8 @@ def frame_read(node, namespace_key, *context):
 
 def selection_base(selection):
     """The value a member selection is made from — what has to be a
-    frame: a one-argument ``__getattribute__`` call selects from the
-    object the dunder is read from, every other call selection takes its
-    first argument.
+    frame; the bound protocol spelling selects from its receiver, every
+    other call selection from its first argument.
     """
     if isinstance(selection, ast.Call):
         if _bound_protocol_call(selection):
@@ -508,11 +507,10 @@ def _call_read(node, function, handler_globals, scope_binds,
     ``api('GET', 'f_locals')`` is refused whatever the callee is — nothing
     in the tree is refused today — gating on the callee would name a member
     through a shadowed one, the false green I-1 closed. What the audit
-    cannot read is a read too: a starred expansion hides the
-    argument list, a callee that is itself a call has a value the audit
-    cannot see, and a proven builtin ``getattr`` or attribute-protocol
-    callee whose name is an expression selects what the source does not
-    spell; a one-argument visible-callee call is not a selection —
+    cannot read is a read too, and a proven builtin ``getattr`` or
+    attribute-protocol callee whose name is an expression selects a member
+    the source does not spell; a one-argument visible-callee call is not a
+    selection —
     ``value.lower()``, ``res.get('result', [])`` stay out of it. The
     protocol proof admits three spellings — the bound
     ``x.__getattribute__``, proven by the dunder name itself; the unbound

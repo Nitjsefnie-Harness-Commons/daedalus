@@ -6,7 +6,9 @@ plants, not the rule's inputs — the rule answers once, from the member
 set read off types.FrameType. Three rows are each the sole plant dying with
 one arm — the callee that is itself a call, the starred expansion, and
 the getattr whose name is an expression; removing any arm reds
-test_cli_audit_refuses_every_frame_namespace_plant on its row. The
+test_cli_audit_refuses_every_frame_namespace_plant on its row. That
+starred row is not sole among the controls —
+test_cli_audit_reports_namespace_escapes reads it too. The
 unreadable-subscript arm is pinned on both sides: four rows are the sole
 catchers of its refusal, and the real tree reds on the eleven correct
 slices the CLI has when the exemption is removed.
@@ -473,7 +475,7 @@ def assert_admitted_call_shapes(read_module, base):
     """Call shapes the arm admits, one row each: the 131 constant-
     second-argument CLI calls stay out of the answer; the other-dunder
     row pins the dunder equality, the shadowed-object row the protocol
-    store's veto, which keeps the callee unproven.
+    store's veto.
     """
     shapes = {
         'literal receiver, namespace key':
