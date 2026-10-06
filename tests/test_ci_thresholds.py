@@ -14,8 +14,8 @@ from _repo import ROOT  # noqa: E402
 from _ci_reseed_fixtures import (  # noqa: E402
     _ci_reseed_budget_repo, _ci_reseed_commit, _ci_reseed_merge,
     _ci_reseed_module, _ci_reseed_order_subject, _ci_reseed_repo,
-    _ci_reseed_diamond, _ci_reseed_document, _ci_reseed_force_true,
-    _ci_reseed_restore_true, _ci_reseed_shallow, _ci_reseed_visit_order)
+    _ci_reseed_diamond, _ci_reseed_document, _ci_reseed_shallow,
+    _ci_reseed_true_probe, _ci_reseed_visit_order)
 from _ratchet_fixture import (
     _captured_main, _git, _normalised)  # noqa: E402
 
@@ -617,12 +617,12 @@ def test_the_window_skips_the_line_gate_and_the_tighten(tmp):
     assert target.read_bytes() == before
 
     policy = _util.load(POLICY_SOURCE, 'tests_lines_window_branch')
-    real = _ci_reseed_force_true()
+    real, restore = _ci_reseed_true_probe()
     try:
         status, stdout, stderr = _captured_main(
             policy, ['--thresholds', str(target)])
     finally:
-        _ci_reseed_restore_true(real)
+        restore()
     assert status == 0 and stderr == '', (stdout, stderr)
     assert 're-seed window' in stdout, stdout
 

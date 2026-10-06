@@ -79,6 +79,20 @@ def test_unrecorded_carries_its_own_remedy_naming_both_actions(tmp):
     assert 'cover the uncovered lines' in policy.UNRECORDED_REMEDY
 
 
+def test_tightening_still_cannot_add_the_entry_the_remedy_names(tmp):
+    """The remedy says a reviewer adds the entry, not that --tighten does.
+
+    Both halves have to hold: the prose may tell a reader to add the
+    entry in their diff, and the tool must still be incapable of adding
+    it on its own. If tightening could add, a run on main would admit
+    whatever coverage happened to be measured that day.
+    """
+    del tmp
+    policy = _policy()
+    assert policy.tightened({}, {'new.js': 4}) is None
+    assert policy.tightened({'a.js': 2}, {'a.js': 2, 'new.js': 4}) is None
+
+
 def test_the_gate_reuses_the_totals_gate_attribution(tmp):
     """The gate must reuse the totals gate's attribution, not a second copy.
 

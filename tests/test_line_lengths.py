@@ -329,6 +329,24 @@ def test_real_cli_tighten_shrink_rewrites_only_the_lowered_member(tmp):
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
 
 
+def test_real_cli_reports_threshold_load_failure_without_traceback(tmp):
+    repo, target = _line_fixture(tmp, {'a.py': _over(0)}, {}, 'broken')
+    target.write_bytes(b'{')
+    (repo / 'unreadable').mkdir()
+    failures = (
+        (target, 'invalid thresholds JSON: '),
+        (repo / 'unreadable', 'cannot read thresholds: '),
+        (repo / 'missing.json', 'cannot read thresholds: '),
+    )
+    for path, marker in failures:
+        result = _run_cli(repo, target=path)
+        assert result.returncode == 1, (path, result.stdout, result.stderr)
+        assert result.stdout == ''
+        assert result.stderr.startswith(marker), (path, result.stderr)
+        assert result.stderr.count('\n') == 1, (path, result.stderr)
+        assert 'Traceback' not in result.stderr
+
+
 def test_real_cli_names_an_undecodable_file_without_traceback(tmp):
     repo, _target = _line_fixture(
         tmp, {'bad.py': b'x = 1\n\xff\n', 'ok.py': _over(0)}, {},
