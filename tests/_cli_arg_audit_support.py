@@ -1,21 +1,18 @@
 """Resolver tables and isolated CLI dispatch controls; the namespace-storage
 contract is stated in test_cli_arg_audit.py's own docstring.
-FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a
-frame's namespace, planted into a real module and read one per row here;
-they are plants, not the rule's inputs — the rule answers once, from the
-member set the resolver reads off types.FrameType. Three rows are each the
-sole plant that dies with one arm — the callee that is itself a call, the
-starred expansion, and the getattr whose name is an expression. Removing
-any of the three arms reds
-test_cli_audit_refuses_every_frame_namespace_plant on the row that names
-the arm. The unreadable-subscript arm is pinned on both sides: four rows
-are the sole catchers of its refusal, and the real tree is the control for
-its exemption, reding on the eleven correct slices the CLI already has
-when the exemption is removed.
-A guard operand ADDED to the resolver may fire nothing here, and one blind
-spot survives: no control DISTINGUISHES frame_read's attribute arm from the
-member test inside it — the two tests that die with the whole arm removed
-die among twenty-four when only the member test goes."""
+FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
+namespace, planted into a real module and read one per row here; they are
+plants, not the rule's inputs — the rule answers once, from the member set
+read off types.FrameType. Three rows are each the sole plant that dies
+with one arm — the callee that is itself a call, the starred expansion,
+and the getattr whose name is an expression; removing any arm reds
+test_cli_audit_refuses_every_frame_namespace_plant on its row. The
+unreadable-subscript arm is pinned on both sides: four rows are the sole
+catchers of its refusal, and the real tree reds on the eleven correct
+slices the CLI has when the exemption is removed.
+A guard operand ADDED to the resolver may fire nothing here, and one
+blind spot survives: no control DISTINGUISHES frame_read's attribute arm
+from the member test inside it."""
 import argparse
 import builtins
 import contextlib
@@ -284,7 +281,6 @@ REFLECTIVE_ESCAPE_CASES = (
     ('holder = helper()\n_ = holder[\'args\'].undeclared_probe',
      "holder['args']"),)
 _PROTOCOL_PLANTS = (
-    # The builtin getattr row above is the control for this selection.
     ('aliased object.__getattribute__',
      'def do_reload(args):\n    getattr = object.__getattribute__\n'
      "    _ = getattr(sys._getframe(), 'f_' + 'locals')"
@@ -303,7 +299,6 @@ _PROTOCOL_PLANTS = (
      "frame(), 'f_' + 'locals').get('args').undeclared_probe\n",
      "object.__getattribute__(sys._getframe(), 'f_' + 'locals')"))
 
-# Each row: prelude, anchor replacement, named receiver in commands_eval.py.
 CLI_ANCHOR = 'def do_reload(args):\n'
 
 FRAME_NAMESPACE_PLANTS = (
@@ -433,8 +428,8 @@ def plant_in_reload(base, replacement, prelude=''):
 def assert_every_frame_namespace_plant_refused(read_module, base):
     """Each plant, spliced into the real handler module, is refused once.
 
-    The plants run through the real package walk, not a synthetic tree, so a
-    rule that only fires on a fixture's shape cannot pass this.
+    The plants run through the real package walk, not a synthetic tree, so
+    a fixture-only rule cannot pass this.
     """
     for name, prelude, _anchor, replacement, receiver in \
             FRAME_NAMESPACE_PLANTS:
@@ -448,8 +443,8 @@ def assert_domain_covers_a_second_module(read_module, package):
     """A frame read in a module other than the handler's is refused.
 
     Every other plant splices into the handler's own module, so a walk
-    narrowed to that one module satisfies all of them; this module holds no
-    handler, so what the plant can be catching is the walk's coverage.
+    narrowed to it satisfies all of them; this module holds no handler, so
+    the plant can only be catching the walk's coverage.
     """
     source = (package / 'transport.py').read_text(encoding='utf-8')
     anchor = 'def token():\n'
@@ -466,8 +461,7 @@ def assert_every_frame_member_refused(read_module, base):
     """Each member types.FrameType carries, planted, is refused once.
 
     The member list is this module's own reading of the interpreter, so a
-    short literal replacing the derivation fails here on the members it
-    lost.
+    short literal derivation fails here on the members lost.
     """
     for member in FRAME_MEMBERS:
         body = (f'def do_reload(args):\n    _ = sys._getframe(1).{member}'
@@ -482,10 +476,10 @@ def assert_namespace_key_call_accepted(read_module, base):
 
     The negative control on the tree the guard runs over: 131 calls in the
     CLI pass a constant string as a second argument and the call arm has to
-    leave every one of them alone. Two receivers, because they are exempt by
-    different rules and only the second exercises the arm's member test — a
-    literal receiver is decided by the origin resolver, so a control with
-    only that shape passes with the arm admitting the key.
+    leave every one of them alone. Two receivers, exempt by different
+    rules; only the second exercises the arm's member test, a literal
+    receiver being decided by the origin resolver; the other-dunder row
+    pins the dunder equality against its cheaper prefix readings.
     """
     shapes = {
         'literal receiver, namespace key':
@@ -496,15 +490,16 @@ def assert_namespace_key_call_accepted(read_module, base):
         'literal receiver, a frame member':
             "def do_reload(args):\n    api('GET', 'f_locals')\n",
         'unproven receiver, a frame member':
-            "def do_reload(args):\n    send('t', 'f_code')\n"}
+            "def do_reload(args):\n    send('t', 'f_code')\n",
+        'other dunder, unproven receiver':
+            "def do_reload(args):\n    _ = UNSEEN.__len__(member)\n"}
     for name, body in shapes.items():
         escapes = read_module({'commands_eval': plant_in_reload(base, body)})
         assert escapes == [], (name, escapes)
 
 
 def assert_resolved_frame_receiver_refused(read_module, base, frame):
-    """A receiver the audit resolves to a live frame is refused on that
-    count — the one case that keeps the frame-type test load-bearing."""
+    """The frame-type test's case: a receiver resolved to a frame refuses."""
     body = ("def do_reload(args):\n"
             "    _ = HELD.f_locals.get('args').undeclared_probe\n")
     escapes = read_module(
