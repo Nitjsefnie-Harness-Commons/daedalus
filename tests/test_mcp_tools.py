@@ -252,7 +252,9 @@ def test_no_registered_tool_behavior_is_authored_in_composition(_tmp):
 
     The check follows the callable's own and nested code, functions in
     closure cells, direct function-valued defaults, ``__wrapped__`` links,
-    and module-level functions its code names in its own module globals.
+    and module-level functions its code names in its own module globals;
+    functions in default containers, dynamically-found functions and
+    forged-origin code objects are outside the property.
     """
     composition = _load_composition('composition-origin')
     composition_path = (_util.ROOT / 'daedalus_mcp' / 'server.py').resolve()
