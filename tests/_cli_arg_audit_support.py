@@ -294,6 +294,10 @@ _PROTOCOL_PLANTS = (
      "def do_reload(args):\n    _ = sys._getframe().__getattribute__('"
      "f_' + 'locals').get('args').undeclared_probe\n",
      "sys._getframe().__getattribute__('f_' + 'locals')"),
+    ('bound __getattribute__, constant member',
+     "def do_reload(args):\n    _ = sys._getframe().__getattribute__"
+     "('f_locals').get('args').undeclared_probe\n",
+     "sys._getframe().__getattribute__('f_locals')"),
     ('unbound object.__getattribute__',
      'def do_reload(args):\n    _ = object.__getattribute__(sys._get'
      "frame(), 'f_' + 'locals').get('args').undeclared_probe\n",

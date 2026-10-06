@@ -524,6 +524,9 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
     # A call's second argument names a member, not a mapping key.
     assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
+    # The bound protocol spelling selects from its receiver, not its name.
+    assert _audit_fake_handler(
+        "ROUTES.__getattribute__('f_' + 'locals')", scope=scope) == []
     # A LOCAL binding is unproven — the resolver's one stated over-refusal.
     local = "data = {'f_locals': 1}\nreturn data['f_locals']"
     assert _audit_fake_handler(local) == [
