@@ -122,6 +122,21 @@ def _ci_reseed_order_subject(tmp, marker):
     return repo, *named.stdout.decode().split()
 
 
+def _ci_reseed_force_true():
+    """Point the tree probe at a True answer for one in-process leg;
+    the return value restores it."""
+    import reseed
+    real = reseed.in_flight
+    setattr(reseed, 'in_flight', lambda root=None: True)
+    return real
+
+
+def _ci_reseed_restore_true(real):
+    """Put the tree probe back after ``_ci_reseed_force_true``."""
+    import reseed
+    setattr(reseed, 'in_flight', real)
+
+
 def _ci_reseed_visit_order(repo):
     """The revisions whose messages the walk reads, in visit order."""
     observed = []
@@ -140,6 +155,27 @@ def _ci_reseed_visit_order(repo):
         setattr(probe, '_revision_message', real)
     probe.clear_cache()
     return observed
+
+
+def _ci_reseed_diamond(tmp, marker):
+    """A merge whose parents share a base commit: the base is queued
+    twice and the second visit takes the seen-continue on the way down
+    to the marker below it."""
+    repo = _ci_reseed_repo(tmp, 'diamond')
+    _ci_reseed_commit(repo, f'root {marker}', row=False)
+    _ci_reseed_commit(repo, 'base', row=False)
+    named = subprocess.run(
+        ('git', '-C', str(repo), 'branch', '--show-current'),
+        check=True, capture_output=True,
+        env=_util.child_coverage('scrub'))
+    base_branch = named.stdout.decode().strip()
+    _git(repo, 'checkout', '-qb', 'side')
+    _ci_reseed_commit(repo, 'side work', row=False)
+    _git(repo, 'checkout', '-q', base_branch)
+    _ci_reseed_commit(repo, 'main work', row=False)
+    _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #3',
+         'side')
+    return repo
 
 
 def _ci_reseed_budget_repo(tmp, files, budget, name):
