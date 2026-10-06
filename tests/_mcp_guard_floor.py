@@ -594,11 +594,11 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_bridge.env_config', 'env_int',
      "raise SystemExit(f'{name} must be {requirement}; got {raw!r}') "
      'from None',
-     'tests/test_mcp_server_config.py::'
+     'tests/test_mcp_server_load.py::'
      'test_mcp_and_bridge_config_use_one_env_parser'),
     ('daedalus_bridge.env_config', 'env_int',
      'value < minimum or (maximum is not None and value > maximum)',
-     'tests/test_mcp_server_config.py::'
+     'tests/test_mcp_server_load.py::'
      'test_mcp_and_bridge_config_use_one_env_parser'),
     ('daedalus_bridge.env_config', 'env_positive_float',
      "raise SystemExit(f'{name} must be a finite positive number; "
