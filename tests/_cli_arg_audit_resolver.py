@@ -474,7 +474,8 @@ def selection_base(selection):
     other call selection from its first argument.
     """
     if isinstance(selection, ast.Call):
-        if _bound_protocol_call(selection):
+        if (_bound_protocol_call(selection)
+                and isinstance(selection.func, ast.Attribute)):
             return selection.func.value
         return selection.args[0] if selection.args else selection.func
     return selection.value
