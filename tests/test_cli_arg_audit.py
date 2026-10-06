@@ -126,18 +126,12 @@ def _origin(node, function, handler_globals):
 def _frame_escapes(node, scope, handler_globals, key, label, found):
     """Report every frame read under a node, wherever the node sits.
 
-    Applied in two places, one per walk, and each is pinned: removing this copy
-    or the inline one in ``_handler_arg_violations`` reds four controls apiece,
-    which is what holds the two copies to one rule. One read reports once: the
-    walk stops descending as soon as a node is refused, so a line that both
-    selects and subscripts a member is not counted twice.
-
-    ``scope`` is the innermost callable enclosing the node, or the module, and
-    is what a name resolves against; entering a callable changes both it and
-    the label, so a class body, a module-level statement and a nested helper
-    are all reached and each is reported against what encloses it. The unit of
-    traversal is the node rather than the callable: a callable is where a label
-    opens, not where the walk starts.
+    Applied in two places, one per walk, and each is pinned: removing this
+    copy or the inline one in ``_handler_arg_violations`` reds four controls
+    apiece — what holds the two copies to one rule. ``scope`` is the
+    innermost callable enclosing the node, or the module, and is what a name
+    resolves against; entering a callable changes both it and the label, so
+    a class body, a module-level statement and a nested helper are reached.
     """
     context = (scope, handler_globals, _scope_binds,
                _comprehension_shadows)
@@ -249,11 +243,8 @@ CLI_PACKAGE = _util.ROOT / 'daedalus_cli'
 
 
 def _package_roots(tree):
-    """Yield the one walk root a package module has: the module itself.
-
-    The domain is the module, so the walk starts there and a callable opens a
-    label inside it rather than being where the walk starts.
-    """
+    """Yield the one walk root a package module has: the module itself,
+    where the walk starts and a callable only opens a label."""
     yield '', tree
 
 
@@ -261,10 +252,8 @@ def audited_namespace_key():
     """The name the audited namespace is stored under, read off the handlers.
 
     The handler walk derives it from each handler's own AST; this reads the
-    same name from the dispatch table. That the handlers agree on one is the
-    whole-tree claim test_cli_handlers_read_only_declared_args makes, so the
-    disagreement is raised there: raising here reds every control that walks
-    the package rather than the one the failure is about.
+    same name from the dispatch table, and a disagreement is raised in the
+    whole-tree test that owns the claim.
     """
     from daedalus_cli.cli import DISPATCH
     names = {next(iter(inspect.signature(handler).parameters))
@@ -275,12 +264,10 @@ def audited_namespace_key():
 def package_frame_escapes(overrides=None, extra_globals=None):
     """Refuse a frame read anywhere in the CLI package, helper included.
 
-    The domain is the package rather than one handler's body, so a read in a
-    helper a handler calls is refused even when the handler names no frame.
-    The reflective branch is per handler and stops at the callable boundary:
-    ``eval``/``exec`` in a helper is outside this walk, a frame read in one is
-    not. Names ``overrides`` adds to a module's source stay unproven, and an
-    unproven receiver is what the rule refuses; ``extra_globals`` adds a
+    The domain is the package, so a read in a helper a handler calls is
+    refused even when the handler names no frame. The reflective branch is
+    per handler and stops at the callable boundary. Names ``overrides`` adds
+    stay unproven — what the rule refuses — and ``extra_globals`` adds a
     binding altered source cannot hold.
     """
     key = audited_namespace_key()
@@ -537,8 +524,7 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
     # A call's second argument names a member, not a mapping key.
     assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
-    # A name a LOCAL scope binds is not an origin the audit can see — the
-    # resolver's one stated over-refusal — so this read by key is refused.
+    # A LOCAL binding is unproven — the resolver's one stated over-refusal.
     local = "data = {'f_locals': 1}\nreturn data['f_locals']"
     assert _audit_fake_handler(local) == [
         "namespace escape: data['f_locals']"], local

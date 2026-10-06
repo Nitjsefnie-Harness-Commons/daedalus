@@ -1,18 +1,10 @@
-"""Static argparse, builtin-identity, and origin helpers. DECLARED covers
-stored action destinations and parser defaults; GUARANTEED adds required and
-non-suppressed values. A required mutually exclusive group guarantees a
-destination only when every member stores that same non-SUPPRESS destination.
-A store to an attribute of the namespace parameter is admitted; a rebind of
-the name or a non-attribute store is refused; an augmented attribute target
-is read-checked; a del is refused; a store never satisfies a read.
+"""Static argparse, builtin-identity, and origin helpers. The DECLARED and
+GUARANTEED storage contract lives in test_cli_arg_audit.py's own docstring.
 An origin the audit can see is a module-level name, a literal, or an
-attribute of such a value. A name a local scope binds is NOT one, so
-``data = {'f_locals': 1}`` read as ``data['f_locals']`` is refused: a
-binding the audit does not read is unproven, and unproven is the refusal.
-That is the one over-refusal this rule accepts, and it is a name the audit
-cannot see rather than one it can. A frame read is refused when the audit
-cannot see its receiver; ``frame_read`` and ``reads_frame_namespace`` below
-own that rule."""
+attribute of such a value; a name a local scope binds is unproven, and
+unproven is the refusal — the one over-refusal this rule accepts. A frame
+read is refused when the audit cannot see its receiver; ``frame_read`` and
+``reads_frame_namespace`` own that rule."""
 import argparse
 import ast
 import builtins
@@ -194,10 +186,7 @@ def _update_builtin_bindings(statement, bindings, handler_globals,
         bindings[name] = unresolved
     if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
             and isinstance(statement.targets[0], ast.Name)
-            and isinstance(statement.value, ast.Attribute)
-            and statement.value.attr == '__getattribute__'
-            and isinstance(statement.value.value, ast.Name)
-            and statement.value.value.id == 'object'
+            and _protocol_value(statement.value)
             and not scope_binds(function, 'object')):
         bindings[statement.targets[0].id] = object.__getattribute__
     for name in module_names:
@@ -307,18 +296,24 @@ def _static_attribute(base, attribute, unresolved):
             base.__dict__.get(attribute, unresolved))
 
 
+def _protocol_value(node):
+    return (isinstance(node, ast.Attribute)
+            and node.attr == '__getattribute__'
+            and isinstance(node.value, ast.Name)
+            and node.value.id == 'object')
+
+
 def resolve_origin(node, function, handler_globals, unresolved, scope_binds,
                    bindings=None):
     """Return the value the audit can see a name, attribute or literal names.
 
     A name resolves through ``bindings`` when the audit has tracked one for
-    it, then through the scope it reads; an attribute resolves through a base
-    it has already resolved; a literal resolves to itself. Every other
-    expression — a call, a subscript, a comprehension — is unproven, because
-    its value is produced by running code the audit does not run. A literal
-    receiver is the cheap half of the frame rule's selectivity: a selection on
-    a string the audit can see cannot be a frame member, and refusing it would
-    refuse the CLI's own ``api('GET', path)`` calls.
+    it, then through the scope it reads; an attribute resolves through a
+    base it has already resolved; a literal resolves to itself. Every other
+    expression is unproven, its value produced by running code the audit
+    does not run. A literal receiver is the cheap half of the frame rule's
+    selectivity: refusing a selection on a visible string would refuse the
+    CLI's own ``api('GET', path)`` calls.
     """
     if isinstance(node, ast.Constant):
         return node.value
@@ -451,17 +446,15 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
 def frame_read(node, namespace_key, *context):
     """The member selection to refuse, or ``None``.
 
-    A position that can carry a member name and one the audit cannot read are
-    the same position, and answering the second "no member" is silence: a
-    computed name, a starred expansion and a member chosen by a callee the
-    audit cannot see all reach ``f_locals`` without naming it. Each is
-    reported, and ``reads_frame_namespace`` refuses it on the receiver's
-    origin exactly as it refuses a constant member. Deciding a name the audit
-    CAN read is what keeps that cheap, and a literal receiver is the case the
-    CLI's own calls hit. A member this file has never heard of is refused like
-    a known one, which is why the member test is the set read off
-    ``types.FrameType``. Only the subscript reaches the audited namespace by
-    its own key, so a call naming a path reads nothing.
+    A position that can carry a member name and one the audit cannot read
+    are the same position, and answering the second "no member" is silence:
+    a computed name, a starred expansion and a member chosen by a callee
+    the audit cannot see all reach ``f_locals`` without naming it, refused
+    by ``reads_frame_namespace`` on the receiver's origin exactly as a
+    constant member is; a member this file has never heard of is refused
+    like a known one, which is why the member test is the set read off
+    ``types.FrameType``. Only the subscript reaches the audited namespace
+    by its own key, so a call naming a path reads nothing.
     """
     if isinstance(node, ast.Attribute):
         return node if node.attr in FRAME_SURFACE else None
@@ -482,9 +475,9 @@ def selection_base(selection):
 def _subscript_read(node, namespace_key):
     """A subscript names a member by its key; an unreadable key names one too.
 
-    A constant the audit can read is decided, and a key that is a range or a
-    tuple is a position rather than a name; an expression is neither, so it is
-    a member the source does not spell and the receiver's origin refuses it.
+    A constant the audit can read is decided, a range or tuple key is a
+    position rather than a name, and an expression is a member the source
+    does not spell.
     """
     if isinstance(node.slice, ast.Constant):
         key = constant_string(node.slice)
@@ -510,11 +503,15 @@ def _call_read(node, function, handler_globals, scope_binds,
     What the audit cannot read is a read too: a starred expansion hides the
     whole argument list, a callee that is itself a call has a value the audit
     cannot see, and a proven builtin ``getattr`` or attribute-protocol callee
-    whose name is an expression selected a member the source does not spell;
-    ``_protocol_selection`` owns the protocol's three spellings. A
-    one-argument call with a callee the audit can see is not a selection,
+    whose name is an expression selected a member the source does not spell.
+    A one-argument call with a callee the audit can see is not a selection,
     which keeps ``value.lower()`` and ``res.get('result', [])`` out of the
-    answer.
+    answer. The protocol proof admits exactly three spellings — the bound
+    ``x.__getattribute__``, proven by the dunder name itself; the unbound
+    ``object.__getattribute__``, whose base is proven through the
+    builtin-reference machinery; and a callee name the builtin table binds
+    to it, the alias — refusing an unreadable name argument exactly as
+    builtin getattr does.
     """
     visible = [argument for argument in node.args
                if isinstance(argument, ast.Constant)
@@ -527,57 +524,38 @@ def _call_read(node, function, handler_globals, scope_binds,
                 node.func, 'getattr', function, handler_globals,
                 scope_binds, comprehension_shadows)):
         return node
-    if _protocol_selection(node, function, handler_globals, scope_binds,
-                           comprehension_shadows):
-        return node
-    return None
+    if node.keywords or not node.args or isinstance(
+            node.args[-1], ast.Constant):
+        return None
+    func = node.func
+    if isinstance(func, ast.Attribute) \
+            and func.attr == '__getattribute__':
+        if len(node.args) == 1:
+            return node
+        return node if (_protocol_value(func) and len(node.args) == 2
+                        and is_builtin_reference(
+                            func.value, 'object', function, handler_globals,
+                            scope_binds, comprehension_shadows)) else None
+    return node if (isinstance(func, ast.Name) and len(node.args) == 2
+                    and is_builtin_reference(
+                        func, func.id, function, handler_globals,
+                        scope_binds, comprehension_shadows,
+                        expected=object.__getattribute__)) else None
 
 
 def _has_starred(node):
     return any(isinstance(argument, ast.Starred) for argument in node.args)
 
 
-def _protocol_selection(node, function, handler_globals, scope_binds,
-                        comprehension_shadows):
-    """A proven attribute-protocol callee selecting by an unreadable name.
-
-    The bound ``x.__getattribute__`` spelling is proven by the dunder name
-    itself; the unbound ``object.__getattribute__`` is proven against the
-    interpreter's own ``object``; a callee name the builtin table binds to
-    it is the alias. The name argument is the member, so a constant is
-    decided by the member test upstream and an expression is a read. The
-    protocol takes no keywords and no default argument, so the bound
-    spelling carries one positional argument, the other two two.
-    """
-    if node.keywords or not node.args \
-            or isinstance(node.args[-1], ast.Constant):
-        return False
-    if isinstance(node.func, ast.Attribute) \
-            and node.func.attr == '__getattribute__':
-        if isinstance(node.func.value, ast.Name) \
-                and node.func.value.id == 'object':
-            return (len(node.args) == 2 and is_builtin_reference(
-                node.func.value, 'object', function, handler_globals,
-                scope_binds, comprehension_shadows))
-        return len(node.args) == 1
-    return (isinstance(node.func, ast.Name) and len(node.args) == 2
-            and is_builtin_reference(
-                node.func, node.func.id, function, handler_globals,
-                scope_binds, comprehension_shadows,
-                expected=object.__getattribute__))
-
-
 def reads_frame_namespace(selection, origin):
     """Refuse a frame read whose receiver the audit cannot account for.
 
-    ``selection`` is the expression a reader has to look at and ``origin`` is
-    what the audit can see the receiver it selects from to be, or ``UNPROVEN``
-    when it cannot. A receiver it has resolved to a live frame is refused on
-    the frame's own account, which is the one case a name the audit CAN see
-    still has to refuse. The selection is returned rather than its receiver
-    because the receiver is the argument the callee happened to take first:
-    ``api('GET', 'f_locals')`` is triggered by its second argument, and a
-    message naming ``'GET'`` sends the reader to the wrong place.
+    ``selection`` is the expression a reader has to look at and ``origin``
+    is what the audit can see the receiver to be, or ``UNPROVEN``. A
+    receiver resolved to a live frame is refused on the frame's own account,
+    the one case a name the audit CAN see still has to refuse. The selection
+    is returned rather than its receiver because the receiver is the
+    argument the callee happened to take first.
     """
     if origin is not UNPROVEN and not isinstance(origin, types.FrameType):
         return None
@@ -588,8 +566,8 @@ def assert_exact_module_vars():
     """A module attribute is the one attribute the audit can see through.
 
     Drives ``resolve_origin`` on a real attribute of a real module, so a
-    resolver that stopped reading modules would fail here rather than quietly
-    widening every module attribute to an unproven origin.
+    resolver that stopped reading modules fails here rather than widening
+    every module attribute to an unproven origin.
     """
     function = ast.parse(
         "def do_tabs(args):\n"
