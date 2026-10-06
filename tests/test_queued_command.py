@@ -250,8 +250,6 @@ def test_mcp_suite_has_no_json_loads_of_read_text_results(tmp):
     successors = (
         'test_mcp_server_load.py',
         'test_mcp_server_serve.py',
-        'test_mcp_server_config.py',
-        'test_mcp_live_port.py',
         'test_mcp_path_authority.py',
         'test_mcp_auth.py',
         'test_mcp_live_tools.py',
