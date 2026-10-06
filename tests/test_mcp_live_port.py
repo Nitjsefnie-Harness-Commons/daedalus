@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """The live MCP listener's HTTP surface.
 
-Split from tests/test_mcp_server.py: the port-zero child, the bearer
-gate and its refusal shapes, duplicate carriers, and the Date refresh
-a parser refusal carries.
+Split from tests/test_mcp_server.py.
 """
 import contextlib
 import http.client

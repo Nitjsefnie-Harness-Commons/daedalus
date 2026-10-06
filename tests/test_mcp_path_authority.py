@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """No MCP tool accepts a host path, and none may leak host files.
 
-Split from tests/test_mcp_server.py: the live-surface control that
-refuses every path-bearing tool call and plants exfiltration sentinels
-against list_hotfixes.
+Split from tests/test_mcp_server.py.
 """
 import importlib.util
 import json
