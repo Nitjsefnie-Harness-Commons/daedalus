@@ -34,11 +34,15 @@ NEAR MISS the walk must leave alone — the same shape with the separating
 decision taken the other way, so a rule that over-reaches loses as
 visibly as one that under-reaches; an arm with no near miss says so.
 """
+import ast
+import contextlib
 import sys
+import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_arm_derivation  # noqa: E402
+import _mcp_dead_code  # noqa: E402
 import _util  # noqa: E402
 from _mcp_import_fixtures import (  # noqa: E402
     _assert_scan_refusal, _scan_verdict)
@@ -505,6 +509,37 @@ def test_every_dead_code_barrier_kind_marks_the_tail_behind_it(_tmp):
     assert not over, '; '.join(over)
 
 
+def test_every_claimed_block_field_is_read_as_a_block(_tmp):
+    """Every statement-list field the grammar declares is held, both ways.
+
+    The claimed set is DERIVED from the ast declaration, never from
+    `_blocks` -- a derivation through `_blocks` would shrink silently when
+    the walk narrows. `body`, `orelse` and `finalbody` are the only field
+    names the grammar gives statement lists, and the default-value check
+    drops the single-expression `body` of Expression, Lambda and IfExp.
+    Each row holds its field twice on one probe tree, the field under
+    proof carrying [raise, probe-call] in the position a real module
+    carries it: the live read marks the probe dead, and with exactly that
+    field dropped from the read (`ast.iter_fields` patched, so the mutant
+    is that field alone and cannot drift from the real predicate) the
+    probe is reachable again. Failures are COLLECTED, because one narrowed
+    field names every row it silences.
+    """
+    del _tmp
+    quiet = []
+    for cls, field in _claimed_block_fields():
+        root, call = _block_probe(cls, field)
+        if call not in _mcp_dead_code.dead_nodes(root):
+            quiet.append(f'{cls.__name__}.{field}: live read leaves it '
+                         'reachable')
+        root, call = _block_probe(cls, field)
+        with _field_unread(cls, field):
+            if call in _mcp_dead_code.dead_nodes(root):
+                quiet.append(f'{cls.__name__}.{field}: fieldless read '
+                             'marks it dead')
+    assert not quiet, '; '.join(quiet)
+
+
 def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
     """Every site the analysers can raise has a row, on both sides.
 
@@ -601,6 +636,142 @@ def _indexed_composition(bindings, call):
     return (f'\nimport importlib\n{bindings}\n\n\ndef load():\n'
             '    return [importlib.import_module, 0]'
             f'[{call}]("pkg.leaf")\n')
+
+
+def _claimed_block_fields():
+    """Every (carrier, field) pair the grammar declares a statement list.
+
+    One class in the ast module at a time: a pair is claimed when the
+    grammar names the field `body`, `orelse` or `finalbody` and a bare
+    instance's value for it is a list -- which is what keeps the
+    single-expression `body` of Expression, Lambda and IfExp out.
+    """
+    claimed = []
+    for cls in {value for value in vars(ast).values()
+                if isinstance(value, type) and issubclass(value, ast.AST)}:
+        for field in cls._fields:
+            if field not in _BLOCK_FIELD_NAMES:
+                continue
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', DeprecationWarning)
+                if isinstance(getattr(cls(), field, None), list):
+                    claimed.append((cls, field))
+    return sorted(claimed, key=lambda pair: (pair[0].__name__, pair[1]))
+
+
+def _block_probe(cls, field):
+    """One compilable tree whose `field` holds [raise, probe-call].
+
+    Other fields get what the compiler and the walk's own `_leaves` ask of
+    them: a non-proof statement list carries [Pass()] (the compiler
+    refuses empty bodies, and `_leaves` reads an if-with-else's last body
+    statement), the wrappers put the carrier where a real module carries
+    it -- a handler in a `try`, a case in a `match`, an async loop in an
+    async def.
+    """
+    call = ast.Call(func=ast.Name(id='probe', ctx=ast.Load()), args=[],
+                    keywords=[])
+    root = _probe_root(
+        cls, _fill(cls, field, [ast.Raise(), ast.Expr(value=call)]))
+    ast.fix_missing_locations(root)
+    compile(root, '<probe>', 'single' if cls is ast.Interactive else 'exec')
+    return root, call
+
+
+def _fill(cls, field, body):
+    """One carrier whose `field` holds `body`, every other field filled."""
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', DeprecationWarning)
+        node = cls()
+    for name in cls._fields:
+        setattr(node, name, body if name == field
+                else _field_filler(cls, name))
+    return node
+
+
+def _probe_root(cls, node):
+    """The root the carrier compiles as, in the wrapper a module carries."""
+    if cls in (ast.Module, ast.Interactive):
+        return node
+    if cls is ast.ExceptHandler:
+        node = ast.Try(body=[ast.Pass()], handlers=[node], orelse=[],
+                       finalbody=[])
+    elif cls is ast.match_case:
+        node = ast.Match(subject=ast.Constant(None), cases=[node])
+    if cls in (ast.AsyncFor, ast.AsyncWith):
+        node = _fill(ast.AsyncFunctionDef, 'body', [node])
+    return ast.Module(body=[node], type_ignores=[])
+
+
+def _field_filler(cls, name):
+    """What a non-proof field carries: its filler, or the empty list."""
+    if name in _SCALAR_FILL:
+        return _SCALAR_FILL[name]()
+    if (cls, name) in _LIST_FILL:
+        return _LIST_FILL[(cls, name)]()
+    if name in _BLOCK_FIELD_NAMES:
+        return [ast.Pass()]
+    return []
+
+
+def _arguments():
+    return ast.arguments(posonlyargs=[], args=[], vararg=None,
+                         kwonlyargs=[], kw_defaults=[], kwarg=None,
+                         defaults=[])
+
+
+_BLOCK_FIELD_NAMES = ('body', 'orelse', 'finalbody')
+
+_SCALAR_FILL = {
+    'name': lambda: 'p',
+    'args': _arguments,
+    'returns': lambda: None,
+    'test': lambda: ast.Constant(True),
+    'target': lambda: ast.Name(id='t', ctx=ast.Store()),
+    'iter': lambda: ast.Constant(()),
+    'subject': lambda: ast.Constant(None),
+    'pattern': lambda: ast.MatchAs(name=None, pattern=None),
+    'guard': lambda: None,
+    'type_comment': lambda: None,
+    'type': lambda: ast.Name(id='Exception', ctx=ast.Load()),
+}
+
+_LIST_FILL = {
+    (ast.Try, 'handlers'): lambda: [ast.ExceptHandler(
+        type=ast.Name(id='Exception', ctx=ast.Load()), name=None,
+        body=[ast.Pass()])],
+    (ast.TryStar, 'handlers'): lambda: [ast.ExceptHandler(
+        type=ast.Name(id='Exception', ctx=ast.Load()), name=None,
+        body=[ast.Pass()])],
+    (ast.With, 'items'): lambda: [ast.withitem(
+        context_expr=ast.Constant(None), optional_vars=None)],
+    (ast.AsyncWith, 'items'): lambda: [ast.withitem(
+        context_expr=ast.Constant(None), optional_vars=None)],
+}
+
+
+@contextlib.contextmanager
+def _field_unread(cls, field):
+    """The walk's read with exactly this field dropped from it.
+
+    A wrapper over `ast.iter_fields`, so `_blocks`'s own predicate still
+    decides what a block is and the mutant is that field alone dropped --
+    not a reimplementation that could drift from the real predicate.
+    """
+    real = ast.iter_fields
+
+    def without(node):
+        for name, value in real(node):
+            # pylint: disable-next=unidiomatic-typecheck
+            if type(node) is cls and name == field:
+                continue
+            yield name, value
+
+    ast.iter_fields = without
+    try:
+        yield
+    finally:
+        ast.iter_fields = real
 
 
 if __name__ == '__main__':
