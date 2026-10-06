@@ -5,53 +5,37 @@ THE MARKER IS A PLACE THAT CAN RAISE, not a test name, not a node type and
 not a message: a site is a `raise` whatever it raises, or a call to a
 refusal raiser — the closure's own `_refuse`, the callback every arm
 receives, or the `AssertionError` constructor both of those raise — keyed
-on the function it stands in and its own line. An arm whose message is
-assembled, passed by keyword, forwarded through a local, produced by a
-helper, or raised as an exception type nobody anticipated is still an arm,
-and a table keyed on message text cannot see one. The message is still
-read, as the LABEL a row carries beside its site, and each row carries the
-FIXED part of the message, never the node's own spelling. Two labels are
-shaped so a plain grep of the analysers under-counts them:
-`_refuse_default` names the thing it hands away through `_HIDDEN_NOUN`, a
-VARIABLE, so one call site spells three refusals, and
-`yields_the_operation` refuses a mention that is a FORMAT of the node.
+on the function it stands in and its own line. The message is still read,
+as the LABEL a row carries beside its site, and each row carries the FIXED
+part of the message, never the node's own spelling.
 
 The set is derived twice over and compared with the tables both ways, so
-neither the analysers nor the tables can drift apart quietly. Both halves
-of the derivation live in `_mcp_arm_derivation`, which recognises what a
-thing IS rather than how it is written — a raiser through the name or
-attribute it is bound to, through a partial built from one, a module the
-walk REACHES — and the MODULES are the connected component of the `_mcp_*`
-graph the walk's entry belongs to, keeping members that spell a site. The
-comparison cannot pass by returning nothing on both sides: `CONTROL` and
-`CONTROL_LEAF` are a two-module TREE, the second
-reached from the first by nothing but a `__import__` call, so the control is
-on the MODULE-SET axis as well as the detail axis, and the derivation is
-asked to find every one of them before it compares anything. A key is a
-LINE, the convention `_mcp_guard_floor` keys its own sites on. Each arm is
-stated twice: the refusal, and a
+neither the analysers nor the tables can drift apart quietly; both halves
+of the derivation live in `_mcp_arm_derivation`, and `CONTROL` and
+`CONTROL_LEAF` are a two-module tree, the second reached from the first by
+nothing but a `__import__` call, so the control is on the MODULE-SET axis
+as well as the detail axis. Each arm is stated twice: the refusal, and a
 NEAR MISS the walk must leave alone — the same shape with the separating
 decision taken the other way, so a rule that over-reaches loses as
 visibly as one that under-reaches; an arm with no near miss says so.
 """
-import ast
-import contextlib
 import sys
-import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_arm_derivation  # noqa: E402
 import _mcp_dead_code  # noqa: E402
 import _util  # noqa: E402
+from _block_field_probes import (  # noqa: E402
+    block_probe, claimed_block_fields, field_unread)
 from _mcp_import_fixtures import (  # noqa: E402
     _assert_scan_refusal, _scan_verdict)
 
 # (analyser site, label, the FIXED part of its message, the site the
 # refusal names, the composition the arm refuses). The first column
-# `(enclosing function, line)` is the arm's IDENTITY and the only key every
-# table below compares on. The leading newline in every source puts the
-# first real line on line 2.
+# `(enclosing function, line)` is the arm's IDENTITY and the only key
+# every table below compares on; the leading newline in every source puts
+# the first real line on line 2.
 ARMS = (
     (('_alias', 219), 'a store binds the import-by-name operation to a name',
      'binds the import-by-name operation to a name this scan',
@@ -104,11 +88,8 @@ ARMS = (
      'can hand out the import-by-name operation through',
      6, '\nimport importlib\n\n\ndef load():\n'
         '    return getattr(importlib, "import_module")\n'),
-    # No near miss: this arm refuses EVERY constant program a code-evaluating
-    # builtin is handed, whatever it names, because the walk resolves the
-    # program rather than reading it. Its boundary is the delivery axis
-    # above (a builtin bound to a tool stays silent), not the program's
-    # text, so a weaker row here would pin nothing.
+    # No near miss: the walk resolves every constant program a code
+    # evaluator is handed, so a weaker row here would pin nothing.
     (('_import_targets', 666),
      'a constant program is handed to a code-evaluating builtin',
      'is handed to a code-evaluating builtin, which',
@@ -119,8 +100,7 @@ ARMS = (
      '\nimport importlib\n\n\ndef load():\n    return '
      '[[importlib.import_module]]' + '[0]' * 800 + '("pkg.leaf")\n'),
 )
-# (label, the arm whose near miss this is, the composition the walk must
-# leave alone) — the second column names whose near miss it is.
+# (label, the arm whose near miss this is, the composition to leave alone).
 NEAR_MISSES = (
     ('a name bound to the module, not the operation', ARMS[0][1],
      '\nimport importlib\n\n\ndef load():\n    kept = importlib.util\n'),
@@ -156,8 +136,7 @@ NEAR_MISSES = (
      '    return [[importlib.import_module]][0][0](4)\n'),
 )
 
-# Sites no composition drives, each with the reason; they are arms in the
-# sense this file counts, so omitting them would let a site vanish silently.
+# Sites no composition drives: still arms, so omitting one loses a row.
 UNDRAWN = (
     (('_refuse', 90), 'the raiser itself: every driven site reaches it, so '
      'a composition names the SITE that called it rather than this one'),
@@ -170,9 +149,7 @@ UNDRAWN = (
 )
 
 # Sites in the other two modules the walk's surface is built from, each
-# with the case that drives it — counted here rather than left to a set of
-# function names, which is what let an arm inside `_module_guard_sites` go
-# unseen.
+# with the case that drives it — a set of function names hid one once.
 FLOOR_ARMS = (
     (('_controlling_test', 196), 'test_mcp_guard_floor.py'
      '::test_a_raise_under_a_match_case_is_refused'),
@@ -195,11 +172,9 @@ COVERED = {
     '_mcp_import_fixtures.py': FIXTURE_ARMS,
 }
 
-# The negative control the comparison needs: a TREE of two modules, the
-# second in the component only because the WALK follows the one
-# `__import__` call at the foot of `CONTROL` — so the control holds on the
-# MODULE-SET axis, not only on the detail axis, and the case cannot pass by
-# returning nothing on both sides.
+# The negative control: a two-module TREE, the second in the component
+# only because the walk follows the one `__import__` call at the foot of
+# `CONTROL`, so the case cannot pass by returning nothing on both sides.
 CONTROL = '''
 def _refuse(path, root, node, detail):
     raise AssertionError(f'{path}:{node.lineno}: {detail}')
@@ -233,8 +208,7 @@ def by_a_third_exception(node):
 __import__('control_leaf')
 '''
 
-# The sites `CONTROL` spells, same `(function, line)` identity as every
-# other key, in the fixture's own line numbers.
+# The sites `CONTROL` spells, in the fixture's own line numbers.
 CONTROL_SITES = (
     ('_refuse', 3),
     ('by_keyword', 11),
@@ -245,8 +219,7 @@ CONTROL_SITES = (
 )
 
 # The leaf's arms are the RAISER axis in the three shapes a name-keyed
-# reader cannot see: a raiser reached through a local, an attribute, and a
-# `functools.partial`.
+# reader cannot see: local, attribute and `functools.partial`.
 CONTROL_LEAF = '''import functools
 
 
@@ -283,10 +256,8 @@ CONTROL_LEAF_SITES = (
 )
 
 # The barrier kinds `_mcp_dead_code._BARRIERS` names, plus the `if` whose
-# two branches both leave. Each is one tree: the call BEFORE the barrier
-# still contributes a module, the one AFTER it does not — so a rule that
-# stopped marking tails and a rule that over-reached both fail under one
-# name.
+# two branches both leave: the call BEFORE the barrier still contributes a
+# module, the one AFTER it does not, so both failure directions lose here.
 BARRIERS = (
     ('a raise', '\nimport importlib\n\n\ndef load():\n'
      '    importlib.import_module("pkg.before")\n'
@@ -334,10 +305,8 @@ BARRIER_NAMES = ['composition.py', 'pkg/__init__.py', 'pkg/before.py']
 # operation was resolved, telling a resolution from a silence.
 LEAF_TREE = {'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n'}
 
-# The index axis's own question, asked of the module's own symbol table:
-# `bool` under its own name and an alias IS the builtin wherever the module
-# leaves the name alone; `_Scopes.denotes_builtin` is the only kept
-# declaration that answers it.
+# The index axis's own question: `bool` under its own name and an alias
+# IS the builtin wherever the module leaves the name alone.
 BOOL_INDEX = (
     ('', 'bool(0)', 'resolved'),
     ('from builtins import bool as b', 'b(0)', 'resolved'),
@@ -350,7 +319,7 @@ BOOL_INDEX = (
 # The ORDER the module's statements run in: a `from builtins` binds the
 # builtin once its own statement has run, so a use BEFORE it reads a name
 # the module has not bound yet and the walk declines. Every BOOL_INDEX row
-# puts the binding first, so the axis was carried by no row above.
+# puts the binding first, so this axis is new here.
 BINDING_ORDER = (
     ('\nimport importlib\nfrom builtins import bool as b\n\n\ndef load():\n'
      '    return [importlib.import_module, 0][b(0)]("pkg.leaf")\n',
@@ -362,10 +331,8 @@ BINDING_ORDER = (
 )
 
 
-# A conditional settles a position only when BOTH arms settle and AGREE.
-# Agreeing arms are the near miss; disagreeing arms are the positive — read
-# either alone and the position resolves, putting a module in a closure
-# only one of two values ever reaches.
+# A conditional settles a position only when BOTH arms settle and AGREE;
+# read either alone and the position resolves.
 def _conditional_index(index):
     """A composition whose INDEX is the one expression."""
     return (f'\nimport importlib\n\n\ndef load():\n'
@@ -379,9 +346,8 @@ CONDITIONAL_INDEX = (
 )
 
 
-# The constant folder's answers: literal, literal concatenation and
-# field-less f-string fold and are refused; a runtime-computed value is the
-# declared limit and is not.
+# The constant folder's answers: literal, concatenation and field-less
+# f-string fold and are refused; a runtime value is the declared limit.
 FOLDED_STRING = (
     ('"import_module"', 'refused'),
     ("'import_' + 'module'", 'refused'),
@@ -393,10 +359,9 @@ FOLDED_STRING = (
 def test_every_refusal_arm_is_refused_with_its_own_message(_tmp):
     """Each arm refuses, naming its own site and its own fixed phrase.
 
-    The phrase is the part of the message that does not interpolate the
-    node, so a refusal raised by a neighbouring arm cannot satisfy it; the
-    failures are COLLECTED, because a planted arm has to name every row it
-    silenced.
+    The phrase never interpolates the node, so a neighbouring arm cannot
+    satisfy it; failures are COLLECTED, so a planted arm names every row
+    it silenced.
     """
     quiet = []
     for _site, label, phrase, line, source in ARMS:
@@ -410,10 +375,8 @@ def test_every_refusal_arm_is_refused_with_its_own_message(_tmp):
 def test_every_refusal_arm_has_a_near_miss_the_walk_leaves_alone(_tmp):
     """Each arm's neighbour is clean, so an over-reaching rule loses too.
 
-    The whole `_scan_verdict` answer is READ — verdict and names — the
-    pair the barriers case already reads, so a walk that over-delivers
-    loses this case the way it already loses that one. The failures are
-    collected, for the same reason the refusal case collects them.
+    The whole `_scan_verdict` answer is read — verdict and names — and the
+    failures are collected, for the reason the refusal case collects them.
     """
     reached = []
     for label, beside, source in NEAR_MISSES:
@@ -426,9 +389,9 @@ def test_every_refusal_arm_has_a_near_miss_the_walk_leaves_alone(_tmp):
 
 def test_a_callee_the_fold_cannot_read_is_refused_where_it_reads_one(_tmp):
     """The fold answers one question with three answers, and each is read
-    (`_mcp_selection_fold` states the taxonomy): the middle answer is the
-    one a rule that over-reaches loses, and the third is the one a rule
-    that treats "not read" as "unreachable" loses.
+    (`_mcp_selection_fold` states the taxonomy): the middle a rule that
+    over-reaches loses, the third a rule that treats "not read" as
+    "unreachable" loses.
     """
     for callee, spoken in (('importlib.import_module', 'resolved'),
                            ('(0, importlib.import_module)[4]', 'silent'),
@@ -439,11 +402,8 @@ def test_a_callee_the_fold_cannot_read_is_refused_where_it_reads_one(_tmp):
 
 
 def test_a_bool_index_reads_the_position_it_names(_tmp):
-    """`bool` settles an index under its own name and under an alias, and a
-    name bound to something of its own does not settle it at all: a rule
-    that stopped recognising the builtin refuses the rows the walk
-    resolves, and one that recognised any name at all resolves rows it
-    must refuse.
+    """`bool` settles an index under its own name and under an alias, and
+    a name bound to something of its own does not settle it at all.
     """
     wrong = []
     for bindings, call, spoken in BOOL_INDEX:
@@ -457,29 +417,24 @@ def test_a_bool_index_reads_the_position_it_names(_tmp):
 
 def test_an_alias_the_module_has_not_run_yet_is_not_the_builtin(_tmp):
     """A `from builtins` binds the builtin ONCE ITS OWN STATEMENT HAS RUN:
-    the pair is the same binding and the same use written in the two
-    orders, and the refusing row names the arm it enters — a rule that
-    reads the binding and drops the order resolves it, one that declines
-    every alias loses the other row.
+    the same binding and use written in the two orders, the refusing row
+    naming the arm it enters.
     """
     assert not _index_verdicts(_tmp, BINDING_ORDER)
 
 
 def test_a_conditional_index_settles_only_when_its_two_arms_agree(_tmp):
-    """A conditional is a RUNTIME choice, so it settles a value only when
-    both of its arms settle to the same one. The refusal is read against
-    the arm it enters, so a rule that reads the binding and drops the
-    agreement resolves a module only one of two values ever reaches.
+    """A conditional is a RUNTIME choice, settling a value only when both
+    arms settle to the same one; the refusal names the arm it enters.
     """
     assert not _index_verdicts(_tmp, CONDITIONAL_INDEX)
 
 
 def test_a_string_the_folder_can_fold_is_refused_like_a_literal(_tmp):
-    """The constant folder decides the string axis, and it folds a
-    concatenation of literals and a field-less f-string to the same constant
-    a literal already is; the clean row is the declared limit beside them,
-    read here so the three refusals are not a rule that refuses every
-    string it meets.
+    """The constant folder decides the string axis: it folds a literal
+    concatenation and a field-less f-string to the constant a literal
+    already is; the clean row keeps the refusals from refusing every
+    string at all.
     """
     wrong = []
     for statement, spoken in FOLDED_STRING:
@@ -492,9 +447,9 @@ def test_a_string_the_folder_can_fold_is_refused_like_a_literal(_tmp):
 
 def test_every_dead_code_barrier_kind_marks_the_tail_behind_it(_tmp):
     """Raise, return, break, continue and a two-leaving `if` each end a
-    block. Both halves ride in one tree, so a rule that stopped marking
-    tails adds `pkg/leaf.py` and a rule that over-reached drops
-    `pkg/before.py`; the assertion reads the whole set, not a membership.
+    block; both halves ride in one tree, so a rule that stopped marking
+    tails and one that over-reached both lose, and the assertion reads the
+    whole set, not a membership.
     """
     over = []
     for label, source in BARRIERS:
@@ -527,13 +482,13 @@ def test_every_claimed_block_field_is_read_as_a_block(_tmp):
     """
     del _tmp
     quiet = []
-    for cls, field in _claimed_block_fields():
-        root, call = _block_probe(cls, field)
+    for cls, field in claimed_block_fields():
+        root, call = block_probe(cls, field)
         if call not in _mcp_dead_code.dead_nodes(root):
             quiet.append(f'{cls.__name__}.{field}: live read leaves it '
                          'reachable')
-        root, call = _block_probe(cls, field)
-        with _field_unread(cls, field):
+        root, call = block_probe(cls, field)
+        with field_unread(cls, field):
             if call in _mcp_dead_code.dead_nodes(root):
                 quiet.append(f'{cls.__name__}.{field}: fieldless read '
                              'marks it dead')
@@ -544,18 +499,11 @@ def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
     """Every site the analysers can raise has a row, on both sides.
 
     The module set is DERIVED (`analyser_modules`), the sites are read off
-    each module's parse, and each set is compared with its table both ways:
-    a site with no row fails, a row whose site is gone fails. A count sits
-    beside each comparison because two wrong answers of the same size
-    satisfy a set equality, and the FLOOR has its own table and count for
-    the reason its sites were absorbed by a set of function names.
-    `CONTROL_LEAF` is in the component only because the walk follows the
-    one `__import__` call at the foot of `CONTROL`; a derivation that closed
-    over static imports, or recognised a raiser by the letters its call is
-    written with, reports half a control and this says which half.
-    The deep-chain arm drives the walk's own recursion limit (site `None`).
-    `_refuse_default` is one derived site and three rows:
-    the message names the thing handed away through `_HIDDEN_NOUN`.
+    each module's parse, and each set is compared with its table both ways
+    and by count, because two wrong answers of one size satisfy an
+    equality. `CONTROL_LEAF` is in the component only because the walk
+    follows the one `__import__` call at the foot of `CONTROL`; the
+    deep-chain arm drives the walk's own recursion limit (site `None`).
     """
     del _tmp
     sources = {'control': CONTROL, 'control_leaf': CONTROL_LEAF}
@@ -587,31 +535,23 @@ def test_the_enumeration_covers_every_arm_the_analysers_spell(_tmp):
 
 
 def _read(verdict, detail):
-    """One scan answer in the three words the index cases read: `refused`,
-    or `resolved` when the scan set carries the leaf module and `silent`
-    when it does not."""
+    """One scan answer in three words: refused, resolved (leaf in the
+    scan set), silent."""
     if verdict == 'refused':
         return 'refused'
     return 'resolved' if 'pkg/leaf.py' in detail else 'silent'
 
 
 def _answered(_tmp, files):
-    """`_scan_verdict`'s answer in the three words the callee cases read.
-
-    One reader for both directions, so a control states the arm it enters
-    and the neighbour it must leave alone with the same call and one shape of
-    answer. This classification used to live in the shared fixtures bolted to
-    a single callee composition, the one shape no second case could reuse.
-    """
+    """`_scan_verdict`'s answer in the three words the callee cases read:
+    one reader for the arm and its neighbour alike."""
     return _read(*_scan_verdict(_tmp, files))
 
 
 def _index_verdicts(_tmp, rows):
-    """Each row of an index table answered in those three words, and the ARM
-    a row that must refuse read against for the phrase it names.
-
-    The failures are COLLECTED, for the reason the arm cases collect them: a
-    rule that moved a decision has moved it for more than one row.
+    """Each row of an index table answered in those three words, the ARM
+    a refusing row names read against; failures are COLLECTED, because a
+    moved decision moves more than one row.
     """
     wrong = []
     for source, spoken, phrase in rows:
@@ -636,142 +576,6 @@ def _indexed_composition(bindings, call):
     return (f'\nimport importlib\n{bindings}\n\n\ndef load():\n'
             '    return [importlib.import_module, 0]'
             f'[{call}]("pkg.leaf")\n')
-
-
-def _claimed_block_fields():
-    """Every (carrier, field) pair the grammar declares a statement list.
-
-    One class in the ast module at a time: a pair is claimed when the
-    grammar names the field `body`, `orelse` or `finalbody` and a bare
-    instance's value for it is a list -- which is what keeps the
-    single-expression `body` of Expression, Lambda and IfExp out.
-    """
-    claimed = []
-    for cls in {value for value in vars(ast).values()
-                if isinstance(value, type) and issubclass(value, ast.AST)}:
-        for field in cls._fields:
-            if field not in _BLOCK_FIELD_NAMES:
-                continue
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore', DeprecationWarning)
-                if isinstance(getattr(cls(), field, None), list):
-                    claimed.append((cls, field))
-    return sorted(claimed, key=lambda pair: (pair[0].__name__, pair[1]))
-
-
-def _block_probe(cls, field):
-    """One compilable tree whose `field` holds [raise, probe-call].
-
-    Other fields get what the compiler and the walk's own `_leaves` ask of
-    them: a non-proof statement list carries [Pass()] (the compiler
-    refuses empty bodies, and `_leaves` reads an if-with-else's last body
-    statement), the wrappers put the carrier where a real module carries
-    it -- a handler in a `try`, a case in a `match`, an async loop in an
-    async def.
-    """
-    call = ast.Call(func=ast.Name(id='probe', ctx=ast.Load()), args=[],
-                    keywords=[])
-    root = _probe_root(
-        cls, _fill(cls, field, [ast.Raise(), ast.Expr(value=call)]))
-    ast.fix_missing_locations(root)
-    compile(root, '<probe>', 'single' if cls is ast.Interactive else 'exec')
-    return root, call
-
-
-def _fill(cls, field, body):
-    """One carrier whose `field` holds `body`, every other field filled."""
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
-        node = cls()
-    for name in cls._fields:
-        setattr(node, name, body if name == field
-                else _field_filler(cls, name))
-    return node
-
-
-def _probe_root(cls, node):
-    """The root the carrier compiles as, in the wrapper a module carries."""
-    if cls in (ast.Module, ast.Interactive):
-        return node
-    if cls is ast.ExceptHandler:
-        node = ast.Try(body=[ast.Pass()], handlers=[node], orelse=[],
-                       finalbody=[])
-    elif cls is ast.match_case:
-        node = ast.Match(subject=ast.Constant(None), cases=[node])
-    if cls in (ast.AsyncFor, ast.AsyncWith):
-        node = _fill(ast.AsyncFunctionDef, 'body', [node])
-    return ast.Module(body=[node], type_ignores=[])
-
-
-def _field_filler(cls, name):
-    """What a non-proof field carries: its filler, or the empty list."""
-    if name in _SCALAR_FILL:
-        return _SCALAR_FILL[name]()
-    if (cls, name) in _LIST_FILL:
-        return _LIST_FILL[(cls, name)]()
-    if name in _BLOCK_FIELD_NAMES:
-        return [ast.Pass()]
-    return []
-
-
-def _arguments():
-    return ast.arguments(posonlyargs=[], args=[], vararg=None,
-                         kwonlyargs=[], kw_defaults=[], kwarg=None,
-                         defaults=[])
-
-
-_BLOCK_FIELD_NAMES = ('body', 'orelse', 'finalbody')
-
-_SCALAR_FILL = {
-    'name': lambda: 'p',
-    'args': _arguments,
-    'returns': lambda: None,
-    'test': lambda: ast.Constant(True),
-    'target': lambda: ast.Name(id='t', ctx=ast.Store()),
-    'iter': lambda: ast.Constant(()),
-    'subject': lambda: ast.Constant(None),
-    'pattern': lambda: ast.MatchAs(name=None, pattern=None),
-    'guard': lambda: None,
-    'type_comment': lambda: None,
-    'type': lambda: ast.Name(id='Exception', ctx=ast.Load()),
-}
-
-_LIST_FILL = {
-    (ast.Try, 'handlers'): lambda: [ast.ExceptHandler(
-        type=ast.Name(id='Exception', ctx=ast.Load()), name=None,
-        body=[ast.Pass()])],
-    (ast.TryStar, 'handlers'): lambda: [ast.ExceptHandler(
-        type=ast.Name(id='Exception', ctx=ast.Load()), name=None,
-        body=[ast.Pass()])],
-    (ast.With, 'items'): lambda: [ast.withitem(
-        context_expr=ast.Constant(None), optional_vars=None)],
-    (ast.AsyncWith, 'items'): lambda: [ast.withitem(
-        context_expr=ast.Constant(None), optional_vars=None)],
-}
-
-
-@contextlib.contextmanager
-def _field_unread(cls, field):
-    """The walk's read with exactly this field dropped from it.
-
-    A wrapper over `ast.iter_fields`, so `_blocks`'s own predicate still
-    decides what a block is and the mutant is that field alone dropped --
-    not a reimplementation that could drift from the real predicate.
-    """
-    real = ast.iter_fields
-
-    def without(node):
-        for name, value in real(node):
-            # pylint: disable-next=unidiomatic-typecheck
-            if type(node) is cls and name == field:
-                continue
-            yield name, value
-
-    ast.iter_fields = without
-    try:
-        yield
-    finally:
-        ast.iter_fields = real
 
 
 if __name__ == '__main__':
