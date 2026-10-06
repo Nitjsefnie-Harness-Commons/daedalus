@@ -1,10 +1,9 @@
 """Static argparse, builtin-identity, and origin helpers. The DECLARED and
 GUARANTEED storage contract lives in test_cli_arg_audit.py's own docstring.
 An origin the audit can see is a module-level name, a literal, or an
-attribute of such a value; a name a local scope binds is unproven, and
-unproven is the refusal — the one over-refusal this rule accepts. A frame
-read is refused when the audit cannot see its receiver; ``frame_read`` and
-``reads_frame_namespace`` own that rule."""
+attribute of such a value; a locally bound name is unproven, and unproven
+is the refusal. A frame read is refused when the audit cannot see its
+receiver; ``frame_read`` and ``reads_frame_namespace`` own that rule."""
 import argparse
 import ast
 import builtins
@@ -17,7 +16,6 @@ FRAME_SURFACE = frozenset(
     name for name, member in vars(types.FrameType).items()
     if isinstance(member, _FRAME_DESCRIPTORS))
 UNPROVEN = object()  # the verdict for a value whose origin is untraceable
-# A subscript key that is a range or a tuple is a position, not a name.
 _RANGE_OR_TUPLE_KEYS = (ast.Slice, ast.Tuple, ast.List, ast.Starred)
 _UNKNOWN_MODULE_BINDING = object()
 
@@ -307,13 +305,13 @@ def resolve_origin(node, function, handler_globals, unresolved, scope_binds,
                    bindings=None):
     """Return the value the audit can see a name, attribute or literal names.
 
-    A name resolves through ``bindings`` when the audit has tracked one for
-    it, then through the scope it reads; an attribute resolves through a
-    base it has already resolved; a literal resolves to itself. Every other
+    A name resolves through ``bindings`` when the audit has tracked one,
+    then through the scope it reads; an attribute resolves through a base
+    it has already resolved; a literal resolves to itself. Every other
     expression is unproven, its value produced by running code the audit
     does not run. A literal receiver is the cheap half of the frame rule's
-    selectivity: refusing a selection on a visible string would refuse the
-    CLI's own ``api('GET', path)`` calls.
+    selectivity — refusing one would refuse the CLI's own
+    ``api('GET', path)`` calls.
     """
     if isinstance(node, ast.Constant):
         return node.value
@@ -447,15 +445,12 @@ def frame_read(node, namespace_key, *context):
     """The member selection to refuse, or ``None``.
 
     A position that can carry a member name and one the audit cannot read
-    are the same position, and answering the second "no member" is silence:
-    a computed name, a starred expansion and a member chosen by a callee
-    the audit cannot see all reach ``f_locals`` without naming it, refused
-    by ``reads_frame_namespace`` on the receiver's origin exactly as a
-    constant member is; a member this file has never heard of is refused
-    like a known one, which is why the member test is the set read off
-    ``types.FrameType``. Only the subscript reaches the audited namespace
-    by its own key, so a call naming a path reads nothing.
-    """
+    are the same position: a computed name, a starred expansion and a
+    member chosen by a callee the audit cannot see all reach ``f_locals``
+    without naming it, refused on the receiver's origin exactly as a
+    constant member; a member this file has never heard of is refused
+    like a known one, hence the member test being the set read off
+    ``types.FrameType``."""
     if isinstance(node, ast.Attribute):
         return node if node.attr in FRAME_SURFACE else None
     if isinstance(node, ast.Subscript):
@@ -466,18 +461,26 @@ def frame_read(node, namespace_key, *context):
 
 
 def selection_base(selection):
-    """The value a member selection is made from — what has to be a frame."""
+    """The value a member selection is made from — what has to be a frame.
+
+    A one-argument ``__getattribute__`` call is the bound spelling and
+    selects from the object the dunder is read from; every other call
+    selection takes its first argument.
+    """
     if isinstance(selection, ast.Call):
+        func = selection.func
+        if (len(selection.args) == 1 and isinstance(func, ast.Attribute)
+                and func.attr == '__getattribute__'):
+            return func.value
         return selection.args[0] if selection.args else selection.func
     return selection.value
 
 
 def _subscript_read(node, namespace_key):
-    """A subscript names a member by its key; an unreadable key names one too.
-
-    A constant the audit can read is decided, a range or tuple key is a
-    position rather than a name, and an expression is a member the source
-    does not spell.
+    """A subscript names a member by its key; an unreadable key names one
+    too. A constant the audit can read is decided, a range or tuple key is
+    a position rather than a name, and an expression is a member the
+    source does not spell.
     """
     if isinstance(node.slice, ast.Constant):
         key = constant_string(node.slice)
@@ -495,18 +498,18 @@ def _call_read(node, function, handler_globals, scope_binds,
 
     A visible constant member is decided by the member test, at any argument
     position, because a call can name a member wherever the callee looks for
-    it. The price is measured: 131 calls in ``daedalus_cli/`` pass a constant
-    string as a second argument, 46 distinct values, none a frame member, so
-    ``api('GET', 'f_locals')`` is refused whatever the callee is and nothing
-    in the tree is refused today. Gating on the callee instead would let a
-    member be named through a shadowed one — the false green I-1 closed.
-    What the audit cannot read is a read too: a starred expansion hides the
-    whole argument list, a callee that is itself a call has a value the audit
-    cannot see, and a proven builtin ``getattr`` or attribute-protocol callee
-    whose name is an expression selected a member the source does not spell.
-    A one-argument call with a callee the audit can see is not a selection,
-    which keeps ``value.lower()`` and ``res.get('result', [])`` out of the
-    answer. The protocol proof admits exactly three spellings — the bound
+    it. The price is measured: 131 calls in ``daedalus_cli/`` pass a
+    constant second argument, 46 distinct values, none a frame member, so
+    ``api('GET', 'f_locals')`` is refused whatever the callee is — nothing
+    in the tree is refused today — gating on the callee would name a member
+    through a shadowed one, the false green I-1 closed. What the audit
+    cannot read is a read too: a starred expansion hides the
+    argument list, a callee that is itself a call has a value the audit
+    cannot see, and a proven builtin ``getattr`` or attribute-protocol
+    callee whose name is an expression selects what the source does not
+    spell; a one-argument visible-callee call is not a selection —
+    ``value.lower()``, ``res.get('result', [])`` stay out. The protocol
+    proof admits exactly three spellings — the bound
     ``x.__getattribute__``, proven by the dunder name itself; the unbound
     ``object.__getattribute__``, whose base is proven through the
     builtin-reference machinery; and a callee name the builtin table binds
@@ -550,12 +553,11 @@ def _has_starred(node):
 def reads_frame_namespace(selection, origin):
     """Refuse a frame read whose receiver the audit cannot account for.
 
-    ``selection`` is the expression a reader has to look at and ``origin``
-    is what the audit can see the receiver to be, or ``UNPROVEN``. A
-    receiver resolved to a live frame is refused on the frame's own account,
-    the one case a name the audit CAN see still has to refuse. The selection
-    is returned rather than its receiver because the receiver is the
-    argument the callee happened to take first.
+    ``selection`` is the expression a reader has to look at; ``origin`` is
+    what the audit can see the receiver to be, or ``UNPROVEN`` — a live
+    frame refuses on the frame's own account, the one case a name the audit
+    CAN see still has to refuse. The selection is returned because the
+    receiver's position is the callee's to choose.
     """
     if origin is not UNPROVEN and not isinstance(origin, types.FrameType):
         return None
@@ -567,7 +569,7 @@ def assert_exact_module_vars():
 
     Drives ``resolve_origin`` on a real attribute of a real module, so a
     resolver that stopped reading modules fails here rather than widening
-    every module attribute to an unproven origin.
+    every attribute.
     """
     function = ast.parse(
         "def do_tabs(args):\n"
