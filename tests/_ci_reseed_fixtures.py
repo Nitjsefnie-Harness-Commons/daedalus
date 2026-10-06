@@ -35,6 +35,13 @@ def _ci_reseed_document(row):
     return document
 
 
+def _ci_reseed_rowless():
+    """The shipped document minus the re-seeded row."""
+    document = _ci_reseed_document(True)
+    del document['tests_line_baseline']
+    return document
+
+
 def _ci_reseed_repo(tmp, name):
     """A committed git repository holding only the thresholds document."""
     repo = Path(tmp) / name
@@ -78,7 +85,33 @@ def _ci_reseed_shallow(tmp, marker):
     clone = Path(tmp) / 'shallow'
     _git(tmp, 'clone', '--no-local', '--depth', '1', '-q',
          str(repo), str(clone))
+    (clone / 'scripts' / 'ci').mkdir(parents=True)
+    for source in (THRESHOLDS_SCRIPT, RESEED_SCRIPT):
+        shutil.copy2(source, clone / 'scripts' / 'ci' / source.name)
     return clone
+
+
+def _ci_reseed_order_subject(tmp, marker):
+    """A subject where parent order decides: the marked limb hangs six
+    deep off the merge's second parent, behind a first-parent limb ten
+    commits deep, so FIFO exhausts the visit cap before reaching it."""
+    repo = _ci_reseed_repo(tmp, 'order')
+    _ci_reseed_commit(repo, 'base', row=False)
+    named = subprocess.run(
+        ('git', '-C', str(repo), 'branch', '--show-current'),
+        check=True, capture_output=True,
+        env=_util.child_coverage('scrub'))
+    base = named.stdout.decode().strip()
+    _git(repo, 'checkout', '-qb', 'line')
+    for depth in range(5, 0, -1):
+        _ci_reseed_commit(repo, f'limb {depth}', row=False)
+    _ci_reseed_commit(repo, f'delete {marker}', row=False)
+    _git(repo, 'checkout', '-q', base)
+    for _ in range(10):
+        _ci_reseed_commit(repo, 'filler', row=False)
+    _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #2',
+         'line')
+    return repo
 
 
 def _ci_reseed_budget_repo(tmp, files, budget, name):

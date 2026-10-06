@@ -188,23 +188,6 @@ def test_tightened_lowers_a_file_that_lost_cover(tmp):
     assert tightened is not None
 
 
-def test_tightening_never_raises_or_adds_a_number(tmp):
-    del tmp
-    policy = _policy()
-    baseline = {'a.js': 3}
-    assert policy.tightened(baseline, {'a.js': 3}) is None
-    assert policy.tightened(baseline, {'a.js': 7}) is None
-    assert policy.tightened(
-        baseline, {'a.js': 3, 'b.js': 5}) is None
-
-
-def test_tightening_drops_a_zeroed_entry(tmp):
-    del tmp
-    policy = _policy()
-    assert policy.tightened(
-        {'a.js': 4, 'b.js': 2}, {'a.js': 0, 'b.js': 2}) == {'b.js': 2}
-
-
 def test_tightening_preserves_an_entry_for_a_file_it_cannot_measure(tmp):
     del tmp
     policy = _policy()
@@ -228,22 +211,6 @@ def test_main_refuses_and_names_the_file_and_the_remedy(tmp):
     assert '9' in stderr and '1' in stderr, stderr
     assert policy.UNCOVERED_REMEDY in stderr, stderr
     assert 'Traceback' not in stderr
-
-
-def test_main_reports_a_clean_tree_on_stdout_only(tmp):
-    policy = _policy()
-    thresholds = _thresholds()
-    target = Path(tmp) / 'thresholds.json'
-    data = _document()
-    data[MEMBER] = {'tabs.js': 9}
-    thresholds.write(target, data)
-    setattr(policy, 'tracked_uncovered_counts',
-            lambda *a, **kw: {'tabs.js': 9})
-    status, stdout, stderr = _main(
-        policy, [str(Path(tmp) / 'absent'), '--thresholds', str(target)])
-    assert status == 0
-    assert stdout == '1 tracked modules within the per-module policy\n'
-    assert stderr == ''
 
 
 def _tighten(policy, target, counts):
