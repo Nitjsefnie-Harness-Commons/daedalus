@@ -14,7 +14,7 @@ from _repo import ROOT  # noqa: E402
 from _ci_reseed_fixtures import (  # noqa: E402
     _ci_reseed_budget_repo, _ci_reseed_commit, _ci_reseed_merge,
     _ci_reseed_module, _ci_reseed_order_subject, _ci_reseed_repo,
-    _ci_reseed_rowless, _ci_reseed_shallow)
+    _ci_reseed_rowless, _ci_reseed_shallow, _ci_reseed_visit_order)
 from _ratchet_fixture import _git, _normalised  # noqa: E402
 
 
@@ -584,13 +584,11 @@ def test_the_walk_reads_the_marker_through_bounded_ancestry(tmp):
         assert reseed.in_flight(bound) is expected
 
 
-def test_the_walk_visits_a_deep_marked_lineage_before_the_cap(tmp):
-    """Parent order decides: the marked limb hangs six deep behind a
-    ten-commit first-parent limb."""
-    reseed = _ci_reseed_module()
-    repo = _ci_reseed_order_subject(tmp, reseed.MARKER)
-    reseed.clear_cache()
-    assert reseed.in_flight(repo) is True
+def test_the_walk_visits_the_marked_lineage_first(tmp):
+    """The reversal makes the marked lineage the walk's second visit."""
+    repo, _first, second = _ci_reseed_order_subject(
+        tmp, '[tests-line-re-seed]')
+    assert _ci_reseed_visit_order(repo)[:2] == ['HEAD', second]
 
 
 def test_the_walk_fails_closed_and_the_loader_gates_the_same_answer(tmp):
