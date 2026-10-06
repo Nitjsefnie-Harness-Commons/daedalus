@@ -1,13 +1,7 @@
 """The committed-repository builders the tests-line re-seed pins drive.
 
-Not a suite itself — `run_tests.py` only loads `test_*.py`.
-
-The walk pins need real committed histories: a builder that commits the
-thresholds document with or without the row, a merge standing over the
-marked lineage, and a shallow clone cutting below the marker. They live
-here rather than in the suite because the suite sits at its own size
-ceiling; the pins stay in `tests/test_ci_thresholds.py` and drive these
-builders, so the ruling's test location is preserved.
+Not a suite itself — `run_tests.py` only loads `test_*.py`. The pins
+stay in `tests/test_ci_thresholds.py` and drive these builders.
 """
 import shutil
 import subprocess

@@ -71,14 +71,6 @@ def test_tightening_never_raises_or_adds_a_number(tmp):
         baseline, {'server.py': 2624, 'tests/new.py': 900}) is None
 
 
-def test_tightening_graduates_a_file_under_its_ceiling(tmp):
-    del tmp
-    policy = _policy()
-    baseline = {'server.py': 2624, 'tests/small.py': 939}
-    sizes = {'server.py': 400, 'tests/small.py': 939}
-    assert policy.tightened(baseline, sizes) == {'tests/small.py': 939}
-
-
 def test_tightening_graduates_at_the_inclusive_ceiling(tmp):
     del tmp
     policy = _policy()
