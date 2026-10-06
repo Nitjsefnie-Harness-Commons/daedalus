@@ -125,15 +125,19 @@ def _ci_reseed_order_subject(tmp, marker):
 def _ci_reseed_visit_order(repo):
     """The revisions whose messages the walk reads, in visit order."""
     observed = []
-    real = _ci_reseed_module()._revision_message
     probe = _ci_reseed_module()
-    probe._revision_message = lambda root, rev: (
-        observed.append(rev), real(root, rev))[1]
+    real = probe._revision_message
+
+    def spy(root, rev):
+        observed.append(rev)
+        return real(root, rev)
+
+    setattr(probe, '_revision_message', spy)
     try:
         probe.clear_cache()
         probe.in_flight(repo)
     finally:
-        probe._revision_message = real
+        setattr(probe, '_revision_message', real)
     probe.clear_cache()
     return observed
 
