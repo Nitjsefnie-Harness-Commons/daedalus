@@ -32,9 +32,9 @@ def unsafe_component(value):
     (`<>:"/\\|?*`), Windows device names (`CON`, `PRN`, `AUX`, `NUL`,
     `COM1`-`COM9`, `LPT1`-`LPT9`, case-insensitively, with or without an
     extension), trailing dots or spaces, and UTF-8 encodings longer than 240
-    bytes. Derived result filenames and command-queue target directories are
-    checked after construction. Legacy command files, dashboard event files,
-    screenshot names, and segment record/data/temp names use fixed
+    bytes. Derived result filenames, command-queue target directories, and
+    legacy command files are checked after construction. Dashboard event
+    files, screenshot names, and segment record/data/temp names use fixed
     server-generated affixes whose complete components are bounded by
     construction. This policy does not claim later filesystem operations
     cannot fail for unrelated reasons.
