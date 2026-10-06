@@ -26,6 +26,7 @@ JS_MODULE_PATH = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
 JS_COVERAGE_PATH = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
 JS_LINES_PATH = ROOT / 'scripts' / 'ci' / 'js_lines.py'
 TESTS_LINES_PATH = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
+RESEED_PATH = ROOT / 'scripts' / 'ci' / 'reseed.py'
 
 _WORKFLOW = ROOT / '.github' / 'workflows' / 'tests.yml'
 
@@ -45,7 +46,7 @@ def seed_publisher_tree(repo, data):
         document, encoding='utf-8')
     for path in (RATCHET_PATH, SIZE_PATH, LINES_PATH, JS_MODULE_PATH,
                  JS_COVERAGE_PATH, JS_LINES_PATH, TESTS_LINES_PATH,
-                 ROOT / 'scripts' / 'ci' / 'thresholds.py'):
+                 RESEED_PATH, ROOT / 'scripts' / 'ci' / 'thresholds.py'):
         shutil.copy2(path, repo / 'scripts' / 'ci' / path.name)
     (repo / 'tests' / 'test_mcp_server.py').write_text(
         'value = 1\n' * 1706, encoding='utf-8')
