@@ -278,6 +278,8 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
     (work / 'scripts' / 'ci').mkdir(parents=True)
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
                  work / 'scripts' / 'ci' / 'thresholds.py')
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'reseed.py',
+                 work / 'scripts' / 'ci' / 'reseed.py')
     (work / '.github' / 'ci-thresholds.json').write_text(
         json.dumps(_ratchet_document(python=(80.0, 78.5),
                                      javascript=(50.0, 48.5))),

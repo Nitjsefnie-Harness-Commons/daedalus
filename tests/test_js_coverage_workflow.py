@@ -540,6 +540,8 @@ def test_javascript_gate_reads_floor_from_thresholds_file(tmp):
     (work / 'extension').mkdir()
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
                  work / 'scripts' / 'ci' / 'thresholds.py')
+    shutil.copy2(ROOT / 'scripts' / 'ci' / 'reseed.py',
+                 work / 'scripts' / 'ci' / 'reseed.py')
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'js_coverage.py',
                  work / 'scripts' / 'ci' / 'js_coverage.py')
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'js_lines.py',
