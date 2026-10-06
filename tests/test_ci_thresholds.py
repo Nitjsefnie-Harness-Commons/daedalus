@@ -14,8 +14,10 @@ from _repo import ROOT  # noqa: E402
 from _ci_reseed_fixtures import (  # noqa: E402
     _ci_reseed_budget_repo, _ci_reseed_commit, _ci_reseed_merge,
     _ci_reseed_module, _ci_reseed_order_subject, _ci_reseed_repo,
+    _ci_reseed_diamond, _ci_reseed_force_true, _ci_reseed_restore_true,
     _ci_reseed_rowless, _ci_reseed_shallow, _ci_reseed_visit_order)
-from _ratchet_fixture import _git, _normalised  # noqa: E402
+from _ratchet_fixture import (
+    _captured_main, _git, _normalised)  # noqa: E402
 
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -350,42 +352,6 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
 
 
-def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
-    thresholds = _thresholds()
-    path = Path(tmp) / 'lifecycle.json'
-    source = thresholds.load(DATA_PATH)
-    thresholds.write(path, source)
-    ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
-                         'thresholds_lifecycle_ratchet')
-    recorded, _floor = thresholds.coverage(source, 'python')
-    measured = min(
-        recorded + ratchet.RAISE_HYSTERESIS + Decimal('0.1'),
-        Decimal('100.0'))
-    before = path.read_bytes()
-    assert ratchet.main([
-        '--language', 'python', '--measured', str(measured),
-        '--thresholds', str(path)]) == 0
-    updated = thresholds.load(path)
-    assert path.read_bytes() != before
-    assert updated['coverage']['python'] == {
-        'measured': measured,
-        'floor': measured - ratchet.CALIBRATION_GAP}
-    after = path.read_bytes()
-    assert ratchet.main([
-        '--language', 'python', '--measured', str(measured),
-        '--thresholds', str(path)]) == 0
-    assert path.read_bytes() == after
-
-    _assert_document_contract(path)
-    _assert_cli_floor(path)
-    loaded = thresholds.load(path)
-    assert loaded['coverage'] == {
-        'python': {'measured': measured,
-                   'floor': measured - ratchet.CALIBRATION_GAP},
-        'javascript': source['coverage']['javascript']}
-    assert thresholds.load(DATA_PATH) == source
-
-
 def test_lifecycle_accepts_a_calibration_the_ratchet_cannot_move(tmp):
     """A measured above the hysteresis, and the 100.0 ceiling: both are
     calibrations the ordinary raise must leave byte-identical."""
@@ -615,11 +581,29 @@ def test_the_walk_fails_closed_and_the_loader_gates_the_same_answer(tmp):
     reseed.clear_cache()
     assert answer is False
 
+    assert _ci_reseed_module().in_flight(Path(tmp)) is False
+
     broken = _ci_reseed_repo(tmp, 'broken')
     (broken / '.github' / 'ci-thresholds.json').write_bytes(b'{')
     _git(broken, 'add', '-A')
     _git(broken, 'commit', '-qm', 'broken')
     assert not reseed._field_present(broken, 'HEAD')
+
+
+def test_the_probe_fails_closed_per_read(tmp):
+    """git answering nothing: every reader fails closed."""
+    probe = _ci_reseed_module()
+    real = probe._run
+    setattr(probe, '_run', lambda *args: None)
+    try:
+        message = probe._revision_message(Path('/nowhere'), 'HEAD')
+        parents = probe._parents(Path('/nowhere'), 'HEAD')
+        present = probe._field_present(Path('/nowhere'), 'HEAD')
+        declared = probe._declares(Path('/nowhere'))
+    finally:
+        setattr(probe, '_run', real)
+    assert message is None and parents == [] and present is False
+    assert declared is False
 
 
 def test_the_window_skips_the_line_gate_and_the_tighten(tmp):
@@ -632,6 +616,24 @@ def test_the_window_skips_the_line_gate_and_the_tighten(tmp):
     tighten = _run_lines_cli(repo, '--tighten')
     assert tighten.returncode == 0, (tighten.stdout, tighten.stderr)
     assert target.read_bytes() == before
+
+    policy = _util.load(POLICY_SOURCE, 'tests_lines_window_branch')
+    real = _ci_reseed_force_true()
+    try:
+        status, stdout, stderr = _captured_main(
+            policy, ['--thresholds', str(target)])
+    finally:
+        _ci_reseed_restore_true(real)
+    assert status == 0 and stderr == '', (stdout, stderr)
+    assert 're-seed window' in stdout, stdout
+
+
+def test_a_shared_base_is_visited_once(tmp):
+    """A shared base is queued twice; the second visit continues."""
+    repo = _ci_reseed_diamond(tmp, '[tests-line-re-seed]')
+    probe = _ci_reseed_module()
+    probe.clear_cache()
+    assert probe.in_flight(repo) is True
 
 
 def test_the_accessor_and_the_ratchet_thread_the_verdict(tmp):

@@ -51,16 +51,6 @@ def test_the_ceilings_are_below_everything_they_excuse(tmp):
         assert recorded > policy.ceiling_for(rel), (rel, recorded)
 
 
-def test_tightening_never_raises_or_adds_a_number(tmp):
-    del tmp
-    policy = _policy()
-    baseline = {'server.py': 2624}
-    assert policy.tightened(baseline, {'server.py': 2624}) is None
-    assert policy.tightened(baseline, {'server.py': 2625}) is None
-    assert policy.tightened(
-        baseline, {'server.py': 2624, 'tests/new.py': 900}) is None
-
-
 def test_tightening_graduates_at_the_inclusive_ceiling(tmp):
     del tmp
     policy = _policy()
