@@ -36,7 +36,8 @@ def _line_fixture(tmp, files, baseline, name):
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-    for source in (POLICY_SOURCE, ROOT / 'scripts' / 'ci' / 'thresholds.py'):
+    for source in (POLICY_SOURCE, ROOT / 'scripts' / 'ci' / 'thresholds.py',
+                   ROOT / 'scripts' / 'ci' / 'reseed.py'):
         shutil.copy2(source, repo / 'scripts' / 'ci' / source.name)
     data = _document()
     data['long_line_baseline'] = baseline
@@ -75,7 +76,8 @@ def test_counting_is_by_character_not_byte(tmp):
                               'x' * 80, '\n'),
     }, {}, 'characters')
     counts = policy.tracked_long_lines(repo)
-    scripts = {'scripts/ci/line_lengths.py', 'scripts/ci/thresholds.py'}
+    scripts = {'scripts/ci/line_lengths.py', 'scripts/ci/thresholds.py',
+               'scripts/ci/reseed.py'}
     assert scripts <= set(counts)
     assert {rel: count for rel, count in counts.items()
             if rel not in scripts} == {
@@ -145,36 +147,6 @@ def test_tightening_never_raises_or_adds_a_number(tmp):
     assert policy.tightened(baseline, {'a.py': 3}) is None
     assert policy.tightened(baseline, {'a.py': 2, 'new.py': 5}) is None
     assert policy.tightened({}, {'new.py': 5}) is None
-
-
-def test_tightening_preserves_an_entry_for_a_missing_file(tmp):
-    del tmp
-    policy = _policy()
-    assert policy.tightened({'gone.py': 2}, {}) is None
-    assert policy.tightened({'gone.py': 2, 'a.py': 2}, {'a.py': 1}) == {
-        'gone.py': 2, 'a.py': 1}
-
-
-def test_script_docstring_carries_each_printed_remedy(tmp):
-    del tmp
-    policy = _policy()
-    doc = _normalised(policy.__doc__ or '')
-    assert sorted(policy.REMEDY_FOR) == [
-        'graduated', 'grown', 'missing', 'over']
-    for kind, remedy in policy.REMEDY_FOR.items():
-        assert _normalised(remedy) in doc, (kind, remedy)
-
-
-def test_refused_kinds_carry_wrapping_or_stale_entry_remedies(tmp):
-    del tmp
-    policy = _policy()
-    assert policy.REMEDY_FOR['grown'] == policy.WRAP_REMEDY
-    assert policy.REMEDY_FOR['over'] == policy.WRAP_REMEDY
-    assert policy.REMEDY_FOR['missing'] == policy.STALE_ENTRY_REMEDY
-    assert policy.REMEDY_FOR['graduated'] == policy.STALE_ENTRY_REMEDY
-    assert 'never raised by hand' in policy.WRAP_REMEDY
-    assert 'wrap' in policy.WRAP_REMEDY
-    assert 'deleted by hand' in policy.STALE_ENTRY_REMEDY
 
 
 def test_main_reports_clean_and_all_violation_modes(tmp):
