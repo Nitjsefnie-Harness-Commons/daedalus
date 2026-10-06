@@ -87,7 +87,7 @@ def block_probe(cls, field):
     try:
         compile(root, '<probe>',
                 'single' if cls is ast.Interactive else 'exec')
-    except (SyntaxError, ValueError) as error:
+    except (SyntaxError, ValueError, TypeError) as error:
         raise AssertionError((cls.__name__, field)) from error
     calls = [node.value for node in ast.walk(root)
              if isinstance(node, ast.Expr)
