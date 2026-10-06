@@ -468,7 +468,8 @@ def test_every_claimed_block_field_is_read_as_a_block(_tmp):
     `body`, `orelse` and `finalbody` are the only field names the
     grammar gives statement lists, and the default-value check drops
     the single-expression `body` of Expression, Lambda and IfExp.
-    Failures are COLLECTED: one field's mutant names every row it
+    The live read marks the probe dead; the field dropped, it is
+    reachable again. Failures are COLLECTED: one field's mutant names
     silences.
     """
     del _tmp
