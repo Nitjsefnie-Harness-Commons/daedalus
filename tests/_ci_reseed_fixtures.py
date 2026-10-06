@@ -92,26 +92,50 @@ def _ci_reseed_shallow(tmp, marker):
 
 
 def _ci_reseed_order_subject(tmp, marker):
-    """A subject where parent order decides: the marked limb hangs six
-    deep off the merge's second parent, behind a first-parent limb ten
-    commits deep, so FIFO exhausts the visit cap before reaching it."""
+    """A subject where parent order decides. The first-parent limb ends
+    in a row-present tip, so the pop order gates the whole limb: the
+    mandated ordering visits the marked limb first and finds the marker
+    at the cap's tenth visit, while dropping the reversal pops the
+    row-present tip first, whose ``continue`` skips the limb and leaves
+    the marker at the eleventh visit — past the cap."""
     repo = _ci_reseed_repo(tmp, 'order')
-    _ci_reseed_commit(repo, 'base', row=False)
+    _ci_reseed_commit(repo, 'base', row=True)
     named = subprocess.run(
         ('git', '-C', str(repo), 'branch', '--show-current'),
         check=True, capture_output=True,
         env=_util.child_coverage('scrub'))
     base = named.stdout.decode().strip()
     _git(repo, 'checkout', '-qb', 'line')
-    for depth in range(5, 0, -1):
-        _ci_reseed_commit(repo, f'limb {depth}', row=False)
     _ci_reseed_commit(repo, f'delete {marker}', row=False)
+    for depth in range(1, 9):
+        _ci_reseed_commit(repo, f'limb {depth}', row=False)
     _git(repo, 'checkout', '-q', base)
-    for _ in range(10):
-        _ci_reseed_commit(repo, 'filler', row=False)
+    for _ in range(9):
+        _ci_reseed_commit(repo, 'filler', row=True)
+    _ci_reseed_commit(repo, 'publisher lands', row=True)
     _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #2',
          'line')
-    return repo
+    named = subprocess.run(
+        ('git', '-C', str(repo), 'rev-parse', 'HEAD^1', 'HEAD^2'),
+        check=True, capture_output=True,
+        env=_util.child_coverage('scrub'))
+    return repo, *named.stdout.decode().split()
+
+
+def _ci_reseed_visit_order(repo):
+    """The revisions whose messages the walk reads, in visit order."""
+    observed = []
+    real = _ci_reseed_module()._revision_message
+    probe = _ci_reseed_module()
+    probe._revision_message = lambda root, rev: (
+        observed.append(rev), real(root, rev))[1]
+    try:
+        probe.clear_cache()
+        probe.in_flight(repo)
+    finally:
+        probe._revision_message = real
+    probe.clear_cache()
+    return observed
 
 
 def _ci_reseed_budget_repo(tmp, files, budget, name):

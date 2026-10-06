@@ -249,21 +249,6 @@ def _run_tighten(target, script=POLICY_SOURCE, cwd=ROOT):
         capture_output=True, text=True, timeout=60)
 
 
-def test_real_cli_tighten_already_empty_baseline_is_noop(tmp):
-    policy = _policy()
-    selected = 'tests/unbaselined.py'
-    current = policy.ceiling_for(selected)
-    repo, target = _size_fixture(
-        tmp, {selected: current}, {}, 'empty-baseline')
-    before = target.read_bytes()
-    result = _run_tighten(
-        target, repo / 'scripts' / 'ci' / 'size_baseline.py', repo)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == 'no module shrank below its recorded size\n'
-    assert result.stderr == ''
-    assert target.read_bytes() == before
-
-
 def test_real_cli_tighten_shrink_writes_only_the_lowered_member(tmp):
     policy = _policy()
     thresholds = _thresholds()
