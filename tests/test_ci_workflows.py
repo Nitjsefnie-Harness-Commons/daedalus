@@ -46,7 +46,7 @@ from _wfjobs import (  # noqa: E402
 from _wfskip import implicit_skip_violations  # noqa: E402
 from _wfskip_cases import suites_skip_violation  # noqa: E402
 from _yamlread import job_mapping, step_scalar  # noqa: E402
-from _yamlsteps import complete_job_mapping  # noqa: E402
+from _yamlsteps import complete_job_mapping, workflow_step_items  # noqa: E402
 from _workflows import _trigger_names  # noqa: E402
 
 
@@ -681,11 +681,11 @@ def test_every_run_step_names_only_tracked_paths(tmp):
     assert not unresolved, '\n'.join(unresolved)
 
 
-def test_threshold_push_comment_matches_current_trigger_policy(tmp):
-    del tmp
+def test_threshold_push_comment_matches_current_trigger_policy(_tmp):
     workflow = _tests_yml()
-    start = workflow.index('- name: Commit the raise')
-    comment = workflow[start:]
+    items = workflow_step_items(workflow, 'coverage') or ()
+    step = next(item for item in items if item.name == 'Commit the raise')
+    comment = workflow[step.start:step.end]
     assert 'does not re-run tests or CodeQL' in comment
     assert 'audit.yml remains unfiltered' in comment
     assert 'DOES start the workflows again' not in comment

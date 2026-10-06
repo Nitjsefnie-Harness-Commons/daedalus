@@ -102,7 +102,6 @@ def _audit_step(name):
 # while the outcomes look pinned hard. The bare-ServiceError row and the
 # 401/403/404 rows are the ones a narrow classifier and a broad one disagree
 # on, and the multi-line report is the shape a real audit prints.
-#
 # The ORDER of the block's two tests is the narrowness it claims, and a row
 # that matches both arms is the only thing that pins it: one whose retry
 # predicate also matches while its refusal predicate does not, so a block
