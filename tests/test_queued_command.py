@@ -253,7 +253,6 @@ def test_mcp_suite_has_no_json_loads_of_read_text_results(tmp):
         'test_mcp_path_authority.py',
         'test_mcp_auth.py',
         'test_mcp_live_tools.py',
-        'test_mcp_transport_close.py',
     )
     violations = []
     for name in successors:

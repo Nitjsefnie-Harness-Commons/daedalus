@@ -586,7 +586,6 @@
 !/tests/test_mcp_server_serve.py
 !/tests/test_mcp_tools.py
 !/tests/test_mcp_transport.py
-!/tests/test_mcp_transport_close.py
 !/tests/test_mcp_transport_guards.py
 !/tests/test_parent_watch.py
 !/tests/test_path_containment.py

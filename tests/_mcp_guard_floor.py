@@ -574,7 +574,7 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'test_start_in_thread_rejects_a_second_start'),
     ('daedalus_mcp.transport', 'close_current_loop_clients',
      'isinstance(outcome, BaseException)',
-     'tests/test_mcp_transport_close.py::test_closing_reports_the_first_'
+     'tests/test_mcp_transport.py::test_closing_reports_the_first_'
      'client_close_failure_after_closing_all'),
     ('daedalus_mcp.transport', 'token', 'not t',
      'tests/test_mcp_transport_guards.py::test_empty_token_context_is_'
