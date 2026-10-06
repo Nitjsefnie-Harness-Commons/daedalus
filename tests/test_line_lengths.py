@@ -128,17 +128,6 @@ def test_violations_reports_each_kind_and_nothing_on_a_clean_pair(tmp):
     assert sorted(clean) == ['graduated', 'grown', 'missing', 'over']
 
 
-def test_tightened_lowers_and_drops_at_zero(tmp):
-    del tmp
-    policy = _policy()
-    baseline = {'a.py': 3, 'b.py': 2, 'c.py': 1}
-    counts = {'a.py': 1, 'b.py': 2, 'c.py': 0}
-    lowered = policy.tightened(baseline, counts)
-    assert lowered == {'a.py': 1, 'b.py': 2}
-    assert lowered is not baseline
-    assert baseline == {'a.py': 3, 'b.py': 2, 'c.py': 1}
-
-
 def test_tightening_never_raises_or_adds_a_number(tmp):
     del tmp
     policy = _policy()

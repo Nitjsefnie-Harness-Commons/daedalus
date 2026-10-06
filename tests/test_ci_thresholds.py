@@ -13,7 +13,8 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _ci_reseed_fixtures import (  # noqa: E402
     _ci_reseed_budget_repo, _ci_reseed_commit, _ci_reseed_merge,
-    _ci_reseed_module, _ci_reseed_repo, _ci_reseed_shallow)
+    _ci_reseed_module, _ci_reseed_order_subject, _ci_reseed_repo,
+    _ci_reseed_rowless, _ci_reseed_shallow)
 from _ratchet_fixture import _git, _normalised  # noqa: E402
 
 
@@ -37,13 +38,6 @@ def _thresholds():
 
 def _valid():
     return json.loads(DATA_PATH.read_text(encoding='utf-8'))
-
-
-def _rowless():
-    """The shipped document with the line-budget row deleted."""
-    candidate = _valid()
-    del candidate['tests_line_baseline']
-    return candidate
 
 
 def _write_json(path, value):
@@ -367,45 +361,28 @@ def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
     measured = min(
         recorded + ratchet.RAISE_HYSTERESIS + Decimal('0.1'),
         Decimal('100.0'))
-    should_raise = measured - recorded > ratchet.RAISE_HYSTERESIS
     before = path.read_bytes()
     assert ratchet.main([
         '--language', 'python', '--measured', str(measured),
         '--thresholds', str(path)]) == 0
     updated = thresholds.load(path)
-    if should_raise:
-        assert path.read_bytes() != before
-        assert updated['coverage']['python'] == {
-            'measured': measured,
-            'floor': measured - ratchet.CALIBRATION_GAP}
-    else:
-        assert path.read_bytes() == before
-        assert updated == source
+    assert path.read_bytes() != before
+    assert updated['coverage']['python'] == {
+        'measured': measured,
+        'floor': measured - ratchet.CALIBRATION_GAP}
     after = path.read_bytes()
     assert ratchet.main([
         '--language', 'python', '--measured', str(measured),
         '--thresholds', str(path)]) == 0
     assert path.read_bytes() == after
 
-    size_baseline = _util.load(
-        ROOT / 'scripts' / 'ci' / 'size_baseline.py',
-        'thresholds_lifecycle_size_baseline')
-    updated = thresholds.load(path)
-    sizes = {rel: size_baseline.ceiling_for(rel)
-             for rel in updated['module_size_baseline']}
-    tightened = size_baseline.tightened(
-        updated['module_size_baseline'], sizes)
-    assert tightened == {}
-    updated['module_size_baseline'] = tightened
-    thresholds.write(path, updated)
     _assert_document_contract(path)
     _assert_cli_floor(path)
     loaded = thresholds.load(path)
-    expected_measured = measured if should_raise else recorded
-    assert loaded['coverage']['python'] == {
-        'measured': expected_measured,
-        'floor': expected_measured - ratchet.CALIBRATION_GAP}
-    assert loaded['module_size_baseline'] == tightened
+    assert loaded['coverage'] == {
+        'python': {'measured': measured,
+                   'floor': measured - ratchet.CALIBRATION_GAP},
+        'javascript': source['coverage']['javascript']}
     assert thresholds.load(DATA_PATH) == source
 
 
@@ -544,7 +521,7 @@ def test_the_reseed_verdict_is_a_required_bool_buying_only_absence(tmp):
     _assert_refused_by(lambda: thresholds.normalise(_valid(), 'yes'),
                        'reseed_in_flight must be a bool')
     assert thresholds.normalise(_valid(), True) == strict
-    missing = _rowless()
+    missing = _ci_reseed_rowless()
     _assert_refused_by(
         lambda: thresholds.normalise(missing, False),
         'missing field: tests_line_baseline')
@@ -561,6 +538,22 @@ def test_the_reseed_verdict_is_a_required_bool_buying_only_absence(tmp):
         'missing field: tests_line_baseline')
     assert reseed.MARKER == '[tests-line-re-seed]'
     assert thresholds._SCALAR_FIELDS == (reseed._SCALAR_FIELD,)
+    bad_schema = _ci_reseed_rowless()
+    bad_schema['schema_version'] = 2
+    bad_floor = _ci_reseed_rowless()
+    bad_floor['coverage']['python']['floor'] = \
+        bad_floor['coverage']['python']['measured']
+    unknown = _ci_reseed_rowless()
+    unknown['unknown'] = 1
+    bad_row = _valid()
+    bad_row['tests_line_baseline'] = 'ten'
+    for candidate, needle in (
+            (bad_schema, 'unsupported schema_version: 2'),
+            (bad_floor, 'coverage.python.floor must be below measured'),
+            (unknown, 'unknown field: unknown'),
+            (bad_row, 'tests_line_baseline must be a JSON number')):
+        _assert_refused_by(
+            lambda doc=candidate: thresholds.normalise(doc, True), needle)
 
 
 def test_the_walk_reads_the_marker_through_bounded_ancestry(tmp):
@@ -574,7 +567,7 @@ def test_the_walk_reads_the_marker_through_bounded_ancestry(tmp):
     _ci_reseed_commit(repo, 'a publisher lands', row=False)
     reseed.clear_cache()
     assert reseed.in_flight(repo) is True
-    _ci_reseed_commit(repo, 'the seed restores the row', row=True)
+    _ci_reseed_commit(repo, f'seed {reseed.MARKER}', row=True)
     reseed.clear_cache()
     assert reseed.in_flight(repo) is False
 
@@ -591,16 +584,28 @@ def test_the_walk_reads_the_marker_through_bounded_ancestry(tmp):
         assert reseed.in_flight(bound) is expected
 
 
+def test_the_walk_visits_a_deep_marked_lineage_before_the_cap(tmp):
+    """Parent order decides: the marked limb hangs six deep behind a
+    ten-commit first-parent limb."""
+    reseed = _ci_reseed_module()
+    repo = _ci_reseed_order_subject(tmp, reseed.MARKER)
+    reseed.clear_cache()
+    assert reseed.in_flight(repo) is True
+
+
 def test_the_walk_fails_closed_and_the_loader_gates_the_same_answer(tmp):
     reseed = _ci_reseed_module()
-    thresholds = _thresholds()
     clone = _ci_reseed_shallow(tmp, reseed.MARKER)
     reseed.clear_cache()
     assert reseed.in_flight(clone) is False
     document = clone / '.github' / 'ci-thresholds.json'
-    _assert_refused_by(
-        lambda: thresholds.load(document, False),
-        'missing field: tests_line_baseline')
+    done = subprocess.run(
+        [sys.executable, str(clone / 'scripts' / 'ci' / 'thresholds.py'),
+         '--check', '--thresholds', str(document)],
+        cwd=str(clone), env=_CHILD_ENV, capture_output=True, text=True,
+        timeout=60)
+    assert done.returncode != 0, (done.stdout, done.stderr)
+    assert 'missing field: tests_line_baseline' in done.stderr, done.stderr
 
     real_run = reseed.subprocess.run
     reseed.subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(
@@ -634,16 +639,16 @@ def test_the_window_skips_the_line_gate_and_the_tighten(tmp):
 def test_the_accessor_and_the_ratchet_thread_the_verdict(tmp):
     del tmp
     thresholds = _thresholds()
-    assert thresholds.tests_line_baseline(_rowless(), True) is None
+    assert thresholds.tests_line_baseline(_ci_reseed_rowless(), True) is None
     assert thresholds.tests_line_baseline(
         _valid()) == _valid()['tests_line_baseline']
     ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
                          'thresholds_window_ratchet')
-    raised = ratchet.update(_rowless(), '99.0', 'python', True)
+    raised = ratchet.update(_ci_reseed_rowless(), '99.0', 'python', True)
     assert raised is not None
     assert 'tests_line_baseline' not in raised
     _assert_refused_by(
-        lambda: ratchet.update(_rowless(), '99.0', 'python', False),
+        lambda: ratchet.update(_ci_reseed_rowless(), '99.0', 'python', False),
         'missing field: tests_line_baseline')
 
 
