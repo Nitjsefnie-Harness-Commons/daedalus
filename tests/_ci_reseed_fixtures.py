@@ -57,14 +57,9 @@ def _ci_reseed_commit(repo, message, row):
 def _ci_reseed_merge(repo, marker):
     """A merge whose own message carries no marker and whose second
     parent is the marked lineage."""
-    scrubbed = _util.child_coverage('scrub')
-    named = subprocess.run(
-        ('git', '-C', str(repo), 'branch', '--show-current'),
-        check=True, capture_output=True, env=scrubbed)
-    base = named.stdout.decode().strip()
     _git(repo, 'checkout', '-qb', 'line')
     _ci_reseed_commit(repo, f'delete {marker}', row=False)
-    _git(repo, 'checkout', '-q', base)
+    _git(repo, 'checkout', '-q', '-')
     _ci_reseed_commit(repo, 'unrelated fill', row=False)
     _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #1',
          'line')
@@ -87,23 +82,20 @@ def _ci_reseed_shallow(tmp, marker):
 def _ci_reseed_order_subject(tmp):
     """A subject for the pin that observes the walk's visit order.
 
-    No history can discriminate the two orderings by verdict: pop(0)
-    plus extend interleaves the limbs, so FIFO reaches any given commit
-    no later than the mandated reversed ordering does. What the ordering
-    decides is which lineage the walk reads second at a merge, and this
-    shape — a row-present first-parent tip over a markerless, rowless
-    second-parent tip — is the minimal one whose second visit names that
-    choice."""
+    The reversal queues the last-listed parent — the pull-request head
+    lineage — first, so at a merge the walk's second visit names the
+    ordering: the mandated form reads this subject's second-parent tip
+    at visit two, the unreversed form its first-parent tip. Measured per
+    commit on this shape, delete sits at fifo 2 and mandated 1 while
+    publisher sits at fifo 1 and mandated 2 — neither ordering
+    dominates, and the subject carries no marker message, so the verdict
+    is False under both orderings and the visit order is the only
+    witness."""
     repo = _ci_reseed_repo(tmp, 'order')
     _ci_reseed_commit(repo, 'base', row=True)
-    named = subprocess.run(
-        ('git', '-C', str(repo), 'branch', '--show-current'),
-        check=True, capture_output=True,
-        env=_util.child_coverage('scrub'))
-    base_branch = named.stdout.decode().strip()
     _git(repo, 'checkout', '-qb', 'line')
     _ci_reseed_commit(repo, 'delete', row=False)
-    _git(repo, 'checkout', '-q', base_branch)
+    _git(repo, 'checkout', '-q', '-')
     _ci_reseed_commit(repo, 'publisher lands', row=True)
     _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #2',
          'line')
@@ -114,19 +106,13 @@ def _ci_reseed_order_subject(tmp):
     return repo, *named.stdout.decode().split()
 
 
-def _ci_reseed_force_true():
-    """Point the tree probe at a True answer for one in-process leg;
-    the return value restores it."""
+def _ci_reseed_true_probe():
+    """Point the tree probe at True for one in-process leg; returns
+    (real, undo) and the caller undoes in its finally."""
     import reseed
     real = reseed.in_flight
     setattr(reseed, 'in_flight', lambda root=None: True)
-    return real
-
-
-def _ci_reseed_restore_true(real):
-    """Put the tree probe back after ``_ci_reseed_force_true``."""
-    import reseed
-    setattr(reseed, 'in_flight', real)
+    return real, lambda: setattr(reseed, 'in_flight', real)
 
 
 def _ci_reseed_visit_order(repo):
@@ -156,14 +142,9 @@ def _ci_reseed_diamond(tmp, marker):
     repo = _ci_reseed_repo(tmp, 'diamond')
     _ci_reseed_commit(repo, f'root {marker}', row=False)
     _ci_reseed_commit(repo, 'base', row=False)
-    named = subprocess.run(
-        ('git', '-C', str(repo), 'branch', '--show-current'),
-        check=True, capture_output=True,
-        env=_util.child_coverage('scrub'))
-    base_branch = named.stdout.decode().strip()
     _git(repo, 'checkout', '-qb', 'side')
     _ci_reseed_commit(repo, 'side work', row=False)
-    _git(repo, 'checkout', '-q', base_branch)
+    _git(repo, 'checkout', '-q', '-')
     _ci_reseed_commit(repo, 'main work', row=False)
     _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #3',
          'side')
