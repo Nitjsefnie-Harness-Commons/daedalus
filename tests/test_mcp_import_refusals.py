@@ -259,10 +259,6 @@ CONTROL_LEAF_SITES = (
 # two branches both leave: the call BEFORE the barrier still contributes a
 # module, the one AFTER it does not, so both failure directions lose here.
 BARRIERS = (
-    ('a raise', '\nimport importlib\n\n\ndef load():\n'
-     '    importlib.import_module("pkg.before")\n'
-     '    raise RuntimeError("barrier")\n'
-     '    importlib.import_module("pkg.leaf")\n'),
     ('a return', '\nimport importlib\n\n\ndef load():\n'
      '    importlib.import_module("pkg.before")\n'
      '    return None\n'
@@ -446,10 +442,11 @@ def test_a_string_the_folder_can_fold_is_refused_like_a_literal(_tmp):
 
 
 def test_every_dead_code_barrier_kind_marks_the_tail_behind_it(_tmp):
-    """Raise, return, break, continue and a two-leaving `if` each end a
-    block; both halves ride in one tree, so a rule that stopped marking
-    tails and one that over-reached both lose, and the assertion reads the
-    whole set, not a membership.
+    """Return, break, continue and a two-leaving `if` each end a block.
+
+    Raise's kind is the block-field control's own proof barrier, so it
+    rides there; the remaining kinds ride in one tree here, both halves,
+    and the assertion reads the whole set, not a membership.
     """
     over = []
     for label, source in BARRIERS:
@@ -465,20 +462,17 @@ def test_every_dead_code_barrier_kind_marks_the_tail_behind_it(_tmp):
 
 
 def test_every_claimed_block_field_is_read_as_a_block(_tmp):
-    """Every statement-list field the grammar declares is held, both ways.
-
-    The claimed set is DERIVED from the ast declaration, never from
-    `_blocks` -- a derivation through `_blocks` would shrink silently when
-    the walk narrows. `body`, `orelse` and `finalbody` are the only field
-    names the grammar gives statement lists, and the default-value check
-    drops the single-expression `body` of Expression, Lambda and IfExp.
-    Each row holds its field twice on one probe tree, the field under
-    proof carrying [raise, probe-call] in the position a real module
-    carries it: the live read marks the probe dead, and with exactly that
-    field dropped from the read (`ast.iter_fields` patched, so the mutant
-    is that field alone and cannot drift from the real predicate) the
-    probe is reachable again. Failures are COLLECTED, because one narrowed
-    field names every row it silences.
+    """Every statement-list field the grammar declares is held, both
+    ways. The claimed set is DERIVED from the ast declaration, never
+    from `_blocks`, which would shrink silently when the walk narrows;
+    `body`, `orelse` and `finalbody` are the only field names the
+    grammar gives statement lists, and the default-value check drops
+    the single-expression `body` of Expression, Lambda and IfExp.
+    Each row parses one tree carrying [raise, probe-call] in the
+    claimed field: the live read marks the probe dead, and with that
+    field alone dropped (`ast.iter_fields` patched) it is reachable
+    again. Failures are COLLECTED, because one narrowed field names
+    every row it silences.
     """
     del _tmp
     quiet = []
