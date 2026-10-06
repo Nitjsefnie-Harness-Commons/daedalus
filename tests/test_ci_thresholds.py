@@ -617,7 +617,7 @@ def test_the_window_skips_the_line_gate_and_the_tighten(tmp):
     assert target.read_bytes() == before
 
     policy = _util.load(POLICY_SOURCE, 'tests_lines_window_branch')
-    real, restore = _ci_reseed_true_probe()
+    _real, restore = _ci_reseed_true_probe()
     try:
         status, stdout, stderr = _captured_main(
             policy, ['--thresholds', str(target)])
