@@ -12,8 +12,10 @@ plants, not the rule's inputs: the rule answers the operation once, from
 the member set the resolver reads off types.FrameType. Three rows are each
 the sole plant that dies with one arm — the callee that is itself a call,
 the starred expansion, and the getattr whose name is an expression — and
-test_cli_audit_refuses_every_frame_namespace_plant reads one per row, so
-removing any of the three arms reds that control on the row that names
+the attribute-protocol rows share the last arm's structure, spelling the
+same selection through the bound, unbound and aliased __getattribute__
+instead of builtin getattr. Removing any of the three arms reds
+test_cli_audit_refuses_every_frame_namespace_plant on the row that names
 the arm. The starred expansion is also an escape case read by
 test_cli_audit_reports_namespace_escapes, so it is not sole among the
 controls. The unreadable-subscript arm is pinned on both sides, by
@@ -303,8 +305,27 @@ REFLECTIVE_ESCAPE_CASES = (
      "getattr(sys._getframe(), 'f_locals')['args']"),
     ('holder = helper()\n_ = holder[\'args\'].undeclared_probe',
      "holder['args']"),)
+_PROTOCOL_PLANTS = (
+    # Three spellings of one attribute protocol, each naming a frame member
+    # by an expression only a proven protocol callee catches; the builtin
+    # getattr spelling above is the control for the same selection.
+    ('aliased object.__getattribute__',
+     'def do_reload(args):\n    getattr = object.__getattribute__\n'
+     "    _ = getattr(sys._getframe(), 'f_' + 'locals')"
+     ".get('args').undeclared_probe\n",
+     "getattr(sys._getframe(), 'f_' + 'locals')"),
+    ('bound __getattribute__',
+     "def do_reload(args):\n    _ = sys._getframe().__getattribute__('"
+     "f_' + 'locals').get('args').undeclared_probe\n",
+     "sys._getframe().__getattribute__('f_' + 'locals')"),
+    ('unbound object.__getattribute__',
+     'def do_reload(args):\n    _ = object.__getattribute__(sys._get'
+     "frame(), 'f_' + 'locals').get('args').undeclared_probe\n",
+     "object.__getattribute__(sys._getframe(), 'f_' + 'locals')"))
+
 # Each row splices into the real daedalus_cli/commands_eval.py: the prelude
 # after its first import, the replacement for the anchor, the named receiver.
+CLI_ANCHOR = 'def do_reload(args):\n'
 
 FRAME_NAMESPACE_PLANTS = (
     ('attribute getter', 'import operator\n', 'def do_reload(args):\n',
@@ -410,10 +431,10 @@ FRAME_NAMESPACE_PLANTS = (
     ('mapping key, no member selected', '', 'def do_reload(args):\n',
      'def do_reload(args):\n    holder = helper()\n'
      "    _ = holder['args'].undeclared_probe\n", "holder['args']"),
-)
+) + tuple((name, '', CLI_ANCHOR, body, receiver)
+          for name, body, receiver in _PROTOCOL_PLANTS)
 
 
-CLI_ANCHOR = 'def do_reload(args):\n'
 _FRAME_DESCRIPTORS = (types.GetSetDescriptorType, types.MemberDescriptorType)
 FRAME_MEMBERS = tuple(sorted(
     name for name, member in vars(types.FrameType).items()
