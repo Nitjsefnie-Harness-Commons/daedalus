@@ -570,7 +570,8 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     # test go red - or None for a stated gap; STATED_GAPS names the issue
     # each gap is tracked under.
     ('daedalus_mcp.server', 'start_in_thread', "_start_state['started']",
-     'tests/test_mcp_server.py::test_start_in_thread_rejects_a_second_start'),
+     'tests/test_mcp_server_serve.py::'
+     'test_start_in_thread_rejects_a_second_start'),
     ('daedalus_mcp.transport', 'close_current_loop_clients',
      'isinstance(outcome, BaseException)',
      'tests/test_mcp_transport_close.py::test_closing_reports_the_first_'
@@ -585,7 +586,7 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     # covers 0, -1, nan and inf alone
     ('daedalus_mcp.transport', 'checked_timeout',
      'not math.isfinite(timeout) or timeout <= 0',
-     'tests/test_mcp_server.py::'
+     'tests/test_mcp_live_tools.py::'
      'test_a_nonpositive_mcp_timeout_admits_no_command'),
     ('daedalus_mcp.transport', 'ext_cmd', "res.get('error')",
      'tests/test_mcp_transport_guards.py::'
@@ -593,11 +594,11 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_bridge.env_config', 'env_int',
      "raise SystemExit(f'{name} must be {requirement}; got {raw!r}') "
      'from None',
-     'tests/test_mcp_server.py::'
+     'tests/test_mcp_server_config.py::'
      'test_mcp_and_bridge_config_use_one_env_parser'),
     ('daedalus_bridge.env_config', 'env_int',
      'value < minimum or (maximum is not None and value > maximum)',
-     'tests/test_mcp_server.py::'
+     'tests/test_mcp_server_config.py::'
      'test_mcp_and_bridge_config_use_one_env_parser'),
     ('daedalus_bridge.env_config', 'env_positive_float',
      "raise SystemExit(f'{name} must be a finite positive number; "

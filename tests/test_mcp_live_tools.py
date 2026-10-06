@@ -8,20 +8,27 @@ has no row, so the table cannot drift behind the registry.
 The cases below the table are the other half of that headroom: live tool
 behaviour a real bridge is the only thing that can see, and which the pinned
 table drives through a double. They live here for the same reason the table
-does — test_mcp_server has none of the room and never will.
+does — test_mcp_server had none of the room and never would.
 """
 import asyncio
 import base64
 import json
+import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mcp_load  # noqa: E402
+# The absorbed controls spell the shared module as _mcp_load; this
+# suite's own controls keep their existing binding of the same module
+# object.
+# pylint: disable-next=reimported
 import _mcp_load as mcp  # noqa: E402
 import _mcp_tool_commands  # noqa: E402
 import _util  # noqa: E402
-from _queueread import queued_command  # noqa: E402
+from _queueread import queued_command, queued_commands  # noqa: E402
 
 TOK = mcp.TOK
 BRIDGE_ENV = mcp.BRIDGE_ENV
@@ -198,7 +205,7 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
             # this row's own file, never a leftover's.
             published = sorted(queue.glob('*.json'))
             assert len(published) == 1, (name, published, queued)
-            stored = json.loads(published[0].read_text(encoding='utf-8'))
+            stored = json.load(published[0].open(encoding='utf-8'))
             assert stored == queued, (name, stored, queued)
 
 
@@ -327,6 +334,236 @@ def test_a_nonpositive_timeout_admits_no_command_on_either_send_path(tmp):
             qdir = Path(docroot) / 'commands' / target
             queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
             assert queued == [], (target, queued)
+
+
+def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
+    """A non-positive timeout is refused before any command is submitted.
+
+    The deadline is evaluated by poll_result, which runs after the command
+    has been handed to the browser.
+    """
+    _mcp_load._need_deps()
+    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, docroot):
+        mod = _mcp_load._load_mcp(base)
+        mod._token.set(_mcp_load.TOK)
+        for timeout in (0, -1.0, float('nan'), float('inf')):
+            try:
+                asyncio.run(getattr(mod, 'exec')(
+                    cmd_id='_timeout', code='1', timeout=timeout))
+            except ValueError as error:
+                assert 'finite positive' in str(error), (timeout, error)
+            else:
+                raise AssertionError(f'timeout {timeout!r} was accepted')
+        for name in (f'{_mcp_load.TOK}_extension', _mcp_load.TOK):
+            qdir = Path(docroot) / 'commands' / name
+            queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+            assert queued == [], (name, queued)
+
+
+def test_list_tabs_tool_against_real_bridge(tmp):
+    _mcp_load._need_deps()
+    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, _docroot):
+        _util.post_json(base + '/sync-tabs', {
+            'token': _mcp_load.TOK, 'tabs': [
+                {'tabId': '7', 'url': 'https://example.com/mcp',
+                 'title': 'M'}]})
+        mod = _mcp_load._load_mcp(base)
+        # what daedalus_mcp.auth.BearerAuth does per request
+        mod._token.set(_mcp_load.TOK)
+        tabs = asyncio.run(mod.list_tabs())
+        assert isinstance(tabs, list) and len(tabs) == 1, tabs
+        assert tabs[0]['tabId'] == '7'
+        assert tabs[0]['url'] == 'https://example.com/mcp'
+        assert tabs[0]['title'] == 'M'
+
+
+def test_ping_tool_round_trip(tmp):
+    """ping() PUTs a command and correlates the extension's result delivery."""
+    _mcp_load._need_deps()
+    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, docroot):
+        mod = _mcp_load._load_mcp(base)
+        mod._token.set(_mcp_load.TOK)
+
+        qdir = Path(docroot) / 'commands' / _mcp_load.TOK
+        answered = set()
+        failure = []
+
+        def extension(world):
+            try:
+                command = queued_command(
+                    qdir, 'the ping command', exclude=answered)
+                queued = sorted(path for path in qdir.glob('*.json')
+                                if path.name not in answered)
+                assert len(queued) == 1, queued
+                answered.add(queued[0].name)
+                status, _ = _util.post_json(base + '/result', {
+                    'token': _mcp_load.TOK, 'id': command['id'],
+                    'result': 'MCP Title',
+                    'error': None, 'ts': 1, 'world': world,
+                    '_did': command['_did']})
+                assert status == 200, status
+                queued[0].unlink()  # ping repeats one payload; drain it
+            except Exception as exc:  # test-thread diagnosis, surfaced below
+                failure.append(exc)
+
+        # Execution channels round-trip verbatim.
+        for world in ('cdp', 'page:scripting'):
+            t = threading.Thread(target=extension, args=(world,))
+            t.start()
+            with _mcp_load.surface_responder_errors(t, failure, 20):
+                res = asyncio.run(mod.ping())
+            assert res['title'] == 'MCP Title', res
+            assert res['world'] == world, res
+            assert isinstance(res['ms'], int) and res['ms'] >= 0, res
+        assert len(answered) == 2, answered
+
+
+def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
+    """MCP waiters stay correlated when both results land
+    before either consumes."""
+    _mcp_load._need_deps()
+    owners = ('owner-a', 'owner-b')
+    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, docroot):
+        mod = _mcp_load._load_mcp(base)
+        qdir = Path(docroot) / 'commands' / f'{_mcp_load.TOK}_extension'
+        release_waiters = threading.Event()
+        original_poll = mod.bridge.poll_result
+        held_ids, box = set(), {}
+
+        async def gated_poll(*args, **kwargs):
+            held_ids.add(kwargs['expect_delivery'])
+            while not release_waiters.is_set():
+                await asyncio.sleep(0.01)
+            return await original_poll(*args, **kwargs)
+
+        mod.bridge.poll_result = gated_poll
+
+        def run_callers():
+            mod._token.set(_mcp_load.TOK)
+
+            async def callers():
+                return await asyncio.gather(*(
+                    mod.bridge.ext_cmd('_cookies', 'cookies', timeout=30,
+                                       domain=owner)
+                    for owner in owners))
+
+            try:
+                box['values'] = asyncio.run(callers())
+            except Exception as exc:  # pylint: disable=broad-except
+                box['error'] = exc
+
+        worker = threading.Thread(target=run_callers)
+        try:
+            worker.start()
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+                if len(files) == len(held_ids) == len(owners):
+                    break
+                time.sleep(0.05)
+            files = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
+            assert len(files) == len(held_ids) == len(owners), (files, box)
+            commands = queued_commands(
+                qdir, 'the cookie commands', len(owners))
+            by_owner = {command['domain']: command for command in commands}
+            for owner in owners:
+                command = by_owner[owner]
+                status, body = _util.post_json(base + '/result', {
+                    'token': _mcp_load.TOK, 'tabId': 'extension',
+                    'id': command['id'],
+                    'result': [{'domain': owner}], 'error': None, 'ts': 1,
+                    '_did': command['_did']})
+                assert status == 200 and body == {'ok': True}, (status, body)
+            delivery_dir = Path(docroot) / 'results' / 'deliveries'
+            files = list(
+                (delivery_dir / f'{_mcp_load.TOK}_extension').glob('*.json'))
+            assert len(files) == len(owners), files
+        finally:
+            release_waiters.set()
+            worker.join(timeout=60)
+            mod.bridge.poll_result = original_poll
+        assert not worker.is_alive(), box
+        if 'error' in box:
+            raise box['error']
+        assert box['values'] == [[{'domain': owner}] for owner in owners], box
+
+
+def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
+    """segment_status obtains the job capability itself; a job owned by another
+    token used to surface as a bare httpx 409 through raise_for_status."""
+    _mcp_load._need_deps()
+    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, _docroot):
+        mod = _mcp_load._load_mcp(base)
+        mod._token.set(_mcp_load.TOK)
+        status, _ = _util.post_json(base + '/segment-job',
+                                    {'token': _mcp_load.TOK, 'job': 'mcpjob'})
+        assert status == 200, status
+        res = asyncio.run(mod.segment_status('mcpjob'))
+        assert res == {'done': [], 'count': 0, 'gaps': []}, res
+        # A record left by an earlier token is a foreign job after rotation.
+        # Plant it directly: the live bridge no longer lets a request mint one.
+        segment_root = Path(_docroot) / 'segments'
+        (segment_root / 'mcpjob2').mkdir()
+        (segment_root / 'mcpjob2.json').write_text(json.dumps({
+            'token': 'earlierconfigured',
+            'sig': 'persisted-capability',
+            'max_segment_index': 10,
+            'max_segment_count': 10,
+            'max_bytes': 100,
+        }))
+        try:
+            asyncio.run(mod.segment_status('mcpjob2'))
+        except RuntimeError as e:
+            assert 'owned by a different token' in str(e), e
+        else:
+            raise AssertionError(
+                'segment_status on a foreign job did not raise')
+
+
+def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
+    """Inline this capture, not a later file sharing its `_ss` directory."""
+    _mcp_load._need_deps()
+    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, docroot):
+        mod = _mcp_load._load_mcp(base)
+        mod._token.set(_mcp_load.TOK)
+        qdir = Path(docroot) / 'commands' / f'{_mcp_load.TOK}_extension'
+        failure = []
+
+        def extension():
+            """Store this capture, supersede it, then answer its command."""
+            try:
+                command = queued_command(qdir, 'the screenshot command')
+                for name, payload in (('mine.png', b'this-invocation'),
+                                      ('later.png', b'the-next-invocation')):
+                    status, body = _util.post_json(base + '/upload', {
+                        'token': _mcp_load.TOK, 'id': '_ss', 'filename': name,
+                        'data': base64.b64encode(payload).decode()})
+                    assert status == 200, (status, body)
+                # Stamp order because two writes can share a timestamp.
+                shot_dir = Path(docroot) / 'uploads' / _mcp_load.TOK / '_ss'
+                os.utime(shot_dir / 'mine.png', (1_700_000_000, 1_700_000_000))
+                os.utime(shot_dir / 'later.png',
+                         (1_700_000_100, 1_700_000_100))
+                status, body = _util.post_json(base + '/result', {
+                    'token': _mcp_load.TOK, 'tabId': 'extension',
+                    'id': '_ss',
+                    'result': {'path': f'{_mcp_load.TOK}/_ss/mine.png',
+                               'size': len(b'this-invocation')},
+                    'error': None, 'ts': 1, '_did': command['_did'],
+                })
+                assert status == 200, (status, body)
+            except Exception as exc:  # test-thread diagnosis, surfaced below
+                failure.append(exc)
+
+        responder = threading.Thread(target=extension, daemon=True)
+        responder.start()
+        with _mcp_load.surface_responder_errors(responder, failure, 30):
+            answer = asyncio.run(
+                mod.screenshot(include_image=True, timeout=25))
+        meta, image = answer
+        assert meta == {'path': '_ss/mine.png',
+                        'size': len(b'this-invocation')}, meta
+        assert image.data == b'this-invocation', image.data
 
 
 if __name__ == '__main__':

@@ -8,6 +8,11 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mcp_load  # noqa: E402
+# The absorbed controls spell the shared module as _mcp_load; this
+# suite's own controls keep their existing binding of the same module
+# object.
+# pylint: disable-next=reimported
 import _mcp_load as test_mcp_server  # noqa: E402
 import _util  # noqa: E402
 
@@ -398,6 +403,202 @@ def test_zero_body_limit_starts_and_refuses_nonempty_body(tmp):
         status, _session_id, raw = test_mcp_server._mcp_request(port, b'x')
         assert status == 413, (status, raw)
         assert json.loads(raw) == {'error': 'request body too large'}, raw
+
+
+def test_mcp_authority_carriers_reject_blank_equal_and_scoped_duplicates(tmp):
+    """MCP never selects a bearer, session, or job from repeated carriers."""
+    _mcp_load._need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+    with _util.bridge(
+            tmp, env=_mcp_load.BRIDGE_ENV) as (base, docroot):
+        _mod, port = _mcp_load._start_mcp_in_process(base)
+
+        initialize = {
+            'jsonrpc': '2.0',
+            'id': 'initialize',
+            'method': 'initialize',
+            'params': {
+                'protocolVersion': '2024-11-05',
+                'capabilities': {},
+                'clientInfo': {'name': 'duplicate-proof', 'version': '0'},
+            },
+        }
+        authorization_duplicates = (
+            (f'Bearer {_mcp_load.TOK}', f'Bearer {_mcp_load.TOK}'),
+            ('', f'Bearer {_mcp_load.TOK}'),
+            (f'Bearer {_mcp_load.TOK}', ''),
+        )
+        authorization_replies = []
+        for values in authorization_duplicates:
+            status, _session, raw = _mcp_load._mcp_request(
+                port, initialize, authorizations=values)
+            try:
+                error = json.loads(raw).get('error')
+            except json.JSONDecodeError:
+                error = None
+            authorization_replies.append((values, status, error))
+        assert all(status == 400
+                   and error == 'duplicate Authorization header'
+                   for _values, status, error in authorization_replies), (
+                       authorization_replies)
+
+        status, session_id, raw = _mcp_load._mcp_request(port, initialize)
+        assert status == 200 and session_id, (status, session_id, raw)
+        status, _session, raw = _mcp_load._mcp_request(
+            port, {'jsonrpc': '2.0',
+                   'method': 'notifications/initialized'},
+            session_ids=(session_id,))
+        assert status == 202, (status, raw)
+
+        list_tools = {
+            'jsonrpc': '2.0',
+            'id': 'list',
+            'method': 'tools/list',
+            'params': {},
+        }
+        wrong_session = 'f' * 32
+        session_duplicates = (
+            (session_id, wrong_session),
+            (wrong_session, session_id),
+            (session_id, session_id),
+            ('', session_id),
+            (session_id, ''),
+        )
+        session_replies = []
+        for values in session_duplicates:
+            status, _session, raw = _mcp_load._mcp_request(
+                port, list_tools, session_ids=values)
+            try:
+                error = json.loads(raw).get('error')
+            except json.JSONDecodeError:
+                error = None
+            session_replies.append((values, status, error))
+        assert all(status == 400
+                   and error == 'duplicate Mcp-Session-Id header'
+                   for _values, status, error in session_replies), (
+                       session_replies)
+
+        jobs = (
+            ('segment_job', 'mcp-job-a', 'mcp-job-b'),
+            ('segment_job', 'mcp-job-c', 'mcp-job-c'),
+            ('segment_job', '', 'mcp-job-d'),
+            ('segment_job', 'mcp-job-e', ''),
+            ('segment_status', 'mcp-status-a', 'mcp-status-b'),
+        )
+        job_replies = []
+        for index, (tool, first, second) in enumerate(jobs):
+            raw_call = (
+                b'{"jsonrpc":"2.0","id":' + json.dumps(index).encode()
+                + b',"method":"tools/call","params":{"name":'
+                + json.dumps(tool).encode() + b','
+                + b'"arguments":{"job":' + json.dumps(first).encode()
+                + b',"job":' + json.dumps(second).encode() + b'}}}')
+            status, _session, raw = _mcp_load._mcp_request(
+                port, raw_call, session_ids=(session_id,))
+            try:
+                error = json.loads(raw).get('error')
+            except json.JSONDecodeError:
+                error = None
+            job_replies.append((tool, first, second, status, error))
+        assert all(status == 400 and error == 'duplicate job'
+                   for _tool, _first, _second, status, error in job_replies), (
+                       job_replies)
+
+        wrapped_calls = (
+            (b'{"jsonrpc":"2.0","id":"arguments","method":"tools/call",'
+             b'"params":{"name":"segment_job",'
+             b'"arguments":{"job":"mcp-wrapper-a"},'
+             b'"arguments":{"job":"mcp-wrapper-b"}}}'),
+            (b'{"jsonrpc":"2.0","id":"params","method":"tools/call",'
+             b'"params":{"name":"segment_job",'
+             b'"arguments":{"job":"mcp-wrapper-c"}},'
+             b'"params":{"name":"segment_job",'
+             b'"arguments":{"job":"mcp-wrapper-d"}}}'),
+            (b'{"jsonrpc":"2.0","id":"status-arguments",'
+             b'"method":"tools/call","params":{"name":"segment_status",'
+             b'"arguments":{"job":"mcp-wrapper-e"},'
+             b'"arguments":{"job":"mcp-wrapper-f"}}}'),
+            (b'{"jsonrpc":"2.0","id":"status-params",'
+             b'"method":"tools/call",'
+             b'"params":{"name":"segment_status",'
+             b'"arguments":{"job":"mcp-wrapper-g"}},'
+             b'"params":{"name":"segment_status",'
+             b'"arguments":{"job":"mcp-wrapper-h"}}}'),
+        )
+        wrapper_replies = []
+        for raw_call in wrapped_calls:
+            status, _session, raw = _mcp_load._mcp_request(
+                port, raw_call, session_ids=(session_id,))
+            try:
+                error = json.loads(raw).get('error')
+            except json.JSONDecodeError:
+                error = None
+            wrapper_replies.append((status, error))
+        assert wrapper_replies == [
+            (400, 'duplicate job'), (400, 'duplicate job'),
+            (400, 'duplicate job'), (400, 'duplicate job')], wrapper_replies
+        assert list((Path(docroot) / 'segments').iterdir()) == []
+
+        status, _session, raw = _mcp_load._mcp_request(
+            port, list_tools, session_ids=(session_id,))
+        assert status == 200, (status, raw)
+
+
+def test_mcp_host_and_origin_repeated_headers_are_rejected(tmp):
+    """MCP rejects every repeated transport-security header presentation."""
+    _mcp_load._need_deps()
+    if importlib.util.find_spec('uvicorn') is None:
+        _util.skip('uvicorn not installed — MCP thread cannot serve')
+    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, _docroot):
+        _mod, port = _mcp_load._start_mcp_in_process(base)
+        initialize = {
+            'jsonrpc': '2.0',
+            'id': 'transport-security-headers',
+            'method': 'initialize',
+            'params': {
+                'protocolVersion': '2024-11-05',
+                'capabilities': {},
+                'clientInfo': {'name': 'header-proof', 'version': '0'},
+            },
+        }
+        allowed_host = f'127.0.0.1:{port}'
+        host_cases = (
+            (allowed_host, 'example.com'),
+            ('example.com', allowed_host),
+            (allowed_host, allowed_host),
+            (allowed_host, ''),
+            ('', allowed_host),
+        )
+        host_replies = []
+        for values in host_cases:
+            status, _session, raw = _mcp_load._mcp_request(
+                port, initialize, hosts=values)
+            try:
+                error = json.loads(raw).get('error')
+            except json.JSONDecodeError:
+                error = None
+            host_replies.append((status, error))
+        origin_cases = (
+            ('', 'https://example.com'),
+            ('https://example.com', ''),
+            ('', ''),
+        )
+        origin_replies = []
+        for values in origin_cases:
+            status, _session, raw = _mcp_load._mcp_request(
+                port, initialize, origins=values)
+            try:
+                error = json.loads(raw).get('error')
+            except json.JSONDecodeError:
+                error = None
+            origin_replies.append((status, error))
+        expected_hosts = [(400, 'duplicate Host header')] * len(host_cases)
+        expected_origins = [
+            (400, 'duplicate Origin header')] * len(origin_cases)
+        assert (host_replies == expected_hosts
+                and origin_replies == expected_origins), (
+                    host_replies, origin_replies)
 
 
 if __name__ == '__main__':
