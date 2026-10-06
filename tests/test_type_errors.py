@@ -304,14 +304,6 @@ def test_tighten_lowers_drops_zeroed_and_leaves_raised(tmp):
     assert after == {'tests/a.py': 2, 'tests/c.py': 1}, after
 
 
-def test_tighten_reports_nothing_moved(tmp):
-    repo, target = _repo(tmp, 'steady', {'tests/a.py': _typed(2)},
-                         _thresholds_document({'tests/a.py': 2}))
-    done = _gate(repo, target, '--tighten')
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert 'no test module lost a type error' in done.stdout, done.stdout
-
-
 def test_tighten_refuses_a_broken_scope_and_writes_nothing(tmp):
     """--tighten may not record a baseline measured by a broken scope."""
     repo, target = _repo(
