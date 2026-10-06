@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """The MCP front end's settings, environment and shared-helper contracts.
 
-Split from tests/test_mcp_server.py: startup settings refusals, the
-shared env parser, log_safe sharing, and the in-process loaders'
-environment contract.
+Split from tests/test_mcp_server.py.
 """
 import os
 import subprocess
