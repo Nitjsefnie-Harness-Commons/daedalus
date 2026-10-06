@@ -122,6 +122,12 @@ def test_resolve_targets_refuses_an_unsafe_derived_name(tmp):
     assert route.resolve_targets(Path(tmp), 'tok', '..evil') is None
 
 
+def test_resolve_targets_refuses_an_over_long_derived_name(tmp):
+    route = _load_route('stream_route_over_long_legacy_target')
+
+    assert route.resolve_targets(Path(tmp), 'x' * 36, 't' * 203) is None
+
+
 def test_resolve_targets_names_the_four_paths_under_cmd_dir(tmp):
     route = _load_route('stream_route_target_paths')
     root = Path(tmp)
