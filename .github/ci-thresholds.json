@@ -98,5 +98,5 @@
     "extension/worker/segment_mint.js": 4,
     "extension/worker/stream.js": 6
   },
-  "tests_line_baseline": 143420
+  "tests_line_baseline": 143410
 }
