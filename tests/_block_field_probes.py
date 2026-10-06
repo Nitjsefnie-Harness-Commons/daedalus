@@ -1,6 +1,5 @@
-"""The block-field control's probe machinery, beside the walk it
-reads: the derivation, one source template per claimed pair, and
-the field-drop patch the teeth half reads through.
+"""The block-field control's probe machinery: derivation,
+templates, field-drop patch.
 """
 import ast
 import contextlib
@@ -13,8 +12,7 @@ _P = "raise RuntimeError('x')\nprobe()"
 _P4 = '    ' + _P.replace('\n', '\n    ')
 _P8 = '        ' + _P.replace('\n', '\n        ')
 
-# One source template per claimed pair: the field under proof carries
-# the proof, every other field the parser needs is spelled minimally.
+# One source template per claimed pair, proof at the field's depth.
 _TEMPLATES = {
     ('Module', 'body'): _P,
     ('Interactive', 'body'): _P,
@@ -59,7 +57,7 @@ def claimed_block_fields():
     """Every (carrier, field) pair the grammar declares a statement
     list: the field is one of the three grammar names and a bare
     instance's value for it is a list, which keeps the
-    single-expression `body` of Expression, Lambda and IfExp out.
+    single-expression `body` fields out.
     """
     claimed = []
     for cls in {value for value in vars(ast).values()
@@ -75,17 +73,22 @@ def claimed_block_fields():
 
 
 def block_probe(cls, field):
-    """One parsed tree whose `field` holds [raise, probe-call]; the
-    single probe call and its single holder are asserted, so a
-    template that misplaced the proof fails loudly.
-    """
+    """One parsed tree whose `field` holds [raise, probe-call]."""
     source = _TEMPLATES[cls.__name__, field]
+    try:
+        parsed = ast.parse(source, mode='exec')
+    except SyntaxError as error:
+        raise AssertionError((cls.__name__, field)) from error
     if cls is ast.Interactive:
-        # mode='single' parses one statement; the shell carries the
-        # parse-produced statements the REPL position would.
-        root = ast.Interactive(body=ast.parse(source).body)
+        # mode='single' parses one statement, hence the shell.
+        root = ast.Interactive(body=parsed.body)
     else:
-        root = ast.parse(source, mode='exec')
+        root = parsed
+    try:
+        compile(root, '<probe>',
+                'single' if cls is ast.Interactive else 'exec')
+    except (SyntaxError, ValueError) as error:
+        raise AssertionError((cls.__name__, field)) from error
     calls = [node.value for node in ast.walk(root)
              if isinstance(node, ast.Expr)
              and isinstance(node.value, ast.Call)
@@ -96,17 +99,15 @@ def block_probe(cls, field):
     holders = [node for node in ast.walk(root)
                if isinstance(node, cls)
                and any(getattr(item, 'value', None) is call
-                       for item in getattr(node, field, ()))]
+                       for item in getattr(node, field))]
     assert len(holders) == 1, (cls.__name__, field, len(holders))
     return root, call
 
 
 @contextlib.contextmanager
 def field_unread(cls, field):
-    """The walk's read with exactly this field dropped: a wrapper over
-    `ast.iter_fields`, so `_blocks`'s own predicate still decides what
-    a block is.
-    """
+    """The walk's read with exactly this field dropped,
+    `ast.iter_fields` wrapped so `_blocks` still decides a block."""
     real = ast.iter_fields
 
     def without(node):

@@ -468,11 +468,8 @@ def test_every_claimed_block_field_is_read_as_a_block(_tmp):
     `body`, `orelse` and `finalbody` are the only field names the
     grammar gives statement lists, and the default-value check drops
     the single-expression `body` of Expression, Lambda and IfExp.
-    Each row parses one tree carrying [raise, probe-call] in the
-    claimed field: the live read marks the probe dead, and with that
-    field alone dropped (`ast.iter_fields` patched) it is reachable
-    again. Failures are COLLECTED, because one narrowed field names
-    every row it silences.
+    Failures are COLLECTED: one field's mutant names every row it
+    silences.
     """
     del _tmp
     quiet = []
@@ -481,7 +478,6 @@ def test_every_claimed_block_field_is_read_as_a_block(_tmp):
         if call not in _mcp_dead_code.dead_nodes(root):
             quiet.append(f'{cls.__name__}.{field}: live read leaves it '
                          'reachable')
-        root, call = block_probe(cls, field)
         with field_unread(cls, field):
             if call in _mcp_dead_code.dead_nodes(root):
                 quiet.append(f'{cls.__name__}.{field}: fieldless read '
