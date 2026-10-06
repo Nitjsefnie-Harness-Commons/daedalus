@@ -32,6 +32,17 @@ def test_queue_naming_contract_is_pinned(tmp):
         'tok_tab', 'tok_tab.json')
 
 
+def test_command_target_names_bounds_the_derived_legacy_name(_tmp):
+    queue = _load_queue('command_queue_legacy_name_bound')
+    for name in queue.command_target_names('x' * 36, 't' * 198):
+        assert not queue.path_safety.unsafe_component(name), name
+    try:
+        queue.command_target_names('x' * 36, 't' * 203)
+    except ValueError:
+        return
+    raise AssertionError('the 245-byte legacy name passed unchecked')
+
+
 def test_a_missing_name_is_absence_not_a_refusal(tmp):
     queue = _load_queue('unit_missing_candidate_absence')
     opened = queue.open_command_candidate(Path(tmp) / 'absent.json')
@@ -584,22 +595,12 @@ def test_collect_expired_sweeps_an_expired_legacy_temp(tmp):
     queue = _load_queue('command_queue_legacy_temp_expired')
     cmd_dir = Path(tmp) / 'commands'
     cmd_dir.mkdir()
-    temp = cmd_dir / 'tok.json.tmp'
-    temp.write_text('{"id":"queued"}', encoding='utf-8')
-    os.utime(temp, (0, 0))
+    temps = (cmd_dir / 'tok.json.tmp', cmd_dir / 'tok_tab.json.tmp')
+    for temp in temps:
+        temp.write_text('{"id":"queued"}', encoding='utf-8')
+        os.utime(temp, (0, 0))
     queue.collect_expired(cmd_dir, 1)
-    assert not temp.exists(), temp
-
-
-def test_collect_expired_sweeps_an_expired_legacy_tab_temp(tmp):
-    queue = _load_queue('command_queue_legacy_tab_temp_expired')
-    cmd_dir = Path(tmp) / 'commands'
-    cmd_dir.mkdir()
-    temp = cmd_dir / 'tok_tab.json.tmp'
-    temp.write_text('{"id":"queued"}', encoding='utf-8')
-    os.utime(temp, (0, 0))
-    queue.collect_expired(cmd_dir, 1)
-    assert not temp.exists(), temp
+    assert not any(temp.exists() for temp in temps)
 
 
 def test_collect_expired_retains_an_expired_legacy_temp_partial_json(tmp):

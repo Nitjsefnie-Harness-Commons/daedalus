@@ -29,10 +29,11 @@ _name_vacated = None
 
 
 def command_target_names(token, tab=''):
-    """Return the checked queue directory and bounded legacy filename."""
+    """Return the checked queue directory and legacy filename."""
     queue_name = path_safety.derived_component(
         f'{token}_{tab}' if tab else token)
-    return queue_name, f'{queue_name}.json'
+    legacy_name = path_safety.derived_component(f'{queue_name}.json')
+    return queue_name, legacy_name
 
 
 def claim(key):

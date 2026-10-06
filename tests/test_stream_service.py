@@ -223,47 +223,29 @@ def test_legacy_extension_drain_stops_after_stream_is_killed(tmp):
     assert second.exists(), second
 
 
-def test_legacy_extension_drain_skips_dashboard_name(tmp):
-    service = _load_service('stream_service_legacy_dashboard_skip')
+def test_legacy_extension_drain_skips_reserved_names(tmp):
+    service = _load_service('stream_service_legacy_reserved_skip')
     command_dir = Path(tmp) / 'commands'
     command_dir.mkdir()
     tab = command_dir / 'tok_42.json'
-    dashboard = command_dir / 'tok_dashboard.json'
     tab.write_text('{"id":"tab"}', encoding='utf-8')
-    dashboard.write_text('{"id":"dashboard"}', encoding='utf-8')
+    reserved = []
+    for name in ('dashboard', 'extension'):
+        entry = command_dir / f'tok_{name}.json'
+        entry.write_text('{"id":"' + name + '"}', encoding='utf-8')
+        reserved.append(entry)
     frames = []
 
     delivered = service.drain_legacy_ext(
         command_dir, 'tok', None,
-        extension_legacy_name='tok_extension.json',
+        extension_legacy_name=reserved[1].name,
         command_ttl=100, frame_writer=frames.append)
 
     assert delivered == 1, delivered
     assert _without_did(frames) == [{'id': 'tab', 'chromeTab': '42'}], (
         _without_did(frames))
     assert not tab.exists(), tab
-    assert dashboard.exists(), dashboard
-
-
-def test_legacy_extension_drain_skips_its_own_legacy_name(tmp):
-    service = _load_service('stream_service_legacy_extension_skip')
-    command_dir = Path(tmp) / 'commands'
-    command_dir.mkdir()
-    tab = command_dir / 'tok_42.json'
-    extension = command_dir / 'tok_extension.json'
-    tab.write_text('{"id":"tab"}', encoding='utf-8')
-    extension.write_text('{"id":"extension"}', encoding='utf-8')
-    frames = []
-
-    delivered = service.drain_legacy_ext(
-        command_dir, 'tok', None, extension_legacy_name=extension.name,
-        command_ttl=100, frame_writer=frames.append)
-
-    assert delivered == 1, delivered
-    assert _without_did(frames) == [{'id': 'tab', 'chromeTab': '42'}], (
-        _without_did(frames))
-    assert not tab.exists(), tab
-    assert extension.exists(), extension
+    assert all(entry.exists() for entry in reserved), reserved
 
 
 def test_inherited_legacy_non_object_is_intentionally_retained(tmp):
