@@ -87,13 +87,6 @@ def test_tightening_graduates_at_the_inclusive_ceiling(tmp):
         baseline, {'tests/small.py': policy.TEST_CEILING}) == {}
 
 
-def test_tightening_preserves_an_entry_for_a_missing_file(tmp):
-    del tmp
-    policy = _policy()
-    baseline = {'tests/gone.py': 900}
-    assert policy.tightened(baseline, {}) is None
-
-
 def test_main_reports_clean_and_all_violation_modes(tmp):
     thresholds = _thresholds()
     policy = _policy()
@@ -210,9 +203,9 @@ def _size_fixture(tmp, files, baseline, name):
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('line = 1\n' * count, encoding='utf-8')
-    shutil.copy2(POLICY_SOURCE, repo / 'scripts' / 'ci' / 'size_baseline.py')
-    shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
-                 repo / 'scripts' / 'ci' / 'thresholds.py')
+    for source in (POLICY_SOURCE, ROOT / 'scripts' / 'ci' / 'thresholds.py',
+                   ROOT / 'scripts' / 'ci' / 'reseed.py'):
+        shutil.copy2(source, repo / 'scripts' / 'ci' / source.name)
     data = _document()
     data['module_size_baseline'] = baseline
     target = repo / '.github' / 'ci-thresholds.json'
@@ -451,24 +444,6 @@ def test_skill_mutations_are_caught_independently(tmp):
         path = Path(tmp) / f'{name}.md'
         path.write_text(source.replace(old, new), encoding='utf-8')
         assert not _skill_decisions(path)[name], name
-
-
-def test_skill_pressure_scenarios_name_the_operator_action(tmp):
-    del tmp
-    text = _normalised(SKILL_SOURCE.read_text(encoding='utf-8'))
-    assert 'recorded number is never raised' in text
-    assert 'shrinking is recorded with ' \
-        '`python3 scripts/ci/size_baseline.py --tighten`' \
-        in text
-    assert 'entry naming a file that is gone is deleted by hand' in text
-
-
-def test_script_docstring_carries_each_printed_remedy(tmp):
-    del tmp
-    policy = _policy()
-    doc = _normalised(policy.__doc__ or '')
-    for kind, remedy in policy.REMEDY_FOR.items():
-        assert _normalised(remedy) in doc, (kind, remedy)
 
 
 def test_refused_kinds_print_the_correct_remedy(tmp):

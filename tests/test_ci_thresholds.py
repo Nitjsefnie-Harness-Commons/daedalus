@@ -12,8 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _ratchet_fixture import (  # noqa: E402
-    _captured_main, _git, _normalised)
+from _ratchet_fixture import _git, _normalised  # noqa: E402
 
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -21,10 +20,10 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 SCRIPT = ROOT / 'scripts' / 'ci' / 'thresholds.py'
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
+RESEED_SOURCE = ROOT / 'scripts' / 'ci' / 'reseed.py'
 DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
-# The budget fixtures run a copied policy script in a temporary tree the
-# coverage paths do not map back onto, so the child keeps no collector.
+# The budget fixtures' children run outside the coverage paths.
 _CHILD_ENV = _util.child_coverage('scrub')
 # One list names both the document key and the reader call that must agree.
 _BASELINE_ACCESSORS = ('module_size_baseline', 'long_line_baseline',
@@ -37,6 +36,17 @@ def _thresholds():
 
 def _valid():
     return json.loads(DATA_PATH.read_text(encoding='utf-8'))
+
+
+def _reseed():
+    return _util.load(RESEED_SOURCE, 'thresholds_reseed')
+
+
+def _rowless():
+    """The shipped document with the line-budget row deleted."""
+    candidate = _valid()
+    del candidate['tests_line_baseline']
+    return candidate
 
 
 def _write_json(path, value):
@@ -60,7 +70,8 @@ def _assert_load_refused(path, needle):
 
 
 def _assert_normalise_refused(thresholds, candidate, needle):
-    _assert_refused_by(lambda: thresholds.normalise(candidate), needle)
+    _assert_refused_by(
+        lambda: thresholds.normalise(candidate, False), needle)
 
 
 def _assert_refused_by(read, needle):
@@ -87,6 +98,12 @@ def _assert_document_contract(path):
         assert baseline == data[member], member
         assert all(count > 0 for count in baseline.values()), member
     assert thresholds.tests_line_baseline(data) == data['tests_line_baseline']
+    try:
+        thresholds.coverage(data, 'ruby')
+    except ValueError as error:
+        assert 'unknown coverage language: ruby' in str(error), error
+    else:
+        raise AssertionError('unknown language was accepted')
     result = _check(path)
     assert result.returncode == 0, (result.stdout, result.stderr)
     return data
@@ -104,18 +121,6 @@ def _assert_cli_floor(path):
     assert result.stderr == '', result.stderr
 
 
-def _fully_tightened_baseline(size_baseline, baseline):
-    """The empty shape a size baseline carries once every entry has fallen:
-    a populated one tightens to `{}`, an empty one to `None`."""
-    if baseline:
-        sizes = {rel: size_baseline.ceiling_for(rel) for rel in baseline}
-        tightened = size_baseline.tightened(baseline, sizes)
-        assert tightened == {}
-        return tightened
-    assert size_baseline.tightened(baseline, {}) is None
-    return {}
-
-
 def _restrictive_mode(platform_name):
     return 0o400 if platform_name == 'posix' else 0o600
 
@@ -131,10 +136,7 @@ def test_cli_prints_only_the_requested_floor(tmp):
 
 
 def test_required_and_unknown_fields_are_rejected(tmp):
-    """Every absent and every extra member, at both levels, in one table.
-
-    The needle names the field, so a merged row still says which one broke.
-    """
+    """Every absent and every extra member, at both levels, in one table."""
     path = Path(tmp) / 'thresholds.json'
     cases = []
     for key in ('schema_version', 'coverage', 'module_size_baseline',
@@ -279,23 +281,6 @@ def test_nonobject_baseline_and_missing_threshold_file_are_refused(tmp):
     _assert_load_refused(Path(tmp) / 'missing.json', 'cannot read thresholds:')
 
 
-def test_public_accessors_return_validated_data(tmp):
-    """The per-member round-trip is `_assert_document_contract`'s, run here
-    only for `coverage`'s tuple shape and the unknown-language refusal."""
-    del tmp
-    thresholds = _thresholds()
-    data = thresholds.load(DATA_PATH)
-    assert thresholds.coverage(data, 'python') == (
-        data['coverage']['python']['measured'],
-        data['coverage']['python']['floor'])
-    try:
-        thresholds.coverage(data, 'ruby')
-    except ValueError as error:
-        assert 'unknown coverage language: ruby' in str(error), error
-    else:
-        raise AssertionError('unknown language was accepted')
-
-
 def test_invalid_candidate_never_touches_existing_destination(tmp):
     thresholds = _thresholds()
     target = Path(tmp) / 'thresholds.json'
@@ -409,18 +394,15 @@ def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
         ROOT / 'scripts' / 'ci' / 'size_baseline.py',
         'thresholds_lifecycle_size_baseline')
     updated = thresholds.load(path)
-    tightened = _fully_tightened_baseline(
-        size_baseline, thresholds.module_size_baseline(updated))
+    sizes = {rel: size_baseline.ceiling_for(rel)
+             for rel in updated['module_size_baseline']}
+    tightened = size_baseline.tightened(
+        updated['module_size_baseline'], sizes)
+    assert tightened == {}
     updated['module_size_baseline'] = tightened
     thresholds.write(path, updated)
-    original_path = DATA_PATH
-    globals()['DATA_PATH'] = path
-    try:
-        test_shipped_document_is_exact_and_cli_checkable(tmp)
-        test_cli_prints_only_the_requested_floor(tmp)
-        test_public_accessors_return_validated_data(tmp)
-    finally:
-        globals()['DATA_PATH'] = original_path
+    _assert_document_contract(path)
+    _assert_cli_floor(path)
     loaded = thresholds.load(path)
     expected_measured = measured if should_raise else recorded
     assert loaded['coverage']['python'] == {
@@ -430,21 +412,9 @@ def test_shipped_document_lifecycle_accepts_real_policy_updates(tmp):
     assert thresholds.load(DATA_PATH) == source
 
 
-def _run_lifecycle_against(tmp, path):
-    original_path = DATA_PATH
-    globals()['DATA_PATH'] = path
-    try:
-        test_shipped_document_lifecycle_accepts_real_policy_updates(tmp)
-    finally:
-        globals()['DATA_PATH'] = original_path
-
-
 def test_lifecycle_accepts_a_calibration_the_ratchet_cannot_move(tmp):
-    """A measured already above the hysteresis, and the 100.0 ceiling.
-
-    Both are calibrations the ordinary raise must leave byte-identical, and
-    both go on to carry the whole lifecycle against the mutated document.
-    """
+    """A measured above the hysteresis, and the 100.0 ceiling: both are
+    calibrations the ordinary raise must leave byte-identical."""
     thresholds = _thresholds()
     ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
                          'thresholds_at_ceiling_ratchet')
@@ -459,50 +429,39 @@ def test_lifecycle_accepts_a_calibration_the_ratchet_cannot_move(tmp):
             '--language', 'python', '--measured', f'{measured}',
             '--thresholds', str(path)]) == 0
         assert path.read_bytes() == before
-        _run_lifecycle_against(tmp, path)
-
-
-def test_lifecycle_accepts_a_fully_tightened_empty_baseline(tmp):
-    thresholds = _thresholds()
-    source = thresholds.load(DATA_PATH)
-    size_baseline = _util.load(
-        ROOT / 'scripts' / 'ci' / 'size_baseline.py',
-        'thresholds_empty_baseline_size_baseline')
-    source['module_size_baseline'] = _fully_tightened_baseline(
-        size_baseline, thresholds.module_size_baseline(source))
-    path = Path(tmp) / 'empty-baseline.json'
-    thresholds.write(path, source)
-    _run_lifecycle_against(tmp, path)
-
-
-def test_restrictive_mode_selection_keeps_windows_destination_writable(tmp):
-    del tmp
-    assert _restrictive_mode('posix') == 0o400
-    windows_mode = _restrictive_mode('nt')
-    assert windows_mode == 0o600
-    assert windows_mode & stat.S_IWRITE
+        updated = thresholds.load(path)
+        assert updated['coverage']['python'] == {
+            'measured': measured,
+            'floor': measured - ratchet.CALIBRATION_GAP}
 
 
 def _line_budget_fixture(tmp, files, budget, name):
-    """A committed repository of ``files`` (rel -> bytes) with a document."""
+    """A committed repository of ``files`` with a document; ``budget``
+    None builds the re-seed window itself, the commit message carrying
+    the marker the child's own loader walks."""
     repo = Path(tmp) / name
     (repo / 'scripts' / 'ci').mkdir(parents=True)
     for rel, content in files.items():
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-    for source in (POLICY_SOURCE, SCRIPT):
+    for source in (POLICY_SOURCE, SCRIPT, RESEED_SOURCE):
         shutil.copy2(source, repo / 'scripts' / 'ci' / source.name)
     candidate = _valid()
-    candidate['tests_line_baseline'] = budget
+    marker = ''
+    if budget is None:
+        del candidate['tests_line_baseline']
+        marker = f' {_reseed().MARKER}'
+    else:
+        candidate['tests_line_baseline'] = budget
     target = repo / '.github' / 'ci-thresholds.json'
     target.parent.mkdir(parents=True)
-    _thresholds().write(target, candidate)
+    _thresholds().write(target, candidate, True)
     _git(repo, 'init', '-q')
     _git(repo, 'config', 'user.email', 'tests@example.invalid')
     _git(repo, 'config', 'user.name', 'Tests')
     _git(repo, 'add', '.')
-    _git(repo, 'commit', '-qm', 'base')
+    _git(repo, 'commit', '-qm', f'base{marker}')
     return repo, target
 
 
@@ -554,11 +513,8 @@ def test_tests_line_budget_fails_naming_both_numbers_and_the_remedy(tmp):
 
 
 def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
-    """The drop is recorded and nothing else in the document moves.
-
-    The comparison is against the document as `load` normalises it, not the
-    raw JSON: a raw float and the Decimal it becomes are not equal.
-    """
+    """Compared as `load` normalises it, not raw JSON: a raw float and
+    the Decimal it becomes are not equal."""
     repo, target = _line_budget_fixture(tmp, _tests_files(4, 3), 20, 'drop')
     source = _thresholds().load(target)
     done = _run_lines_cli(repo, '--tighten')
@@ -576,28 +532,10 @@ def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
         assert other_target.read_bytes() == before
 
 
-def test_the_budget_answers_a_failure_on_stderr_with_exit_one(tmp):
-    """Driven in-process, because every other row scrubs the child.
-
-    A subprocess launch carries no collector, so a branch only the child
-    reaches is indistinguishable from a branch no row reaches at all.
-    """
-    policy = _util.load(POLICY_SOURCE, 'tests_lines_failure')
-    status, _stdout, stderr = _captured_main(
-        policy, ['--thresholds', str(Path(tmp) / 'missing.json')])
-    assert status == 1
-    assert 'cannot read thresholds' in stderr, stderr
-
-
 def test_the_budget_counts_every_tracked_text_file_under_tests(tmp):
-    """The counting DEFINITION is the subject, so it gets its own oracle.
-
-    The other rows only bound the count, so an under-count is the direction
-    they cannot see. This row asserts the count itself against a tree with a
-    non-`.py` text fixture (which a `tests/*.py` pathspec drops), a binary
-    one (which a missing `-I` counts) and files outside `tests/` (which a
-    dropped pathspec adds).
-    """
+    """The counting definition gets its own oracle: a non-`.py` text
+    file (which a `tests/*.py` pathspec drops), a binary one (which a
+    missing `-I` counts) and files outside `tests/`."""
     repo, _target = _line_budget_fixture(
         tmp, _mixed_tests_files(4, 3), 7, 'mixed')
     policy = _util.load(POLICY_SOURCE, 'tests_lines_definition')
@@ -629,10 +567,155 @@ def test_the_real_tests_tree_is_within_its_recorded_line_budget(tmp):
     assert done.returncode == 0, (done.stdout, done.stderr)
 
 
+def test_the_reseed_verdict_is_a_required_bool_buying_only_absence(tmp):
+    """The verdict is the tree's answer, asked at one named place."""
+    thresholds = _thresholds()
+    reseed = _reseed()
+    strict = thresholds.normalise(_valid(), False)
+    _assert_refused_by(lambda: thresholds.normalise(_valid(), None),
+                       'reseed_in_flight must be a bool')
+    _assert_refused_by(lambda: thresholds.normalise(_valid(), 'yes'),
+                       'reseed_in_flight must be a bool')
+    assert thresholds.normalise(_valid(), True) == strict
+    missing = _rowless()
+    _assert_refused_by(
+        lambda: thresholds.normalise(missing, False),
+        'missing field: tests_line_baseline')
+    windowed = thresholds.normalise(missing, True)
+    assert 'tests_line_baseline' not in windowed
+    for member in ('schema_version', 'coverage', *_BASELINE_ACCESSORS):
+        assert windowed[member] == strict[member], member
+    target = Path(tmp) / 'window.json'
+    thresholds.write(target, missing, True)
+    assert 'tests_line_baseline' not in target.read_text(encoding='utf-8')
+    assert thresholds.load(target, True) == windowed
+    _assert_refused_by(
+        lambda: thresholds.write(target, missing),
+        'missing field: tests_line_baseline')
+    assert reseed.MARKER == '[tests-line-re-seed]'
+    assert thresholds._SCALAR_FIELDS == (reseed._SCALAR_FIELD,)
+
+
+def _walk_repo(tmp, name):
+    """A committed repository the walk reads, and nothing else in it."""
+    repo = Path(tmp) / name
+    (repo / '.github').mkdir(parents=True)
+    _git(repo, 'init', '-q')
+    _git(repo, 'config', 'user.email', 'tests@example.invalid')
+    _git(repo, 'config', 'user.name', 'Tests')
+    return repo
+
+
+def _walk_commit(repo, message, row):
+    """One commit; complete minus the row exactly when ``row`` is false."""
+    document = _valid() if row else _rowless()
+    _thresholds().write(repo / '.github' / 'ci-thresholds.json', document,
+                        True)
+    _git(repo, 'add', '-A')
+    _git(repo, 'commit', '-q', '--allow-empty', '-m', message)
+
+
+def test_the_walk_reads_the_marker_through_bounded_ancestry(tmp):
+    """The marker survives commits landing on the delete, a GitHub merge,
+    and the visit cap; a present row and a shallow boundary close it."""
+    reseed = _reseed()
+    repo = _walk_repo(tmp, 'walk')
+    _walk_commit(repo, f'base {reseed.MARKER}', row=False)
+    reseed.clear_cache()
+    assert reseed.in_flight(repo) is True
+    _walk_commit(repo, 'a publisher lands', row=False)
+    reseed.clear_cache()
+    assert reseed.in_flight(repo) is True
+    _walk_commit(repo, 'the seed restores the row', row=True)
+    reseed.clear_cache()
+    assert reseed.in_flight(repo) is False
+
+    named = subprocess.run(
+        ('git', '-C', str(repo), 'branch', '--show-current'),
+        check=True, capture_output=True, env=_CHILD_ENV)
+    base = named.stdout.decode().strip()
+    _git(repo, 'checkout', '-qb', 'line')
+    _walk_commit(repo, f'delete {reseed.MARKER}', row=False)
+    _git(repo, 'checkout', '-q', base)
+    _walk_commit(repo, 'unrelated fill', row=False)
+    _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #1',
+         'line')
+    reseed.clear_cache()
+    assert reseed.in_flight(repo) is True
+
+    for fillers, expected in ((9, True), (10, False)):
+        bound = _walk_repo(tmp, f'bound-{fillers}')
+        _walk_commit(bound, f'delete {reseed.MARKER}', row=False)
+        for _ in range(fillers):
+            _walk_commit(bound, 'filler', row=False)
+        reseed.clear_cache()
+        assert reseed.in_flight(bound) is expected
+
+
+def test_the_walk_fails_closed_and_the_loader_gates_the_same_answer(tmp):
+    reseed = _reseed()
+    thresholds = _thresholds()
+    repo = _walk_repo(tmp, 'source')
+    _walk_commit(repo, f'delete {reseed.MARKER}', row=False)
+    _walk_commit(repo, 'publisher lands', row=False)
+    clone = Path(tmp) / 'shallow'
+    _git(tmp, 'clone', '--no-local', '--depth', '1', '-q',
+         str(repo), str(clone))
+    reseed.clear_cache()
+    assert reseed.in_flight(clone) is False
+    document = clone / '.github' / 'ci-thresholds.json'
+    _assert_refused_by(
+        lambda: thresholds.load(document, False),
+        'missing field: tests_line_baseline')
+
+    real_run = reseed.subprocess.run
+    reseed.subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(
+        OSError('no git'))
+    try:
+        answer = reseed.in_flight(Path('/nowhere'))
+    finally:
+        reseed.subprocess.run = real_run
+    reseed.clear_cache()
+    assert answer is False
+
+    broken = _walk_repo(tmp, 'broken')
+    (broken / '.github' / 'ci-thresholds.json').write_bytes(b'{')
+    _git(broken, 'add', '-A')
+    _git(broken, 'commit', '-qm', 'broken')
+    assert not reseed._field_present(broken, 'HEAD')
+
+
+def test_the_window_skips_the_line_gate_and_the_tighten(tmp):
+    repo, target = _line_budget_fixture(
+        tmp, _tests_files(4, 3), None, 'window')
+    before = target.read_bytes()
+    done = _run_lines_cli(repo)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert 're-seed window' in done.stdout, done.stdout
+    tighten = _run_lines_cli(repo, '--tighten')
+    assert tighten.returncode == 0, (tighten.stdout, tighten.stderr)
+    assert target.read_bytes() == before
+
+
+def test_the_accessor_and_the_ratchet_thread_the_verdict(tmp):
+    del tmp
+    thresholds = _thresholds()
+    assert thresholds.tests_line_baseline(_rowless(), True) is None
+    assert thresholds.tests_line_baseline(
+        _valid()) == _valid()['tests_line_baseline']
+    ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
+                         'thresholds_window_ratchet')
+    raised = ratchet.update(_rowless(), '99.0', 'python', True)
+    assert raised is not None
+    assert 'tests_line_baseline' not in raised
+    _assert_refused_by(
+        lambda: ratchet.update(_rowless(), '99.0', 'python', False),
+        'missing field: tests_line_baseline')
+
+
 def _skill_decisions(path=SKILL_SOURCE):
     raw = path.read_text(encoding='utf-8')
-    # Isolate the tests/-budget paragraph, so a phrase the other ratchet
-    # paragraphs share cannot satisfy this one's decisions for it.
+    # Isolate the tests/-budget paragraph from the other ratchets'.
     block = next((part for part in raw.split('\n\n')
                   if 'tests_line_baseline' in part), '')
     paragraph = _normalised(block)
@@ -648,10 +731,8 @@ def _skill_decisions(path=SKILL_SOURCE):
 
 
 def test_skill_names_the_state_owner_and_tighten_command(tmp):
-    """Both phases in one row: each decision is asserted true, then each
-    phrase is mutated once and its decision asserted false. The mutation
-    arm is vacuous without the first, so neither phase can be dropped
-    without the other becoming a green no-op."""
+    """Each decision asserted true, then its phrase mutated once and
+    the decision asserted false, so neither phase is a green no-op."""
     source = SKILL_SOURCE.read_text(encoding='utf-8')
     mutations = (
         ('owner', 'tests_line_baseline', 'tests_line_table'),

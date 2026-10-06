@@ -258,6 +258,7 @@
 !/scripts/ci/line_lengths.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/ratchet_push.py
+!/scripts/ci/reseed.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/suite_bound.py
 !/scripts/ci/tests_lines.py
