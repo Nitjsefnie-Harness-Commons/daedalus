@@ -241,8 +241,7 @@ CLI_PACKAGE = _util.ROOT / 'daedalus_cli'
 
 
 def _package_roots(tree):
-    """Yield the one walk root a package module has: the module itself,
-    where the walk starts and a callable only opens a label."""
+    """Yield the one walk root a package module has: the module itself."""
     yield '', tree
 
 
