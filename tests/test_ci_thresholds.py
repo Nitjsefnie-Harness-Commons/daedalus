@@ -14,8 +14,8 @@ from _repo import ROOT  # noqa: E402
 from _ci_reseed_fixtures import (  # noqa: E402
     _ci_reseed_budget_repo, _ci_reseed_commit, _ci_reseed_merge,
     _ci_reseed_module, _ci_reseed_order_subject, _ci_reseed_repo,
-    _ci_reseed_diamond, _ci_reseed_force_true, _ci_reseed_restore_true,
-    _ci_reseed_rowless, _ci_reseed_shallow, _ci_reseed_visit_order)
+    _ci_reseed_diamond, _ci_reseed_document, _ci_reseed_force_true,
+    _ci_reseed_restore_true, _ci_reseed_shallow, _ci_reseed_visit_order)
 from _ratchet_fixture import (
     _captured_main, _git, _normalised)  # noqa: E402
 
@@ -487,7 +487,7 @@ def test_the_reseed_verdict_is_a_required_bool_buying_only_absence(tmp):
     _assert_refused_by(lambda: thresholds.normalise(_valid(), 'yes'),
                        'reseed_in_flight must be a bool')
     assert thresholds.normalise(_valid(), True) == strict
-    missing = _ci_reseed_rowless()
+    missing = _ci_reseed_document(False)
     _assert_refused_by(
         lambda: thresholds.normalise(missing, False),
         'missing field: tests_line_baseline')
@@ -504,12 +504,12 @@ def test_the_reseed_verdict_is_a_required_bool_buying_only_absence(tmp):
         'missing field: tests_line_baseline')
     assert reseed.MARKER == '[tests-line-re-seed]'
     assert thresholds._SCALAR_FIELDS == (reseed._SCALAR_FIELD,)
-    bad_schema = _ci_reseed_rowless()
+    bad_schema = _ci_reseed_document(False)
     bad_schema['schema_version'] = 2
-    bad_floor = _ci_reseed_rowless()
+    bad_floor = _ci_reseed_document(False)
     bad_floor['coverage']['python']['floor'] = \
         bad_floor['coverage']['python']['measured']
-    unknown = _ci_reseed_rowless()
+    unknown = _ci_reseed_document(False)
     unknown['unknown'] = 1
     bad_row = _valid()
     bad_row['tests_line_baseline'] = 'ten'
@@ -552,8 +552,7 @@ def test_the_walk_reads_the_marker_through_bounded_ancestry(tmp):
 
 def test_the_walk_visits_the_marked_lineage_first(tmp):
     """The reversal makes the marked lineage the walk's second visit."""
-    repo, _first, second = _ci_reseed_order_subject(
-        tmp, '[tests-line-re-seed]')
+    repo, _first, second = _ci_reseed_order_subject(tmp)
     assert _ci_reseed_visit_order(repo)[:2] == ['HEAD', second]
 
 
@@ -639,16 +638,17 @@ def test_a_shared_base_is_visited_once(tmp):
 def test_the_accessor_and_the_ratchet_thread_the_verdict(tmp):
     del tmp
     thresholds = _thresholds()
-    assert thresholds.tests_line_baseline(_ci_reseed_rowless(), True) is None
+    rowless = _ci_reseed_document(False)
+    assert thresholds.tests_line_baseline(rowless, True) is None
     assert thresholds.tests_line_baseline(
         _valid()) == _valid()['tests_line_baseline']
     ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
                          'thresholds_window_ratchet')
-    raised = ratchet.update(_ci_reseed_rowless(), '99.0', 'python', True)
+    raised = ratchet.update(rowless, '99.0', 'python', True)
     assert raised is not None
     assert 'tests_line_baseline' not in raised
     _assert_refused_by(
-        lambda: ratchet.update(_ci_reseed_rowless(), '99.0', 'python', False),
+        lambda: ratchet.update(rowless, '99.0', 'python', False),
         'missing field: tests_line_baseline')
 
 

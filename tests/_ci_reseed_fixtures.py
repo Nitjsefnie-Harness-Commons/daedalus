@@ -35,13 +35,6 @@ def _ci_reseed_document(row):
     return document
 
 
-def _ci_reseed_rowless():
-    """The shipped document minus the re-seeded row."""
-    document = _ci_reseed_document(True)
-    del document['tests_line_baseline']
-    return document
-
-
 def _ci_reseed_repo(tmp, name):
     """A committed git repository holding only the thresholds document."""
     repo = Path(tmp) / name
@@ -91,27 +84,26 @@ def _ci_reseed_shallow(tmp, marker):
     return clone
 
 
-def _ci_reseed_order_subject(tmp, marker):
-    """A subject where parent order decides. The first-parent limb ends
-    in a row-present tip, so the pop order gates the whole limb: the
-    mandated ordering visits the marked limb first and finds the marker
-    at the cap's tenth visit, while dropping the reversal pops the
-    row-present tip first, whose ``continue`` skips the limb and leaves
-    the marker at the eleventh visit — past the cap."""
+def _ci_reseed_order_subject(tmp):
+    """A subject for the pin that observes the walk's visit order.
+
+    No history can discriminate the two orderings by verdict: pop(0)
+    plus extend interleaves the limbs, so FIFO reaches any given commit
+    no later than the mandated reversed ordering does. What the ordering
+    decides is which lineage the walk reads second at a merge, and this
+    shape — a row-present first-parent tip over a markerless, rowless
+    second-parent tip — is the minimal one whose second visit names that
+    choice."""
     repo = _ci_reseed_repo(tmp, 'order')
     _ci_reseed_commit(repo, 'base', row=True)
     named = subprocess.run(
         ('git', '-C', str(repo), 'branch', '--show-current'),
         check=True, capture_output=True,
         env=_util.child_coverage('scrub'))
-    base = named.stdout.decode().strip()
+    base_branch = named.stdout.decode().strip()
     _git(repo, 'checkout', '-qb', 'line')
-    _ci_reseed_commit(repo, f'delete {marker}', row=False)
-    for depth in range(1, 9):
-        _ci_reseed_commit(repo, f'limb {depth}', row=False)
-    _git(repo, 'checkout', '-q', base)
-    for _ in range(9):
-        _ci_reseed_commit(repo, 'filler', row=True)
+    _ci_reseed_commit(repo, 'delete', row=False)
+    _git(repo, 'checkout', '-q', base_branch)
     _ci_reseed_commit(repo, 'publisher lands', row=True)
     _git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #2',
          'line')
