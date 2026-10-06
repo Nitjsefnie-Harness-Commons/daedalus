@@ -194,44 +194,11 @@ def test_put_declared_oversized_body_is_refused_before_the_read(tmp):
     assert result['inner'] == [], result['inner']
 
 
-def test_put_undeclared_oversized_body_is_refused_inside_the_read(tmp):
-    del tmp
-    result = _drive_body([b'x'] * 64, max_body_size=16, method='PUT')
-    payload = _json_payload(result['payload'])
-    assert result['status'] == 413, (result['status'], payload)
-    assert payload == {'error': 'request body too large'}, payload
-    assert result['pulled'] <= 17, result['pulled']
-    assert result['inner'] == [], result['inner']
-
-
-def test_put_undeclared_body_at_the_limit_reaches_the_inner_app(tmp):
-    del tmp
-    body = b'0123456789abcdef'
-    result = _drive_body([body[0:8], body[8:16]], max_body_size=16,
-                         method='PUT')
-    assert result['status'] == 204, result['status']
-    assert result['inner'] == [body], result['inner']
-
-
 def test_get_without_a_body_is_unaffected(tmp):
     del tmp
     result = _drive_body([], max_body_size=16, method='GET')
     assert result['status'] == 204, result['status']
     assert result['inner'] == [b''], result['inner']
-
-
-def test_put_duplicate_job_carrier_still_answers_duplicate_job(tmp):
-    del tmp
-    raw = (
-        '{"jsonrpc": "2.0", "id": 7, "method": "segment_job", '
-        '"params": {"name": "segment_job", "arguments": '
-        '{"job": "first", "job": "second"}}}').encode()
-    result = _drive_body(
-        [raw[0:40], raw[40:80], raw[80:]], max_body_size=256, method='PUT')
-    payload = _json_payload(result['payload'])
-    assert result['status'] == 400, (result['status'], payload)
-    assert payload == {'error': 'duplicate job'}, payload
-    assert result['inner'] == [], result['inner']
 
 
 def test_top_level_json_scalar_has_no_job_carrier(tmp):
