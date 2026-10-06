@@ -6,8 +6,8 @@ destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
 A store to an attribute of the namespace parameter is admitted; a rebind of
 the name or a non-attribute store is refused; an augmented attribute target
 is read-checked; a del is refused; a store never satisfies a read.
-A frame read is refused in every statement of every daedalus_cli module the
-walk reaches, and every member of the interpreter's frame set is refused, not
+A frame read is refused in every statement of every daedalus_cli module
+the walk reaches, and every member of the interpreter's frame set, not
 only the ones this file names. A read in a helper a handler calls is in that
 domain; a read in a module the walk does not reach is not. Aliases follow
 prefixes; headers use outer scope. Other parameters escape."""
@@ -127,11 +127,10 @@ def _frame_escapes(node, scope, handler_globals, key, label, found):
     """Report every frame read under a node, wherever the node sits.
 
     Applied in two places, one per walk, and each is pinned: removing this
-    copy or the inline one in ``_handler_arg_violations`` reds four controls
-    apiece — what holds the two copies to one rule. ``scope`` is the
-    innermost callable enclosing the node, or the module, and is what a name
-    resolves against; entering a callable changes both it and the label, so
-    a class body, a module-level statement and a nested helper are reached.
+    copy or the inline one reds four controls apiece — what holds the two
+    copies to one rule. ``scope`` is the innermost callable enclosing the
+    node, or the module — what a name resolves against, changed with the
+    label on entering a callable.
     """
     context = (scope, handler_globals, _scope_binds,
                _comprehension_shadows)
@@ -252,8 +251,8 @@ def audited_namespace_key():
     """The name the audited namespace is stored under, read off the handlers.
 
     The handler walk derives it from each handler's own AST; this reads the
-    same name from the dispatch table, and a disagreement is raised in the
-    whole-tree test that owns the claim.
+    same name from the dispatch table; a disagreement is raised in the
+    whole-tree test.
     """
     from daedalus_cli.cli import DISPATCH
     names = {next(iter(inspect.signature(handler).parameters))
@@ -265,10 +264,10 @@ def package_frame_escapes(overrides=None, extra_globals=None):
     """Refuse a frame read anywhere in the CLI package, helper included.
 
     The domain is the package, so a read in a helper a handler calls is
-    refused even when the handler names no frame. The reflective branch is
+    refused even when the handler names no frame; the reflective branch is
     per handler and stops at the callable boundary. Names ``overrides`` adds
-    stay unproven — what the rule refuses — and ``extra_globals`` adds a
-    binding altered source cannot hold.
+    stay unproven — what the rule refuses; ``extra_globals`` adds a binding
+    altered source cannot hold.
     """
     key = audited_namespace_key()
     escapes = []
@@ -517,14 +516,12 @@ def test_cli_audit_resolver_only_resolves_exact_module_vars(tmp):
 
 
 def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
-    """A frame member read on a value the audit can see is left alone:
-    widening the member set would refuse correct code."""
+    """A frame member read on a visible value is left alone, not refused."""
     scope = {'ROUTES': {'f_locals': 1}, **globals()}
     assert _audit_fake_handler("ROUTES['f_locals']", scope=scope) == []
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
     # A call's second argument names a member, not a mapping key.
     assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
-    # The bound protocol spelling selects from its receiver, not its name.
     assert _audit_fake_handler(
         "ROUTES.__getattribute__('f_' + 'locals')", scope=scope) == []
     # A LOCAL binding is unproven — the resolver's one stated over-refusal.
@@ -534,7 +531,7 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
 
 
 def test_cli_audit_reads_the_namespace_key_from_the_handler(tmp):
-    """Judge a handler by its own parameter name; a hard-coded args fails."""
+    """Judge a handler by its own parameter name, not a hard-coded args."""
     for parameter in ('args', 'namespace'):
         for key in (parameter, 'args'):
             body = f"holder = helper()\n_ = holder['{key}'].undeclared_probe"
@@ -554,7 +551,6 @@ def test_cli_audit_refuses_every_frame_namespace_plant(tmp):
 
 
 def test_cli_audit_covers_a_second_package_module(tmp):
-    """The domain is the package; one module holding every plant is not."""
     audit_support.assert_domain_covers_a_second_module(
         package_frame_escapes, CLI_PACKAGE)
 
