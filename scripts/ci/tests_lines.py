@@ -55,6 +55,10 @@ def main(argv=None):
     try:
         data = thresholds.load(args.thresholds)
         recorded = thresholds.tests_line_baseline(data)
+        if recorded is None:
+            print('the re-seed window is open: no budget is recorded, so '
+                  'the line gate measures nothing to compare or tighten')
+            return 0
         measured = tracked_test_lines()
         if args.tighten:
             updated = tightened(recorded, measured)

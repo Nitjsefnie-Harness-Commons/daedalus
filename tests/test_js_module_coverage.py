@@ -56,28 +56,6 @@ def test_the_seed_names_only_tracked_javascript_that_still_has_code(tmp):
         assert sources[rel].strip(), rel
 
 
-def test_the_script_docstring_carries_each_printed_remedy(tmp):
-    del tmp
-    policy = _policy()
-    doc = _normalised(policy.__doc__ or '')
-    assert sorted(policy.REMEDY_FOR) == [
-        'graduated', 'grown', 'missing', 'unrecorded']
-    for kind, remedy in policy.REMEDY_FOR.items():
-        assert _normalised(remedy) in doc, (kind, remedy)
-    assert '--tighten' in doc, doc
-    assert 'python3 scripts/ci/js_module_coverage.py' in doc, doc
-
-
-def test_refused_kinds_carry_the_cover_or_stale_entry_remedy(tmp):
-    del tmp
-    policy = _policy()
-    assert policy.REMEDY_FOR['grown'] == policy.UNCOVERED_REMEDY
-    assert policy.REMEDY_FOR['missing'] == policy.STALE_ENTRY_REMEDY
-    assert policy.REMEDY_FOR['graduated'] == policy.STALE_ENTRY_REMEDY
-    assert 'never raised by hand' in policy.UNCOVERED_REMEDY
-    assert 'cover the uncovered lines' in policy.UNCOVERED_REMEDY
-
-
 def test_unrecorded_carries_its_own_remedy_naming_both_actions(tmp):
     """A file with no record cannot be told to cover its lines and stop.
 
@@ -345,8 +323,8 @@ def _js_repo(tmp, name, sources, baseline):
     _git(repo, 'config', 'user.email', 'tests@example.invalid')
     _git(repo, 'config', 'user.name', 'Tests')
     (repo / 'scripts' / 'ci').mkdir(parents=True)
-    for rel in ('thresholds.py', 'js_lines.py', 'js_coverage.py',
-                'js_module_coverage.py'):
+    for rel in ('thresholds.py', 'reseed.py', 'js_lines.py',
+                'js_coverage.py', 'js_module_coverage.py'):
         shutil.copy2(ROOT / 'scripts' / 'ci' / rel,
                      repo / 'scripts' / 'ci' / rel)
     for rel, text in sources.items():

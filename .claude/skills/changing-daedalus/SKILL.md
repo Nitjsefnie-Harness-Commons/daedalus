@@ -215,12 +215,21 @@ never raised by hand, and there is no command that raises one: the test tree
 pays for growth by deleting as many lines elsewhere under `tests/` as the
 change added. The remedy for a refusal is therefore a deletion, not a
 re-baseline, and the fall is recorded with
-`python3 scripts/ci/tests_lines.py --tighten`. The row's first recorded
-value is a seed, taken at the count the gate measures, so the seed absorbs
-whatever the introducing branch added under `tests/`: the recorded number
-stands above main's own count by that branch's net growth rather than by a
-raise, and no number main carried is increased. Once the branch merges, the
-push-to-main publisher tightens the row from there. A pull request is
+`python3 scripts/ci/tests_lines.py --tighten`. A recorded number is also
+never rewritten, so a re-seed — delete the row, then seed it at the count
+the gate measures — has exactly one sanctioned bridge over the rowless
+intermediate the loader refuses: a commit whose message carries
+`[tests-line-re-seed]` may carry the document WITHOUT the row. The marker
+is read by a bounded, fail-closed walk of the commit's ancestry, never a
+single read of the tip, so a publisher commit landing between the delete
+and the seed does not close the window and a shallow checkout reads as no
+marker. The marker buys the absence only: the next recorded value is the
+seed at the count the gate measures on that tree, and the push-to-main
+publisher tightens the row from there. The row's first recorded value is a
+seed on the same terms, taken at the count the gate measures, so the seed
+absorbs whatever the introducing branch added under `tests/`: the recorded
+number stands above main's own count by that branch's net growth rather
+than by a raise, and no number main carried is increased. A pull request is
 checked on its MERGE ref, so a branch that net-adds lines goes red on merge
 however few it adds at its head. `tests/test_ci_thresholds.py` gates the
 policy and reads this paragraph the same way.

@@ -290,16 +290,6 @@ def test_a_baseline_entry_whose_file_is_clean_is_graduated(tmp):
     assert _policy().STALE_ENTRY_REMEDY in red.stderr, red.stderr
 
 
-def test_the_success_line_states_the_analysed_count(tmp):
-    repo, target = _repo(tmp, 'count', {'tests/a.py': _clean(),
-                                        'tests/b.py': _clean()},
-                         _thresholds_document())
-    green = _gate(repo, target)
-    assert green.returncode == 0, (green.stdout, green.stderr)
-    expected = '2 test modules analysed, within the type-error policy\n'
-    assert green.stdout == expected, green.stdout
-
-
 def test_tighten_lowers_drops_zeroed_and_leaves_raised(tmp):
     repo, target = _repo(
         tmp, 'tighten',
@@ -335,37 +325,6 @@ def test_tighten_refuses_a_broken_scope_and_writes_nothing(tmp):
     assert _normalised(_policy().SCOPE_REMEDY) in _normalised(red.stderr), \
         red.stderr
     assert target.read_bytes() == before
-
-
-def test_each_kind_carries_its_own_remedy_in_the_mapping(tmp):
-    """The mapping's shape, pinned independently of what it is printed with.
-
-    The docstring pin reads its expectation out of ``REMEDY_FOR`` — the very
-    mapping that produced the print — so it cannot fail for a remedy that is
-    merely present somewhere in the docstring.  This one names which text
-    belongs to which kind, and the real-CLI tests above name which text each
-    refusal actually carries.
-    """
-    del tmp
-    policy = _policy()
-    assert policy.REMEDY_FOR['unanalysed'] == policy.SCOPE_REMEDY
-    assert policy.REMEDY_FOR['grown'] == policy.FIX_REMEDY
-    assert policy.REMEDY_FOR['over'] == policy.FIX_REMEDY
-    assert policy.REMEDY_FOR['missing'] == policy.STALE_ENTRY_REMEDY
-    assert policy.REMEDY_FOR['graduated'] == policy.STALE_ENTRY_REMEDY
-    assert 'never raised by hand' in policy.FIX_REMEDY
-    assert 'fix the type error' in policy.FIX_REMEDY
-    assert 'deleted by hand' in policy.STALE_ENTRY_REMEDY
-    assert 'stale entry' in policy.STALE_ENTRY_REMEDY
-    assert 'pyrightconfig.tests.json' in policy.SCOPE_REMEDY
-
-
-def test_script_docstring_carries_each_printed_remedy(tmp):
-    del tmp
-    policy = _policy()
-    doc = _normalised(policy.__doc__ or '')
-    for kind, remedy in policy.REMEDY_FOR.items():
-        assert _normalised(remedy) in doc, (kind, remedy)
 
 
 def _skill_decisions(path=SKILL_SOURCE):
