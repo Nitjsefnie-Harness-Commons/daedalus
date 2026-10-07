@@ -67,18 +67,23 @@ def test_put_command_derived_queue_name_byte_boundary(tmp):
     with _util.bridge(
             tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (
                 base, docroot):
-        boundary_tab = 't' * 203
+        boundary_tab = 't' * 198
         status, body = put_command(
             base, {'token': token, 'tab': boundary_tab,
                    'id': 'boundary', 'code': '1'})
         assert status == 200, (status, body)
         assert len(queue_files(docroot, f'{token}_{boundary_tab}')) == 1
 
-        status, body = put_command(
-            base, {'token': token, 'tab': 't' * 240,
-                   'id': 'overflow', 'code': '2'})
-        assert status == 400, (status, body)
-        assert json.loads(body)['error'] == 'invalid path component', body
+        # The derived legacy file is the combined name plus '.json', so the
+        # last accepted tab ends the combined name at 235 bytes and the
+        # first refused one is one byte further.
+        for tab in ('t' * 199, 't' * 240):
+            status, body = put_command(
+                base, {'token': token, 'tab': tab,
+                       'id': 'overflow', 'code': '2'})
+            assert status == 400, (status, body)
+            assert json.loads(body)['error'] == 'invalid path component', (
+                body)
 
         status, body = _util.get_json(base + '/health')
         assert status == 200 and body['ok'] is True, (status, body)
@@ -329,7 +334,7 @@ def test_stream_derived_queue_name_matches_command_enqueue(tmp):
     with _util.bridge(
             tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (
                 base, _docroot):
-        boundary_tab = 't' * 203
+        boundary_tab = 't' * 198
         status, body = put_command(
             base, {'token': token, 'tab': boundary_tab,
                    'id': 'boundary-stream', 'code': '1'})
