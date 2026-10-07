@@ -75,8 +75,7 @@ def test_put_command_derived_queue_name_byte_boundary(tmp):
         assert len(queue_files(docroot, f'{token}_{boundary_tab}')) == 1
 
         # The derived legacy file is the combined name plus '.json', so the
-        # last accepted tab ends the combined name at 235 bytes and the
-        # first refused one is one byte further.
+        # last accepted tab ends the combined name at 235, the refused at 236.
         for tab in ('t' * 199, 't' * 240):
             status, body = put_command(
                 base, {'token': token, 'tab': tab,
@@ -187,17 +186,16 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
             status, body)
 
 
-# How far outside the TTL window each arm stamps, on opposite sides. A stall
-# in the handshake has to exceed this before it can move either verdict, so
-# the shipped comparison is settled by the sign of its difference.
+# How far outside the TTL window each arm stamps; a handshake stall must
+# exceed it to flip either verdict's sign.
 _STAMP_LEASH = 3600
 
 
 def _sweep(command_root, served):
     """Run one sweep in the bridge child and return the root it left.
 
-    The list is the sweep's own record, written by the sweep after it ran,
-    so a trigger answered early cannot stand in for one that finished.
+    The list is the sweep's own record, written after it ran, so a trigger
+    answered early cannot stand in for one that finished.
     """
     done = command_root / _GC_DONE
     if done.exists():
@@ -219,11 +217,8 @@ def _root_names(command_root):
 
 
 def _stamp(queues, when):
-    """Put every queued command's own mtime at `when`.
-
-    The collector decides by comparing that mtime's distance from its own
-    clock to the TTL, so an age inside the window is a boundary assertion
-    that a stall the size of the window crosses.
+    """Put every queued command's own mtime at `when`, the value the
+    collector compares to its own clock against the TTL.
     """
     for queue in queues:
         for command_file in queue.iterdir():
@@ -391,12 +386,8 @@ def test_stream_modes_deliver_end_to_end(tmp):
 
 
 def test_a_lost_command_ends_the_read_instead_of_riding_keepalives(tmp):
-    """An undelivered command must fail its reader, not outlive the suite.
-
-    The stream's keepalives reset the connection's socket timeout and arrive
-    more often than it, so a reader bounded only by the socket waits exactly
-    as long as the bridge stays healthy: a lost command hangs, undiagnosed.
-    """
+    """An undelivered command must fail its reader, not outlive the suite:
+    keepalives reset the socket timeout, so the read's deadline must fire."""
     outcome = []
     with _util.bridge(
             tmp, env={**BRIDGE_ENV,
@@ -434,11 +425,7 @@ def test_stream_drops_a_non_object_queue_entry(tmp):
 
 def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
     """A queued command whose id holds a lone surrogate must not kill the
-    stream.
-
-    The SSE frame escapes the surrogate (json.dumps defaults); the DELIVERED
-    log line then raised UnicodeEncodeError and tore the stream down.
-    """
+    stream: the frame escapes it, and the log line carries it."""
     served = []
     with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
@@ -466,16 +453,13 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
 def test_stream_survives_an_undecodable_byte_in_a_dropped_name(tmp):
     """A raw-dropped NAME with an undecodable byte must not kill the stream.
 
-    iterdir() decodes filesystem bytes with surrogateescape, so a dropped
-    file or queue directory named with a raw byte arrives as '\\udcff…';
-    where sys.stdout.errors is strict (PYTHONIOENCODING=utf-8:strict forces
-    it here, because this box's C.UTF-8 stdio would mask it), the DELIVERED
-    log line used to raise UnicodeEncodeError and tear the stream down.
+    iterdir() decodes raw bytes with surrogateescape, and the strict stdout
+    this suite forces must still carry the name.
     """
     _util.require_undecodable_names(tmp)
     strict = {**BRIDGE_ENV, 'PYTHONIOENCODING': 'utf-8:strict'}
-    # The bridge's own log goes into every failure here, and its DELIVERED
-    # lines are the only direct evidence of whether the drain saw the file.
+    # The bridge's log rides every failure here; its DELIVERED lines are
+    # the only direct evidence of whether the drain saw the file.
     served = []
     with _util.bridge(tmp, env=strict, output=served) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
@@ -585,9 +569,7 @@ def test_queue_publication_never_deletes_an_in_progress_write(tmp):
 def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
     """The diagnostic has to fire, or it reads as absent evidence.
 
-    #23's fifth sighting produced nothing but "no data frame arrived" because
-    the capture existed on one test in the family and not its siblings. A
-    capture that is wired but silent looks the same from a failure report,
+    A capture that is wired but silent looks the same from a failure report,
     so this drives a real timeout and reads what comes out.
     """
     served = []
@@ -606,8 +588,8 @@ def test_a_stream_timeout_carries_the_bridges_own_log(tmp):
     assert message, 'the read returned instead of timing out'
     assert 'a command nobody ever sent' in message, message
     assert 'no data frame arrived within 1 seconds' in message, message
-    # The fixture cannot return before the announcement it reads the port
-    # from, so this line is in `served` whatever else the bridge has logged.
+    # The fixture cannot return before the port announcement is in `served`,
+    # whatever else the bridge has logged.
     assert 'the bridge said: ' in message, message
     assert '[Daedalus] Listening on 127.0.0.1:' in message, message
 
@@ -654,12 +636,8 @@ def test_queue_delivery_updates_the_health_clock(tmp):
 
 
 def test_health_counts_a_stream_that_named_no_tab(tmp):
-    """A stream with no tab selector is still a stream.
-
-    It got no entry at all, so it served commands and held a request worker
-    while /health reported zero — and the count it reported was the number of
-    distinct tab NAMES, so two streams sharing a name counted once.
-    """
+    """A stream with no tab selector is still a stream, and two dashboard
+    windows sharing one tab name are still two streams."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['active_streams'] == 0, health
@@ -684,6 +662,27 @@ def test_health_counts_a_stream_that_named_no_tab(tmp):
                         break
                     assert time.time() < deadline, health
                 assert health['stream_tabs'] == ['', 'extension'], health
+
+                dash_conn, dash = stream_response(
+                    base, TOK, tab='dashboard')
+                twin_conn, twin = stream_response(
+                    base, TOK, tab='dashboard')
+                try:
+                    assert dash.status == 200, dash.status
+                    assert twin.status == 200, twin.status
+                    deadline = time.time() + 10
+                    while True:
+                        status, health = _util.get_json(base + '/health')
+                        if health['active_streams'] == 4:
+                            break
+                        assert time.time() < deadline, health
+                    assert health['stream_tabs'] == [
+                        '', 'dashboard', 'extension'], health
+                finally:
+                    twin.close()
+                    twin_conn.close()
+                    dash.close()
+                    dash_conn.close()
             finally:
                 named.close()
                 named_conn.close()
