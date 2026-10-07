@@ -34,10 +34,12 @@ def unsafe_component(value):
     extension), trailing dots or spaces, and UTF-8 encodings longer than 240
     bytes. Derived result filenames, command-queue target directories, and
     legacy command files are checked after construction. Dashboard event
-    files, screenshot names, and segment record/data/temp names use fixed
-    server-generated affixes whose complete components are bounded by
-    construction. This policy does not claim later filesystem operations
-    cannot fail for unrelated reasons.
+    files and screenshot names use fixed server-generated affixes whose
+    complete components are bounded by construction, and so do segment
+    data names; segment record, marker, and temp names are checked at job
+    admission through the store's one derived-name predicate. This policy
+    does not claim later filesystem operations cannot fail for unrelated
+    reasons.
     """
     if not isinstance(value, str):
         return True
