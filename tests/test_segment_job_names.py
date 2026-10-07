@@ -138,13 +138,16 @@ def test_the_reservation_covers_exactly_the_names_the_layout_writes(tmp):
         assert not store.reserved_bookkeeping_name(job), job
 
 
-def test_a_case_variant_suffixed_bookkeeping_name_is_refused(tmp):
-    """`.{job}.json.DIRTY` and `.{job}.json.TMP` are the reserved names.
+def test_a_case_varied_bookkeeping_name_is_refused(tmp):
+    """Case- or width-varied owner and suffix limbs stay reserved.
 
-    The stripe key folds case, so on a case-insensitive filesystem this
-    name and `.{job}.json.dirty` are one directory: the refused spelling
-    and the accepted one would be the same entry, and the accepted one
-    parks a directory exactly where `mark_dirty` has to write. #1167.
+    The stripe key folds case, so on a case-insensitive filesystem a
+    varied spelling and `.{job}.json.dirty` are one directory, and the
+    accepted one parks a directory exactly where `mark_dirty` has to
+    write. #1167. The owner limb and the suffix limb are varied on their
+    own on purpose: fixing one limb and missing its twin is the mistake
+    the review rounds caught on the fold controls, so neither literal
+    rides on the other's assertion.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
@@ -152,7 +155,8 @@ def test_a_case_variant_suffixed_bookkeeping_name_is_refused(tmp):
         # on a normalising filesystem this name is the same directory as
         # `.{job}.json.dirty`. A casefold WITHOUT NFKD would leave it
         # unmatched and admit it, which is what mutant D1 is.
-        for reserved in (f'.{job}.json.DIRTY', f'.{job}.json.TMP',
+        for reserved in (f'.{job.upper()}.json.dirty',
+                         f'.{job}.json.DIRTY', f'.{job}.json.TMP',
                          f'.{job}\uff0ejson.DIRTY'):
             status, body = mint_job(base, TOK, reserved)
             assert (status, body) == (
@@ -160,22 +164,6 @@ def test_a_case_variant_suffixed_bookkeeping_name_is_refused(tmp):
                     reserved, status, body)
             assert not (Path(docroot) / 'segments' / reserved).exists(), (
                 f'{reserved!r} was refused but its directory was written')
-
-
-def test_a_case_variant_owner_alone_is_refused(tmp):
-    """`.{JOB}.json.dirty` — the owner limb on its own, suffix spelled right.
-
-    Pinned separately because fixing one limb and missing its twin is the
-    mistake the review rounds caught on the fold controls: here the owner is
-    the only thing case-varied, so a suffix-only fix would not touch it and a
-    control written only for the suffix would not notice.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        job = seg_job()
-        reserved = f'.{job.upper()}.json.dirty'
-        status, body = mint_job(base, TOK, reserved)
-        assert (status, body) == (409, {'error': 'job name unavailable'}), (
-            reserved, status, body)
 
 
 def test_the_fold_does_not_over_refuse_harmless_names(tmp):
@@ -219,6 +207,22 @@ def test_a_segment_write_for_an_over_derived_job_is_refused(tmp):
         status, body = post_segment(base, 'x' * 229, 'sig', '0')
         assert status == 400, (status, body)
         assert json.loads(body)['error'] == 'invalid param', body
+
+
+def test_a_status_query_for_an_over_derived_job_is_refused(tmp):
+    """GET /segment-status admits through the derived-name check."""
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        status, body = _util.get_json(
+            base + f'/segment-status?job={"x" * 229}&sig=sig')
+        assert (status, body) == (400, {'error': 'bad job'}), (status, body)
+
+
+def test_a_job_lookup_for_an_over_derived_job_is_refused(tmp):
+    """GET /segment-job admits through the derived-name check."""
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        status, body = _util.get_json(
+            base + f'/segment-job?token={TOK}&job={"x" * 229}')
+        assert (status, body) == (400, {'error': 'bad job'}), (status, body)
 
 
 def main():

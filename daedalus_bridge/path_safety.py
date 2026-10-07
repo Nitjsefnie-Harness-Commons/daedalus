@@ -32,14 +32,14 @@ def unsafe_component(value):
     (`<>:"/\\|?*`), Windows device names (`CON`, `PRN`, `AUX`, `NUL`,
     `COM1`-`COM9`, `LPT1`-`LPT9`, case-insensitively, with or without an
     extension), trailing dots or spaces, and UTF-8 encodings longer than 240
-    bytes. Derived result filenames, command-queue target directories, and
-    legacy command files are checked after construction. Dashboard event
-    files and screenshot names use fixed server-generated affixes whose
-    complete components are bounded by construction, and so do segment
-    data names; segment record, marker, and temp names are checked at job
-    admission through the store's one derived-name predicate. This policy
-    does not claim later filesystem operations cannot fail for unrelated
-    reasons.
+    bytes. Derived result filenames, command-queue target directories,
+    legacy command files, and screenshot names are checked after
+    construction. Dashboard event files and segment data names use fixed
+    server-generated affixes whose complete components are bounded by
+    construction; segment record, marker, and temp names are checked at
+    job admission through the store's one derived-name predicate. This
+    policy does not claim later filesystem operations cannot fail for
+    unrelated reasons.
     """
     if not isinstance(value, str):
         return True
