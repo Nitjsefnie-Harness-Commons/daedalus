@@ -111,9 +111,9 @@ def unregister(stream_id, killed_event):
 def snapshot():
     """Return the live connection count and sorted distinct tab names."""
     with _stream_lock:
-        # Count connections, not distinct display names: two tokens streaming
-        # the same named tab are two live workers even though stream_tabs has
-        # one distinct name for them.
+        # Count connections, not distinct display names: two dashboard
+        # windows on one token share their tab name and are two live workers
+        # even though stream_tabs has one distinct name for them.
         return (
             len(_active_streams),
             sorted({entry['tab'] for entry in _active_streams.values()}),
