@@ -1274,7 +1274,7 @@ jobs:
     # the collapse lottery's draws without lengthening one job.
     strategy:
       matrix:
-        replica: [1, 2, 3]
+        replica: [1, 2, 3, 4, 5, 6, 7, 8]
       fail-fast: false
     env:
       # How many rounds the measurement takes. One is the steady state:
