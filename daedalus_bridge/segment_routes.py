@@ -64,7 +64,9 @@ def admit_segment(seg_dir_root, params, sig):
     if (seg.isascii() and seg.isdecimal()
             and len(seg) > SEGMENT_DECIMAL_MAX_DIGITS):
         return 400, {'error': 'seg must be a bounded ASCII decimal'}
-    for val in (job, seg, total):
+    if segment_store.unsafe_job_name(job):
+        return 400, {'error': 'invalid param'}
+    for val in (seg, total):
         if path_safety.unsafe_component(val):
             return 400, {'error': 'invalid param'}
     if not seg.isascii() or not seg.isdecimal():
@@ -200,7 +202,7 @@ def store_segment(raw, admission):
 def segment_status(seg_dir_root, params, sig):
     """GET /segment-status?job=X&sig=S — list received segments."""
     job = params.get('job', [''])[0]
-    if not job or path_safety.unsafe_component(job):
+    if not job or segment_store.unsafe_job_name(job):
         return 400, {'error': 'bad job'}
     # Both path uses inside one guard: the directory and the record the
     # sig is checked against are separate joins, and either can be the one
@@ -236,7 +238,7 @@ def lookup_job(seg_dir_root, token, params):
     oracle, and a caller holding the bridge token is owed neither.
     """
     job = params.get('job', [''])[0]
-    if not job or path_safety.unsafe_component(job):
+    if not job or segment_store.unsafe_job_name(job):
         return 400, {'error': 'bad job'}
     with segment_store.seg_lock_for(job):
         try:

@@ -33,7 +33,7 @@ def mint_job(seg_dir_root, token, body, quotas):
     the job's directory so both survive together.
     """
     job = body.get('job', '')
-    if not job or path_safety.unsafe_component(job):
+    if not job or segment_store.unsafe_job_name(job):
         return 400, {'error': 'bad job'}
     if segment_store.reserved_bookkeeping_name(job):
         # The collision refusal's own answer, so a caller cannot read the

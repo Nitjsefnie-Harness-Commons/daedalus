@@ -14,6 +14,7 @@ endpoint, and assert the status and body. None of them uses a clock. The
 lock-side controls live in `test_segment_lock_stripes.py`, which needs the
 injected seams these do not.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -35,53 +36,32 @@ def _load_store():
                       name='segname_store')
 
 
-def test_the_dirty_bookkeeping_name_is_refused_beside_its_job(tmp):
-    """`.{job}.json.dirty` is the marker `mark_dirty` writes, not a job name.
+def test_a_bookkeeping_name_beside_its_job_is_refused(tmp):
+    """The store's own names are refused: the marker and the record temp.
 
-    A job named K spends four names under the segments root, and this is
-    the marker among them. Minted as a job of its own it parks a directory
-    exactly where the victim's first segment write has to put a file, and
-    mark_dirty cannot, so every write for the victim answers 500 from then
-    on. The refusal is the collision refusal's own answer, so a caller
-    cannot read the reservation as an oracle for which names are in use.
+    A job named K spends four names under the segments root: its directory,
+    its record `K.json`, the marker `.{K}.json.dirty` that `mark_dirty`
+    writes and the temp `.{K}.json.tmp` that `write_usage` replaces from.
+    Minted as a job of its own, either parks a directory exactly where the
+    victim's write path has to put a file: the marker means every later
+    write for the victim answers 500, and the temp means the record never
+    lands, so the job's stored totals stay at zero and every later write
+    rescans instead of trusting them. The refusal is the collision
+    refusal's own answer, so a caller cannot read the reservation as an
+    oracle for which names are in use.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
         status, body = mint_job(base, TOK, job)
         assert status == 200, (status, body)
         sig = body['sig']
-        reserved = f'.{job}.json.dirty'
-        status, body = mint_job(base, TOK, reserved)
-        assert (status, body) == (409, {'error': 'job name unavailable'}), (
-            status, body)
+        for reserved in (f'.{job}.json.dirty', f'.{job}.json.tmp'):
+            status, body = mint_job(base, TOK, reserved)
+            assert (status, body) == (
+                409, {'error': 'job name unavailable'}), (status, body)
+            assert not (Path(docroot) / 'segments' / reserved).exists()
         # A refused mint writes nothing, so it cannot leave the directory
-        # that would have broken the victim either.
-        assert not (Path(docroot) / 'segments' / reserved).exists()
-        # And the victim still stores: on the unfixed tree this is the 500
-        # the squatter causes, from this write onwards.
-        status, body = _store_one_segment(base, job, sig)
-        assert status == 200, (status, body)
-
-
-def test_the_temp_bookkeeping_name_is_refused_beside_its_job(tmp):
-    """`.{job}.json.tmp` is the temp `write_usage` replaces from.
-
-    The same reservation as the dirty marker, with the quieter harm: the
-    record write cannot land, so the job's stored totals stay at zero and
-    every later write rescans the whole directory instead of trusting them.
-    The control therefore checks the record after a successful write, not
-    only the mint's answer.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        job = seg_job()
-        status, body = mint_job(base, TOK, job)
-        assert status == 200, (status, body)
-        sig = body['sig']
-        reserved = f'.{job}.json.tmp'
-        status, body = mint_job(base, TOK, reserved)
-        assert (status, body) == (409, {'error': 'job name unavailable'}), (
-            status, body)
-        assert not (Path(docroot) / 'segments' / reserved).exists()
+        # that would have broken the victim; the victim itself still works.
         status, body = _store_one_segment(base, job, sig)
         assert status == 200, (status, body)
         record = _job_record(docroot, job)
@@ -198,34 +178,47 @@ def test_a_case_variant_owner_alone_is_refused(tmp):
             reserved, status, body)
 
 
-def test_the_empty_owner_carve_out_survives_the_fold(tmp):
-    """`.json.dirty` and its case variants still have no owner, and mint.
+def test_the_fold_does_not_over_refuse_harmless_names(tmp):
+    """The reservation refuses only the two shapes, folded or spelled wide.
 
-    The boundary the fold could move: both limbs are case-varied here and
-    neither may become reserved, because no job reserves either name. A
-    fold applied to the length check rather than to the comparison is what
-    would over-refuse, so the case variants are checked too.
+    Names the layout never spends keep minting whatever the fold does: the
+    two bookkeeping shapes with no owner between the dot and the affix,
+    case-varied too — a fold applied to the length check rather than to
+    the comparison is what would over-refuse — and a legitimate dotted
+    name that is not one of the two shapes is a job, folded or not.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        for job in ('.json.dirty', '.JSON.DIRTY', '.json.tmp', '.JSON.TMP'):
+        for job in ('.json.dirty', '.JSON.DIRTY', '.json.tmp', '.JSON.TMP',
+                    f'{seg_job()}.1', f'{seg_job().upper()}.Ts'):
             status, body = mint_job(base, TOK, job)
             assert status == 200, (job, status, body)
             status, body = _store_one_segment(base, job, body['sig'])
             assert status == 200, (job, status, body)
 
 
-def test_a_dotted_name_still_mints_under_the_folded_reservation(tmp):
-    """A legitimate dotted name is unaffected by the fold.
+def test_a_job_whose_derived_names_exceed_the_ceiling_is_refused(tmp):
+    """The marker is the longest derived form: job + 12 bytes."""
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        status, body = mint_job(base, TOK, 'x' * 229)
+        assert (status, body) == (400, {'error': 'bad job'}), (status, body)
+        assert not (Path(docroot) / 'segments' / ('x' * 229)).exists()
 
-    The rule is still the two bookkeeping shapes and nothing wider: a name
-    with a dot in it that is not one of them is a job, folded or not.
-    """
+
+def test_the_longest_job_with_safe_derived_names_is_accepted(tmp):
+    """228 bytes is the last job whose derived names all stay in bounds."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        for job in (f'{seg_job()}.1', f'{seg_job().upper()}.Ts'):
-            status, body = mint_job(base, TOK, job)
-            assert status == 200, (job, status, body)
-            status, body = _store_one_segment(base, job, body['sig'])
-            assert status == 200, (job, status, body)
+        status, body = mint_job(base, TOK, 'x' * 228)
+        assert status == 200, (status, body)
+        status, body = _store_one_segment(base, 'x' * 228, body['sig'])
+        assert status == 200, (status, body)
+
+
+def test_a_segment_write_for_an_over_derived_job_is_refused(tmp):
+    """POST /segment admits through the same derived-name check."""
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        status, body = post_segment(base, 'x' * 229, 'sig', '0')
+        assert status == 400, (status, body)
+        assert json.loads(body)['error'] == 'invalid param', body
 
 
 def main():

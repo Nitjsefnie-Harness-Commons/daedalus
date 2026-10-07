@@ -57,6 +57,23 @@ _BOOKKEEPING_SUFFIXES = (f'{_RECORD_AFFIX}{_MARK_AFFIX}',
                          f'{_RECORD_AFFIX}{_TEMP_AFFIX}')
 
 
+def unsafe_job_name(job):
+    """Whether `job` or any name the store derives from it is unsafe.
+
+    The affixes are fixed, so a derived form is checked against the byte
+    ceiling alone: for a dot-leading job the marker spells a leading `..`,
+    which `unsafe_component` reads as traversal although the store writes
+    it as one legal component.
+    """
+    return (path_safety.unsafe_component(job)
+            or any(len(derived.encode('utf-8'))
+                   > path_safety.MAX_COMPONENT_BYTES
+                   for derived in (
+                       f'{job}{_RECORD_AFFIX}',
+                       *(f'.{job}{suffix}'
+                         for suffix in _BOOKKEEPING_SUFFIXES))))
+
+
 def record_temp_path(seg_dir_root, job):
     """The temp a record is written from, beside the record it replaces.
 
