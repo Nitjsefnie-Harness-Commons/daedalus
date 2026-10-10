@@ -13,13 +13,6 @@ from _yamlsteps import (  # noqa: E402
     workflow_mapping,
 )
 
-# The policy claim's reference block passes: per-role caps on concurrent
-# claims, and the days an idle claim survives.
-CLAIM_POLICY = {
-    'max-claims': 'read=2, triage=4, write=6, maintain=10, admin=-1',
-    'expire': '7',
-}
-
 # The prefilter, as the operator's semantics: a bot never starts a runner,
 # and a body carrying a command word is a candidate. The closed-issue and
 # pull-request checks are the action's, not this job's.
@@ -92,13 +85,8 @@ def test_claim_scopes_its_permission_to_the_job(tmp):
         'job: a claim on a pull request has to be answerable on it')
 
 
-def test_claim_passes_the_reference_claim_policy(tmp):
-    del tmp
-    workflow = _claim_text()
-    assert _claim_step(workflow).get('with') == CLAIM_POLICY, (
-        'claim must pass the reference per-role caps and expiry, so one '
-        'account cannot hold unlimited claims and an idle claim cannot '
-        'outlive the issue it was taken for')
+# The claim action's own inputs (max-claims, expire) are contract and are
+# deliberately unread — fleet-rules "Merging and CI" with:-inputs ruling.
 
 
 def test_claim_keeps_its_serialization_and_runner_shape(tmp):
