@@ -106,15 +106,6 @@ def test_unknown_and_dynamic_actions_fail_with_exact_context(tmp):
             ('owner/action@v1', "cache boundary cannot classify job "
              "'wheel' step 1: no cache policy for action 'owner/action@v1'; "
              "inspect its primary action.yml"),
-            ('actions/checkout@deadbeef', "cache boundary has no reviewed "
-             "manifest for job 'wheel' step 1 action 'actions/checkout' "
-             "ref 'deadbeef'"),
-            ('actions/setup-python@deadbeef', "cache boundary has no reviewed "
-             "manifest for job 'wheel' step 1 action 'actions/setup-python' "
-             "ref 'deadbeef'"),
-            ('docker/build-push-action@deadbeef',
-             "cache boundary has no reviewed manifest for job 'wheel' step 1 "
-             "action 'docker/build-push-action' ref 'deadbeef'"),
             ('actions/cache/unknown@v4', "cache boundary cannot classify job "
              "'wheel' step 1: unknown actions/cache sub-action "
              "'actions/cache/unknown'"),

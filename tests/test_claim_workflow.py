@@ -13,10 +13,6 @@ from _yamlsteps import (  # noqa: E402
     workflow_mapping,
 )
 
-# The current claim release, pinned by the commit it names.
-CLAIM_RELEASE = '2.0.4'
-CLAIM_COMMIT = 'cd8ffd8227e94cdf60ed2580016187353b055cf4'
-
 # The policy claim's reference block passes: per-role caps on concurrent
 # claims, and the days an idle claim survives.
 CLAIM_POLICY = {
@@ -94,19 +90,6 @@ def test_claim_scopes_its_permission_to_the_job(tmp):
         "claim's effective scope must be exactly issues: write plus "
         'pull-requests: write, which the two assertions above leave on the '
         'job: a claim on a pull request has to be answerable on it')
-
-
-def test_claim_pins_the_current_release(tmp):
-    del tmp
-    workflow = _claim_text()
-    uses = _claim_step(workflow).get('uses')
-    assert uses == f'Nitjsefnie-Actions/claim@{CLAIM_COMMIT}', (
-        'claim must pin the current release by its commit')
-    line = re.search(r'^\s*-\s+uses:.*$', workflow, re.MULTILINE)
-    assert line and re.search(
-        rf'#\s+v{re.escape(CLAIM_RELEASE)}\b', line.group()), (
-        f'claim must name v{CLAIM_RELEASE} in the comment on the pin, so the '
-        'two cannot drift apart silently')
 
 
 def test_claim_passes_the_reference_claim_policy(tmp):

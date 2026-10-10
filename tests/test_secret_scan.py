@@ -15,10 +15,6 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
 
-CHECKOUT_SHA = '3d3c42e5aac5ba805825da76410c181273ba90b1'
-GITLEAKS_VERSION = '8.30.1'
-TARBALL = 'gitleaks_8.30.1_linux_x64.tar.gz'
-DIGEST = '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
 EXAMPLE_UUID = '123e4567-e89b-12d3-a456-426614174000'
 CONFIG = '.gitleaks.toml'
 
@@ -33,17 +29,6 @@ def _read(relative):
 
 def _decoded_workflow():
     return workflow_mapping(_read(WORKFLOW))
-
-
-def _download_command():
-    """The download step's expected shell lines."""
-    return [
-        'curl --connect-timeout 5 --max-time 120 -fsSLO '
-        'https://github.com/gitleaks/gitleaks/releases/download/'
-        f'v{GITLEAKS_VERSION}/{TARBALL}',
-        f"echo '{DIGEST}  {TARBALL}' | sha256sum -c -",
-        f'tar xzf {TARBALL} gitleaks',
-    ]
 
 
 def _toml_sections(text):
@@ -132,7 +117,9 @@ def test_the_checkout_reads_full_history_without_credentials(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     checkout = steps[0]
-    assert checkout['uses'] == f'actions/checkout@{CHECKOUT_SHA}', checkout
+    # Which revision of checkout runs is the workflow's business; the
+    # credential posture is what this pins.
+    assert checkout['uses'].startswith('actions/checkout@'), checkout
     assert checkout['with'] == {
         'fetch-depth': '0', 'persist-credentials': 'false'}, checkout
 
@@ -142,9 +129,22 @@ def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     download = steps[1]
     assert set(download) == {'name', 'run'}, download
-    assert download['run'].splitlines() == _download_command(), download
-    url = _download_command()[0].split()[-1]
-    assert url.startswith('https://github.com/'), url
+    # Which gitleaks release the workflow pins is its business; what must
+    # hold is that the three lines agree with each other — the tarball the
+    # URL fetches is the one the digest verifies and the one tar extracts.
+    lines = download['run'].splitlines()
+    assert len(lines) == 3, lines
+    url_line = re.fullmatch(
+        r'curl --connect-timeout 5 --max-time 120 -fsSLO '
+        r'https://github\.com/gitleaks/gitleaks/releases/download/'
+        r'v\d+\.\d+\.\d+/(gitleaks_\d+\.\d+\.\d+_linux_x64\.tar\.gz)',
+        lines[0])
+    assert url_line, lines[0]
+    tarball = url_line.group(1)
+    assert re.fullmatch(
+        r"echo '[0-9a-f]{64}  " + re.escape(tarball)
+        + r"' \| sha256sum -c -", lines[1]), lines[1]
+    assert lines[2] == f'tar xzf {tarball} gitleaks', lines[2]
 
 
 def test_the_scan_step_is_the_bare_gate(tmp):

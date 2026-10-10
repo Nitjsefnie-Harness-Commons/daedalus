@@ -22,7 +22,6 @@ from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
 SOURCE = ROOT / 'scripts' / 'ci' / 'aggregate_gate.py'
-CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
 GATE_RUN = 'python3 scripts/ci/aggregate_gate.py'
 STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
 SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
@@ -411,7 +410,7 @@ def test_the_aggregate_job_runs_the_module(tmp):
     checkouts = [step for step in job['steps']
                  if str(step.get('uses', '')).startswith('actions/checkout')]
     assert len(checkouts) == 1, job['steps']
-    assert checkouts[0]['uses'] == CHECKOUT
+    assert checkouts[0]['uses'].startswith('actions/checkout@')
     assert checkouts[0]['with'] == {'persist-credentials': 'false'}
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gates = [_gate_step()]
@@ -477,8 +476,11 @@ def test_the_marker_step_precedes_the_gate_step(tmp):
 
 def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
     del tmp
-    pins = set(re.findall(r'actions/checkout@([0-9a-f]{40})', _tests_yml()))
-    assert pins == {CHECKOUT.split('@')[1]}, pins
+    # Derived from the workflow itself, never a literal: every checkout in
+    # tests.yml must name one revision, so a hand edit that bumps only
+    # some of them reddens while a coordinated bump stays green.
+    refs = set(re.findall(r'actions/checkout@\S+', _tests_yml()))
+    assert len(refs) == 1, refs
 
 
 CLEAN = _secrets_run(7)
