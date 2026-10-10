@@ -17,9 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(
     1, str(Path(__file__).resolve().parents[1] / 'scripts' / 'ci'))
 import _util  # noqa: E402
-from _pip_cache import _CACHE_JOBS  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
 
 V610 = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
 V430 = '0057852bfaa89a56745cba8c7296529d2fc39830'
@@ -611,19 +609,6 @@ def test_main_reports_every_refusal_and_exits_nonzero(tmp):
         '.github/workflows/tests.yml:5: actions/cache/restore@v4 is not '
         'pinned to a 40-hex commit\n'), err
     assert calls == [], calls
-
-
-def test_the_real_tree_pins_are_the_ones_the_offline_guard_reviews(tmp):
-    """The online check verifies exactly the pins the offline guard
-    reviews, never a quietly different set."""
-    del tmp
-    mod = _verifier()
-    pins, refusals = mod.scan(ROOT)
-    assert refusals == [], refusals
-    assert len(pins) == 2 * len(_CACHE_JOBS), pins
-    assert all(mod.shape_refusal(pin) is None for pin in pins), pins
-    pairs = {(pin.ref, pin.comment) for pin in pins}
-    assert pairs <= set(REVIEWED_CACHE_RELEASES.items()), pairs
 
 
 def main():

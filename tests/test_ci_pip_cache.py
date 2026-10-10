@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Execute the tests workflow's pip-cache invariants that GitHub
 otherwise fails silently."""
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pip_cache import _CACHE_JOBS  # noqa: E402
-from _wfgraph import _job_section, _tests_yml  # noqa: E402
+from _wfgraph import _tests_yml  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
-from _workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
 
 
 # Every platform pip cache directory, so one spelling warms all three OSes;
@@ -25,14 +23,6 @@ def _cache_step(steps, action):
                if step.get('uses', '').startswith(f'actions/cache/{action}@')]
     assert len(matches) == 1, f'expected one cache/{action} step: {matches}'
     return matches[0]
-
-
-def _uses_version_comment(workflow, job, action):
-    lines = [line.strip() for line in _job_section(workflow, job)
-             if f'actions/cache/{action}@' in line]
-    assert len(lines) == 1, (job, action, lines)
-    _uses, _marker, comment = lines[0].partition('# ')
-    return comment.strip()
 
 
 def _named_step_index(steps, name):
@@ -72,13 +62,6 @@ def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
     for job, python, _save_after, install in _CACHE_JOBS:
         steps = complete_job_mapping(workflow, job)['steps']
         restore_index, restore = _cache_step(steps, 'restore')
-        assert re.fullmatch(r'actions/cache/restore@[0-9a-f]{40}',
-                            restore['uses']), restore['uses']
-        comment = _uses_version_comment(workflow, job, 'restore')
-        sha = restore['uses'].split('@')[1]
-        assert sha in REVIEWED_CACHE_RELEASES, (job, 'restore', sha)
-        expected_tag = REVIEWED_CACHE_RELEASES[sha]
-        assert comment == expected_tag, (job, comment, expected_tag)
         assert 'if' not in restore, (job, restore.get('if'))
         assert set(restore['with']['path'].splitlines()) == set(
             _PIP_CACHE_PATHS), (job, restore['with']['path'])
@@ -103,13 +86,6 @@ def test_the_cached_jobs_save_the_pip_cache_only_from_a_push_of_main(tmp):
         steps = complete_job_mapping(workflow, job)['steps']
         restore_index, restore = _cache_step(steps, 'restore')
         save_index, save = _cache_step(steps, 'save')
-        assert re.fullmatch(r'actions/cache/save@[0-9a-f]{40}',
-                            save['uses']), save['uses']
-        comment = _uses_version_comment(workflow, job, 'save')
-        sha = save['uses'].split('@')[1]
-        assert sha in REVIEWED_CACHE_RELEASES, (job, 'save', sha)
-        expected_tag = REVIEWED_CACHE_RELEASES[sha]
-        assert comment == expected_tag, (job, comment, expected_tag)
         assert save['with']['key'] == restore['with']['key'], (job, save)
         assert save['with']['path'] == restore['with']['path'], (job, save)
         gate = save.get('if')

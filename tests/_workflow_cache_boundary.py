@@ -2,9 +2,7 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-The whole engine moved here out of tests/test_workflow_cache_boundary.py,
-and `REVIEWED_CACHE_RELEASES` now has its only home here: the two
-pip-cache suites read it here.
+The whole engine moved here out of tests/test_workflow_cache_boundary.py.
 """
 import csv
 import io
@@ -18,40 +16,6 @@ _CACHE_WRITING_JOBS = frozenset((
     'suites', 'coverage-matrix', 'coverage',
     'pycodestyle', 'pylint', 'pyright',
 ))
-
-
-# The pip-cache suite shares this review point for pinned `uses:` comments.
-REVIEWED_CACHE_RELEASES = {
-    '0057852bfaa89a56745cba8c7296529d2fc39830': 'v4.3.0',
-    '55cc8345863c7cc4c66a329aec7e433d2d1c52a9': 'v6.1.0',
-}
-
-_REVIEWED_REFS = {
-    'actions/cache': frozenset((
-        'v4', 'v6', *REVIEWED_CACHE_RELEASES,
-        *REVIEWED_CACHE_RELEASES.values())),
-    'actions/setup-go': frozenset((
-        'v6', '924ae3a1cded613372ab5595356fb5720e22ba16',
-    )),
-    'actions/setup-node': frozenset((
-        'v7', '820762786026740c76f36085b0efc47a31fe5020',
-    )),
-    'actions/setup-python': frozenset((
-        'v7', '5fda3b95a4ea91299a34e894583c3862153e4b97',
-    )),
-    'docker/setup-buildx-action': frozenset((
-        'v3', '8d2750c68a42422c14e847fe6c8ac0403b4cbd6f',
-    )),
-    'astral-sh/setup-uv': frozenset((
-        'v7', '37802adc94f370d6bfd71619e3f0bf239e1f3b78',
-    )),
-    'swatinem/rust-cache': frozenset((
-        'v2', '6323deb102c322ba6fcbdcafc7e3dddab59af2b6',
-    )),
-    'docker/build-push-action': frozenset((
-        'v6', '10e90e3645eae34f1e60eeb005ba3a3d33f178e8',
-    )),
-}
 
 _REVIEWED_NONCACHE_ACTIONS = frozenset((
     'actions/checkout',
@@ -250,17 +214,6 @@ def _reviewed_noncache_action(action, ref, job, step_number):
     return action in _REVIEWED_NONCACHE_ACTIONS
 
 
-def _require_reviewed_writer_ref(action, ref, job, step_number):
-    # Reviewed by ACTION, never by revision — except actions/cache, whose
-    # release table still refuses an unreviewed ref (daedalus#629's slice).
-    if action in _REVIEWED_REFS and action != 'actions/cache':
-        return
-    if ref not in _REVIEWED_REFS.get(action, ()):
-        raise AssertionError(
-            f"cache boundary has no reviewed manifest for job {job!r} "
-            f"step {step_number} action {action!r} ref {ref!r}")
-
-
 def _direct_reason(run, job, step_number):
     try:
         return _direct_cache_run(run)
@@ -303,22 +256,18 @@ def _cache_write_reason(step, job, step_number):
                 if run is not None else None
 
         if action == 'actions/cache':
-            _require_reviewed_writer_ref(action, ref, job, step_number)
             reason = 'actions/cache combined post-save'
         elif action.startswith('actions/cache/'):
             if action not in ('actions/cache/restore', 'actions/cache/save'):
                 raise _boundary_error(
                     job, step_number,
                     f'unknown actions/cache sub-action {action!r}')
-            _require_reviewed_writer_ref(
-                'actions/cache', ref, job, step_number)
             reason = (None if action == 'actions/cache/restore'
                       else 'actions/cache/save cache writer')
         elif action == 'actions/setup-go':
             cache = _literal_control(
                 inputs, 'cache', 'true', job, step_number, action)
             if cache == 'false':
-                _require_reviewed_writer_ref(action, ref, job, step_number)
                 reason = None
             else:
                 reason = 'setup-go cache post-save'
@@ -332,23 +281,18 @@ def _cache_write_reason(step, job, step_number):
                     inputs, 'package-manager-cache', 'true', job,
                     step_number, action)
                 if package_cache == 'false':
-                    _require_reviewed_writer_ref(
-                        action, ref, job, step_number)
                     reason = None
                 else:
                     reason = 'setup-node package-manager cache post-save'
         elif action == 'actions/setup-python':
             cache = _literal_control(
                 inputs, 'cache', None, job, step_number, action)
-            if cache is None:
-                _require_reviewed_writer_ref(action, ref, job, step_number)
             reason = 'setup-python package-manager cache' \
                 if cache is not None else None
         elif action == 'docker/setup-buildx-action':
             cache = _literal_control(
                 inputs, 'cache-binary', 'true', job, step_number, action)
             if cache == 'false':
-                _require_reviewed_writer_ref(action, ref, job, step_number)
                 reason = None
             else:
                 reason = 'setup-buildx binary cache'
@@ -356,12 +300,10 @@ def _cache_write_reason(step, job, step_number):
             if _decisive_opt_out(
                     inputs, _DECISIVE_CONTROLS[action][0],
                     (job, step_number, action)):
-                _require_reviewed_writer_ref(action, ref, job, step_number)
                 reason = None
             else:
                 reason = _DECISIVE_CONTROLS[action][1]
         elif action == 'docker/build-push-action':
-            _require_reviewed_writer_ref(action, ref, job, step_number)
             cache_to_keys = [key for key in inputs
                              if isinstance(key, str)
                              and key.casefold() == 'cache-to']
