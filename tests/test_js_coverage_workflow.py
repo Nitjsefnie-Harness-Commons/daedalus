@@ -381,20 +381,19 @@ def _assert_coverage_artifact_flow(workflow, tmp):
     uploads = [step for step in matrix_job['steps']
                if step.get('uses', '').startswith('actions/upload-artifact@')]
     assert len(uploads) == 2, uploads
-    assert {step['with']['name'] for step in uploads} == {
-        'coverage-data-${{ matrix.os }}'}, uploads
+    # Which upload is which is read from the step CONDITIONS — the
+    # workflow's behaviour — never from the action's contract inputs
+    # (name, path, include-hidden-files, if-no-files-found are the
+    # workflow's business: fleet-rules, "Merging and CI" with:-inputs
+    # ruling). The matrix each upload runs on is exactly what this flow
+    # exists to pin, so the conditions both select and assert it.
     javascript = [step for step in uploads
-                  if '.node-v8-coverage' in step['with']['path']]
+                  if _matrix_rows(step.get('if') or '') == {'ubuntu-latest'}]
     assert len(javascript) == 1, uploads
-    assert _matrix_rows(javascript[0]['if']) == {'ubuntu-latest'}
     python_only = [step for step in uploads if step not in javascript]
     assert len(python_only) == 1, uploads
-    assert python_only[0]['with']['path'].strip() == '.coverage.*'
-    assert _matrix_rows(python_only[0]['if']) == {
+    assert _matrix_rows(python_only[0].get('if') or '') == {
         'windows-latest', 'macos-latest'}
-    for step in uploads:
-        assert step['with']['include-hidden-files'] == 'true', step
-        assert step['with']['if-no-files-found'] == 'error', step
 
     job_env = matrix_job.get('env', {})
     assert _CAPTURE_KEY not in job_env, job_env
