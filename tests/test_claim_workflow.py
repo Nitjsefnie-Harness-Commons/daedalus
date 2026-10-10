@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin the claim action caller's prefilter, scope, release and policy."""
+"""Pin the claim action caller's prefilter, scope and job shape."""
 import re
 import sys
 from pathlib import Path
@@ -38,14 +38,6 @@ def _claim_job(workflow):
     job = complete_job_mapping(workflow, 'claim')
     assert job is not None, 'claim.yml must declare claim as a job mapping'
     return job
-
-
-def _claim_step(workflow):
-    """Return claim.yml's one action step, decoded whole."""
-    steps = step_mappings(workflow, 'claim')
-    assert steps is not None and len(steps) == 1, (
-        'claim.yml must have exactly one action step')
-    return steps[0]
 
 
 def test_the_claim_trigger_is_a_new_issue_comment(tmp):
@@ -106,6 +98,13 @@ def test_claim_keeps_its_serialization_and_runner_shape(tmp):
         'claim runner must keep its five-minute timeout')
     assert not re.search(r'^\s*(?:-\s+)?run:', workflow, re.MULTILINE), (
         'claim.yml must not contain a run block')
+    # Exactly one action step: a second `uses:` in a job scoped
+    # issues/pull-requests: write must be a named failure (the invariant
+    # the deleted policy test kept alive; it asserts no with: input, no
+    # value, no revision — pure workflow-derived structure).
+    steps = step_mappings(workflow, 'claim')
+    assert steps is not None and len(steps) == 1, (
+        'claim.yml must have exactly one action step')
 
 
 if __name__ == '__main__':
