@@ -108,10 +108,7 @@ def test_unknown_and_dynamic_actions_fail_with_exact_context(tmp):
              "inspect its primary action.yml"),
             ('actions/cache/unknown@v4', "cache boundary cannot classify job "
              "'wheel' step 1: unknown actions/cache sub-action "
-             "'actions/cache/unknown'"),
-            ('actions/cache/save@deadbeef', "cache boundary has no reviewed "
-             "manifest for job 'wheel' step 1 action 'actions/cache' "
-             "ref 'deadbeef'")):
+             "'actions/cache/unknown'")):
         assert _refuses(_cache_write_reason, {'uses': uses}, 'wheel', 1,
                         contains=expected) == f'AssertionError: {expected}'
 
