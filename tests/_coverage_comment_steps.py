@@ -86,6 +86,8 @@ else:
         raise SystemExit(result.returncode)
 sys.stdout.buffer.write(output)
 '''
+
+from _yamlsteps import step_mappings
 EXPECTED_STEP_MAPPINGS = (
     {
         "name": "Check for the comment artifact",
@@ -569,3 +571,45 @@ elif method == 'PATCH' and '/issues/comments/' in target:
             comment['body'] = body
 state_path.write_text(json.dumps(state), encoding='utf-8')
 """
+
+
+def fold_use_revisions(actual, expected):
+    """Fold uses revisions to family where expected names the action only."""
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        folded = dict(actual)
+        for key, exp in expected.items():
+            if key == 'uses' and isinstance(exp, str) and '@' not in exp:
+                if str(folded.get(key, '')).startswith(exp + '@'):
+                    folded[key] = exp
+            elif key in folded:
+                folded[key] = fold_use_revisions(folded[key], exp)
+        return folded
+    if (isinstance(expected, list) and isinstance(actual, list)
+            and len(actual) == len(expected)):
+        return [fold_use_revisions(a, e) for a, e in zip(actual, expected)]
+    return actual
+
+
+def assert_privileged_step_allowlist(workflow, expected_steps):
+    """Every decoded key exact, but uses compares by action family."""
+    steps = step_mappings(workflow, 'comment')
+    assert isinstance(steps, list), 'privileged steps were not decoded'
+    assert len(steps) == len(expected_steps), (
+        f'unsafe privileged step count: {len(steps)}')
+    for actual, expected in zip(steps, expected_steps):
+        actual = dict(actual)
+        for key, value in expected.items():
+            if key == 'uses':
+                uses = actual.get('uses', '')
+                assert uses.startswith(value + '@'), (
+                    f'{expected["name"]!r}: want {value}@, got {uses!r}')
+                actual[key] = value
+        if actual == expected:
+            continue
+        differing = sorted(
+            key for key in set(actual) | set(expected)
+            if key not in actual or key not in expected
+            or actual[key] != expected[key])
+        raise AssertionError(
+            f'unsafe privileged step mapping for {expected["name"]!r}: '
+            f'differing keys {differing!r}')

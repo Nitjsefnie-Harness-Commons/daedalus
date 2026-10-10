@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _workflowrun  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
+import _coverage_comment_steps as _ccs  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
     GH_COMMENT_STUB as _GH_COMMENT_STUB,
     complete_workflow_expectations,
@@ -191,79 +192,19 @@ def _workflow():
         encoding='utf-8')
 
 
-def _assert_privileged_step_allowlist(workflow):
-    """Require every decoded key and value of every privileged step.
-
-    The expected `uses` carries the ACTION IDENTITY only; which revision
-    of that action runs is the workflow's business (fleet-rules,
-    "Merging and CI" — a legitimate CI change never fails a test), so
-    `uses` compares by prefix and every other key compares exactly.
-    """
-    steps = step_mappings(workflow, 'comment')
-    assert isinstance(steps, list), 'privileged steps were not decoded'
-    assert len(steps) == len(EXPECTED_STEP_MAPPINGS), (
-        f'unsafe privileged step count: {len(steps)}')
-    for actual, expected in zip(steps, EXPECTED_STEP_MAPPINGS):
-        actual = dict(actual)
-        for key, value in expected.items():
-            if key == 'uses':
-                actual_uses = actual.get('uses', '')
-                assert actual_uses.startswith(value + '@'), (
-                    f'unsafe privileged step mapping for '
-                    f'{expected["name"]!r}: uses must run {value}, '
-                    f'got {actual_uses!r}')
-                actual[key] = value
-        if actual == expected:
-            continue
-        differing = sorted(
-            key for key in set(actual) | set(expected)
-            if key not in actual or key not in expected
-            or actual[key] != expected[key])
-        raise AssertionError(
-            f'unsafe privileged step mapping for {expected["name"]!r}: '
-            f'differing keys {differing!r}')
-
-
 def _assert_allowlist_refuses(workflow):
     """Require one hostile topology mutation to fail the allowlist."""
     try:
-        _assert_privileged_step_allowlist(workflow)
+        _ccs.assert_privileged_step_allowlist(workflow, EXPECTED_STEP_MAPPINGS)
         _assert_privileged_container_allowlist(workflow)
     except (AssertionError, YAMLReadError):
         return
     raise AssertionError('unsafe privileged container mutation was accepted')
 
 
-def _fold_use_revisions(actual, expected):
-    """Fold `uses` revisions to their family where the expectation names
-    the action only — which revision of a reviewed action a workflow
-    runs is the workflow's business (fleet-rules, "Merging and CI": a
-    legitimate CI change never fails a test). A uses value that does not
-    run the expected action is left alone so the comparison still fails.
-    """
-    if isinstance(expected, dict) and isinstance(actual, dict):
-        folded = dict(actual)
-        for key, exp in expected.items():
-            if key not in folded:
-                continue
-            if key == 'uses' and isinstance(exp, str) and '@' not in exp:
-                value = folded[key]
-                if isinstance(value, str) and value.startswith(exp + '@'):
-                    folded[key] = exp
-            else:
-                folded[key] = _fold_use_revisions(folded[key], exp)
-        return folded
-    if (isinstance(expected, list) and isinstance(actual, list)
-            and len(actual) == len(expected)):
-        return [_fold_use_revisions(a, e)
-                for a, e in zip(actual, expected)]
-    return actual
-
-
 def _assert_exact_mapping(actual, expected, owner):
     """Require exact keys and values while naming the differing keys."""
-    actual = _fold_use_revisions(actual, expected)
-    if actual == expected:
+    if _ccs.fold_use_revisions(actual, expected) == expected:
         return
     assert isinstance(actual, dict), (
         f'unsafe privileged {owner} mapping: {actual!r}')
@@ -434,7 +375,7 @@ def test_privileged_steps_are_an_exact_allowlist(tmp):
     """Every field and unknown key is part of the privileged contract."""
     del tmp
     workflow = _workflow()
-    _assert_privileged_step_allowlist(workflow)
+    _ccs.assert_privileged_step_allowlist(workflow, EXPECTED_STEP_MAPPINGS)
     post_run = (
         '          PR_NUMBER: ${{ steps.pr.outputs.number }}\n'
         '        run: |\n')
