@@ -476,9 +476,8 @@ def test_the_marker_step_precedes_the_gate_step(tmp):
 
 def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
     del tmp
-    # Derived from the workflow itself, never a literal: every checkout in
-    # tests.yml must name one revision, so a hand edit that bumps only
-    # some of them reddens while a coordinated bump stays green.
+    # Derived from tests.yml itself: one revision across its checkouts —
+    # a split hand edit reddens, a coordinated bump stays green.
     refs = set(re.findall(r'actions/checkout@\S+', _tests_yml()))
     assert len(refs) == 1, refs
 

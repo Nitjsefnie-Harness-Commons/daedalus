@@ -53,11 +53,11 @@ _REVIEWED_REFS = {
     )),
 }
 
-_REVIEWED_NONCACHE_REFS = {
-    'actions/checkout': '3d3c42e5aac5ba805825da76410c181273ba90b1',
-    'actions/upload-artifact': '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
-    'actions/download-artifact': '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c',
-}
+_REVIEWED_NONCACHE_ACTIONS = frozenset((
+    'actions/checkout',
+    'actions/upload-artifact',
+    'actions/download-artifact',
+))
 
 _DECISIVE_CONTROLS = {
     'astral-sh/setup-uv': ((('enable-cache', 'auto'),
@@ -245,20 +245,14 @@ def _direct_cache_run(run):
 
 
 def _reviewed_noncache_action(action, ref, job, step_number):
-    # Reviewed by ACTION, never by revision: which revision of a reviewed
-    # non-cache action a workflow runs is the workflow's business
-    # (fleet-rules, "Merging and CI" — a legitimate CI change never fails
-    # a test), so a Dependabot bump of checkout or the artifact actions
-    # passes while an action outside the reviewed set still falls through
-    # to the cache-policy analysis below.
+    # Reviewed by ACTION, never by revision (fleet-rules, "Merging and CI").
     del ref, job, step_number
-    return action in _REVIEWED_NONCACHE_REFS
+    return action in _REVIEWED_NONCACHE_ACTIONS
 
 
 def _require_reviewed_writer_ref(action, ref, job, step_number):
     # Reviewed by ACTION, never by revision — except actions/cache, whose
-    # release table still refuses an unreviewed ref: daedalus#629 owns
-    # that slice and this sweep leaves it untouched.
+    # release table still refuses an unreviewed ref (daedalus#629's slice).
     if action in _REVIEWED_REFS and action != 'actions/cache':
         return
     if ref not in _REVIEWED_REFS.get(action, ()):
