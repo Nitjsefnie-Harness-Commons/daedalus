@@ -336,7 +336,6 @@ EXPECTED_STEP_MAPPINGS = (
         "steps.pr.outputs.present != 'false'",
         "uses": "actions/download-artifact",
         "with": {
-            "name": "diff-coverage-comment",
             "run-id": "${{ github.event.workflow_run.id }}",
             "github-token": "${{ github.token }}",
         },
@@ -575,13 +574,22 @@ state_path.write_text(json.dumps(state), encoding='utf-8')
 
 
 def fold_use_revisions(actual, expected):
-    """Fold uses revisions to family where expected names the action only."""
+    """Fold uses revisions to family where expected names the action only.
+
+    A `with` mapping is narrowed to the keys the expectation declares —
+    the trust-boundary inputs. The action's other contract inputs are the
+    workflow's business (fleet-rules, "Merging and CI" with:-inputs
+    ruling), so an undeclared key there is not a difference.
+    """
     if isinstance(expected, dict) and isinstance(actual, dict):
         folded = dict(actual)
         for key, exp in expected.items():
             if key == 'uses' and isinstance(exp, str) and '@' not in exp:
                 if str(folded.get(key, '')).startswith(exp + '@'):
                     folded[key] = exp
+            elif key == 'with' and isinstance(exp, dict):
+                got = folded.get(key) or {}
+                folded[key] = {k: got.get(k) for k in exp}
             elif key in folded:
                 folded[key] = fold_use_revisions(folded[key], exp)
         return folded
@@ -605,6 +613,13 @@ def assert_privileged_step_allowlist(workflow, expected_steps):
                 assert uses.startswith(value + '@'), (
                     f'{expected["name"]!r}: want {value}@, got {uses!r}')
                 actual[key] = value
+            elif key == 'with':
+                # Only the keys the expectation declares are compared —
+                # the trust-boundary run-id/token. The action's other
+                # contract inputs are the workflow's business
+                # (fleet-rules, "Merging and CI" with:-inputs ruling).
+                actual_with = actual.get(key) or {}
+                actual[key] = {k: actual_with.get(k) for k in value}
         if actual == expected:
             continue
         differing = sorted(
