@@ -331,10 +331,7 @@ EXPECTED_STEP_MAPPINGS = (
         "if": "steps.artifact.outputs.present == 'true' && "
         "steps.pr.outputs.stale != 'true' && "
         "steps.pr.outputs.present != 'false'",
-        "uses": (
-            "actions/download-artifact@"
-            "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
-        ),
+        "uses": "actions/download-artifact",
         "with": {
             "name": "diff-coverage-comment",
             "run-id": "${{ github.event.workflow_run.id }}",
