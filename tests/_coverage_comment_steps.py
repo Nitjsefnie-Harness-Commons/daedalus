@@ -1,4 +1,6 @@
 """Exact decoded mappings and doubles for the coverage-comment workflow."""
+from _yamlsteps import step_mappings
+
 CHECK_NAME = 'coverage comment'
 CHECK_EXTERNAL_PREFIX = 'daedalus-coverage-comment/v1/'
 GH_CHECK_STUB = r'''#!/usr/bin/env python3
@@ -87,7 +89,6 @@ else:
 sys.stdout.buffer.write(output)
 '''
 
-from _yamlsteps import step_mappings
 EXPECTED_STEP_MAPPINGS = (
     {
         "name": "Check for the comment artifact",

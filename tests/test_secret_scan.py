@@ -141,7 +141,7 @@ def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):
         lines[0])
     assert url_line, lines[0]
     tarball = url_line.group('tar')
-    assert url_line.group('ver') in tarball, 'tarball must name the release' 
+    assert url_line.group('ver') in tarball, 'tarball must name the release'
     assert re.fullmatch(
         r"echo '[0-9a-f]{64}  " + re.escape(tarball)
         + r"' \| sha256sum -c -", lines[1]), lines[1]
