@@ -1010,7 +1010,7 @@ jobs:
           key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
 
       - name: Download per-OS coverage data
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           pattern: coverage-data-*
           path: coverage-data
@@ -1210,7 +1210,7 @@ jobs:
 
       # actions/download-artifact v8.0.1
       - uses: >-
-          actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+          actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: coverage-xml
 
