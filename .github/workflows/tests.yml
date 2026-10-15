@@ -752,7 +752,7 @@ jobs:
       #
       # An artifact whose smoke test failed is the one worth having: it is the
       # copy you need to reproduce the failure, and it is rare.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: ${{ failure() }}
         with:
           name: artifacts-failed-smoke-test
@@ -906,7 +906,7 @@ jobs:
       - name: Upload Ubuntu coverage data
         if: ${{ !cancelled() && steps.measure.conclusion == 'success'
                 && matrix.os == 'ubuntu-latest' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: coverage-data-${{ matrix.os }}
           path: |
@@ -918,7 +918,7 @@ jobs:
       - name: Upload Python coverage data
         if: ${{ !cancelled() && steps.measure.conclusion == 'success'
                 && matrix.os != 'ubuntu-latest' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: coverage-data-${{ matrix.os }}
           path: .coverage.*
@@ -1055,7 +1055,7 @@ jobs:
 
       - name: Upload coverage XML
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: coverage-xml
           path: |
@@ -1243,7 +1243,7 @@ jobs:
       - name: Upload the comment for the trusted commenter
         # actions/upload-artifact v7.0.1
         uses: >-
-          actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: diff-coverage-comment
           path: |
@@ -1376,7 +1376,7 @@ jobs:
       # wrong.
       - name: Upload the measured counts
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: journey-counts
           path: ${{ runner.temp }}/journey-counts.json
