@@ -316,7 +316,6 @@ def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
 
 
 def test_both_jobs_call_the_one_push_implementation(tmp):
-    """Both credential holders call the shared push with two arguments."""
     del tmp
     source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
@@ -326,8 +325,6 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
         assert job is not None, f'the {name} job is not in tests.yml'
         for step in job['steps']:
             body = step.get('run') or ''
-            # The key is in the step's env block, not its body: the
-            # body is the script call.
             if 'MASTER_PUSH_DEPLOY_KEY' not in str(step):
                 continue
             assert 'ratchet_push.py' in body, (
@@ -361,9 +358,10 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
                 ('push', 'refs/tags/v1', ''),
                 ('workflow_dispatch', 'refs/heads/main', ''),
                 ('workflow_dispatch', 'refs/heads/other', '')):
-            assert evaluate(expression, {'github': {
-                'event_name': event, 'ref': ref}}) == expected, (
-                    name, event, ref)
+            actual = (evaluate(expression, {'github': {
+                'event_name': event, 'ref': ref}})
+                if expression.startswith('${{') else expression)
+            assert actual == expected, (name, event, ref, actual)
     for name, job in jobs.items():
         for step in job.get('steps', []):
             if 'secrets.MASTER_PUSH_DEPLOY_KEY' in str(step):
