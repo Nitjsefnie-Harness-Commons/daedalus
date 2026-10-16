@@ -347,9 +347,11 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
     jobs = jobs_mapping((ROOT / '.github/workflows/tests.yml').read_text(
         encoding='utf-8'))
     assert jobs is not None
-    for name in ('coverage', 'journey-budget'):
-        expression = jobs[name].get('environment', '')
-        assert expression, name
+    consumers = {name: job for name, job in jobs.items()
+                 if 'MASTER_PUSH_DEPLOY_KEY' in str(job)}
+    assert {'coverage', 'journey-budget'} <= consumers.keys()
+    for name, job in consumers.items():
+        expression = job.get('environment', '')
         for event, ref, expected in (
                 ('push', 'refs/heads/main', 'main-push'),
                 ('pull_request', 'refs/heads/main', ''),
@@ -362,11 +364,6 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
                 'event_name': event, 'ref': ref}})
                 if expression.startswith('${{') else expression)
             assert actual == expected, (name, event, ref, actual)
-    for name, job in jobs.items():
-        for step in job.get('steps', []):
-            if 'secrets.MASTER_PUSH_DEPLOY_KEY' in str(step):
-                assert job.get('environment') == jobs['coverage'][
-                    'environment'], name
 
 
 def main():
