@@ -24,20 +24,20 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 ROOT = _util.ROOT
 
 PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.py'
-SECRET_ACCESS = re.compile(
-    r"""\bsecrets\s*(?:\.\s*MASTER_PUSH_DEPLOY_KEY\b"""
-    r"""|\[\s*(['"])MASTER_PUSH_DEPLOY_KEY\1\s*\]"""
-    r"""|\[(?!\s*(?:'(?:[^']|'')*'|"(?:[^"]|"")*")\s*\]))""",
-    re.IGNORECASE)
+# Only ratchet pushes read secrets today; any new reader needs review.
+# Every expression using the secrets context must bind the environment.
+SECRET_CONTEXT = re.compile(
+    r"""\$\{\{(?:'(?:[^']|'')*'|"(?:[^"]|"")*"|[^'"}]|\}(?!\}))*?"""
+    r"""\bsecrets\b""", re.IGNORECASE)
 
 
-def _uses_push_secret(value):
+def _uses_secrets_context(value):
     if isinstance(value, str):
-        return bool(SECRET_ACCESS.search(value))
+        return bool(SECRET_CONTEXT.search(value))
     if isinstance(value, dict):
         value = list(value.items())
     return isinstance(value, (list, tuple)) and any(
-        map(_uses_push_secret, value))
+        map(_uses_secrets_context, value))
 
 
 def _summary_text(summary):
@@ -344,7 +344,7 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
         encoding='utf-8'))
     assert jobs is not None
     consumers = {name: job for name, job in jobs.items()
-                 if _uses_push_secret(job)}
+                 if _uses_secrets_context(job)}
     assert {'coverage', 'journey-budget'} <= consumers.keys()
     for name, job in consumers.items():
         expression = job.get('environment', '')
