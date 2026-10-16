@@ -944,6 +944,10 @@ jobs:
     # V8 records embed runner-specific file URLs.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The branch policy refuses other refs; an empty name binds no
+    # environment, so pull requests can still run these checks.
+    environment: ${{ github.event_name == 'push'
+      && github.ref == 'refs/heads/main' && 'main-push' || '' }}
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -1163,11 +1167,9 @@ jobs:
         #
         # A threshold-only push does not re-run tests or CodeQL;
         # audit.yml remains unfiltered.
-        # Without the deploy key, changes remain in the summary.
-        if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true'
-                && env.RATCHET_SSH_KEY != '' }}
+        if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true' }}
         env:
-          RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
+          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
           REPO: ${{ github.repository }}
         run: |
           python3 scripts/ci/ratchet_push.py .github/ci-thresholds.json \
@@ -1270,6 +1272,10 @@ jobs:
     # cost, so 60 is several times what the measured run needs — room for
     # a slower runner, which is what a ceiling is for.
     timeout-minutes: 60
+    # The branch policy refuses other refs; an empty name binds no
+    # environment, so pull requests can still run these checks.
+    environment: ${{ github.event_name == 'push'
+      && github.ref == 'refs/heads/main' && 'main-push' || '' }}
     env:
       # How many rounds the measurement takes. One is the steady state:
       # these counts are deterministic, so a discarded warm-up round buys
@@ -1426,10 +1432,9 @@ jobs:
       # push and a concurrent one, so a second copy of a write credential
       # cannot exist here to drift from the coverage job's.
       - name: Commit the tighten
-        if: ${{ !cancelled() && steps.tighten.outputs.changed == 'true'
-                && env.RATCHET_SSH_KEY != '' }}
+        if: ${{ !cancelled() && steps.tighten.outputs.changed == 'true' }}
         env:
-          RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
+          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
           REPO: ${{ github.repository }}
         run: |
           python3 scripts/ci/ratchet_push.py .github/journey-budget.json \
