@@ -484,13 +484,11 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
         assert evaluate_if(ratchet['if'], context) is expected, context
     for changed, secret, status, expected in (
             ('true', 'key',
-             {'success': True, 'failure': False, 'cancelled': False}, True),
-            ('true', 'key',
              {'success': False, 'failure': True, 'cancelled': False}, True),
             ('false', 'key',
              {'success': True, 'failure': False, 'cancelled': False}, False),
             ('true', '',
-             {'success': True, 'failure': False, 'cancelled': False}, False),
+             {'success': True, 'failure': False, 'cancelled': False}, True),
             ('', 'key',
              {'success': False, 'failure': True, 'cancelled': False}, False),
             ('true', 'key',
@@ -498,7 +496,7 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     ):
         context = {
             'steps': {'ratchet': {'outputs': {'changed': changed}}},
-            'env': {'RATCHET_SSH_KEY': secret},
+            'env': {'MASTER_PUSH_DEPLOY_KEY': secret},
             'status': status,
         }
         assert evaluate_if(commit['if'], context) is expected, context
@@ -539,7 +537,6 @@ def test_publisher_condition_mutations_are_rejected(tmp):
         ratchet_failure) is False
     cancelled = {
         'steps': {'ratchet': {'outputs': {'changed': 'true'}}},
-        'env': {'RATCHET_SSH_KEY': 'key'},
         'status': {'success': True, 'failure': False, 'cancelled': True},
     }
     changed_false = dict(cancelled)
@@ -547,25 +544,15 @@ def test_publisher_condition_mutations_are_rejected(tmp):
         'ratchet': {'outputs': {'changed': 'false'}}}
     changed_false['status'] = {
         'success': True, 'failure': False, 'cancelled': False}
-    changed_false['env'] = {'RATCHET_SSH_KEY': 'key'}
-    missing_secret = dict(cancelled)
-    missing_secret['env'] = {'RATCHET_SSH_KEY': ''}
-    missing_secret['status'] = {
-        'success': True, 'failure': False, 'cancelled': False}
     assert evaluate_if(commit['if'], cancelled) is False
     assert evaluate_if(commit['if'].replace('!cancelled() && ', ''),
                        cancelled) is True
     assert evaluate_if(commit['if'], changed_false) is False
     assert evaluate_if(
-        commit['if'].replace("steps.ratchet.outputs.changed == 'true' && ",
-                             ''), changed_false) is True
-    assert evaluate_if(commit['if'], missing_secret) is False
-    assert evaluate_if(
-        commit['if'].replace("env.RATCHET_SSH_KEY != ''", 'true'),
-        missing_secret) is True
+        commit['if'].replace("steps.ratchet.outputs.changed == 'true'",
+                             'true'), changed_false) is True
     commit_failure = {
         'steps': {'ratchet': {'outputs': {'changed': 'true'}}},
-        'env': {'RATCHET_SSH_KEY': 'key'},
         'status': {'success': False, 'failure': True, 'cancelled': False},
     }
     assert evaluate_if(commit['if'], commit_failure) is True

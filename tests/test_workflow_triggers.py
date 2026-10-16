@@ -333,7 +333,7 @@ def test_the_ratchet_is_only_committed_when_it_changed(tmp):
     actual = step_scalar(tests_yml, 'coverage', 'Commit the raise', 'if')
     assert actual == (
         "${{ !cancelled() && steps.ratchet.outputs.changed == 'true'"
-        " && env.RATCHET_SSH_KEY != '' }}"), (
+        " }}"), (
             f'coverage/Commit the raise: {actual!r}')
 
 
@@ -375,7 +375,7 @@ def test_journey_budget_steps_are_gated_on_the_steps_before_them(tmp):
              " && github.ref == 'refs/heads/main' }}"),
             ('Commit the tighten',
              "${{ !cancelled() && steps.tighten.outputs.changed == 'true'"
-             " && env.RATCHET_SSH_KEY != '' }}")):
+             " }}")):
         actual = step_scalar(tests_yml, 'journey-budget', step, 'if')
         assert actual == expected, f'journey-budget/{step}: {actual!r}'
 

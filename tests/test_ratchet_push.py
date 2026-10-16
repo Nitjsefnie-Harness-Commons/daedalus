@@ -34,6 +34,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ghexpr import evaluate  # noqa: E402
+from _wfjobs import jobs_mapping  # noqa: E402
 from _ratchet_fixture import _git  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -137,7 +139,7 @@ def _drive_push(work, refuse, change=True, arguments=None, environment=None):
     child = dict(os.environ,
                  HOME=str(work.parent / 'home'),
                  REPO='o/r',
-                 RATCHET_SSH_KEY='not-a-real-key',
+                 MASTER_PUSH_DEPLOY_KEY='not-a-real-key',
                  GITHUB_STEP_SUMMARY=str(summary))
     for name, value in (environment or {}).items():
         if value is None:
@@ -273,17 +275,7 @@ def test_a_commit_with_nothing_to_commit_aborts(tmp):
 
 
 def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
-    """Each of the three refusals says which of its inputs was absent.
-
-    These are the only three ways this script declines, and all three are
-    reached before a single `git` call, so the checkout is real and the
-    assertion is that it did not move. An exit status alone would not
-    separate them: all three answer 2, and a script that answered 2 while
-    printing nothing at all would pass every control that reads only the
-    status. A job that reddens with a sentence is a job whose reader can
-    fix the invocation; one that reddens silently is one they must read
-    the source to diagnose.
-    """
+    """Missing inputs fail before git; the secret is named for repair."""
     base = Path(tmp) / 'refusals'
     work, bare = _push_repo(base)
     message = 'ci: tighten the journey budget'
@@ -296,10 +288,12 @@ def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
             ([message], {}, usage),
             (['ratcheted.json', ''], {}, usage),
             (['', message], {}, usage),
-            (['ratcheted.json', message], {'RATCHET_SSH_KEY': None},
-             'the deploy key is not set; nothing is pushed'),
-            (['ratcheted.json', message], {'RATCHET_SSH_KEY': ''},
-             'the deploy key is not set; nothing is pushed'),
+            (['ratcheted.json', message], {'MASTER_PUSH_DEPLOY_KEY': None},
+             'MASTER_PUSH_DEPLOY_KEY is not set; '
+             'ratchet change is not pushed'),
+            (['ratcheted.json', message], {'MASTER_PUSH_DEPLOY_KEY': ''},
+             'MASTER_PUSH_DEPLOY_KEY is not set; '
+             'ratchet change is not pushed'),
             (['ratcheted.json', message], {'REPO': None},
              'the repository is not set; there is nowhere to push'),
             (['ratcheted.json', message], {'REPO': ''},
@@ -322,13 +316,7 @@ def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
 
 
 def test_both_jobs_call_the_one_push_implementation(tmp):
-    """One script, called with each job's own file and message.
-
-    The drift this retires was two copies of a write credential. There is
-    now one. The walk names the two jobs that hold the key, so a third
-    holder elsewhere in the file is not covered by it — that is the limit of
-    this control, stated rather than implied.
-    """
+    """Both credential holders call the shared push with two arguments."""
     del tmp
     source = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
@@ -340,7 +328,7 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
             body = step.get('run') or ''
             # The key is in the step's env block, not its body: the
             # body is the script call.
-            if 'RATCHET_SSH_KEY' not in str(step):
+            if 'MASTER_PUSH_DEPLOY_KEY' not in str(step):
                 continue
             assert 'ratchet_push.py' in body, (
                 f'the {step.get("name")!r} step holds the deploy key and does '
@@ -356,6 +344,31 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
                 f'commit message; the call does not supply both: {body}')
             seen[name] = body
     assert sorted(seen) == ['coverage', 'journey-budget'], sorted(seen)
+
+
+def test_push_secrets_bind_only_the_main_push_environment(tmp):
+    del tmp
+    jobs = jobs_mapping((ROOT / '.github/workflows/tests.yml').read_text(
+        encoding='utf-8'))
+    for name in ('coverage', 'journey-budget'):
+        expression = jobs[name].get('environment', '')
+        assert expression, name
+        for event, ref, expected in (
+                ('push', 'refs/heads/main', 'main-push'),
+                ('pull_request', 'refs/heads/main', ''),
+                ('pull_request', 'refs/pull/1/merge', ''),
+                ('push', 'refs/heads/other', ''),
+                ('push', 'refs/tags/v1', ''),
+                ('workflow_dispatch', 'refs/heads/main', ''),
+                ('workflow_dispatch', 'refs/heads/other', '')):
+            assert evaluate(expression, {'github': {
+                'event_name': event, 'ref': ref}}) == expected, (
+                    name, event, ref)
+    for name, job in jobs.items():
+        for step in job.get('steps', []):
+            if 'secrets.MASTER_PUSH_DEPLOY_KEY' in str(step):
+                assert job.get('environment') == jobs['coverage'][
+                    'environment'], name
 
 
 def main():

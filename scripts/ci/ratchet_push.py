@@ -15,12 +15,11 @@ tracked file a workflow step runs, and it reads Python only: a step running a
 set in silence, which `tests/test_ci_tool_declarations.py` refuses. This way
 the walk reads this file, sees that it runs no suite, and says so.
 
-The credential is a deploy key, not the built-in token, and the difference
-is not a preference. A ruleset may list a job among its required contexts,
-and a commit pushed from here has no green checks yet, so the built-in token
-is refused; GitHub Actions cannot be added as a bypass actor either. A deploy
-key can, it is scoped to this one repository rather than to an account, and
-revoking it is deleting one key.
+The main-push environment supplies MASTER_PUSH_DEPLOY_KEY. A deploy key is
+required: a ruleset may list this job among its required contexts, and a commit
+pushed here has no green checks yet, so the built-in token is refused.
+GitHub Actions cannot be a bypass actor; a deploy key can. It is scoped to
+this repository rather than an account, and revoking it is deleting one key.
 
 A rejected push is usually main moving while this ran, and failing the job
 for that would turn a required context red for an ordinary concurrent push.
@@ -68,10 +67,12 @@ def main(argv=None):
               file=sys.stderr)
         return 2
     path, message = argv
-    key = os.environ.get('RATCHET_SSH_KEY')
+    key = os.environ.get('MASTER_PUSH_DEPLOY_KEY')
     repository = os.environ.get('REPO')
     if not key:
-        print('the deploy key is not set; nothing is pushed', file=sys.stderr)
+        print('MASTER_PUSH_DEPLOY_KEY is not set; '
+              'ratchet change is not pushed',
+              file=sys.stderr)
         return 2
     if not repository:
         print('the repository is not set; there is nowhere to push',
