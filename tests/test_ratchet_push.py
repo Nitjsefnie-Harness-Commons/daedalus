@@ -1,31 +1,13 @@
 #!/usr/bin/env python3
-"""The ratchet push, exercised against a real repository rather than read.
+"""Exercise ratchet pushes against real local git repositories.
 
-Its own module because `test_journey_tighten.py` holds the CLI and the
-workflow guard and reached the 700-line ceiling, and these are a different
-subject rather than more of the same: `scripts/ci/ratchet_push.py` is the
-one step holding a write credential, so its behaviour is pinned by RUNNING
-it against a real bare repository and reading what each state did, rather
-than by reading its text.
-
-Reading cannot settle what these controls settle. `=` and `!=` are two
-behaviourally different versions of the same three tokens, and a control
-that accepts both pins neither. So the fixtures drive the real script as a
-child process, with git's own `url.<base>.insteadOf` pointing its remote at
-a local bare repository, and every state is a real git state: a
-`pre-receive` refusal, a non-fast-forward rejection from a concurrent push, a
-remote that cannot answer, and a commit with nothing to commit.
-
-The script is copied INTO the tree and the copy is what runs, because that
-is the only shape the collector can see. `source = ["."]` resolves against
-the child's working directory, so a script left at its repository path and
-run from a temporary tree is measured under a `source` that excludes it, and
-`tests/test_suite_runner.py::_runner_tree` copies for the same reason. The tree
-root is the checkout here, so the copy sits at `scripts/ci/ratchet_push.py`
-inside it and `[tool.coverage.paths]`'s `*/tree` maps that back onto the
-repository's own file.
+Git's URL rewrite directs the real script to a bare fixture repository,
+covering successful, refused and concurrent pushes without a network.
+The script runs from the fixture's scripts/ci path so coverage's source
+root and */tree alias map its executed lines onto the real module.
 """
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -42,6 +24,20 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 ROOT = _util.ROOT
 
 PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.py'
+SECRET_ACCESS = re.compile(
+    r"""\bsecrets\s*(?:\.\s*MASTER_PUSH_DEPLOY_KEY\b"""
+    r"""|\[\s*(['"])MASTER_PUSH_DEPLOY_KEY\1\s*\]"""
+    r"""|\[(?!\s*(?:'(?:[^']|'')*'|"(?:[^"]|"")*")\s*\]))""",
+    re.IGNORECASE)
+
+
+def _uses_push_secret(value):
+    if isinstance(value, str):
+        return bool(SECRET_ACCESS.search(value))
+    if isinstance(value, dict):
+        value = list(value.items())
+    return isinstance(value, (list, tuple)) and any(
+        map(_uses_push_secret, value))
 
 
 def _summary_text(summary):
@@ -348,7 +344,7 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
         encoding='utf-8'))
     assert jobs is not None
     consumers = {name: job for name, job in jobs.items()
-                 if 'MASTER_PUSH_DEPLOY_KEY' in str(job)}
+                 if _uses_push_secret(job)}
     assert {'coverage', 'journey-budget'} <= consumers.keys()
     for name, job in consumers.items():
         expression = job.get('environment', '')
