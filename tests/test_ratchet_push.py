@@ -26,14 +26,40 @@ ROOT = _util.ROOT
 PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.py'
 # Only ratchet pushes read secrets today; any new reader needs review.
 # Every expression using the secrets context must bind the environment.
-SECRET_CONTEXT = re.compile(
-    r"""\$\{\{(?:'(?:[^']|'')*'|"(?:[^"]|"")*"|[^'"}]|\}(?!\}))*?"""
-    r"""\bsecrets\b""", re.IGNORECASE)
+SECRET_CONTEXT = re.compile(r'\bsecrets\b', re.IGNORECASE)
+
+
+def _expression_uses_secrets(source):
+    index = 0
+    while (start := source.find('${{', index)) >= 0:
+        index = start + 3
+        quote = None
+        unquoted = []
+        while index < len(source):
+            char = source[index]
+            if quote:
+                if char == quote:
+                    if source[index:index + 2] == quote * 2:
+                        index += 2
+                        continue
+                    quote = None
+            elif char in "'\"":
+                quote = char
+                unquoted.append(' ')
+            elif source.startswith('}}', index):
+                index += 2
+                break
+            else:
+                unquoted.append(char)
+            index += 1
+        if SECRET_CONTEXT.search(''.join(unquoted)):
+            return True
+    return False
 
 
 def _uses_secrets_context(value):
     if isinstance(value, str):
-        return bool(SECRET_CONTEXT.search(value))
+        return _expression_uses_secrets(value)
     if isinstance(value, dict):
         value = list(value.items())
     return isinstance(value, (list, tuple)) and any(
@@ -51,18 +77,10 @@ def _summary_text(summary):
 
 
 def _push_repo(base, remote_at=None):
-    """A working checkout with one commit, and a bare repo standing in for
-    github.
+    """A checkout and bare remote, using git's URL rewrite rather than stubs.
 
-    The remote the script builds is `git@github.com:${REPO}.git`, so git's own
-    `url.<base>.insteadOf` maps it onto the bare repo. Nothing else is
-    stubbed: `push` and `fetch` are the real git against a real repository,
-    and the script's reads of HEAD^ and FETCH_HEAD are the repository's.
-
-    `remote_at` points the mapping somewhere else — at a path that is not a
-    repository, which is what an unreachable host looks like to git. Both the
-    push and the fetch then fail against a remote that cannot answer, which
-    is the transient failure the recovery branch must not read as movement.
+    `remote_at` redirects only the script's own push/fetch after setup; a
+    non-repository path represents a remote that cannot answer.
     """
     # Under a `tree` component: pyproject maps `*/tree` back onto this
     # repository, which is what `child_coverage('keep')' proves at
@@ -99,23 +117,11 @@ def _push_repo(base, remote_at=None):
 
 
 def _drive_push(work, refuse, change=True, arguments=None, environment=None):
-    """Run the real script over the prepared checkout.
+    """Run the copied script against a real repository.
 
-    `refuse` installs a pre-receive hook that rejects everything, which is
-    what a revoked key or a ruleset refusal looks like from the pushing side:
-    the push fails and main does not move. Without it the push is real, and
-    whether it is rejected is then decided by whether main has moved.
-
-    `change` is what gets committed. Leaving it False stages nothing, so
-    `git commit` has nothing to commit and fails — the route where the
-    recorded file was already committed by an earlier step.
-
-    `arguments` replaces the call the script is given and `environment`
-    overrides variables in it, which is how the three refusals `main` makes
-    before it touches the repository are reached. A variable whose value is
-    None is REMOVED rather than emptied: `os.environ.get` reads an absent
-    key and an empty one alike, while subprocess has no spelling for
-    `None`, so a control that set one would be testing the wrong arm.
+    `refuse` installs a rejecting pre-receive hook; `change=False` leaves
+    nothing to commit. `arguments` and `environment` override script inputs;
+    an environment value of None removes that variable from the child.
     """
     if refuse:
         hook = work / 'bare.git' / 'hooks' / 'pre-receive'
