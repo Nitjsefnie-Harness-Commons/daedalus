@@ -327,13 +327,12 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
             body = step.get('run') or ''
             if 'MASTER_PUSH_DEPLOY_KEY' not in str(step):
                 continue
+            assert step['env']['MASTER_PUSH_DEPLOY_KEY'] == (
+                '${{ secrets.MASTER_PUSH_DEPLOY_KEY }}'), step
             assert 'ratchet_push.py' in body, (
                 f'the {step.get("name")!r} step holds the deploy key and does '
                 f'not call the shared script, so a second copy of the push '
                 f'is back: {body}')
-            # The line continuations go first: left in, `shlex` counts each
-            # trailing backslash as an argument of its own and a one-argument
-            # call parses as two.
             call = body.replace('\\\n', ' ')
             assert len(shlex.split(
                 call.split('ratchet_push.py', 1)[1])) == 2, (
@@ -347,6 +346,7 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
     del tmp
     jobs = jobs_mapping((ROOT / '.github/workflows/tests.yml').read_text(
         encoding='utf-8'))
+    assert jobs is not None
     for name in ('coverage', 'journey-budget'):
         expression = jobs[name].get('environment', '')
         assert expression, name
