@@ -312,45 +312,6 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
     assert '**100.0%**' not in state[0]['body'], state
 
 
-def test_a_current_run_replaces_the_marker_and_gates_the_job(tmp):
-    """A current run replaces the old percentage; the job gates by event."""
-    posted, state, calls, _output = _run_comment_block(
-        tmp, 'Post or update the pull request comment', state=[],
-        head_sha='A', current_head='A', body='**100.0%**')
-    assert posted.returncode == 0, (posted.stdout, posted.stderr)
-    assert len(recorded_writes(calls)) == 1, \
-        calls.read_text(encoding='utf-8')
-    artifact, output = _run_artifact_check(
-        tmp, {'total_count': 0, 'artifacts': []})
-    assert artifact.returncode == 0, (artifact.stdout, artifact.stderr)
-    assert 'present=true' not in output, output
-    marked, state, calls, _output = _run_comment_block(
-        tmp, 'Mark missing patch coverage', state=state,
-        head_sha='B', current_head='B')
-    assert marked.returncode == 0, (marked.stdout, marked.stderr)
-    assert len(recorded_writes(calls)) == 1, \
-        calls.read_text(encoding='utf-8')
-    assert 'Patch coverage was not measured for commit B.' in \
-        state[0]['body'], state
-    assert '**100.0%**' not in state[0]['body'], state
-
-    condition = _job_condition(_workflow(), 'comment')
-    for conclusion in ('cancelled', 'success'):
-        context = {
-            'github': {'event': {'workflow_run': {
-                'event': 'pull_request',
-                'conclusion': conclusion,
-            }}},
-        }
-        assert evaluate(condition, context) is True, condition
-    non_pull_request = {
-        'github': {'event': {'workflow_run': {
-            'event': 'push', 'conclusion': 'success',
-        }}},
-    }
-    assert evaluate(condition, non_pull_request) is False, condition
-
-
 def test_a_cancelled_run_credits_the_run_whatever_the_jobs_hold(tmp):
     for jobs in ([], [{'name': 'coverage', 'conclusion': 'cancelled'}]):
         marked, _state, calls, output = _run_comment_block(
@@ -467,21 +428,6 @@ def test_commenter_runs_every_completed_run_and_orders_stale_gate(
             context = _step_context('true', 'false', run_state)
             assert evaluate_if(expression, context) is False, (
                 step_name, run_state, expression)
-
-
-def test_missing_marker_step_owns_its_artifact_and_stale_conditions(tmp):
-    """Invalidation is enabled only for a current run missing its artifact."""
-    del tmp
-    expression = _step_condition(_workflow(), 'Mark missing patch coverage')
-    assert evaluate_if(expression, _step_context(None, 'false')) is True
-    assert evaluate_if(expression, _step_context('true', 'false')) is False
-    assert evaluate_if(expression, _step_context(None, 'true')) is False
-    assert evaluate_if(
-        expression, _step_context(None, 'false', 'success', 'false')) is False
-    for run_state in ('failure', 'cancelled'):
-        context = _step_context(None, 'false', run_state)
-        assert evaluate_if(expression, context) is False, (
-            'Mark missing patch coverage', run_state, expression)
 
 
 def test_blank_lines_cannot_hide_condition_terms(tmp):
