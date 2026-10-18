@@ -138,22 +138,12 @@ def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
          'FAILED ?: \n0 opened, 1 failed\n'),
     )
     for urls, result, expected in cases:
-        plan = [_ext_cmd('_open_tabs', 'open-tabs', {'urls': urls}, timeout=30)]
+        plan = [_ext_cmd('_open_tabs', 'open-tabs',
+                         {'urls': urls}, timeout=30)]
         _recorded, out = run_cli(
             ['open-tabs', *urls], [result],
             module=commands_browser, plan=plan, token=TOK)
         assert _rendered(out) == expected, repr(out)
-
-
-def test_do_open_tabs_prints_only_a_count_when_nothing_opened(tmp):
-    del tmp
-    plan = [_ext_cmd('_open_tabs', 'open-tabs',
-                     {'urls': ['https://a.example.com/']}, timeout=30)]
-    _recorded, out = run_cli(
-        ['open-tabs', 'https://a.example.com/'], [{}],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert _rendered(out) == '0 opened, 0 failed\n', repr(out)
 
 
 def test_do_open_tabs_sends_active_false_only_with_background(tmp):
@@ -192,22 +182,6 @@ def test_do_open_tabs_sends_pinned_only_with_the_flag(tmp):
         '1 opened, 0 failed\n'), repr(out)
 
 
-def test_do_open_tabs_renders_a_refusal_carrying_no_url_or_error(tmp):
-    """Two independent placeholders in one refusal line.
-
-    The url is what an operator would retype, so its absence has to be
-    visible rather than printed as None.
-    """
-    del tmp
-    plan = [_ext_cmd('_open_tabs', 'open-tabs',
-                     {'urls': ['https://a.example.com/']}, timeout=30)]
-    _recorded, out = run_cli(
-        ['open-tabs', 'https://a.example.com/'], [{'errors': [{}]}],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert _rendered(out) == 'FAILED ?: \n0 opened, 1 failed\n', repr(out)
-
-
 # ── do_focus_tab ─────────────────────────────────────────────────────
 
 def test_do_focus_tab_names_the_tab_and_the_window_it_focused(tmp):
@@ -234,22 +208,6 @@ def test_do_focus_tab_prints_placeholders_for_both_absent_fields(tmp):
 
 # ── do_ext_navigate ──────────────────────────────────────────────────
 
-def test_do_ext_navigate_sends_the_url_and_no_tab_id(tmp):
-    """No `tabId`: the browser's active tab runs it."""
-    del tmp
-    plan = [_ext_cmd('_nav', 'navigate', {'url': 'https://example.com/'})]
-    recorded, out = run_cli(
-        ['ext-navigate', 'https://example.com/'],
-        [{'tabId': 42}],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert recorded.calls == [('_nav', 'navigate',
-                               {'url': 'https://example.com/'})], \
-        recorded.calls
-    assert _rendered(out) == (
-        f'Navigated tab 42 {OUT} https://example.com/\n'), repr(out)
-
-
 def test_do_ext_navigate_carries_the_chrome_tab_only_when_it_was_given(tmp):
     """The active tab is implicit; --chrome-tab names even tab zero."""
     del tmp
@@ -268,35 +226,6 @@ def test_do_ext_navigate_carries_the_chrome_tab_only_when_it_was_given(tmp):
 
 
 # ── do_ext_reload ────────────────────────────────────────────────────
-
-def test_do_ext_reload_sends_no_fields_at_all_on_the_bare_arm(tmp):
-    """Both fields are opt-in, so the bare body is an empty object.
-
-    This is the assertion that makes `tabId` and `bypassCache` opt-in: a
-    handler that always sent them would pass the two tests below.
-    """
-    del tmp
-    recorded, out = run_cli(
-        ['ext-reload'], [{'tabId': 42}],
-        module=commands_browser, plan=[_ext_cmd('_reload', 'reload', {})],
-        token=TOK)
-
-    assert recorded.calls == [('_reload', 'reload', {})], recorded.calls
-    assert out == 'Reloaded tab 42\n', repr(out)
-
-
-def test_do_ext_reload_carries_the_chrome_tab_only_when_it_was_given(tmp):
-    """`--chrome-tab` adds `tabId`; the rendered line is unchanged."""
-    del tmp
-    recorded, out = run_cli(
-        ['ext-reload', '--chrome-tab', '0'], [{'tabId': 0}],
-        module=commands_browser,
-        plan=[_ext_cmd('_reload', 'reload', {'tabId': 0})], token=TOK)
-
-    assert recorded.calls == [('_reload', 'reload', {'tabId': 0})], \
-        recorded.calls
-    assert out == 'Reloaded tab 0\n', repr(out)
-
 
 def test_do_ext_reload_names_the_cache_bypass_in_its_output_too(tmp):
     """Each reload flag combination pins both the body and rendered line."""
@@ -318,20 +247,6 @@ def test_do_ext_reload_names_the_cache_bypass_in_its_output_too(tmp):
         assert recorded.calls == [('_reload', 'reload', fields)], \
             recorded.calls
         assert out == expected, repr(out)
-
-
-def test_do_ext_reload_carries_both_fields_when_both_were_given(tmp):
-    del tmp
-    fields = {'tabId': 7, 'bypassCache': True}
-    recorded, out = run_cli(
-        ['ext-reload', '--chrome-tab', '7', '--bypass-cache'],
-        [{'tabId': 7}],
-        module=commands_browser, plan=[_ext_cmd('_reload', 'reload', fields)],
-        token=TOK)
-
-    assert recorded.calls == [('_reload', 'reload', fields)], \
-        recorded.calls
-    assert out == 'Reloaded tab 7 (bypass cache)\n', repr(out)
 
 
 def main():
