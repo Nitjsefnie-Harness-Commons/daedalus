@@ -31,8 +31,8 @@ def _decodes_to(source):
     return decoded['jobs']
 
 
-def test_a_nested_flow_mapping_in_a_flow_sequence_decodes(tmp):
-    """`[{run: echo}]` is a sequence of mappings, not a malformed key."""
+def test_a_field_after_an_indentless_sequence_survives(tmp):
+    """Flow and indentless sequences retain their fields and siblings."""
     del tmp
     jobs = _decodes_to(
         'jobs: {probe: {runs-on: ubuntu-latest, timeout-minutes: 5,'
@@ -42,16 +42,9 @@ def test_a_nested_flow_mapping_in_a_flow_sequence_decodes(tmp):
         'steps': [{'run': 'echo'}],
     }}
 
-
-def test_a_nested_flow_sequence_in_a_flow_sequence_decodes(tmp):
-    del tmp
     jobs = _decodes_to('jobs: {probe: {matrix: [[1, 2], [3, 4]]}}\n')
     assert jobs == {'probe': {'matrix': [['1', '2'], ['3', '4']]}}
 
-
-def test_an_indentless_sequence_under_a_mapping_key_decodes(tmp):
-    """`needs:` may carry its sequence at the key's own indentation."""
-    del tmp
     jobs = _decodes_to(
         'jobs:\n'
         '  aggregate:\n'
@@ -66,9 +59,6 @@ def test_an_indentless_sequence_under_a_mapping_key_decodes(tmp):
         '    timeout-minutes: 9\n')
     assert jobs['aggregate']['needs'] == ['suites', 'wheel']
 
-
-def test_an_indentless_sequence_of_mappings_decodes(tmp):
-    del tmp
     jobs = _decodes_to(
         'jobs:\n'
         '  probe:\n'
@@ -82,10 +72,6 @@ def test_an_indentless_sequence_of_mappings_decodes(tmp):
         {'name': 'two', 'run': 'echo two'},
     ]
 
-
-def test_a_field_after_an_indentless_sequence_survives(tmp):
-    """The sibling key after the sequence is a field, not its content."""
-    del tmp
     jobs = _decodes_to(
         'jobs:\n'
         '  aggregate:\n'
@@ -116,105 +102,7 @@ def _assert_jobs_equal(left, right, source):
 
 
 def test_every_spelling_of_the_jobs_key_decodes_the_same(tmp):
-    """Quoted and spaced keys decode to the same jobs mapping."""
-    del tmp
-    body = '  probe:\n' + BOUNDED
-    for head in ('jobs:\n', 'jobs :\n', '"jobs":\n', 'jobs:  # manual\n'):
-        _assert_jobs_equal(jobs_mapping(head + body), {'probe': {
-            'runs-on': 'ubuntu-latest', 'timeout-minutes': '5',
-            'steps': [{'run': 'echo hi'}],
-        }}, head + body)
-
-
-def test_a_job_written_as_an_inline_flow_mapping_decodes(tmp):
-    del tmp
-    jobs = jobs_mapping(
-        'jobs: {probe: {runs-on: ubuntu-latest, timeout-minutes: 5}}\n')
-    assert jobs == {
-        'probe': {'runs-on': 'ubuntu-latest', 'timeout-minutes': '5'}}
-
-
-def test_a_job_header_carrying_a_comment_decodes(tmp):
-    del tmp
-    jobs = jobs_mapping('jobs:\n  probe: # manual probe\n' + BOUNDED)
-    assert jobs == {'probe': {
-        'runs-on': 'ubuntu-latest', 'timeout-minutes': '5',
-        'steps': [{'run': 'echo hi'}],
-    }}
-
-
-def test_a_quoted_job_id_decodes(tmp):
-    del tmp
-    jobs = jobs_mapping('jobs:\n  "probe":\n' + BOUNDED)
-    assert jobs == {'probe': {
-        'runs-on': 'ubuntu-latest', 'timeout-minutes': '5',
-        'steps': [{'run': 'echo hi'}],
-    }}
-
-
-def test_jobs_indented_four_spaces_decodes(tmp):
-    del tmp
-    jobs = jobs_mapping(
-        'jobs:\n'
-        '    probe:\n'
-        '        runs-on: ubuntu-latest\n'
-        '        timeout-minutes: 5\n'
-        '        steps:\n'
-        '            - run: echo hi\n')
-    assert jobs['probe']['timeout-minutes'] == '5'
-
-
-def test_a_workflow_with_no_jobs_key_reads_as_none(tmp):
-    del tmp
-    assert jobs_mapping('name: x\non: push\n') is None
-
-
-def test_an_explicit_top_level_jobs_key_is_refused_not_empty(tmp):
-    """The fail-open shape a real branch shipped: refusal, never `None`."""
-    del tmp
-    _assert_refusal(
-        jobs_mapping, '? jobs\n:\n  probe:\n    runs-on: x\n',
-        'unsupported mapping field')
-
-
-def test_an_explicit_job_key_is_refused_not_skipped(tmp):
-    del tmp
-    _assert_refusal(
-        jobs_mapping, 'jobs:\n  ? probe\n  : runs-on: x\n',
-        'empty mapping key')
-
-
-def test_duplicate_job_keys_are_refused(tmp):
-    del tmp
-    _assert_refusal(
-        jobs_mapping,
-        'jobs:\n  probe:\n    runs-on: x\n  probe:\n    runs-on: y\n',
-        'duplicate mapping key')
-
-
-def test_an_empty_jobs_mapping_is_refused(tmp):
-    """A workflow with no job classifies nothing, which is not a pass."""
-    del tmp
-    _assert_refusal(jobs_mapping, 'jobs:\n', 'jobs is not a mapping')
-    _assert_refusal(jobs_mapping, 'jobs: {}\n', 'declares no job')
-
-
-def test_a_job_whose_value_is_a_sequence_is_refused(tmp):
-    del tmp
-    _assert_refusal(jobs_mapping, 'jobs:\n  probe:\n    - run: echo\n',
-                    'is not a mapping')
-    _assert_refusal(jobs_mapping, 'jobs:\n  probe:\n  - run: echo\n',
-                    'is not a mapping')
-
-
-def test_a_job_field_of_unknown_shape_is_refused(tmp):
-    """A job value that is neither mapping nor sequence is not read."""
-    del tmp
-    _assert_refusal(jobs_mapping, 'jobs: probe\n', 'is not a mapping')
-
-
-def test_the_jobs_block_ends_at_the_next_top_level_key(tmp):
-    """A following `defaults:` is not read as a job."""
+    """Job and jobs-key spellings decode within their top-level bounds."""
     del tmp
     jobs = jobs_mapping(
         'jobs:\n'
@@ -225,6 +113,71 @@ def test_the_jobs_block_ends_at_the_next_top_level_key(tmp):
         '  run:\n'
         '    shell: bash\n')
     assert list(jobs) == ['probe']
+
+    jobs = jobs_mapping(
+        'jobs:\n'
+        '    probe:\n'
+        '        runs-on: ubuntu-latest\n'
+        '        timeout-minutes: 5\n'
+        '        steps:\n'
+        '            - run: echo hi\n')
+    assert jobs['probe']['timeout-minutes'] == '5'
+
+    jobs = jobs_mapping(
+        'jobs: {probe: {runs-on: ubuntu-latest, timeout-minutes: 5}}\n')
+    assert jobs == {
+        'probe': {'runs-on': 'ubuntu-latest', 'timeout-minutes': '5'}}
+
+    jobs = jobs_mapping('jobs:\n  probe: # manual probe\n' + BOUNDED)
+    assert jobs == {'probe': {
+        'runs-on': 'ubuntu-latest', 'timeout-minutes': '5',
+        'steps': [{'run': 'echo hi'}],
+    }}
+
+    jobs = jobs_mapping('jobs:\n  "probe":\n' + BOUNDED)
+    assert jobs == {'probe': {
+        'runs-on': 'ubuntu-latest', 'timeout-minutes': '5',
+        'steps': [{'run': 'echo hi'}],
+    }}
+
+    body = '  probe:\n' + BOUNDED
+    for head in ('jobs:\n', 'jobs :\n', '"jobs":\n', 'jobs:  # manual\n'):
+        _assert_jobs_equal(jobs_mapping(head + body), {'probe': {
+            'runs-on': 'ubuntu-latest', 'timeout-minutes': '5',
+            'steps': [{'run': 'echo hi'}],
+        }}, head + body)
+
+
+def test_a_workflow_with_no_jobs_key_reads_as_none(tmp):
+    del tmp
+    assert jobs_mapping('name: x\non: push\n') is None
+
+
+def test_a_job_whose_value_is_a_sequence_is_refused(tmp):
+    """Malformed jobs values and keys retain their refusal diagnostics."""
+    del tmp
+    _assert_refusal(jobs_mapping, 'jobs:\n', 'jobs is not a mapping')
+    _assert_refusal(jobs_mapping, 'jobs: {}\n', 'declares no job')
+
+    _assert_refusal(jobs_mapping, 'jobs: probe\n', 'is not a mapping')
+
+    _assert_refusal(
+        jobs_mapping, '? jobs\n:\n  probe:\n    runs-on: x\n',
+        'unsupported mapping field')
+
+    _assert_refusal(
+        jobs_mapping, 'jobs:\n  ? probe\n  : runs-on: x\n',
+        'empty mapping key')
+
+    _assert_refusal(
+        jobs_mapping,
+        'jobs:\n  probe:\n    runs-on: x\n  probe:\n    runs-on: y\n',
+        'duplicate mapping key')
+
+    _assert_refusal(jobs_mapping, 'jobs:\n  probe:\n    - run: echo\n',
+                    'is not a mapping')
+    _assert_refusal(jobs_mapping, 'jobs:\n  probe:\n  - run: echo\n',
+                    'is not a mapping')
 
 
 def _assert_refusal(reader, source, expected):
@@ -422,13 +375,6 @@ def test_a_bare_empty_job_field_reads_as_none_through_every_job_reader(tmp):
     assert len(none_paths) == 2, none_paths
 
 
-def test_a_bare_empty_needs_is_refused_as_not_a_list_of_names(tmp):
-    """`needs:` with nothing under it names no job, and says so."""
-    workflow = _real(tmp, _replaced(BLOCK_NEEDS, '    needs:\n'))
-    message = _refuses(_job_needs, workflow, 'suites')
-    assert 'needs is not a list of job names' in message, message
-
-
 def test_an_absent_needs_field_reads_as_no_dependencies(tmp):
     """A job with no `needs:` key names no job, though the next one does."""
     del tmp
@@ -459,18 +405,14 @@ def _refuses_needs(spelling):
     assert 'not a list of job names' in message, spelling
 
 
-def test_one_needs_dependency_reads_the_same_in_all_three_shapes(tmp):
-    """A bare scalar, a block sequence and a flow sequence name one job."""
+def test_the_needs_spellings_only_the_tolerance_grants_all_decode(tmp):
+    """Scalar, block, flow and tolerated needs spellings name one job."""
     del tmp
-    for spelling in ('    needs: changes\n',
-                     '    needs:\n      - changes\n',
-                     '    needs: [changes]\n'):
+    for spelling in ('    needs:\n      - changes\n',
+                     '    needs: [changes]\n',
+                     '    needs: changes\n'):
         assert _planted_needs(spelling) == ['changes'], spelling
 
-
-def test_the_needs_spellings_only_the_tolerance_grants_all_decode(tmp):
-    """The four no other row spells: each is an acceptance, not a bug."""
-    del tmp
     for spelling in ('    needs: [changes, ]\n',
                      '    needs: ["changes"]\n',
                      '    needs:\n      - "changes"\n',
@@ -493,18 +435,17 @@ def test_a_needs_flow_sequence_names_the_same_jobs_in_order(tmp):
 
 
 def test_a_needs_mapping_is_refused_as_not_a_list_of_names(tmp):
-    """`needs:` names jobs; a mapping there is a shape, not a spelling."""
-    del tmp
-    for spelling in ("    needs: {changes: 'true'}\n",
-                     '    needs:\n      changes: true\n'):
-        _refuses_needs(spelling)
+    """Invalid needs shapes are refused as lists of job names."""
+    workflow = _real(tmp, _replaced(BLOCK_NEEDS, '    needs:\n'))
+    message = _refuses(_job_needs, workflow, 'suites')
+    assert 'needs is not a list of job names' in message, message
 
-
-def test_a_needs_member_that_is_not_a_job_name_is_refused(tmp):
-    """A nested collection is a shape, so it names no job either."""
-    del tmp
     for spelling in ('    needs: [[changes, suites], pylint]\n',
                      '    needs: [changes, {changes: true}]\n'):
+        _refuses_needs(spelling)
+
+    for spelling in ("    needs: {changes: 'true'}\n",
+                     '    needs:\n      changes: true\n'):
         _refuses_needs(spelling)
 
 
