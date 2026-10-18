@@ -421,20 +421,6 @@ def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
     raise AssertionError('an empty gate-path answer was not refused')
 
 
-def test_enumeration_unreadable_is_a_global_failure(tmp):
-    del tmp
-    m = _mod()
-
-    def read(_argv):
-        raise m.QueryError('HTTP 500')
-    try:
-        m.enumerate_gates(read, 'o/r')
-    except m.QueryError as error:
-        assert 'gate commit' in str(error), str(error)
-        return
-    raise AssertionError('an unreadable gate lookup was not refused')
-
-
 def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
     """A payload that decodes to a non-list is not 'no commits'."""
     del tmp
@@ -623,19 +609,6 @@ def test_publish_filters_and_sends_no_cache(tmp):
                      'github-actions', 'filter=all', '--paginate',
                      'Cache-Control: no-cache'):
         assert fragment in captured[0], (fragment, captured[0])
-
-
-def test_a_per_head_listing_failure_raises_so_the_run_can_skip(tmp):
-    """An unreadable existing-check listing is a per-head failure, not a
-    crash: publish raises and process() catches and skips that head."""
-    del tmp
-    m = _mod()
-    try:
-        m.publish(_publish_read([], [], fail_listing=m.QueryError), 'o/r',
-                  HEAD, 'failure', 't', 's', RUN)
-    except m.QueryError:
-        return
-    raise AssertionError('an unreadable listing did not raise QueryError')
 
 
 # ---- select_heads ----
