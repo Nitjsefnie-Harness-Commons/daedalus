@@ -95,22 +95,28 @@ def test_remove_expired_leaves_an_unrelated_suffix(tmp):
 
 
 def test_remove_expired_does_not_follow_a_symlink(tmp):
-    queue = _load_queue('command_queue_symlink')
-    target = Path(tmp) / 'target.json'
-    path = Path(tmp) / 'link.json'
-    target.write_text('{"id":"target"}', encoding='utf-8')
-    now = time.time()
-    _set_mtime(target, now - 91)
-    try:
-        path.symlink_to(target)
-        os.utime(path, (now, now), follow_symlinks=False)
-    except (OSError, NotImplementedError):
-        _util.skip('this platform cannot create or timestamp symlinks')
+    for legacy in (False, True):
+        queue = _load_queue('command_queue_symlink')
+        case = Path(tmp) / str(legacy)
+        case.mkdir()
+        target = case / 'target.json'
+        path = case / ('tok.json.tmp' if legacy else 'link.json')
+        target.write_text('{"id":"queued"}' if legacy else '{"id":"target"}',
+                          encoding='utf-8')
+        now, ttl = (2, 1) if legacy else (time.time(), 90)
+        if not legacy:
+            _set_mtime(target, now - 91)
+        try:
+            path.symlink_to(target)
+            stamp = 0 if legacy else now
+            os.utime(path, (stamp, stamp), follow_symlinks=False)
+        except (OSError, NotImplementedError):
+            _util.skip('this platform cannot create or timestamp symlinks')
 
-    queue.remove_expired(path, now, 90)
+        queue.remove_expired(path, now, ttl, legacy=legacy)
 
-    assert path.is_symlink(), path
-    assert target.exists(), target
+        assert path.is_symlink(), path
+        assert target.exists(), target
 
 
 def test_a_claim_released_by_an_exception_can_be_claimed_again(tmp):
@@ -362,110 +368,46 @@ def test_extension_legacy_drain_forwards_the_command_directory(tmp):
 
 
 def test_two_streams_covering_one_queue_deliver_a_command_once(tmp):
-    fault_dir, read_count = _slow_queue_read_dir(tmp)
-    served = []
-    with _util.bridge(tmp, env={**BRIDGE_ENV,
-                                'PYTHONPATH': str(fault_dir)},
-                      output=served) as (base, _docroot):
-        ext_conn, ext_response = stream_response(base, TOK, tab='extension')
-        tab_conn, tab_response = stream_response(base, TOK, tab='dup')
-        try:
-            assert ext_response.status == 200, (
-                ext_response.status, ''.join(served))
-            assert tab_response.status == 200, (
-                tab_response.status, ''.join(served))
-            status, body = put_command(
-                base, {'token': TOK, 'tab': 'dup', 'id': 'once',
-                       'code': '1'})
-            assert status == 200, (status, body, ''.join(served))
-            delivered = _read_streams_once(
-                (('extension', ext_response), ('dup', tab_response)))
-            _assert_one_delivery(delivered, 'once', served, read_count)
-        finally:
-            ext_response.close()
-            ext_conn.close()
-            tab_response.close()
-            tab_conn.close()
-
-
-def test_two_streams_covering_one_legacy_file_deliver_a_command_once(tmp):
-    fault_dir, read_count = _slow_queue_read_dir(tmp)
-    served = []
-    with _util.bridge(tmp, env={**BRIDGE_ENV,
-                                'PYTHONPATH': str(fault_dir)},
-                      output=served) as (base, docroot):
-        ext_conn, ext_response = stream_response(base, TOK, tab='extension')
-        tab_conn, tab_response = stream_response(base, TOK, tab='dup')
-        try:
-            assert ext_response.status == 200, (
-                ext_response.status, ''.join(served))
-            assert tab_response.status == 200, (
-                tab_response.status, ''.join(served))
-            legacy = Path(docroot) / 'commands' / f'{TOK}.json'
-            _publish_legacy(legacy, '{"id":"legacy-once","code":"1"}')
-            delivered = _read_streams_once(
-                (('extension', ext_response), ('dup', tab_response)))
-            _assert_one_delivery(
-                delivered, 'legacy-once', served, read_count)
-        finally:
-            ext_response.close()
-            ext_conn.close()
-            tab_response.close()
-            tab_conn.close()
-
-
-def test_two_streams_covering_a_broadcast_queue_deliver_a_command_once(tmp):
-    fault_dir, read_count = _slow_queue_read_dir(tmp)
-    served = []
-    with _util.bridge(tmp, env={**BRIDGE_ENV,
-                                'PYTHONPATH': str(fault_dir)},
-                      output=served) as (base, _docroot):
-        ext_conn, ext_response = stream_response(base, TOK, tab='extension')
-        tab_conn, tab_response = stream_response(base, TOK, tab='dup')
-        try:
-            assert ext_response.status == 200, (
-                ext_response.status, ''.join(served))
-            assert tab_response.status == 200, (
-                tab_response.status, ''.join(served))
-            status, body = put_command(
-                base, {'token': TOK, 'id': 'broadcast-once', 'code': '1'})
-            assert status == 200, (status, body, ''.join(served))
-            delivered = _read_streams_once(
-                (('extension', ext_response), ('dup', tab_response)))
-            _assert_one_delivery(
-                delivered, 'broadcast-once', served, read_count)
-        finally:
-            ext_response.close()
-            ext_conn.close()
-            tab_response.close()
-            tab_conn.close()
-
-
-def test_two_streams_covering_a_per_tab_legacy_file_deliver_once(tmp):
-    fault_dir, read_count = _slow_queue_read_dir(tmp)
-    served = []
-    with _util.bridge(tmp, env={**BRIDGE_ENV,
-                                'PYTHONPATH': str(fault_dir)},
-                      output=served) as (base, docroot):
-        ext_conn, ext_response = stream_response(base, TOK, tab='extension')
-        tab_conn, tab_response = stream_response(base, TOK, tab='dup')
-        try:
-            assert ext_response.status == 200, (
-                ext_response.status, ''.join(served))
-            assert tab_response.status == 200, (
-                tab_response.status, ''.join(served))
-            legacy = Path(docroot) / 'commands' / f'{TOK}_dup.json'
-            _publish_legacy(
-                legacy, '{"id":"per-tab-legacy-once","code":"1"}')
-            delivered = _read_streams_once(
-                (('extension', ext_response), ('dup', tab_response)))
-            _assert_one_delivery(
-                delivered, 'per-tab-legacy-once', served, read_count)
-        finally:
-            ext_response.close()
-            ext_conn.close()
-            tab_response.close()
-            tab_conn.close()
+    for route, command_id in (
+            ('queue', 'once'), ('legacy', 'legacy-once'),
+            ('broadcast', 'broadcast-once'),
+            ('tab-legacy', 'per-tab-legacy-once')):
+        case = Path(tmp) / route
+        case.mkdir()
+        fault_dir, read_count = _slow_queue_read_dir(case)
+        served = []
+        with _util.bridge(str(case), env={**BRIDGE_ENV,
+                                          'PYTHONPATH': str(fault_dir)},
+                          output=served) as (base, docroot):
+            ext_conn, ext_response = stream_response(
+                base, TOK, tab='extension')
+            tab_conn, tab_response = stream_response(base, TOK, tab='dup')
+            try:
+                assert ext_response.status == 200, (
+                    ext_response.status, ''.join(served))
+                assert tab_response.status == 200, (
+                    tab_response.status, ''.join(served))
+                if route in ('queue', 'broadcast'):
+                    body = {'token': TOK, 'id': command_id, 'code': '1'}
+                    if route == 'queue':
+                        body['tab'] = 'dup'
+                    status, body = put_command(base, body)
+                    assert status == 200, (status, body, ''.join(served))
+                else:
+                    name = f'{TOK}_dup.json' if route == 'tab-legacy' else (
+                        f'{TOK}.json')
+                    legacy = Path(docroot) / 'commands' / name
+                    _publish_legacy(legacy, json.dumps(
+                        {'id': command_id, 'code': '1'},
+                        separators=(',', ':')))
+                delivered = _read_streams_once(
+                    (('extension', ext_response), ('dup', tab_response)))
+                _assert_one_delivery(delivered, command_id, served, read_count)
+            finally:
+                ext_response.close()
+                ext_conn.close()
+                tab_response.close()
+                tab_conn.close()
 
 
 def test_symlinked_queue_directory_reaches_extension_stream(tmp):
@@ -560,46 +502,38 @@ def test_a_successful_legacy_delivery_releases_its_claim(tmp):
 
 
 def test_queue_write_failure_keeps_file_and_releases_claim(tmp):
-    server = _load_server_for_drain(tmp, 'server_queue_write_failure')
-    qdir = server.CMD_DIR / 'write-fail-queue'
-    qdir.mkdir(parents=True)
-    command = qdir / '0000000000001_000001.json'
-    command.write_text('{"id":"write-fail"}', encoding='utf-8')
-    key = f'queue:{qdir.name}/{command.name}'
-    try:
-        try:
-            server.stream_service.drain_queue(
-                qdir, None, None, command_ttl=server.CMD_TTL,
-                frame_writer=_raise_broken_pipe)
-        except BrokenPipeError:
-            pass
+    for legacy in (False, True):
+        server = _load_server_for_drain(
+            tmp, f'server_write_failure_{legacy}')
+        qdir = server.CMD_DIR / 'write-fail-queue'
+        if legacy:
+            server.CMD_DIR.mkdir(parents=True, exist_ok=True)
+            command = server.CMD_DIR / 'legacy-write-fail.json'
+            _publish_legacy(command, '{"id":"write-fail"}')
+            key = f'legacy:{command.name}'
         else:
-            raise AssertionError('the injected queue write did not fail')
-        assert command.exists(), command
-        assert server.command_queue.claim(key) is True
-    finally:
-        server.command_queue.release(key)
-
-
-def test_legacy_write_failure_keeps_file_and_releases_claim(tmp):
-    server = _load_server_for_drain(tmp, 'server_legacy_write_failure')
-    server.CMD_DIR.mkdir(parents=True, exist_ok=True)
-    command = server.CMD_DIR / 'legacy-write-fail.json'
-    _publish_legacy(command, '{"id":"write-fail"}')
-    key = f'legacy:{command.name}'
-    try:
+            qdir.mkdir(parents=True)
+            command = qdir / '0000000000001_000001.json'
+            command.write_text('{"id":"write-fail"}', encoding='utf-8')
+            key = f'queue:{qdir.name}/{command.name}'
         try:
-            server.stream_service.drain_legacy_file(
-                command, None, command_ttl=server.CMD_TTL,
-                frame_writer=_raise_broken_pipe)
-        except BrokenPipeError:
-            pass
-        else:
-            raise AssertionError('the injected legacy write did not fail')
-        assert command.exists(), command
-        assert server.command_queue.claim(key) is True
-    finally:
-        server.command_queue.release(key)
+            try:
+                if legacy:
+                    server.stream_service.drain_legacy_file(
+                        command, None, command_ttl=server.CMD_TTL,
+                        frame_writer=_raise_broken_pipe)
+                else:
+                    server.stream_service.drain_queue(
+                        qdir, None, None, command_ttl=server.CMD_TTL,
+                        frame_writer=_raise_broken_pipe)
+            except BrokenPipeError:
+                pass
+            else:
+                raise AssertionError('the injected write did not fail')
+            assert command.exists(), command
+            assert server.command_queue.claim(key) is True
+        finally:
+            server.command_queue.release(key)
 
 
 if __name__ == '__main__':

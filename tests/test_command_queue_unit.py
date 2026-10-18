@@ -416,52 +416,30 @@ def test_an_identical_enqueue_scans_under_the_shared_lock(tmp):
         'id': 'same', 'code': '1', '_did': first_did}
 
 
-def test_a_same_id_with_a_changed_payload_enqueues_fresh(tmp):
-    queue = _load_queue('command_queue_dedup_payload')
-    cmd_dir = Path(tmp) / 'commands'
-    first_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '1'},
-        command_ttl=90)
-    assert duplicate is False
-    second_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'tab', {'id': 'same', 'code': '2'},
-        command_ttl=90)
-    assert duplicate is False
-    assert second_did != first_did
-    published = list((cmd_dir / 'tok_tab').glob('*.json'))
-    assert len(published) == 2, published
-
-
-def test_a_same_id_with_changed_typed_fields_enqueues_fresh(tmp):
-    queue = _load_queue('command_queue_dedup_typed')
-    cmd_dir = Path(tmp) / 'commands'
-    first_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'extension',
-        {'id': 'same', 'type': 'shot', 'quality': 'low'}, command_ttl=90)
-    assert duplicate is False
-    second_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'extension',
-        {'id': 'same', 'type': 'shot', 'quality': 'high'}, command_ttl=90)
-    assert duplicate is False
-    assert second_did != first_did
-    published = list((cmd_dir / 'tok_extension').glob('*.json'))
-    assert len(published) == 2, published
-
-
 def test_the_same_payload_for_another_tab_enqueues_fresh(tmp):
-    queue = _load_queue('command_queue_dedup_tab')
-    cmd_dir = Path(tmp) / 'commands'
-    first_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'tab1', {'id': 'same', 'code': '1'},
-        command_ttl=90)
-    assert duplicate is False
-    second_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'tab2', {'id': 'same', 'code': '1'},
-        command_ttl=90)
-    assert duplicate is False
-    assert second_did != first_did
-    assert (cmd_dir / 'tok_tab1' / f'{first_did}.json').exists()
-    assert (cmd_dir / 'tok_tab2' / f'{second_did}.json').exists()
+    for case, first_tab, second_tab, first, second in (
+            ('payload', 'tab', 'tab', {'id': 'same', 'code': '1'},
+             {'id': 'same', 'code': '2'}),
+            ('typed', 'extension', 'extension',
+             {'id': 'same', 'type': 'shot', 'quality': 'low'},
+             {'id': 'same', 'type': 'shot', 'quality': 'high'}),
+            ('tab', 'tab1', 'tab2', {'id': 'same', 'code': '1'},
+             {'id': 'same', 'code': '1'})):
+        queue = _load_queue('command_queue_dedup_tab')
+        cmd_dir = Path(tmp) / case / 'commands'
+        first_did, duplicate = queue.enqueue(
+            cmd_dir, 'tok', first_tab, first, command_ttl=90)
+        assert duplicate is False
+        second_did, duplicate = queue.enqueue(
+            cmd_dir, 'tok', second_tab, second, command_ttl=90)
+        assert duplicate is False
+        assert second_did != first_did
+        if case == 'tab':
+            assert (cmd_dir / 'tok_tab1' / f'{first_did}.json').exists()
+            assert (cmd_dir / 'tok_tab2' / f'{second_did}.json').exists()
+        else:
+            published = list((cmd_dir / f'tok_{first_tab}').glob('*.json'))
+            assert len(published) == 2, published
 
 
 def test_a_drained_command_enqueues_fresh(tmp):
@@ -579,85 +557,38 @@ def test_collect_expired_removes_old_commands_and_empty_queues(tmp):
     assert not legacy.exists(), legacy
 
 
-def test_collect_expired_sweeps_an_expired_legacy_temp(tmp):
-    queue = _load_queue('command_queue_legacy_temp_expired')
-    cmd_dir = Path(tmp) / 'commands'
-    cmd_dir.mkdir()
-    temps = (cmd_dir / 'tok.json.tmp', cmd_dir / 'tok_tab.json.tmp')
-    for temp in temps:
-        temp.write_text('{"id":"queued"}', encoding='utf-8')
-        os.utime(temp, (0, 0))
-    queue.collect_expired(cmd_dir, 1)
-    assert not any(temp.exists() for temp in temps)
-
-
-def test_collect_expired_retains_an_expired_legacy_temp_partial_json(tmp):
-    """An expired temp that does not parse is retained.
-
-    A crashed legacy writer's partial temp is indistinguishable from a
-    live writer's, so the sweep keeps both — the same protection a
-    malformed legacy final already gets.
-    """
-    queue = _load_queue('command_queue_legacy_temp_partial')
-    cmd_dir = Path(tmp) / 'commands'
-    cmd_dir.mkdir()
-    temp = cmd_dir / 'tok.json.tmp'
-    temp.write_text('{"id":"que', encoding='utf-8')
-    os.utime(temp, (0, 0))
-    queue.collect_expired(cmd_dir, 1)
-    assert temp.exists(), temp
-
-
 def test_collect_expired_retains_fresh_legacy_temps(tmp):
-    queue = _load_queue('command_queue_legacy_temp_fresh')
-    cmd_dir = Path(tmp) / 'commands'
-    cmd_dir.mkdir()
-    complete = cmd_dir / 'tok.json.tmp'
-    partial = cmd_dir / 'tok_tab.json.tmp'
-    complete.write_text('{"id":"queued"}', encoding='utf-8')
-    partial.write_text('{"id":"que', encoding='utf-8')
-    queue.collect_expired(cmd_dir, 60)
-    assert complete.exists(), complete
-    assert partial.exists(), partial
-
-
-def test_collect_expired_leaves_a_hidden_temp_alone(tmp):
-    queue = _load_queue('command_queue_hidden_temp')
-    cmd_dir = Path(tmp) / 'commands'
-    cmd_dir.mkdir()
-    hidden = cmd_dir / '.tok.json.tmp'
-    hidden.write_text('{"id":"queued"}', encoding='utf-8')
-    os.utime(hidden, (0, 0))
-    queue.collect_expired(cmd_dir, 1)
-    assert hidden.exists(), hidden
-
-
-def test_collect_expired_leaves_a_bare_tmp_name_alone(tmp):
-    queue = _load_queue('command_queue_bare_tmp')
-    cmd_dir = Path(tmp) / 'commands'
-    cmd_dir.mkdir()
-    stray = cmd_dir / 'tok.tmp'
-    stray.write_text('{"id":"queued"}', encoding='utf-8')
-    os.utime(stray, (0, 0))
-    queue.collect_expired(cmd_dir, 1)
-    assert stray.exists(), stray
-
-
-def test_remove_expired_retains_a_refused_legacy_temp(tmp):
-    queue = _load_queue('command_queue_legacy_temp_refused')
-    cmd_dir = Path(tmp) / 'commands'
-    cmd_dir.mkdir()
-    target = cmd_dir / 'target.json'
-    temp = cmd_dir / 'tok.json.tmp'
-    target.write_text('{"id":"queued"}', encoding='utf-8')
-    try:
-        temp.symlink_to(target)
-        os.utime(temp, (0, 0), follow_symlinks=False)
-    except (OSError, NotImplementedError):
-        _util.skip('this platform cannot create or timestamp symlinks')
-    queue.remove_expired(temp, 2, 1, legacy=True)
-    assert temp.is_symlink(), temp
-    assert target.exists(), target
+    # A partial temp may still belong to a live legacy writer.
+    for case, files, aged, ttl, retained in (
+            ('expired', (('tok.json.tmp', '{"id":"queued"}'),
+                         ('tok_tab.json.tmp', '{"id":"queued"}')),
+             True, 1, False),
+            ('partial', (('tok.json.tmp', '{"id":"que'),), True, 1, True),
+            ('fresh', (('tok.json.tmp', '{"id":"queued"}'),
+                       ('tok_tab.json.tmp', '{"id":"que')),
+             False, 60, True),
+            ('hidden', (('.tok.json.tmp', '{"id":"queued"}'),), True, 1, True),
+            ('bare', (('tok.tmp', '{"id":"queued"}'),), True, 1, True)):
+        queue = _load_queue('command_queue_legacy_temp_fresh')
+        cmd_dir = Path(tmp) / case / 'commands'
+        cmd_dir.mkdir(parents=True)
+        temps = []
+        for name, content in files:
+            temp = cmd_dir / name
+            temp.write_text(content, encoding='utf-8')
+            if aged:
+                os.utime(temp, (0, 0))
+            temps.append(temp)
+        queue.collect_expired(cmd_dir, ttl)
+        if case == 'fresh':
+            complete, partial = temps[0], temps[1]
+            assert complete.exists(), complete
+            assert partial.exists(), partial
+        elif retained:
+            for temp in temps:
+                assert temp.exists(), temp
+        else:
+            assert not any(temp.exists() for temp in temps)
 
 
 def test_gc_loop_forwards_directory_and_ttl_after_sleep(_tmp):

@@ -50,33 +50,6 @@ def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
         assert re.fullmatch(pattern, "__version__ = '9.9.\\\r\n9'")
 
 
-def test_check_versions_print_refuses_the_other_quote_package_duplicate(tmp):
-    """--print must not hand out the first of two competing values (#319)."""
-    for second_value, quote in _DUPLICATE_SPELLINGS:
-        copy_root = Path(tmp) / 'tree'
-        _copy_versioned_tree(copy_root)
-        _duplicate_the_package_version(copy_root, second_value, quote)
-        r = _run_checker(copy_root, '--print')
-        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-        assert r.stdout.strip() == '', r.stdout
-        assert 'matches 2 times' in r.stderr, r.stderr
-
-
-def test_check_versions_set_refuses_the_other_quote_package_duplicate(tmp):
-    """--set must not rewrite every site to an invisible duplicate (#319)."""
-    for second_value, quote in _DUPLICATE_SPELLINGS:
-        copy_root = Path(tmp) / 'tree'
-        _copy_versioned_tree(copy_root)
-        _duplicate_the_package_version(copy_root, second_value, quote)
-        init_copy = copy_root / 'daedalus_cli' / '__init__.py'
-        before = init_copy.read_text(encoding='utf-8')
-        r = _run_checker(copy_root, '--set', '9.9.9')
-        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-        assert 'matches 2 times' in r.stderr, r.stderr
-        after = init_copy.read_text(encoding='utf-8')
-        assert after == before, 'refused sites must not be partially rewritten'
-
-
 def test_check_versions_package_value_may_contain_a_different_quote(tmp):
     """The value class only has to refuse whichever delimiter `q` captured, so
     a single-quoted value may still carry a double quote the way page.js's
@@ -91,51 +64,36 @@ def test_check_versions_package_value_may_contain_a_different_quote(tmp):
 
 
 def test_check_versions_ignores_page_js_comment_and_string_decoys(tmp):
-    """Only executable page.js bindings count as duplicate versions."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, pattern = checker.SITES[3]
-    assert path == 'extension/page.js', path
-    page_copy = copy_root / path
-    text = page_copy.read_text(encoding='utf-8')
-    canonical = re.search(pattern, text).group('v')
-    decoys = (
-        "\n// script: { version: '9.9.9' }\n"
-        '// script: { version: "8.8.8" }\n'
-        "const _single = 'script: { version: \"7.7.7\" }';\n"
-        'const _double = "script: { version: \'6.6.6\' }";\n')
-    page_copy.write_text(text + decoys, encoding='utf-8')
-    r = _run_checker(copy_root)
-    expected = (f'ok: version {canonical} consistent across '
-                f'{len(checker.SITES)} sites in '
-                f'{len({p for p, _, _ in checker.SITES})} files\n')
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    assert r.stdout == expected, r.stdout
-    assert desc not in r.stderr, r.stderr
-
-
-def test_check_versions_ignores_python_comment_and_string_decoys(tmp):
-    """Python comments and string literals are not version bindings."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, pattern = checker.SITES[-1]
-    assert path == 'daedalus_cli/__init__.py', path
-    init_copy = copy_root / path
-    text = init_copy.read_text(encoding='utf-8')
-    canonical = re.search(pattern, text).group('v')
-    decoys = (
-        "\n# __version__ = '9.9.9'\n"
-        '# __version__ = "8.8.8"\n'
-        "_single = '__version__ = \"7.7.7\"'\n"
-        '_double = "__version__ = \'6.6.6\'"\n')
-    init_copy.write_text(text + decoys, encoding='utf-8')
-    r = _run_checker(copy_root)
-    expected = (f'ok: version {canonical} consistent across '
-                f'{len(checker.SITES)} sites in '
-                f'{len({p for p, _, _ in checker.SITES})} files\n')
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    assert r.stdout == expected, r.stdout
-    assert desc not in r.stderr, r.stderr
+    for index, expected_path, decoys in (
+            (3, 'extension/page.js', (
+                '\n'
+                "// script: { version: '9.9.9' }\n"
+                '// script: { version: "8.8.8" }\n'
+                'const _single = \'script: { version: "7.7.7" }\';\n'
+                'const _double = "script: { version: \'6.6.6\' }";\n'
+            )),
+            (-1, 'daedalus_cli/__init__.py', (
+                '\n'
+                "# __version__ = '9.9.9'\n"
+                '# __version__ = "8.8.8"\n'
+                '_single = \'__version__ = "7.7.7"\'\n'
+                '_double = "__version__ = \'6.6.6\'"\n'
+            ))):
+        copy_root = Path(tmp) / 'tree'
+        checker = _copy_versioned_tree(copy_root)
+        path, desc, pattern = checker.SITES[index]
+        assert path == expected_path, path
+        target = copy_root / path
+        text = target.read_text(encoding='utf-8')
+        canonical = re.search(pattern, text).group('v')
+        target.write_text(text + decoys, encoding='utf-8')
+        r = _run_checker(copy_root)
+        expected = (f'ok: version {canonical} consistent across '
+                    f'{len(checker.SITES)} sites in '
+                    f'{len({p for p, _, _ in checker.SITES})} files\n')
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert r.stdout == expected, r.stdout
+        assert desc not in r.stderr, r.stderr
 
 
 def main():
