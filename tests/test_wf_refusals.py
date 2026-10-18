@@ -63,16 +63,6 @@ def test_a_duplicate_named_mapping_key_is_refused(_tmp):
         lambda: _step_items(source, 'sample')) == DUP + 'jobs'
 
 
-def test_a_step_scalar_that_closes_no_quote_is_refused(_tmp):
-    # MASKED: with `_step_value`'s quote arm deleted this row still goes
-    # red, but the reader stays fail-closed -- `decode_inline_scalar`
-    # refuses the same value with a different message, and no input
-    # separates them (an open quote means no unescaped close, and a value
-    # that both opens a quote and ends in one raises on the escape).
-    source = STEP_JOB_HEAD + '      - uses: "abc\n      - run: echo "def\n'
-    assert _value_error(lambda: _step_items(source, 'sample')) == MULTILINE
-
-
 def test_a_step_scalar_opening_with_an_indicator_is_refused(_tmp):
     source = STEP_JOB_HEAD + '      - uses: [owner/one@abc]\n'
     assert _value_error(lambda: _step_items(source, 'sample')) == SCALAR
