@@ -160,6 +160,8 @@ def test_public_update_uses_recorded_measurement_high_water(tmp):
     data = _ratchet_document()
     for measured in (60.0, 78.5, 80.0, 80.1, 81.5):
         assert ratchet.update(data, Decimal(str(measured)), 'python') is None
+    for language in ('python', 'javascript'):
+        assert ratchet.update(data, Decimal('0.0'), language) is None
     raised = ratchet.update(data, Decimal('81.6'), 'python')
     assert raised is not None
     assert raised['coverage']['python'] == {
@@ -169,13 +171,6 @@ def test_public_update_uses_recorded_measurement_high_water(tmp):
     assert raised['module_size_baseline'] == data['module_size_baseline']
     assert ratchet.update(raised, Decimal('81.6'), 'python') is None
     assert ratchet.update(raised, Decimal('81.7'), 'python') is None
-
-
-def test_lower_measurements_never_lower_either_calibration(tmp):
-    ratchet = _ratchet()
-    data = _ratchet_document()
-    for language in ('python', 'javascript'):
-        assert ratchet.update(data, Decimal('0.0'), language) is None
 
 
 def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
@@ -330,56 +325,39 @@ def test_publisher_python_carries_posix_and_windows_paths_without_embedding(
 
 
 def test_real_publisher_step_size_only_preserves_calibrations(tmp):
-    data = _ratchet_document()
-    data['module_size_baseline']['tests/test_mcp_server.py'] = 1707
-    result = _run_publisher_case(
-        tmp, 'publisher-size', data, '80.0', '35.5')
-    repo, path, before, output, summary, done = result
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert 'changed=true' in output.read_text(encoding='utf-8')
-    assert '### Recorded by this run' in summary.read_text(encoding='utf-8')
-    after = _thresholds().load(path)
-    assert after['coverage'] == data['coverage']
-    assert after['module_size_baseline']['tests/test_mcp_server.py'] == 1706
-    assert path.read_bytes() != before
-    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
-        '.github/ci-thresholds.json']
-    assert after['module_size_baseline']['tests/test_cli.py'] == 1238
-
-
-def test_real_publisher_step_tightens_the_suite_tree_budget(tmp):
-    """The no-op replays seed the budget at the measured number, so a tighten
-    that wrote a wrong value on a real drop passes every one of them."""
-    data = _ratchet_document()
-    data['tests_line_baseline'] = 1707
-    repo, path, _before, output, _summary, done = _run_publisher_case(
-        tmp, 'publisher-tests-lines', data, '80.0', '35.5')
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert 'changed=true' in output.read_text(encoding='utf-8')
-    after = _thresholds().load(path)
-    assert after['tests_line_baseline'] == 1706
-    assert after['coverage'] == data['coverage']
-    assert after['module_size_baseline'] == data['module_size_baseline']
-    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
-        '.github/ci-thresholds.json']
-
-
-def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
-    data = _ratchet_document()
-    data['module_size_baseline']['tests/test_mcp_server.py'] = 1707
-    result = _run_publisher_case(
-        tmp, 'publisher-combined', data, '81.6', '35.5')
-    repo, path, _before, output, _summary, done = result
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert 'changed=true' in output.read_text(encoding='utf-8')
-    after = _thresholds().load(path)
-    assert after['coverage']['python'] == {
-        'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
-    assert after['coverage']['javascript'] == data['coverage']['javascript']
-    assert after['module_size_baseline']['tests/test_mcp_server.py'] == 1706
-    assert after['module_size_baseline']['tests/test_cli.py'] == 1238
-    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
-        '.github/ci-thresholds.json']
+    for name, measured, member in (
+            ('publisher-size', '80.0', 'module_size_baseline'),
+            ('publisher-combined', '81.6', 'module_size_baseline'),
+            ('publisher-tests-lines', '80.0', 'tests_line_baseline')):
+        data = _ratchet_document()
+        if member == 'module_size_baseline':
+            data[member]['tests/test_mcp_server.py'] = 1707
+        else:
+            data[member] = 1707
+        repo, path, before, output, summary, done = _run_publisher_case(
+            tmp, name, data, measured, '35.5')
+        assert done.returncode == 0, (done.stdout, done.stderr)
+        assert 'changed=true' in output.read_text(encoding='utf-8')
+        assert '### Recorded by this run' in summary.read_text(
+            encoding='utf-8')
+        after = _thresholds().load(path)
+        if measured == '81.6':
+            assert after['coverage']['python'] == {
+                'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
+            assert after['coverage']['javascript'] \
+                == data['coverage']['javascript']
+        else:
+            assert after['coverage'] == data['coverage']
+        if member == 'module_size_baseline':
+            assert after[member]['tests/test_mcp_server.py'] == 1706
+            assert after[member]['tests/test_cli.py'] == 1238
+        else:
+            assert after['tests_line_baseline'] == 1706
+            assert after['module_size_baseline'] \
+                == data['module_size_baseline']
+        assert path.read_bytes() != before
+        assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
+            '.github/ci-thresholds.json']
 
 
 def test_real_publisher_step_rejects_malformed_data_without_publishing(tmp):

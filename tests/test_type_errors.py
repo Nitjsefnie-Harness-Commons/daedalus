@@ -201,27 +201,20 @@ def test_only_a_type_error_in_a_new_test_file_is_over(tmp):
 
 
 def test_a_run_analysing_no_file_is_unanalysed(tmp):
-    """The exact shape of the original defect: the tree is excluded."""
-    repo, target = _repo(
-        tmp, 'zero', {'tests/typed.py': _clean()}, _thresholds_document(),
-        config=_config(exclude=('tests',)))
-    red = _gate(repo, target)
-    assert red.returncode != 0, (red.stdout, red.stderr)
-    assert 'unanalysed' in red.stderr, red.stderr
-    assert _policy().SCOPE_REMEDY in red.stderr, red.stderr
-    assert 'within the type-error policy' not in red.stdout, red.stdout
-
-
-def test_a_run_with_no_tracked_test_module_at_all_is_unanalysed(tmp):
-    """The empty scope, not a mismatched one: nothing is tracked and
-    nothing is analysed, so the counts agree and only ``expected == 0``
-    can tell a clean run from a gate pointed at no test tree at all."""
-    repo, target = _repo(tmp, 'empty', {}, _thresholds_document())
-    red = _gate(repo, target)
-    assert red.returncode != 0, (red.stdout, red.stderr)
-    assert 'unanalysed' in red.stderr, red.stderr
-    assert _policy().SCOPE_REMEDY in red.stderr, red.stderr
-    assert 'within the type-error policy' not in red.stdout, red.stdout
+    for name, files, config in (
+            ('zero', {'tests/typed.py': _clean()},
+             _config(exclude=('tests',))),
+            ('empty', {}, _config()),
+            ('mismatch', {'tests/kept.py': _clean(),
+                          'tests/skipped.py': _clean()},
+             _config(exclude=('tests/skipped.py',)))):
+        repo, target = _repo(
+            tmp, name, files, _thresholds_document(), config=config)
+        red = _gate(repo, target)
+        assert red.returncode != 0, (red.stdout, red.stderr)
+        assert 'unanalysed' in red.stderr, red.stderr
+        assert _policy().SCOPE_REMEDY in red.stderr, red.stderr
+        assert 'within the type-error policy' not in red.stdout, red.stdout
 
 
 def test_an_unreadable_config_is_named_in_the_refusal(tmp):
@@ -260,34 +253,16 @@ def test_a_report_without_a_summary_is_a_refusal_not_a_traceback(tmp):
         setattr(policy, '_pyright_report', original)
 
 
-def test_a_scope_missing_a_tracked_module_is_a_mismatch(tmp):
-    repo, target = _repo(
-        tmp, 'mismatch',
-        {'tests/kept.py': _clean(), 'tests/skipped.py': _clean()},
-        _thresholds_document(), config=_config(exclude=('tests/skipped.py',)))
-    red = _gate(repo, target)
-    assert red.returncode != 0, (red.stdout, red.stderr)
-    assert 'unanalysed' in red.stderr, red.stderr
-    assert _policy().SCOPE_REMEDY in red.stderr, red.stderr
-    assert 'within the type-error policy' not in red.stdout, red.stdout
-
-
 def test_a_baseline_entry_naming_a_gone_file_is_missing(tmp):
-    repo, target = _repo(tmp, 'missing', {'tests/kept.py': _clean()},
-                         _thresholds_document({'tests/gone.py': 3}))
-    red = _gate(repo, target)
-    assert red.returncode != 0, (red.stdout, red.stderr)
-    assert 'missing' in red.stderr, red.stderr
-    assert _policy().STALE_ENTRY_REMEDY in red.stderr, red.stderr
-
-
-def test_a_baseline_entry_whose_file_is_clean_is_graduated(tmp):
-    repo, target = _repo(tmp, 'graduated', {'tests/kept.py': _clean()},
-                         _thresholds_document({'tests/kept.py': 1}))
-    red = _gate(repo, target)
-    assert red.returncode != 0, (red.stdout, red.stderr)
-    assert 'graduated' in red.stderr, red.stderr
-    assert _policy().STALE_ENTRY_REMEDY in red.stderr, red.stderr
+    for kind, baseline in (
+            ('missing', {'tests/gone.py': 3}),
+            ('graduated', {'tests/kept.py': 1})):
+        repo, target = _repo(tmp, kind, {'tests/kept.py': _clean()},
+                             _thresholds_document(baseline))
+        red = _gate(repo, target)
+        assert red.returncode != 0, (red.stdout, red.stderr)
+        assert kind in red.stderr, red.stderr
+        assert _policy().STALE_ENTRY_REMEDY in red.stderr, red.stderr
 
 
 def test_tighten_lowers_drops_zeroed_and_leaves_raised(tmp):
