@@ -182,9 +182,6 @@ def test_omissions_follow_current_config_and_keep_other_source(tmp):
         'pkg/helper.py',
         'extension/content.js'}, missing
 
-
-def test_omission_near_misses_stay_in_the_complaint(tmp):
-    del tmp
     added = {
         '.claude/skills/changing-daedalus/watch_all.py': {1},
         '.claude/skillsx/watch_all.py': {1},

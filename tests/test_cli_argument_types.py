@@ -121,10 +121,6 @@ def test_well_formed_values_parse_to_their_typed_values(tmp):
     args = accepted(['cdp', 'Page.enable', '--chrome-tab', '0'])
     assert args.chrome_tab == 0, args
 
-
-def test_expires_keeps_floats_whole_domain(tmp):
-    """The fix moved the refusal to argparse; it did not tighten the domain."""
-    del tmp
     args = accepted([*SET_COOKIE, '--expires', 'inf'])
     assert args.expires == float('inf'), args
     args = accepted([*SET_COOKIE, '--expires', 'nan'])
@@ -132,10 +128,6 @@ def test_expires_keeps_floats_whole_domain(tmp):
     args = accepted([*SET_COOKIE, '--expires', '-3'])
     assert args.expires == -3.0, args
 
-
-def test_params_keep_json_loads_whole_domain(tmp):
-    """A JSON value that is not an object is still admitted."""
-    del tmp
     for text, value in (('[1,2]', [1, 2]), ('"str"', 'str'), ('3', 3),
                         ('null', None)):
         args = accepted(['cdp', 'Page.enable', '-p', text])

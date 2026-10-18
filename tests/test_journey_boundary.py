@@ -65,6 +65,19 @@ def test_the_counted_boundary_is_established_or_the_run_is_refused(tmp):
     value, why, argv = counted_run(counters, 'mcp-exec', ROOT, tmp)
     assert argv and argv[0][0] == '/usr/bin/valgrind', (value, why, argv)
 
+    counters = _journey_contract.counters()
+    (Path(tmp) / 'callgrind.mcp-exec.9999').mkdir()
+    with environment(BOUNDARY_ENV, None):
+        try:
+            kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
+        except OSError as error:
+            raise AssertionError(
+                'the refused run reached stale-file cleanup') from error
+    assert kept is None, kept
+    assert isinstance(why, str) and BOUNDARY_ENV in why, (
+        'a refusing counter must return its refusal sentence without ever '
+        f'reaching the unlink loop: {why!r}')
+
 
 def test_the_boundary_is_the_first_statement_of_main(tmp):
     """The placement is load-bearing and is asserted in three places, so it

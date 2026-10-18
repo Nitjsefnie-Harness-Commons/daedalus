@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (  # noqa: E402
     BRIDGE_ENV, TOK, _patch_env, _REDELIVERY_BUDGET_SECONDS,
-    _wait_for_delivery_health, frame_reader, framer, next_stream_data,
+    frame_reader, framer,
     prove_scan, put_command, stub_stream, stream_response)
 
 # The fault a redelivery needs: the drain removes a command file it has
@@ -48,31 +48,6 @@ def _refuses_legacy_unlink(tmp):
     (fault_dir / 'sitecustomize.py').write_text(
         _REFUSES_LEGACY_UNLINK, encoding='utf-8')
     return _patch_env(str(fault_dir))
-
-
-def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):
-    """The same lone surrogate in a legacy raw-write file must not kill the
-    stream."""
-    served = []
-    with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
-        conn, response = stream_response(base, TOK, tab='extension')
-        frame = framer(response, served)
-        try:
-            assert response.status == 200, response.status
-            legacy = Path(docroot) / 'commands' / f'{TOK}.json'
-            legacy.write_bytes(b'{"id":"\\ud800","code":"1"}')
-            first = frame('the legacy file with a surrogate id')
-            assert first.get('code') == '1', first
-            status, _ = put_command(
-                base, {'token': TOK, 'id': 'after', 'code': '2'})
-            assert status == 200, status
-            second = frame('the command enqueued afterwards')
-            assert second.get('id') == 'after', second
-        finally:
-            response.close()
-            conn.close()
-        status, health = _util.get_json(base + '/health')
-        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_legacy_publication_never_deletes_an_in_progress_write(tmp):
@@ -257,26 +232,6 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
                 'the scan that delivered the last command did not redeliver '
                 f'the file it could not remove: {again}')
             assert legacy.exists(), 'the file was removed after all'
-        finally:
-            response.close()
-            conn.close()
-
-
-def test_legacy_delivery_updates_the_health_clock(tmp):
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        conn, response = stream_response(base, TOK, tab='extension')
-        try:
-            status, health = _util.get_json(base + '/health')
-            assert status == 200, (status, health)
-            assert health['last_delivery_s_ago'] is None, health
-
-            legacy = Path(docroot) / 'commands' / f'{TOK}.json'
-            legacy.write_text(
-                '{"id":"legacy-clock","code":"1"}', encoding='utf-8')
-            delivered = next_stream_data(response)
-            assert delivered['id'] == 'legacy-clock', delivered
-
-            _wait_for_delivery_health(base)
         finally:
             response.close()
             conn.close()

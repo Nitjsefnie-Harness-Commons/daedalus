@@ -35,51 +35,42 @@ def test_result_roundtrip_and_consume(tmp):
 
 
 def test_result_per_tab_and_broadcast_files(tmp):
+    for tab, result_id, value in (('tab1', 'r2', 'x'),
+                                  ('legacy', 'legacy-result', 'kept')):
+        _result_slots(Path(tmp) / tab, tab, result_id, value)
+
+
+def _result_slots(tmp, tab, result_id, value):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        res = {'token': TOK, 'tabId': 'tab1', 'id': 'r2',
-               'result': 'x', 'error': None, 'ts': 1}
-        status, _ = _util.post_json(base + '/result', res)
+        res = {'token': TOK, 'tabId': tab, 'id': result_id,
+               'result': value, 'error': None, 'ts': 1}
+        status, posted = _util.post_json(base + '/result', res)
         assert status == 200, status
+        assert posted == {'ok': True}, posted
         res_dir = Path(docroot) / 'results'
         # Per-tab result AND the token-only back-compat file are both written.
-        assert (res_dir / f'{TOK}_tab1.json').is_file()
+        assert (res_dir / f'{TOK}_{tab}.json').is_file()
         assert (res_dir / f'{TOK}.json').is_file()
+        assert not (res_dir / f'{TOK}_{tab}').exists()
 
-        status, body = _util.get_json(base + f'/result?token={TOK}&tab=tab1')
-        assert body['id'] == 'r2', body
+        status, body = _util.get_json(base + f'/result?token={TOK}&tab={tab}')
+        assert body['id'] == result_id, body
+        assert status == 200, status
         status, body = _util.get_json(base + f'/result?token={TOK}')
-        assert body['id'] == 'r2', body
+        assert body['id'] == result_id, body
+        assert status == 200, status
 
         # Consuming the per-tab result leaves the token-only file readable.
         status, body = _util.get_json(
-            base + f'/result?token={TOK}&tab=tab1&consume=1')
-        assert body['id'] == 'r2'
-        assert not (res_dir / f'{TOK}_tab1.json').exists()
-        status, body = _util.get_json(base + f'/result?token={TOK}&tab=tab1')
+            base + f'/result?token={TOK}&tab={tab}&consume=1')
+        assert body['id'] == result_id
+        assert status == 200, status
+        assert not (res_dir / f'{TOK}_{tab}.json').exists()
+        status, body = _util.get_json(base + f'/result?token={TOK}&tab={tab}')
         assert body == {'pending': True}, body
         status, body = _util.get_json(base + f'/result?token={TOK}')
-        assert body['id'] == 'r2', body
-
-
-def test_result_without_delivery_id_keeps_both_compatibility_slots(tmp):
-    """Legacy results still write and consume the shared compatibility
-    slots."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        status, body = _util.post_json(base + '/result', {
-            'token': TOK, 'tabId': 'legacy', 'id': 'legacy-result',
-            'result': 'kept', 'error': None, 'ts': 1})
-        assert status == 200 and body == {'ok': True}, (status, body)
-        result_dir = Path(docroot) / 'results'
-        assert (result_dir / f'{TOK}_legacy.json').is_file()
-        assert (result_dir / f'{TOK}.json').is_file()
-        assert not (result_dir / f'{TOK}_legacy').exists()
-
-        status, consumed = _util.get_json(
-            base + f'/result?token={TOK}&tab=legacy&consume=1')
-        assert status == 200 and consumed['id'] == 'legacy-result', consumed
-        assert not (result_dir / f'{TOK}_legacy.json').exists()
-        status, shared = _util.get_json(base + f'/result?token={TOK}')
-        assert status == 200 and shared['id'] == 'legacy-result', shared
+        assert body['id'] == result_id, body
+        assert status == 200, status
 
 
 def test_result_did_becomes_roundtrip_ms(tmp):

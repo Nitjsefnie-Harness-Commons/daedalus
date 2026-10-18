@@ -191,23 +191,6 @@ def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
     }
 
 
-def test_main_noop_then_raise_preserves_and_updates_thresholds(tmp):
-    path = _copy_thresholds(tmp)
-    before = path.read_bytes()
-    ratchet = _ratchet()
-    for measured, expected in (('80.1', 'no raise'), ('81.6', 'raised')):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            status = ratchet.main(['--language', 'python', '--measured',
-                                   measured, '--thresholds', str(path)])
-        assert status == 0
-        assert expected in output.getvalue()
-        if measured == '80.1':
-            assert path.read_bytes() == before
-    assert _thresholds().load(path)['coverage']['python']['floor'] \
-        == Decimal('80.1')
-
-
 def test_cli_rejects_the_retired_workflow_option(tmp):
     path = _copy_thresholds(tmp)
     result = subprocess.run(
@@ -241,6 +224,37 @@ def test_shipped_file_forcing_measurement_is_derived_and_capped(tmp):
         else:
             assert actual == source
             assert 'no raise' in result.stdout
+
+    path = _copy_thresholds(tmp)
+    before = path.read_bytes()
+    ratchet = _ratchet()
+    for measured, expected in (('80.1', 'no raise'), ('81.6', 'raised')):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status = ratchet.main(['--language', 'python', '--measured',
+                                   measured, '--thresholds', str(path)])
+        assert status == 0
+        assert expected in output.getvalue()
+        if measured == '80.1':
+            assert path.read_bytes() == before
+    assert _thresholds().load(path)['coverage']['python']['floor'] \
+        == Decimal('80.1')
+
+    for measured in (Decimal('96.0'), Decimal('100.0')):
+        source = thresholds.load(THRESHOLDS_PATH)
+        source['coverage']['python'] = {
+            'measured': measured, 'floor': measured - ratchet.CALIBRATION_GAP}
+        path = Path(tmp) / f'at-{measured}.json'
+        thresholds.write(path, source)
+        before = path.read_bytes()
+        assert ratchet.main([
+            '--language', 'python', '--measured', f'{measured}',
+            '--thresholds', str(path)]) == 0
+        assert path.read_bytes() == before
+        updated = thresholds.load(path)
+        assert updated['coverage']['python'] == {
+            'measured': measured,
+            'floor': measured - ratchet.CALIBRATION_GAP}
 
 
 def test_workflow_gate_steps_consume_the_threshold_floor(tmp):

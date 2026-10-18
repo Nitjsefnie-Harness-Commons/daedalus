@@ -113,64 +113,6 @@ def test_job_stripes_come_from_a_table_that_never_grows(tmp):
     assert len(store.seg_locks) == len(table), 'the lock table grew'
 
 
-def test_case_spellings_take_one_stripe(tmp):
-    """What each assertion here proves, and which mutant fails it.
-
-    Four assertions, and they are not interchangeable:
-
-    - the STRIPE equality (`Foo` vs `foo`) proves the fold reaches the
-      lock. M9 — the casefold removed — fails it, but only about once in
-      sixty-four: the two names land on different roots and then happen to
-      share a stripe. That is why the root assertion below exists.
-    - the ROOT equality proves the fold exactly, with nothing between the
-      record and the claim. M9 fails this every run.
-    - the same pair again, on `Foo.json` and `foo.JSON`, covers the CHAIN:
-      a key that casefolds but strips the affix case-sensitively sends
-      `foo.JSON` down a different root. Its own premise, its own pair.
-    - the per-assertion `_require_a_discriminating_pair` calls are the
-      premises, not properties: each says the assertion after it CAN fail.
-      Without one the assertion is green whenever the hash collides.
-
-    Two names on one stripe is also not the whole claim. A single lock —
-    M1, which this control is indifferent to — holds every pair together
-    too; what makes this worth pinning is that the FOLD, not the table,
-    is what puts them together on a case-insensitive parent.
-    """
-    store = _load_store()
-    # The stripe is hashed from a per-process secret, so two unrelated names
-    # land on one stripe about one time in sixty-four. A control that simply
-    # asserted "these two differ" would therefore pass a key that folds
-    # nothing, once in sixty-four runs — and it did, 19/20 rather than 20/20.
-    # The name it compares against is searched for instead, so the assertion
-    # is about the fold and never about a collision.
-    # One pair per assertion, because one pair does not cover both. The
-    # second assertion compares `Foo.json` with `foo.JSON`, and a key that
-    # casefolds but strips the affix case-sensitively sends `foo.JSON` down
-    # a different chain root — which lands on a different stripe about one
-    # time in sixty-four, so the assertion passes a broken fold. The pair
-    # that protects the first assertion says nothing about the second.
-    _require_a_discriminating_pair(store, 'Foo')
-    assert (store.seg_lock_for('Foo')
-            is store.seg_lock_for('foo')), 'case spellings took two stripes'
-    _require_a_discriminating_pair(store, 'Foo.json')
-    assert (store.seg_lock_for('Foo.json')
-            is store.seg_lock_for('foo.JSON')), (
-                'case spellings split the record chain')
-    # Both, and the second is the sound one. Two names agreeing on a STRIPE
-    # can coincide by hash — with the casefold removed they land on different
-    # roots and then share a stripe about once in sixty-four, which is the
-    # escape this control was measured missing. Two names agreeing on a CHAIN
-    # ROOT is exact, and the root is what the stripe is derived from, so
-    # there is nothing left to coincide. The stripe assertions stay because
-    # they are what the callers observe; the root assertions are what cannot
-    # pass by accident.
-    _require_a_distinct_chain_root(store, 'Foo')
-    assert store._job_chain_root('Foo') == store._job_chain_root('foo')
-    _require_a_distinct_chain_root(store, 'Foo.json')
-    assert (store._job_chain_root('Foo.json')
-            == store._job_chain_root('foo.JSON'))
-
-
 def test_normalisation_spellings_take_one_stripe(tmp):
     """The same four assertions as the case control, over normalisation.
 
@@ -212,6 +154,19 @@ def test_normalisation_spellings_take_one_stripe(tmp):
     _require_a_distinct_chain_root(store, f'{composed}.json')
     assert (store._job_chain_root(f'{composed}.json')
             == store._job_chain_root(f'{decomposed}.JSON'))
+
+    _require_a_discriminating_pair(store, 'Foo')
+    assert (store.seg_lock_for('Foo')
+            is store.seg_lock_for('foo')), 'case spellings took two stripes'
+    _require_a_discriminating_pair(store, 'Foo.json')
+    assert (store.seg_lock_for('Foo.json')
+            is store.seg_lock_for('foo.JSON')), (
+                'case spellings split the record chain')
+    _require_a_distinct_chain_root(store, 'Foo')
+    assert store._job_chain_root('Foo') == store._job_chain_root('foo')
+    _require_a_distinct_chain_root(store, 'Foo.json')
+    assert (store._job_chain_root('Foo.json')
+            == store._job_chain_root('foo.JSON'))
 
 
 def test_the_chain_root_is_a_fixpoint(tmp):

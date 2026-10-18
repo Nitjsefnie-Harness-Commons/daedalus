@@ -3,7 +3,6 @@
 import os
 import sys
 from pathlib import Path
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -101,29 +100,25 @@ def test_transient_sharing_violation_is_retried_until_it_clears(tmp):
     assert attempts == [(src, dst)] * 3, attempts
     assert dst.read_bytes() == payload
 
+    for error_type, errno, budget in (
+            (OSError, 30, 1), (PermissionError, 13, 5)):
+        src.write_bytes(b'never published')
+        dst.unlink(missing_ok=True)
 
-def test_errors_retrying_cannot_fix_surface_on_the_first_attempt(tmp):
-    module = _fresh_module()
-    src = Path(tmp) / 'incoming'
-    dst = Path(tmp) / 'live.json'
-    payload = b'never published through a read-only refusal'
-    src.write_bytes(payload)
-    attempts = []
+        def refused(src, dst, fault=error_type, code=errno):
+            raise fault(code, 'injected refusal')
 
-    def read_only(src, dst):
-        attempts.append((src, dst))
-        raise OSError(30, 'injected read-only refusal')
+        module.os = _PublishSpy(refused)
+        attempts = module.os.calls
+        raised = None
+        try:
+            module.replace_atomically(src, dst)
+        except OSError as error:
+            raised = error
 
-    module.os = _PublishSpy(read_only)
-    raised = None
-    try:
-        module.replace_atomically(src, dst)
-    except OSError as error:
-        raised = error
-
-    assert isinstance(raised, OSError), raised
-    assert attempts == [(src, dst)], attempts
-    assert not dst.exists()
+        assert isinstance(raised, error_type), raised
+        assert attempts == [(src, dst)] * budget, attempts
+        assert not dst.exists()
 
 
 def test_the_recorder_accepts_the_keyword_call_form(tmp):
@@ -137,32 +132,6 @@ def test_the_recorder_accepts_the_keyword_call_form(tmp):
 
     assert spy.calls == [(src, dst)], spy.calls
     assert dst.read_bytes() == payload
-
-
-def test_a_refusal_that_never_clears_costs_the_whole_attempt_budget(tmp):
-    module = _fresh_module()
-    src = Path(tmp) / 'incoming'
-    dst = Path(tmp) / 'live.json'
-    src.write_bytes(b'never published')
-    attempts = []
-
-    def always_refused(src, dst):
-        attempts.append((src, dst))
-        raise PermissionError(13, 'injected sharing violation')
-
-    with mock.patch.object(module.os, 'replace', always_refused):
-        raised = None
-        try:
-            module.replace_atomically(src, dst)
-        except PermissionError as error:
-            raised = error
-
-    assert isinstance(raised, PermissionError), raised
-    # A literal, not the constant the subject reads: reading `_RETRY_ATTEMPTS`
-    # off the module moves both sides of this comparison together, so a plant
-    # that changes the constant passes a test written to police it.
-    assert len(attempts) == 5, attempts
-    assert not dst.exists()
 
 
 def test_unlink_retries_a_transient_refusal_then_removes_the_file(tmp):

@@ -86,27 +86,15 @@ def test_an_exhausted_write_retry_still_answers_500(tmp):
         assert dirty_path.is_file(), 'refused publish must leave its mark'
 
 
-def test_mint_record_write_retries_transient_refusal(tmp):
-    """One refused record write retries, and the mint still succeeds."""
-    with _bridge_with(tmp, (
-            '_refused = [True]\n'
-            'def _refuse_one_record_write(path, data, **kw):\n'
-            '    if path.name.endswith(".json.tmp") and _refused[0]:\n'
-            '        _refused[0] = False\n'
-            f'        raise {_REFUSAL}\n'
-            '    return _real_write_text(path, data, **kw)\n'
-            'pathlib.Path.write_text = _refuse_one_record_write\n')) as (
-            base, docroot):
-        job = seg_job()
-        status, body = mint_job(base, TOK, job)
-        assert status == 200 and body.get('sig'), (status, body)
-        record_path = Path(docroot) / 'segments' / f'{job}.json'
-        record = json.loads(record_path.read_text(encoding='utf-8'))
-        assert record['sig'] == body['sig'], (record, body)
-
-
 def test_legacy_mint_record_write_retries_transient_refusal(tmp):
     """The same retry covers the legacy-record upgrade write on a resume."""
+    for legacy in (False, True):
+        case = Path(tmp) / str(legacy)
+        case.mkdir()
+        _mint_record_retry(case, legacy)
+
+
+def _mint_record_retry(tmp, legacy):
     with _bridge_with(tmp, (
             '_refused = [True]\n'
             'def _refuse_one_record_write(path, data, **kw):\n'
@@ -117,19 +105,25 @@ def test_legacy_mint_record_write_retries_transient_refusal(tmp):
             'pathlib.Path.write_text = _refuse_one_record_write\n'), {
             'DAEDALUS_MAX_SEGMENT_INDEX': '10',
             'DAEDALUS_MAX_SEGMENTS_PER_JOB': '3',
-            'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '5'}) as (base, docroot):
+            'DAEDALUS_MAX_SEGMENT_JOB_SIZE': '5'} if legacy else None) as (
+            base, docroot):
         job = seg_job()
         sig = 'legacy-capability'
         seg_root = Path(docroot) / 'segments'
-        seg_dir = seg_root / job
-        seg_dir.mkdir()
-        (seg_dir / '000000.ts').write_bytes(b'abc')
         record_path = seg_root / f'{job}.json'
-        record_path.write_text(json.dumps({'token': TOK, 'sig': sig}))
+        if legacy:
+            seg_dir = seg_root / job
+            seg_dir.mkdir()
+            (seg_dir / '000000.ts').write_bytes(b'abc')
+            record_path.write_text(json.dumps({'token': TOK, 'sig': sig}))
         status, body = mint_job(base, TOK, job)
-        assert status == 200 and body['sig'] == sig, (status, body)
+        assert status == 200 and body.get('sig'), (status, body)
+        if legacy:
+            assert status == 200 and body['sig'] == sig, (status, body)
         record = json.loads(record_path.read_text(encoding='utf-8'))
-        assert record['max_segment_index'] == 10, record
+        assert record['sig'] == body['sig'], (record, body)
+        if legacy:
+            assert record['max_segment_index'] == 10, record
 
 
 def test_usage_record_write_retries_transient_refusal(tmp):

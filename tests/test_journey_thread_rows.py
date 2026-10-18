@@ -256,19 +256,7 @@ def test_self_totals_sum_to_the_summary_and_calls_cost_lands_nowhere(tmp):
         {'fn': 'gamma', 'ir': 10}], mixed
     assert sum(f['ir'] for f in mixed['functions']) == 86, mixed
 
-
-def test_self_totals_reconcile_on_the_shapes_a_real_profile_carries(tmp):
-    """The numeric control over the shapes a REAL profile writes, recorded
-    from the harvested CI profiles: relative positions (`+1 2`, `-1 21`),
-    the trailing-space signed `calls=`, `*`-position arcs, a bare
-    `fn=(id)` re-select, and the thread-entry chain whose arc carries the
-    thread's inclusive cost. Every cost line here is either self or the
-    arc it follows, so the totals sum to the file's own `summary:` and
-    `totals:` lines -- where the walk that matched neither spelling
-    billed each arc to the caller that drew it, which on the harvest put
-    a whole thread's cost on `clone` alone."""
-    functions = functions_module()
-    _profile_file(tmp, 'callgrind.x.4', (
+    _profile_file(tmp, 'callgrind.x.4.1', (
         'version: 1\npid: 21\npart: 1\nthread: 3\n'
         'cmd:  python3 server.py\npositions: line\nevents: Ir\n'
         'summary: 3106\n'
@@ -302,7 +290,7 @@ def test_self_totals_reconcile_on_the_shapes_a_real_profile_carries(tmp):
         'fn=(4)\n'
         '0 8\n'
         'totals: 3106\n'))
-    rows = functions.read(Path(tmp), 'callgrind.x')
+    rows = functions.read(Path(tmp), 'callgrind.x.4')
     assert len(rows) == 1, rows
     row = rows[0]
     assert row['pid'] == 21 and row['thread'] == 3 and (
