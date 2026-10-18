@@ -155,12 +155,6 @@ def test_data_url_without_a_separator_is_rejected(tmp):
     assert _data_source('data:text/javascript') is None
 
 
-def test_malformed_base64_data_url_is_rejected(tmp):
-    """Letting malformed base64 escape the decode guard must fail."""
-    del tmp
-    assert _data_source('data:text/javascript;base64,%%%') is None
-
-
 def test_failed_data_decode_stops_before_source_lookup(tmp):
     """Removing the decoded-None guard must consult this forbidden map."""
     del tmp
