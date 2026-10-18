@@ -136,31 +136,53 @@ def test_an_invented_entry_for_an_untracked_path_is_red(tmp):
     assert 'named but not tracked' in verdict.detail, verdict.detail
 
 
+def test_a_reordering_of_two_entries_is_red(tmp):
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py', 'c.py'))
+    _edit_ignore(repo, (f'{PREFIX}a.py\n{PREFIX}b.py\n',
+                        f'{PREFIX}b.py\n{PREFIX}a.py\n'), 'swap a and b')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
+
+
 def test_a_swapped_whole_block_is_red(tmp):
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'd/x.py', 'e/y.py'))
     first = (f'{BLOCK}d ───\n{PREFIX}d/\n{PREFIX}d/x.py\n'
              f'\n{BLOCK}e ───\n{PREFIX}e/\n{PREFIX}e/y.py\n')
     second = (f'{BLOCK}e ───\n{PREFIX}e/\n{PREFIX}e/y.py\n'
               f'\n{BLOCK}d ───\n{PREFIX}d/\n{PREFIX}d/x.py\n')
-    cases = (
-        (('a.py', 'd/x.py', 'e/y.py'), (first, second),
-         'swap the d and e blocks whole'),
-        (('a.py', 'b.py', 'c.py'),
-         (f'{PREFIX}a.py\n{PREFIX}b.py\n',
-          f'{PREFIX}b.py\n{PREFIX}a.py\n'), 'swap a and b'),
-        (('a.py', 'b.py'), ('\n*\n', '\n'), 'drop the deny rule'),
-        (('a.py', 'b.py'),
-         (f'\n{PREFIX}b.py\n', f'\n\n{PREFIX}b.py\n'),
-         'a stray blank line inside a block'),
-        (('a.py', 'b.py'), (f'{PREFIX}b.py\n', f'{PREFIX}b.py \n'),
-         'a trailing space on an entry'),
-        (('a.py', 'd/x.py'), (f'{PREFIX}d/\n', ''),
-         'drop the directory re-open'),
-    )
-    for index, (files, replacement, message) in enumerate(cases):
-        repo = _fixture_repo(Path(tmp) / str(index), files)
-        _edit_ignore(repo, replacement, message)
-        verdict = control(repo)
-        assert verdict.status == 'red', verdict.detail
+    _edit_ignore(repo, (first, second), 'swap the d and e blocks whole')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
+
+
+def test_a_missing_deny_rule_is_red(tmp):
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py'))
+    _edit_ignore(repo, ('\n*\n', '\n'), 'drop the deny rule')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
+
+
+def test_a_stray_blank_line_is_red(tmp):
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py'))
+    _edit_ignore(repo, (f'\n{PREFIX}b.py\n', f'\n\n{PREFIX}b.py\n'),
+                 'a stray blank line inside a block')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
+
+
+def test_a_trailing_space_on_an_entry_is_red(tmp):
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py'))
+    _edit_ignore(repo, (f'{PREFIX}b.py\n', f'{PREFIX}b.py \n'),
+                 'a trailing space on an entry')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
+
+
+def test_a_dropped_directory_reopen_is_red(tmp):
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'd/x.py'))
+    _edit_ignore(repo, (f'{PREFIX}d/\n', ''), 'drop the directory re-open')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
 
 
 def test_a_missing_ignore_file_is_red(tmp):

@@ -367,8 +367,6 @@ def test_do_fetch_timings_renders_a_failed_entry_in_its_own_columns(tmp):
         f'GET    ERR{ERR_GAP}5  '
         'https://cdn.example.com/bad.ts (net::ERR_ABORTED)\n'), repr(out)
 
-    row = (f'GET    ERR{ERR_GAP}5  '
-           'https://cdn.example.com/bad.ts (net::ERR_ABORTED)\n')
     _recorded, out = run_cli(
         ['fetch-timings'], [_timings(ABORTED, ABORTED)],
         module=commands_browser,
