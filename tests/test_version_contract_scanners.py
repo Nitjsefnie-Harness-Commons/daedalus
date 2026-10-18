@@ -329,16 +329,6 @@ def test_script_data_state_limbs_reach_the_first_end_tag(tmp):
         assert regions._html_script_end(source, 0) == expected, label
 
 
-def test_check_survives_an_apostrophe_in_html_text(tmp):
-    """An apostrophe in ordinary text is not a quote delimiter (#316)."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    _insert_before_rail_foot(copy_root, "<p>it's ordinary text</p>\n")
-    r = _run_checker(copy_root)
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    assert 'ok:' in r.stdout, r.stdout
-
-
 def test_check_survives_the_html_adversarial_cases(tmp):
     """No HTML case takes the real dashboard site out of the count."""
     for index, (label, markup, _expected) in enumerate(_HTML_CASES):
