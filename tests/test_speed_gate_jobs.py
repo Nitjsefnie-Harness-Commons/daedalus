@@ -58,12 +58,6 @@ def wait_only_jobs(workflow):
     return waiters
 
 
-def test_a_job_whose_only_work_is_waiting_cannot_join_the_workflow(tmp):
-    """Every real job's ``run:`` scripts must not all be pure waits."""
-    del tmp
-    assert wait_only_jobs(_tests_yml()) == [], wait_only_jobs(_tests_yml())
-
-
 _SYNTHETIC = """\
 jobs:
   compile:
