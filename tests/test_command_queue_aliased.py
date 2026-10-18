@@ -181,6 +181,9 @@ def test_poll_answers_the_command_when_the_file_will_not_unlink(tmp):
 
 def test_poll_refuses_a_legacy_name_that_leaves_the_root(tmp):
     service = _load_service('aliased_poll_escape')
+    answer = service.poll_legacy(Path(tmp), 'ba..d')
+    assert answer == (400, {'error': 'invalid path component'}), answer
+
     outside = Path(tmp).parent / 'poll-escape-payload.json'
     _write_command(outside, 'outside-payload')
     link = Path(tmp) / 'tok.json'

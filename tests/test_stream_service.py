@@ -470,14 +470,6 @@ def test_poll_answers_empty_for_a_missing_or_malformed_file(tmp):
     assert path.exists(), path
 
 
-def test_poll_refuses_an_unsafe_token_name(tmp):
-    svc = _load_service('stream_service_poll_unsafe')
-
-    answer = svc.poll_legacy(Path(tmp), 'ba..d')
-
-    assert answer == (400, {'error': 'invalid path component'}), answer
-
-
 def test_the_delivered_queue_line_carries_no_full_token(tmp):
     """The queue name is <token>_<tab>: the delivery line may not spell it.
 
