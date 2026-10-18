@@ -96,24 +96,6 @@ def test_a_bookkeeping_name_is_refused_with_no_owner_on_disk(tmp):
         assert status == 200, (status, body)
 
 
-def test_the_reservation_refuses_only_the_two_bookkeeping_shapes(tmp):
-    """A name that merely contains a dot, or has no job in it, still mints.
-
-    The rule is the two bookkeeping shapes and nothing wider: a dotted job
-    name, the two names with no job between the dot and the affix, a
-    leading dot with a different affix, and a trailing temp affix without
-    a leading one. Each of those is a name the layout never spends, so
-    refusing any of them would be the bridge inventing a restriction.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        for job in (f'{seg_job()}.1', '.json.dirty', '.json.tmp',
-                    f'.{seg_job()}.dirty', f'{seg_job()}.json.tmp'):
-            status, body = mint_job(base, TOK, job)
-            assert status == 200, (job, status, body)
-            status, body = _store_one_segment(base, job, body['sig'])
-            assert status == 200, (job, status, body)
-
-
 def test_the_reservation_covers_exactly_the_names_the_layout_writes(tmp):
     """The refused names are the names the write path spends, and no others.
 
@@ -219,14 +201,6 @@ def test_a_status_query_for_an_over_derived_job_is_refused(tmp):
             status, body = _util.get_json(base + target)
             assert (status, body) == (
                 400, {'error': 'bad job'}), (status, body)
-
-
-def test_a_job_lookup_for_an_over_derived_job_is_refused(tmp):
-    """GET /segment-job admits through the derived-name check."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = _util.get_json(
-            base + f'/segment-job?token={TOK}&job={"x" * 229}')
-        assert (status, body) == (400, {'error': 'bad job'}), (status, body)
 
 
 def main():

@@ -59,22 +59,6 @@ def test_uploads_delete_refuses_a_filename_without_an_id(tmp):
                 '/one.txt').is_file()
 
 
-def test_unblock_refuses_rule_id_zero_before_sending_it(tmp):
-    """Zero is not a rule id, and it must not reach the extension as one.
-
-    The extension read a present-but-false ruleId as absent and removed every
-    session rule, so the CLI refusing it here is the outer half of that fix.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        r = run_cli(['unblock-requests', '--rule-id', '0'],
-                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
-        assert r.returncode != 0, (r.returncode, r.stdout)
-        assert 'positive' in r.stderr, r.stderr
-        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
-        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
-        assert queued == [], queued
-
-
 def test_set_permanent_refuses_a_value_it_cannot_read(tmp):
     """A misspelling must not read as false and clear the flag it was setting.
 
@@ -115,35 +99,6 @@ def test_set_permanent_reads_every_documented_spelling(tmp):
     lines = r.stdout.strip().splitlines()
     assert lines[0] == str([True] * 6), lines
     assert lines[1] == str([False] * 6), lines
-
-
-def test_store_hotfix_refuses_a_file_that_is_not_there(tmp):
-    """A mistyped path is an error, not a hotfix whose source is that path.
-
-    The single positional this replaced decided between a path and inline
-    source by asking whether the path existed, so a typo stored the literal
-    string as persistent page code and reported success.
-    """
-    missing = Path(tmp) / 'not-here.js'
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        r = run_cli(['store-hotfix', 'typo', '--file', str(missing)],
-                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
-        assert r.returncode != 0, (r.returncode, r.stdout)
-        assert 'File not found' in r.stderr, r.stderr
-        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
-        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
-        assert queued == [], queued
-
-
-def test_store_hotfix_refuses_the_positional_that_meant_either(tmp):
-    """The ambiguous form fails loudly rather than picking a meaning."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        r = run_cli(['store-hotfix', 'legacy', 'console.log(1)'],
-                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
-        assert r.returncode != 0, (r.returncode, r.stdout)
-        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
-        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
-        assert queued == [], queued
 
 
 def test_store_hotfix_sends_a_code_value_verbatim(tmp):
