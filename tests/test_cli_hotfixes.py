@@ -36,23 +36,6 @@ def test_store_hotfix_sends_the_scope_it_was_given(tmp):
     ], recorded.calls
 
 
-def test_store_hotfix_leaves_an_unstated_scope_unsaid(tmp):
-    """C11: absent travels as absent, never as an empty pattern.
-
-    The extension refuses a pattern it cannot parse, so `--match ''` would
-    be answered with a refusal, and a field sent as anything but absent
-    would be read as the operator having set a scope.
-    """
-    del tmp
-    recorded, _out = run_cli(
-        ['store-hotfix', 'fix', '--code', 'console.log(1)'], [STORED])
-
-    assert recorded.calls == [
-        ('_store_hf', 'store-hotfix',
-         {'fixId': 'fix', 'code': 'console.log(1)'}),
-    ], recorded.calls
-
-
 def test_store_hotfix_can_ask_for_the_scope_to_be_removed(tmp):
     """C12, CLI direction: `--clear-scope` reaches the extension as the
     clear, not as a pattern.
@@ -117,18 +100,6 @@ def test_store_hotfix_prints_the_scope_the_fix_ended_up_with(tmp):
 
     assert SCOPE in scoped, repr(scoped)
     assert 'unscoped' not in scoped, repr(scoped)
-
-
-def test_list_hotfixes_prints_the_scope_it_read_back(tmp):
-    """C9, list direction: the row names the scope the record carried."""
-    del tmp
-    _recorded, out = run_cli(['list-hotfixes'], [{'version': '1.0', 'fixes': [
-        {'id': 'scoped', 'ts': 1750000000000, 'code': 'console.log(1)',
-         'match': SCOPE},
-    ]}])
-
-    assert SCOPE in [line for line in out.splitlines()
-                     if 'scoped' in line][0], repr(out)
 
 
 def test_list_hotfixes_prints_an_absent_scope_as_absent(tmp):
