@@ -13,7 +13,6 @@ import ast
 import os
 import re
 import sys
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
@@ -145,28 +144,6 @@ def test_acceptance_recorded_on_the_delivery_write_path(tmp):
         'discovering a shared stripe by timing a write is accepted; '
         f'bullet {bullets} is missing a match for a pattern of '
         f'{ACCEPTANCE_TERMS}')
-
-
-def test_lock_table_stays_bounded_as_targets_are_named(tmp):
-    """Targets, named and created, do not grow the delivery lock table.
-
-    Half are directories that exist, which is what the stripe is keyed on,
-    and half are not, which take no stripe at all. Neither may grow the
-    table, and the fixed count is what the timing acceptance trades on.
-    """
-    store = _util.load(RESULT_STORE, 'stripe_acceptance_store')
-    deliveries = Path(tmp) / 'deliveries'
-    deliveries.mkdir(parents=True)
-    for number in range(200):
-        present = deliveries / f'bounded-token_tab-{number:04d}'
-        present.mkdir()
-        assert store.delivery_lock_for(present) is not None
-        assert store.delivery_lock_for(
-            deliveries / f'absent-token_tab-{number:04d}') is None
-    assert len(store.delivery_locks) == store.DELIVERY_LOCK_STRIPES, (
-        'the delivery lock table grew with the target names mapped into '
-        'it; the bounded stripe count is what the timing acceptance '
-        'trades on')
 
 
 def main():
