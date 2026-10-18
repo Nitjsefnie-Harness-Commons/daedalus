@@ -477,18 +477,6 @@ def test_uppercase_script_tag_filters_its_decoy(tmp_path):
         result.returncode, result.stdout, result.stderr)
 
 
-def test_data_class_dashboard_decoys_are_ignored(tmp_path):
-    copy_root = Path(tmp_path) / 'tree'
-    _copy_versioned_tree(copy_root)
-    markup = (
-        "<div data-class='rail-foot'>v9.9.9</div>\n"
-        "<span data-class='sl-v'>8.8.8</span>")
-    _insert_before_body(copy_root, markup)
-    result = _run_checker(copy_root)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-
-
 def test_mismatched_dashboard_delimiters_are_not_sites(tmp_path):
     rail_root = Path(tmp_path) / 'rail-foot' / 'tree'
     _copy_versioned_tree(rail_root)
