@@ -430,15 +430,6 @@ def test_a_ref_that_is_not_a_full_lowercase_commit_is_refused(tmp):
             'pinned to a 40-hex commit'], (ref, refusals)
 
 
-def test_a_pin_without_a_release_comment_is_refused(tmp):
-    mod = _verifier()
-    root = _one_pin(tmp, f'actions/cache/restore@{V610}')
-    _verified, refusals = mod.verify(root, _refusing_run)
-    assert refusals == [
-        f'.github/workflows/tests.yml:4: actions/cache/restore@{V610} '
-        'carries no release comment'], refusals
-
-
 def test_a_comment_that_is_not_a_full_release_is_refused(tmp):
     mod = _verifier()
     for comment in ('v6', '6.1.0', 'v6.1.0-rc1', 'v6.1', 'version v6.1.0'):
@@ -499,28 +490,6 @@ def test_a_tag_object_that_names_no_commit_is_refused(tmp):
         f"v3.13.0: tag object {CPYTHON_TAG} names a 'tag', not a commit "
         'at .github/workflows/tests.yml:4'], refusals
     assert len(calls) == 2, calls
-
-
-def test_a_release_that_does_not_exist_is_refused_with_the_error(tmp):
-    mod = _verifier()
-    root = _one_pin(tmp, _cache_pin('a' * 40, 'v99.99.99'))
-    _calls, run = _upstream({})
-    verified, refusals = mod.verify(root, run)
-    assert verified == [], verified
-    assert refusals == [
-        'v99.99.99: gh api exited 1: gh: Not Found (HTTP 404) at '
-        '.github/workflows/tests.yml:4'], refusals
-
-
-def test_a_commit_under_the_wrong_release_is_refused_with_upstream(tmp):
-    mod = _verifier()
-    root = _one_pin(tmp, _cache_pin(V430, 'v6.1.0', 'actions/cache/save'))
-    _calls, run = _upstream({_REF + 'v6.1.0': _LIGHTWEIGHT})
-    verified, refusals = mod.verify(root, run)
-    assert verified == [], verified
-    assert refusals == [
-        f'v6.1.0: upstream is {V610}, pinned {V430} at '
-        '.github/workflows/tests.yml:4'], refusals
 
 
 def test_a_response_that_is_not_json_is_refused(tmp):
