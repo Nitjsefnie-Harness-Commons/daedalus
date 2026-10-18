@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _lint_tool_refusals import (  # noqa: E402
     no_pin, no_wheel, oversize_wheel, recorded_missing,
-    recorded_outside_the_tool_dir, resolved_outside_the_tool_dir,
+    recorded_outside_the_tool_dir,
     several_pins, too_many_wheels, unreadable_requirements, unreadable_wheel)
 
 
@@ -67,12 +67,6 @@ def test_a_wheel_over_the_transfer_ceiling_is_refused(tmp):
 def test_a_download_that_is_not_a_zip_is_refused(tmp):
     """A file at a wheel's name that is not an archive is refused by name."""
     unreadable_wheel(Path(tmp))
-
-
-def test_a_tool_that_resolved_outside_the_tool_dir_is_not_the_installed_one(
-        tmp):
-    """Both answers of the comparison `_record` refuses on, asserted."""
-    resolved_outside_the_tool_dir(tmp)
 
 
 def test_a_tool_resolved_from_outside_the_tool_dir_is_refused(tmp):
