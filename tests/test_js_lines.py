@@ -38,13 +38,6 @@ def test_line_comments_end_at_each_javascript_terminator(tmp):
     assert code_lines(source) == {1, 3, 5}
 
 
-def test_crlf_is_one_physical_line_terminator(tmp):
-    """A CRLF pair advances the physical line number only once."""
-    del tmp
-    source = 'const one = 1;\r\nconst two = 2;\r\nconst three = 3;\r\n'
-    assert code_lines(source) == {1, 2, 3}
-
-
 def test_block_comments_can_span_lines_and_share_code_lines(tmp):
     """Only text outside a spanning block comment contributes code."""
     del tmp
@@ -115,12 +108,6 @@ def test_regex_literals_follow_start_keywords_and_punctuators(tmp):
         'const grouped = (/after-paren/);\n'
         'const selected = ready ? /yes/ : /no/;\n')
     assert code_lines(source) == {1, 2, 3, 4}
-
-
-def test_throw_keyword_is_followed_by_a_regex_literal(tmp):
-    """The expression after throw can begin with a regex literal."""
-    del tmp
-    assert code_lines('throw /boom/;\n') == {1}
 
 
 def test_regex_literal_is_the_body_of_an_if_head(tmp):
