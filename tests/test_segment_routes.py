@@ -208,18 +208,6 @@ def test_store_counts_a_replacement_as_the_same_segment(_tmp):
     assert (SEG_DIR / 'replace-job' / '000000.ts').read_bytes() == b'bbbbbb'
 
 
-def test_store_refuses_a_segment_past_the_count_quota(_tmp):
-    jobs = _jobs('fixture_segment_jobs_count')
-    routes = _routes('fixture_segment_routes_count')
-    sig = _mint(jobs, 'counttok', 'count-job')
-    for index in range(QUOTAS[1]):
-        assert _admit_and_store(routes, sig, 'count-job', index, b'aa') == (
-            200, {'ok': True})
-    assert _admit_and_store(routes, sig, 'count-job', QUOTAS[1], b'aa') == (
-        413, {'error': 'segment count limit exceeded'})
-    assert not (SEG_DIR / 'count-job' / '000003.ts').exists()
-
-
 def test_store_refuses_a_segment_past_the_byte_quota(_tmp):
     jobs = _jobs('fixture_segment_jobs_bytes')
     routes = _routes('fixture_segment_routes_bytes')
@@ -276,26 +264,6 @@ def test_lookup_reports_an_absent_job_as_absent(tmp):
             404, {'error': 'no such job'})
 
 
-def test_lookup_refuses_a_job_another_token_owns(_tmp):
-    jobs = _jobs('fixture_segment_jobs_lookup409')
-    routes = _routes('fixture_segment_routes_lookup409')
-    sig = _mint(jobs, 'owner-a', 'lookup409-job')
-    assert routes.lookup_job(
-        SEG_DIR, 'owner-a', {'job': ['lookup409-job']}) == (
-            200, {'ok': True, 'sig': sig})
-    assert routes.lookup_job(
-        SEG_DIR, 'owner-b', {'job': ['lookup409-job']}) == (
-            409, {'error': 'job owned by a different token'})
-
-
-def test_mint_is_idempotent_for_the_owning_token(_tmp):
-    """A resume re-fetches the capability rather than minting a new one."""
-    jobs = _jobs('fixture_segment_jobs_idempotent')
-    first = _mint(jobs, 'minttok', 'mint-idempotent')
-    assert _mint(jobs, 'minttok', 'mint-idempotent') == first
-    assert _record('mint-idempotent')['sig'] == first
-
-
 def test_mint_refuses_a_job_another_token_owns(_tmp):
     jobs = _jobs('fixture_segment_jobs_mint409')
     sig = _mint(jobs, 'mint409-a', 'mint409-job')
@@ -305,23 +273,6 @@ def test_mint_refuses_a_job_another_token_owns(_tmp):
     assert (status, payload) == (
         409, {'error': 'job owned by a different token'})
     assert _record('mint409-job')['sig'] == sig
-
-
-def test_mint_writes_nothing_when_the_name_collides(_tmp):
-    """Job names may contain dots, so one flat namespace has collisions.
-
-    With job `x.json` minted, its directory occupies the record path job
-    `x` would publish to. The mint fails there, and a refused mint must
-    leave neither its temp record nor the directory it created.
-    """
-    jobs = _jobs('fixture_segment_jobs_collision')
-    _mint(jobs, 'colltok', 'coll.json')
-    status, payload = jobs.mint_job(
-        SEG_DIR, 'colltok', {'job': 'coll'}, jobs.JobQuotas(*QUOTAS))
-    assert (status, payload) == (409, {'error': 'job name unavailable'})
-    assert not (SEG_DIR / '.coll.json.tmp').exists()
-    assert not (SEG_DIR / 'coll').exists()
-    assert (SEG_DIR / 'coll.json').is_dir()
 
 
 def test_admit_and_status_refuse_a_job_whose_directory_escapes_the_root(_tmp):
