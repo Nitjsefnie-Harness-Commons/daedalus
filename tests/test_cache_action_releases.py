@@ -136,76 +136,6 @@ def test_every_cache_family_pin_shape_is_recognised(tmp):
     ], pins
 
 
-def test_a_comment_inside_a_folded_scalar_is_content_and_refused(tmp):
-    """Inside a block scalar `#` is content: YAML hands GitHub the whole
-    line as the reference."""
-    mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n  j:\n    steps:\n'
-        '      - uses: >-\n'
-        f'          actions/cache/save@{V610}  # v6.1.0\n'))
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        '.github/workflows/tests.yml:4: uses value cannot be classified: '
-        f"'>-' then 'actions/cache/save@{V610}  # v6.1.0'"], refusals
-
-
-def test_a_folded_scalar_that_keeps_going_is_refused(tmp):
-    mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n  j:\n    steps:\n'
-        '      - uses: >-  # v6.1.0\n'
-        f'          actions/cache/save@{V610}\n'
-        '          and-more\n'))
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        '.github/workflows/tests.yml:4: uses value cannot be classified: '
-        f"'>-  # v6.1.0' then 'actions/cache/save@{V610}'"], refusals
-
-
-def test_a_pin_continued_from_an_empty_uses_line_is_refused(tmp):
-    """`uses:` then a deeper line is one plain scalar to YAML."""
-    mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n  j:\n    steps:\n'
-        '      - uses:\n'
-        f'          actions/cache@{V610}  # v6.1.0\n'))
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        '.github/workflows/tests.yml:4: uses value cannot be classified: '
-        f"'' then 'actions/cache@{V610}  # v6.1.0'"], refusals
-
-
-def test_a_line_no_deeper_than_the_key_is_not_block_content(tmp):
-    """A shallower line after an empty block is the next node to YAML,
-    not the reference."""
-    mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n  j:\n    steps:\n'
-        '      - uses: >-  # v6.1.0\n'
-        f'  actions/cache@{V610}:\n'
-        '    runs-on: ubuntu-latest\n'))
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        '.github/workflows/tests.yml:4: uses value cannot be classified: '
-        f"'>-  # v6.1.0' then 'actions/cache@{V610}:'"], refusals
-
-
-def test_a_hash_glued_to_a_quoted_reference_is_not_a_comment(tmp):
-    """A comment needs whitespace before its `#`."""
-    mod = _verifier()
-    root = _one_pin(tmp, f'"actions/cache@{V610}"#v6.1.0')
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        '.github/workflows/tests.yml:4: uses value cannot be classified: '
-        f"'\"actions/cache@{V610}\"#v6.1.0'"], refusals
-
-
 def test_an_unclassifiable_uses_naming_no_cache_action_is_left_alone(tmp):
     """The line grammar leaves it alone and the decoder, reading the
     file, finds the cache pin matched by its own step: no refusal."""
@@ -227,6 +157,14 @@ def test_a_block_header_ending_the_file_is_left_alone(tmp):
     mod = _verifier()
     root = _workflow(
         tmp, 'jobs:\n  j:\n    steps:\n      - uses: >-  # v6.1.0')
+    assert mod.scan(root) == ([], []), mod.scan(root)
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        f'      - uses: actions/cache-warmer@{V610}  # v1.0.0\n'
+        f'      - uses: actions/cachex@{V610}  # v1.0.0\n'
+        f'      - uses: >-  # v1.0.0\n'
+        f'          x/actions/cache@{V610}\n'
+        f'      - uses: actions-cache/restore@{V610}  # v1.0.0\n'))
     assert mod.scan(root) == ([], []), mod.scan(root)
 
 
@@ -260,35 +198,6 @@ def test_a_reference_the_grammar_did_not_account_for_is_refused(tmp):
     assert refusals == [
         f'.github/workflows/tests.yml:{line}: unclassified actions/cache '
         'reference' for line in (6, 7, 8, 10, 11)], refusals
-
-
-def test_a_comment_line_naming_a_reference_is_not_refused(tmp):
-    mod = _verifier()
-    root = _workflow(tmp, _PLAIN + (
-        f'      # - uses: actions/cache@{V610}  # v6.1.0\n'
-        f'#actions/cache/save@{V610}\n'))
-    pins, refusals = mod.scan(root)
-    assert refusals == [], refusals
-    assert len(pins) == 5, pins
-
-
-def test_a_near_name_action_is_neither_a_pin_nor_refused(tmp):
-    mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n  j:\n    steps:\n'
-        f'      - uses: actions/cache-warmer@{V610}  # v1.0.0\n'
-        f'      - uses: actions/cachex@{V610}  # v1.0.0\n'
-        f'      - uses: >-  # v1.0.0\n'
-        f'          x/actions/cache@{V610}\n'
-        f'      - uses: actions-cache/restore@{V610}  # v1.0.0\n'))
-    assert mod.scan(root) == ([], []), mod.scan(root)
-
-
-def test_a_reference_into_the_cache_repository_is_never_silent(tmp):
-    """`actions/cache/` with an empty or unknown subpath is not one of the
-    three actions, and whether GitHub runs it is not this guard's to
-    guess: it is refused, never verified and never skipped."""
-    mod = _verifier()
     for action in ('actions/cache/', 'actions/cache/x', 'Actions/Cache/',
                    'actions/cache/restorer'):
         root = _one_pin(tmp, f'{action}@{V610}  # v1.0.0')
@@ -299,16 +208,14 @@ def test_a_reference_into_the_cache_repository_is_never_silent(tmp):
             'reference'], (action, refusals)
 
 
-def test_the_refusal_filter_matches_the_action_name_case_insensitively(tmp):
+def test_a_comment_line_naming_a_reference_is_not_refused(tmp):
     mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n  j:\n    steps:\n'
-        '      - uses: >-\n'
-        f'          Actions/Cache@{V610}  # v6.1.0\n'))
-    _verified, refusals = mod.verify(root, _refusing_run)
-    assert refusals == [
-        '.github/workflows/tests.yml:4: uses value cannot be classified: '
-        f"'>-' then 'Actions/Cache@{V610}  # v6.1.0'"], refusals
+    root = _workflow(tmp, _PLAIN + (
+        f'      # - uses: actions/cache@{V610}  # v6.1.0\n'
+        f'#actions/cache/save@{V610}\n'))
+    pins, refusals = mod.scan(root)
+    assert refusals == [], refusals
+    assert len(pins) == 5, pins
 
 
 def test_a_workflow_that_is_not_utf8_is_refused_by_path(tmp):
@@ -336,6 +243,67 @@ def test_a_block_header_that_keeps_a_newline_is_refused(tmp):
             '.github/workflows/tests.yml:4: uses value cannot be '
             f"classified: '{header}  # v6.1.0' then 'actions/cache@{V610}'"
         ], (header, refusals)
+    for text, expected in (
+        (
+            'jobs:\n  j:\n    steps:\n'
+            '      - uses: >-\n'
+            f'          actions/cache/save@{V610}  # v6.1.0\n',
+            [
+                '.github/workflows/tests.yml:4: uses value cannot be '
+                'classified: '
+                f"'>-' then 'actions/cache/save@{V610}  # v6.1.0'"],
+        ),
+        (
+            'jobs:\n  j:\n    steps:\n'
+            '      - uses: >-  # v6.1.0\n'
+            f'          actions/cache/save@{V610}\n'
+            '          and-more\n',
+            [
+                '.github/workflows/tests.yml:4: uses value cannot be '
+                'classified: '
+                f"'>-  # v6.1.0' then 'actions/cache/save@{V610}'"],
+        ),
+        (
+            'jobs:\n  j:\n    steps:\n'
+            '      - uses:\n'
+            f'          actions/cache@{V610}  # v6.1.0\n',
+            [
+                '.github/workflows/tests.yml:4: uses value cannot be '
+                'classified: '
+                f"'' then 'actions/cache@{V610}  # v6.1.0'"],
+        ),
+        (
+            'jobs:\n  j:\n    steps:\n'
+            '      - uses: >-  # v6.1.0\n'
+            f'  actions/cache@{V610}:\n'
+            '    runs-on: ubuntu-latest\n',
+            [
+                '.github/workflows/tests.yml:4: uses value cannot be '
+                'classified: '
+                f"'>-  # v6.1.0' then 'actions/cache@{V610}:'"],
+        ),
+        (
+            'jobs:\n  j:\n    steps:\n'
+            f'      - uses: "actions/cache@{V610}"#v6.1.0\n',
+            [
+                '.github/workflows/tests.yml:4: uses value cannot be '
+                'classified: '
+                f"'\"actions/cache@{V610}\"#v6.1.0'"],
+        ),
+        (
+            'jobs:\n  j:\n    steps:\n'
+            '      - uses: >-\n'
+            f'          Actions/Cache@{V610}  # v6.1.0\n',
+            [
+                '.github/workflows/tests.yml:4: uses value cannot be '
+                'classified: '
+                f"'>-' then 'Actions/Cache@{V610}  # v6.1.0'"],
+        ),
+    ):
+        root = _workflow(tmp, text)
+        verified, refusals = mod.verify(root, _refusing_run)
+        assert verified == [], verified
+        assert refusals == expected, refusals
 
 
 def test_an_escaped_reference_is_refused_by_the_decoder_cross_check(tmp):
@@ -353,50 +321,34 @@ def test_an_escaped_reference_is_refused_by_the_decoder_cross_check(tmp):
         assert refusals == [
             f".github/workflows/tests.yml:4: decoded uses '{action}@"
             f"{V610}' matches no recognised pin"], (spelling, refusals)
+    for text, expected in (
+        (
+            'jobs:\n  j:\n    steps:\n'
+            f'      - uses: "actions/cache/x\\x40{V610}"  # v1.0.0\n',
+            [
+                ".github/workflows/tests.yml:4: decoded uses "
+                f"'actions/cache/x@"
+                f"{V610}' matches no recognised pin"],
+        ),
+        (
+            'jobs:\n'
+            '  first:\n    steps:\n'
+            f'      - uses: actions/cache@{V610}  # v6.1.0\n'
+            '  second:\n    steps:\n'
+            f'      - uses: "actions/cache\\x40{V610}"\n'
+            '  third:\n    steps:\n'
+            f'      - uses: "actions/cache\\x40{V610}"\n',
+            [
+                f".github/workflows/tests.yml:{line}: decoded uses "
+                f"'actions/cache@"
+                f"{V610}' matches no recognised pin" for line in (7, 10)],
+        ),
+    ):
+        root = _workflow(tmp, text)
+        verified, refusals = mod.verify(root, _refusing_run)
+        assert verified == [], verified
+        assert refusals == expected, refusals
 
-
-def test_an_escaped_reference_into_a_subpath_is_refused(tmp):
-    mod = _verifier()
-    root = _one_pin(tmp, f'"actions/cache/x\\x40{V610}"  # v1.0.0')
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        f".github/workflows/tests.yml:4: decoded uses 'actions/cache/x@"
-        f"{V610}' matches no recognised pin"], refusals
-
-
-def test_an_escaped_reference_in_any_job_is_cross_checked(tmp):
-    mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n'
-        f'  first:\n    steps:\n      - uses: actions/cache@{V610}  # v6.1.0\n'
-        f'  second:\n    steps:\n      - uses: "actions/cache\\x40{V610}"\n'
-        f'  third:\n    steps:\n      - uses: "actions/cache\\x40{V610}"\n'))
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        f".github/workflows/tests.yml:{line}: decoded uses 'actions/cache@"
-        f"{V610}' matches no recognised pin" for line in (7, 10)], refusals
-
-
-def test_a_reference_split_by_a_quoted_line_continuation_is_refused(tmp):
-    mod = _verifier()
-    root = _workflow(tmp, (
-        'jobs:\n  j:\n    steps:\n'
-        '      - uses: "actions/\\\n'
-        f'          cache@{V610}"  # v6.1.0\n'))
-    verified, refusals = mod.verify(root, _refusing_run)
-    assert verified == [], verified
-    assert refusals == [
-        '.github/workflows/tests.yml: step uses has an unsupported '
-        'multiline scalar'], refusals
-
-
-def test_the_decoder_reads_the_file_past_an_unclassifiable_uses(tmp):
-    """A `uses:` the line grammar cannot classify and leaves alone must
-    not stop the decoder cross-check from seeing the file: an escaped
-    cache pin after it is still refused by its step line."""
-    mod = _verifier()
     checkout = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
     for shape, line in ((f'&co {checkout}  # v7.0.1\n', 5),
                         (f'>-\n          {checkout}\n          and-more\n',
@@ -412,6 +364,19 @@ def test_the_decoder_reads_the_file_past_an_unclassifiable_uses(tmp):
             f".github/workflows/tests.yml:{line}: decoded uses "
             f"'actions/cache@{V610}' matches no recognised pin"
         ], (shape, refusals)
+
+
+def test_a_reference_split_by_a_quoted_line_continuation_is_refused(tmp):
+    mod = _verifier()
+    root = _workflow(tmp, (
+        'jobs:\n  j:\n    steps:\n'
+        '      - uses: "actions/\\\n'
+        f'          cache@{V610}"  # v6.1.0\n'))
+    verified, refusals = mod.verify(root, _refusing_run)
+    assert verified == [], verified
+    assert refusals == [
+        '.github/workflows/tests.yml: step uses has an unsupported '
+        'multiline scalar'], refusals
 
 
 def _one_pin(tmp, uses):
@@ -464,10 +429,6 @@ def test_a_lightweight_tag_verifies_the_commit_it_names(tmp):
     assert refusals == [], refusals
     assert verified == [f'{V610} v6.1.0 5 pin(s)'], verified
     assert calls == [_GH_API + [_REF + 'v6.1.0']], calls
-
-
-def test_an_annotated_tag_is_dereferenced_exactly_once(tmp):
-    mod = _verifier()
     root = _one_pin(tmp, _cache_pin(CPYTHON_COMMIT, 'v3.13.0'))
     calls, run = _upstream({_REF + 'v3.13.0': _ANNOTATED_REF,
                             _TAG + CPYTHON_TAG: _ANNOTATED_TAG})
