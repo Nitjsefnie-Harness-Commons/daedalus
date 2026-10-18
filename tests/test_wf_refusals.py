@@ -42,6 +42,11 @@ def test_a_duplicate_step_key_is_refused(_tmp):
             lambda source=source: step_mappings(source, 'sample')) == DUP + key
 
 
+def test_a_duplicate_step_scalar_mapping_key_is_refused(_tmp):
+    source = STEP_JOB_HEAD + '      - env:\n          F: a\n          F: b\n'
+    assert _value_error(lambda: step_mappings(source, 'sample')) == DUP + 'F'
+
+
 def test_a_duplicate_job_mapping_key_is_refused(_tmp):
     cases = (
         (JOB_HEAD + '    runs-on: a\n    runs-on: b\n', 'runs-on'),
@@ -51,6 +56,16 @@ def test_a_duplicate_job_mapping_key_is_refused(_tmp):
     for source, key in cases:
         assert _value_error(
             lambda source=source: _job(source, 'sample')) == DUP + key
+
+
+def test_a_duplicate_sequence_item_mapping_key_is_refused(_tmp):
+    source = STEP_JOB_HEAD + '      - run: one\n        run: two\n'
+    assert _value_error(lambda: _job(source, 'sample')) == DUP + 'run'
+
+
+def test_a_duplicate_flow_mapping_key_is_refused(_tmp):
+    source = JOB_HEAD + '    env: {FOO: a, FOO: b}\n'
+    assert _value_error(lambda: _job(source, 'sample')) == DUP + 'FOO'
 
 
 def test_a_duplicate_named_mapping_key_is_refused(_tmp):
@@ -109,6 +124,13 @@ def test_a_step_name_field_written_twice_is_refused(_tmp):
         assert _value_error(
             lambda source=source, name=name: step_scalar(
                 source, 'sample', name, 'if')) == DUP + key
+
+
+def test_a_step_scalar_written_inline_and_nested_is_refused(_tmp):
+    source = (STEP_JOB_HEAD + '      - if: a\n        name: x\n'
+              '        if:\n          b\n')
+    assert _value_error(
+        lambda: step_scalar(source, 'sample', 'x', 'if')) == DUP + 'if'
 
 
 def main():

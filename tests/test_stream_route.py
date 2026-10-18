@@ -11,13 +11,14 @@ import threading
 
 from pathlib import Path
 import sys
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 
-def _load_route(name):
+def _load_route(name) -> Any:
     return _util.load(
         _util.ROOT / 'daedalus_bridge' / 'stream_route.py', name=name)
 
