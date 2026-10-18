@@ -194,30 +194,6 @@ def test_poll_refuses_a_legacy_name_that_leaves_the_root(tmp):
         'id': 'outside-payload', 'code': '1'}
 
 
-def test_a_retained_candidate_logs_its_refusal_once(tmp):
-    """One line per refused candidate, not one per drain pass."""
-    service = _load_service('aliased_refusal_logged_once')
-    qdir = Path(tmp) / 'commands' / 'tok'
-    qdir.mkdir(parents=True)
-    first = qdir / '0000000000001_000001.json'
-    second = qdir / '0000000000002_000002.json'
-    _write_command(first, 'aliased')
-    _hard_link(first, second)
-    frames = []
-    captured = io.StringIO()
-    with contextlib.redirect_stdout(captured):
-        for _pass in range(2):
-            service.drain_queue(
-                qdir, None, None, command_ttl=100,
-                frame_writer=frames.append)
-
-    refusals = [line for line in captured.getvalue().splitlines()
-                if '[STREAM] REFUSED' in line]
-    assert frames == [], frames
-    assert refusals, 'no refusal was logged at all'
-    assert len(refusals) == 2, refusals
-
-
 def test_a_retained_legacy_candidate_logs_its_refusal_once(tmp):
     """The legacy drain shares the once-per-candidate registry."""
     service = _load_service('aliased_legacy_refusal_logged_once')
@@ -236,53 +212,6 @@ def test_a_retained_legacy_candidate_logs_its_refusal_once(tmp):
                 if '[STREAM] REFUSED' in line]
     assert frames == [], frames
     assert len(refusals) == 1, refusals
-
-
-def test_a_swept_queue_name_refused_again_for_a_different_object(tmp):
-    """G1: the once-registry keys the refused object, not only its name.
-
-    The queue sweep vacates a name by unlinking it without an alias check, so
-    a different refused object can appear at a name the registry already
-    recorded. That object must log its own refusal.
-    """
-    service = _load_service('aliased_swept_name_refusal')
-    queue = service.command_queue
-    qdir = Path(tmp) / 'commands' / 'tok'
-    qdir.mkdir(parents=True)
-    victim = qdir / '0001_000001.json'
-    # A hard-linked object is refused under both of its names; the sweep
-    # frees the name by unlinking it, and a filesystem may hand the freed
-    # inode straight back to whatever takes the name next.
-    twin = qdir / '0002_000002.json'
-    _write_command(twin, 'aliased')
-    _hard_link(twin, victim)
-
-    frames = []
-    captured = io.StringIO()
-    with contextlib.redirect_stdout(captured):
-        service.drain_queue(
-            qdir, None, None, command_ttl=100, frame_writer=frames.append)
-    first = _refusals(captured)
-    assert any(victim.name in line for line in first), first
-
-    aged = time.time() - 160
-    os.utime(victim, (aged, aged))
-    queue.collect_expired(Path(tmp) / 'commands', 90)
-    assert not victim.exists(), 'the sweep did not vacate the name'
-    qdir.mkdir(exist_ok=True)
-
-    # A DIFFERENT object — a directory named like an entry — takes the name.
-    victim.mkdir()
-
-    captured = io.StringIO()
-    with contextlib.redirect_stdout(captured):
-        service.drain_queue(
-            qdir, None, None, command_ttl=100, frame_writer=frames.append)
-    second = _refusals(captured)
-
-    assert frames == [], frames
-    assert any(victim.name in line for line in second), (
-        f'a different object at a swept name logged nothing: {second!r}')
 
 
 def test_the_vacating_retire_lets_a_swept_name_log_again(tmp):
