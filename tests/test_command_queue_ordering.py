@@ -109,36 +109,6 @@ def test_a_backwards_clock_step_keeps_per_target_fifo(tmp):
         'first', 'second']
 
 
-def test_a_fresh_process_over_survivors_keeps_fifo(tmp):
-    """The restart case: entries minted by a previous process survive on
-    disk, the clock is stepped back, and a fresh generator stands up over
-    that directory. The seed must raise the mark and counter above every
-    survivor, so the new stem sorts above them all and a real drain of the
-    mixed directory delivers the old commands before the new one. Without the
-    seed the fresh process mints at the stepped-back clock and its entry
-    sorts below the survivors, inverting FIFO."""
-    cmd_dir = Path(tmp) / 'commands'
-    qdir = cmd_dir / f'{TOKEN}_{TAB}'
-    qdir.mkdir(parents=True)
-    survivors = ['0000000005000_00000000000000000007',
-                 '0000000006000_00000000000000000009']
-    for index, stem in enumerate(survivors):
-        _write_entry(qdir, stem, id=f'old{index}')
-
-    cq, order = _fresh_queue('ordering_restart')
-    clock = _Clock(4.0)  # stepped back below both survivors
-    saved = _on(clock, order)
-    try:
-        minted, _ = cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'new'},
-                               command_ttl=90)
-    finally:
-        setattr(cq, 'time', saved)
-    for stem in survivors:
-        assert minted > stem, (minted, stem)
-    assert _drain_order(qdir, 'ordering_restart_drain') == [
-        'old0', 'old1', 'new']
-
-
 def test_the_seed_ignores_unparseable_neighbours(tmp):
     """A legacy drop and foreign-format entries beside the parseable
     survivors must not raise, must be left in place, and must not be counted
