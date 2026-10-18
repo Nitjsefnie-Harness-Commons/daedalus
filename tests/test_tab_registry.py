@@ -100,17 +100,6 @@ def test_refresh_of_an_unknown_tab_publishes_nothing(tmp):
     assert _events(tmp, 'tok') == []
 
 
-def test_replace_publishes_one_synced_event_into_cmd_dir(tmp):
-    reg = _load('fixture_tab_registry_replace_event')
-    synced = reg.replace(tmp, 'tok', {'tabs': [{'tabId': '7'},
-                                               {'tabId': '8'}]})
-    assert synced == (200, {'ok': True, 'count': 2}), synced
-    events = _events(tmp, 'tok')
-    assert len(events) == 1, events
-    assert events[0]['type'] == 'tabs-synced', events[0]
-    assert events[0]['count'] == 2, events[0]
-
-
 def test_replace_answers_the_count_of_the_list_it_wrote(tmp):
     """The count a /sync-tabs caller is answered with, and the count its
     tabs-synced event carries, are the size of the list that caller sent.
