@@ -68,12 +68,6 @@ def test_the_style_joins_the_lines_and_chomping_ends_them(tmp):
         ('|', '  one\n  two', 'one\ntwo'),
         ('|+', '  one\n  two', 'one\ntwo'),
         ('>', '  one\n  two', 'one two'),
-    ])
-
-
-def test_the_content_indent_comes_from_the_header_or_the_first_line(tmp):
-    del tmp
-    _table([
         ('|2', '  one\n   two\n', 'one\n two\n'),
         ('|2-', '  one\n   two\n', 'one\n two'),
         ('|-2', '  one\n   two\n', 'one\n two'),
@@ -83,24 +77,12 @@ def test_the_content_indent_comes_from_the_header_or_the_first_line(tmp):
         ('|', '    one\n     two\n', 'one\n two\n'),
         ('|', '\n  one\n', '\none\n'),
         ('>', '\n\n  one\n', '\n\none\n'),
-    ])
-
-
-def test_blank_and_space_only_lines_decode_by_their_width(tmp):
-    del tmp
-    _table([
         ('|', '  one\n\n  two\n', 'one\n\ntwo\n'),
         ('|+', '\n  one\n\n', '\none\n\n'),
         ('|', '  one\n    \n  two\n', 'one\n  \ntwo\n'),
         ('|', '  one\n  \n  two\n', 'one\n\ntwo\n'),
         ('>', '  one\n    \n  two\n', 'one\n  \ntwo\n'),
         ('>', '  one\n  \n  two\n', 'one\ntwo\n'),
-    ])
-
-
-def test_an_empty_or_blank_only_body_keeps_only_what_chomping_keeps(tmp):
-    del tmp
-    _table([
         ('|', '', ''),
         ('|+', '', ''),
         ('>-', '', ''),
@@ -108,12 +90,6 @@ def test_an_empty_or_blank_only_body_keeps_only_what_chomping_keeps(tmp):
         ('|-', '\n\n', ''),
         ('|+', '\n\n', '\n\n'),
         ('>+', '\n\n', '\n\n'),
-    ])
-
-
-def test_a_folded_block_keeps_the_breaks_it_may_not_fold(tmp):
-    del tmp
-    _table([
         ('>', '  one\n    deep\n  two\n', 'one\n  deep\ntwo\n'),
         ('>', '  one\n    d1\n    d2\n  two\n', 'one\n  d1\n  d2\ntwo\n'),
         ('>2', '   deep\n  one\n', ' deep\none\n'),
@@ -172,19 +148,10 @@ def test_a_step_name_and_id_may_be_written_as_a_block_scalar(tmp):
         ('one\ntwo\n', None)]
     assert _fields(_step('id: >-', '      one\n      two\n')) == [
         (None, 'one two')]
-
-
-def test_a_block_scalar_step_field_does_not_swallow_the_next_field(tmp):
-    """A block on a dash line is indented from the mapping, not the dash."""
-    del tmp
     assert _fields(_step('name: |2', '       one\n', '     id: gate\n')) == [
         ('one\n', 'gate')]
     assert _fields(_step('name: |', '\n', '     id: gate\n')) == [
         ('', 'gate')]
-
-
-def test_a_kept_blank_body_before_another_field_keeps_its_breaks(tmp):
-    del tmp
     assert _fields(_step('name: |+', '\n\n')) == [('\n\n', None)]
 
 

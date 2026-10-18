@@ -50,14 +50,7 @@ def _stored(**over):
 # ── do_store_hotfix ──────────────────────────────────────────────────
 
 def test_store_hotfix_sends_the_code_and_neither_flag_when_none_was_given(tmp):
-    """The bare arm: `fixId` and `code`, and nothing else on the wire.
-
-    `permanent` is absent here rather than sent as `False`, which is the
-    half of the flag control that shows it absent; the `--permanent` test
-    below is the half that shows it present. A handler that sent
-    `permanent: False` on every store would demote every permanent fix an
-    operator updated without restating the flag.
-    """
+    """Pin each flag combination and the populated or defaulted answer."""
     del tmp
     recorded, out = run_cli(
         ['store-hotfix', 'fix', '--code', CODE], [_stored()],
@@ -70,44 +63,25 @@ def test_store_hotfix_sends_the_code_and_neither_flag_when_none_was_given(tmp):
         recorded.calls
     assert out == 'Stored hotfix "fix" [unscoped] (1 total)\n', repr(out)
 
-
-def test_store_hotfix_sends_an_empty_pattern_rather_than_dropping_it(tmp):
-    """`--match ''` puts `'match': ''` on the wire, and no other field.
-
-    The empty string is what separates this guard from a truthiness
-    test: a handler reading `if args.match:` drops the field entirely,
-    the extension is never asked, and the fix is stored unscoped while
-    the operator believes it was scoped. The field set is the whole
-    assertion -- `''` present and nothing beside it -- so a handler that
-    sent the empty pattern but also a flag it was not given fails too.
-
-    The answer is the default record, because that is what the worker
-    sends for any fix it holds without a scope: `hotfixes.js` answers
-    `match: match || null`, and `''` is falsy, so an empty pattern can
-    never come back as an empty pattern. Against the real extension
-    this command does not render at all -- it exits on the worker's
-    refusal -- and that surfacing is `ext_cmd`'s, not this handler's:
-    `invoke.py` raises it, and the harness here rebinds `ext_cmd` itself,
-    so this suite cannot reach it. `tests/test_cli_error_reporting.py`
-    is where a refused command's exit is pinned, and driving the real
-    `ext_cmd` against a live worker is the end-to-end check.
-    """
-    del tmp
-    recorded, out = run_cli(
-        ['store-hotfix', 'fix', '--code', CODE, '--match', ''],
-        [_stored()],
-        plan=[_ext_cmd('_store_hf', 'store-hotfix',
-                       {'fixId': 'fix', 'code': CODE, 'match': ''})],
-        token=TOK)
-
-    assert recorded.calls == [('_store_hf', 'store-hotfix',
-                               {'fixId': 'fix', 'code': CODE,
-                                'match': ''})], recorded.calls
-    # `[unscoped]` and not `[SCOPE]`: the record that comes back carries
-    # no scope, which is the state a refused store leaves nothing of.
-    # The arm that renders a scope is the one above, and the arm that
-    # renders `[PERM]` beside one is `..._renders_both_markers_...`.
-    assert out == 'Stored hotfix "fix" [unscoped] (1 total)\n', repr(out)
+    cases = (
+        (['--match', ''], _stored(), {'match': ''},
+         'Stored hotfix "fix" [unscoped] (1 total)\n'),
+        (['--permanent'], _stored(permanent=True), {'permanent': True},
+         'Stored hotfix "fix" [PERM] [unscoped] (1 total)\n'),
+        (['--permanent', '--match', SCOPE],
+         _stored(permanent=True, match=SCOPE),
+         {'permanent': True, 'match': SCOPE},
+         f'Stored hotfix "fix" [PERM] [{SCOPE}] (1 total)\n'),
+        ([], {}, {}, 'Stored hotfix "?" [unscoped] (? total)\n'),
+    )
+    for flags, answer, fields, expected in cases:
+        wire = {'fixId': 'fix', 'code': CODE, **fields}
+        recorded, out = run_cli(
+            ['store-hotfix', 'fix', '--code', CODE, *flags], [answer],
+            plan=[_ext_cmd('_store_hf', 'store-hotfix', wire)], token=TOK)
+        assert recorded.calls == [('_store_hf', 'store-hotfix', wire)], \
+            recorded.calls
+        assert out == expected, (flags, answer, repr(out))
 
 
 def test_store_hotfix_reads_its_source_out_of_the_file_it_was_given(tmp):
@@ -133,70 +107,6 @@ def test_store_hotfix_reads_its_source_out_of_the_file_it_was_given(tmp):
     assert out == 'Stored hotfix "fix" [unscoped] (2 total)\n', repr(out)
 
 
-def test_store_hotfix_carries_the_permanent_flag_only_when_it_was_given(tmp):
-    """`--permanent` adds `permanent`, and the record echoes it back.
-
-    Both halves in one line: the flag on the wire and the `[PERM]`
-    marker the operator reads, which is the only place the CLI reports
-    that a stored fix will survive a version bump.
-    """
-    del tmp
-    recorded, out = run_cli(
-        ['store-hotfix', 'fix', '--code', CODE, '--permanent'],
-        [_stored(permanent=True)],
-        plan=[_ext_cmd('_store_hf', 'store-hotfix',
-                       {'fixId': 'fix', 'code': CODE, 'permanent': True})],
-        token=TOK)
-
-    assert recorded.calls == [('_store_hf', 'store-hotfix',
-                               {'fixId': 'fix', 'code': CODE,
-                                'permanent': True})], recorded.calls
-    assert out == 'Stored hotfix "fix" [PERM] [unscoped] (1 total)\n', \
-        repr(out)
-
-
-def test_store_hotfix_renders_both_markers_for_a_permanent_scoped_fix(tmp):
-    """A permanent fix with a scope prints `[PERM]` then the scope.
-
-    The order is the permanent marker first, which is the arm the bare
-    and `--permanent` tests above do not reach: each of those has an
-    absent scope, so neither pins the two markers together.
-    """
-    del tmp
-    recorded, out = run_cli(
-        ['store-hotfix', 'fix', '--code', CODE, '--permanent',
-         '--match', SCOPE],
-        [_stored(permanent=True, match=SCOPE)],
-        plan=[_ext_cmd('_store_hf', 'store-hotfix',
-                       {'fixId': 'fix', 'code': CODE, 'permanent': True,
-                        'match': SCOPE})],
-        token=TOK)
-
-    assert recorded.calls == [('_store_hf', 'store-hotfix',
-                               {'fixId': 'fix', 'code': CODE,
-                                'permanent': True, 'match': SCOPE})], \
-        recorded.calls
-    assert out == f'Stored hotfix "fix" [PERM] [{SCOPE}] (1 total)\n', \
-        repr(out)
-
-
-def test_store_hotfix_prints_placeholders_for_a_result_naming_nothing(tmp):
-    """A result with no `stored` and no `total` reads `?` for both.
-
-    The scope cell is not a placeholder: `match` is read with `get`, so
-    an absent key and an explicit null both render `[unscoped]`, and
-    only a record that really carries a pattern renders one.
-    """
-    del tmp
-    _recorded, out = run_cli(
-        ['store-hotfix', 'fix', '--code', CODE], [{}],
-        plan=[_ext_cmd('_store_hf', 'store-hotfix',
-                       {'fixId': 'fix', 'code': CODE})],
-        token=TOK)
-
-    assert out == 'Stored hotfix "?" [unscoped] (? total)\n', repr(out)
-
-
 # ── do_clear_hotfix ──────────────────────────────────────────────────
 
 def test_do_clear_hotfix_reports_the_fix_it_cleared_and_what_remains(tmp):
@@ -217,14 +127,6 @@ def test_do_clear_hotfix_reports_the_fix_it_cleared_and_what_remains(tmp):
     assert out == 'Cleared hotfix "fix" (found=True, remaining=2)\n', \
         repr(out)
 
-
-def test_do_clear_hotfix_renders_a_result_carrying_neither_count(tmp):
-    """An absent `found` reads `False` and an absent `remaining` reads 0.
-
-    Two defaults on one line, and the `found` one is the one that
-    matters: an absent key must not read as a cleared fix.
-    """
-    del tmp
     _recorded, out = run_cli(
         ['clear-hotfix', 'ghost'], [{}],
         plan=[_ext_cmd('_clear_hf', 'clear-hotfix', {'fixId': 'ghost'})],
@@ -256,11 +158,6 @@ def test_do_clear_hotfixes_sends_include_permanent_false_when_not_asked(tmp):
         recorded.calls
     assert out == 'Cleared 3 hotfix(es); 1 permanent kept\n', repr(out)
 
-
-def test_do_clear_hotfixes_renders_zero_counts_when_the_extension_has_nothing(
-        tmp):
-    """A result naming neither count reads a zero and a zero."""
-    del tmp
     _recorded, out = run_cli(
         ['clear-hotfixes'], [{}],
         plan=[_ext_cmd('_clear_all_hf', 'clear-all-hotfixes',

@@ -148,14 +148,6 @@ def test_the_push_route_publishes_for_every_open_head(tmp):
     assert any('state=open' in c for c in calls)
     assert len(published) == 2, published
 
-
-def test_the_push_route_exits_zero_when_a_head_moved_under_the_run(tmp):
-    """`main()`'s return value is what CI sees: a head pushed to while the
-    run walked must not turn an unrelated `main` push red, and must not cost
-    the run the healthy head. This drives `main()` with a moved head, so a
-    future edit to its return cannot reintroduce this issue's own bug -- a
-    run that fails because it published for fewer heads than it walked --
-    one layer above where `process()` is pinned."""
     code, calls, published = _main_env(tmp, 'push', {
         'open_pulls': [_pr(7), _pr(8)]}, moved=7)
     assert code == 0, f'a moved head must not fail the main run: {calls}'
@@ -325,29 +317,18 @@ _MOVED = 'gate freshness: head of pull request 7 moved; skipping'
 
 def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
     del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {}, published, moved_to='z' * 40)
-    code, verdicts, err = _process_capturing_stderr(
-        m, read, m.select_heads([_pr(7)]))
-    assert published == [], 'published onto a superseded SHA'
-    assert code == 0, 'a moved head gets its own verdict; not a failure'
-    assert verdicts == []
-    assert _MOVED in err, 'a moved head must still be reported on stderr'
-
-
-def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
-    """Revalidate immediately before the write: a head that moves between the
-    two revalidations is skipped, not published onto."""
-    del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {}, {7: HEAD}, published, moved='m' * 40)
-    code, _, err = _process_capturing_stderr(m, read,
-                                             m.select_heads([_pr(7)]))
-    assert published == [], 'published onto a SHA that stopped being the head'
-    assert code == 0, 'a moved head gets its own verdict; not a failure'
-    assert _MOVED in err, 'a moved head must still be reported on stderr'
+    cases = (({'.pylintrc': [G1]}, {}, {'moved_to': 'z' * 40}),
+             ({}, {7: HEAD}, {'moved': 'm' * 40}))
+    for gates, current, flow in cases:
+        m = _mod()
+        published = []
+        read = _flow_read(m, gates, current, published, **flow)
+        code, verdicts, err = _process_capturing_stderr(
+            m, read, m.select_heads([_pr(7)]))
+        assert published == [], 'published onto a superseded SHA'
+        assert code == 0, 'a moved head gets its own verdict; not a failure'
+        assert verdicts == []
+        assert _MOVED in err, 'a moved head must still be reported on stderr'
 
 
 def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
@@ -355,33 +336,19 @@ def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
     the run learned nothing about this head, so it exits nonzero and says it
     could not read, rather than reporting a clean skip."""
     del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
-                      unreadable=(7,))
-    code, verdicts, err = _process_capturing_stderr(
-        m, read, m.select_heads([_pr(7)]))
-    assert published == [], 'published onto a head that was never revalidated'
-    assert verdicts == []
-    assert code == 1, 'an unreadable revalidation must fail the run'
-    assert _MOVED not in err, 'an unreadable read was reported as a move'
-    assert 'could not read' in err and 'pull request 7' in err, err
-
-
-def test_a_head_that_becomes_unreadable_before_the_write_fails_the_run(tmp):
-    """The second revalidation has the same contract as the first: a read that
-    fails there is a failure of the run, not a move."""
-    del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
-                      fails_from=2)
-    code, _, err = _process_capturing_stderr(m, read,
-                                             m.select_heads([_pr(7)]))
-    assert published == [], 'published onto a head that was never revalidated'
-    assert code == 1, 'an unreadable revalidation must fail the run'
-    assert _MOVED not in err, 'an unreadable read was reported as a move'
-    assert 'could not read' in err and 'pull request 7' in err, err
+    for flow in ({'unreadable': (7,)}, {'fails_from': 2}):
+        m = _mod()
+        published = []
+        read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
+                          **flow)
+        code, verdicts, err = _process_capturing_stderr(
+            m, read, m.select_heads([_pr(7)]))
+        assert published == [], (
+            'published onto a head that was never revalidated')
+        assert verdicts == []
+        assert code == 1, 'an unreadable revalidation must fail the run'
+        assert _MOVED not in err, 'an unreadable read was reported as a move'
+        assert 'could not read' in err and 'pull request 7' in err, err
 
 
 def test_a_healthy_sibling_still_publishes_beside_an_unreadable_head(tmp):
@@ -435,17 +402,6 @@ def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
     assert len(verdicts) == 1
     assert verdicts[0].conclusion == 'success'
 
-
-def test_a_moved_head_and_a_write_failure_and_a_healthy_head(tmp):
-    """Kills `return 0` and `return 2 if failed`. It does NOT rule out "exit
-    nonzero if anything was skipped": under that shape the run has a failed
-    write too and the verdict is 1 either way. The moved-only tests rule that
-    out (`test_a_moved_head_...` wants 0 with no failure;
-    `test_a_moved_head_beside_a_healthy_head_...` wants 0 with one published);
-    `test_the_run_fails_when_the_only_head_cannot_be_published` rules out
-    `failed and published`."""
-    del tmp
-    m = _mod()
     published = []
     bad_sha = 'b' * 40
     good_sha = 'd' * 40
