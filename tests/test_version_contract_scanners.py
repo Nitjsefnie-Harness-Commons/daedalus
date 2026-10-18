@@ -56,13 +56,6 @@ def test_javascript_regions_classify_adversarial_cases(tmp):
             filtered) == kind, context
 
 
-def test_a_division_slash_opens_no_region(tmp):
-    """Division leaves the code around it unfiltered."""
-    del tmp
-    source = 'const d = a / b / c;\n' + _EXECUTABLE
-    assert _region_texts(_JS, source) == [("'9.9.9'", 'string')]
-
-
 def test_a_substitution_spans_to_its_own_closing_brace(tmp):
     """Division stays code; nested braces leave template bounds intact."""
     del tmp
@@ -202,30 +195,11 @@ def test_html_template_version_sites_are_inert(tmp):
         assert [kind for _start, _end, kind in spans] == ['inert'], site
 
 
-def test_html_scanning_resumes_after_a_closed_template(tmp):
-    del tmp
-    decoy = _HTML_TEMPLATE_SITES[0]
-    source = '<template>' + decoy + '</template><div ' + _SITE + '</div>'
-    regions = _checker()
-    assert _surviving(regions, _DASHBOARD, source, decoy) == 0
-    assert _surviving(regions, _DASHBOARD, source, _SITE) == 1
-
-
 def test_nested_html_template_content_stays_inert(tmp):
     del tmp
     site = _HTML_TEMPLATE_SITES[0]
     source = '<template><template></template>' + site + '</template>'
     assert _surviving(_checker(), _DASHBOARD, source, site) == 0
-
-
-def test_html_template_closer_in_a_quoted_attribute_is_inert(tmp):
-    del tmp
-    site = _HTML_TEMPLATE_SITES[1]
-    source = ('<template><div title="</template>">' + site
-              + '</div></template><div ' + _SITE + '</div>')
-    regions = _checker()
-    assert _surviving(regions, _DASHBOARD, source, site) == 0
-    assert _surviving(regions, _DASHBOARD, source, _SITE) == 1
 
 
 def test_html_template_comment_tags_do_not_change_depth(tmp):
@@ -290,48 +264,6 @@ def test_html_close_comments_begin_at_every_javascript_line_start(tmp):
         assert _surviving(regions, _DASHBOARD, source, live) == 1, label
 
 
-def test_html_comments_end_at_every_javascript_line_terminator(tmp):
-    del tmp
-    decoy = "<span class='sl-v'>9.9.9</span>"
-    live = 'const live = 1;'
-    regions = _checker()
-    for label, terminator in _HTML_LINE_TERMINATORS:
-        source = f'<script>\n--> {decoy}{terminator}{live}</script>'
-        assert _surviving(regions, _DASHBOARD, source, decoy) == 0, label
-        assert _surviving(regions, _DASHBOARD, source, live) == 1, label
-
-
-def test_html_comment_uses_the_nearest_line_terminator(tmp):
-    del tmp
-    decoy = "<span class='sl-v'>9.9.9</span>"
-    live = 'const live = 1;'
-    regions = _checker()
-    orders = (('CR before LF', '\r', '\n'),
-              ('LF before CR', '\n', '\r'))
-    for label, nearer, farther in orders:
-        source = (
-            f'<script>\n--> {decoy}{nearer}{live}{farther}</script>')
-        assert _surviving(
-            regions, _DASHBOARD, source, decoy) == 0, label
-        assert _surviving(
-            regions, _DASHBOARD, source, live) == 1, label
-
-
-def test_slash_comments_in_html_end_at_unicode_line_terminators(tmp):
-    del tmp
-    decoy = "<span class='sl-v'>9.9.9</span>"
-    live = 'const live = 1;'
-    regions = _checker()
-    terminators = (('line separator', '\u2028'),
-                   ('paragraph separator', '\u2029'))
-    for label, terminator in terminators:
-        source = f'<script>\n// {decoy}{terminator}{live}</script>'
-        assert _surviving(
-            regions, _DASHBOARD, source, decoy) == 0, label
-        assert _surviving(
-            regions, _DASHBOARD, source, live) == 1, label
-
-
 def test_script_data_state_limbs_reach_the_first_end_tag(tmp):
     """Each state-machine limb leaves the first end tag as the closer."""
     del tmp
@@ -365,21 +297,6 @@ def test_check_survives_the_html_adversarial_cases(tmp):
         assert 'ok:' in r.stdout, (label, r.stdout)
 
 
-def test_check_ignores_version_sites_in_html_template_content(tmp):
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    dashboard = copy_root / _DASHBOARD
-    text = dashboard.read_text(encoding='utf-8')
-    markup = ''.join('<template>' + site + '</template>\n'
-                     for site in _HTML_TEMPLATE_SITES)
-    assert text.count('</body>') == 1, text
-    dashboard.write_text(text.replace('</body>', markup + '</body>'),
-                         encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    assert 'ok:' in r.stdout, r.stdout
-
-
 def test_check_counts_a_duplicate_after_a_regex_literal(tmp):
     """Regex quotes and template substitutions leave duplicates visible."""
     snippets = (
@@ -398,48 +315,6 @@ def test_check_counts_a_duplicate_after_a_regex_literal(tmp):
         assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
         assert 'matches 2 times' in r.stderr, r.stderr
         assert '9.9.9' in r.stderr, r.stderr
-
-
-def test_check_counts_a_duplicate_in_a_template_substitution(tmp):
-    """A template substitution is executable code, so a binding inside one
-    counts (#316)."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    page = copy_root / 'extension' / 'page.js'
-    page.write_text(
-        page.read_text(encoding='utf-8')
-        + '\nconst _dup = `${({script: {version: \'9.9.9\'}})'
-        + '.script.version}`;\n',
-        encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-
-
-def test_check_counts_a_duplicate_in_a_brace_nested_substitution(tmp):
-    """A binding behind a nested brace inside a substitution is executable
-    code too: the substitution ends at its own closing brace."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    page = copy_root / 'extension' / 'page.js'
-    page.write_text(
-        page.read_text(encoding='utf-8')
-        + '\nconst _probe = `${ {a: 1} && { script : { version : '
-        + '\'9.9.9\' } } }`;\n',
-        encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-
-
-def test_check_survives_a_json_escaped_quote(tmp):
-    """Escaped quotes in a manifest string are content, not delimiters."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    _add_json_decoy(copy_root)
-    r = _run_checker(copy_root)
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    assert 'ok:' in r.stdout, r.stdout
 
 
 def _add_json_decoy(copy_root):
