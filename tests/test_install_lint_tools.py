@@ -209,34 +209,19 @@ def test_every_pinned_key_names_the_asset_and_the_archive_it_carries(tmp):
 
 
 def test_a_windows_release_asset_unpacks_from_its_zip(tmp):
-    """The zip arm is the live arm on Windows, and tarfile is not in it."""
+    """Both release archive formats unpack their binary as executable."""
     tmp = Path(tmp)
     installer = _installer()
-    destination = tmp / 'tools'
-    destination.mkdir()
-    with _on(*WINDOWS_X64):
-        binary = actionlint_binary(WINDOWS_X64)
-        target = installer._extract(
-            _release_asset(binary, True), destination)
-    assert target == destination / binary, target
-    assert target.read_bytes() == EXECUTABLE
-    assert os.access(target, os.X_OK), 'the binary is not executable'
-
-
-def test_a_unix_release_asset_unpacks_from_its_tarball(tmp):
-    """The tarball arm still works, on the shape the release really ships."""
-    tmp = Path(tmp)
-    installer = _installer()
-    destination = tmp / 'tools'
-    destination.mkdir()
-    host = ('Linux', 'x86_64')
-    with _on(*host):
-        binary = actionlint_binary(host)
-        target = installer._extract(
-            _release_asset(binary, False), destination)
-    assert target == destination / binary, target
-    assert target.read_bytes() == EXECUTABLE
-    assert os.access(target, os.X_OK), 'the binary is not executable'
+    for host, zipped in ((WINDOWS_X64, True), (('Linux', 'x86_64'), False)):
+        destination = tmp / host[0]
+        destination.mkdir()
+        with _on(*host):
+            binary = actionlint_binary(host)
+            target = installer._extract(
+                _release_asset(binary, zipped), destination)
+        assert target == destination / binary, target
+        assert target.read_bytes() == EXECUTABLE
+        assert os.access(target, os.X_OK), 'the binary is not executable'
 
 
 def test_an_archive_without_the_binary_is_refused_not_silently_empty(tmp):

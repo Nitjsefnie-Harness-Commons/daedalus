@@ -362,17 +362,21 @@ def test_a_count_over_budget_is_a_violation_carrying_its_remedy(tmp):
     policy = _journey_contract.policy()
     names = journeys().NAMES
     document = budget_document()
-    counts = {name: 1000 for name in names}
-    assert not any(policy.violations(counts, document, names).values())
-    over = dict(counts, **{names[0]: 1200})
-    found = policy.violations(over, document, names)
-    # Three kinds, and the third is a journey this run could not
-    # resolve against a count the budget holds — which is a failure,
-    # not an absence. See the two controls above.
-    assert sorted(found) == ['over', 'unmeasured', 'unresolved']
-    assert found['over'] == {names[0]: (1200, 1100.0)}, found['over']
-    assert policy.REMEDY_FOR['over'] == policy.OVER_REMEDY
-    assert 'never raised by hand' in policy.REMEDY_FOR['over']
+    for baseline, counts, kind, expected, remedy, phrase in (
+            (1000, {names[0]: 1200}, 'over', {names[0]: (1200, 1100.0)},
+             policy.OVER_REMEDY, 'never raised by hand'),
+            (1, {name: None for name in names}, 'unmeasured',
+             {name: 'perf-instructions' for name in names},
+             policy.UNMEASURED_REMEDY, 'measured nothing')):
+        clean = {name: baseline for name in names}
+        assert not any(policy.violations(clean, document, names).values())
+        found = policy.violations(dict(clean, **counts), document, names)
+        assert sorted(found) == ['over', 'unmeasured', 'unresolved']
+        assert found[kind] == expected, found[kind]
+        if kind == 'unmeasured':
+            assert not found['over'], found['over']
+        assert policy.REMEDY_FOR[kind] == remedy
+        assert phrase in policy.REMEDY_FOR[kind]
 
 
 def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
@@ -386,27 +390,6 @@ def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
     assert not found['over'], found
     assert not found['unmeasured'], found
     assert policy.unrecorded(document, names) == sorted(names[1:])
-
-
-def test_a_counter_this_runner_refuses_is_a_violation_not_a_pass(tmp):
-    """A green that measured nothing is the false green this exists against.
-
-    The artefact names the counter; a runner that cannot produce it produces
-    no counts at all, and a check that read that as "none over budget" would
-    report a pass on a journey it never ran.
-    """
-    del tmp
-    policy = _journey_contract.policy()
-    names = journeys().NAMES
-    document = budget_document()
-    assert not any(policy.violations(
-        {name: 1 for name in names}, document, names).values())
-    found = policy.violations({name: None for name in names}, document, names)
-    assert found['unmeasured'] == {
-        name: 'perf-instructions' for name in names}, found['unmeasured']
-    assert not found['over'], found['over']
-    assert policy.REMEDY_FOR['unmeasured'] == policy.UNMEASURED_REMEDY
-    assert 'measured nothing' in policy.REMEDY_FOR['unmeasured']
 
 
 def test_rounds_that_disagree_are_a_refusal_naming_both(tmp):

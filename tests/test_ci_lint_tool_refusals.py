@@ -39,14 +39,10 @@ def test_a_requirements_file_the_installer_cannot_read_is_refused(tmp):
     unreadable_requirements()
 
 
-def test_a_requirements_file_that_pins_no_version_is_refused(tmp):
-    """No pin at all is the supply route gone, and it is refused by name."""
-    no_pin(Path(tmp))
-
-
 def test_a_requirements_file_that_pins_it_twice_is_refused(tmp):
-    """Two pins for one file: refused with the count and both lines."""
-    several_pins(Path(tmp))
+    """Missing and ambiguous pins are refused with their required evidence."""
+    for refusal in (several_pins, no_pin):
+        refusal(Path(tmp))
 
 
 def test_a_download_that_brought_no_wheel_is_refused(tmp):

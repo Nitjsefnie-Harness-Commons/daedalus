@@ -262,21 +262,18 @@ def _run_missing_artifact_case(tmp, prior_comments):
     return marked, comments, checks
 
 
-def test_missing_artifact_reports_failure_without_prior_marker(tmp):
-    marked, comments, checks = _run_missing_artifact_case(
-        Path(tmp) / 'without-marker', [])
-    assert marked.returncode == 0, (marked.stdout, marked.stderr)
-    assert comments == [], comments
-    assert checks['checks'][0]['conclusion'] == 'failure', checks
-
-
 def test_missing_artifact_reports_failure_with_prior_marker(tmp):
-    marked, comments, checks = _run_missing_artifact_case(
-        Path(tmp) / 'with-marker', _PRIOR_MARKER)
-    assert marked.returncode == 0, (marked.stdout, marked.stderr)
-    assert len(comments) == 1, comments
-    assert 'not measured' in comments[0]['body'], comments
-    assert checks['checks'][0]['conclusion'] == 'failure', checks
+    for label, prior in (('without-marker', []),
+                         ('with-marker', _PRIOR_MARKER)):
+        marked, comments, checks = _run_missing_artifact_case(
+            Path(tmp) / label, prior)
+        assert marked.returncode == 0, (marked.stdout, marked.stderr)
+        if prior:
+            assert len(comments) == 1, comments
+            assert 'not measured' in comments[0]['body'], comments
+        else:
+            assert comments == [], comments
+        assert checks['checks'][0]['conclusion'] == 'failure', checks
 
 
 if __name__ == '__main__':

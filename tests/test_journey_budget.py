@@ -413,84 +413,38 @@ def test_a_journey_may_be_held_to_a_tolerance_of_its_own(tmp):
     # Both percentages are eighths, so `1000 * (1 + pct/100)` is a number
     # the boundary can be stated in exactly rather than a float the control
     # would have to round to find the edge of.
-    document = recorded_document(tolerance_pct=12.5, tolerances={own: 25.0})
-    artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(document))
-    carried = policy.load(artifact)
-    assert carried['tolerances'] == {own: 25.0}, (
-        'the rendering did not carry the per-journey tolerance, so this '
-        f'control would be measuring a document the artefact cannot hold: '
-        f'{carried.get("tolerances")}')
-    assert policy.tolerance_of(carried, own) == 25.0, carried
-    assert policy.tolerance_of(carried, defaulted) == 12.5, carried
-    assert policy.budget_of(carried, own) == 1250.0, carried
-    assert policy.budget_of(carried, defaulted) == 1125.0, carried
-    for name, inside, outside in ((own, 1250, 1251),
-                                  (defaulted, 1125, 1126)):
-        for measured, expected in ((inside, 0), (outside, 1)):
-            counts = {journey: 1 for journey in names}
-            counts[name] = measured
-            report = Path(tmp) / f'{name}-{measured}.json'
-            report.write_text(json.dumps(measured_report(counts)),
-                              encoding='utf-8')
-            out, err = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(out), \
-                    contextlib.redirect_stderr(err):
-                code = policy.main(['check', '--artifact', str(artifact),
-                                    '--measurements', str(report)])
-            assert code == expected, (
-                f'{name} at {measured} against a tolerance of '
-                f'{policy.tolerance_of(carried, name)}%: {out.getvalue()} '
-                f'{err.getvalue()}')
-
-
-def test_a_tolerance_of_zero_is_a_bound_and_not_an_absence(tmp):
-    """`0` is the tightest tolerance there is, so it must be read as one.
-
-    `_is_a_tolerance` admits `0` deliberately — a percentage may be any
-    nonnegative number — and a tolerance of `0` means an exact count: not
-    one instruction over the recorded number. So the lookup has to test for
-    `None` rather than for truthiness, and both shapes of that mistake are
-    the same defect read from opposite ends: a guard that drops the journey's
-    own bound and hands it the document default SILENTLY WIDENS the one
-    budget a person set as tight as it can be, and nothing anywhere reports
-    it.
-
-    The control drives both journeys through the real command, because a
-    document carrying a value nothing reads is a document that says
-    something the verdict above it does not.
-    """
-    policy = _journey_contract.policy()
-    names = journeys().NAMES
-    exact, defaulted = names[0], names[1]
-    document = recorded_document(tolerance_pct=12.5, tolerances={exact: 0})
-    artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(document))
-    carried = policy.load(artifact)
-    assert carried['tolerances'] == {exact: 0}, carried['tolerances']
-    assert policy.tolerance_of(carried, exact) == 0, carried
-    assert policy.tolerance_of(carried, defaulted) == 12.5, carried
-    # An exact count: the recorded number passes, one instruction over does
-    # not, and the journey beside it is still held to the document default.
-    assert policy.budget_of(carried, exact) == 1000.0, carried
-    assert policy.budget_of(carried, defaulted) == 1125.0, carried
-    for name, inside, outside in ((exact, 1000, 1001),
-                                  (defaulted, 1125, 1126)):
-        for measured, expected in ((inside, 0), (outside, 1)):
-            counts = {journey: 1 for journey in names}
-            counts[name] = measured
-            report = Path(tmp) / f'{name}-{measured}.json'
-            report.write_text(json.dumps(measured_report(counts)),
-                              encoding='utf-8')
-            out, err = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(out), \
-                    contextlib.redirect_stderr(err):
-                code = policy.main(['check', '--artifact', str(artifact),
-                                    '--measurements', str(report)])
-            assert code == expected, (
-                f'{name} at {measured} against a tolerance of '
-                f'{policy.tolerance_of(carried, name)}%: {out.getvalue()} '
-                f'{err.getvalue()}')
+    for tolerance, bound in ((25.0, 1250), (0, 1000)):
+        document = recorded_document(
+            tolerance_pct=12.5, tolerances={own: tolerance})
+        artifact = Path(tmp) / 'journey-budget.json'
+        artifact.write_bytes(policy.render(document))
+        carried = policy.load(artifact)
+        assert carried['tolerances'] == {own: tolerance}, (
+            'the rendering did not carry the per-journey tolerance, so this '
+            f'control would be measuring a document the artefact cannot '
+            f'hold: '
+            f'{carried.get("tolerances")}')
+        assert policy.tolerance_of(carried, own) == tolerance, carried
+        assert policy.tolerance_of(carried, defaulted) == 12.5, carried
+        assert policy.budget_of(carried, own) == bound, carried
+        assert policy.budget_of(carried, defaulted) == 1125.0, carried
+        for name, inside, outside in ((own, bound, bound + 1),
+                                      (defaulted, 1125, 1126)):
+            for measured, expected in ((inside, 0), (outside, 1)):
+                counts = {journey: 1 for journey in names}
+                counts[name] = measured
+                report = Path(tmp) / f'{name}-{measured}.json'
+                report.write_text(json.dumps(measured_report(counts)),
+                                  encoding='utf-8')
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), \
+                        contextlib.redirect_stderr(err):
+                    code = policy.main(['check', '--artifact', str(artifact),
+                                        '--measurements', str(report)])
+                assert code == expected, (
+                    f'{name} at {measured} against a tolerance of '
+                    f'{policy.tolerance_of(carried, name)}%: {out.getvalue()} '
+                    f'{err.getvalue()}')
 
 
 def test_a_journey_the_budget_does_not_hold_is_compared_against_nothing(tmp):

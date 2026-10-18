@@ -72,19 +72,10 @@ def test_fetch_timings_still_refuses_a_non_integer_count(tmp):
     assert "'soon'" in message, message
 
 
-def test_fetch_timings_one_selects_exactly_the_last_entry(tmp):
-    del tmp
-    recorded, out = run_cli(['fetch-timings', '-n', '1'], [CANNED])
-    assert recorded.calls == [
-        ('_fetch_timings', 'fetch-timings', {})], recorded.calls
-    assert TIMINGS[0]['url'] not in out, out
-    assert TIMINGS[1]['url'] not in out, out
-    assert TIMINGS[2]['url'] in out, out
-
-
 def test_fetch_timings_larger_counts_keep_the_selection(tmp):
     del tmp
     cases = (
+        (['fetch-timings', '-n', '1'], (False, False, True)),
         (['fetch-timings', '-n', '2'], (False, True, True)),
         (['fetch-timings', '-n', '3'], (True, True, True)),
         (['fetch-timings', '-n', '30'], (True, True, True)),
