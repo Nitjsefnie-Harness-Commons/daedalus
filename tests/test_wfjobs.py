@@ -32,7 +32,6 @@ def _decodes_to(source):
 
 
 def test_a_field_after_an_indentless_sequence_survives(tmp):
-    """Flow and indentless sequences retain their fields and siblings."""
     del tmp
     jobs = _decodes_to(
         'jobs: {probe: {runs-on: ubuntu-latest, timeout-minutes: 5,'
@@ -102,7 +101,6 @@ def _assert_jobs_equal(left, right, source):
 
 
 def test_every_spelling_of_the_jobs_key_decodes_the_same(tmp):
-    """Job and jobs-key spellings decode within their top-level bounds."""
     del tmp
     jobs = jobs_mapping(
         'jobs:\n'
@@ -154,7 +152,6 @@ def test_a_workflow_with_no_jobs_key_reads_as_none(tmp):
 
 
 def test_a_job_whose_value_is_a_sequence_is_refused(tmp):
-    """Malformed jobs values and keys retain their refusal diagnostics."""
     del tmp
     _assert_refusal(jobs_mapping, 'jobs:\n', 'jobs is not a mapping')
     _assert_refusal(jobs_mapping, 'jobs: {}\n', 'declares no job')
@@ -406,7 +403,6 @@ def _refuses_needs(spelling):
 
 
 def test_the_needs_spellings_only_the_tolerance_grants_all_decode(tmp):
-    """Scalar, block, flow and tolerated needs spellings name one job."""
     del tmp
     for spelling in ('    needs:\n      - changes\n',
                      '    needs: [changes]\n',
@@ -435,7 +431,6 @@ def test_a_needs_flow_sequence_names_the_same_jobs_in_order(tmp):
 
 
 def test_a_needs_mapping_is_refused_as_not_a_list_of_names(tmp):
-    """Invalid needs shapes are refused as lists of job names."""
     workflow = _real(tmp, _replaced(BLOCK_NEEDS, '    needs:\n'))
     message = _refuses(_job_needs, workflow, 'suites')
     assert 'needs is not a list of job names' in message, message

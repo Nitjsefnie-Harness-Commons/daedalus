@@ -166,7 +166,6 @@ def test_do_cookies_exits_with_the_error_the_extension_reported(tmp):
 # ── do_set_cookie ────────────────────────────────────────────────────
 
 def test_do_set_cookie_sends_the_three_required_fields_and_nothing_else(tmp):
-    """Pin required fields, option combinations and the echoed value."""
     del tmp
     cases = (
         ([], {}),

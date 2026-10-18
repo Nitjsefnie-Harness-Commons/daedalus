@@ -103,7 +103,6 @@ def test_check_versions_sites_all_present_in_copy(tmp):
 
 
 def test_check_versions_set_refuses_an_empty_version(tmp):
-    """Invalid spellings are refused before any site is rewritten."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
@@ -167,7 +166,6 @@ def test_check_versions_reads_the_index_and_a_revision(tmp):
 
 
 def test_check_versions_reports_a_site_that_changed_shape(tmp):
-    """Check and --set both name a site whose binding no longer matches."""
     for argv in ((), ('--set', '9.9.9')):
         copy_root = Path(tmp) / 'tree'
         checker = _copy_versioned_tree(copy_root)
@@ -253,7 +251,6 @@ def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
 
 
 def test_check_versions_refuses_a_page_js_version_with_quoted_keys(tmp):
-    """Every executable duplicate spelling is counted and names both values."""
     spellings = [
         'script: { version: "9.9.9" }',
         'script: { version: `\n9.9.9` }',

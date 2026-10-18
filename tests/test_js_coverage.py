@@ -150,7 +150,6 @@ def test_percent_and_base64_data_urls_match_exact_source_text(tmp):
 
 
 def test_data_url_without_a_separator_is_rejected(tmp):
-    """Missing separators and undecodable UTF-8 are both refused."""
     del tmp
     payload = base64.b64encode(b'\xff').decode('ascii')
     for url in ('data:text/javascript',
@@ -179,7 +178,6 @@ def test_empty_data_url_decodes_to_empty_source(tmp):
 
 
 def test_non_file_scheme_has_no_file_path(tmp):
-    """Only a local file URL has a file path."""
     del tmp
     for url in ('https://example.com/extension/a.js',
                 'file://example.com/extension/a.js'):
@@ -199,7 +197,6 @@ def test_resolution_stops_when_a_file_url_has_no_candidate(tmp):
 
 
 def test_data_url_near_match_is_not_resolved(tmp):
-    """Neither near matches nor unrelated decoded text name a file."""
     cases = (
         ('dashboard/exact.js', 'export const exact = true;\n',
          'export const exact = true;'),
@@ -259,7 +256,6 @@ def test_non_shipped_script_shapes_are_not_resolved(tmp):
 
 
 def test_inner_zero_range_overrides_outer_nonzero_range(tmp):
-    """Inner counts override outer counts independently of input order."""
     del tmp
     cases = (
         ([{'startOffset': 0, 'endOffset': 6, 'count': 1},
