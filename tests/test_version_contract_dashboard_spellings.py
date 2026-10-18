@@ -82,69 +82,75 @@ _STATUS_SPELLINGS = {
 
 def _assert_duplicate_spelling_refused(tmp_path, markup, desc):
     """`markup` planted before `</body>` makes `desc` match twice."""
-    copy_root = Path(tmp_path) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    canonical = _canonical_dashboard_value(copy_root, checker, desc)
-    _insert_before_body(copy_root, markup)
-    _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
-                              '9.9.9')
+    try:
+        copy_root = Path(tmp_path) / 'tree'
+        checker = _copy_versioned_tree(copy_root)
+        canonical = _canonical_dashboard_value(copy_root, checker, desc)
+        _insert_before_body(copy_root, markup)
+        _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
+                                  '9.9.9')
+    except AssertionError as exc:
+        raise AssertionError(f'{Path(tmp_path).name}: {exc}') from exc
 
 
 def _assert_markup_is_not_a_site(tmp_path, markup, desc):
     """`markup` planted before `</body>` leaves `desc` matching once."""
-    copy_root = Path(tmp_path) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    _insert_before_body(copy_root, markup)
-    _assert_one_dashboard_match(copy_root, checker, desc)
+    try:
+        copy_root = Path(tmp_path) / 'tree'
+        checker = _copy_versioned_tree(copy_root)
+        _insert_before_body(copy_root, markup)
+        _assert_one_dashboard_match(copy_root, checker, desc)
+    except AssertionError as exc:
+        raise AssertionError(f'{Path(tmp_path).name}: {exc}') from exc
 
 
 def test_attribute_before_class_status_line_duplicate_is_refused(tmp_path):
     _assert_duplicate_spelling_refused(
         tmp_path, _STATUS_SPELLINGS['attribute_before_class'], _STATUS)
     for name, markup, desc in (
-            ('case_0',
+            ('case-data-attribute-status-line-duplicate',
              "<span class='sl-v' data-meta='x'>9.9.9</span>",
              _STATUS),
-            ('case_1',
+            ('case-space-before-gt-rail-duplicate',
              "<div class='rail-foot' >v9.9.9</div>",
              _RAIL),
-            ('case_2',
+            ('case-space-before-gt-status-line-duplicate',
              "<span class='sl-v' >9.9.9</span>",
              _STATUS),
-            ('case_3',
+            ('case-spaced-equals-trailing-attribute-status-line-duplicate',
              "<span class = 'sl-v' id = 'x'>9.9.9</span>",
              _STATUS),
-            ('case_4',
+            ('case-trailing-attribute-rail-duplicate',
              "<div class='rail-foot' id='x'>v9.9.9</div>",
              _RAIL),
-            ('case_5',
+            ('case-trailing-attribute-status-line-duplicate',
              "<span class='sl-v' id='x'>9.9.9</span>",
              _STATUS),
-            ('case_6',
+            ('case-unquoted-gt-in-earlier-attribute-rail-duplicate',
              "<div title='a>b' class=rail-foot>v9.9.9</div>",
              _RAIL),
-            ('case_7',
+            ('case-unquoted-gt-in-earlier-attribute-status-line-duplicate',
              "<span title='a>b' class=sl-v>9.9.9</span>",
              _STATUS),
-            ('case_8',
+            ('case-unquoted-rail-duplicate',
              '<div class=rail-foot>v9.9.9</div>',
              _RAIL),
-            ('case_9',
+            ('case-unquoted-space-before-gt-rail-duplicate',
              '<div class=rail-foot >v9.9.9</div>',
              _RAIL),
-            ('case_10',
+            ('case-unquoted-space-before-gt-status-line-duplicate',
              '<span class=sl-v >9.9.9</span>',
              _STATUS),
-            ('case_11',
+            ('case-unquoted-status-line-duplicate',
              '<span class=sl-v>9.9.9</span>',
              _STATUS),
-            ('case_12',
+            ('case-unquoted-trailing-attribute-rail-duplicate',
              '<div class=rail-foot id=x>v9.9.9</div>',
              _RAIL),
-            ('case_13',
+            ('case-unquoted-trailing-attribute-status-line-duplicate',
              '<span class=sl-v id=x>9.9.9</span>',
              _STATUS),
-            ('case_14',
+            ('case-uppercase-trailing-attribute-status-line-duplicate',
              "<SPAN CLASS='sl-v' ID='X'>9.9.9</SPAN>",
              _STATUS),
     ):
@@ -164,16 +170,16 @@ def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp_path):
         _assert_duplicate_spelling_refused(
             Path(tmp_path) / name, _STATUS_SPELLINGS[name], _STATUS)
     for name, markup, desc in (
-            ('case_0',
+            ('case-quoted-gt-in-trailing-attribute-status-line-duplicate',
              "<span class='sl-v' title='a>b'>9.9.9</span>",
              _STATUS),
-            ('case_1',
+            ('case-quoted-gt-in-trailing-attribute-rail-duplicate',
              "<div class='rail-foot' title='a>b'>v9.9.9</div>",
              _RAIL),
-            ('case_2',
+            ('case-quoted-lt-in-trailing-attribute-rail-duplicate',
              "<div class='rail-foot' title='a<b'>v9.9.9</div>",
              _RAIL),
-            ('case_3',
+            ('case-double-quoted-lt-in-trailing-attribute-rail-duplicate',
              '<div class="rail-foot" data-x="a<b">v9.9.9</div>',
              _RAIL),
     ):
@@ -185,25 +191,25 @@ def test_unquoted_uppercase_names_rail_duplicate_is_refused(tmp_path):
     _assert_duplicate_spelling_refused(
         tmp_path, _RAIL_SPELLINGS['unquoted_uppercase_names'], _RAIL)
     for name, markup, desc in (
-            ('case_0',
+            ('case-unquoted-uppercase-names-status-line-duplicate',
              '<SPAN CLASS=sl-v>9.9.9</SPAN>',
              _STATUS),
-            ('case_1',
+            ('case-uppercase-attribute-rail-duplicate',
              "<div CLASS='rail-foot'>v9.9.9</div>",
              _RAIL),
-            ('case_2',
+            ('case-uppercase-attribute-status-line-duplicate',
              "<span CLASS='sl-v'>9.9.9</span>",
              _STATUS),
-            ('case_3',
+            ('case-uppercase-names-rail-duplicate',
              "<DIV CLASS='rail-foot'>v9.9.9</DIV>",
              _RAIL),
-            ('case_4',
+            ('case-uppercase-names-status-line-duplicate',
              "<SPAN CLASS='sl-v'>9.9.9</SPAN>",
              _STATUS),
-            ('case_5',
+            ('case-uppercase-tag-rail-duplicate',
              "<DIV class='rail-foot'>v9.9.9</div>",
              _RAIL),
-            ('case_6',
+            ('case-uppercase-tag-status-line-duplicate',
              "<SPAN class='sl-v'>9.9.9</span>",
              _STATUS),
     ):
@@ -230,49 +236,49 @@ def test_shipped_meta_cells_are_not_status_line_sites(tmp_path):
     _assert_markup_is_not_a_site(
         tmp_path, "<span class='sl-meta' data-meta='x'>9.9.9</span>", _STATUS)
     for name, markup, desc in (
-            ('case_0',
+            ('case-class-token-prefix-status-line-not-a-site',
              "<span class='notsl-v' id='x'>9.9.9</span>",
              _STATUS),
-            ('case_1',
+            ('case-class-token-suffix-status-line-not-a-site',
              "<span class='sl-value' id='x'>9.9.9</span>",
              _STATUS),
-            ('case_2',
+            ('case-missing-attribute-separator-status-line-not-a-site',
              "<span class='sl-v'id='x'>9.9.9</span>",
              _STATUS),
-            ('case_3',
+            ('case-missing-attribute-separator-rail-not-a-site',
              "<div class='rail-foot'id='x'>v9.9.9</div>",
              _RAIL),
-            ('case_4',
+            ('case-unquoted-class-prose-status-line-not-a-site',
              '<p>ordinary class=sl-v>9.9.9</span></p>',
              _STATUS),
-            ('case_5',
+            ('case-unquoted-class-token-prefix-rail-not-a-site',
              '<div class=xrail-foot>v9.9.9</div>',
              _RAIL),
-            ('case_6',
+            ('case-unquoted-class-token-suffix-rail-not-a-site',
              '<div class=rail-footer>v9.9.9</div>',
              _RAIL),
-            ('case_7',
+            ('case-unquoted-class-token-prefix-status-line-not-a-site',
              '<span class=xsl-v>9.9.9</span>',
              _STATUS),
-            ('case_8',
+            ('case-unquoted-class-token-suffix-status-line-not-a-site',
              '<span class=sl-value>9.9.9</span>',
              _STATUS),
-            ('case_9',
+            ('case-unterminated-trailing-quote-rail-not-a-site',
              '<div class=\'rail-foot\' title="a> ordinary>v9.9.9</div>',
              _RAIL),
-            ('case_10',
+            ('case-unterminated-trailing-quote-status-line-not-a-site',
              '<span class=\'sl-v\' title="a> ordinary>9.9.9</span>',
              _STATUS),
-            ('case_11',
+            ('case-uppercase-class-value-rail-not-a-site',
              "<div class='RAIL-FOOT'>v9.9.9</div>",
              _RAIL),
-            ('case_12',
+            ('case-uppercase-class-value-status-line-not-a-site',
              "<span class='SL-V'>9.9.9</span>",
              _STATUS),
-            ('case_13',
+            ('case-unquoted-uppercase-class-value-rail-not-a-site',
              '<div CLASS=RAIL-FOOT>v9.9.9</div>',
              _RAIL),
-            ('case_14',
+            ('case-unquoted-uppercase-class-value-status-line-not-a-site',
              '<span CLASS=SL-V>9.9.9</span>',
              _STATUS),
     ):
