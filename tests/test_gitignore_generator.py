@@ -153,7 +153,6 @@ def _gitignore_exception_result(tmp, exception_type, failing_command):
 
 
 def test_gitignore_reports_launch_failures_from_both_git_calls(tmp):
-    """Each Git failure at either boundary returns an operator failure."""
     for exception_type in (FileNotFoundError, subprocess.TimeoutExpired,
                            UnicodeDecodeError):
         for command in ('ls-files', 'check-ignore'):

@@ -21,8 +21,7 @@ from workflow_yaml import (  # noqa: E402
 # A key written twice can hide a `run:` behind a decoy, so every decoder
 # below refuses one. The shipped reader is the exception: it decodes only
 # `name`, `id` and `uses`, so a repeated `run:` is recorded as None every
-# time and no consumer sees either write. Each duplicate-key site keeps
-# its own input in the decoder controls below.
+# time and no consumer sees either write.
 STEP_JOB_HEAD = 'jobs:\n  sample:\n    steps:\n'
 JOB_HEAD = 'jobs:\n  sample:\n'
 DUP = 'duplicate mapping key: '

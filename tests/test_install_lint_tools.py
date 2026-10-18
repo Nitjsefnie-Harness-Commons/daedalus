@@ -209,7 +209,6 @@ def test_every_pinned_key_names_the_asset_and_the_archive_it_carries(tmp):
 
 
 def test_a_windows_release_asset_unpacks_from_its_zip(tmp):
-    """Both release archive formats unpack their binary as executable."""
     tmp = Path(tmp)
     installer = _installer()
     for host, zipped in ((WINDOWS_X64, True), (('Linux', 'x86_64'), False)):

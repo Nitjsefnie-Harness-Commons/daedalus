@@ -50,7 +50,6 @@ def _stored(**over):
 # ── do_store_hotfix ──────────────────────────────────────────────────
 
 def test_store_hotfix_sends_the_code_and_neither_flag_when_none_was_given(tmp):
-    """Pin each flag combination and the populated or defaulted answer."""
     del tmp
     recorded, out = run_cli(
         ['store-hotfix', 'fix', '--code', CODE], [_stored()],

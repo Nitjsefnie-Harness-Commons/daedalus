@@ -123,7 +123,6 @@ def test_do_open_tabs_sends_every_url_in_order_and_waits_thirty(tmp):
 
 
 def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
-    """Partial, empty, and underspecified answers retain their output."""
     del tmp
     cases = (
         (['https://a.example.com/', 'https://b.example.com/'],
@@ -228,7 +227,6 @@ def test_do_ext_navigate_carries_the_chrome_tab_only_when_it_was_given(tmp):
 # ── do_ext_reload ────────────────────────────────────────────────────
 
 def test_do_ext_reload_names_the_cache_bypass_in_its_output_too(tmp):
-    """Each reload flag combination pins both the body and rendered line."""
     del tmp
     cases = (
         ([], {}, 42, 'Reloaded tab 42\n'),

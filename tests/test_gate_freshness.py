@@ -517,7 +517,6 @@ def _publish_read(existing_ids, recorded, fail_listing=None):
 
 
 def test_a_failure_overwrites_a_published_success_by_patching(tmp):
-    """Overwrite published verdicts and create the first check on a head."""
     del tmp
     m = _mod()
     for ids, conclusion, title, summary in (

@@ -40,7 +40,6 @@ def test_a_requirements_file_the_installer_cannot_read_is_refused(tmp):
 
 
 def test_a_requirements_file_that_pins_it_twice_is_refused(tmp):
-    """Missing and ambiguous pins are refused with their required evidence."""
     for refusal in (several_pins, no_pin):
         refusal(Path(tmp))
 

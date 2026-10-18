@@ -57,7 +57,6 @@ def test_javascript_regions_classify_adversarial_cases(tmp):
 
 
 def test_a_substitution_spans_to_its_own_closing_brace(tmp):
-    """Division stays code; nested braces leave template bounds intact."""
     del tmp
     cases = (
         ('const d = a / b / c;\n' + _EXECUTABLE,
@@ -274,7 +273,6 @@ def test_script_data_state_limbs_reach_the_first_end_tag(tmp):
 
 
 def test_check_survives_the_html_adversarial_cases(tmp):
-    """HTML markup and JSON escapes leave the real sites counted."""
     cases: list[tuple[str, str | None]] = [
         (label, markup) for label, markup, _expected in _HTML_CASES]
     cases.extend((('template content', None), ('JSON escaped quote', None)))
@@ -299,7 +297,6 @@ def test_check_survives_the_html_adversarial_cases(tmp):
 
 
 def test_check_counts_a_duplicate_after_a_regex_literal(tmp):
-    """Regex quotes and template substitutions leave duplicates visible."""
     snippets = (
         "\nconst _probe = /'/;\n"
         + "const _dup = {script: {version: '9.9.9'}};\n",
