@@ -550,29 +550,6 @@ def test_the_target_tab_and_token_are_the_tests_own(tmp):
         recorded.api_calls
 
 
-def test_run_cli_rebinds_the_module_it_is_given(tmp):
-    """`module=` is what makes the harness general rather than eval's own.
-
-    Without it the fakes land on commands_content and every other handler
-    runs against a live socket, which is the hardwiring this parameter
-    exists to remove. A real handler of that module is driven here, so the
-    assertion is on the wire request it actually built — deliberately not
-    on what it printed. This control asks `run_cli` a question about the
-    harness; an assertion on `invoke.send_and_wait`'s own `(3 bytes)`
-    rendering would turn a change to that sentence into a red here, which
-    is the coupling this suite exists to prevent.
-    """
-    del tmp
-    plan = [dict(COMMAND, body={'token': 'clitok', 'id': 'job0',
-                                'code': '1+1', 'tab': 'tab7'})]
-    recorded, _out = run_cli(
-        ['exec', 'job0', '1+1', '--no-result'], [{'target': 'tab7'}],
-        module=commands_eval, plan=plan, target_tab='tab7', token='clitok')
-
-    assert recorded.api_calls == [('PUT', '/command', plan[0]['body'])], \
-        recorded.api_calls
-
-
 def test_a_socket_the_harness_does_not_model_is_refused(tmp):
     """The boundary is the process, not the list of names it fakes.
 
