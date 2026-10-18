@@ -225,7 +225,7 @@ def test_query_token_duplicates_reject_blank_and_equal_values(tmp):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['active_streams'] == 0, (
             status, health)
-        assert status == 200 and health['ok'] is True, (status, health)
+        assert health['ok'] is True, (status, health)
 
 
 def test_body_token_duplicates_reject_blank_and_equal_values(tmp):
