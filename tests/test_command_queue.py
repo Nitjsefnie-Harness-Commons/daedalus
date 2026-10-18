@@ -34,6 +34,30 @@ def _publish_legacy(path, content):
     temporary.replace(path)
 
 
+def test_remove_expired_leaves_a_malformed_legacy_file(tmp):
+    queue = _load_queue('command_queue_malformed')
+    path = Path(tmp) / 'legacy.json'
+    _publish_legacy(path, '{not-json')
+    now = time.time()
+    _set_mtime(path, now - 91)
+
+    queue.remove_expired(path, now, 90, legacy=True)
+
+    assert path.exists(), path
+
+
+def test_remove_expired_removes_an_expired_tmp(tmp):
+    queue = _load_queue('command_queue_expired_tmp')
+    path = Path(tmp) / 'queued.json.tmp'
+    path.write_text('{"id":"expired"}', encoding='utf-8')
+    now = time.time()
+    _set_mtime(path, now - 91)
+
+    queue.remove_expired(path, now, 90)
+
+    assert not path.exists(), path
+
+
 def test_remove_expired_removes_an_expired_non_object_legacy_json(tmp):
     queue = _load_queue('command_queue_non_object_legacy_expired')
     path = Path(tmp) / 'legacy.json'
@@ -303,6 +327,26 @@ def test_an_inherited_export_cannot_kill_the_in_process_server_load(tmp):
 
 def _raise_broken_pipe(_data):
     raise BrokenPipeError('injected write failure')
+
+
+def test_stream_queue_drain_forwards_ttl_for_an_expired_command(tmp):
+    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '3600'}
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        qdir = Path(docroot) / 'commands' / TOK
+        qdir.mkdir()
+        expired = qdir / '0000000000001_000001.json'
+        fresh = qdir / '0000000000002_000002.json'
+        expired.write_text('{"id":"expired-forwarded"}', encoding='utf-8')
+        fresh.write_text('{"id":"after-expired"}', encoding='utf-8')
+        now = time.time()
+        old_stamp = now - 5400
+        os.utime(expired, (old_stamp, old_stamp))
+        os.utime(fresh, (now, now))
+
+        delivered = read_stream_data(base, TOK, timeout=5)
+
+        assert delivered['id'] == 'after-expired', delivered
+        assert not expired.exists(), expired
 
 
 def test_extension_legacy_drain_forwards_the_command_directory(tmp):

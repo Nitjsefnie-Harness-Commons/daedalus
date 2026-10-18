@@ -194,6 +194,30 @@ def test_poll_refuses_a_legacy_name_that_leaves_the_root(tmp):
         'id': 'outside-payload', 'code': '1'}
 
 
+def test_a_retained_candidate_logs_its_refusal_once(tmp):
+    """One line per refused candidate, not one per drain pass."""
+    service = _load_service('aliased_refusal_logged_once')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    first = qdir / '0000000000001_000001.json'
+    second = qdir / '0000000000002_000002.json'
+    _write_command(first, 'aliased')
+    _hard_link(first, second)
+    frames = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        for _pass in range(2):
+            service.drain_queue(
+                qdir, None, None, command_ttl=100,
+                frame_writer=frames.append)
+
+    refusals = [line for line in captured.getvalue().splitlines()
+                if '[STREAM] REFUSED' in line]
+    assert frames == [], frames
+    assert refusals, 'no refusal was logged at all'
+    assert len(refusals) == 2, refusals
+
+
 def test_a_retained_legacy_candidate_logs_its_refusal_once(tmp):
     """The legacy drain shares the once-per-candidate registry."""
     service = _load_service('aliased_legacy_refusal_logged_once')
