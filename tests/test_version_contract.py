@@ -96,19 +96,6 @@ def test_check_versions_sites_all_present_in_copy(tmp):
     assert m and int(m.group(1)) == expected, r.stdout
 
 
-def test_check_versions_set_rewrites_every_site(tmp):
-    """--set is the whole point of the script: one pass, every site."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    r = _run_checker(copy_root, '--set', '9.9.9')
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    for path, desc, pattern in checker.SITES:
-        text = (copy_root / path).read_text(encoding='utf-8')
-        m = re.search(pattern, text)
-        assert m, (path, desc)
-        assert m.group('v') == '9.9.9', (path, desc, m.group('v'))
-
-
 def test_check_versions_set_writes_one_string_to_every_site(tmp):
     """--set translates nothing: the manifest gets the same string as every
     other site, whatever shape the version has."""
