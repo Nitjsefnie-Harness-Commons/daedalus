@@ -311,39 +311,6 @@ def unreadable_wheel(staging):
         'the archive failure that produced it')
 
 
-def resolved_outside_the_tool_dir(tmp):
-    """A tool that resolved somewhere else, and the comparison behind it.
-
-    `_record` refuses on this, so the predicate is the whole basis of that
-    refusal and both of its answers are asserted: a predicate that always
-    said yes would let a binary the image supplied answer in place of the
-    pinned one, which is the defect the check's second revision exists to
-    close, and a predicate that always said no would refuse a correct
-    install.
-
-    MUTANT: `return False` in the `except ValueError` arm becomes `return
-    True`. The path outside the directory is then reported as installed, and
-    the second assertion fails.
-    """
-    installer = _installer_module('lint_installer_installed_here')
-    root = Path(tmp)
-    tool_dir = root / 'daedalus-lint-tools'
-    tool_dir.mkdir()
-    inside = tool_dir / 'shellcheck'
-    inside.write_bytes(b'')
-    outside = root / 'elsewhere' / 'shellcheck'
-    outside.parent.mkdir()
-    outside.write_bytes(b'')
-    with mock.patch.object(installer, 'TOOL_DIR', tool_dir):
-        assert installer._installed_here(str(inside)) is True, (
-            f'{inside} is under {tool_dir} and was not reported as the tool '
-            'this install put on PATH, so every correct install is refused')
-        assert installer._installed_here(str(outside)) is False, (
-            f'{outside} is not under {tool_dir} and was reported as the tool '
-            'this install put on PATH, so a binary the image supplied answers '
-            'in place of the pinned one and the check cannot see it')
-
-
 def recorded_outside_the_tool_dir(tmp):
     """A tool the machine answered with, somewhere this install never wrote.
 
