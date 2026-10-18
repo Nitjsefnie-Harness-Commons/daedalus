@@ -149,39 +149,43 @@ def test_notify_dashboard_publishes_no_final_name_before_the_replace(tmp):
     writer holds the document, only the dot-prefixed temp may exist in the
     queue directory.
     """
-    queue = _load_queue('command_queue_dashboard_publish_pause')
-    cmd_dir = Path(tmp) / 'commands'
-    dash_dir = cmd_dir / 'tok_dashboard'
-    payload = {'type': 'tabs-synced'}
-    paused, release = threading.Event(), threading.Event()
-    real_replace = queue.atomic_file.replace_atomically
+    for event_type, forged in (
+            ('tabs-synced', {}),
+            ('result', {'id': 'forged-id', 'kind': 'not-an-event'})):
+        queue = _load_queue('command_queue_dashboard_publish_pause')
+        cmd_dir = Path(tmp) / event_type / 'commands'
+        dash_dir = cmd_dir / 'tok_dashboard'
+        payload = {'type': event_type}
+        paused, release = threading.Event(), threading.Event()
+        real_replace = queue.atomic_file.replace_atomically
 
-    def replace_paused(src, dst):
-        paused.set()
-        release.wait()
-        real_replace(src, dst)
+        def replace_paused(src, dst):
+            paused.set()
+            release.wait()
+            real_replace(src, dst)
 
-    # command_queue calls through the shared daedalus_bridge.atomic_file
-    # module, so this attribute is the one _publish resolves at call time.
-    queue.atomic_file.replace_atomically = replace_paused
-    worker = threading.Thread(
-        target=queue.notify_dashboard, args=(cmd_dir, 'tok', payload))
-    worker.start()
-    try:
-        assert paused.wait(5), (
-            'notify_dashboard never reached the atomic replacement')
-        assert not list(dash_dir.glob('*.json')), (
-            'a final event name was visible before the replace')
-    finally:
-        release.set()
-        worker.join(5)
-        queue.atomic_file.replace_atomically = real_replace
-    assert not worker.is_alive(), 'the publisher stayed blocked'
-    names = sorted(path.name for path in dash_dir.iterdir())
-    assert len(names) == 1 and names[0].endswith('.json'), names
-    final = dash_dir / names[0]
-    assert json.loads(final.read_text(encoding='utf-8')) == {
-        'id': final.stem, 'kind': 'event', **payload}
+        # command_queue calls through the shared daedalus_bridge.atomic_file
+        # module, so this attribute is the one _publish resolves at call time.
+        queue.atomic_file.replace_atomically = replace_paused
+        worker = threading.Thread(
+            target=queue.notify_dashboard,
+            args=(cmd_dir, 'tok', {**payload, **forged}))
+        worker.start()
+        try:
+            assert paused.wait(5), (
+                'notify_dashboard never reached the atomic replacement')
+            assert not list(dash_dir.glob('*.json')), (
+                'a final event name was visible before the replace')
+        finally:
+            release.set()
+            worker.join(5)
+            queue.atomic_file.replace_atomically = real_replace
+        assert not worker.is_alive(), 'the publisher stayed blocked'
+        names = sorted(path.name for path in dash_dir.iterdir())
+        assert len(names) == 1 and names[0].endswith('.json'), names
+        final = dash_dir / names[0]
+        assert json.loads(final.read_text(encoding='utf-8')) == {
+            'id': final.stem, 'kind': 'event', **payload}
 
 
 def test_the_notify_failure_line_redacts_the_credential(tmp):

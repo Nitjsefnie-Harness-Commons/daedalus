@@ -519,44 +519,47 @@ def test_two_events_across_the_counter_overflow_are_both_delivered(tmp):
     events are delivered, neither file is unlinked, and the stem-format
     expectation still holds at the seeded value.
     """
-    service, drain = _service('fanout_counter_boundary')
-    cq = service.command_queue
-    token = 'tok'
-    cmd_dir = Path(tmp) / 'commands'
-    qdir = _queue(service, tmp, token)
-    _sub_id, killed = service.register(token, DASHBOARD)
-    _qo = _order()
-    saved_time, saved_counter = _qo.time, _qo._seq_counter
-    setattr(_qo, 'time', type('T', (), {
-        'time': staticmethod(lambda: 1_700_000_000.123)})())
-    setattr(_qo, '_seq_counter', itertools.count(999999))  # overflow point
-    frames = []
-    try:
-        cq.notify_dashboard(cmd_dir, token, {'type': 'first'})
-        first = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
-                                      frame_writer=frames.append)
-        cq.notify_dashboard(cmd_dir, token, {'type': 'second'})
-        second = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
-                                       frame_writer=frames.append)
-        third = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
-                                      frame_writer=frames.append)
-    finally:
-        setattr(_qo, 'time', saved_time)
-        setattr(_qo, '_seq_counter', saved_counter)
+    for seed in (None, 999999):
+        service, drain = _service('fanout_counter_boundary')
+        cq = service.command_queue
+        token = 'tok'
+        case = Path(tmp) / str(seed)
+        cmd_dir = case / 'commands'
+        qdir = _queue(service, case, token)
+        _sub_id, killed = service.register(token, DASHBOARD)
+        _qo = _order()
+        saved_time, saved_counter = _qo.time, _qo._seq_counter
+        setattr(_qo, 'time', type('T', (), {
+            'time': staticmethod(lambda: 1_700_000_000.123)})())
+        if seed is not None:
+            setattr(_qo, '_seq_counter', itertools.count(seed))
+        frames = []
+        try:
+            cq.notify_dashboard(cmd_dir, token, {'type': 'first'})
+            first = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                          frame_writer=frames.append)
+            cq.notify_dashboard(cmd_dir, token, {'type': 'second'})
+            second = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                           frame_writer=frames.append)
+            third = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                          frame_writer=frames.append)
+        finally:
+            setattr(_qo, 'time', saved_time)
+            setattr(_qo, '_seq_counter', saved_counter)
 
-    assert first == 1, first
-    assert second == 1, (
-        'the event published across the counter overflow was lost: '
-        f'{second}')
-    assert third == 0, third
-    assert [f['type'] for f in frames] == ['first', 'second'], frames
-    first_id, second_id = frames[0]['id'], frames[1]['id']
-    for stem in (first_id, second_id):
-        assert re.fullmatch(r'\d{13}_\d{20}', stem), (
-            f'stem format failure at the boundary: {stem!r}')
-    assert first_id < second_id, (
-        'the overflow inverted the byte order: '
-        f'{first_id!r} !< {second_id!r}')
+        assert first == 1, first
+        assert second == 1, (
+            'the event published across the counter overflow was lost: '
+            f'{second}')
+        assert third == 0, third
+        assert [f['type'] for f in frames] == ['first', 'second'], frames
+        first_id, second_id = frames[0]['id'], frames[1]['id']
+        for stem in (first_id, second_id):
+            assert re.fullmatch(r'\d{13}_\d{20}', stem), (
+                f'stem format failure at the boundary: {stem!r}')
+        assert first_id < second_id, (
+            'the overflow inverted the byte order: '
+            f'{first_id!r} !< {second_id!r}')
 
 
 _DEDUP_HARNESS = _dashnode.DashboardNodeHarness(

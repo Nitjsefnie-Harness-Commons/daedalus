@@ -82,14 +82,25 @@ def test_set_permanent_refuses_a_value_it_cannot_read(tmp):
     permanent hotfix version-gated and reported success while doing it. The
     refusal has to come before the mutation is sent, not after.
     """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        r = run_cli(['set-permanent', 'critical-fix', 'ture'],
-                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
-        assert r.returncode != 0, (r.returncode, r.stdout)
-        assert 'ture' in r.stderr, r.stderr
-        queue = Path(docroot) / 'commands' / f'{TOK}_extension'
-        queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
-        assert queued == [], queued
+    missing = Path(tmp) / 'not-here.js'
+    cases = (
+        (['set-permanent', 'critical-fix', 'ture'], 'ture'),
+        (['unblock-requests', '--rule-id', '0'], 'positive'),
+        (['store-hotfix', 'typo', '--file', str(missing)],
+         'File not found'),
+        (['store-hotfix', 'legacy', 'console.log(1)'], None),
+    )
+    for index, (argv, needle) in enumerate(cases):
+        case = Path(tmp) / str(index)
+        with _util.bridge(case, env=BRIDGE_ENV) as (base, docroot):
+            r = run_cli(argv,
+                        cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+            assert r.returncode != 0, (r.returncode, r.stdout)
+            if needle is not None:
+                assert needle in r.stderr, r.stderr
+            queue = Path(docroot) / 'commands' / f'{TOK}_extension'
+            queued = sorted(queue.glob('*.json')) if queue.is_dir() else []
+            assert queued == [], queued
 
 
 def test_set_permanent_reads_every_documented_spelling(tmp):
