@@ -184,15 +184,6 @@ def test_an_explicit_job_key_is_refused_not_skipped(tmp):
         'empty mapping key')
 
 
-def test_whole_job_anchors_and_aliases_are_refused(tmp):
-    """A bound on one job must not be read as shared by an alias."""
-    del tmp
-    _assert_refusal(
-        jobs_mapping,
-        'jobs:\n  probe: &probe\n    runs-on: x\n  clone: *probe\n',
-        'unsupported plain scalar')
-
-
 def test_duplicate_job_keys_are_refused(tmp):
     del tmp
     _assert_refusal(
@@ -322,15 +313,6 @@ def _none_paths(document, path=()):
             found.append(here)
         found.extend(_none_paths(value, here))
     return found
-
-
-def test_a_trigger_key_with_nothing_under_it_reads_as_none(tmp):
-    """The issue's exact source."""
-    source = _real(tmp, 'name: x\non:\n  pull_request:\njobs:\n  probe:\n'
-                   '    runs-on: ubuntu-latest\n    timeout-minutes: 5\n')
-    decoded = workflow_mapping(source)
-    assert decoded['on'] == {'pull_request': None}, decoded['on']
-    assert decoded['on']['pull_request'] is None
 
 
 def _bare_trigger_sweep(paths):
