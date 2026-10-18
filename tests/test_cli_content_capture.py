@@ -99,35 +99,16 @@ def test_do_net_capture_says_so_when_the_tab_is_already_capturing(tmp):
     assert out == 'Already capturing on tab 6 (12 requests buffered)\n', \
         repr(out)
 
-
-def test_do_net_capture_reports_zero_buffered_when_the_extension_says_nothing(
-        tmp):
-    """A capture already running with an unstated buffer reads zero."""
-    del tmp
-    _recorded, out = run_cli(
-        ['net-capture'], [{'already': True, 'tabId': 6}],
-        plan=[_ext('_net_cap', 'net-capture', {'maxRequests': 1000}, 15)],
-        token=TOK)
-
-    assert out == 'Already capturing on tab 6 (0 requests buffered)\n', \
-        repr(out)
-
-
-def test_do_net_capture_reads_a_tab_the_already_arm_left_out(tmp):
-    """The `already` line has its own read, and it needed its own test.
-
-    It is a separate f-string from the default arm's, so pinning one
-    default says nothing about the other, and both of the tests beside
-    this one carry a `tabId`.
-    """
-    del tmp
-    _recorded, out = run_cli(
-        ['net-capture'], [{'already': True, 'buffered': 12}],
-        plan=[_ext('_net_cap', 'net-capture', {'maxRequests': 1000}, 15)],
-        token=TOK)
-
-    assert out == 'Already capturing on tab ? (12 requests buffered)\n', \
-        repr(out)
+    for reply, expected in (
+            ({'already': True, 'tabId': 6},
+             'Already capturing on tab 6 (0 requests buffered)\n'),
+            ({'already': True, 'buffered': 12},
+             'Already capturing on tab ? (12 requests buffered)\n')):
+        _recorded, out = run_cli(
+            ['net-capture'], [reply],
+            plan=[_ext('_net_cap', 'net-capture',
+                       {'maxRequests': 1000}, 15)], token=TOK)
+        assert out == expected, repr(out)
 
 
 def test_do_net_capture_names_a_tab_the_extension_left_out(tmp):

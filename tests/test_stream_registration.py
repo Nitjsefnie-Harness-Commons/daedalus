@@ -80,19 +80,12 @@ def _request_stream(server, tab):
 
 
 def test_a_failed_header_delivery_releases_a_named_stream(tmp):
-    with _server(tmp, 'named') as server:
-        _request_stream(server, 'chrome1')
+    for label, tab in (('named', 'chrome1'), ('tabless', '')):
+        with _server(tmp, label) as server:
+            _request_stream(server, tab)
 
-        assert server.stream_service.snapshot() == (0, []), (
-            'the registration outlived the failed header delivery')
-
-
-def test_a_failed_header_delivery_releases_a_tabless_stream(tmp):
-    with _server(tmp, 'tabless') as server:
-        _request_stream(server, '')
-
-        assert server.stream_service.snapshot() == (0, []), (
-            'the tabless registration outlived the failed delivery')
+            assert server.stream_service.snapshot() == (0, []), (
+                'the registration outlived the failed header delivery')
 
 
 if __name__ == '__main__':

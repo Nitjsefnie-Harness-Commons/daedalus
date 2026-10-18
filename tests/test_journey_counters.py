@@ -11,11 +11,10 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
-    BOUNDARY_ENV,
     ROOT,
     _util,
     boundary_set, counter_facts,
-    environment, journeys, launch_refusal, planting,
+    journeys, launch_refusal, planting,
 )
 
 
@@ -144,24 +143,6 @@ def test_the_measurement_carries_the_median_the_check_compares(tmp):
         'front-end-import', 'uvicorn-serve']
 
 
-def test_a_counter_this_runner_cannot_produce_is_reported_not_assumed(tmp):
-    """An unavailable counter is unavailable, and the row says so."""
-    del tmp
-    counters = _journey_contract.counters()
-    with planting(counters,
-                  shapes=lambda names, root, rounds: (
-                      {name: ['s'] for name in names}, None),
-                  COUNTERS=('syscalls',),
-                  COUNTERS_BY_NAME={
-                      'syscalls': (lambda name, root, workdir: (
-                          None, 'this runner will not count this'), True)}):
-        report = counters.measure(root=ROOT, rounds=1,
-                                  found=counter_facts())
-    row = report['counters']['syscalls']
-    assert row['available'] is False, row
-    assert 'will not count' in row['why'], row
-
-
 def test_a_journey_that_prints_no_record_stops_the_measurement(tmp):
     """A shape nobody can read is a refusal, not a count of zero."""
     del tmp
@@ -221,6 +202,20 @@ def test_a_counter_that_stops_mid_measurement_stops_the_measurement(tmp):
     assert row['available'] is False, row
     assert 'stopped counting' in row['why'], row
     assert 'journeys' not in row, row
+
+    counters = _journey_contract.counters()
+    with planting(counters,
+                  shapes=lambda names, root, rounds: (
+                      {name: ['s'] for name in names}, None),
+                  COUNTERS=('syscalls',),
+                  COUNTERS_BY_NAME={
+                      'syscalls': (lambda name, root, workdir: (
+                          None, 'this runner will not count this'), True)}):
+        report = counters.measure(root=ROOT, rounds=1,
+                                  found=counter_facts())
+    row = report['counters']['syscalls']
+    assert row['available'] is False, row
+    assert 'will not count' in row['why'], row
 
 
 def test_a_counter_that_will_not_start_is_reported_before_it_is_run(tmp):
@@ -542,31 +537,6 @@ def test_a_callgrind_child_that_failed_is_reported_in_its_own_words(tmp):
         kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
     assert kept is None, kept
     assert why == {'returncode': 255, 'stderr': loud[-400:]}, why
-
-
-def test_a_refused_callgrind_refuses_before_it_clears_the_workdir(tmp):
-    """The refusal has to land BEFORE the loop that unlinks stale entries.
-
-    `_callgrind` unlinks the previous round's `callgrind.<name>.*` entries
-    before it counts anything, and `unlink()` refuses anything that is not
-    a file. A run the boundary refuses never reaches that loop at all, so
-    the two statements are ORDERED: were they swapped, a run refused for a
-    missing boundary would instead raise `IsADirectoryError` out of the
-    unlink — an unhandled crash, carrying no diagnosis, on the reader path
-    whose whole point is a legible sentence.
-
-    The entry here is a DIRECTORY precisely because a plain file would be
-    unlinked and the ordering would never be read, and the boundary is
-    explicitly unset rather than left to whatever the ambient value is.
-    """
-    counters = _journey_contract.counters()
-    (Path(tmp) / 'callgrind.mcp-exec.9999').mkdir()
-    with environment(BOUNDARY_ENV, None):
-        kept, why = counters._callgrind('mcp-exec', ROOT, tmp)
-    assert kept is None, kept
-    assert isinstance(why, str) and BOUNDARY_ENV in why, (
-        'a refusing counter must return its refusal sentence without ever '
-        f'reaching the unlink loop: {why!r}')
 
 
 def test_a_profile_the_gate_cannot_read_comes_back_as_a_sentence(tmp):

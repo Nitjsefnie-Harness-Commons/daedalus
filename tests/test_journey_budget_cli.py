@@ -632,17 +632,6 @@ def _tighten(budget, report, tmp):
          '--tighten'], capture_output=True, text=True, timeout=120)
 
 
-def test_a_single_draw_never_records_a_count(tmp):
-    """The defect, on the artefact this repository actually ships."""
-    budget = _shipped_budget(tmp)
-    before = budget.read_bytes()
-    document = json.loads(before)
-    done = _tighten(budget, _shipped_measurement(document, 1), tmp)
-    assert done.returncode == 0, done.stderr
-    assert budget.read_bytes() == before, (
-        f'a single draw was written as a baseline: {done.stdout}')
-
-
 def test_the_recording_boundary_is_pinned_in_both_directions(tmp):
     """Two rounds record; one draw, and a count that is not a draw, do not.
 
@@ -663,7 +652,8 @@ def test_the_recording_boundary_is_pinned_in_both_directions(tmp):
         'the recorded counts are not the ones this run measured: '
         f'{json.loads(budget.read_bytes())["journeys"]}')
 
-    shapes = {'null': None, 'string': '2', 'float': 2.5, 'bool': True}
+    shapes = {'single': 1, 'null': None, 'string': '2',
+              'float': 2.5, 'bool': True}
     for label in ('absent', *shapes):
         budget.write_bytes(before)
         report = _shipped_measurement(document, 2)

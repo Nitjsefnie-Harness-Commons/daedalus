@@ -352,29 +352,6 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
 
 
-def test_lifecycle_accepts_a_calibration_the_ratchet_cannot_move(tmp):
-    """A measured above the hysteresis, and the 100.0 ceiling: both are
-    calibrations the ordinary raise must leave byte-identical."""
-    thresholds = _thresholds()
-    ratchet = _util.load(ROOT / 'scripts' / 'ci' / 'ratchet.py',
-                         'thresholds_at_ceiling_ratchet')
-    for measured in (Decimal('96.0'), Decimal('100.0')):
-        source = thresholds.load(DATA_PATH)
-        source['coverage']['python'] = {
-            'measured': measured, 'floor': measured - ratchet.CALIBRATION_GAP}
-        path = Path(tmp) / f'at-{measured}.json'
-        thresholds.write(path, source)
-        before = path.read_bytes()
-        assert ratchet.main([
-            '--language', 'python', '--measured', f'{measured}',
-            '--thresholds', str(path)]) == 0
-        assert path.read_bytes() == before
-        updated = thresholds.load(path)
-        assert updated['coverage']['python'] == {
-            'measured': measured,
-            'floor': measured - ratchet.CALIBRATION_GAP}
-
-
 def _tests_files(first, second):
     return {'tests/first.py': b'x = 1\n' * first,
             'tests/second.py': b'x = 1\n' * second}

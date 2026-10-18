@@ -366,13 +366,6 @@ def test_the_passed_delivery_cap_is_the_one_enforced(tmp):
                   in (root / 'deliveries' / f'{token}_1').iterdir())
     assert kept == ['cap-2.json'], kept
 
-
-def test_a_zero_delivery_cap_evicts_nothing(tmp):
-    """Proves: cap 0 — the minimum `DAEDALUS_MAX_DELIVERY_RESULTS` admits —
-    retains every delivery rather than evicting all of them. Does not prove the
-    guard's `not max_results` clause, which is a no-op by arithmetic:
-    `ordered[-0]` is `ordered[0]`, so the boundary is the oldest stamp;
-    nothing is below it, and deleting that clause leaves this test green."""
     routes = _load('fixture_result_routes_nocap')
     root = Path(tmp) / 'nocap-results'
     root.mkdir(parents=True)

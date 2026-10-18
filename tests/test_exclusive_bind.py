@@ -111,36 +111,26 @@ def test_the_windows_bridge_arm_excludes_the_port(tmp):
         runner takes the branch a Windows bridge takes.
 
         """
-    mod = _load_server(Path(tmp) / 'win32-bridge')
-    created = []
-    mod.socket = _StubSocketModule(created)
-    mod.WIN32 = True
-    address = ('127.0.0.1', 64738)
-    server = _bridge_instance(mod, created, address)
-    server.server_bind()
-    assert not server.allow_reuse_address
-    assert server.socket.events == _exclusive_events() + [
-        ('bind', address)], server.socket.events
-    assert server.server_address == address
-    assert server.server_name == '127.0.0.1'
-    assert server.server_port == 64738
-
-
-def test_the_posix_bridge_arm_keeps_the_reuse_path(tmp):
-    """The non-win32 bind stays byte-for-byte the stdlib reuse bind.
-
-        Both arms are driven by the same name the Windows arm uses, so the
-        assertion holds on a Windows runner too.
-
-        """
-    mod = _load_server(Path(tmp) / 'posix-bridge')
-    created = []
-    mod.WIN32 = False
-    address = ('127.0.0.1', 64738)
-    server = _bridge_instance(mod, created, address)
-    server.server_bind()
-    assert bool(server.allow_reuse_address) is True
-    assert server.socket.events == _reuse_events(64738), server.socket.events
+    for windows in (True, False):
+        mod = _load_server(Path(tmp) / str(windows))
+        created = []
+        if windows:
+            mod.socket = _StubSocketModule(created)
+        mod.WIN32 = windows
+        address = ('127.0.0.1', 64738)
+        server = _bridge_instance(mod, created, address)
+        server.server_bind()
+        if windows:
+            assert not server.allow_reuse_address
+            assert server.socket.events == _exclusive_events() + [
+                ('bind', address)], server.socket.events
+        else:
+            assert bool(server.allow_reuse_address) is True
+            assert server.socket.events == _reuse_events(64738), (
+                server.socket.events)
+        assert server.server_address == address
+        assert server.server_name == '127.0.0.1'
+        assert server.server_port == 64738
 
 
 def test_the_posix_bridge_listener_keeps_reuse_address(tmp):

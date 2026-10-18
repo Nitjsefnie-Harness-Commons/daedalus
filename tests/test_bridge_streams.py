@@ -404,16 +404,24 @@ def test_stream_drops_a_non_object_queue_entry(tmp):
 def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
     """A queued command whose id holds a lone surrogate must not kill the
     stream: the frame escapes it, and the log line carries it."""
+    for legacy in (False, True):
+        _surrogate_command(tmp, legacy)
+
+
+def _surrogate_command(tmp, legacy):
     served = []
     with _util.bridge(tmp, output=served, env=BRIDGE_ENV) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         frame = framer(response, served)
         try:
             assert response.status == 200, response.status
-            qdir = Path(docroot) / 'commands' / TOK
-            qdir.mkdir(parents=True)
-            (qdir / '0000000000001_000001.json').write_bytes(
-                b'{"id":"\\ud800","code":"1"}')
+            if legacy:
+                path = Path(docroot) / 'commands' / f'{TOK}.json'
+            else:
+                qdir = Path(docroot) / 'commands' / TOK
+                qdir.mkdir(parents=True)
+                path = qdir / '0000000000001_000001.json'
+            path.write_bytes(b'{"id":"\\ud800","code":"1"}')
             first = frame('the queued command with a surrogate id')
             assert first.get('code') == '1', first
             status, _ = put_command(
@@ -593,19 +601,30 @@ def test_a_replaced_stream_reports_its_own_end(tmp):
 
 
 def test_queue_delivery_updates_the_health_clock(tmp):
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+    for legacy in (False, True):
+        _delivery_clock(tmp, legacy)
+
+
+def _delivery_clock(tmp, legacy):
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         conn, response = stream_response(base, TOK, tab='extension')
         try:
             status, health = _util.get_json(base + '/health')
             assert status == 200, (status, health)
             assert health['last_delivery_s_ago'] is None, health
 
-            status, body = put_command(
-                base, {'token': TOK, 'tab': 'extension',
-                       'id': 'queue-clock', 'code': '1'})
-            assert status == 200, (status, body)
+            if legacy:
+                path = Path(docroot) / 'commands' / f'{TOK}.json'
+                path.write_text(
+                    '{"id":"legacy-clock","code":"1"}', encoding='utf-8')
+            else:
+                status, body = put_command(
+                    base, {'token': TOK, 'tab': 'extension',
+                           'id': 'queue-clock', 'code': '1'})
+                assert status == 200, (status, body)
             delivered = next_stream_data(response)
-            assert delivered['id'] == 'queue-clock', delivered
+            expected = 'legacy-clock' if legacy else 'queue-clock'
+            assert delivered['id'] == expected, delivered
 
             _wait_for_delivery_health(base)
         finally:

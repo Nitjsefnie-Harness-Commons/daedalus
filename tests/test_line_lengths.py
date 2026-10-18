@@ -333,30 +333,22 @@ def test_real_cli_reports_threshold_load_failure_without_traceback(tmp):
     repo, target = _line_fixture(tmp, {'a.py': _over(0)}, {}, 'broken')
     target.write_bytes(b'{')
     (repo / 'unreadable').mkdir()
+    undecodable, _target = _line_fixture(
+        tmp, {'bad.py': b'x = 1\n\xff\n', 'ok.py': _over(0)}, {},
+        'undecodable')
     failures = (
-        (target, 'invalid thresholds JSON: '),
-        (repo / 'unreadable', 'cannot read thresholds: '),
-        (repo / 'missing.json', 'cannot read thresholds: '),
+        (repo, target, 'invalid thresholds JSON: '),
+        (repo, repo / 'unreadable', 'cannot read thresholds: '),
+        (repo, repo / 'missing.json', 'cannot read thresholds: '),
+        (undecodable, None, 'bad.py: '),
     )
-    for path, marker in failures:
-        result = _run_cli(repo, target=path)
+    for case_repo, path, marker in failures:
+        result = _run_cli(case_repo, target=path)
         assert result.returncode == 1, (path, result.stdout, result.stderr)
         assert result.stdout == ''
         assert result.stderr.startswith(marker), (path, result.stderr)
         assert result.stderr.count('\n') == 1, (path, result.stderr)
         assert 'Traceback' not in result.stderr
-
-
-def test_real_cli_names_an_undecodable_file_without_traceback(tmp):
-    repo, _target = _line_fixture(
-        tmp, {'bad.py': b'x = 1\n\xff\n', 'ok.py': _over(0)}, {},
-        'undecodable')
-    result = _run_cli(repo)
-    assert result.returncode == 1, (result.stdout, result.stderr)
-    assert result.stdout == ''
-    assert result.stderr.startswith('bad.py: '), result.stderr
-    assert result.stderr.count('\n') == 1, result.stderr
-    assert 'Traceback' not in result.stderr
 
 
 def _skill_decisions(path=SKILL_SOURCE):

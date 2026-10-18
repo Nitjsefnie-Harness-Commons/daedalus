@@ -573,25 +573,12 @@ def test_a_second_bridge_on_an_in_use_data_root_refuses(tmp):
     The second process is spawned directly rather than through the
     readiness fixture, which raises on exactly this early exit.
     """
-    with _util.bridge(tmp) as (_base, docroot):
-        _assert_data_root_refusal(_refusal_child(docroot, '0'))
+    with _util.bridge(tmp) as (base, docroot):
+        for port in ('0', base.rsplit(':', 1)[1]):
+            _assert_data_root_refusal(_refusal_child(docroot, port))
         # Spelled out, not LOCK_NAME: a rename would let bridges of different
         # vintages exclude one another on different files.
         assert (docroot / 'bridge.lock').is_file(), sorted(os.listdir(docroot))
-
-
-def test_the_data_root_refusal_comes_before_the_bind(tmp):
-    """A refused bridge answers for the root before it touches the port.
-
-    On a fixed-port deployment the port a second bridge would bind is the
-    holder's live listener, so a bind-first ordering would answer the
-    caller with a bind traceback instead of the ownership message. The
-    child asks for the holder's own port and is still answered with the
-    message.
-    """
-    with _util.bridge(tmp) as (base, docroot):
-        _assert_data_root_refusal(
-            _refusal_child(docroot, base.rsplit(':', 1)[1]))
 
 
 def test_shared_log_safe_never_raises_and_stays_useful(tmp):
