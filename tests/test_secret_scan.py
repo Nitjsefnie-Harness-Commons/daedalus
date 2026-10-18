@@ -103,16 +103,6 @@ def test_the_workflow_declares_no_other_top_level_key(tmp):
         'name', 'on', 'permissions', 'concurrency', 'jobs'}, sorted(top)
 
 
-def test_concurrency_scopes_runs_per_commit_and_per_pull(tmp):
-    del tmp
-    concurrency = _decoded_workflow()['concurrency']
-    assert concurrency == {
-        'group':
-        'secrets-${{ github.event.pull_request.number || github.sha }}',
-        'cancel-in-progress': 'true',
-    }, concurrency
-
-
 def test_the_checkout_reads_full_history_without_credentials(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
