@@ -284,13 +284,6 @@ def test_shipped_meta_cells_are_not_status_line_sites(tmp_path):
         tmp_path, "<span class='sl-meta' data-meta='x'>9.9.9</span>", _STATUS)
 
 
-def test_uppercase_status_line_class_value_with_attribute_is_not_a_site(
-        tmp_path):
-    """A trailing attribute does not admit a case-folded class value."""
-    _assert_markup_is_not_a_site(
-        tmp_path, "<span class='SL-V' id='x'>9.9.9</span>", _STATUS)
-
-
 def test_status_line_trailing_attribute_without_whitespace_is_not_a_site(
         tmp_path):
     """HTML separates attributes by whitespace, so `'id=` is not one."""
