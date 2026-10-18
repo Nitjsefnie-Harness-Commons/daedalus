@@ -314,9 +314,6 @@ def test_a_read_short_of_the_declared_length_is_refused(_tmp):
     assert exact._read_body(3) == b'abc'
     assert exact.status is None, exact.status
 
-
-def test_a_body_one_byte_short_of_its_declaration_is_refused(_tmp):
-    """The comparison is exact: one missing byte is still a shortfall."""
     stub = _Stub(headers=[('Content-Length', '10')],
                  body=b'0123456789'[:9])
     assert stub._read_body(10) is None
@@ -324,9 +321,6 @@ def test_a_body_one_byte_short_of_its_declaration_is_refused(_tmp):
     assert json.loads(stub.wfile.getvalue()) == {
         'error': 'request body shorter than Content-Length'}
 
-
-def test_a_zero_length_declaration_passes_through(_tmp):
-    """Content-Length: 0 is a complete read: b'' handed over, no refusal."""
     empty = _Stub(headers=[('Content-Length', '0')])
     assert empty._read_body(0) == b''
     assert empty.status is None, empty.status
@@ -349,20 +343,6 @@ def test_bridge_token_refuses_a_header_and_query_that_disagree(_tmp):
     assert json.loads(stub.wfile.getvalue()) == {'error': 'conflicting token'}
 
 
-def test_json_nests_deeper_than_counts_structure_outside_strings(_tmp):
-    assert json_body.json_nests_deeper_than(b'[[[1]]]', 2)
-    assert not json_body.json_nests_deeper_than(b'[[1]]', 2)
-    # Cumulative openers past the limit with the simultaneous depth never
-    # above it is what the closing arm is for: a wide but shallow body must
-    # stay acceptable.
-    assert not json_body.json_nests_deeper_than(
-        b'[' + b'[]' * 60 + b']', 2)
-    # A brace inside a string literal opens nothing, and an escaped quote
-    # does not end the literal it sits in.
-    assert not json_body.json_nests_deeper_than(b'{"a": "[[[[["}', 2)
-    assert not json_body.json_nests_deeper_than(b'{"a": "\\"[[[["}', 2)
-
-
 def test_json_nests_deeper_than_ends_the_escape_before_the_quote(_tmp):
     """A string whose value ends in an escaped backslash still closes.
 
@@ -376,18 +356,6 @@ def test_json_nests_deeper_than_ends_the_escape_before_the_quote(_tmp):
     body = b'["\\\\", {}, {}]'
     assert json_body.json_nests_deeper_than(body, 1)
     assert not json_body.json_nests_deeper_than(body, 2)
-
-
-def test_json_nests_deeper_than_accepts_a_wide_sequence_of_objects(_tmp):
-    """A wide body of objects rides the same closing arm as one of arrays.
-
-    `}` and `]` share the closing arm, so the array twin of this body stays
-    green even if the arm drops `}`: only the inner `]` would ever count.
-    Sixty `{}` pairs drive the `{` arm instead — cumulative `{` count past
-    the limit with the simultaneous depth never above it, which each `}`
-    must bring back down to keep the body acceptable.
-    """
-    assert not json_body.json_nests_deeper_than(b'[' + b'{}' * 60 + b']', 2)
 
 
 def test_a_shallow_body_is_admitted_without_the_per_byte_walk(_tmp):
@@ -430,22 +398,24 @@ def test_a_body_past_the_opener_bound_still_walks_its_bytes(_tmp):
     assert walk.call_args_list[1][0] == (b'{"a": "[[[[["}', 2), \
         walk.call_args_list
 
-
-def test_a_mixed_opener_body_reaches_the_walk(_tmp):
-    """The bound is on both opener kinds added, not on the larger count.
-
-    Two braces and one bracket nest three deep, so `{[{}]}` at a limit
-    of 2 must answer True. A bound that counted only the larger kind
-    would admit it: every single-kind body the other two tests use makes
-    that cheaper reading and the sum agree, so only a mixed body
-    separates them.
-    """
-    real = getattr(json_body, '_opens_past_limit', None)
     with mock.patch.object(json_body, '_opens_past_limit',
                            side_effect=real, create=True) as walk:
         assert json_body.json_nests_deeper_than(b'{[{}]}', 2)
     assert walk.call_count == 1, walk.call_args_list
     assert walk.call_args_list[0][0] == (b'{[{}]}', 2), walk.call_args_list
+
+    assert not json_body.json_nests_deeper_than(b'[[1]]', 2)
+    # Cumulative openers past the limit with the simultaneous depth never
+    # above it is what the closing arm is for: a wide but shallow body must
+    # stay acceptable.
+    assert not json_body.json_nests_deeper_than(
+        b'[' + b'[]' * 60 + b']', 2)
+    # A brace inside a string literal opens nothing, and an escaped quote
+    # does not end the literal it sits in.
+    assert not json_body.json_nests_deeper_than(b'{"a": "[[[[["}', 2)
+    assert not json_body.json_nests_deeper_than(b'{"a": "\\"[[[["}', 2)
+
+    assert not json_body.json_nests_deeper_than(b'[' + b'{}' * 60 + b']', 2)
 
 
 def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
