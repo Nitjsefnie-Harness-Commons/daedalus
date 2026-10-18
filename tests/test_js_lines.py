@@ -110,34 +110,6 @@ def test_regex_literals_follow_start_keywords_and_punctuators(tmp):
     assert code_lines(source) == {1, 2, 3, 4}
 
 
-def test_regex_literal_is_the_body_of_an_if_head(tmp):
-    """A slash after a statement keyword's paren starts a regex."""
-    del tmp
-    source = (
-        'function check(ok, b) {\n'
-        '  if (ok) /a/*b;\n'
-        '  const marker = 1;\n'
-        '  return marker;\n'
-        '}\n'
-        '/* trailing */\n'
-        'const after = 2;\n')
-    assert code_lines(source) == {1, 2, 3, 4, 5, 7}
-
-
-def test_regex_class_holding_a_comment_opener_after_an_if_head(tmp):
-    """A class can hold /* without opening a phantom block comment."""
-    del tmp
-    source = (
-        'function classify(ch) {\n'
-        '  if (ch) /[/*]/.test(ch);\n'
-        '  const marker = 1;\n'
-        '  return marker;\n'
-        '}\n'
-        '/* trailing */\n'
-        'const after = 2;\n')
-    assert code_lines(source) == {1, 2, 3, 4, 5, 7}
-
-
 def test_statement_heads_keep_division_inside_and_regex_after(tmp):
     """while, for and with heads behave like if; head division stays."""
     del tmp
@@ -149,6 +121,26 @@ def test_statement_heads_keep_division_inside_and_regex_after(tmp):
         '/* tail */\n'
         'const after = 1;\n')
     assert code_lines(source) == {1, 2, 3, 4, 6}
+
+    source = (
+        'function check(ok, b) {\n'
+        '  if (ok) /a/*b;\n'
+        '  const marker = 1;\n'
+        '  return marker;\n'
+        '}\n'
+        '/* trailing */\n'
+        'const after = 2;\n')
+    assert code_lines(source) == {1, 2, 3, 4, 5, 7}
+
+    source = (
+        'function classify(ch) {\n'
+        '  if (ch) /[/*]/.test(ch);\n'
+        '  const marker = 1;\n'
+        '  return marker;\n'
+        '}\n'
+        '/* trailing */\n'
+        'const after = 2;\n')
+    assert code_lines(source) == {1, 2, 3, 4, 5, 7}
 
 
 def test_keywords_used_as_property_names_end_expressions(tmp):

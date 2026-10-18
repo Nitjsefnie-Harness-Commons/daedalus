@@ -94,10 +94,6 @@ def test_added_lines_follow_the_new_file_numbering(tmp):
         ' tail\n')
     assert diff_coverage.added_lines(diff) == {'pkg/mod.py': {2, 3}}
 
-
-def test_added_triple_plus_content_stays_in_the_current_file(tmp):
-    """A source line beginning `+++ ` is not a later file header."""
-    del tmp
     diff = (
         'diff --git a/x.py b/x.py\n'
         '--- a/x.py\n'
@@ -107,10 +103,6 @@ def test_added_triple_plus_content_stays_in_the_current_file(tmp):
         '+print(value)\n')
     assert diff_coverage.added_lines(diff) == {'x.py': {2, 3}}
 
-
-def test_added_lines_decode_git_quoted_paths(tmp):
-    """Git C-quoted UTF-8 paths join the coverage report spelling."""
-    del tmp
     diff = (
         '--- "a/caf\\303\\251.py"\n'
         '+++ "b/caf\\303\\251.py"\n'

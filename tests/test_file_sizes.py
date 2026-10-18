@@ -195,23 +195,6 @@ def _size_fixture(tmp, files, baseline, name):
     return repo, target
 
 
-def test_cli_tighten_changes_json_member_and_preserves_calibration(tmp):
-    policy = _policy()
-    thresholds = _thresholds()
-    selected = 'tests/shrinking.py'
-    current = policy.TEST_CEILING + 1
-    repo, target = _size_fixture(
-        tmp, {selected: current}, {selected: current + 1}, 'one-line-shrink')
-    before = thresholds.load(target)
-    result = _run_tighten(
-        target, repo / 'scripts' / 'ci' / 'size_baseline.py', repo)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    after = thresholds.load(target)
-    live = policy.tracked_sizes(repo)[selected]
-    assert after['module_size_baseline'] == {selected: live}
-    assert after['coverage'] == before['coverage']
-
-
 def test_real_cli_no_shrink_and_missing_entry_report_without_write(tmp):
     policy = _policy()
     thresholds = _thresholds()
@@ -239,27 +222,6 @@ def _run_tighten(target, script=POLICY_SOURCE, cwd=ROOT):
         capture_output=True, text=True, timeout=60)
 
 
-def test_real_cli_tighten_shrink_writes_only_the_lowered_member(tmp):
-    policy = _policy()
-    thresholds = _thresholds()
-    selected = 'tests/shrinking.py'
-    steady = 'tests/steady.py'
-    current = policy.TEST_CEILING + 1
-    repo, target = _size_fixture(
-        tmp, {selected: current, steady: current},
-        {selected: current + 1, steady: current}, 'shrink')
-    before = thresholds.load(target)
-    result = _run_tighten(
-        target, repo / 'scripts' / 'ci' / 'size_baseline.py', repo)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == 'tightened the module size baseline\n'
-    after = thresholds.load(target)
-    assert after['coverage'] == before['coverage']
-    live = policy.tracked_sizes(repo)
-    assert after['module_size_baseline'] == {
-        selected: live[selected], steady: live[steady]}
-
-
 def test_real_cli_tighten_graduates_last_entry_to_empty(tmp):
     policy = _policy()
     thresholds = _thresholds()
@@ -278,19 +240,24 @@ def test_real_cli_tighten_graduates_last_entry_to_empty(tmp):
     assert after['module_size_baseline'] == {}
     assert after['coverage'] == before['coverage']
 
-
-def test_real_cli_tighten_growth_reports_without_upward_write(tmp):
-    policy = _policy()
-    selected = 'tests/growing.py'
-    current = policy.TEST_CEILING + 2
-    repo, target = _size_fixture(
-        tmp, {selected: current}, {selected: current - 1}, 'growth')
-    before = target.read_bytes()
-    result = _run_tighten(
-        target, repo / 'scripts' / 'ci' / 'size_baseline.py', repo)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == 'no module shrank below its recorded size\n'
-    assert target.read_bytes() == before
+    current = policy.TEST_CEILING + 1
+    for files, baseline, fixture in (
+            ({'tests/shrinking.py': current},
+             {'tests/shrinking.py': current + 1}, 'one-line-shrink'),
+            ({'tests/shrinking.py': current, 'tests/steady.py': current},
+             {'tests/shrinking.py': current + 1,
+              'tests/steady.py': current}, 'shrink')):
+        repo, target = _size_fixture(tmp, files, baseline, fixture)
+        before = thresholds.load(target)
+        result = _run_tighten(
+            target, repo / 'scripts' / 'ci' / 'size_baseline.py', repo)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert result.stdout == 'tightened the module size baseline\n'
+        after = thresholds.load(target)
+        live = policy.tracked_sizes(repo)
+        assert after['module_size_baseline'] == {
+            rel: live[rel] for rel in files}
+        assert after['coverage'] == before['coverage']
 
 
 def test_real_cli_tighten_over_ceiling_unbaselined_file_reports_without_write(
@@ -314,6 +281,18 @@ def test_real_cli_tighten_over_ceiling_unbaselined_file_reports_without_write(
     assert selected not in after['module_size_baseline']
     assert after['coverage'] == data['coverage']
     assert after['module_size_baseline'] == data['module_size_baseline']
+
+    policy = _policy()
+    selected = 'tests/growing.py'
+    current = policy.TEST_CEILING + 2
+    repo, target = _size_fixture(
+        tmp, {selected: current}, {selected: current - 1}, 'growth')
+    before = target.read_bytes()
+    result = _run_tighten(
+        target, repo / 'scripts' / 'ci' / 'size_baseline.py', repo)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout == 'no module shrank below its recorded size\n'
+    assert target.read_bytes() == before
 
 
 def test_real_cli_tighten_missing_entry_reports_without_deleting_it(tmp):
