@@ -567,15 +567,11 @@ def _recent_captures(tmp, count, ids):
 
 
 def test_recent_captures_show_newest_24_within_one_id(tmp):
-    _recent_captures(tmp, 25, ['_ss'])
-
-
-def test_recent_captures_find_newest_beyond_the_first_page(tmp):
-    _recent_captures(tmp, 225, ['_ss'])
-
-
-def test_recent_captures_merge_surface_ids_across_all_pages(tmp):
-    _recent_captures(tmp, 450, ['_ss', '_screenshot'])
+    for count, ids in ((25, ['_ss']), (225, ['_ss']),
+                       (450, ['_ss', '_screenshot'])):
+        case = Path(tmp) / str(count)
+        case.mkdir()
+        _recent_captures(case, count, ids)
 
 
 def main():

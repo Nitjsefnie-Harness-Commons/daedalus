@@ -35,20 +35,6 @@ def test_allow_segment_origin_sends_the_extension_command(tmp):
          {'origin': ALLOWED})], recorded.calls
     assert out == f'Allowed {ALLOWED}\n{ALLOWED}\n', repr(out)
 
-
-def test_allow_segment_origin_reports_an_origin_already_stored(tmp):
-    del tmp
-    canned = {'origin': ALLOWED, 'origins': [ALLOWED], 'added': False}
-    recorded, out = run_cli(
-        ['allow-segment-origin', NON_CANONICAL], [canned])
-    assert recorded.calls == [
-        ('_allow_seg_origin', 'allow-segment-origin',
-         {'origin': NON_CANONICAL})], recorded.calls
-    assert out == f'Already allowed {ALLOWED}\n{ALLOWED}\n', repr(out)
-
-
-def test_allow_segment_origin_prints_the_workers_canonical_origin(tmp):
-    del tmp
     canned = {'origin': ALLOWED, 'origins': [ALLOWED], 'added': True}
     recorded, out = run_cli(
         ['allow-segment-origin', NON_CANONICAL], [canned])
@@ -56,6 +42,14 @@ def test_allow_segment_origin_prints_the_workers_canonical_origin(tmp):
         ('_allow_seg_origin', 'allow-segment-origin',
          {'origin': NON_CANONICAL})], recorded.calls
     assert out == f'Allowed {ALLOWED}\n{ALLOWED}\n', repr(out)
+
+    canned = {'origin': ALLOWED, 'origins': [ALLOWED], 'added': False}
+    recorded, out = run_cli(
+        ['allow-segment-origin', NON_CANONICAL], [canned])
+    assert recorded.calls == [
+        ('_allow_seg_origin', 'allow-segment-origin',
+         {'origin': NON_CANONICAL})], recorded.calls
+    assert out == f'Already allowed {ALLOWED}\n{ALLOWED}\n', repr(out)
 
 
 def test_revoke_segment_origin_sends_the_extension_command(tmp):
@@ -67,9 +61,6 @@ def test_revoke_segment_origin_sends_the_extension_command(tmp):
          {'origin': OTHER})], recorded.calls
     assert out == f'Revoked {OTHER}\n', repr(out)
 
-
-def test_revoke_segment_origin_prints_the_workers_canonical_origin(tmp):
-    del tmp
     canned = {'origin': ALLOWED, 'origins': [], 'found': True}
     recorded, out = run_cli(
         ['revoke-segment-origin', NON_CANONICAL], [canned])

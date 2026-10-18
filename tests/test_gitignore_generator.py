@@ -153,23 +153,19 @@ def _gitignore_exception_result(tmp, exception_type, failing_command):
 
 
 def test_gitignore_reports_launch_failures_from_both_git_calls(tmp):
-    """A Git launch failure at either boundary returns an operator failure."""
-    for command in ('ls-files', 'check-ignore'):
-        result, caught, error = _gitignore_exception_result(
-            tmp, FileNotFoundError, command)
-        assert caught is None, (command, caught)
-        assert result == 1, command
-        assert f'git {command} failed' in error, (command, error)
-
-
-def test_gitignore_reports_timeouts_from_both_git_calls(tmp):
-    """A Git timeout at either boundary returns an operator failure."""
-    for command in ('ls-files', 'check-ignore'):
-        result, caught, error = _gitignore_exception_result(
-            tmp, subprocess.TimeoutExpired, command)
-        assert caught is None, (command, caught)
-        assert result == 1, command
-        assert f'git {command} failed' in error, (command, error)
+    """Each Git failure at either boundary returns an operator failure."""
+    for exception_type in (FileNotFoundError, subprocess.TimeoutExpired,
+                           UnicodeDecodeError):
+        for command in ('ls-files', 'check-ignore'):
+            if exception_type is UnicodeDecodeError:
+                result, caught, error = _gitignore_invalid_output_result(
+                    tmp, command)
+            else:
+                result, caught, error = _gitignore_exception_result(
+                    tmp, exception_type, command)
+            assert caught is None, (command, caught)
+            assert result == 1, command
+            assert f'git {command} failed' in error, (command, error)
 
 
 def _gitignore_invalid_output_result(tmp, failing_command):
@@ -212,15 +208,6 @@ def _gitignore_invalid_output_result(tmp, failing_command):
     finally:
         generator.subprocess.run = real_run
     return result, caught, error.getvalue()
-
-
-def test_gitignore_reports_invalid_output_from_both_git_calls(tmp):
-    """Invalid output at either Git boundary returns an operator failure."""
-    for command in ('ls-files', 'check-ignore'):
-        result, caught, error = _gitignore_invalid_output_result(tmp, command)
-        assert caught is None, (command, caught)
-        assert result == 1, command
-        assert f'git {command} failed' in error, (command, error)
 
 
 def test_gitignore_bounds_both_git_calls(tmp):
