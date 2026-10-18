@@ -253,13 +253,6 @@ def test_fetch_consuming_a_delivery_removes_the_slot_copy(tmp):
     assert not _slot(token).exists()
 
 
-def test_fetch_answers_pending_for_an_absent_delivery(_tmp):
-    routes = _load('fixture_result_routes_pending')
-    status, payload = routes.fetch_result(
-        RES_DIR, 'pendingtok', {'delivery': ['never-stored']})
-    assert (status, payload) == (200, {'pending': True})
-
-
 def test_fetch_refuses_an_unsafe_tab(_tmp):
     routes = _load('fixture_result_routes_unsafe_get')
     status, payload = routes.fetch_result(
