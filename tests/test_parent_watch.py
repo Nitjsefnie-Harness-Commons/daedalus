@@ -427,16 +427,26 @@ def test_the_bounded_exit_wait_expires_naming_the_child(tmp):
 
 def test_spawn_failure_propagates_and_closes_the_writer(tmp):
     missing = str(Path(tmp) / 'missing')
-    with _record_watch_pipe() as descriptors:
-        try:
-            _spawn_short_child(dict(os.environ), [missing])
-        except FileNotFoundError:
-            pass
-        else:
-            raise AssertionError('spawn with a missing executable succeeded')
-        assert len(descriptors) == 2, descriptors
-        _assert_fd_closed(descriptors[0])
-        _assert_fd_closed(descriptors[1])
+    for args in ([missing], None):
+        proc = write_fd = None
+        with _record_watch_pipe() as descriptors:
+            try:
+                if args is None:
+                    proc, write_fd = _spawn_short_child(dict(os.environ))
+                else:
+                    try:
+                        _spawn_short_child(dict(os.environ), args)
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        raise AssertionError(
+                            'spawn with a missing executable succeeded')
+                assert len(descriptors) == 2, descriptors
+                _assert_fd_closed(descriptors[0])
+                if args is not None:
+                    _assert_fd_closed(descriptors[1])
+            finally:
+                _cleanup_spawn(proc, write_fd)
 
 
 def test_start_rejects_a_regular_file_descriptor(tmp):
@@ -501,17 +511,6 @@ def test_spawn_preserves_the_callers_environment(tmp):
         assert env == original
     finally:
         _cleanup_spawn(proc, write_fd)
-
-
-def test_successful_spawn_closes_the_parent_read_end(tmp):
-    proc = write_fd = None
-    with _record_watch_pipe() as descriptors:
-        try:
-            proc, write_fd = _spawn_short_child(dict(os.environ))
-            assert len(descriptors) == 2, descriptors
-            _assert_fd_closed(descriptors[0])
-        finally:
-            _cleanup_spawn(proc, write_fd)
 
 
 def test_bridge_cleans_up_when_proc_out_append_fails(tmp):

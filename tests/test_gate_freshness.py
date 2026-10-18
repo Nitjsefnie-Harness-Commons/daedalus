@@ -371,10 +371,12 @@ def _commits_read(m, commits=None, raise_for=None, live_shaped=False,
 def test_enumerate_gates_reads_one_commit_for_every_pattern(tmp):
     del tmp
     m = _mod()
-    asked = []
-    gates = m.enumerate_gates(_commits_read(m, asked=asked), 'o/r')
-    assert len(gates) == len(m.GATE_PATTERNS)
-    assert len(asked) == len(m.GATE_PATTERNS)
+    for live_shaped in (False, True):
+        asked = []
+        gates = m.enumerate_gates(
+            _commits_read(m, asked=asked, live_shaped=live_shaped), 'o/r')
+        assert len(gates) == len(m.GATE_PATTERNS)
+        assert len(asked) == len(m.GATE_PATTERNS)
 
 
 def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
@@ -395,15 +397,6 @@ def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
                   'eslint.config.js', 'pyproject.toml', '.gitleaks.toml',
                   'scripts/check_versions.py'):
         assert exact in asked, exact
-
-
-def test_a_live_shaped_endpoint_resolves_every_pattern(tmp):
-    """Against a fake that answers [] for a glob, the run still resolves every
-    pattern; reverting the translation makes it ask as `**` and refuse."""
-    del tmp
-    m = _mod()
-    gates = m.enumerate_gates(_commits_read(m, live_shaped=True), 'o/r')
-    assert len(gates) == len(m.GATE_PATTERNS), gates
 
 
 def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
@@ -464,13 +457,16 @@ def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
 def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
     del tmp
     m = _mod()
-    gates = [_gate('path-a', G1), _gate('path-b', G2)]
-    verdict = m.head_verdict(_multi_gate_read(G2), 'o/r', _head(), gates)
-    assert verdict.conclusion == 'failure'
-    assert verdict.kind == 'stale'
-    assert G2[:12] in verdict.summary
-    assert 'path-b' in verdict.summary
-    assert 'path-a' not in verdict.summary
+    for gates, missing, absent in (
+            ([_gate('path-a', G1), _gate('path-b', G2)], G2, 'path-a'),
+            ([_gate('older', G1), _gate('newer', G2)], G1, 'newer')):
+        verdict = m.head_verdict(
+            _multi_gate_read(missing), 'o/r', _head(), gates)
+        assert verdict.conclusion == 'failure'
+        assert verdict.kind == 'stale'
+        assert missing[:12] in verdict.summary
+        assert gates[0 if missing == G1 else 1][0] in verdict.summary
+        assert absent not in verdict.summary
 
 
 def test_every_gate_is_compared_not_short_circuited(tmp):
@@ -482,17 +478,6 @@ def test_every_gate_is_compared_not_short_circuited(tmp):
     gates = [_gate('a', G1), _gate('b', G2), _gate('c', 'd' * 40)]
     m.head_verdict(_multi_gate_read(G2, asked), 'o/r', _head(), gates)
     assert asked == [G1, G2, 'd' * 40], asked
-
-
-def test_every_gate_commit_is_checked_not_just_the_newest(tmp):
-    """The newest gate is not a proxy for the rest: a head lacking only the
-    older one is still red."""
-    del tmp
-    m = _mod()
-    gates = [_gate('older', G1), _gate('newer', G2)]
-    verdict = m.head_verdict(_multi_gate_read(G1), 'o/r', _head(), gates)
-    assert verdict.conclusion == 'failure'
-    assert G1[:12] in verdict.summary
 
 
 def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
@@ -532,46 +517,30 @@ def _publish_read(existing_ids, recorded, fail_listing=None):
 
 
 def test_a_failure_overwrites_a_published_success_by_patching(tmp):
-    """The regression: a head already green must be PATCHed to red, not left
-    alone; deleting the PATCH leaves the stale green, the defect."""
+    """Overwrite published verdicts and create the first check on a head."""
     del tmp
     m = _mod()
-    recorded = []
-    m.publish(_publish_read([4242], recorded), 'o/r', HEAD, 'failure', 's',
-              'why', RUN)
-    assert len(recorded) == 1
-    method, target, argv = recorded[0]
-    assert method == 'PATCH', method
-    assert target.endswith('/check-runs/4242'), target
-    assert 'conclusion=failure' in argv
-    assert 'name=gate freshness' in argv
-    assert 'external_id=daedalus-gate-freshness/v1' in argv
-    assert not any(str(a).startswith('head_sha') for a in argv), \
-        'a PATCH must not resend head_sha'
-
-
-def test_a_success_overwrites_a_published_failure(tmp):
-    del tmp
-    m = _mod()
-    recorded = []
-    m.publish(_publish_read([7], recorded), 'o/r', HEAD, 'success', 'f', 'ok',
-              RUN)
-    assert recorded[0][0] == 'PATCH'
-    assert 'conclusion=success' in recorded[0][2]
-
-
-def test_no_existing_check_posts_a_new_one_carrying_head_sha(tmp):
-    del tmp
-    m = _mod()
-    recorded = []
-    m.publish(_publish_read([], recorded), 'o/r', HEAD, 'success', 'f', 'ok',
-              RUN)
-    assert len(recorded) == 1
-    method, target, argv = recorded[0]
-    assert method == 'POST', method
-    assert target.endswith('/check-runs'), target
-    assert f'head_sha={HEAD}' in argv
-    assert 'conclusion=success' in argv
+    for ids, conclusion, title, summary in (
+            ([4242], 'failure', 's', 'why'),
+            ([7], 'success', 'f', 'ok'),
+            ([], 'success', 'f', 'ok')):
+        recorded = []
+        m.publish(_publish_read(ids, recorded), 'o/r', HEAD, conclusion,
+                  title, summary, RUN)
+        assert len(recorded) == 1
+        method, target, argv = recorded[0]
+        assert f'conclusion={conclusion}' in argv
+        assert 'name=gate freshness' in argv
+        assert 'external_id=daedalus-gate-freshness/v1' in argv
+        if ids:
+            assert method == 'PATCH', method
+            assert target.endswith(f'/check-runs/{ids[0]}'), target
+            assert not any(str(a).startswith('head_sha') for a in argv), \
+                'a PATCH must not resend head_sha'
+        else:
+            assert method == 'POST', method
+            assert target.endswith('/check-runs'), target
+            assert f'head_sha={HEAD}' in argv
 
 
 def test_re_running_updates_the_same_check_rather_than_accumulating(tmp):
