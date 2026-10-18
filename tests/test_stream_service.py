@@ -78,9 +78,6 @@ def test_write_frame_propagates_write_errors(_tmp):
 
     assert sink.flushes == 0, sink.flushes
 
-
-def test_write_frame_propagates_flush_errors(_tmp):
-    service = _load_service('stream_service_frame_flush_error')
     sink = _RecordingByteSink(fail_at='flush')
 
     try:
@@ -114,11 +111,6 @@ def test_queue_drain_honors_explicit_ttl_and_frame_writer(tmp):
     assert not fresh.exists(), fresh
     assert not expired.exists(), expired
 
-
-def test_queue_drain_stops_after_stream_is_killed(tmp):
-    service = _load_service('stream_service_queue_killed')
-    qdir = Path(tmp) / 'commands' / 'tok'
-    qdir.mkdir(parents=True)
     first = qdir / '0000000000001_000001.json'
     second = qdir / '0000000000002_000002.json'
     first.write_text('{"id":"first"}', encoding='utf-8')
@@ -178,6 +170,46 @@ def test_legacy_extension_drain_uses_explicit_command_directory(tmp):
     assert _without_did(frames) == [{'id': 'legacy', 'chromeTab': '42'}], (
         _without_did(frames))
     assert not legacy.exists(), legacy
+
+    _case_fold.require_case_sensitive(
+        Path(tmp), 'the extension\'s own legacy file is a tab\'s here',
+        'test_case_fold_parent.test_the_extensions_own_legacy_file_the_parent_'
+        'folds')
+    command_dir = Path(tmp) / 'folded'
+    command_dir.mkdir()
+    tab = command_dir / 'tok_42.json'
+    extension = command_dir / 'tok_Extension.json'
+    tab.write_text('{"id":"tab"}', encoding='utf-8')
+    extension.write_text('{"id":"extension"}', encoding='utf-8')
+    frames = []
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', None,
+        extension_legacy_name='tok_extension.json',
+        command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 2, delivered
+    assert _without_did(frames) == [
+        {'id': 'tab', 'chromeTab': '42'},
+        {'id': 'extension', 'chromeTab': 'Extension'}], _without_did(frames)
+
+    _case_fold.require_case_sensitive(
+        Path(tmp), 'a symlinked Extension legacy file is a tab\'s file here',
+        'test_case_fold_parent.test_a_folded_symlinked_legacy_file_is_still_'
+        'reserved')
+    command_dir = Path(tmp) / 'symlinked'
+    command_dir.mkdir()
+    _real, _alias = _symlinked_legacy_file(command_dir)
+    frames = []
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', None,
+        extension_legacy_name='tok_extension.json',
+        command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert _without_did(frames) == [{'id': 'tab', 'chromeTab': '42'}], (
+        _without_did(frames))
 
 
 def test_legacy_extension_name_must_be_keyword_only(tmp):
@@ -320,8 +352,6 @@ def test_streams_for_two_tabs_of_one_token_coexist(_tmp):
     assert not second_killed.is_set()
     assert service.snapshot() == (2, ['first', 'second'])
 
-
-def test_two_tabless_streams_coexist_without_killing_either(_tmp):
     service = _load_service('stream_service_tabless')
     _first_id, first_killed = service.register('tok', '')
 
@@ -470,10 +500,6 @@ def test_the_delivered_queue_line_carries_no_full_token(tmp):
     assert 'tok-verify' not in line, line
     assert 'tok-veri…' in line, line
 
-
-def test_the_ttl_drop_line_carries_no_full_token(tmp):
-    """The expiry sweep names the queue too, so it redacts like delivery."""
-    service = _load_service('stream_service_ttldrop_redact')
     qdir = Path(tmp) / 'commands' / 'tok-verify_tab2'
     qdir.mkdir(parents=True)
     expired = qdir / '0000000000002_000002.json'
@@ -489,14 +515,6 @@ def test_the_ttl_drop_line_carries_no_full_token(tmp):
     assert 'tok-verify' not in line, line
     assert '[STREAM] TTL-DROP tok-veri…_tab2/' in line, line
 
-
-def test_the_refused_line_carries_no_full_token(tmp):
-    """A refused candidate is named with its queue: redacted the same way.
-
-    The refusal path also redacts the reason, which an OSError can render
-    with the token-bearing path inside it.
-    """
-    service = _load_service('stream_service_refused_redact')
     qdir = Path(tmp) / 'commands' / 'tok-verify_tab3'
     qdir.mkdir(parents=True)
     (qdir / 'refused-entry.json').mkdir()
@@ -542,6 +560,19 @@ def test_the_legacy_refused_line_carries_no_full_token(tmp):
 
     The legacy-drain producer's own `secret=` argument needs a limb as well.
     """
+    service = _load_service('stream_service_legacy_redact')
+    legacy = Path(tmp) / 'tok-verify_tab4.json'
+    legacy.write_text('{"id":"legacy"}', encoding='utf-8')
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        delivered = service.drain_legacy_file(
+            legacy, 'tab4', command_ttl=100,
+            frame_writer=lambda frame: None, secret='tok-verify')
+    assert delivered == 1, delivered
+    line = output.getvalue()
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
+
     _case_fold.require_second_name(
         Path(tmp), 'a refused legacy drop keeps the token out of its line',
         os.link, 'give one file a second name (a hard link)')
@@ -562,53 +593,6 @@ def test_the_legacy_refused_line_carries_no_full_token(tmp):
     assert 'tok-veri…' in line, line
 
 
-def test_the_legacy_delivered_line_carries_no_full_token(tmp):
-    """A legacy drop's own name is <token>[_<tab>].json: redacted too."""
-    service = _load_service('stream_service_legacy_redact')
-    legacy = Path(tmp) / 'tok-verify_tab4.json'
-    legacy.write_text('{"id":"legacy"}', encoding='utf-8')
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        delivered = service.drain_legacy_file(
-            legacy, 'tab4', command_ttl=100,
-            frame_writer=lambda frame: None, secret='tok-verify')
-    assert delivered == 1, delivered
-    line = output.getvalue()
-    assert 'tok-verify' not in line, line
-    assert 'tok-veri…' in line, line
-
-
-def test_legacy_extension_drain_takes_a_folded_name_as_a_tab(tmp):
-
-    """Where the parent folds nothing, `Extension` is a tab's legacy file.
-
-    The other half of the reserved-name check; the half where the parent
-    does resolve it is in `test_case_fold_parent`, which needs one.
-    """
-    _case_fold.require_case_sensitive(
-        Path(tmp), 'the extension\'s own legacy file is a tab\'s here',
-        'test_case_fold_parent.test_the_extensions_own_legacy_file_the_parent_'
-        'folds')
-    service = _load_service('stream_service_legacy_extension_nofold')
-    command_dir = Path(tmp) / 'commands'
-    command_dir.mkdir()
-    tab = command_dir / 'tok_42.json'
-    extension = command_dir / 'tok_Extension.json'
-    tab.write_text('{"id":"tab"}', encoding='utf-8')
-    extension.write_text('{"id":"extension"}', encoding='utf-8')
-    frames = []
-
-    delivered = service.drain_legacy_ext(
-        command_dir, 'tok', None,
-        extension_legacy_name='tok_extension.json',
-        command_ttl=100, frame_writer=frames.append)
-
-    assert delivered == 2, delivered
-    assert _without_did(frames) == [
-        {'id': 'tab', 'chromeTab': '42'},
-        {'id': 'extension', 'chromeTab': 'Extension'}], _without_did(frames)
-
-
 def _symlinked_legacy_file(command_dir):
     """A `tok_Extension.json` that is a symlink to a tab's real file.
 
@@ -625,35 +609,6 @@ def _symlinked_legacy_file(command_dir):
     except (OSError, NotImplementedError) as why:
         _util.skip(f'this filesystem will not hold a symlink: {why}')
     return real, alias
-
-
-def test_legacy_drain_takes_a_symlinked_tab_file(tmp):
-
-    """Where the parent folds nothing, that symlink is a tab's file.
-
-    `tok_extension.json` names nothing here, so the entry is a tab's and is
-    delivered as one -- the reason the check asks the parent rather than
-    folding the name itself. The folded half is in
-    `test_case_fold_parent`.
-    """
-    _case_fold.require_case_sensitive(
-        Path(tmp), 'a symlinked Extension legacy file is a tab\'s file here',
-        'test_case_fold_parent.test_a_folded_symlinked_legacy_file_is_still_'
-        'reserved')
-    service = _load_service('stream_service_legacy_symlink_control')
-    command_dir = Path(tmp) / 'commands'
-    command_dir.mkdir()
-    _real, _alias = _symlinked_legacy_file(command_dir)
-    frames = []
-
-    delivered = service.drain_legacy_ext(
-        command_dir, 'tok', None,
-        extension_legacy_name='tok_extension.json',
-        command_ttl=100, frame_writer=frames.append)
-
-    assert delivered == 1, delivered
-    assert _without_did(frames) == [{'id': 'tab', 'chromeTab': '42'}], (
-        _without_did(frames))
 
 
 if __name__ == '__main__':
