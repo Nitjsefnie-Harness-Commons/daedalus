@@ -230,58 +230,36 @@ def test_bounded_consume_fallback_still_honours_expected(tmp):
 def test_delivery_results_evict_oldest_per_tab(tmp):
     """The per-tab delivery store retains only its configured newest
     results."""
-    dids = [f'170000000000{i}_00000{i}' for i in (1, 2, 3)]
     env = {**BRIDGE_ENV, 'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
-    with _util.bridge(tmp, env=env) as (base, docroot):
-        for index, did in enumerate(dids, 1):
-            status, body = _util.post_json(base + '/result', {
-                'token': TOK, 'tabId': 'bounded', 'id': f'r{index}',
-                'result': index, 'error': None, 'ts': index, '_did': did})
-            assert status == 200 and body == {'ok': True}, (status, body)
+    cases = (
+        ('bounded', [f'170000000000{i}_00000{i}' for i in (1, 2, 3)]),
+        ('ordered', ('zzzz-oldest', '1700000000001_000001',
+                     '1700000000002_000002')),
+    )
+    for tab, dids in cases:
+        with _util.bridge(tmp, env=env) as (base, docroot):
+            for index, did in enumerate(dids, 1):
+                status, body = _util.post_json(base + '/result', {
+                    'token': TOK, 'tabId': tab, 'id': f'r{index}',
+                    'result': index, 'error': None, 'ts': index, '_did': did})
+                assert status == 200 and body == {'ok': True}, (status, body)
 
-        def delivery_url(did):
-            query = urllib.parse.urlencode({
-                'token': TOK, 'tab': 'bounded', 'delivery': did})
-            return base + '/result?' + query
+            def delivery_url(did):
+                query = urllib.parse.urlencode({
+                    'token': TOK, 'tab': tab, 'delivery': did})
+                return base + '/result?' + query
 
-        status, oldest = _util.get_json(delivery_url(dids[0]))
-        assert status == 200 and oldest == {'pending': True}, oldest
-        status, middle = _util.get_json(delivery_url(dids[1]))
-        assert status == 200 and middle['id'] == 'r2', middle
-        status, newest = _util.get_json(delivery_url(dids[2]))
-        assert status == 200 and newest['id'] == 'r3', newest
+            status, oldest = _util.get_json(delivery_url(dids[0]))
+            assert status == 200 and oldest == {'pending': True}, oldest
+            status, middle = _util.get_json(delivery_url(dids[1]))
+            assert status == 200 and middle['id'] == 'r2', middle
+            status, newest = _util.get_json(delivery_url(dids[2]))
+            assert status == 200 and newest['id'] == 'r3', newest
 
-        result_dir = (Path(docroot) / 'results' / 'deliveries'
-                      / f'{TOK}_bounded')
-        assert sorted(path.name for path in result_dir.glob('*.json')) == [
-            f'{dids[1]}.json', f'{dids[2]}.json']
-
-
-def test_delivery_results_evict_by_acceptance_order_not_filename(tmp):
-    """A non-sortable delivery id still ages out in its actual order."""
-    dids = ('zzzz-oldest', '1700000000001_000001', '1700000000002_000002')
-    env = {**BRIDGE_ENV, 'DAEDALUS_MAX_DELIVERY_RESULTS': '2'}
-    with _util.bridge(tmp, env=env) as (base, docroot):
-        for index, did in enumerate(dids, 1):
-            status, body = _util.post_json(base + '/result', {
-                'token': TOK, 'tabId': 'ordered', 'id': f'r{index}',
-                'result': index, 'error': None, 'ts': index, '_did': did})
-            assert status == 200 and body == {'ok': True}, (status, body)
-
-        def delivery_url(did):
-            return base + '/result?' + urllib.parse.urlencode({
-                'token': TOK, 'tab': 'ordered', 'delivery': did})
-
-        status, oldest = _util.get_json(delivery_url(dids[0]))
-        assert status == 200 and oldest == {'pending': True}, oldest
-        for did, result_id in zip(dids[1:], ('r2', 'r3')):
-            status, body = _util.get_json(delivery_url(did))
-            assert status == 200 and body['id'] == result_id, body
-
-        result_dir = (Path(docroot) / 'results' / 'deliveries'
-                      / f'{TOK}_ordered')
-        assert sorted(path.name for path in result_dir.glob('*.json')) == [
-            f'{dids[1]}.json', f'{dids[2]}.json']
+            result_dir = (Path(docroot) / 'results' / 'deliveries'
+                          / f'{TOK}_{tab}')
+            assert sorted(path.name for path in result_dir.glob('*.json')) == [
+                f'{dids[1]}.json', f'{dids[2]}.json']
 
 
 def test_delivery_write_cannot_race_compatibility_cleanup(tmp):

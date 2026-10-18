@@ -112,12 +112,14 @@ def test_do_inject_css_carries_all_frames_only_when_it_was_asked_for(tmp):
 def test_do_inject_css_prints_placeholders_for_a_result_counting_nothing(tmp):
     """A result carrying neither key reads `?` twice, never `None`."""
     del tmp
-    _recorded, out = run_cli(
-        ['inject-css', '--css', 'a{}'], [{}],
-        plan=[_ext_cmd('_inject_css', 'inject-css', {'css': 'a{}'})],
-        token=TOK)
-
-    assert out == 'Injected ? chars CSS into tab ?\n', repr(out)
+    for command, expected in (
+            ('inject-css', 'Injected ? chars CSS into tab ?\n'),
+            ('remove-css', 'Removed ? chars CSS from tab ?\n')):
+        _recorded, out = run_cli(
+            [command, '--css', 'a{}'], [{}],
+            plan=[_ext_cmd('_' + command.replace('-', '_'), command,
+                           {'css': 'a{}'})], token=TOK)
+        assert out == expected, repr(out)
 
 
 # ── do_remove_css ────────────────────────────────────────────────────
@@ -186,17 +188,6 @@ def test_do_remove_css_carries_all_frames_only_when_it_was_asked_for(tmp):
                                {'css': 'a{}', 'allFrames': True})], \
         recorded.calls
     assert out == 'Removed 3 chars CSS from tab 2\n', repr(out)
-
-
-def test_do_remove_css_prints_placeholders_for_a_result_counting_nothing(tmp):
-    """A result carrying neither key reads `?` twice, never `None`."""
-    del tmp
-    _recorded, out = run_cli(
-        ['remove-css', '--css', 'a{}'], [{}],
-        plan=[_ext_cmd('_remove_css', 'remove-css', {'css': 'a{}'})],
-        token=TOK)
-
-    assert out == 'Removed ? chars CSS from tab ?\n', repr(out)
 
 
 def main():

@@ -394,18 +394,22 @@ def test_a_transient_transfer_failure_is_retried_and_the_next_attempt_serves(
     collected. The payload is what the SECOND attempt served, so a loop that
     kept the first failure is caught by the value as well as the count."""
     del tmp
-    _, transfer, name, asset = _installer_and_transfer([
-        urllib.error.URLError(TimeoutError('timed out')), b'the asset bytes'])
-    with (mock.patch.object(asset.urllib.request, 'urlopen', transfer),
-          mock.patch.object(asset.time, 'sleep', lambda seconds: None)):
-        payload = asset.fetch(name)
-    assert payload == b'the asset bytes', (
-        f'fetch returned {payload!r} where the second attempt served '
-        "b'the asset bytes'")
-    assert len(transfer.calls) == 2, (
-        f'the transfer failed transiently and was asked '
-        f'{len(transfer.calls)} time(s); one ask fails the install step, '
-        'which is the defect this retry is for')
+    for failures in (
+            [urllib.error.URLError(TimeoutError('timed out')),
+             b'the asset bytes'],
+            lambda i: [_http_error(i, 500, 'Internal Server Error'),
+                       b'the asset bytes']):
+        _, transfer, name, asset = _installer_and_transfer(failures)
+        with (mock.patch.object(asset.urllib.request, 'urlopen', transfer),
+              mock.patch.object(asset.time, 'sleep', lambda seconds: None)):
+            payload = asset.fetch(name)
+        assert payload == b'the asset bytes', (
+            f'fetch returned {payload!r} where the second attempt served '
+            "b'the asset bytes'")
+        assert len(transfer.calls) == 2, (
+            f'the transfer failed transiently and was asked '
+            f'{len(transfer.calls)} time(s); one ask fails the install step, '
+            'which is the defect this retry is for')
 
 
 def test_the_attempt_count_is_the_bound_and_the_last_failure_is_what_raises(
@@ -533,27 +537,6 @@ def test_a_4xx_is_asked_once_and_propagates(tmp):
         f'the installer paused {waits} on a status it never retried; a '
         'verdict about the asset is not a failure worth waiting out, so the '
         'retry window belongs to the failing half of the boundary')
-
-
-def test_a_5xx_is_asked_again_and_the_next_attempt_serves(tmp):
-    """The other half: a 5xx is the server failing rather than answering.
-    Separate from the 4xx control because a mutant that moves the boundary
-    fails exactly one of them: widening it retries the 404, narrowing it
-    refuses the 500. THE STATUS IS 500 AND NOT 503 — a 503 passes a `> 500`
-    mutant too, so a control written on it does not pin the boundary the
-    installer's comment states."""
-    del tmp
-    _, transfer, name, asset = _installer_and_transfer(
-        lambda i: [_http_error(i, 500, 'Internal Server Error'),
-                   b'the asset bytes'])
-    with (mock.patch.object(asset.urllib.request, 'urlopen', transfer),
-          mock.patch.object(asset.time, 'sleep', lambda seconds: None)):
-        payload = asset.fetch(name)
-    assert payload == b'the asset bytes', payload
-    assert len(transfer.calls) == 2, (
-        f'a 500 was asked for {len(transfer.calls)} times and not retried; a '
-        'server failing is the transfer failing, which is what the retry is '
-        'for')
 
 
 def test_a_retry_waits_the_window_the_status_asked_for(tmp):

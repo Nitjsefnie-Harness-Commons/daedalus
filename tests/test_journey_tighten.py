@@ -460,22 +460,20 @@ def _assert_refused(report, tmp, what):
         f'success, so the refusal is doing nothing a reader can see: {said}')
 
 
-def test_a_measurement_with_no_count_for_a_journey_is_not_recorded(tmp):
-    """A journey with no count records nothing, rather than a null: a
-    `null` in the journeys map is a budget that compares nothing."""
-    report = _journey_contract.fixture_report()
-    report['counters']['valgrind-callgrind']['journeys'].pop(
-        journeys().NAMES[0])
-    _assert_refused(report, tmp, 'a journey with no count')
-
-
 def test_a_measurement_with_no_toolchain_is_not_recorded(tmp):
     """Every field then reads as a match against whatever the next run
     measures.
     """
-    report = _journey_contract.fixture_report()
-    report['toolchain'] = {}
-    _assert_refused(report, tmp, 'a measurement with no toolchain identity')
+    for missing, what in (
+            ('toolchain', 'a measurement with no toolchain identity'),
+            ('count', 'a journey with no count')):
+        report = _journey_contract.fixture_report()
+        if missing == 'toolchain':
+            report['toolchain'] = {}
+        else:
+            report['counters']['valgrind-callgrind']['journeys'].pop(
+                journeys().NAMES[0])
+        _assert_refused(report, tmp, what)
 
 
 def test_a_measurement_missing_a_journeys_threads_is_not_recorded(tmp):

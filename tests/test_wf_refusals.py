@@ -21,9 +21,8 @@ from workflow_yaml import (  # noqa: E402
 # A key written twice can hide a `run:` behind a decoy, so every decoder
 # below refuses one. The shipped reader is the exception: it decodes only
 # `name`, `id` and `uses`, so a repeated `run:` is recorded as None every
-# time and no consumer sees either write. One test per decoder, so a dying
-# guard names itself; the two shared-message refusals get fixtures that
-# exclude each other.
+# time and no consumer sees either write. Each duplicate-key site keeps
+# its own input in the decoder controls below.
 STEP_JOB_HEAD = 'jobs:\n  sample:\n    steps:\n'
 JOB_HEAD = 'jobs:\n  sample:\n'
 DUP = 'duplicate mapping key: '
@@ -32,28 +31,26 @@ SCALAR = 'step uses has an unsupported scalar'
 
 
 def test_a_duplicate_step_key_is_refused(_tmp):
-    source = STEP_JOB_HEAD + '      - run: echo one\n        run: echo two\n'
-    assert _value_error(lambda: step_mappings(source, 'sample')) == DUP + 'run'
-
-
-def test_a_duplicate_step_scalar_mapping_key_is_refused(_tmp):
-    source = STEP_JOB_HEAD + '      - env:\n          F: a\n          F: b\n'
-    assert _value_error(lambda: step_mappings(source, 'sample')) == DUP + 'F'
+    cases = (
+        (STEP_JOB_HEAD + '      - run: echo one\n        run: echo two\n',
+         'run'),
+        (STEP_JOB_HEAD + '      - env:\n          F: a\n          F: b\n',
+         'F'),
+    )
+    for source, key in cases:
+        assert _value_error(
+            lambda source=source: step_mappings(source, 'sample')) == DUP + key
 
 
 def test_a_duplicate_job_mapping_key_is_refused(_tmp):
-    source = JOB_HEAD + '    runs-on: a\n    runs-on: b\n'
-    assert _value_error(lambda: _job(source, 'sample')) == DUP + 'runs-on'
-
-
-def test_a_duplicate_sequence_item_mapping_key_is_refused(_tmp):
-    source = STEP_JOB_HEAD + '      - run: one\n        run: two\n'
-    assert _value_error(lambda: _job(source, 'sample')) == DUP + 'run'
-
-
-def test_a_duplicate_flow_mapping_key_is_refused(_tmp):
-    source = JOB_HEAD + '    env: {FOO: a, FOO: b}\n'
-    assert _value_error(lambda: _job(source, 'sample')) == DUP + 'FOO'
+    cases = (
+        (JOB_HEAD + '    runs-on: a\n    runs-on: b\n', 'runs-on'),
+        (STEP_JOB_HEAD + '      - run: one\n        run: two\n', 'run'),
+        (JOB_HEAD + '    env: {FOO: a, FOO: b}\n', 'FOO'),
+    )
+    for source, key in cases:
+        assert _value_error(
+            lambda source=source: _job(source, 'sample')) == DUP + key
 
 
 def test_a_duplicate_named_mapping_key_is_refused(_tmp):
@@ -102,17 +99,16 @@ def test_a_step_scalar_written_twice_in_one_step_is_refused(_tmp):
 
 
 def test_a_step_name_field_written_twice_is_refused(_tmp):
-    source = (STEP_JOB_HEAD + '      - name: a\n        name: b\n'
-              '        if: x\n')
-    assert _value_error(
-        lambda: step_scalar(source, 'sample', 'a', 'if')) == DUP + 'name'
-
-
-def test_a_step_scalar_written_inline_and_nested_is_refused(_tmp):
-    source = (STEP_JOB_HEAD + '      - if: a\n        name: x\n'
-              '        if:\n          b\n')
-    assert _value_error(
-        lambda: step_scalar(source, 'sample', 'x', 'if')) == DUP + 'if'
+    cases = (
+        (STEP_JOB_HEAD + '      - name: a\n        name: b\n'
+         '        if: x\n', 'a', 'name'),
+        (STEP_JOB_HEAD + '      - if: a\n        name: x\n'
+         '        if:\n          b\n', 'x', 'if'),
+    )
+    for source, name, key in cases:
+        assert _value_error(
+            lambda source=source, name=name: step_scalar(
+                source, 'sample', name, 'if')) == DUP + key
 
 
 def main():

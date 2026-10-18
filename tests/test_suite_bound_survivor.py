@@ -92,33 +92,15 @@ def test_a_survivor_clause_names_the_escalation_that_went_out(tmp):
     with `None` in it, and no record this control can see says that.
     """
     del tmp
-    signals = Signals()
-    record = _record_for(signals)
-    assert [sig for _group, sig in signals.sent] == \
-        REQUEST_THEN_ESCALATION, signals.sent
-    assert record == (f'process group {GROUP} asked to stop and the suite '
-                      f'did; {ESCALATION_WENT_OUT}'), record
-    assert GROUP_WAS_GONE not in record, record
-
-
-def test_a_survivor_clause_names_the_escalation_that_found_nothing(tmp):
-    """The group was already gone, and the escalation is what proved it.
-
-    The other half of the same clause, and the one a record written from
-    the constant alone gets wrong: a group that no longer exists is a fact
-    the escalation established, so it is the escalation's own wording that
-    belongs here. Deleting the `insisted or` leaves this control red and
-    the one above green, which is why the pair is one suite and not one
-    arm.
-    """
-    del tmp
-    signals = _EscalationFindsNothing()
-    record = _record_for(signals)
-    assert [sig for _group, sig in signals.sent] == \
-        REQUEST_THEN_ESCALATION, signals.sent
-    assert record == (f'process group {GROUP} asked to stop and the suite '
-                      f'did; {GROUP_WAS_GONE}'), record
-    assert ESCALATION_WENT_OUT not in record, record
+    for signals, expected, refused in (
+            (Signals(), ESCALATION_WENT_OUT, GROUP_WAS_GONE),
+            (_EscalationFindsNothing(), GROUP_WAS_GONE, ESCALATION_WENT_OUT)):
+        record = _record_for(signals)
+        assert [sig for _group, sig in signals.sent] == \
+            REQUEST_THEN_ESCALATION, signals.sent
+        assert record == (f'process group {GROUP} asked to stop and the suite '
+                          f'did; {expected}'), record
+        assert refused not in record, record
 
 
 # The Windows route's arms, through the same stand-ins: the signals and
