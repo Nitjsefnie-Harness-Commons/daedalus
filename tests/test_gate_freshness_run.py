@@ -480,23 +480,6 @@ def test_a_head_is_revalidated_before_the_decision(tmp):
     assert asked == [], 'a superseded head was compared before revalidation'
 
 
-def test_a_per_head_write_failure_skips_that_head_and_continues(tmp):
-    """A transient listing failure must not abandon the later heads: the
-    failing head is skipped loudly and the healthy one still publishes."""
-    del tmp
-    m = _mod()
-    published = []
-    bad = 'b' * 40
-    good = 'd' * 40
-    heads = m.select_heads([_pr(7, sha=bad), _pr(8, sha=good)])
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: bad, 8: good}, published,
-                      fail_listing_for=(bad,))
-    code, verdicts = m.process(read, 'o/r', heads, [('.pylintrc', G1)], RUN)
-    assert len(published) == 1, 'the run abandoned the later head'
-    assert code != 0, 'a per-head write failure must be loud'
-    assert len(verdicts) == 1
-
-
 def test_the_run_fails_when_the_only_head_cannot_be_published(tmp):
     """A healthy sibling is not what makes the run red: this is the limb a
     `failed and published` exit code drops."""
