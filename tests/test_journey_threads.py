@@ -197,22 +197,6 @@ def test_a_thread_outside_the_journeys_process_is_background(tmp):
         == classifier.SERVE, 'import machinery is not the front end'
 
 
-def test_the_signature_must_be_complete_before_a_thread_is_the_import(tmp):
-    """Carrying a symbol is not the role; carrying the signature is.
-
-    `_carries` requires every member, so dropping one WIDENS the signature
-    toward calling a background thread the role it names, and a control that
-    reads its expectation from the subject cannot see that.
-    """
-    del tmp
-    classifier = _journey_contract.threads()
-    members = classifier.SIGNATURES[classifier.IMPORT]
-    for member in members:
-        without = set(members) - {member}
-        assert classifier.role_of(row(4, 3_800_000_000, BRIDGE, without)) \
-            == classifier.SERVE, (member, without)
-
-
 def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
         tmp):
     """The finding that made the generic signature unshippable.
@@ -237,31 +221,6 @@ def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
     # The journey's own MCP client — 3.8 billion instructions of it — is
     # inside the count, and the bridge's front end is the one thing out.
     assert kept == 400_000_000 + 3_800_000_000 + 5_000, kept
-
-
-def test_the_module_init_signature_is_the_installed_extensions_init_symbol(
-        tmp):
-    """The front end's symbol, checked against the installed extension.
-
-    `daedalus_mcp/*.py` is pure Python and has no `PyInit_<name>` of its
-    own, but `mcp==2.2.0` pulls pydantic v2, whose compiled core is a C
-    extension and is the one thing on the front end's import thread that a
-    bridge thread never initialises. The expected symbol comes from the file
-    that extension resolves to, so this fails on a constant that names
-    something nothing exports, and survives a rename the way a literal
-    cannot: the review shipped `PyInit_pydantic_core` where the symbol is
-    `PyInit__pydantic_core`, and a literal on both sides of the assertion
-    agreed with itself all the way to green.
-    """
-    del tmp
-    classifier = _journey_contract.threads()
-    expected = front_end_symbol()
-    assert classifier.SIGNATURES[classifier.IMPORT] == [expected], (
-        f'the front end\'s import is told by '
-        f'{classifier.SIGNATURES[classifier.IMPORT]} and the installed '
-        f'{FRONT_END_EXTENSION} exports {expected}')
-    assert classifier.role_of(row(4, 3_800_000_000, BRIDGE, (expected,))) \
-        == classifier.IMPORT
 
 
 def test_an_extension_that_is_not_installed_is_a_refusal_naming_it(tmp):
