@@ -118,31 +118,6 @@ def test_do_tabs_renders_one_row_per_tab_in_age_order(tmp):
         repr(out)
 
 
-def test_do_tabs_says_so_when_no_tab_is_active(tmp):
-    """The empty listing is a sentence, not a bare zero rows."""
-    del tmp
-    _recorded, out = run_cli(
-        ['tabs'], [[]], module=commands_eval, plan=[_api_get('/tabs')],
-        token=TOK)
-
-    assert out == 'No active tabs\n', repr(out)
-
-
-def test_do_tabs_renders_absent_fields_as_their_placeholders(tmp):
-    """A registry row may carry no age, no title and no url.
-
-    All three are read through `.get` with a different default each: 0 to
-    sort by, `?` to print, and the empty string for the two text cells. A
-    handler that printed None instead would put the word in three places.
-    """
-    del tmp
-    _recorded, out = run_cli(
-        ['tabs'], [[{'tabId': 'tab3'}]], module=commands_eval,
-        plan=[_api_get('/tabs')], token=TOK)
-
-    assert out == '  tab3     ?s  ' + ' ' * 52 + '\n', repr(out)
-
-
 def test_do_tabs_truncates_a_title_at_fifty_columns(tmp):
     """The title cell is fixed width, so a long one is cut, not wrapped."""
     del tmp
@@ -169,20 +144,23 @@ def test_do_tabs_json_prints_the_list_it_was_given(tmp):
     assert out == '[\n  {\n    "tabId": "tab9",\n    "age": 5\n  }\n]\n', \
         repr(out)
 
-
-def test_do_tabs_json_prints_an_empty_list_when_there_is_none(tmp):
-    """`--json` wins over the sentence: the consumer is a program.
-
-    The bridge answering null and the handler printing `No active tabs`
-    would leave a JSON consumer parsing prose, so the two arms are pinned
-    apart rather than as one row.
-    """
-    del tmp
     _recorded, out = run_cli(
         ['tabs', '--json'], [None], module=commands_eval,
         plan=[_api_get('/tabs')], token=TOK)
 
     assert out == '[]\n', repr(out)
+
+    _recorded, out = run_cli(
+        ['tabs'], [[{'tabId': 'tab3'}]], module=commands_eval,
+        plan=[_api_get('/tabs')], token=TOK)
+
+    assert out == '  tab3     ?s  ' + ' ' * 52 + '\n', repr(out)
+
+    _recorded, out = run_cli(
+        ['tabs'], [[]], module=commands_eval, plan=[_api_get('/tabs')],
+        token=TOK)
+
+    assert out == 'No active tabs\n', repr(out)
 
 
 # ── do_put ───────────────────────────────────────────────────────────
@@ -208,6 +186,29 @@ def test_do_put_sends_the_file_it_read_and_waits_for_the_result(tmp):
         f'{IN} job1  tab=tab0  @channel=page:cdp  3ms\n'
         'ok\n'), repr(out)
 
+    body = {'token': TOK, 'id': 'job1', 'code': 'document.title'}
+    recorded, out = run_cli(
+        ['put', 'job1', path, '-b', '--no-result'], [{'target': 'bcast'}],
+        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
+        token=TOK)
+
+    assert recorded.api_calls == [('PUT', '/command', body)], \
+        recorded.api_calls
+    assert _rendered(out) == f'{OUT} job1 {OUT} bcast  (14 bytes)\n', repr(out)
+
+    body = {'token': TOK, 'id': 'job1', 'code': 'window.x = 1', 'tab': 'tab0'}
+    with _stdin('window.x = 1\n'):
+        recorded, out = run_cli(
+            ['put', 'job1', '-', '--no-result'], [{'target': 'tab0'}],
+            module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
+            token=TOK)
+
+    assert recorded.api_calls == [('PUT', '/command', body)], \
+        recorded.api_calls
+    # The stdin newline is stripped exactly as a file's is, so the count
+    # printed here is the twelve characters and not thirteen.
+    assert _rendered(out) == f'{OUT} job1 {OUT} tab0  (12 bytes)\n', repr(out)
+
 
 def test_do_put_strips_the_code_it_read_from_a_file(tmp):
     """The file's own newline is not part of the code sent to the page."""
@@ -222,23 +223,6 @@ def test_do_put_strips_the_code_it_read_from_a_file(tmp):
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
     assert _rendered(out) == f'{OUT} job1 {OUT} tab0  (14 bytes)\n', repr(out)
-
-
-def test_do_put_reads_the_dash_standard_input(tmp):
-    """`-` is stdin, so the code never touches the filesystem."""
-    del tmp
-    body = {'token': TOK, 'id': 'job1', 'code': 'window.x = 1', 'tab': 'tab0'}
-    with _stdin('window.x = 1\n'):
-        recorded, out = run_cli(
-            ['put', 'job1', '-', '--no-result'], [{'target': 'tab0'}],
-            module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
-            token=TOK)
-
-    assert recorded.api_calls == [('PUT', '/command', body)], \
-        recorded.api_calls
-    # The stdin newline is stripped exactly as a file's is, so the count
-    # printed here is the twelve characters and not thirteen.
-    assert _rendered(out) == f'{OUT} job1 {OUT} tab0  (12 bytes)\n', repr(out)
 
 
 def test_do_put_refuses_a_file_that_is_not_there(tmp):
@@ -257,26 +241,6 @@ def test_do_put_refuses_a_file_that_is_not_there(tmp):
 
     assert code == f'File not found: {missing}', code
     assert out == '', repr(out)
-
-
-def test_do_put_broadcast_leaves_the_tab_field_off_the_body(tmp):
-    """`-b` means the browser's active tab, which is an absent tab field.
-
-    Sending `tab: ''` instead would name a tab that does not exist rather
-    than name none, and the two travel differently on the wire. The row
-    the operator reads is the only place the broadcast is visible, since
-    the request itself carries no tab at all.
-    """
-    path = _source(tmp)
-    body = {'token': TOK, 'id': 'job1', 'code': 'document.title'}
-    recorded, out = run_cli(
-        ['put', 'job1', path, '-b', '--no-result'], [{'target': 'bcast'}],
-        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
-        token=TOK)
-
-    assert recorded.api_calls == [('PUT', '/command', body)], \
-        recorded.api_calls
-    assert _rendered(out) == f'{OUT} job1 {OUT} bcast  (14 bytes)\n', repr(out)
 
 
 def test_do_put_waits_the_default_fifteen_seconds_and_not_the_zero(tmp):
@@ -299,9 +263,6 @@ def test_do_put_waits_the_default_fifteen_seconds_and_not_the_zero(tmp):
         f'{OUT} job1 {OUT} tab0  (14 bytes)\n'
         f'{IN} job1\nok\n'), repr(out)
 
-
-def test_do_put_carries_an_explicit_timeout_through_unchanged(tmp):
-    """The other arm of `args.timeout or 15`: a stated value is the value."""
     path = _source(tmp)
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title',
             'tab': 'tab0'}
@@ -338,9 +299,6 @@ def test_do_exec_sends_the_inline_code_stripped(tmp):
         f'{IN} job5  tab=tab0  @channel=page-main  7ms\n'
         'ok\n'), repr(out)
 
-
-def test_do_exec_broadcast_leaves_the_tab_field_off_the_body(tmp):
-    """Same absent-tab contract as do_put, on the inline subcommand."""
     body = {'token': TOK, 'id': 'job5', 'code': '1+1'}
     recorded, out = run_cli(
         ['exec', 'job5', '1+1', '-b', '--no-result'], [{'target': 'bcast'}],
@@ -396,11 +354,6 @@ def test_do_ping_reports_the_round_trip_in_the_tab_it_named(tmp):
     assert recorded.timeouts == [10], recorded.timeouts
     assert out == 'Pong @channel=page:main: "Hello"  (250ms)\n', repr(out)
 
-
-def test_do_ping_leaves_the_tab_field_off_when_none_is_set(tmp):
-    """With no tab the payload carries none, and the wait is for the
-    broadcast slot — the same absent-not-empty contract as `-b`."""
-    del tmp
     body = {'token': TOK, 'id': '_ping', 'code': 'document.title'}
     plan = [_api_put(body), _wait('_ping', '', 'd9', 10, interval=0.3)]
     pong = {'id': '_ping', 'result': 'Hello', 'error': None, 'ts': 1}
@@ -478,17 +431,6 @@ def test_do_navigate_sends_a_location_assignment_and_never_waits(tmp):
     assert recorded.waits == [], recorded.waits
     assert _rendered(out) == f'{OUT} _nav {OUT} tab0  (38 bytes)\n', repr(out)
 
-
-def test_do_navigate_json_encodes_a_url_carrying_a_quote(tmp):
-    """A quote in the URL is escaped, not pasted: the code must stay a
-    JavaScript string literal rather than terminating one.
-
-    The rendered line is pinned whole: its byte count is the ENCODED
-    code's, 50 including the backslash, against 38 for the plain URL the
-    sibling test navigates to. The escaping is therefore visible in what
-    the operator reads and not only in the body.
-    """
-    del tmp
     body = {'token': TOK, 'id': '_nav',
             'code': 'location.href = "https://example.com/a\\"b?x=1&y=2"',
             'tab': 'tab0'}
@@ -517,11 +459,6 @@ def test_do_reload_sends_the_reload_expression_to_the_tab(tmp):
     assert _rendered(out) == (
         f'{OUT} _reload {OUT} tab0  (17 bytes)\n'), repr(out)
 
-
-def test_do_reload_broadcast_carries_no_tab(tmp):
-    """`-b` on reload is the same absent-field contract as on put and exec.
-    """
-    del tmp
     body = {'token': TOK, 'id': '_reload', 'code': 'location.reload()'}
     recorded, out = run_cli(
         ['reload', '-b'], [{'target': 'bcast'}], module=commands_eval,
@@ -559,15 +496,6 @@ def test_do_title_asks_the_page_for_its_title_in_the_tab(tmp):
         f'{IN} _title  tab=tab0\n'
         'A page\n'), repr(out)
 
-
-def test_do_title_leaves_the_tab_field_off_when_none_is_set(tmp):
-    """The absent-tab arm of the read-only pair, pinned separately.
-
-    The result carries no `tabId`, so the result line drops the `tab=`
-    cell as well as the sent row dropping its own. Both are whole strings
-    rather than substrings of the sibling test's.
-    """
-    del tmp
     body = {'token': TOK, 'id': '_title', 'code': 'document.title'}
     plan = [_api_put(body), _wait('_title', '', 'd3', 10)]
     recorded, out = run_cli(
@@ -603,10 +531,6 @@ def test_do_url_asks_the_page_for_its_location_in_the_tab(tmp):
         f'{IN} _url  tab=tab0\n'
         'https://example.com/a\n'), repr(out)
 
-
-def test_do_url_leaves_the_tab_field_off_when_none_is_set(tmp):
-    """The absent-tab arm of `url`, pinned separately from `title`'s."""
-    del tmp
     body = {'token': TOK, 'id': '_url', 'code': 'location.href'}
     plan = [_api_put(body), _wait('_url', '', 'd4', 10)]
     recorded, out = run_cli(
