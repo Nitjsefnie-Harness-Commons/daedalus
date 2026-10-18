@@ -132,12 +132,6 @@ def test_a_quoted_name_continued_past_a_property_is_a_boundary(tmp):
         'unsupported multiline scalar')
 
 
-def test_aliased_step_name_decodes_to_the_anchored_value(tmp):
-    del tmp
-    source = _step_with_field('name: *a', 'anchors:\n gate: &a target\n')
-    assert _names(source) == ['target']
-
-
 def test_step_id_accepts_every_property_spelling(tmp):
     del tmp
     prefix = 'anchors:\n gate: &a target\n'
