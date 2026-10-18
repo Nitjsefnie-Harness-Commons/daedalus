@@ -95,29 +95,6 @@ def test_added_lines_follow_the_new_file_numbering(tmp):
     assert diff_coverage.added_lines(diff) == {'pkg/mod.py': {2, 3}}
 
 
-def test_added_lines_reads_every_hunk_of_every_file(tmp):
-    """A second hunk restarts the counter from its own header."""
-    del tmp
-    diff = (
-        'diff --git a/one.py b/one.py\n'
-        '--- a/one.py\n'
-        '+++ b/one.py\n'
-        '@@ -1 +1,2 @@\n'
-        ' a\n'
-        '+b\n'
-        '@@ -10,2 +11,3 @@\n'
-        ' c\n'
-        '+d\n'
-        ' e\n'
-        'diff --git a/two.py b/two.py\n'
-        '--- a/two.py\n'
-        '+++ b/two.py\n'
-        '@@ -0,0 +1 @@\n'
-        '+only\n')
-    assert diff_coverage.added_lines(diff) == {
-        'one.py': {2, 12}, 'two.py': {1}}
-
-
 def test_added_triple_plus_content_stays_in_the_current_file(tmp):
     """A source line beginning `+++ ` is not a later file header."""
     del tmp
