@@ -150,9 +150,12 @@ def test_percent_and_base64_data_urls_match_exact_source_text(tmp):
 
 
 def test_data_url_without_a_separator_is_rejected(tmp):
-    """Removing the missing-separator guard must fail."""
+    """Missing separators and undecodable UTF-8 are both refused."""
     del tmp
-    assert _data_source('data:text/javascript') is None
+    payload = base64.b64encode(b'\xff').decode('ascii')
+    for url in ('data:text/javascript',
+                'data:text/javascript;base64,' + payload):
+        assert _data_source(url) is None, url
 
 
 def test_failed_data_decode_stops_before_source_lookup(tmp):
@@ -183,9 +186,11 @@ def test_empty_data_url_decodes_to_empty_source(tmp):
 
 
 def test_non_file_scheme_has_no_file_path(tmp):
-    """Accepting another URL scheme as a local path must fail."""
+    """Only a local file URL has a file path."""
     del tmp
-    assert _file_url_path('https://example.com/extension/a.js') is None
+    for url in ('https://example.com/extension/a.js',
+                'file://example.com/extension/a.js'):
+        assert _file_url_path(url) is None, url
 
 
 def test_foreign_file_host_has_no_file_path(tmp):
@@ -207,14 +212,19 @@ def test_resolution_stops_when_a_file_url_has_no_candidate(tmp):
 
 
 def test_data_url_near_match_is_not_resolved(tmp):
-    """Ignoring a tracked source's trailing newline must fail."""
-    source = 'export const exact = true;\n'
-    root = _repository(tmp, {'dashboard/exact.js': source})
-    near_url = 'data:text/javascript,' + quote(source.rstrip('\n'), safe='')
-
-    assert resolve_script(
-        near_url, root, tracked_sources(root)
-    ) is None
+    """Neither near matches nor unrelated decoded text name a file."""
+    cases = (
+        ('dashboard/exact.js', 'export const exact = true;\n',
+         'export const exact = true;'),
+        ('dashboard/tracked.js', 'export const tracked = true;\n',
+         'export const unrelated = true;\n'),
+    )
+    for index, (path, source, decoded) in enumerate(cases):
+        case = Path(tmp) / str(index)
+        case.mkdir()
+        root = _repository(case, {path: source})
+        url = 'data:text/javascript,' + quote(decoded, safe='')
+        assert resolve_script(url, root, tracked_sources(root)) is None
 
 
 def test_data_url_with_unmatched_text_is_not_resolved(tmp):
@@ -273,14 +283,22 @@ def test_non_shipped_script_shapes_are_not_resolved(tmp):
 
 
 def test_inner_zero_range_overrides_outer_nonzero_range(tmp):
-    """Treating any loaded outer range as coverage must fail."""
+    """Inner counts override outer counts independently of input order."""
     del tmp
-    record = _record('extension/sample.js', [
-        {'startOffset': 0, 'endOffset': 6, 'count': 1},
-        {'startOffset': 2, 'endOffset': 4, 'count': 0},
-    ])
-
-    assert merge_records([record], 6) == [1, 1, 0, 0, 1, 1]
+    cases = (
+        ([{'startOffset': 0, 'endOffset': 6, 'count': 1},
+          {'startOffset': 2, 'endOffset': 4, 'count': 0}],
+         [1, 1, 0, 0, 1, 1]),
+        ([{'startOffset': 0, 'endOffset': 6, 'count': 0},
+          {'startOffset': 2, 'endOffset': 4, 'count': 1}],
+         [0, 0, 1, 1, 0, 0]),
+        ([{'startOffset': 2, 'endOffset': 4, 'count': 1},
+          {'startOffset': 0, 'endOffset': 6, 'count': 0}],
+         [0, 0, 1, 1, 0, 0]),
+    )
+    for ranges, expected in cases:
+        record = _record('extension/sample.js', ranges)
+        assert merge_records([record], 6) == expected, ranges
 
 
 def test_inner_nonzero_range_overrides_outer_zero_range(tmp):
@@ -461,36 +479,39 @@ def test_cli_writes_cobertura_with_repo_paths_and_line_hits(tmp):
 
 
 def test_real_node_dump_reports_executed_and_skipped_lines(tmp):
-    """A drift from Node's emitted schema or offsets must fail."""
+    """Real Node dumps preserve LF and CRLF source offsets."""
     node = shutil.which('node')
     if node is None:
         _util.skip('node is not installed')
-    source = (
-        'function called() {\n'
-        '  return 1;\n'
-        '}\n'
-        'function missed() {\n'
-        '  return 2;\n'
-        '}\n'
-        'called();\n'
-        'console.log("done");\n'
+    cases = (
+        ('real.js', b'function called() {\n  return 1;\n}\n'
+         b'function missed() {\n  return 2;\n}\n'
+         b'called();\nconsole.log("done");\n',
+         {1, 2, 3, 4, 5, 6, 7, 8}, {1, 2, 3, 7, 8}),
+        ('crlf.js', b'const hit = 1;\r\nfunction missed() {\r\n'
+         b'  return 2;\r\n}\r\nconsole.log(hit);\r\n',
+         {1, 2, 3, 4, 5}, {1, 5}),
     )
-    root = _repository(tmp, {'extension/real.js': source})
-    dumps = Path(tmp) / 'coverage'
-    dumps.mkdir()
-    env = dict(os.environ)
-    env['NODE_V8_COVERAGE'] = str(dumps)
+    for name, source, executable, covered in cases:
+        case = Path(tmp) / name
+        case.mkdir()
+        root = _repository(case, {'extension/' + name: ''})
+        script = root / 'extension' / name
+        script.write_bytes(source)
+        dumps = case / 'coverage'
+        dumps.mkdir()
+        env = dict(os.environ)
+        env['NODE_V8_COVERAGE'] = str(dumps)
+        completed = run_node_argv(
+            node, [str(script)], str(root),
+            environment=_util.child_coverage('scrub', env))
+        assert completed.returncode == 0, (completed.stdout, completed.stderr)
+        assert list(dumps.glob('coverage-*.json')), 'node wrote no coverage dump'
 
-    completed = run_node_argv(
-        node, [str(root / 'extension' / 'real.js')], str(root),
-        environment=_util.child_coverage('scrub', env))
-    assert completed.returncode == 0, (completed.stdout, completed.stderr)
-    assert list(dumps.glob('coverage-*.json')), 'node wrote no coverage dump'
-
-    report = collect_coverage(dumps, root)
-    coverage = report.files['extension/real.js']
-    assert coverage.executable_lines == {1, 2, 3, 4, 5, 6, 7, 8}
-    assert coverage.covered_lines == {1, 2, 3, 7, 8}
+        report = collect_coverage(dumps, root)
+        coverage = report.files['extension/' + name]
+        assert coverage.executable_lines == executable, name
+        assert coverage.covered_lines == covered, name
 
 
 def test_real_node_dump_preserves_crlf_offsets(tmp):

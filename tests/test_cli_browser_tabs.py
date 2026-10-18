@@ -123,25 +123,26 @@ def test_do_open_tabs_sends_every_url_in_order_and_waits_thirty(tmp):
 
 
 def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
-    """One opened and one refused: three lines, in that order.
-
-    The count line is the last thing printed and names both halves, so a
-    partial open is readable without counting the rows above it.
-    """
+    """Partial, empty, and underspecified answers retain their output."""
     del tmp
-    fields = {'urls': ['https://a.example.com/', 'https://b.example.com/']}
-    plan = [_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)]
-    _recorded, out = run_cli(
-        ['open-tabs', 'https://a.example.com/', 'https://b.example.com/'],
-        [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}],
+    cases = (
+        (['https://a.example.com/', 'https://b.example.com/'],
+         {'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}],
           'errors': [{'url': 'https://b.example.com/',
-                      'error': 'blocked by policy'}]}],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert _rendered(out) == (
-        f'Opened tab 42 {OUT} https://a.example.com/\n'
-        'FAILED https://b.example.com/: blocked by policy\n'
-        '1 opened, 1 failed\n'), repr(out)
+                      'error': 'blocked by policy'}]},
+         f'Opened tab 42 {OUT} https://a.example.com/\n'
+         'FAILED https://b.example.com/: blocked by policy\n'
+         '1 opened, 1 failed\n'),
+        (['https://a.example.com/'], {}, '0 opened, 0 failed\n'),
+        (['https://a.example.com/'], {'errors': [{}]},
+         'FAILED ?: \n0 opened, 1 failed\n'),
+    )
+    for urls, result, expected in cases:
+        plan = [_ext_cmd('_open_tabs', 'open-tabs', {'urls': urls}, timeout=30)]
+        _recorded, out = run_cli(
+            ['open-tabs', *urls], [result],
+            module=commands_browser, plan=plan, token=TOK)
+        assert _rendered(out) == expected, repr(out)
 
 
 def test_do_open_tabs_prints_only_a_count_when_nothing_opened(tmp):
@@ -250,23 +251,20 @@ def test_do_ext_navigate_sends_the_url_and_no_tab_id(tmp):
 
 
 def test_do_ext_navigate_carries_the_chrome_tab_only_when_it_was_given(tmp):
-    """`--chrome-tab 0` adds `tabId` — `is not None`, so zero is named.
-
-    A truthiness test would drop tab 0 and navigate the active tab
-    instead, which is the one tab an operator never means.
-    """
+    """The active tab is implicit; --chrome-tab names even tab zero."""
     del tmp
-    fields = {'url': 'https://example.com/', 'tabId': 0}
-    recorded, out = run_cli(
-        ['ext-navigate', 'https://example.com/', '--chrome-tab', '0'],
-        [{'tabId': 0}],
-        module=commands_browser, plan=[_ext_cmd('_nav', 'navigate', fields)],
-        token=TOK)
-
-    assert recorded.calls == [('_nav', 'navigate', fields)], \
-        recorded.calls
-    assert _rendered(out) == f'Navigated tab 0 {OUT} https://example.com/\n', \
-        repr(out)
+    cases = (([], {'url': 'https://example.com/'}, 42),
+             (['--chrome-tab', '0'],
+              {'url': 'https://example.com/', 'tabId': 0}, 0))
+    for flags, fields, tab in cases:
+        recorded, out = run_cli(
+            ['ext-navigate', 'https://example.com/', *flags],
+            [{'tabId': tab}], module=commands_browser,
+            plan=[_ext_cmd('_nav', 'navigate', fields)], token=TOK)
+        assert recorded.calls == [('_nav', 'navigate', fields)], \
+            recorded.calls
+        assert _rendered(out) == (
+            f'Navigated tab {tab} {OUT} https://example.com/\n'), repr(out)
 
 
 # ── do_ext_reload ────────────────────────────────────────────────────
@@ -301,22 +299,25 @@ def test_do_ext_reload_carries_the_chrome_tab_only_when_it_was_given(tmp):
 
 
 def test_do_ext_reload_names_the_cache_bypass_in_its_output_too(tmp):
-    """`--bypass-cache` changes the body AND the line an operator reads.
-
-    The two are asserted together because a handler that sent the field
-    without the suffix, or printed the suffix without sending the field,
-    would each pass half of a split assertion.
-    """
+    """Each reload flag combination pins both the body and rendered line."""
     del tmp
-    fields = {'bypassCache': True}
-    recorded, out = run_cli(
-        ['ext-reload', '--bypass-cache'], [{'tabId': 42}],
-        module=commands_browser, plan=[_ext_cmd('_reload', 'reload', fields)],
-        token=TOK)
-
-    assert recorded.calls == [('_reload', 'reload', fields)], \
-        recorded.calls
-    assert out == 'Reloaded tab 42 (bypass cache)\n', repr(out)
+    cases = (
+        ([], {}, 42, 'Reloaded tab 42\n'),
+        (['--chrome-tab', '0'], {'tabId': 0}, 0, 'Reloaded tab 0\n'),
+        (['--bypass-cache'], {'bypassCache': True}, 42,
+         'Reloaded tab 42 (bypass cache)\n'),
+        (['--chrome-tab', '7', '--bypass-cache'],
+         {'tabId': 7, 'bypassCache': True}, 7,
+         'Reloaded tab 7 (bypass cache)\n'),
+    )
+    for flags, fields, tab, expected in cases:
+        recorded, out = run_cli(
+            ['ext-reload', *flags], [{'tabId': tab}],
+            module=commands_browser,
+            plan=[_ext_cmd('_reload', 'reload', fields)], token=TOK)
+        assert recorded.calls == [('_reload', 'reload', fields)], \
+            recorded.calls
+        assert out == expected, repr(out)
 
 
 def test_do_ext_reload_carries_both_fields_when_both_were_given(tmp):

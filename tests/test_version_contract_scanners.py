@@ -64,17 +64,17 @@ def test_a_division_slash_opens_no_region(tmp):
 
 
 def test_a_substitution_spans_to_its_own_closing_brace(tmp):
-    """A substitution does not end at a nested object's `}`: the code behind
-    a nested brace stays code, and the template text past its own `}` is
-    string again."""
+    """Division stays code; nested braces leave template bounds intact."""
     del tmp
-    source = ('const t = `${ {a: 1} && { script : { version : \'9.9.9\' } }'
-              ' }`;\n')
-    assert _region_texts(_JS, source) == [
-        ('`', 'string'),
-        ("'9.9.9'", 'string'),
-        ('`', 'string'),
-    ]
+    cases = (
+        ('const d = a / b / c;\n' + _EXECUTABLE,
+         [("'9.9.9'", 'string')]),
+        ('const t = `${ {a: 1} && { script : { version : \'9.9.9\' } }'
+         ' }`;\n',
+         [('`', 'string'), ("'9.9.9'", 'string'), ('`', 'string')]),
+    )
+    for source, expected in cases:
+        assert _region_texts(_JS, source) == expected, source
 
 
 def test_json_regions_honour_escaped_quotes(tmp):
@@ -230,15 +230,18 @@ def test_html_template_closer_in_a_quoted_attribute_is_inert(tmp):
 
 def test_html_template_comment_tags_do_not_change_depth(tmp):
     del tmp
-    decoy = _HTML_TEMPLATE_SITES[0]
     regions = _checker()
-    comments = ('<!-- x > <template> </template> -->',
-                '<!-- <template> x > </template> -->')
-    for comment in comments:
-        source = ('<template>' + comment + decoy
+    cases = (
+        ('', _HTML_TEMPLATE_SITES[0], ''),
+        ('<div title="</template>">', _HTML_TEMPLATE_SITES[1], '</div>'),
+        ('<!-- x > <template> </template> -->', _HTML_TEMPLATE_SITES[0], ''),
+        ('<!-- <template> x > </template> -->', _HTML_TEMPLATE_SITES[0], ''),
+    )
+    for prefix, decoy, suffix in cases:
+        source = ('<template>' + prefix + decoy + suffix
                   + '</template><div ' + _SITE + '</div>')
-        assert _surviving(regions, _DASHBOARD, source, decoy) == 0, comment
-        assert _surviving(regions, _DASHBOARD, source, _SITE) == 1, comment
+        assert _surviving(regions, _DASHBOARD, source, decoy) == 0, source
+        assert _surviving(regions, _DASHBOARD, source, _SITE) == 1, source
 
 
 def test_midline_html_close_marker_stays_javascript(tmp):
@@ -272,8 +275,17 @@ def test_html_close_comments_begin_at_every_javascript_line_start(tmp):
     decoy = "<span class='sl-v'>9.9.9</span>"
     live = 'const live = 1;'
     regions = _checker()
-    for label, prefix in _HTML_CLOSE_STARTS:
-        source = f'<script>{prefix}--> {decoy}\n{live}</script>'
+    cases = [(label, prefix, '-->', '\n', '')
+             for label, prefix in _HTML_CLOSE_STARTS]
+    cases.extend((label, '\n', '-->', terminator, '')
+                 for label, terminator in _HTML_LINE_TERMINATORS)
+    cases.extend((('CR before LF', '\n', '-->', '\r', '\n'),
+                  ('LF before CR', '\n', '-->', '\n', '\r'),
+                  ('slash line separator', '\n', '//', '\u2028', ''),
+                  ('slash paragraph separator', '\n', '//', '\u2029', '')))
+    for label, prefix, opener, terminator, suffix in cases:
+        source = (f'<script>{prefix}{opener} {decoy}'
+                  f'{terminator}{live}{suffix}</script>')
         assert _surviving(regions, _DASHBOARD, source, decoy) == 0, label
         assert _surviving(regions, _DASHBOARD, source, live) == 1, label
 
@@ -330,11 +342,24 @@ def test_script_data_state_limbs_reach_the_first_end_tag(tmp):
 
 
 def test_check_survives_the_html_adversarial_cases(tmp):
-    """No HTML case takes the real dashboard site out of the count."""
-    for index, (label, markup, _expected) in enumerate(_HTML_CASES):
+    """HTML markup and JSON escapes leave the real sites counted."""
+    cases = [(label, markup) for label, markup, _expected in _HTML_CASES]
+    cases.extend((('template content', None), ('JSON escaped quote', None)))
+    for index, (label, markup) in enumerate(cases):
         copy_root = Path(tmp) / f'case-{index}' / 'tree'
         _copy_versioned_tree(copy_root)
-        _insert_before_rail_foot(copy_root, markup)
+        if markup is not None:
+            _insert_before_rail_foot(copy_root, markup)
+        elif label == 'template content':
+            dashboard = copy_root / _DASHBOARD
+            text = dashboard.read_text(encoding='utf-8')
+            markup = ''.join('<template>' + site + '</template>\n'
+                             for site in _HTML_TEMPLATE_SITES)
+            assert text.count('</body>') == 1, text
+            dashboard.write_text(text.replace('</body>', markup + '</body>'),
+                                 encoding='utf-8')
+        else:
+            _add_json_decoy(copy_root)
         r = _run_checker(copy_root)
         assert r.returncode == 0, (label, r.returncode, r.stdout, r.stderr)
         assert 'ok:' in r.stdout, (label, r.stdout)
@@ -356,19 +381,23 @@ def test_check_ignores_version_sites_in_html_template_content(tmp):
 
 
 def test_check_counts_a_duplicate_after_a_regex_literal(tmp):
-    """A quote inside a regex literal must not swallow the executable
-    binding after it (#316)."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    page = copy_root / 'extension' / 'page.js'
-    page.write_text(
-        page.read_text(encoding='utf-8') + "\nconst _probe = /'/;\n"
+    """Regex quotes and template substitutions leave duplicates visible."""
+    snippets = (
+        "\nconst _probe = /'/;\n"
         + "const _dup = {script: {version: '9.9.9'}};\n",
-        encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    assert '9.9.9' in r.stderr, r.stderr
+        '\nconst _dup = `${({script: {version: \'9.9.9\'}})'
+        + '.script.version}`;\n',
+        '\nconst _probe = `${ {a: 1} && { script : { version : '
+        + '\'9.9.9\' } } }`;\n',
+    )
+    for index, snippet in enumerate(snippets):
+        copy_root = Path(tmp) / f'case-{index}' / 'tree'
+        _copy_versioned_tree(copy_root)
+        _append_to(copy_root, _JS, snippet)
+        r = _run_checker(copy_root)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert 'matches 2 times' in r.stderr, r.stderr
+        assert '9.9.9' in r.stderr, r.stderr
 
 
 def test_check_counts_a_duplicate_in_a_template_substitution(tmp):
