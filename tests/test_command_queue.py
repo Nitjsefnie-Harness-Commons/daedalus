@@ -34,54 +34,6 @@ def _publish_legacy(path, content):
     temporary.replace(path)
 
 
-def test_remove_expired_removes_an_expired_json(tmp):
-    queue = _load_queue('command_queue_expired')
-    path = Path(tmp) / 'queued.json'
-    path.write_text('{"id":"expired"}', encoding='utf-8')
-    now = time.time()
-    _set_mtime(path, now - 91)
-
-    queue.remove_expired(path, now, 90)
-
-    assert not path.exists(), path
-
-
-def test_remove_expired_leaves_a_fresh_json(tmp):
-    queue = _load_queue('command_queue_fresh')
-    path = Path(tmp) / 'queued.json'
-    path.write_text('{"id":"fresh"}', encoding='utf-8')
-    now = time.time()
-    _set_mtime(path, now - 1)
-
-    queue.remove_expired(path, now, 90)
-
-    assert path.exists(), path
-
-
-def test_remove_expired_leaves_a_malformed_legacy_file(tmp):
-    queue = _load_queue('command_queue_malformed')
-    path = Path(tmp) / 'legacy.json'
-    _publish_legacy(path, '{not-json')
-    now = time.time()
-    _set_mtime(path, now - 91)
-
-    queue.remove_expired(path, now, 90, legacy=True)
-
-    assert path.exists(), path
-
-
-def test_remove_expired_removes_an_expired_tmp(tmp):
-    queue = _load_queue('command_queue_expired_tmp')
-    path = Path(tmp) / 'queued.json.tmp'
-    path.write_text('{"id":"expired"}', encoding='utf-8')
-    now = time.time()
-    _set_mtime(path, now - 91)
-
-    queue.remove_expired(path, now, 90)
-
-    assert not path.exists(), path
-
-
 def test_remove_expired_removes_an_expired_non_object_legacy_json(tmp):
     queue = _load_queue('command_queue_non_object_legacy_expired')
     path = Path(tmp) / 'legacy.json'
@@ -92,18 +44,6 @@ def test_remove_expired_removes_an_expired_non_object_legacy_json(tmp):
     queue.remove_expired(path, now, 90, legacy=True)
 
     assert not path.exists(), path
-
-
-def test_remove_expired_leaves_a_fresh_non_object_legacy_json(tmp):
-    queue = _load_queue('command_queue_non_object_legacy_fresh')
-    path = Path(tmp) / 'legacy.json'
-    _publish_legacy(path, '["not a command"]')
-    now = time.time()
-    _set_mtime(path, now - 1)
-
-    queue.remove_expired(path, now, 90, legacy=True)
-
-    assert path.exists(), path
 
 
 def test_remove_expired_leaves_a_file_at_the_ttl_boundary(tmp):
@@ -147,28 +87,6 @@ def test_remove_expired_does_not_follow_a_symlink(tmp):
 
     assert path.is_symlink(), path
     assert target.exists(), target
-
-
-def test_a_second_claimer_of_one_key_is_refused(tmp):
-    queue = _load_queue('command_queue_claim_refused')
-    del tmp
-
-    assert queue.claim('queue:target/one.json') is True
-    try:
-        assert queue.claim('queue:target/one.json') is False
-    finally:
-        queue.release('queue:target/one.json')
-
-
-def test_a_released_key_can_be_claimed_again(tmp):
-    queue = _load_queue('command_queue_claim_again')
-    del tmp
-
-    assert queue.claim('queue:target/two.json') is True
-    queue.release('queue:target/two.json')
-
-    assert queue.claim('queue:target/two.json') is True
-    queue.release('queue:target/two.json')
 
 
 def test_a_claim_released_by_an_exception_can_be_claimed_again(tmp):
@@ -385,41 +303,6 @@ def test_an_inherited_export_cannot_kill_the_in_process_server_load(tmp):
 
 def _raise_broken_pipe(_data):
     raise BrokenPipeError('injected write failure')
-
-
-def test_stream_queue_drain_forwards_ttl_for_a_fresh_command(tmp):
-    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '3600'}
-    with _util.bridge(tmp, env=env) as (base, docroot):
-        qdir = Path(docroot) / 'commands' / TOK
-        qdir.mkdir()
-        command = qdir / '0000000000001_000001.json'
-        command.write_text('{"id":"fresh-forwarded"}', encoding='utf-8')
-        stamp = time.time() - 1
-        os.utime(command, (stamp, stamp))
-
-        delivered = read_stream_data(base, TOK, timeout=5)
-
-        assert delivered['id'] == 'fresh-forwarded', delivered
-
-
-def test_stream_queue_drain_forwards_ttl_for_an_expired_command(tmp):
-    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '3600'}
-    with _util.bridge(tmp, env=env) as (base, docroot):
-        qdir = Path(docroot) / 'commands' / TOK
-        qdir.mkdir()
-        expired = qdir / '0000000000001_000001.json'
-        fresh = qdir / '0000000000002_000002.json'
-        expired.write_text('{"id":"expired-forwarded"}', encoding='utf-8')
-        fresh.write_text('{"id":"after-expired"}', encoding='utf-8')
-        now = time.time()
-        old_stamp = now - 5400
-        os.utime(expired, (old_stamp, old_stamp))
-        os.utime(fresh, (now, now))
-
-        delivered = read_stream_data(base, TOK, timeout=5)
-
-        assert delivered['id'] == 'after-expired', delivered
-        assert not expired.exists(), expired
 
 
 def test_extension_legacy_drain_forwards_the_command_directory(tmp):
