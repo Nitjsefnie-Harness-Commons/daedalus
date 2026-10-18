@@ -55,12 +55,6 @@ def _envelope(**over):
 # ── do_cdp ───────────────────────────────────────────────────────────
 
 def test_do_cdp_sends_empty_params_and_neither_option_when_none_given(tmp):
-    """The bare arm: `params` is `{}` — a real empty object, not absent.
-
-    `tabId` and `keep_session` are absent rather than null, so this test is
-    the only thing that pins the two flags as opt-in: a handler that always
-    sent them would still satisfy the sibling test that asks for both.
-    """
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.captureScreenshot',
             'params': {}, 'token': TOK, 'tab': 'extension'}
@@ -77,57 +71,27 @@ def test_do_cdp_sends_empty_params_and_neither_option_when_none_given(tmp):
     assert _rendered(out) == f'{IN} _cdp\n{{\n  "format": "png"\n}}\n', \
         repr(out)
 
+    cases = (
+        ('Page.navigate', ['-p', '{"url": "https://example.com/"}'],
+         {'url': 'https://example.com/'}, {}, {}, f'{IN} _cdp\n{{}}\n'),
+        ('Page.enable', ['--chrome-tab', '0'], {}, {'tabId': 0}, {},
+         f'{IN} _cdp\n{{}}\n'),
+        ('Profiler.enable', ['--keep-session'], {}, {'keep_session': True},
+         {}, f'{IN} _cdp\n{{}}\n'),
+    )
+    for method, flags, params, fields, result, expected in cases:
+        body = {'id': '_cdp', 'type': 'cdp', 'method': method,
+                'params': params, 'token': TOK, 'tab': 'extension', **fields}
+        plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
+        recorded, out = run_cli(
+            ['cdp', method, *flags],
+            [{'did': 'd1'}, _envelope(id='_cdp', result=result)],
+            module=commands_browser, plan=plan, token=TOK)
 
-def test_do_cdp_sends_the_params_it_was_given(tmp):
-    del tmp
-    body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.navigate',
-            'params': {'url': 'https://example.com/'}, 'token': TOK,
-            'tab': 'extension'}
-    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
-    recorded, out = run_cli(
-        ['cdp', 'Page.navigate', '-p', '{"url": "https://example.com/"}'],
-        [{'did': 'd1'}, _envelope(id='_cdp', result={})],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert recorded.api_calls == [('PUT', '/command', body)], \
-        recorded.api_calls
-    assert _rendered(out) == f'{IN} _cdp\n{{}}\n', repr(out)
-
-
-def test_do_cdp_carries_the_chrome_tab_only_when_it_was_given(tmp):
-    """`--chrome-tab` adds `tabId`, as the integer Chrome numbers tabs with.
-
-    `is not None` rather than truthiness is what lets a tab numbered 0 be
-    named, so the arm is pinned with the zero and not with a big number.
-    """
-    del tmp
-    body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.enable', 'params': {},
-            'token': TOK, 'tab': 'extension', 'tabId': 0}
-    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
-    recorded, out = run_cli(
-        ['cdp', 'Page.enable', '--chrome-tab', '0'],
-        [{'did': 'd1'}, _envelope(id='_cdp', result={})],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert recorded.api_calls == [('PUT', '/command', body)], \
-        recorded.api_calls
-    assert _rendered(out) == f'{IN} _cdp\n{{}}\n', repr(out)
-
-
-def test_do_cdp_carries_the_keep_session_flag_only_when_it_was_given(tmp):
-    del tmp
-    body = {'id': '_cdp', 'type': 'cdp', 'method': 'Profiler.enable',
-            'params': {}, 'token': TOK, 'tab': 'extension',
-            'keep_session': True}
-    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
-    recorded, out = run_cli(
-        ['cdp', 'Profiler.enable', '--keep-session'],
-        [{'did': 'd1'}, _envelope(id='_cdp', result={})],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert recorded.api_calls == [('PUT', '/command', body)], \
-        recorded.api_calls
-    assert _rendered(out) == f'{IN} _cdp\n{{}}\n', repr(out)
+        assert recorded.api_calls == [('PUT', '/command', body)], \
+            recorded.api_calls
+        assert recorded.timeouts == [30], recorded.timeouts
+        assert _rendered(out) == expected, repr(out)
 
 
 def test_do_cdp_renders_the_header_cells_the_result_carries(tmp):
@@ -183,30 +147,8 @@ def test_do_cdp_exits_when_no_result_arrives(tmp):
 
 # ── do_close_tab ─────────────────────────────────────────────────────
 
-def test_do_close_tab_sends_one_id_as_tab_id(tmp):
-    """A single tab travels as `tabId` — a scalar, not a one-item list.
-
-    The two spellings are not interchangeable on the extension's side, so
-    the arity split is pinned by the request rather than by the output,
-    which is identical for both.
-    """
-    del tmp
-    body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
-            'tab': 'extension', 'tabId': 101}
-    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
-    recorded, out = run_cli(
-        ['close-tab', '101'],
-        [{'did': 'd2'},
-         _envelope(id='_close_tab', result={'closed': [101]})],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert recorded.api_calls == [('PUT', '/command', body)], \
-        recorded.api_calls
-    assert out == 'Closed 1 tab(s): [101]\n', repr(out)
-
 
 def test_do_close_tab_sends_several_ids_as_a_list(tmp):
-    """Two or more travel as `tabIds`, and `tabId` is absent."""
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabIds': [101, 102, 103]}
@@ -221,51 +163,30 @@ def test_do_close_tab_sends_several_ids_as_a_list(tmp):
         recorded.api_calls
     assert out == 'Closed 3 tab(s): [101, 102, 103]\n', repr(out)
 
+    cases = (
+        ([101], {'tabId': 101}, {'closed': [101]},
+         'Closed 1 tab(s): [101]\n'),
+        ([101, 102], {'tabIds': [101, 102]},
+         {'errors': [{'id': 102, 'error': 'no such tab'},
+                     {'id': 101, 'error': 'busy'}]},
+         'Failed tab 102: no such tab\nFailed tab 101: busy\n'),
+        ([101, 102], {'tabIds': [101, 102]},
+         {'closed': [101], 'errors': [{'id': 102, 'error': 'busy'}]},
+         'Closed 1 tab(s): [101]\nFailed tab 102: busy\n'),
+        ([101], {'tabId': 101}, {'errors': [{}]}, 'Failed tab ?: \n'),
+    )
+    for ids, fields, answer, expected in cases:
+        body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
+                'tab': 'extension', **fields}
+        plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
+        recorded, out = run_cli(
+            ['close-tab', *map(str, ids)],
+            [{'did': 'd2'}, _envelope(id='_close_tab', result=answer)],
+            module=commands_browser, plan=plan, token=TOK)
 
-def test_do_close_tab_reports_each_tab_the_extension_could_not_close(tmp):
-    """A refusal is one line per tab, id then error, in the order given.
-
-    Two errors, not one, and the ids deliberately NOT in ascending order:
-    a single-element fixture leaves this docstring's claim about order
-    unfalsifiable, because a handler iterating the list backwards prints
-    the same lone line and the suite stays green. Expecting `102` before
-    `101` is what makes the ordering claim a control.
-    """
-    del tmp
-    body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
-            'tab': 'extension', 'tabIds': [101, 102]}
-    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
-    answer = {'errors': [{'id': 102, 'error': 'no such tab'},
-                         {'id': 101, 'error': 'busy'}]}
-    _recorded, out = run_cli(
-        ['close-tab', '101', '102'],
-        [{'did': 'd2'}, _envelope(id='_close_tab', result=answer)],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert out == (
-        'Failed tab 102: no such tab\n'
-        'Failed tab 101: busy\n'), repr(out)
-
-
-def test_do_close_tab_reports_a_partial_close_as_both_lines(tmp):
-    """Some closed and some refused: the count line and the failure lines.
-
-    The order is the closed count first and then each refusal, which is
-    what makes a partial close readable rather than a bare number.
-    """
-    del tmp
-    body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
-            'tab': 'extension', 'tabIds': [101, 102]}
-    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
-    answer = {'closed': [101], 'errors': [{'id': 102, 'error': 'busy'}]}
-    _recorded, out = run_cli(
-        ['close-tab', '101', '102'],
-        [{'did': 'd2'}, _envelope(id='_close_tab', result=answer)],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert out == (
-        'Closed 1 tab(s): [101]\n'
-        'Failed tab 102: busy\n'), repr(out)
+        assert recorded.api_calls == [('PUT', '/command', body)], \
+            recorded.api_calls
+        assert out == expected, repr(out)
 
 
 def test_do_close_tab_says_so_when_no_tab_was_affected(tmp):
@@ -285,25 +206,6 @@ def test_do_close_tab_says_so_when_no_tab_was_affected(tmp):
         module=commands_browser, plan=plan, token=TOK)
 
     assert out == 'No tabs affected\n', repr(out)
-
-
-def test_do_close_tab_renders_a_failure_carrying_neither_field(tmp):
-    """A refusal with no id and no error reads `?` and an empty reason.
-
-    Two independent defaults in one row: the id is what an operator needs
-    to retry, so its absence must be visible rather than printed as None.
-    """
-    del tmp
-    body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
-            'tab': 'extension', 'tabId': 101}
-    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
-    _recorded, out = run_cli(
-        ['close-tab', '101'],
-        [{'did': 'd2'},
-         _envelope(id='_close_tab', result={'errors': [{}]})],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert out == 'Failed tab ?: \n', repr(out)
 
 
 def test_do_close_tab_exits_when_no_result_arrives(tmp):
@@ -453,12 +355,6 @@ def test_do_fetch_timings_says_so_when_the_buffer_is_empty(tmp):
 
 
 def test_do_fetch_timings_renders_a_failed_entry_in_its_own_columns(tmp):
-    """An entry carrying `error` has no status, size or timer to print.
-
-    The five blank cells are the handler's own empty strings, and the
-    reason is appended in parentheses after the url rather than occupying
-    a column of its own.
-    """
     del tmp
     _recorded, out = run_cli(
         ['fetch-timings'], [_timings(ABORTED)],
@@ -471,17 +367,8 @@ def test_do_fetch_timings_renders_a_failed_entry_in_its_own_columns(tmp):
         f'GET    ERR{ERR_GAP}5  '
         'https://cdn.example.com/bad.ts (net::ERR_ABORTED)\n'), repr(out)
 
-
-def test_do_fetch_timings_prints_no_statistics_when_every_entry_failed(tmp):
-    """The summary counts only the entries that completed.
-
-    A buffer of nothing but failures has no median to take, and the
-    `if completed` guard is what keeps the block off the output entirely.
-    The comparison is a whole string because the absence of the summary
-    line is what is being pinned — a substring check would pass a handler
-    that printed the block in a different shape.
-    """
-    del tmp
+    row = (f'GET    ERR{ERR_GAP}5  '
+           'https://cdn.example.com/bad.ts (net::ERR_ABORTED)\n')
     _recorded, out = run_cli(
         ['fetch-timings'], [_timings(ABORTED, ABORTED)],
         module=commands_browser,
@@ -530,10 +417,6 @@ def test_do_ext_self_reload_reports_the_version_it_reloaded_from(tmp):
     assert out == ('Extension reloading from v2.7.1 — will reconnect '
                    'SSE automatically\n'), repr(out)
 
-
-def test_do_ext_self_reload_prints_a_placeholder_for_a_missing_version(tmp):
-    """A result with no `version` reads `v?`, not `vNone`."""
-    del tmp
     _recorded, out = run_cli(
         ['ext-self-reload'], [{}],
         module=commands_browser,

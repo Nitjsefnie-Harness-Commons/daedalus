@@ -44,134 +44,6 @@ def _refused(source, detail):
     raise AssertionError(f'expected a {detail} refusal')
 
 
-def test_nested_sequence_block_headers_hide_scalar_content_anchors(tmp):
-    del tmp
-    prefixes = (
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoys:\n'
-        '  - - |\n'
-        '      key: &a hidden\n',
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoys:\n'
-        '  -\n'
-        '    |\n'
-        '      key: &a hidden\n',
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoys:\n'
-        '  -\n'
-        '  |\n'
-        '    key: &a hidden\n',
-    )
-    for prefix in prefixes:
-        source = _step_with_aliased_name(prefix)
-        parsed = yaml.load(source, Loader=yaml.BaseLoader)
-        expected = parsed['jobs']['sample']['steps'][0]['name']
-        assert _names(source) == [expected] == ['target'], source
-
-
-def test_following_line_block_headers_hide_mapping_scalar_content(tmp):
-    del tmp
-    prefixes = (
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoy:\n'
-        '  job:\n'
-        '   |\n'
-        '     key: &a hidden\n',
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoy:\n'
-        '  env:\n'
-        '   KEY:\n'
-        '     |\n'
-        '       key: &a hidden\n',
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoys:\n'
-        '  ? |\n'
-        '    key: &a hidden\n'
-        '  : value\n',
-    )
-    for prefix in prefixes:
-        source = _step_with_aliased_name(prefix)
-        expected = _base_name(source)
-        assert _names(source) == [expected] == ['target'], source
-
-
-def test_nested_quoted_scalar_content_hides_anchors(tmp):
-    del tmp
-    prefixes = (
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoy:\n'
-        '  - - "open\n'
-        '      key: &a hidden"\n',
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoy:\n'
-        "  - - 'open\n"
-        "      key: &a hidden'\n",
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoy:\n'
-        '  -\n'
-        '   "open\n'
-        '     key: &a hidden"\n',
-        'anchors:\n'
-        ' first: &a target\n'
-        ' decoy:\n'
-        "  -\n"
-        "   'open\n"
-        "     key: &a hidden'\n",
-    )
-    for prefix in prefixes:
-        source = _step_with_aliased_name(prefix)
-        expected = _base_name(source)
-        assert _names(source) == [expected] == ['target'], source
-
-
-def test_nested_scalar_boundaries_preserve_same_level_siblings(tmp):
-    del tmp
-    headers = ('|2', '|2-', '>2', '|', '>-')
-    for header in headers:
-        prefixes = (
-            'anchors:\n'
-            ' decoy:\n'
-            f'  - - {header}\n'
-            '      hidden\n'
-            '    - first: &a target\n',
-            'anchors:\n'
-            ' decoy:\n'
-            f'  - - {header}\n'
-            '    - first: &a target\n',
-        )
-        for prefix in prefixes:
-            source = _step_with_aliased_name(prefix)
-            expected = _base_name(source)
-            assert _names(source) == [expected] == ['target'], source
-
-
-def test_bare_sequence_anchor_position_skips_blank_and_comment_lines(tmp):
-    del tmp
-    prefixes = (
-        'anchors:\n'
-        ' decoy:\n'
-        '  -\n'
-        '\n'
-        '   &a target\n',
-        'anchors:\n'
-        ' decoy:\n'
-        '  -\n'
-        '  # comment\n'
-        '   &a target\n',
-    )
-    for prefix in prefixes:
-        _refused(_step_with_aliased_name(prefix), 'sequence item')
-
-
 def test_separate_line_explicit_key_anchor_names_mapping_key(tmp):
     del tmp
     prefixes = (
@@ -190,23 +62,6 @@ def test_separate_line_explicit_key_anchor_names_mapping_key(tmp):
     )
     for prefix in prefixes:
         _refused(_step_with_aliased_name(prefix), 'mapping key')
-
-
-def test_nested_explicit_key_scalar_content_hides_anchors(tmp):
-    del tmp
-    headers = ('|', '|-', '|2', '>-', '>2')
-    for header in headers:
-        for properties in ('', '&b '):
-            prefix = (
-                'anchors:\n'
-                ' first: &a target\n'
-                ' decoy:\n'
-                f'  - - ? {properties}{header}\n'
-                '        key: &a hidden\n'
-                '      : value\n')
-            source = _step_with_aliased_name(prefix)
-            expected = _base_name(source)
-            assert _names(source) == [expected] == ['target'], source
 
 
 def test_nested_explicit_quoted_key_scalar_hides_anchors(tmp):
@@ -240,6 +95,28 @@ def test_nested_explicit_quoted_key_scalar_hides_anchors(tmp):
         "            key: &a hidden\n"
         "            end'\n"
         "          : value\n",
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        '  - - "open\n'
+        '      key: &a hidden"\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        "  - - 'open\n"
+        "      key: &a hidden'\n",
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        '  -\n'
+        '   "open\n'
+        '     key: &a hidden"\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        "  -\n"
+        "   'open\n"
+        "     key: &a hidden'\n",
     )
     for prefix in prefixes:
         source = _step_with_aliased_name(prefix)
@@ -291,55 +168,25 @@ def test_inline_anchored_keys_name_their_yaml_position(tmp):
             'nested sequence',
         ),
     )
+    cases += (
+        ('anchors:\n ? &a key\n : value\n', 'mapping key'),
+        ('anchors:\n -\n  &a target\n', 'sequence item'),
+        ('anchors:\n - - &a target\n', 'nested sequence'),
+    )
+    cases += tuple((prefix, 'sequence item') for prefix in (
+        'anchors:\n'
+        ' decoy:\n'
+        '  -\n'
+        '\n'
+        '   &a target\n',
+        'anchors:\n'
+        ' decoy:\n'
+        '  -\n'
+        '  # comment\n'
+        '   &a target\n',
+    ))
     for prefix, detail in cases:
         _refused(_step_with_aliased_name(prefix), detail)
-
-
-def test_nested_mapping_scalar_header_keeps_mapping_sibling_visible(tmp):
-    del tmp
-    prefixes = (
-        'anchors:\n'
-        ' decoys:\n'
-        '  - - key: |2\n'
-        '        scalar\n'
-        '      first: &a target\n',
-        'anchors:\n'
-        ' decoys:\n'
-        '  - - key: >2-\n'
-        '        scalar\n'
-        '      first: &a target\n',
-    )
-    for prefix in prefixes:
-        source = _step_with_aliased_name(prefix)
-        expected = _base_name(source)
-        assert _names(source) == [expected] == ['target'], source
-
-
-def test_empty_nested_literal_stops_before_a_sibling_anchor(tmp):
-    del tmp
-    prefixes = (
-        'anchors:\n'
-        ' decoy:\n'
-        '  - - |\n'
-        '    - first: &a target\n',
-        'anchors:\n'
-        ' decoy:\n'
-        '  - -\n'
-        '    |\n'
-        '    - first: &a target\n',
-        'anchors:\n'
-        ' decoy:\n'
-        '  - -\n'
-        '\n'
-        '    # comment\n'
-        '    |\n'
-        '\n'
-        '    - first: &a target\n',
-    )
-    for prefix in prefixes:
-        source = _step_with_aliased_name(prefix)
-        expected = _base_name(source)
-        assert _names(source) == [expected] == ['target'], source
 
 
 def test_following_line_scalar_headers_stop_before_sibling_anchors(tmp):
@@ -409,6 +256,7 @@ def test_following_line_scalar_headers_stop_before_sibling_anchors(tmp):
 
 def test_standalone_scalar_headers_keep_the_containing_dash_indent(tmp):
     del tmp
+    prefixes = []
     cases = (
         ('|2', 4, 4, '', ''),
         ('|2-', 4, 5, '', ''),
@@ -427,14 +275,59 @@ def test_standalone_scalar_headers_keep_the_containing_dash_indent(tmp):
             f'anchors:\n first: &a target\n decoys:\n{marker}{gap}'
             f'{" " * header_indent}{header}\n'
             f'{" " * content_indent}key: &a hidden\n')
-        source = _step_with_aliased_name(prefix)
-        expected = _base_name(source)
-        assert _names(source) == [expected] == ['target'], source
-
-
-def test_nested_explicit_key_scalar_keeps_mapping_sibling_visible(tmp):
-    del tmp
-    prefixes = (
+        prefixes.append(prefix)
+    prefixes.extend((
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  - - |\n'
+        '      key: &a hidden\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  -\n'
+        '    |\n'
+        '      key: &a hidden\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  -\n'
+        '  |\n'
+        '    key: &a hidden\n',
+    ))
+    prefixes.extend((
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        '  job:\n'
+        '   |\n'
+        '     key: &a hidden\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoy:\n'
+        '  env:\n'
+        '   KEY:\n'
+        '     |\n'
+        '       key: &a hidden\n',
+        'anchors:\n'
+        ' first: &a target\n'
+        ' decoys:\n'
+        '  ? |\n'
+        '    key: &a hidden\n'
+        '  : value\n',
+    ))
+    headers = ('|', '|-', '|2', '>-', '>2')
+    for header in headers:
+        for properties in ('', '&b '):
+            prefix = (
+                'anchors:\n'
+                ' first: &a target\n'
+                ' decoy:\n'
+                f'  - - ? {properties}{header}\n'
+                '        key: &a hidden\n'
+                '      : value\n')
+            prefixes.append(prefix)
+    prefixes.extend((
         'anchors:\n'
         ' decoys:\n'
         '  - - ? |2\n'
@@ -447,7 +340,51 @@ def test_nested_explicit_key_scalar_keeps_mapping_sibling_visible(tmp):
         '        scalar\n'
         '      : value\n'
         '      first: &a target\n',
-    )
+    ))
+    prefixes.extend((
+        'anchors:\n'
+        ' decoys:\n'
+        '  - - key: |2\n'
+        '        scalar\n'
+        '      first: &a target\n',
+        'anchors:\n'
+        ' decoys:\n'
+        '  - - key: >2-\n'
+        '        scalar\n'
+        '      first: &a target\n',
+    ))
+    headers = ('|2', '|2-', '>2', '|', '>-')
+    for header in headers:
+        prefixes.extend((
+            'anchors:\n'
+            ' decoy:\n'
+            f'  - - {header}\n'
+            '      hidden\n'
+            '    - first: &a target\n',
+            'anchors:\n'
+            ' decoy:\n'
+            f'  - - {header}\n'
+            '    - first: &a target\n',
+        ))
+    prefixes.extend((
+        'anchors:\n'
+        ' decoy:\n'
+        '  - - |\n'
+        '    - first: &a target\n',
+        'anchors:\n'
+        ' decoy:\n'
+        '  - -\n'
+        '    |\n'
+        '    - first: &a target\n',
+        'anchors:\n'
+        ' decoy:\n'
+        '  - -\n'
+        '\n'
+        '    # comment\n'
+        '    |\n'
+        '\n'
+        '    - first: &a target\n',
+    ))
     for prefix in prefixes:
         source = _step_with_aliased_name(prefix)
         expected = _base_name(source)
@@ -550,17 +487,6 @@ def test_step_reader_rejects_nested_sequence_items(tmp):
     raise AssertionError('nested sequence item was returned as a step')
 
 
-def test_present_unsupported_anchor_positions_name_their_yaml_position(tmp):
-    del tmp
-    cases = (
-        ('anchors:\n ? &a key\n : value\n', 'mapping key'),
-        ('anchors:\n -\n  &a target\n', 'sequence item'),
-        ('anchors:\n - - &a target\n', 'nested sequence'),
-    )
-    for prefix, detail in cases:
-        _refused(_step_with_aliased_name(prefix), detail)
-
-
 def test_unsupported_tag_diagnostic_does_not_claim_a_false_resolution(tmp):
     del tmp
     try:
@@ -611,25 +537,14 @@ def _flow_member_document(member, top_level):
                     '     uses: actions/cache@deadbeef\n')
 
 
-def test_flow_member_properties_preserve_quoted_hashes(tmp):
-    del tmp
-    for prop in ('&a', '!!str'):
-        for quote in ("'", '"'):
-            for top_level in (False, True):
-                member = f'{prop} {quote}x # y{quote}'
-                source = _flow_member_document(member, top_level)
-                parsed = yaml.load(source, Loader=yaml.BaseLoader)
-                expected = [step.get('name') for step in
-                            parsed['jobs']['sample']['steps']]
-                assert _names(source) == expected == [None, 'hidden step'], (
-                    prop, quote, top_level, source)
-
-
 def test_flow_member_properties_keep_unquoted_hashes_as_comments(tmp):
     del tmp
     for prop in ('&a', '!!str'):
-        for top_level in (False, True):
-            member = f'{prop} x # ], hidden: [\n        '
+        members = (f'{prop} x # ], hidden: [\n        ',
+                   f"{prop} 'x # y'", f'{prop} "x # y"')
+        for member, top_level in (
+                (member, top) for member in members
+                for top in (False, True)):
             source = _flow_member_document(member, top_level)
             parsed = yaml.load(source, Loader=yaml.BaseLoader)
             expected = [step.get('name') for step in
@@ -637,7 +552,8 @@ def test_flow_member_properties_keep_unquoted_hashes_as_comments(tmp):
             assert _names(source) == expected == [None, 'hidden step'], source
             collection = (parsed['x'] if top_level else
                           parsed['jobs']['sample']['steps'][0]['with']['args'])
-            assert collection == ['x', 'b'], collection
+            if member == members[0]:
+                assert collection == ['x', 'b'], collection
 
 
 if __name__ == '__main__':
