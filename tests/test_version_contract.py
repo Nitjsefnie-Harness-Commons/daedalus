@@ -199,28 +199,42 @@ def test_check_versions_refuses_a_second_version_assignment(tmp):
 
 def test_check_versions_print_refuses_a_second_version_assignment(tmp):
     """--print must not hand out the first of two competing values."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    _duplicate_the_package_version(copy_root)
-    r = _run_checker(copy_root, '--print')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert r.stdout.strip() == '', r.stdout
-    assert 'matches 2 times' in r.stderr, r.stderr
+    for second_value, quote in (
+            ('0.22.0.2', "'"),
+            ('9.9.9"', "'"),
+            ("9.9.9'", '"'),
+            ('9.9.\\\n9', "'"),
+    ):
+        copy_root = Path(tmp) / 'tree'
+        _copy_versioned_tree(copy_root)
+        _duplicate_the_package_version(copy_root, second_value, quote)
+        r = _run_checker(copy_root, '--print')
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert r.stdout.strip() == '', r.stdout
+        assert 'matches 2 times' in r.stderr, r.stderr
 
 
 def test_check_versions_set_refuses_a_second_version_assignment(tmp):
     """--set must not rewrite only the first of two competing assignments
     and leave the second one stale, which would silently reintroduce the
     exact disagreement this checker exists to catch."""
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    _duplicate_the_package_version(copy_root)
-    before = (copy_root / 'daedalus_cli' / '__init__.py').read_text(encoding='utf-8')
-    r = _run_checker(copy_root, '--set', '9.9.9')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    after = (copy_root / 'daedalus_cli' / '__init__.py').read_text(encoding='utf-8')
-    assert after == before, 'refused sites must not be partially rewritten'
+    for second_value, quote in (
+            ('0.22.0.2', "'"),
+            ('9.9.9"', "'"),
+            ("9.9.9'", '"'),
+            ('9.9.\\\n9', "'"),
+    ):
+        copy_root = Path(tmp) / 'tree'
+        _copy_versioned_tree(copy_root)
+        _duplicate_the_package_version(copy_root, second_value, quote)
+        before = (copy_root / 'daedalus_cli' / '__init__.py').read_text(
+            encoding='utf-8')
+        r = _run_checker(copy_root, '--set', '9.9.9')
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert 'matches 2 times' in r.stderr, r.stderr
+        after = (copy_root / 'daedalus_cli' / '__init__.py').read_text(
+            encoding='utf-8')
+        assert after == before, 'refused sites must not be partially rewritten'
 
 
 def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
