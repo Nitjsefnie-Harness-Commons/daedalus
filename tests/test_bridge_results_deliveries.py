@@ -244,7 +244,7 @@ def test_delivery_results_evict_oldest_per_tab(tmp):
                     'result': index, 'error': None, 'ts': index, '_did': did})
                 assert status == 200 and body == {'ok': True}, (status, body)
 
-            def delivery_url(did):
+            def delivery_url(did, base=base, tab=tab):
                 query = urllib.parse.urlencode({
                     'token': TOK, 'tab': tab, 'delivery': did})
                 return base + '/result?' + query
