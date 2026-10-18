@@ -35,15 +35,6 @@ def _classifier():
                       'classify_mod')
 
 
-def test_markdown_pattern_matches_at_any_depth(tmp):
-    del tmp
-    mod = _classifier()
-    assert mod.matches('**/*.md', 'README.md')
-    assert mod.matches('**/*.md', 'docs/deep/nested/guide.md')
-    assert not mod.matches('**/*.md', 'readme.mdx')
-    assert not mod.matches('**/*.md', 'server.py')
-
-
 def test_exact_patterns_match_only_the_root_file(tmp):
     del tmp
     mod = _classifier()
@@ -54,6 +45,16 @@ def test_exact_patterns_match_only_the_root_file(tmp):
     assert mod.matches('.gitignore', '.gitignore')
     assert not mod.matches('.gitignore', 'sub/.gitignore')
     assert mod.matches('docs]', 'docs]')
+
+    assert mod.matches('**/*.md', 'README.md')
+    assert mod.matches('**/*.md', 'docs/deep/nested/guide.md')
+    assert not mod.matches('**/*.md', 'readme.mdx')
+    assert not mod.matches('**/*.md', 'server.py')
+
+    assert not mod.matches('.github/workflows/**', '.github/workflows')
+
+    assert mod.matches('**/doc*.md', 'foo/doc1.md')
+    assert mod.matches('**/doc*.md', 'doc1.md')
 
 
 def test_unimplemented_metacharacters_fail_closed_at_any_position(tmp):
@@ -73,35 +74,12 @@ def test_unimplemented_metacharacters_fail_closed_at_any_position(tmp):
         raise AssertionError(f'{pattern!r} was matched instead of refused')
     assert mod.matches('docs/README.md', 'docs/README.md')
 
-
-def test_nested_glob_shape_still_fails_closed(tmp):
-    del tmp
-    mod = _classifier()
     try:
         mod.matches('docs/**/*.md', 'docs/guide.md')
     except ValueError:
         pass
     else:
         raise AssertionError("'docs/**/*.md' was matched instead of refused")
-
-
-def test_directory_glob_does_not_match_the_directory_itself(tmp):
-    del tmp
-    mod = _classifier()
-    assert not mod.matches('.github/workflows/**', '.github/workflows')
-
-
-def test_star_star_pattern_compares_the_final_segment(tmp):
-    """`**/rest` matches on the path's final segment, not the whole path.
-
-    A whole-path comparison would fail 'foo/doc1.md' here: fnmatch does
-    not treat '/' specially, but the pattern's literal 'doc' prefix would
-    have to match at the path's start.
-    """
-    del tmp
-    mod = _classifier()
-    assert mod.matches('**/doc*.md', 'foo/doc1.md')
-    assert mod.matches('**/doc*.md', 'doc1.md')
 
 
 def test_workflow_patterns_match_root_nested_and_dependabot_paths(tmp):
@@ -111,10 +89,6 @@ def test_workflow_patterns_match_root_nested_and_dependabot_paths(tmp):
     assert mod.is_workflow('.github/workflows/nested/check.yml')
     assert mod.is_workflow('.github/dependabot.yml')
 
-
-def test_workflow_patterns_reject_a_similarly_prefixed_path_and_source(tmp):
-    del tmp
-    mod = _classifier()
     assert not mod.is_workflow('.github/workflowsx/a.yml')
     assert not mod.is_workflow('scripts/server.py')
 
@@ -173,19 +147,6 @@ def test_a_pull_request_reads_its_file_list(tmp):
         'gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',
         'repos/octo/daedalus/pulls/247/files', '--jq', '.[].filename']], calls
 
-
-def test_the_shared_event_default_names_a_requestable_pull_request(tmp):
-    """The default number is a real one: it reaches the request URL."""
-    del tmp
-    mod = _classifier()
-    calls, run = _recording_run('README.md\n')
-    mod.classify(_event(), run)
-    assert 'repos/octo/daedalus/pulls/248/files' in calls[0], calls
-
-
-def test_a_push_reads_the_compare_between_before_and_sha(tmp):
-    del tmp
-    mod = _classifier()
     before, sha = 'b' * 40, 'a' * 40
     calls, run = _recording_run('docs/guide.md\n')
     mod.classify(_event(name='push', pull_request=None,
@@ -194,6 +155,15 @@ def test_a_push_reads_the_compare_between_before_and_sha(tmp):
         'gh', 'api', '-H', 'Cache-Control: no-cache',
         f'repos/octo/daedalus/compare/{before}...{sha}', '--jq',
         '.files[].filename']], calls
+
+
+def test_the_shared_event_default_names_a_requestable_pull_request(tmp):
+    """The default number is a real one: it reaches the request URL."""
+    del tmp
+    mod = _classifier()
+    calls, run = _recording_run('README.md\n')
+    mod.classify(_event(), run)
+    assert 'repos/octo/daedalus/pulls/248/files' in calls[0], calls
 
 
 def test_unusable_events_never_call_the_api(tmp):
@@ -245,16 +215,6 @@ def test_a_capped_push_file_list_falls_back_to_the_full_matrix(tmp):
     assert workflows is True
     assert matrix == mod.FULL_MATRIX, matrix
 
-
-def test_a_capped_pull_request_file_list_runs_the_full_matrix(tmp):
-    """3000 paths can be a truncated pulls/files list, despite pagination.
-
-    The pulls files endpoint paginates but hard-caps the collection at
-    3000, so a list that long may be missing a code file sorted past the
-    cutoff; classifying it documentation-only would under-run.
-    """
-    del tmp
-    mod = _classifier()
     stdout = ''.join(f'docs/file{index}.md\n' for index in range(3000))
     _calls, run = _recording_run(stdout)
     docs_only, matrix, workflows, reason = mod.classify(_event(), run)
@@ -432,6 +392,12 @@ def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
         assert len(needs) == len(set(needs)) == len(expected), (
             job, needs, expected)
 
+    needs = _job_needs(workflow, 'aggregate')
+    expected = AGGREGATE_DEPS
+    assert set(needs) == set(expected), (needs, expected)
+    assert len(needs) == len(set(needs)) == len(expected), (
+        needs, expected)
+
 
 def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
         tmp):
@@ -505,16 +471,6 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
     assert matrix_lines == [
         'matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}'], (
         matrix_lines)
-
-
-def test_aggregate_waits_on_every_job_it_checks(tmp):
-    del tmp
-    workflow = _tests_yml()
-    needs = _job_needs(workflow, 'aggregate')
-    expected = AGGREGATE_DEPS
-    assert set(needs) == set(expected), (needs, expected)
-    assert len(needs) == len(set(needs)) == len(expected), (
-        needs, expected)
 
 
 def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
