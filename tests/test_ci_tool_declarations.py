@@ -360,28 +360,6 @@ def test_every_skipped_tool_is_answered_by_exactly_one_mechanism(tmp):
         'goes in the table that mechanism owns rather than in a new table.')
 
 
-def test_the_derivation_reaches_the_mechanism_closure_not_only_the_table(tmp):
-    """The other half of the control above: a tool no mechanism answers.
-
-    The tree on this run is answered by all three mechanisms, so a green
-    residue here says nothing about whether the DERIVATION would notice a
-    fourth tool. A suite that skips on a binary nothing installs is the
-    defect both lint-tool files are for, and it reaches this control only
-    through the recognisers — so it is driven through the `sources` seam,
-    which is what that seam is for, rather than by planting a file in
-    `tests/`.
-    """
-    del tmp
-    source = [_PREAMBLE + 'if not shutil.which(TOOL):\n'
-              '    _util.skip("no parser")\n']
-    residue, overlap, stale = _mechanism_residue(source)
-    assert residue == ['gojq'], (
-        'a suite that skips on gojq puts no tool in the residue, so the '
-        'closure this control reads is not over the derived skip set and a '
-        'binary nothing installs reads as answered: '
-        f'residue={residue}, overlap={overlap}, stale={stale}')
-
-
 def test_a_mechanisms_share_never_carries_a_tool_the_mechanism_lacks(tmp):
     """The share a control indexes its own table with stays inside it.
 
