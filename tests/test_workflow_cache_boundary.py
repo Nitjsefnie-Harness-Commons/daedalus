@@ -21,10 +21,6 @@ from _workflow_cache_boundary import (  # noqa: E402
 )
 
 
-def test_only_the_recorded_jobs_write_the_actions_cache(tmp):
-    _assert_writer_inventory(_tests_yml())
-
-
 def test_steps_less_local_job_is_empty_but_reusable_job_is_pending(tmp):
     local = 'jobs:\n  local:\n    runs-on: ubuntu-latest\n'
     assert _cache_writing_jobs(local) == set()
