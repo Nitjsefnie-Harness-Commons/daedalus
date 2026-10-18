@@ -177,7 +177,8 @@ def test_the_fold_does_not_over_refuse_harmless_names(tmp):
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for job in ('.json.dirty', '.JSON.DIRTY', '.json.tmp', '.JSON.TMP',
-                    f'{seg_job()}.1', f'{seg_job().upper()}.Ts'):
+                    f'{seg_job()}.1', f'{seg_job().upper()}.Ts',
+                    f'.{seg_job()}.dirty', f'{seg_job()}.json.tmp'):
             status, body = mint_job(base, TOK, job)
             assert status == 200, (job, status, body)
             status, body = _store_one_segment(base, job, body['sig'])
@@ -212,9 +213,12 @@ def test_a_segment_write_for_an_over_derived_job_is_refused(tmp):
 def test_a_status_query_for_an_over_derived_job_is_refused(tmp):
     """GET /segment-status admits through the derived-name check."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = _util.get_json(
-            base + f'/segment-status?job={"x" * 229}&sig=sig')
-        assert (status, body) == (400, {'error': 'bad job'}), (status, body)
+        for target in (
+                f'/segment-status?job={"x" * 229}&sig=sig',
+                f'/segment-job?token={TOK}&job={"x" * 229}'):
+            status, body = _util.get_json(base + target)
+            assert (status, body) == (
+                400, {'error': 'bad job'}), (status, body)
 
 
 def test_a_job_lookup_for_an_over_derived_job_is_refused(tmp):

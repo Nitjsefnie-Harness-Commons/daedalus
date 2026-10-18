@@ -119,7 +119,8 @@ def _one_tick(route, sink, tmp, token, tab, *, keepalive=15, clock=None):
 def test_resolve_targets_refuses_an_unsafe_derived_name(tmp):
     route = _load_route('stream_route_unsafe_target')
 
-    assert route.resolve_targets(Path(tmp), 'tok', '..evil') is None
+    for token, tab in (('tok', '..evil'), ('x' * 36, 't' * 203)):
+        assert route.resolve_targets(Path(tmp), token, tab) is None
 
 
 def test_resolve_targets_refuses_an_over_long_derived_name(tmp):
@@ -339,21 +340,26 @@ def test_a_dashboard_stream_leaves_the_broadcast_legacy_file_alone(tmp):
 
 
 def test_a_killed_stream_leaves_the_loop_without_a_frame(tmp):
-    route = _load_route('stream_route_killed')
-    cq = route.command_queue
-    root = Path(tmp)
-    cq.enqueue(root, 'tok', 'extension', {'id': 'never'}, command_ttl=90)
-    sink = _FrameSink()
-    killed = threading.Event()
-    killed.set()
-    targets = route.resolve_targets(root, 'tok', 'extension')
+    for cause in ('killed', 'aged'):
+        route = _load_route('stream_route_killed')
+        cq = route.command_queue
+        root = Path(tmp) / cause
+        root.mkdir()
+        cq.enqueue(root, 'tok', 'extension', {'id': 'never'}, command_ttl=90)
+        clock = iter((0.0, 0.0))
+        route._now = lambda: next(clock, 5000.0)
+        sink = _FrameSink()
+        killed = threading.Event()
+        if cause == 'killed':
+            killed.set()
+        targets = route.resolve_targets(root, 'tok', 'extension')
 
-    route.serve_stream(
-        sink, cmd_dir=root, token='tok', tab='extension', targets=targets,
-        killed_event=killed, command_ttl=90, keepalive=15, max_age=3600,
-        client_label='test')
+        route.serve_stream(
+            sink, cmd_dir=root, token='tok', tab='extension', targets=targets,
+            killed_event=killed, command_ttl=90, keepalive=15, max_age=3600,
+            client_label='test')
 
-    assert sink.frames == [], sink.frames
+        assert sink.frames == [], sink.frames
 
 
 def test_an_aged_out_stream_leaves_the_loop_without_a_frame(tmp):
@@ -391,17 +397,22 @@ def test_a_write_error_ends_the_loop_and_is_not_raised(tmp):
 
 
 def test_keepalive_is_written_when_the_clock_passes_the_interval(tmp):
-    route = _load_route('stream_route_keepalive')
-    root = Path(tmp)
-    route.command_queue.enqueue(
-        root, 'tok', 'extension', {'id': 'only'}, command_ttl=90)
-    sink = _FrameSink()
+    for tick, expected in ((20.0, 1), (14.0, 0)):
+        route = _load_route('stream_route_keepalive')
+        root = Path(tmp) / str(tick)
+        root.mkdir()
+        route.command_queue.enqueue(
+            root, 'tok', 'extension', {'id': 'only'}, command_ttl=90)
+        sink = _FrameSink()
 
-    _one_tick(route, sink, root, 'tok', 'extension',
-              keepalive=15, clock=(0.0, 0.0, 0.0, 20.0))
+        _one_tick(route, sink, root, 'tok', 'extension',
+                  keepalive=15, clock=(0.0, 0.0, 0.0, tick))
 
-    assert sink.keepalives == 1, sink.chunks
-    assert sink.chunks[-1] == b': keepalive\n\n', sink.chunks
+        if expected:
+            assert sink.keepalives == 1, sink.chunks
+            assert sink.chunks[-1] == b': keepalive\n\n', sink.chunks
+        else:
+            assert sink.keepalives == 0, sink.chunks
 
 
 def test_no_keepalive_before_the_clock_reaches_the_interval(tmp):

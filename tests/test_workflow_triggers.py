@@ -320,8 +320,28 @@ def test_coverage_gates_run_only_on_a_successful_measurement(tmp):
          " && github.event_name == 'push'"
          " && github.ref == 'refs/heads/main' }}"),
     )
-    for step, expected in expected_by_step:
-        actual = step_scalar(tests_yml, 'coverage', step, 'if')
+    cases = [('coverage', step, expected)
+             for step, expected in expected_by_step]
+    cases += [
+        ('actionlint', 'zizmor',
+         "${{ !cancelled() && steps.install_zizmor.outcome == 'success' }}"),
+        ('coverage-matrix', 'Upload Ubuntu coverage data',
+         "${{ !cancelled() && steps.measure.conclusion == 'success'"
+         " && matrix.os == 'ubuntu-latest' }}"),
+        ('coverage-matrix', 'Upload Python coverage data',
+         "${{ !cancelled() && steps.measure.conclusion == 'success'"
+         " && matrix.os != 'ubuntu-latest' }}"),
+        ('journey-budget', 'Upload the measured counts', measured),
+        ('journey-budget', 'Follow the journeys that got cheaper',
+         "${{ !cancelled() && steps.check.conclusion == 'success'"
+         " && github.event_name == 'push'"
+         " && github.ref == 'refs/heads/main' }}"),
+        ('journey-budget', 'Commit the tighten',
+         "${{ !cancelled() && steps.tighten.outputs.changed == 'true'"
+         " }}"),
+    ]
+    for job, step, expected in cases:
+        actual = step_scalar(tests_yml, job, step, 'if')
         assert actual == expected, f'{step}: {actual!r}'
 
 
