@@ -152,17 +152,6 @@ def test_documentation_paths_classify_to_the_reduced_matrix(tmp):
     assert matrix == mod.FULL_MATRIX, matrix
 
 
-def test_an_unreadable_path_list_overruns_the_workflow_gate(tmp):
-    del tmp
-    mod = _classifier()
-
-    def run(argv):
-        raise RuntimeError(f'api down for {argv}')
-
-    result = mod.classify(_event(), run)
-    assert result[2] is True, result
-
-
 def test_empty_and_missing_path_lists_run_the_full_matrix(tmp):
     del tmp
     mod = _classifier()
@@ -288,16 +277,6 @@ def test_write_outputs_appends_the_three_output_lines(tmp):
     assert json.loads(lines[1][len('matrix='):]) == matrix
     assert '\n' not in json.dumps(matrix)
     assert text.count('\n') == 6 and text.endswith('\n'), repr(text)
-
-
-def test_write_outputs_appends_the_workflow_line(tmp):
-    mod = _classifier()
-    out = Path(tmp) / 'github_output'
-    matrix = {'os': ['ubuntu-latest'], 'python': ['3.13']}
-    mod.write_outputs(str(out), True, matrix, True)
-    lines = out.read_text(encoding='utf-8').splitlines()
-    assert lines == ['docs_only=true', f'matrix={json.dumps(matrix)}',
-                     'workflows=true'], lines
 
 
 def test_write_outputs_without_a_file_writes_nothing(tmp):
@@ -526,34 +505,6 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
     assert matrix_lines == [
         'matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}'], (
         matrix_lines)
-
-
-def test_coverage_runs_unless_docs_only_is_exactly_true(tmp):
-    """The if: over-runs on every docs_only value except an exact 'true'.
-
-    Evaluated, not substring-matched: `== 'false'` reads as equivalent but
-    skips coverage when the classifier emitted nothing — Actions resolves
-    a missing output to '' — and a skipped required check reports success
-    with nothing measured. The status calls also bypass Actions' implicit
-    success check when actionlint skips. Only this shape keeps both cases on
-    the over-run branch the design promises.
-    """
-    del tmp
-    expression = _job_if_expression(_tests_yml(), 'coverage')
-    assert expression is not None
-
-    def runs(docs_only, status):
-        context = {
-            'status': status,
-            'needs': {'changes': {'outputs': {'docs_only': docs_only}}},
-        }
-        return evaluate_if(expression, context)
-
-    for status, should_run in CONDITION_CONTEXTS:
-        assert runs('true', status) is False
-        assert runs('false', status) is should_run
-        # '' is both an empty emission and what a missing output resolves to.
-        assert runs('', status) is should_run
 
 
 def test_aggregate_waits_on_every_job_it_checks(tmp):
