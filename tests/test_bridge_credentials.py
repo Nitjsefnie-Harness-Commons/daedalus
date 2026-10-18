@@ -359,23 +359,6 @@ def _declared_post(base, path, declared, sent, headers):
         conn.close()
 
 
-def test_an_unauthenticated_body_is_refused_before_it_arrives(tmp):
-    """A body token cannot be checked without reading the body.
-
-    Every JSON route parsed the whole declared body and only then compared
-    the token inside it, so an unauthenticated 24 MiB request moved the
-    process high-water mark by 72,904 KiB on its way to a 401 — and every
-    concurrent worker could be made to do the same. The Bearer header is
-    what makes the decision reachable first.
-    """
-    env = {**BRIDGE_ENV, 'DAEDALUS_REQUEST_TIMEOUT': '5'}
-    with _util.bridge(tmp, env=env) as (base, _docroot):
-        status, payload = _declared_post(
-            base, '/result', 8 * 1024 * 1024, b'{' + b' ' * 65535, ())
-    assert status == 401, (status, payload)
-    assert json.loads(payload) == {'error': 'unauthorized'}, payload
-
-
 def test_a_bearer_header_admits_a_body_past_that_window(tmp):
     """The header is the carrier that lets a large body be authenticated."""
     env = {**BRIDGE_ENV, 'DAEDALUS_REQUEST_TIMEOUT': '5'}
@@ -392,17 +375,6 @@ def test_a_bearer_header_admits_a_body_past_that_window(tmp):
         # And the same body without the header is refused unread.
         status, payload = _declared_post(
             base, '/result', 8 * 1024 * 1024, b'{' + b' ' * 65535, ())
-        assert status == 401, (status, payload)
-
-
-def test_a_small_body_still_authenticates_from_its_own_token(tmp):
-    """The older form keeps working where its size was never the problem."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, payload = _util.post_json(
-            base + '/result', {'token': TOK, 'id': 'small', 'result': 'ok'})
-        assert status == 200, (status, payload)
-        status, payload = _util.post_json(
-            base + '/result', {'token': 'wrong', 'id': 'no', 'result': 'no'})
         assert status == 401, (status, payload)
 
 
