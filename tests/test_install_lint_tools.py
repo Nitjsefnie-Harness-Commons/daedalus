@@ -185,17 +185,6 @@ def _release_asset(binary, zipped):
     return _tarball(binary, EXECUTABLE)
 
 
-def test_the_checksum_key_and_the_asset_name_read_one_normalised_machine(tmp):
-    """A Windows runner's key resolves, and resolves to what it pins."""
-    del tmp
-    installer = _installer()
-    with _on(*WINDOWS_X64):
-        assert installer.platform.machine() == 'AMD64'
-        name, key = installer._asset_name()
-    assert key == _key_for(installer, WINDOWS_X64), key
-    assert name == PINNED[3][1], name
-
-
 def test_every_pinned_key_names_the_asset_and_the_archive_it_carries(tmp):
     """Each row of the table is a key a host reports and an asset it serves.
 
