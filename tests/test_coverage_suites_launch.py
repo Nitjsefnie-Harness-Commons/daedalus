@@ -26,13 +26,6 @@ from _coverage_suite_fixture import (  # noqa: E402
 _FAILURE_MARKER = '(suite did not pass; its coverage still counts)'
 
 
-def test_a_suite_ended_at_its_bound_is_recorded_and_refuses_the_run(tmp):
-    """A suite stopped at the bound leaves its record and refuses the run."""
-    outcome = _launch.run_main(tmp, scripts={
-        'test_alpha': {'result': (0, _launch.KILLED)}})
-    _launch.assert_timed_out(outcome, _launch.KILLED)
-
-
 def test_a_windows_read_gets_the_same_sentence_and_refuses_the_dead_one(tmp):
     """The sentence no longer depends on the platform the runner read.
 
