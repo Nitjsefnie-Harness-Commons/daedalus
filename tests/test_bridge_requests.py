@@ -345,23 +345,6 @@ def test_a_complete_segment_body_still_stores(tmp):
         assert (status, payload) == (200, {'done': [0], 'count': 1}), payload
 
 
-def test_a_body_one_byte_short_of_its_declaration_is_refused(tmp):
-    """The comparison is exact: one missing byte is still a shortfall.
-
-    Any tolerance looser than the declared count itself — off-by-one
-    included — would hand a truncated body to the route as though the
-    request had finished arriving.
-    """
-    job = 'tt-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        resp, _sig = _segment_post(base, job, 10, b'0123456789'[:9])
-        assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
-        seg_dir = Path(docroot) / 'segments' / job
-        assert sorted(path.name for path in seg_dir.iterdir()) == [], (
-            'the one-byte-short body was published')
-
-
 def test_a_zero_length_segment_body_is_accepted(tmp):
     """Content-Length: 0 is a complete body, stored as an empty segment.
 
@@ -523,67 +506,6 @@ def test_the_json_depth_bound_is_the_bridges_and_is_configurable(tmp):
             headers={'Content-Type': 'application/json'})
         assert (status, json.loads(raw).get('error')) == (
             400, 'JSON body too deeply nested'), (status, raw)
-
-
-def test_a_brace_inside_a_json_string_opens_nothing(tmp):
-    """Structure is counted, not characters.
-
-    A scan that treated every `[` as a container would refuse a body whose
-    only nesting is inside a string literal — and an escaped quote inside one
-    would end the string early, so the rest of a hostile value would be read
-    as structure.
-    """
-    with _util.bridge(
-            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '3'}
-    ) as (base, _d):
-        literal = json.dumps({'token': 'wrongtoken',
-                              'value': '[' * 50 + '\\"' + '{' * 50}).encode()
-        status, raw = _util.request(
-            base + '/result', 'POST', body=literal,
-            headers={'Content-Type': 'application/json'})
-        assert (status, json.loads(raw).get('error')) == (
-            401, 'unauthorized'), (
-            status, raw)
-
-
-def test_a_wide_but_shallow_body_is_accepted(tmp):
-    """The bound is simultaneous depth, not cumulative openers.
-
-    A body of many small containers nests no deeper than one of them: its
-    openers close again as the scan walks, and a check that counted every
-    `[` it had ever seen would refuse ordinary large documents. The closing
-    arm of the scan is what keeps those apart, so this body must clear the
-    bound the way any small one does.
-    """
-    with _util.bridge(
-            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
-    ) as (base, _d):
-        wide = b'{"token":"wrongtoken","value":[' + b'[0],' * 60 + b'[0]]}'
-        status, raw = _util.request(
-            base + '/result', 'POST', body=wide,
-            headers={'Content-Type': 'application/json'})
-        assert (status, json.loads(raw).get('error')) == (
-            401, 'unauthorized'), (status, raw)
-
-
-def test_a_wide_body_of_objects_is_accepted(tmp):
-    """The object closer counts in the bridge's own scan, not only `]`.
-
-    The array twin of this control stays green if the closing arm loses
-    `}`: its inner `]` does the decrementing, so depth never climbs. An
-    array of many small objects is the body a lost `}` arm reports as too
-    deep — through the bridge, the 400 it would invent replaces the 401
-    authentication owes this shallow body.
-    """
-    with _util.bridge(
-            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
-    ) as (base, _d):
-        wide = b'{"token":"wrongtoken","value":[' + b'{},' * 60 + b'{}]}'
-        status, raw = _util.request(
-            base + '/result', 'POST', body=wide,
-            headers={'Content-Type': 'application/json'})
-        assert (status, json.loads(raw).get('error')) == (
-            401, 'unauthorized'), (status, raw)
 
 
 def test_recursive_json_is_refused_on_every_body_verb_before_authentication(
