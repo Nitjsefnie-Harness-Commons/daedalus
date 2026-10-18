@@ -411,23 +411,6 @@ def test_an_identical_enqueue_scans_under_the_shared_lock(tmp):
         'id': 'same', 'code': '1', '_did': first_did}
 
 
-def test_an_identical_live_command_admits_one_delivery(tmp):
-    queue = _load_queue('command_queue_dedup_live')
-    cmd_dir = Path(tmp) / 'commands'
-    command = {'id': 'same', 'code': '1'}
-    first_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'tab', command, command_ttl=90)
-    assert duplicate is False
-    replay_did, duplicate = queue.enqueue(
-        cmd_dir, 'tok', 'tab', command, command_ttl=90)
-    assert duplicate is True
-    assert replay_did == first_did
-    published = sorted((cmd_dir / 'tok_tab').glob('*.json'))
-    assert len(published) == 1, published
-    assert json.loads(published[0].read_text(encoding='utf-8')) == {
-        'id': 'same', 'code': '1', '_did': first_did}
-
-
 def test_a_same_id_with_a_changed_payload_enqueues_fresh(tmp):
     queue = _load_queue('command_queue_dedup_payload')
     cmd_dir = Path(tmp) / 'commands'
