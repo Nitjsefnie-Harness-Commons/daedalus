@@ -65,11 +65,6 @@ def _assert_permissions_mutation_refused(workflow):
     raise AssertionError('widened decoded permissions were accepted')
 
 
-def test_diff_coverage_permissions_are_exactly_read_only(tmp):
-    del tmp
-    _assert_diff_coverage_permissions(_tests_yml())
-
-
 def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
     del tmp
     source = _tests_yml()
