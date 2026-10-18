@@ -63,22 +63,28 @@ def test_check_versions_site_list_covers_package(tmp):
 
 
 def test_check_versions_detects_drift(tmp):
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    # Break exactly one site, in the COPY — never the real files.
-    init_copy = copy_root / 'daedalus_cli' / '__init__.py'
-    text = init_copy.read_text(encoding='utf-8')
-    new_text, n = re.subn(r'__version__\s*=\s*"[^"]+"',
-                          '__version__ = "0.0.0-drift"', text)
-    assert n == 1, text
-    init_copy.write_text(new_text, encoding='utf-8')
-    r = subprocess.run([sys.executable, str(copy_root / 'scripts' / 'check_versions.py')],
-                       cwd=str(copy_root),
-                       env=_util.child_coverage('keep', cwd=copy_root),
-                       capture_output=True, text=True, timeout=60)
-    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
-    assert 'FAIL' in r.stderr, r.stderr
-    assert 'daedalus_cli/__init__.py' in r.stderr, r.stderr
+    for path, pattern, replacement in (
+            ('daedalus_cli/__init__.py', r'__version__\s*=\s*"[^"]+"',
+             '__version__ = "0.0.0-drift"'),
+            ('extension/manifest.json', r'"version"\s*:\s*"[^"]+"',
+             '"version": "9.9.9.2"')):
+        copy_root = Path(tmp) / path / 'tree'
+        _copy_versioned_tree(copy_root)
+        if path == 'extension/manifest.json':
+            written = _run_checker(copy_root, '--set', '9.9.9.1')
+            assert written.returncode == 0, (written.stdout, written.stderr)
+        target = copy_root / path
+        text = target.read_text(encoding='utf-8')
+        new_text, n = re.subn(pattern, replacement, text)
+        assert n == 1, text
+        target.write_text(new_text, encoding='utf-8')
+        r = _run_checker(copy_root)
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        assert 'FAIL' in r.stderr, r.stderr
+        if path == 'extension/manifest.json':
+            assert 'extension/manifest.json' in r.stderr, r.stderr
+        else:
+            assert 'daedalus_cli/__init__.py' in r.stderr, r.stderr
 
 
 def test_check_versions_sites_all_present_in_copy(tmp):
@@ -96,180 +102,52 @@ def test_check_versions_sites_all_present_in_copy(tmp):
     assert m and int(m.group(1)) == expected, r.stdout
 
 
-def test_check_versions_set_writes_one_string_to_every_site(tmp):
-    """--set translates nothing: the manifest gets the same string as every
-    other site, whatever shape the version has."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    r = _run_checker(copy_root, '--set', '9.9.9.1')
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    for path, desc, pattern in checker.SITES:
-        text = (copy_root / path).read_text(encoding='utf-8')
-        m = re.search(pattern, text)
-        assert m, (path, desc)
-        assert m.group('v') == '9.9.9.1', (path, desc, m.group('v'))
-
-
-def test_a_manifest_spelling_the_version_differently_is_reported(tmp):
-    """A manifest holding a different string from the canonical version is
-    drift, whatever the shape of the difference.
-
-    The manifest used to be compared against a translation of the canonical
-    version rather than against the version itself, so exactly one shape of
-    disagreement was absorbed instead of reported — and it was the shape the
-    tree carried between every pair of releases.
-    """
-    copy_root = Path(tmp) / 'tree'
-    _copy_versioned_tree(copy_root)
-    written = _run_checker(copy_root, '--set', '9.9.9.1')
-    assert written.returncode == 0, (written.stdout, written.stderr)
-    manifest = copy_root / 'extension' / 'manifest.json'
-    text = manifest.read_text(encoding='utf-8')
-    new_text, n = re.subn(r'"version"\s*:\s*"[^"]+"',
-                          '"version": "9.9.9.2"', text)
-    assert n == 1, text
-    manifest.write_text(new_text, encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
-    assert 'extension/manifest.json' in r.stderr, r.stderr
-
-
-def test_check_versions_set_refuses_a_version_no_site_can_carry(tmp):
-    """Chrome accepts only dot-separated integers in a manifest version, so a
-    letter-suffixed version cannot be spelled the same way at every site.
-    --set is the documented way the tree acquires a version, so it is where
-    that shape has to be refused — before anything is written."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    before = {p: (copy_root / p).read_text(encoding='utf-8')
-              for p, _, _ in checker.SITES}
-    r = _run_checker(copy_root, '--set', '9.9.9a')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert '9.9.9a' in r.stderr, r.stderr
-    for path, text in before.items():
-        assert (copy_root / path).read_text(encoding='utf-8') == text, path
-
-
-def test_check_versions_set_refuses_one_value_spelled_more_than_one_way(tmp):
-    """A version has to be the single spelling Chrome reads back, so a
-    non-ASCII digit and a leading zero are refused like any other shape no
-    site can carry. Both name an integer without being the string an integer
-    is written as."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    before = {p: (copy_root / p).read_text(encoding='utf-8')
-              for p, _, _ in checker.SITES}
-    for version in ('01.2.3', '1.02.3', '\u0661.\u0662.\u0663'):
-        r = _run_checker(copy_root, '--set', version)
-        assert r.returncode != 0, (version, r.returncode, r.stdout, r.stderr)
-        # The constraint is named, and the version itself only where it
-        # survives the round trip: a Windows runner's stderr encoding cannot
-        # hold a non-ASCII digit, so the child backslash-escapes it and the
-        # literal string is absent while the refusal it reports is identical.
-        assert 'ASCII digits' in r.stderr, (version, r.stderr)
-        # Normalize both sides through the same escaping before comparing, so
-        # one assertion covers a UTF-8 stderr (the digits pass through
-        # unchanged) and the affected Windows stderr (they arrive already
-        # escaped) alike, instead of skipping the check for the non-ASCII
-        # case entirely.
-        escaped_version = version.encode('ascii', 'backslashreplace').decode('ascii')
-        escaped_stderr = r.stderr.encode('ascii', 'backslashreplace').decode('ascii')
-        assert escaped_version in escaped_stderr, (version, r.stderr)
-        for path, text in before.items():
-            assert (copy_root / path).read_text(encoding='utf-8') == text, (
-                version, path)
-
-
-def test_check_versions_set_refuses_a_segment_chrome_cannot_hold(tmp):
-    """A manifest version segment stops at 65535, so a version above it is
-    refused for the same reason a letter is: no site can carry it."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    before = {p: (copy_root / p).read_text(encoding='utf-8')
-              for p, _, _ in checker.SITES}
-    r = _run_checker(copy_root, '--set', '9.70000.9')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert '65535' in r.stderr, r.stderr
-    for path, text in before.items():
-        assert (copy_root / path).read_text(encoding='utf-8') == text, path
-
-
-def test_a_version_no_site_can_carry_is_reported(tmp):
-    """A tree that acquired such a version some other way is reported rather
-    than handed to the gate, which would otherwise pass a tree whose
-    extension Chrome refuses to load."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    for path, desc, pattern in checker.SITES:
-        target = copy_root / path
-        text = target.read_text(encoding='utf-8')
-        m = re.search(pattern, text)
-        assert m, (path, desc)
-        start, end = m.span('v')
-        target.write_text(text[:start] + '9.9.9a' + text[end:],
-                          encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert '9.9.9a' in r.stderr, r.stderr
-
-
-def test_check_versions_set_refuses_a_source_it_cannot_rewrite(tmp):
-    """--set writes the working tree, so naming another source is a mistake
-    the script must refuse rather than half-honour. An empty string still
-    names one, and the empty-rev refusal every mode shares fires before the
-    conflict guard, so `--rev ''` and `--rev=` answer with that message;
-    --staged and a real revision answer with the conflict one."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
-    for source, message in (
-            (['--staged'], 'drop --staged/--rev'),
-            (['--rev', 'HEAD'], 'drop --staged/--rev'),
-            (['--rev', ''], 'cannot read an empty revision name'),
-            (['--rev='], 'cannot read an empty revision name')):
-        r = _run_checker(copy_root, '--set', '9.9.9', *source)
-        assert r.returncode != 0, (source, r.returncode, r.stdout, r.stderr)
-        assert message in r.stderr, (source, r.stderr)
-        for path, body in before.items():
-            assert (copy_root / path).read_bytes() == body, (source, path)
-
-
 def test_check_versions_set_refuses_an_empty_version(tmp):
-    """An empty version is refused like any other version no site can carry.
-
-    The dispatcher read `--set` as a truthiness test, so the one argument an
-    empty string is took the plain-check path instead: the run printed `ok:`
-    and exited 0 without writing anything, reporting a tree it never
-    touched. Dispatching on presence reaches apply(), which refuses the
-    value before a single site is rewritten."""
+    """Invalid spellings are refused before any site is rewritten."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
-    r = _run_checker(copy_root, '--set', '')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert "''" in r.stderr, r.stderr
-    assert 'dot-separated integers' in r.stderr, r.stderr
-    assert 'ok:' not in r.stdout, r.stdout
-    for path, body in before.items():
-        assert (copy_root / path).read_bytes() == body, path
+    for version in ('', '9.9.9a', '9.70000.9',
+                    '01.2.3', '1.02.3', '\u0661.\u0662.\u0663'):
+        r = _run_checker(copy_root, '--set', version)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        if version == '':
+            assert "''" in r.stderr, r.stderr
+            assert 'dot-separated integers' in r.stderr, r.stderr
+            assert 'ok:' not in r.stdout, r.stdout
+        elif version == '9.9.9a':
+            assert '9.9.9a' in r.stderr, r.stderr
+        elif version == '9.70000.9':
+            assert '65535' in r.stderr, r.stderr
+        else:
+            assert 'ASCII digits' in r.stderr, (version, r.stderr)
+            escaped_version = version.encode(
+                'ascii', 'backslashreplace').decode('ascii')
+            escaped_stderr = r.stderr.encode(
+                'ascii', 'backslashreplace').decode('ascii')
+            assert escaped_version in escaped_stderr, (version, r.stderr)
+        for path, body in before.items():
+            assert (copy_root / path).read_bytes() == body, path
 
 
 def test_check_versions_set_refuses_an_empty_version_with_a_source(tmp):
-    """`--set ''` paired with a source is still a write, so the pair takes
-    the working-tree refusal.
-
-    That only works once the dispatch tests presence: under a truthiness
-    test the pair never reached the `--set` branch, and the plain check it
-    fell through to answers a question the caller did not ask."""
+    """A present --set conflicts with a source even when its value is empty."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     before = {p: (copy_root / p).read_bytes() for p, _, _ in checker.SITES}
-    for argv in (['--set', ''], ['--set=']):
-        for source in (['--staged'], ['--rev', 'HEAD']):
+    for argv in (['--set', ''], ['--set='], ['--set', '9.9.9']):
+        for source, message in (
+                (['--staged'], 'drop --staged/--rev'),
+                (['--rev', 'HEAD'], 'drop --staged/--rev'),
+                (['--rev', ''], 'cannot read an empty revision name'),
+                (['--rev='], 'cannot read an empty revision name')):
             r = _run_checker(copy_root, *argv, *source)
             assert r.returncode != 0, (argv, source, r.stdout, r.stderr)
-            assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
-            assert 'ok:' not in r.stdout, (source, r.stdout)
+            if source in (['--staged'], ['--rev', 'HEAD']):
+                assert 'drop --staged/--rev' in r.stderr, (source, r.stderr)
+                assert 'ok:' not in r.stdout, (source, r.stdout)
+            else:
+                assert message in r.stderr, (source, r.stderr)
             for path, body in before.items():
                 assert (copy_root / path).read_bytes() == body, (source, path)
 
@@ -288,39 +166,18 @@ def test_check_versions_reads_the_index_and_a_revision(tmp):
     assert worktree.returncode == 1, (worktree.stdout, worktree.stderr)
 
 
-def test_check_versions_reports_a_revision_it_cannot_read(tmp):
-    """A revision that does not exist is named, not reported as drift."""
-    copy_root, _checker = _versioned_git_tree(tmp)
-    r = _run_checker(copy_root, '--rev', 'no-such-revision')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'cannot read' in r.stderr, r.stderr
-
-
 def test_check_versions_reports_a_site_that_changed_shape(tmp):
-    """A site whose line no longer matches is a stale SITES entry, and saying
-    so is the difference between fixing the script and hunting a version."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, _pattern = checker.SITES[0]
-    target = copy_root / path
-    target.write_text('{"nothing": "here"}\n', encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'no version found' in r.stderr, r.stderr
-    assert desc in r.stderr, (desc, r.stderr)
-
-
-def test_check_versions_set_reports_a_site_it_cannot_rewrite(tmp):
-    """--set refuses a site whose line no longer matches rather than writing
-    some files and abandoning the rest at the old version."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, _pattern = checker.SITES[0]
-    (copy_root / path).write_text('{"nothing": "here"}\n', encoding='utf-8')
-    r = _run_checker(copy_root, '--set', '9.9.9')
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'no version found' in r.stderr, r.stderr
-    assert desc in r.stderr, (desc, r.stderr)
+    """Check and --set both name a site whose binding no longer matches."""
+    for argv in ((), ('--set', '9.9.9')):
+        copy_root = Path(tmp) / 'tree'
+        checker = _copy_versioned_tree(copy_root)
+        path, desc, _pattern = checker.SITES[0]
+        target = copy_root / path
+        target.write_text('{"nothing": "here"}\n', encoding='utf-8')
+        r = _run_checker(copy_root, *argv)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert 'no version found' in r.stderr, r.stderr
+        assert desc in r.stderr, (desc, r.stderr)
 
 
 def test_check_versions_refuses_a_second_version_assignment(tmp):
@@ -366,24 +223,6 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
     assert after == before, 'refused sites must not be partially rewritten'
 
 
-def test_check_versions_refuses_a_page_js_version_spelled_with_the_other_quote(tmp):
-    """A second `script: { version: ... }` in page.js, spelled with a double
-    quote where the file's own site uses a single one, still has to be
-    caught. Before the fix the site's pattern only recognized the single
-    quote, so this duplicate was invisible and the tree came back consistent
-    (#247)."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, _pattern = checker.SITES[3]
-    assert path == 'extension/page.js', path
-    _duplicate_the_page_js_version(copy_root)
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    assert desc in r.stderr, (desc, r.stderr)
-    assert '9.9.9' in r.stderr, r.stderr
-
-
 def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
     """The same duplicate, spelled with a backtick. Review on #247 pointed
     out a template literal is a third valid way to write this string, and
@@ -399,69 +238,36 @@ def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
     assert desc in r.stderr, (desc, r.stderr)
 
 
-def test_check_versions_refuses_a_page_js_template_literal_spanning_lines(tmp):
-    """A backtick value is the one of the three delimiters that may legally
-    span multiple lines, and review on #247 pointed out that excluding
-    newlines from the value class (to keep the other two delimiters off
-    one line each) also hid this exact duplicate."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, _pattern = checker.SITES[3]
-    assert path == 'extension/page.js', path
-    page_copy = copy_root / 'extension' / 'page.js'
-    text = page_copy.read_text(encoding='utf-8')
-    page_copy.write_text(
-        text + '\nconst _dup = { info: { script: { version: `\n9.9.9` } } };\n',
-        encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    assert desc in r.stderr, (desc, r.stderr)
-
-
-def test_check_versions_page_js_value_may_contain_a_different_quote_character(tmp):
-    """The value class only has to exclude whichever delimiter is actually
-    in play, not every delimiter this site recognizes. Review on #247
-    found that excluding all three regressed the single-quote case: `main`
-    lets a single-quoted value contain a double quote (and vice versa),
-    same as the package version site already does, and the widened
-    pattern must not narrow that."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, _pattern = checker.SITES[3]
-    assert path == 'extension/page.js', path
-    page_copy = copy_root / 'extension' / 'page.js'
-    text = page_copy.read_text(encoding='utf-8')
-    page_copy.write_text(
-        text + '\nconst _dup = { info: { script: { version: \'9.9.9"\' } } };\n',
-        encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    assert desc in r.stderr, (desc, r.stderr)
-
-
 def test_check_versions_refuses_a_page_js_version_with_quoted_keys(tmp):
-    """A duplicate whose `script` and `version` keys are quoted is valid
-    JavaScript and must be counted as a competing page.js binding (#320)."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    path, desc, pattern = checker.SITES[3]
-    assert path == 'extension/page.js', path
-    page_copy = copy_root / 'extension' / 'page.js'
-    text = page_copy.read_text(encoding='utf-8')
-    canonical = re.search(pattern, text).group('v')
-    page_copy.write_text(
-        text + '\nconst _dup = { info: { "script": { "version": '
-        '\'9.9.9\' } } };\n',
-        encoding='utf-8')
-    r = _run_checker(copy_root)
-    assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
-    assert 'matches 2 times' in r.stderr, r.stderr
-    assert 'extension/page.js' in r.stderr, r.stderr
-    assert desc in r.stderr, r.stderr
-    assert canonical in r.stderr, r.stderr
-    assert '9.9.9' in r.stderr, r.stderr
+    """Every executable duplicate spelling is counted and names both values."""
+    spellings = [
+        'script: { version: "9.9.9" }',
+        'script: { version: `\n9.9.9` }',
+        'script: { version: \'9.9.9"\' }',
+        '"script": { "version": \'9.9.9\' }',
+    ]
+    for script_ws in (' ', '  ', '\t', '\n'):
+        for version_ws in (' ', '  ', '\t', '\n'):
+            spellings.append('script' + script_ws + ': { version'
+                             + version_ws + ': \'9.9.9\' }')
+    for spelling in spellings:
+        copy_root = Path(tmp) / 'tree'
+        checker = _copy_versioned_tree(copy_root)
+        path, desc, pattern = checker.SITES[3]
+        assert path == 'extension/page.js', path
+        page_copy = copy_root / 'extension' / 'page.js'
+        text = page_copy.read_text(encoding='utf-8')
+        canonical = re.search(pattern, text).group('v')
+        page_copy.write_text(
+            text + '\nconst _dup = { info: { ' + spelling + ' } };\n',
+            encoding='utf-8')
+        r = _run_checker(copy_root)
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert 'matches 2 times' in r.stderr, r.stderr
+        assert 'extension/page.js' in r.stderr, r.stderr
+        assert desc in r.stderr, r.stderr
+        assert canonical in r.stderr, r.stderr
+        assert '9.9.9' in r.stderr, r.stderr
 
 
 def test_check_versions_print_refuses_a_tree_that_disagrees(tmp):

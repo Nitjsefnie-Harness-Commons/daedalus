@@ -3,9 +3,8 @@
 
 A second assignment whose value carries the other quote character, or runs
 across a continuation, is still what Python binds at import time, so the
-three mirror tests refuse every spelling `_DUPLICATE_SPELLINGS` holds, the
-page.js duplicate-spelling coverage includes optional whitespace before
-colons, and a separate test pins that the widened value class still admits a
+three mirror tests refuse every spelling `_DUPLICATE_SPELLINGS` holds,
+and a separate test pins that the widened value class still admits a
 foreign quote inside a value that is not a duplicate at all.
 test_version_contract.py holds the checker's other contracts; these tests
 were moved here when that file met its 700-line ceiling.
@@ -27,7 +26,6 @@ from _version_contract import (  # noqa: E402
 # Duplicate `__version__` spellings the three mirror tests must all refuse:
 # a value carrying the other quote character, or a continuation spelling.
 _DUPLICATE_SPELLINGS = (('9.9.9"', "'"), ("9.9.9'", '"'), ('9.9.\\\n9', "'"))
-_PAGE_JS_PRE_COLON_WHITESPACE = (' ', '  ', '\t', '\n')
 
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
@@ -90,34 +88,6 @@ def test_check_versions_package_value_may_contain_a_different_quote(tmp):
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
     assert 'version strings disagree' in r.stderr, r.stderr
     assert '9.9.9"' in r.stderr, r.stderr
-
-
-def test_check_versions_refuses_a_page_js_version_with_spaced_colons(tmp):
-    """Whitespace before either colon is valid JavaScript and must be
-    counted as a competing page.js binding for every supported spelling."""
-    for script_index, script_ws in enumerate(_PAGE_JS_PRE_COLON_WHITESPACE):
-        for version_index, version_ws in enumerate(
-                _PAGE_JS_PRE_COLON_WHITESPACE):
-            copy_root = (Path(tmp) / f'case-{script_index}-{version_index}'
-                         / 'tree')
-            checker = _copy_versioned_tree(copy_root)
-            path, desc, pattern = checker.SITES[3]
-            assert path == 'extension/page.js', path
-            page_copy = copy_root / 'extension' / 'page.js'
-            text = page_copy.read_text(encoding='utf-8')
-            canonical = re.search(pattern, text).group('v')
-            duplicate = (
-                '\nconst _dup = { info: { script' + script_ws
-                + ': { version' + version_ws + ': \'9.9.9\' } } };\n')
-            page_copy.write_text(text + duplicate, encoding='utf-8')
-            r = _run_checker(copy_root)
-            context = (script_ws, version_ws, r.returncode, r.stdout, r.stderr)
-            assert r.returncode != 0, context
-            assert 'matches 2 times' in r.stderr, context
-            assert 'extension/page.js' in r.stderr, context
-            assert desc in r.stderr, context
-            assert canonical in r.stderr, context
-            assert '9.9.9' in r.stderr, context
 
 
 def test_check_versions_ignores_page_js_comment_and_string_decoys(tmp):

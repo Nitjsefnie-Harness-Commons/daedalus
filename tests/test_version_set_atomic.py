@@ -49,7 +49,8 @@ def test_check_versions_set_writes_every_site_or_none(tmp):
 
     # The positive control: the same tree without the duplicate still gets
     # every site written, so the atomic path did not stop writing at all.
-    for i, argv in enumerate(spellings):
+    successful = (*spellings, ['--set', '9.9.9.1'])
+    for i, argv in enumerate(successful):
         clean_root = Path(tmp) / f'clean{i}' / 'tree'
         checker = _copy_versioned_tree(clean_root)
         clean = _run_checker(clean_root, *argv)
@@ -57,7 +58,12 @@ def test_check_versions_set_writes_every_site_or_none(tmp):
         for path, desc, pattern in checker.SITES:
             site_text = (clean_root / path).read_text(encoding='utf-8')
             site = re.search(pattern, site_text)
-            assert site and site.group('v') == '1.2.3', (argv, path, desc)
+            if argv == ['--set', '9.9.9.1']:
+                assert site, (path, desc)
+                assert site.group('v') == '9.9.9.1', (
+                    path, desc, site.group('v'))
+            else:
+                assert site and site.group('v') == '1.2.3', (argv, path, desc)
 
 
 def main():

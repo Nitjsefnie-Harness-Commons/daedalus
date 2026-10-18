@@ -49,6 +49,11 @@ def test_check_versions_refuses_an_empty_revision_name(tmp):
         assert 'cannot read an empty revision name' in r.stderr, (
             argv, r.stdout, r.stderr)
 
+    missing = _run_checker(copy_root, '--rev', 'no-such-revision')
+    assert missing.returncode != 0, (
+        missing.returncode, missing.stdout, missing.stderr)
+    assert 'cannot read' in missing.stderr, missing.stderr
+
     # Nor may the refusal depend on the tree being clean: the dirty tree is
     # where the old behavior mislabeled the index as the working tree.
     manifest = copy_root / 'extension' / 'manifest.json'
