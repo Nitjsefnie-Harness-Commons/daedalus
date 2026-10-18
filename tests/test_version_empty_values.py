@@ -165,19 +165,24 @@ def test_check_versions_refuses_an_empty_canonical_version(tmp):
 
 
 def test_check_versions_refuses_a_tree_of_empty_versions(tmp):
-    """Every site carrying '' agrees with itself, so the spelling gate is the
-    only thing standing between that tree and an `ok:` (#324): the empty
-    string is still a version no site can carry."""
-    copy_root = Path(tmp) / 'tree'
-    checker = _copy_versioned_tree(copy_root)
-    for path, desc, pattern in checker.SITES:
-        target = copy_root / path
-        text = target.read_text(encoding='utf-8')
-        match = re.search(pattern, text)
-        assert match, (path, desc)
-        start, end = match.span('v')
-        target.write_text(text[:start] + text[end:], encoding='utf-8')
-    _assert_spelling_refused(_run_checker(copy_root))
+    """Agreement alone cannot make an invalid version carryable."""
+    for version in ('', '9.9.9a'):
+        copy_root = Path(tmp) / 'tree'
+        checker = _copy_versioned_tree(copy_root)
+        for path, desc, pattern in checker.SITES:
+            target = copy_root / path
+            text = target.read_text(encoding='utf-8')
+            match = re.search(pattern, text)
+            assert match, (path, desc)
+            start, end = match.span('v')
+            target.write_text(text[:start] + version + text[end:],
+                              encoding='utf-8')
+        if version == '':
+            _assert_spelling_refused(_run_checker(copy_root))
+        else:
+            r = _run_checker(copy_root)
+            assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+            assert '9.9.9a' in r.stderr, r.stderr
 
 
 def main():
