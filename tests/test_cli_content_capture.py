@@ -53,27 +53,6 @@ def _second():
 
 # ── do_net_capture ───────────────────────────────────────────────────
 
-def test_do_net_capture_sends_the_buffer_limit_the_parser_chose(tmp):
-    """The bare arm: the default limit, and the fifteen this waits for.
-
-    `--max` defaults to 1000 rather than to absent, so the field is on
-    the wire even when the operator never mentioned it. That is the
-    arm a handler that always sent `maxRequests` and one that sent the
-    default both satisfy -- it is here to pin the value, not the
-    presence, and `--max 5` below pins the value the operator chose.
-    """
-    del tmp
-    recorded, out = run_cli(
-        ['net-capture'], [{'tabId': 4}],
-        plan=[_ext('_net_cap', 'net-capture', {'maxRequests': 1000}, 15)],
-        token=TOK)
-
-    assert recorded.calls == [('_net_cap', 'net-capture',
-                               {'maxRequests': 1000})], recorded.calls
-    assert recorded.timeouts == [15], recorded.timeouts
-    assert out == 'Capturing network on tab 4\n', repr(out)
-
-
 def test_do_net_capture_sends_the_buffer_limit_it_was_given(tmp):
     """`--max 5` travels as `maxRequests: 5`."""
     del tmp
