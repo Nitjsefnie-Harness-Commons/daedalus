@@ -37,6 +37,18 @@ def test_list_uploads_answers_a_page_shape_when_paging_is_asked_for(tmp):
     assert [item['filename'] for item in payload['items']] == ['b.png']
 
 
+def test_store_upload_writes_a_timestamped_screenshot(tmp):
+    routes = _load('fixture_upload_routes_store')
+    body = {'token': 'tok', 'id': 'id1', 'format': 'png',
+            'data': base64.b64encode(b'PNGDATA').decode('ascii')}
+    status, payload = routes.store_upload(Path(tmp), body)
+    assert status == 200, (status, payload)
+    rel = payload['path']
+    assert rel.startswith('id1/') and rel.endswith('.png'), rel
+    assert payload['size'] == 7, payload
+    assert (Path(tmp) / 'tok' / rel).read_bytes() == b'PNGDATA'
+
+
 def test_store_upload_logs_and_answers_the_token_free_path(tmp):
     """The answer's path and its log line stop at the token directory.
 
