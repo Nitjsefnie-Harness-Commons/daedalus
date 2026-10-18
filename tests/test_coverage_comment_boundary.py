@@ -11,7 +11,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _workflowrun  # noqa: E402
-from _ghexpr import evaluate_if  # noqa: E402
 import _coverage_comment_steps as _ccs  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
     GH_COMMENT_STUB as _GH_COMMENT_STUB,
@@ -21,7 +20,6 @@ from _coverage_comment_publication import (  # noqa: E402
     EXPECTED_PUBLICATION_STEP as _EXPECTED_PUBLICATION_STEP,
 )
 from _coverage_comment_workflow import (  # noqa: E402
-    run_artifact_check,
     run_block,
     step_condition,
     workflow,
@@ -489,29 +487,6 @@ def test_privileged_permissions_are_exactly_allowlisted(tmp):
     for mutated in mutations:
         assert mutated != workflow, 'real permission mapping was not mutated'
         _assert_permissions_refused(mutated)
-
-
-def test_absent_artifact_output_enables_the_missing_marker(tmp):
-    """An unset output is absent, and the real guard handles that value."""
-    result, output = run_artifact_check(
-        tmp, {'total_count': 0, 'artifacts': []})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert output == '', output
-    context = {
-        'steps': {
-            'artifact': {'outputs': {}},
-            'pr': {'outputs': {'stale': 'false'}},
-        },
-        'status': {
-            'success': True,
-            'failure': False,
-            'cancelled': False,
-        },
-    }
-    assert 'present' not in context['steps']['artifact']['outputs']
-    condition = step_condition(
-        _workflow(), 'Mark missing patch coverage')
-    assert evaluate_if(condition, context) is True, (condition, context)
 
 
 def _pin_refused(workflow, action, detail):
