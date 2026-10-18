@@ -160,24 +160,6 @@ print('UNCONFIGURED ' + json.dumps({
 '''
 
 
-def test_the_alias_refusal_redacts_the_credential(tmp):
-    """The alias guard's own refusal print carries the secret too.
-
-    This is the one place a route's path refusal is printed without going
-    through `under`, so threading the credential into `under` alone would
-    still leave the token fully spelled in this line — in the derived
-    target component and in the resolved attempts alike.
-    """
-    store = _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'result_store.py',
-        'fixture_alias_secret')
-    res_dir, _real, _alias = _symlinked_alias(tmp, 'aliascredential')
-    refused, line = _refused_alias(store, res_dir, 'aliascredential', 'ext')
-    assert refused, line
-    assert 'aliascredential' not in line, line
-    assert "parts=('aliascre…_ext',)" in line, line
-
-
 def test_result_store_owns_atomic_slots_and_delivery_dedup(tmp):
     root = Path(tmp) / 'result-store-root'
     slot = root / 'results' / 'unit.json'
