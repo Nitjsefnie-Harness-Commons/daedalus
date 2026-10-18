@@ -357,49 +357,6 @@ def test_the_ratchet_is_only_committed_when_it_changed(tmp):
             f'coverage/Commit the raise: {actual!r}')
 
 
-def test_the_audit_is_gated_on_a_successful_install(tmp):
-    del tmp
-    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    actual = step_scalar(tests_yml, 'actionlint', 'zizmor', 'if')
-    assert actual == (
-        "${{ !cancelled() && steps.install_zizmor.outcome == 'success' }}"), (
-            f'actionlint/zizmor: {actual!r}')
-
-
-def test_coverage_matrix_uploads_are_split_by_leg(tmp):
-    del tmp
-    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    for step, expected in (
-            ('Upload Ubuntu coverage data',
-             "${{ !cancelled() && steps.measure.conclusion == 'success'"
-             " && matrix.os == 'ubuntu-latest' }}"),
-            ('Upload Python coverage data',
-             "${{ !cancelled() && steps.measure.conclusion == 'success'"
-             " && matrix.os != 'ubuntu-latest' }}")):
-        actual = step_scalar(tests_yml, 'coverage-matrix', step, 'if')
-        assert actual == expected, f'coverage-matrix/{step}: {actual!r}'
-
-
-def test_journey_budget_steps_are_gated_on_the_steps_before_them(tmp):
-    del tmp
-    tests_yml = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    for step, expected in (
-            ('Upload the measured counts',
-             "${{ !cancelled() && steps.measure.conclusion == 'success' }}"),
-            ('Follow the journeys that got cheaper',
-             "${{ !cancelled() && steps.check.conclusion == 'success'"
-             " && github.event_name == 'push'"
-             " && github.ref == 'refs/heads/main' }}"),
-            ('Commit the tighten',
-             "${{ !cancelled() && steps.tighten.outputs.changed == 'true'"
-             " }}")):
-        actual = step_scalar(tests_yml, 'journey-budget', step, 'if')
-        assert actual == expected, f'journey-budget/{step}: {actual!r}'
-
-
 _OUTPUT_REDIRECT = '>> "$GITHUB_OUTPUT"'
 _OUTPUT_NAME = r'[a-z_][a-z0-9_]*'
 

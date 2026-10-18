@@ -159,7 +159,8 @@ def test_notify_dashboard_publishes_no_final_name_before_the_replace(tmp):
         paused, release = threading.Event(), threading.Event()
         real_replace = queue.atomic_file.replace_atomically
 
-        def replace_paused(src, dst):
+        def replace_paused(src, dst, paused=paused, release=release,
+                           real_replace=real_replace):
             paused.set()
             release.wait()
             real_replace(src, dst)

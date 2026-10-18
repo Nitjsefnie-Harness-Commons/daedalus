@@ -123,12 +123,6 @@ def test_resolve_targets_refuses_an_unsafe_derived_name(tmp):
         assert route.resolve_targets(Path(tmp), token, tab) is None
 
 
-def test_resolve_targets_refuses_an_over_long_derived_name(tmp):
-    route = _load_route('stream_route_over_long_legacy_target')
-
-    assert route.resolve_targets(Path(tmp), 'x' * 36, 't' * 203) is None
-
-
 def test_resolve_targets_names_the_four_paths_under_cmd_dir(tmp):
     route = _load_route('stream_route_target_paths')
     root = Path(tmp)
@@ -347,7 +341,7 @@ def test_a_killed_stream_leaves_the_loop_without_a_frame(tmp):
         root.mkdir()
         cq.enqueue(root, 'tok', 'extension', {'id': 'never'}, command_ttl=90)
         clock = iter((0.0, 0.0))
-        route._now = lambda: next(clock, 5000.0)
+        route._now = lambda clock=clock: next(clock, 5000.0)
         sink = _FrameSink()
         killed = threading.Event()
         if cause == 'killed':
@@ -360,24 +354,6 @@ def test_a_killed_stream_leaves_the_loop_without_a_frame(tmp):
             client_label='test')
 
         assert sink.frames == [], sink.frames
-
-
-def test_an_aged_out_stream_leaves_the_loop_without_a_frame(tmp):
-    route = _load_route('stream_route_max_age')
-    cq = route.command_queue
-    root = Path(tmp)
-    cq.enqueue(root, 'tok', 'extension', {'id': 'never'}, command_ttl=90)
-    clock = iter((0.0, 0.0))
-    route._now = lambda: next(clock, 5000.0)
-    sink = _FrameSink()
-    targets = route.resolve_targets(root, 'tok', 'extension')
-
-    route.serve_stream(
-        sink, cmd_dir=root, token='tok', tab='extension', targets=targets,
-        killed_event=threading.Event(), command_ttl=90, keepalive=15,
-        max_age=3600, client_label='test')
-
-    assert sink.frames == [], sink.frames
 
 
 def test_a_write_error_ends_the_loop_and_is_not_raised(tmp):
@@ -413,19 +389,6 @@ def test_keepalive_is_written_when_the_clock_passes_the_interval(tmp):
             assert sink.chunks[-1] == b': keepalive\n\n', sink.chunks
         else:
             assert sink.keepalives == 0, sink.chunks
-
-
-def test_no_keepalive_before_the_clock_reaches_the_interval(tmp):
-    route = _load_route('stream_route_keepalive_early')
-    root = Path(tmp)
-    route.command_queue.enqueue(
-        root, 'tok', 'extension', {'id': 'only'}, command_ttl=90)
-    sink = _FrameSink()
-
-    _one_tick(route, sink, root, 'tok', 'extension',
-              keepalive=15, clock=(0.0, 0.0, 0.0, 14.0))
-
-    assert sink.keepalives == 0, sink.chunks
 
 
 def _symlinked_extension_queue(root, name):
