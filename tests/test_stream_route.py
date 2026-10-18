@@ -341,7 +341,14 @@ def test_a_killed_stream_leaves_the_loop_without_a_frame(tmp):
         root.mkdir()
         cq.enqueue(root, 'tok', 'extension', {'id': 'never'}, command_ttl=90)
         clock = iter((0.0, 0.0))
-        route._now = lambda clock=clock: next(clock, 5000.0)
+        if cause == 'aged':
+            route._now = lambda clock=clock: next(clock, 5000.0)
+        else:
+            def killed_now(clock=clock):
+                value = next(clock, None)
+                assert value is not None, 'killed stream reached the age check'
+                return value
+            route._now = killed_now
         sink = _FrameSink()
         killed = threading.Event()
         if cause == 'killed':
