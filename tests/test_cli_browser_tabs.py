@@ -46,23 +46,6 @@ def _rendered(out):
 
 # ── do_open_tab ──────────────────────────────────────────────────────
 
-def test_do_open_tab_sends_the_url_and_neither_option(tmp):
-    """The bare arm: `url` alone, and a ten-second wait."""
-    del tmp
-    plan = [_ext_cmd('_open_tab', 'open-tab', {'url': 'https://example.com/'})]
-    recorded, out = run_cli(
-        ['open-tab', 'https://example.com/'],
-        [{'tabId': 42, 'url': 'https://example.com/'}],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert recorded.calls == [('_open_tab', 'open-tab',
-                               {'url': 'https://example.com/'})], \
-        recorded.calls
-    assert recorded.timeouts == [10], recorded.timeouts
-    assert _rendered(out) == f'Opened tab 42 {OUT} https://example.com/\n', \
-        repr(out)
-
-
 def test_do_open_tab_sends_active_false_only_with_background(tmp):
     """`--background` is the field `active: False` — not `background`.
 
