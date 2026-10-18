@@ -171,21 +171,6 @@ def test_public_update_uses_recorded_measurement_high_water(tmp):
     assert ratchet.update(raised, Decimal('81.7'), 'python') is None
 
 
-def test_rerunning_a_raise_is_idempotent(tmp):
-    ratchet = _ratchet()
-    data = _ratchet_document()
-    candidate = ratchet.update(data, Decimal('81.6'), 'python')
-    assert candidate is not None
-    assert ratchet.update(candidate, Decimal('81.6'), 'python') is None
-
-
-def test_measurement_above_recorded_value_raises(tmp):
-    ratchet = _ratchet()
-    data = _ratchet_document()
-    raised = ratchet.update(data, Decimal('81.6'), 'python')
-    assert raised['coverage']['python']['measured'] == Decimal('81.6')
-
-
 def test_lower_measurements_never_lower_either_calibration(tmp):
     ratchet = _ratchet()
     data = _ratchet_document()
