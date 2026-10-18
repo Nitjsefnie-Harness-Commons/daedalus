@@ -38,6 +38,16 @@ def test_unknown_paths_404(tmp):
             base + '/result', 'POST', body=b'{not json')
         assert status == 400, status
         assert json.loads(body)['error'] == 'invalid JSON body'
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        payload = b'x' * 8192
+        status, body = _util.request(
+            base + '/nope', 'PUT', body=payload,
+            headers={'Content-Type': 'application/octet-stream'})
+        assert status == 404, (status, body)
+        assert json.loads(body)['error'] == 'not found', body
+
+        status, body = _util.get_json(base + '/health')
+        assert status == 200 and body['ok'] is True, (status, body)
 
 
 def test_a_malformed_absolute_form_target_is_refused_not_dropped(tmp):
@@ -85,10 +95,6 @@ def test_request_body_cap_applies_to_every_body_reader(tmp):
 
 
 def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
-    """rfile.read(-1) reads to EOF, so a negative Content-Length is not a small
-    body — it is an unbounded one. One character turned the cap off on every
-    body-reading path: the guard must reject the sign, not test `clen > MAX`.
-    """
     job = 'tt-' + uuid.uuid4().hex[:12]
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_BODY_SIZE': '4096'}
@@ -122,13 +128,6 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
             'error': 'invalid Content-Length'
         }, resp
 
-
-def test_a_malformed_content_length_is_refused_not_dropped(tmp):
-    """A Content-Length int() cannot parse raised uncaught in every
-    body-reading verb: the request thread died and the client saw the
-    connection close with no answer at all. A garbled header is a client
-    error — every verb answers 400 for it.
-    """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for method, path in (('POST', '/result'), ('PUT', '/command'),
                              ('DELETE', '/upload')):
@@ -142,6 +141,21 @@ def test_a_malformed_content_length_is_refused_not_dropped(tmp):
             assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
                 'error': 'invalid Content-Length'
             }, resp
+
+    payload = b'x' * 16384
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        for declared in ('notanumber', '-1'):
+            resp, reset = _refused_exchange(
+                base,
+                (f'POST /result HTTP/1.0\r\nHost: x\r\n'
+                 'Content-Type: application/json\r\n'
+                 f'Content-Length: {declared}\r\n\r\n').encode() + payload)
+            assert resp.startswith(b'HTTP/1.0 400'), (
+                declared, reset, resp[:120])
+            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
+                'error': 'invalid Content-Length'}, (declared, reset, resp)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def _refused_exchange(base, request_bytes):
@@ -175,62 +189,6 @@ def _refused_exchange(base, request_bytes):
                 break
             chunks.append(chunk)
     return b''.join(chunks), reset
-
-
-def test_a_refused_body_length_is_answered_in_full(tmp):
-    """A refusal of an invalid Content-Length survives a body in flight.
-
-    The client sends its declared body and must still read the complete
-    refusal, whatever the close does behind it. The deterministic kill for a
-    missing drain is the stub pin
-    test_an_invalid_content_length_refusal_absorbs_the_declared_body in
-    tests/test_http_transport.py: in this client shape on Linux loopback no
-    reset is observable, because the close's FIN precedes the RST the
-    in-flight body triggers later, which is why the issue's sighting was a
-    one-off flake on windows-latest rather than a reliable red here.
-
-    The payload stays inside the drain bound, so the drained refusal closes
-    clean.
-    """
-    payload = b'x' * 16384
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        for declared in ('notanumber', '-1'):
-            resp, reset = _refused_exchange(
-                base,
-                (f'POST /result HTTP/1.0\r\nHost: x\r\n'
-                 'Content-Type: application/json\r\n'
-                 f'Content-Length: {declared}\r\n\r\n').encode() + payload)
-            assert resp.startswith(b'HTTP/1.0 400'), (
-                declared, reset, resp[:120])
-            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
-                'error': 'invalid Content-Length'}, (declared, reset, resp)
-        status, health = _util.get_json(base + '/health')
-        assert status == 200 and health['ok'] is True, (status, health)
-
-
-def test_a_refused_put_absorbs_its_body_so_the_answer_survives(tmp):
-    """A PUT the bridge refuses must still deliver the refusal.
-
-    An unread body makes the close an RST, and an RST discards the answer
-    the client has not read yet — a reset this suite has already seen twice
-    on a refused body. A refused PUT never reads its body at all.
-
-    The payload stays inside the drain bound on purpose. Past that bound the
-    early close is the documented trade, made so that a body far larger than
-    the server will take is never read into the process; a test asserting a
-    404 there would be asserting against the design rather than for it, and
-    on macOS it duly reported the reset.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        payload = b'x' * 8192
-        status, body = _util.request(
-            base + '/nope', 'PUT', body=payload,
-            headers={'Content-Type': 'application/octet-stream'})
-        assert status == 404, (status, body)
-        assert json.loads(body)['error'] == 'not found', body
-
-        status, body = _util.get_json(base + '/health')
-        assert status == 200 and body['ok'] is True, (status, body)
 
 
 def test_an_incomplete_body_never_holds_a_request_worker(tmp):
@@ -327,91 +285,39 @@ def test_a_short_segment_body_leaves_the_job_record_at_zero(tmp):
 
 
 def test_a_complete_segment_body_still_stores(tmp):
-    """The refusal is the shortfall's: a full declaration still stores.
-
-    The control for the length check — the same raw route, same capability,
-    with every declared byte delivered — must keep its 200 and its file.
-    """
-    job = 'tt-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        body = b'ab' * 500
-        resp, sig = _segment_post(base, job, len(body), body)
-        assert resp.startswith(b'HTTP/1.0 200'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {'ok': True}, resp
-        stored = Path(docroot) / 'segments' / job / '000000.ts'
-        assert stored.read_bytes() == body
-        status, payload = _util.get_json(
-            base + f'/segment-status?job={job}&sig={sig}')
-        assert (status, payload) == (200, {'done': [0], 'count': 1}), payload
-
-
-def test_a_zero_length_segment_body_is_accepted(tmp):
-    """Content-Length: 0 is a complete body, stored as an empty segment.
-
-    The acceptance boundary sits at the declared count itself: an empty
-    delivery is exactly what the request declared, not a shortfall, so it
-    keeps the 200 and the job's totals move to 1 segment / 0 bytes.
-    """
-    job = 'tt-' + uuid.uuid4().hex[:12]
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        resp, sig = _segment_post(base, job, 0, b'')
-        assert resp.startswith(b'HTTP/1.0 200'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {'ok': True}, resp
-        stored = Path(docroot) / 'segments' / job / '000000.ts'
-        assert stored.read_bytes() == b''
-        status, payload = _util.get_json(
-            base + f'/segment-status?job={job}&sig={sig}')
-        assert (status, payload) == (200, {'done': [0], 'count': 1}), payload
+    for body in (b'ab' * 500, b''):
+        job = 'tt-' + uuid.uuid4().hex[:12]
+        with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+            resp, sig = _segment_post(base, job, len(body), body)
+            assert resp.startswith(b'HTTP/1.0 200'), resp[:120]
+            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
+                'ok': True}, resp
+            stored = Path(docroot) / 'segments' / job / '000000.ts'
+            assert stored.read_bytes() == body
+            status, payload = _util.get_json(
+                base + f'/segment-status?job={job}&sig={sig}')
+            assert (status, payload) == (
+                200, {'done': [0], 'count': 1}), payload
 
 
 def test_a_short_json_body_is_refused_before_parsing(tmp):
-    """The same shortfall through a JSON verb, with the slot left empty.
-
-    Truncation used to surface as the parse refusal, because the route
-    never learned the body had ended early — and a cut falling just after
-    a complete JSON text would have parsed a document the client never
-    sent. The length check answers first now, so the answer is the
-    shortfall's on every body verb.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        body = json.dumps(
-            {'token': TOK, 'id': 'short-body', 'result': {'n': 1}}).encode()
-        resp = raw_request(
-            base,
-            b'POST /result HTTP/1.0\r\nHost: x\r\n'
-            b'Content-Type: application/json\r\n'
-            b'Content-Length: ' + str(len(body)).encode() + b'\r\n\r\n'
-            + body[:8])
-        assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
-        status, slot = _util.get_json(base + '/result?token=' + TOK)
-        assert (status, slot) == (200, {'pending': True}), (status, slot)
-
-
-def test_a_shortfall_after_a_complete_json_text_is_refused(tmp):
-    """A declaration one byte past a COMPLETE document is still a shortfall.
-
-    The truncation pin above cuts inside invalid JSON, where the parse
-    refusal was already answering. Here every byte of a complete, valid
-    document arrives and only the declaration exceeds it — the received
-    bytes parse as exactly the request the route then acts on, so the
-    length comparison is the only thing standing between the shortfall
-    and a result stored for a body the client never finished declaring.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        body = json.dumps(
-            {'token': TOK, 'id': 'complete-prefix',
-             'result': {'n': 1}}).encode()
-        resp = raw_request(
-            base,
-            b'POST /result HTTP/1.0\r\nHost: x\r\n'
-            b'Content-Type: application/json\r\n'
-            b'Content-Length: ' + str(len(body) + 1).encode() + b'\r\n\r\n'
-            + body)
-        assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
-        status, slot = _util.get_json(base + '/result?token=' + TOK)
-        assert (status, slot) == (200, {'pending': True}), (status, slot)
+    for identity, complete in (('short-body', False),
+                               ('complete-prefix', True)):
+        with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+            body = json.dumps(
+                {'token': TOK, 'id': identity, 'result': {'n': 1}}).encode()
+            resp = raw_request(
+                base,
+                b'POST /result HTTP/1.0\r\nHost: x\r\n'
+                b'Content-Type: application/json\r\n'
+                b'Content-Length: '
+                + str(len(body) + int(complete)).encode() + b'\r\n\r\n'
+                + (body if complete else body[:8]))
+            assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
+            assert json.loads(
+                resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
+            status, slot = _util.get_json(base + '/result?token=' + TOK)
+            assert (status, slot) == (200, {'pending': True}), (status, slot)
 
 
 def _settled(socks, timeout, grace=1.0):
@@ -479,48 +385,8 @@ def test_request_workers_are_capped_rather_than_grown_per_connection(tmp):
         assert body['ok'] is True, body
 
 
-def test_the_json_depth_bound_is_the_bridges_and_is_configurable(tmp):
-    """The limit is a setting, and a body at it is still accepted.
-
-    A bound nothing can be measured against is not a bound: this drives one
-    body to exactly the configured depth and one past it, so the refusal is
-    shown to be the number's doing rather than the interpreter's.
-    """
-    with _util.bridge(
-            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
-    ) as (base, _d):
-        # depth 4 counting the object itself: {"token": [[[0]]]}
-        at_limit = (b'{"token":"wrongtoken","value":'
-                    + b'[' * 3 + b'0' + b']' * 3 + b'}')
-        status, raw = _util.request(
-            base + '/result', 'POST', body=at_limit,
-            headers={'Content-Type': 'application/json'})
-        assert (status, json.loads(raw).get('error')) == (
-            401, 'unauthorized'), (
-            status, raw)
-
-        past_limit = (b'{"token":"wrongtoken","value":'
-                      + b'[' * 4 + b'0' + b']' * 4 + b'}')
-        status, raw = _util.request(
-            base + '/result', 'POST', body=past_limit,
-            headers={'Content-Type': 'application/json'})
-        assert (status, json.loads(raw).get('error')) == (
-            400, 'JSON body too deeply nested'), (status, raw)
-
-
 def test_recursive_json_is_refused_on_every_body_verb_before_authentication(
         tmp):
-    """A deeply nested body is refused, before the token is looked at.
-
-    The answer used to depend on the interpreter, because the depth bound was
-    the interpreter's rather than the bridge's: through 3.13 this nesting
-    exceeded the C recursion limit and json.loads raised, which
-    _load_json_object turned into the 400; 3.14 parsed the same payload and
-    answered the ordinary unauthorized instead. Both were safe and neither
-    was a crash, but one body had two answers.
-
-    The bound is now the bridge's, so the answer is the same everywhere.
-    """
     payload = (b'{"token":"wrongtoken","value":'
                + b'[' * 10000 + b'0' + b']' * 10000 + b'}')
     assert len(payload) == 20032
@@ -544,6 +410,27 @@ def test_recursive_json_is_refused_on_every_body_verb_before_authentication(
         expected = (400, 'JSON body too deeply nested')
         assert all((status, error) == expected
                    for _method, _path, status, error in replies), replies
+
+    with _util.bridge(
+            tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_JSON_DEPTH': '4'}
+    ) as (base, _d):
+        # depth 4 counting the object itself: {"token": [[[0]]]}
+        at_limit = (b'{"token":"wrongtoken","value":'
+                    + b'[' * 3 + b'0' + b']' * 3 + b'}')
+        status, raw = _util.request(
+            base + '/result', 'POST', body=at_limit,
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (
+            401, 'unauthorized'), (
+            status, raw)
+
+        past_limit = (b'{"token":"wrongtoken","value":'
+                      + b'[' * 4 + b'0' + b']' * 4 + b'}')
+        status, raw = _util.request(
+            base + '/result', 'POST', body=past_limit,
+            headers={'Content-Type': 'application/json'})
+        assert (status, json.loads(raw).get('error')) == (
+            400, 'JSON body too deeply nested'), (status, raw)
 
 
 def test_json_scalars_arrays_and_null_are_refused_on_every_body_verb(tmp):
