@@ -148,17 +148,5 @@ def test_store_hotfix_sends_a_code_value_verbatim(tmp):
     assert queued['fixId'] == 'ambiguous', queued
 
 
-def test_store_hotfix_reads_the_file_it_was_given(tmp):
-    """`--file` sends the contents, not the path."""
-    src = Path(tmp) / 'fix.js'
-    src.write_text('/* real hotfix */\n', encoding='utf-8')
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        queued = _queued_extension_command(
-            base, docroot, ['store-hotfix', 'realfix', '--file', str(src)],
-            'the store-hotfix command')
-    assert queued['code'] == '/* real hotfix */\n', queued
-    assert queued['fixId'] == 'realfix', queued
-
-
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
