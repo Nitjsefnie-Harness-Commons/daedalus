@@ -98,90 +98,58 @@ def _assert_markup_is_not_a_site(tmp_path, markup, desc):
     _assert_one_dashboard_match(copy_root, checker, desc)
 
 
-def test_unquoted_rail_class_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['unquoted'], _RAIL)
-
-
-def test_unquoted_status_line_class_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['unquoted'], _STATUS)
-
-
-def test_uppercase_names_rail_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['uppercase_names'], _RAIL)
-
-
-def test_uppercase_names_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['uppercase_names'], _STATUS)
-
-
-def test_uppercase_tag_rail_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['uppercase_tag'], _RAIL)
-
-
-def test_uppercase_tag_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['uppercase_tag'], _STATUS)
-
-
-def test_uppercase_attribute_rail_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['uppercase_attribute'], _RAIL)
-
-
-def test_uppercase_attribute_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['uppercase_attribute'], _STATUS)
-
-
-def test_trailing_attribute_rail_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['trailing_attribute'], _RAIL)
-
-
-def test_trailing_attribute_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['trailing_attribute'], _STATUS)
-
-
-def test_data_attribute_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['data_attribute'], _STATUS)
-
-
-def test_uppercase_trailing_attribute_status_line_duplicate_is_refused(
-        tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['uppercase_trailing_attribute'], _STATUS)
-
-
-def test_unquoted_trailing_attribute_status_line_duplicate_is_refused(
-        tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['unquoted_trailing_attribute'], _STATUS)
-
-
 def test_attribute_before_class_status_line_duplicate_is_refused(tmp_path):
     _assert_duplicate_spelling_refused(
         tmp_path, _STATUS_SPELLINGS['attribute_before_class'], _STATUS)
-
-
-def test_spaced_equals_trailing_attribute_status_line_duplicate_is_refused(
-        tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['spaced_equals_trailing_attribute'],
-        _STATUS)
-
-
-def test_status_line_trailing_region_reads_a_quoted_gt_whole(tmp_path):
-    """A `>` inside a later attribute value does not end the tag early."""
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['quoted_gt_in_trailing_attribute'],
-        _STATUS)
+    for name, markup, desc in (
+            ('case_0',
+             "<span class='sl-v' data-meta='x'>9.9.9</span>",
+             _STATUS),
+            ('case_1',
+             "<div class='rail-foot' >v9.9.9</div>",
+             _RAIL),
+            ('case_2',
+             "<span class='sl-v' >9.9.9</span>",
+             _STATUS),
+            ('case_3',
+             "<span class = 'sl-v' id = 'x'>9.9.9</span>",
+             _STATUS),
+            ('case_4',
+             "<div class='rail-foot' id='x'>v9.9.9</div>",
+             _RAIL),
+            ('case_5',
+             "<span class='sl-v' id='x'>9.9.9</span>",
+             _STATUS),
+            ('case_6',
+             "<div title='a>b' class=rail-foot>v9.9.9</div>",
+             _RAIL),
+            ('case_7',
+             "<span title='a>b' class=sl-v>9.9.9</span>",
+             _STATUS),
+            ('case_8',
+             '<div class=rail-foot>v9.9.9</div>',
+             _RAIL),
+            ('case_9',
+             '<div class=rail-foot >v9.9.9</div>',
+             _RAIL),
+            ('case_10',
+             '<span class=sl-v >9.9.9</span>',
+             _STATUS),
+            ('case_11',
+             '<span class=sl-v>9.9.9</span>',
+             _STATUS),
+            ('case_12',
+             '<div class=rail-foot id=x>v9.9.9</div>',
+             _RAIL),
+            ('case_13',
+             '<span class=sl-v id=x>9.9.9</span>',
+             _STATUS),
+            ('case_14',
+             "<SPAN CLASS='sl-v' ID='X'>9.9.9</SPAN>",
+             _STATUS),
+    ):
+        _assert_duplicate_spelling_refused(
+            Path(tmp_path) / name, markup, desc)
 
 
 def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp_path):
@@ -195,73 +163,52 @@ def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp_path):
                  'double_quoted_lt_in_trailing_attribute'):
         _assert_duplicate_spelling_refused(
             Path(tmp_path) / name, _STATUS_SPELLINGS[name], _STATUS)
-
-
-def test_space_before_gt_rail_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['space_before_gt'], _RAIL)
-
-
-def test_space_before_gt_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['space_before_gt'], _STATUS)
+    for name, markup, desc in (
+            ('case_0',
+             "<span class='sl-v' title='a>b'>9.9.9</span>",
+             _STATUS),
+            ('case_1',
+             "<div class='rail-foot' title='a>b'>v9.9.9</div>",
+             _RAIL),
+            ('case_2',
+             "<div class='rail-foot' title='a<b'>v9.9.9</div>",
+             _RAIL),
+            ('case_3',
+             '<div class="rail-foot" data-x="a<b">v9.9.9</div>',
+             _RAIL),
+    ):
+        _assert_duplicate_spelling_refused(
+            Path(tmp_path) / name, markup, desc)
 
 
 def test_unquoted_uppercase_names_rail_duplicate_is_refused(tmp_path):
     _assert_duplicate_spelling_refused(
         tmp_path, _RAIL_SPELLINGS['unquoted_uppercase_names'], _RAIL)
-
-
-def test_unquoted_uppercase_names_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['unquoted_uppercase_names'], _STATUS)
-
-
-def test_unquoted_trailing_attribute_rail_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['unquoted_trailing_attribute'], _RAIL)
-
-
-def test_unquoted_space_before_gt_rail_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['unquoted_space_before_gt'], _RAIL)
-
-
-def test_unquoted_space_before_gt_status_line_duplicate_is_refused(tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['unquoted_space_before_gt'], _STATUS)
-
-
-def test_unquoted_gt_in_earlier_attribute_rail_duplicate_is_refused(
-        tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['unquoted_gt_in_earlier_attribute'], _RAIL)
-
-
-def test_unquoted_gt_in_earlier_attribute_status_line_duplicate_is_refused(
-        tmp_path):
-    _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['unquoted_gt_in_earlier_attribute'],
-        _STATUS)
-
-
-def test_trailing_region_reads_a_quoted_gt_whole(tmp_path):
-    """A `>` inside a later attribute value does not end the tag early."""
-    _assert_duplicate_spelling_refused(
-        tmp_path, "<div class='rail-foot' title='a>b'>v9.9.9</div>", _RAIL)
-
-
-def test_trailing_region_reads_a_quoted_lt_whole(tmp_path):
-    """A `<` inside a later attribute value does not end the tag early.
-
-    Both quote spellings, so the twin is not itself a single-spelling
-    control: a region narrowed at `<` inside one of them fails here
-    whichever of the two it is.
-    """
-    for name in ('quoted_lt_in_trailing_attribute',
-                 'double_quoted_lt_in_trailing_attribute'):
+    for name, markup, desc in (
+            ('case_0',
+             '<SPAN CLASS=sl-v>9.9.9</SPAN>',
+             _STATUS),
+            ('case_1',
+             "<div CLASS='rail-foot'>v9.9.9</div>",
+             _RAIL),
+            ('case_2',
+             "<span CLASS='sl-v'>9.9.9</span>",
+             _STATUS),
+            ('case_3',
+             "<DIV CLASS='rail-foot'>v9.9.9</DIV>",
+             _RAIL),
+            ('case_4',
+             "<SPAN CLASS='sl-v'>9.9.9</SPAN>",
+             _STATUS),
+            ('case_5',
+             "<DIV class='rail-foot'>v9.9.9</div>",
+             _RAIL),
+            ('case_6',
+             "<SPAN class='sl-v'>9.9.9</span>",
+             _STATUS),
+    ):
         _assert_duplicate_spelling_refused(
-            Path(tmp_path) / name, _RAIL_SPELLINGS[name], _RAIL)
+            Path(tmp_path) / name, markup, desc)
 
 
 def test_status_line_shipped_class_names_one_element(tmp_path):
@@ -282,81 +229,55 @@ def test_shipped_meta_cells_are_not_status_line_sites(tmp_path):
     """The class the four status cells moved to is not a version class."""
     _assert_markup_is_not_a_site(
         tmp_path, "<span class='sl-meta' data-meta='x'>9.9.9</span>", _STATUS)
-
-
-def test_status_line_trailing_attribute_without_whitespace_is_not_a_site(
-        tmp_path):
-    """HTML separates attributes by whitespace, so `'id=` is not one."""
-    _assert_markup_is_not_a_site(
-        tmp_path, "<span class='sl-v'id='x'>9.9.9</span>", _STATUS)
-
-
-def test_unterminated_trailing_quote_is_not_a_status_line_site(tmp_path):
-    """An attribute value that never closes leaves the tag unclosed."""
-    _assert_markup_is_not_a_site(
-        tmp_path, '<span class=\'sl-v\' title="a> ordinary>9.9.9</span>',
-        _STATUS)
-
-
-def test_status_line_class_token_suffix_with_attribute_is_not_a_site(
-        tmp_path):
-    """The token-boundary rule survives the widened trailing region."""
-    _assert_markup_is_not_a_site(
-        tmp_path, "<span class='sl-value' id='x'>9.9.9</span>", _STATUS)
-
-
-def test_status_line_class_token_prefix_is_not_a_site(tmp_path):
-    """The token boundary holds at the front as well as the back.
-
-    The prefix side of the class-value group is what keeps `sl-v` a whole
-    token rather than a substring, and the quoted arm had no control of its
-    own: relaxing it to `\\w*sl-v` turns `notsl-v` into a second version site
-    while the unquoted arm's control still passes.
-    """
-    _assert_markup_is_not_a_site(
-        tmp_path, "<span class='notsl-v' id='x'>9.9.9</span>", _STATUS)
-
-
-def test_uppercase_rail_class_value_is_not_a_site(tmp_path):
-    """Class names are case-sensitive in standards mode, so the value is."""
-    _assert_markup_is_not_a_site(
-        tmp_path, "<div class='RAIL-FOOT'>v9.9.9</div>", _RAIL)
-
-
-def test_uppercase_status_line_class_value_is_not_a_site(tmp_path):
-    _assert_markup_is_not_a_site(
-        tmp_path, "<span class='SL-V'>9.9.9</span>", _STATUS)
-
-
-def test_uppercase_unquoted_rail_class_value_is_not_a_site(tmp_path):
-    """The unquoted arm carries its own case-sensitive value rule."""
-    _assert_markup_is_not_a_site(
-        tmp_path, '<div CLASS=RAIL-FOOT>v9.9.9</div>', _RAIL)
-
-
-def test_uppercase_unquoted_status_line_class_value_is_not_a_site(tmp_path):
-    _assert_markup_is_not_a_site(
-        tmp_path, '<span CLASS=SL-V>9.9.9</span>', _STATUS)
-
-
-def test_unquoted_rail_class_token_suffix_is_not_a_site(tmp_path):
-    _assert_markup_is_not_a_site(
-        tmp_path, '<div class=rail-footer>v9.9.9</div>', _RAIL)
-
-
-def test_unquoted_rail_class_token_prefix_is_not_a_site(tmp_path):
-    _assert_markup_is_not_a_site(
-        tmp_path, '<div class=xrail-foot>v9.9.9</div>', _RAIL)
-
-
-def test_unquoted_status_line_class_token_suffix_is_not_a_site(tmp_path):
-    _assert_markup_is_not_a_site(
-        tmp_path, '<span class=sl-value>9.9.9</span>', _STATUS)
-
-
-def test_unquoted_status_line_class_token_prefix_is_not_a_site(tmp_path):
-    _assert_markup_is_not_a_site(
-        tmp_path, '<span class=xsl-v>9.9.9</span>', _STATUS)
+    for name, markup, desc in (
+            ('case_0',
+             "<span class='notsl-v' id='x'>9.9.9</span>",
+             _STATUS),
+            ('case_1',
+             "<span class='sl-value' id='x'>9.9.9</span>",
+             _STATUS),
+            ('case_2',
+             "<span class='sl-v'id='x'>9.9.9</span>",
+             _STATUS),
+            ('case_3',
+             "<div class='rail-foot'id='x'>v9.9.9</div>",
+             _RAIL),
+            ('case_4',
+             '<p>ordinary class=sl-v>9.9.9</span></p>',
+             _STATUS),
+            ('case_5',
+             '<div class=xrail-foot>v9.9.9</div>',
+             _RAIL),
+            ('case_6',
+             '<div class=rail-footer>v9.9.9</div>',
+             _RAIL),
+            ('case_7',
+             '<span class=xsl-v>9.9.9</span>',
+             _STATUS),
+            ('case_8',
+             '<span class=sl-value>9.9.9</span>',
+             _STATUS),
+            ('case_9',
+             '<div class=\'rail-foot\' title="a> ordinary>v9.9.9</div>',
+             _RAIL),
+            ('case_10',
+             '<span class=\'sl-v\' title="a> ordinary>9.9.9</span>',
+             _STATUS),
+            ('case_11',
+             "<div class='RAIL-FOOT'>v9.9.9</div>",
+             _RAIL),
+            ('case_12',
+             "<span class='SL-V'>9.9.9</span>",
+             _STATUS),
+            ('case_13',
+             '<div CLASS=RAIL-FOOT>v9.9.9</div>',
+             _RAIL),
+            ('case_14',
+             '<span CLASS=SL-V>9.9.9</span>',
+             _STATUS),
+    ):
+        _assert_markup_is_not_a_site(
+            Path(tmp_path) / name, markup, desc)
 
 
 def test_wrong_tag_name_in_new_spellings_is_not_a_rail_site(tmp_path):
@@ -377,27 +298,9 @@ def test_wrong_tag_name_in_new_spellings_is_not_a_status_line_site(tmp_path):
         _assert_one_dashboard_match(copy_root, checker, _STATUS)
 
 
-def test_unterminated_trailing_quote_is_not_a_rail_site(tmp_path):
-    """An attribute value that never closes leaves the tag unclosed."""
-    _assert_markup_is_not_a_site(
-        tmp_path, '<div class=\'rail-foot\' title="a> ordinary>v9.9.9</div>',
-        _RAIL)
-
-
-def test_trailing_attribute_without_whitespace_is_not_a_rail_site(tmp_path):
-    """HTML separates attributes by whitespace, so `'id=` is not one."""
-    _assert_markup_is_not_a_site(
-        tmp_path, "<div class='rail-foot'id='x'>v9.9.9</div>", _RAIL)
-
-
 def test_unquoted_class_prose_is_not_a_rail_site(tmp_path):
     _assert_markup_is_not_a_site(
         tmp_path, '<p>ordinary class=rail-foot>v9.9.9</p>', _RAIL)
-
-
-def test_unquoted_class_prose_is_not_a_status_line_site(tmp_path):
-    _assert_markup_is_not_a_site(
-        tmp_path, '<p>ordinary class=sl-v>9.9.9</span></p>', _STATUS)
 
 
 def test_new_spelling_decoys_in_script_are_ignored(tmp_path):
@@ -428,20 +331,10 @@ def test_repeated_class_runs_without_a_close_do_not_flip_the_verdict(
         tmp_path,
         '<div ' * anchors + "class='rail-foot' " * anchors + 'a' * anchors,
         _RAIL)
-
-
-def test_repeated_status_line_class_runs_without_a_close_do_not_flip(
-        tmp_path):
-    """The rail control's shape over the region the status site now admits.
-
-    It pins the verdict on that shape, not the guard's presence, for the
-    reason its rail twin records.
-    """
-    anchors = 200
     _assert_markup_is_not_a_site(
-        tmp_path,
-        '<span ' * anchors + "class='sl-v' " * anchors + 'a' * anchors,
-        _STATUS)
+        Path(tmp_path) / "status",
+        '<span ' * anchors + "class='sl-v' " * anchors
+        + 'a' * anchors, _STATUS)
 
 
 def test_canonical_tree_passes_and_set_preserves_dashboard_markup(tmp_path):
