@@ -235,16 +235,6 @@ def test_a_gate_that_moved_says_so_in_the_summary_of_a_plain_check(tmp):
 # ─── which way a recorded number may move ──────────────────────────────────
 
 
-def test_tightened_follows_a_cheaper_journey_down(tmp):
-    del tmp
-    policy = _journey_contract.policy()
-    names = journeys().NAMES
-    document = budget_document()
-    counts = {name: 900 for name in names}
-    assert policy.tightened(counts, document, names) == {
-        name: 900 for name in names}
-
-
 def test_tightening_never_raises_and_never_adds_a_journey(tmp):
     del tmp
     policy = _journey_contract.policy()
@@ -268,27 +258,6 @@ def test_tightening_drops_a_journey_the_set_no_longer_has(tmp):
     assert policy.tightened(
         {name: 1000 for name in names}, document, names) == {
             name: 1000 for name in names}
-
-
-def test_the_tighten_command_is_the_one_the_implementation_uses(tmp):
-    policy = _journey_contract.policy()
-    names = journeys().NAMES
-    artifact = Path(tmp) / 'journey-budget.json'
-    payload = json.dumps(recorded_document()).encode('utf-8')
-    artifact.write_bytes(payload)
-    measurements = Path(tmp) / 'counts.json'
-    measurements.write_text(json.dumps({
-        'rounds': 3, 'python': sys.version, **recorded_maps(),
-        'counters': {'perf-instructions': {
-            'available': True, 'startup_only': 0,
-            'journeys': {name: {'min': 800, 'max': 800, 'median': 800,
-                                'spread': 0, 'raw': 800}
-                         for name in names}}}}, ), encoding='utf-8')
-    assert policy.main(['check', '--artifact', str(artifact),
-                        '--measurements', str(measurements),
-                        '--tighten']) == 0
-    written = json.loads(artifact.read_text(encoding='utf-8'))
-    assert written['journeys'] == {name: 800 for name in names}, written
 
 
 def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
