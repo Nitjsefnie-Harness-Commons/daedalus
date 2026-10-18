@@ -275,7 +275,8 @@ def test_script_data_state_limbs_reach_the_first_end_tag(tmp):
 
 def test_check_survives_the_html_adversarial_cases(tmp):
     """HTML markup and JSON escapes leave the real sites counted."""
-    cases = [(label, markup) for label, markup, _expected in _HTML_CASES]
+    cases: list[tuple[str, str | None]] = [
+        (label, markup) for label, markup, _expected in _HTML_CASES]
     cases.extend((('template content', None), ('JSON escaped quote', None)))
     for index, (label, markup) in enumerate(cases):
         copy_root = Path(tmp) / f'case-{index}' / 'tree'
