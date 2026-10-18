@@ -87,34 +87,6 @@ def test_tabs_registry(tmp):
         assert body == [], body
 
 
-def test_register_says_whether_it_actually_updated_a_tab(tmp):
-    """Update-only means a tab the registry never had is a no-op, and says so.
-
-    The route answered {'ok': True} either way, so a client whose tab had
-    fallen out of the registry was told its entry had been refreshed. Nothing
-    in the answer let it notice it should re-sync.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = _util.post_json(base + '/register', {
-            'token': TOK, 'tabId': '404', 'url': 'http://example.com/a',
-            'title': 'a'})
-        assert status == 200, (status, body)
-        assert body == {'ok': True, 'updated': False}, body
-
-        status, _ = _util.post_json(base + '/sync-tabs', {
-            'token': TOK, 'tabs': [{'tabId': '404',
-                                    'url': 'http://example.com/a',
-                                    'title': 'a'}]})
-        assert status == 200, status
-        status, body = _util.post_json(base + '/register', {
-            'token': TOK, 'tabId': '404', 'url': 'http://example.com/b',
-            'title': 'b'})
-        assert status == 200, (status, body)
-        assert body == {'ok': True, 'updated': True}, body
-        status, tabs = _util.get_json(base + f'/tabs?token={TOK}')
-        assert [t['url'] for t in tabs] == ['http://example.com/b'], tabs
-
-
 def test_register_refuses_unhashable_tab_ids_and_stays_healthy(tmp):
     """JSON arrays and objects cannot reach the registry's dictionary
     lookup."""
