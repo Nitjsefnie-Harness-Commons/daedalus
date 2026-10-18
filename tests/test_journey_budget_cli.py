@@ -323,39 +323,56 @@ def test_the_summary_remedies_come_in_the_report_s_order(tmp):
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
-    document = recorded_document(tolerance_pct=0.5)
-    artifact = Path(tmp) / 'journey-budget.json'
-    artifact.write_bytes(policy.render(document))
-    counts = Path(tmp) / 'counts.json'
-    report = measured_report({name: 5000 for name in names})
-    entry = report['counters']['perf-instructions']
-    unresolved, unmeasured = names[0], names[1]
-    entry['journeys'].pop(unresolved)
-    entry['journeys'].pop(unmeasured)
-    entry['refused'] = {
-        unresolved: 'its own work is smaller than the background it shares'}
-    counts.write_text(json.dumps(report), encoding='utf-8')
-    with summary_file(tmp, 'every-kind.md') as summary:
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = policy.main(['check', '--artifact', str(artifact),
-                                '--measurements', str(counts), '--summary'])
-    said = summary.read_text(encoding='utf-8')
-    assert code == 1, out.getvalue()
-    reported = [line.split(':', 1)[0] for line in err.getvalue().split('\n')
-                if line.startswith(('over:', 'unmeasured:', 'unresolved:'))]
-    assert reported == ['over', 'unmeasured', 'unresolved'], reported
-    # Every remedy reaches the summary, and the two that are different
-    # strings are distinguishable in it — an order control that could not
-    # tell them apart would pass on any order.
-    assert policy.UNMEASURED_REMEDY in said, said
-    assert policy.UNRESOLVED_REMEDY in said, said
-    over = summaries().rebaseline_lines()[0]
-    assert over in said, (over, said)
-    places = [said.index(over),
-              said.index(policy.UNMEASURED_REMEDY),
-              said.index(policy.UNRESOLVED_REMEDY)]
-    assert places == sorted(places), (places, said)
+    for every_kind in (True, False):
+        document = recorded_document(tolerance_pct=0.5 if every_kind else 10)
+        artifact = Path(tmp) / 'journey-budget.json'
+        artifact.write_bytes(policy.render(document))
+        counts = Path(tmp) / 'counts.json'
+        counts_by_name = {name: 5000 if every_kind else 1000 for name in names}
+        if not every_kind:
+            counts_by_name[names[0]] = 1200
+            counts_by_name[names[1]] = 800
+        report = measured_report(counts_by_name)
+        entry = report['counters']['perf-instructions']
+        if every_kind:
+            unresolved, unmeasured = names[0], names[1]
+            entry['journeys'].pop(unresolved)
+            entry['journeys'].pop(unmeasured)
+            entry['refused'] = {
+                unresolved: 'its own work is smaller than the background '
+                'it shares'}
+        else:
+            entry['journeys'].pop(names[2])
+        counts.write_text(json.dumps(report), encoding='utf-8')
+        label = 'every-kind.md' if every_kind else 'mixed.md'
+        with summary_file(tmp, label) as summary:
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(err):
+                code = policy.main(['check', '--artifact', str(artifact),
+                                    '--measurements', str(counts),
+                                    '--summary'])
+        said = summary.read_text(encoding='utf-8')
+        assert code == 1, out.getvalue()
+        assert policy.UNMEASURED_REMEDY in said, said
+        assert 'journey_budget.py rebaseline' in said, said
+        if not every_kind:
+            continue
+        reported = [
+            line.split(':', 1)[0] for line in err.getvalue().split('\n')
+            if line.startswith(('over:', 'unmeasured:', 'unresolved:'))]
+        assert reported == ['over', 'unmeasured', 'unresolved'], reported
+        # Every remedy reaches the summary, and the two that are different
+        # strings are distinguishable in it; an order control that could
+        # not tell them apart would pass on any order.
+        assert policy.UNMEASURED_REMEDY in said, said
+        assert policy.UNRESOLVED_REMEDY in said, said
+        over = summaries().rebaseline_lines()[0]
+        assert over in said, (over, said)
+        places = [said.index(over),
+                  said.index(policy.UNMEASURED_REMEDY),
+                  said.index(policy.UNRESOLVED_REMEDY)]
+        assert places == sorted(places), (places, said)
 
 
 def test_the_counter_s_own_refusal_reaches_the_step_summary(tmp):
