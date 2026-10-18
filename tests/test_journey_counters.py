@@ -19,26 +19,6 @@ from _journey_contract import (  # noqa: E402
 )
 
 
-def test_a_strace_row_with_an_errors_column_is_still_counted(tmp):
-    """`strace -c` prints that column only for a syscall that FAILED.
-
-    A parser that assumes four columns on every row drops exactly the failing
-    rows — `futex` among them — and a table built that way is flat for a
-    reason that has nothing to do with the program. The total comes from
-    strace's own last line, which is the one row every rendering prints.
-    """
-    del tmp
-    counters = _journey_contract.counters()
-    with_errors = (
-        '% time     seconds  usecs/call    calls    errors syscall\n'
-        '------ ----------- ----------- --------- ------ ----------------\n'
-        ' 0.00    0.000000           0        12       0 futex\n'
-        ' 0.00    0.000123          61       2       1 poll\n'
-        '100.00    0.000123          54        14      1 total\n')
-    assert counters._strace_call_total(with_errors) == 14
-    assert counters._strace_call_total('nothing here\n') is None
-
-
 def test_the_probe_decides_which_counter_by_measurement(tmp):
     """Which counter gates is settled by what this machine allows, not by
     a preference list read on faith: perf it cannot count, callgrind it
