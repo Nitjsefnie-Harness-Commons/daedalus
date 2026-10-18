@@ -183,74 +183,6 @@ def test_repeated_wrong_tokens_create_no_storage_namespaces(tmp):
             assert list((Path(docroot) / directory).iterdir()) == [], directory
 
 
-def test_duplicate_query_credentials_are_rejected_without_parser_order(tmp):
-    """No query route may select one token from duplicate credentials."""
-    routes = (
-        ('/tabs', ''),
-        ('/result', ''),
-        ('/upload', ''),
-        ('/screenshot', ''),
-        # Keep the old accepted-token stream finite by making its tab invalid.
-        ('/stream', '&tab=..'),
-    )
-    orders = ((TOK, 'wrongtoken'), ('wrongtoken', TOK))
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        replies = []
-        for first, second in orders:
-            for path, suffix in routes:
-                status, raw = _util.get(
-                    f'{base}{path}?token={first}&token={second}{suffix}')
-                parsed = json.loads(raw)
-                error = (parsed.get('error')
-                         if isinstance(parsed, dict) else None)
-                replies.append((path, first, status, error))
-
-        assert all(status == 400 and error == 'duplicate token'
-                   for _path, _first, status, error in replies), replies
-        status, health = _util.get_json(base + '/health')
-        assert status == 200 and health['ok'] is True, (status, health)
-
-
-def test_duplicate_body_credentials_are_rejected_on_every_json_route(tmp):
-    """No JSON body route may select one token from duplicate credentials."""
-    routes = (
-        ('POST', '/register', b'"tabId":"duplicate-tab"'),
-        ('POST', '/sync-tabs', b'"tabs":[]'),
-        ('POST', '/unregister', b'"tabId":"duplicate-tab"'),
-        ('POST', '/poll', b'"probe":true'),
-        ('POST', '/upload', b'"id":"duplicate-upload","data":"QQ=="'),
-        ('POST', '/segment-job', b'"job":"duplicate-job"'),
-        ('POST', '/result', b'"id":"duplicate-result","result":1'),
-        ('PUT', '/command', b'"id":"duplicate-command","code":"1"'),
-        ('DELETE', '/upload', b'"id":"duplicate-delete"'),
-    )
-    orders = ((TOK, 'wrongtoken'), ('wrongtoken', TOK))
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = _util.post_json(base + '/upload', {
-            'token': TOK, 'id': 'duplicate-delete', 'data': 'QQ=='})
-        assert status == 200 and body['ok'] is True, (status, body)
-
-        replies = []
-        for first, second in orders:
-            for method, path, fields in routes:
-                raw_body = (f'{{"token":"{first}","token":"{second}",'
-                            .encode() + fields + b'}')
-                status, raw = _util.request(
-                    base + path, method, body=raw_body,
-                    headers={'Content-Type': 'application/json'})
-                parsed = json.loads(raw)
-                error = (parsed.get('error')
-                         if isinstance(parsed, dict) else None)
-                replies.append((method, path, first, status, error))
-
-        assert all(status == 400 and error == 'duplicate token'
-                   for _method, _path, _first, status, error in replies), (
-                       replies)
-        health_status, health = _util.get_json(base + '/health')
-        assert health_status == 200 and health['ok'] is True, (
-            health_status, health)
-
-
 def test_query_token_duplicates_reject_blank_and_equal_values(tmp):
     """Blank or equal repeated tokens are ambiguous on every query route."""
     routes = (
@@ -260,12 +192,15 @@ def test_query_token_duplicates_reject_blank_and_equal_values(tmp):
         ('/screenshot', ''),
         ('/stream', '&tab=duplicate-token'),
     )
-    duplicates = ((TOK, TOK), ('', TOK), (TOK, ''))
+    duplicates = ((TOK, 'wrongtoken'), ('wrongtoken', TOK),
+                  (TOK, TOK), ('', TOK), (TOK, ''))
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
         port = int(base.rsplit(':', 1)[1])
         for first, second in duplicates:
             for path, suffix in routes:
+                if path == '/stream' and 'wrongtoken' in (first, second):
+                    suffix = '&tab=..'
                 request_path = (
                     f'{path}?token={first}&token={second}{suffix}')
                 if path == '/stream':
@@ -290,6 +225,7 @@ def test_query_token_duplicates_reject_blank_and_equal_values(tmp):
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['active_streams'] == 0, (
             status, health)
+        assert status == 200 and health['ok'] is True, (status, health)
 
 
 def test_body_token_duplicates_reject_blank_and_equal_values(tmp):
@@ -306,7 +242,8 @@ def test_body_token_duplicates_reject_blank_and_equal_values(tmp):
         ('PUT', '/command', b'"id":"duplicate-command","code":"1"'),
         ('DELETE', '/upload', b'"id":"duplicate-delete"'),
     )
-    duplicates = ((TOK, TOK), ('', TOK), (TOK, ''))
+    duplicates = ((TOK, 'wrongtoken'), ('wrongtoken', TOK),
+                  (TOK, TOK), ('', TOK), (TOK, ''))
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         status, body = _util.post_json(base + '/upload', {
             'token': TOK, 'id': 'duplicate-delete', 'data': 'QQ=='})
@@ -334,6 +271,10 @@ def test_body_token_duplicates_reject_blank_and_equal_values(tmp):
         assert not list((Path(docroot) / 'segments').iterdir())
         kept = Path(docroot) / 'uploads' / TOK / 'duplicate-delete'
         assert kept.is_dir() and len(list(kept.iterdir())) == 1
+
+        health_status, health = _util.get_json(base + '/health')
+        assert health_status == 200 and health['ok'] is True, (
+            health_status, health)
 
 
 def _declared_post(base, path, declared, sent, headers):
@@ -403,6 +344,18 @@ def test_an_ambiguous_authorization_header_is_refused(tmp):
         assert status == 400, (status, payload)
         assert json.loads(payload) == {
             'error': 'duplicate Authorization header'}, payload
+
+        conn, response = _util.header_stream(
+            base, '/tabs',
+            (('Authorization', f'Bearer {TOK}'),
+             ('Authorization', f'Bearer {TOK}')))
+        try:
+            status, payload = response.status, json.loads(response.read())
+        finally:
+            response.close()
+            conn.close()
+        assert status == 400 and payload == {
+            'error': 'duplicate Authorization header'}, (status, payload)
 
 
 def test_an_authorization_that_is_not_bearer_is_refused(tmp):
@@ -512,22 +465,6 @@ def test_a_get_header_and_query_token_must_agree(tmp):
             base + f'/tabs?token={TOK}',
             headers={'Authorization': f'Bearer {TOK}'})
         assert status == 200 and payload == [], (status, payload)
-
-
-def test_a_duplicate_authorization_header_is_refused_on_a_get(tmp):
-    """Two Authorization headers are refused before either is selected."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        conn, response = _util.header_stream(
-            base, '/tabs',
-            (('Authorization', f'Bearer {TOK}'),
-             ('Authorization', f'Bearer {TOK}')))
-        try:
-            status, payload = response.status, json.loads(response.read())
-        finally:
-            response.close()
-            conn.close()
-        assert status == 400 and payload == {
-            'error': 'duplicate Authorization header'}, (status, payload)
 
 
 def test_a_query_token_still_authorizes_a_get(tmp):

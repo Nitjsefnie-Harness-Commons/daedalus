@@ -109,20 +109,6 @@ def test_an_upload_id_cannot_escape_on_read(tmp):
                     f'GET {path} accepted id {bad!r} with {status}')
 
 
-def test_a_token_may_not_contain_a_backslash(tmp):
-    """Inert on POSIX, a nested path on Windows — so it is rejected on both.
-
-    The check listed `/` and `.` and not `\\`, which meant the same token was a
-    plain name on one platform and a directory separator on another.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        status, _ = _util.post_json(
-            base + '/result', {'token': 'a\\b', 'id': 'x', 'result': 'y'})
-        assert status == 400, f'a backslash token was accepted: {status}'
-        assert not list((docroot / 'results').rglob('*')), (
-            'a backslash token still wrote a result')
-
-
 def test_an_ascii_letter_segment_is_answered_not_dropped(tmp):
     """The ordinary non-decimal syntax branch answers 400 before conversion."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
@@ -160,10 +146,6 @@ def test_a_superscript_digit_segment_is_answered_not_dropped(tmp):
         assert b'seg' in body.lower(), body
         assert not list((docroot / 'segments' / job).glob('*.ts'))
 
-
-def test_a_five_thousand_digit_segment_is_answered_not_dropped(tmp):
-    """An overlong ASCII decimal must be bounded before integer conversion."""
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = 'overlong-segment'
         sig = _mint_segment_capability(base, job)
         status, body = _post_segment(base, job, sig, '9' * 5000)
@@ -182,26 +164,6 @@ def test_a_malformed_body_is_refused_on_every_verb(tmp):
                 headers={'Content-Type': 'application/json'})
             assert status == 400, (
                 f'{verb} {path} did not refuse a malformed body: {status}')
-
-
-def test_non_alphabet_base64_is_refused_not_stored_empty(tmp):
-    """`b64decode` without validate=True silently decoded non-alphabet input to
-    b''.
-
-    A 200 and a zero-byte file is the worst answer available: the caller
-    believes the upload succeeded and the bytes are simply gone.
-    """
-    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        status, _ = _util.post_json(
-            base + '/upload',
-            # Four non-alphabet characters: a valid LENGTH, so the lenient
-            # decoder discards them all and returns b'' instead of raising.
-            # An input that also breaks padding would be refused either way and
-            # would pin nothing.
-            {'token': TOKEN, 'id': 'shot', 'data': '!!!!'})
-        assert status == 400, f'non-alphabet base64 returned {status}'
-        stored = [p for p in (docroot / 'uploads').rglob('*') if p.is_file()]
-        assert not stored, f'a rejected upload was still stored: {stored}'
 
 
 def test_a_command_tab_cannot_escape_the_queue_directory(tmp):
@@ -247,6 +209,17 @@ def test_a_screenshot_format_cannot_become_a_path_fragment(tmp):
                     if p.is_file()], (
             'a rejected format still stored a file')
 
+        status, _ = _util.post_json(
+            base + '/upload',
+            # Four non-alphabet characters: a valid LENGTH, so the lenient
+            # decoder discards them all and returns b'' instead of raising.
+            # An input that also breaks padding would be refused either way and
+            # would pin nothing.
+            {'token': TOKEN, 'id': 'shot', 'data': '!!!!'})
+        assert status == 400, f'non-alphabet base64 returned {status}'
+        stored = [p for p in (docroot / 'uploads').rglob('*') if p.is_file()]
+        assert not stored, f'a rejected upload was still stored: {stored}'
+
 
 def test_a_windows_drive_component_cannot_escape_the_data_root(tmp):
     """`C:escape` is drive-qualified on Windows, and joining it discards the
@@ -266,6 +239,12 @@ def test_a_windows_drive_component_cannot_escape_the_data_root(tmp):
             assert status == 400, f'token {value!r} accepted with {status}'
         assert not list((docroot / 'results').rglob('*')), (
             'a drive-qualified value wrote a result')
+
+        status, _ = _util.post_json(
+            base + '/result', {'token': 'a\\b', 'id': 'x', 'result': 'y'})
+        assert status == 400, f'a backslash token was accepted: {status}'
+        assert not list((docroot / 'results').rglob('*')), (
+            'a backslash token still wrote a result')
 
 
 def test_upload_path_components_reject_windows_aliases(tmp):

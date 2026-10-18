@@ -156,36 +156,19 @@ def test_equal_start_ties_break_by_id_both_ways(tmp):
     assert mod.superseded(older_id, [older_id, newer_id])
     assert not mod.superseded(newer_id, [older_id, newer_id])
 
-
-def test_created_at_stands_in_for_a_missing_started_at(tmp):
-    del tmp
-    mod = _gate()
     started = _run(1, None, '2026-09-07T10:00:00Z', status='in_progress')
     created = _run(2, None, None, created_at='2026-09-07T10:05:00Z')
     assert mod.superseded(started, [started, created])
     assert not mod.superseded(created, [started, created])
 
-
-def test_equal_keys_are_not_superseded(tmp):
-    del tmp
-    mod = _gate()
-    stamp = '2026-09-07T10:00:00Z'
     mine = _run(7, None, stamp, status='in_progress')
     twin = _run(7, 'success', stamp)
     assert not mod.superseded(mine, [mine, twin])
 
-
-def test_a_newer_run_of_another_workflow_does_not_supersede(tmp):
-    del tmp
-    mod = _gate()
     assert not mod.superseded(
         MINE, [MINE, _run(2, 'success', '2026-09-07T10:05:00Z',
                           workflow=22)])
 
-
-def test_naive_timestamps_are_treated_as_utc(tmp):
-    del tmp
-    mod = _gate()
     mine = _run(1, None, '2026-09-07T10:00:00', status='in_progress')
     east = _run(2, 'success', '2026-09-07T11:00:00+02:00')
     assert not mod.superseded(mine, [mine, east])
@@ -486,17 +469,6 @@ CLEAN = _secrets_run(7)
 CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 
 
-def test_the_gate_waits_for_the_run_and_passes_on_a_clean_scan(tmp):
-    """Absence is not an empty answer: this fixture shows both."""
-    del tmp
-    # Scale: the poll interval — the 420 s poll carries no run yet.
-    calls, verdict, message = _drive_scan(
-        [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 420.0, EPOCH + 590.0))
-    assert verdict in _gate().GREEN, message
-    assert 'gitleaks' in message and 'concluded success' in message, message
-    assert len(_polls(calls)) == 3, calls
-
-
 def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
     """The bound governs the CONTINUE, so a verdict found at it stands."""
     del tmp
@@ -512,9 +484,12 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
     assert 'secrets' in message and f'{bound:g} s' in message, message
     assert len(_polls(calls)) == 2, calls
 
+    calls, verdict, message = _drive_scan(
+        [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 420.0, EPOCH + 590.0))
+    assert verdict in _gate().GREEN, message
+    assert 'gitleaks' in message and 'concluded success' in message, message
+    assert len(_polls(calls)) == 3, calls
 
-def test_an_unfinished_run_keeps_the_gate_waiting(tmp):
-    del tmp
     calls, verdict, message = _drive_scan(
         [[_secrets_run(7, status='in_progress')], [CLEAN]], CLEAN_JOBS,
         (EPOCH, EPOCH + 30.0, EPOCH + 60.0))
