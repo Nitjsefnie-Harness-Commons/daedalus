@@ -199,7 +199,7 @@ def test_legacy_extension_drain_uses_explicit_command_directory(tmp):
         'reserved')
     command_dir = Path(tmp) / 'symlinked'
     command_dir.mkdir()
-    _real, _alias = _symlinked_legacy_file(command_dir)
+    _symlinked_legacy_file(command_dir)
     frames = []
 
     delivered = service.drain_legacy_ext(
