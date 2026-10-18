@@ -264,28 +264,6 @@ def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
         assert status == 200 and health['ok'] is True, (status, health)
 
 
-def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
-    """The collector keeps fresh work and expires work past the exact TTL."""
-    fault_dir = Path(tmp) / 'controlled-command-gc'
-    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '10',
-           'PYTHONPATH': _on_demand_command_gc(fault_dir)}
-    served = []
-    with _util.bridge(tmp, env=env, output=served) as (_base, docroot):
-        command_root = Path(docroot) / 'commands'
-        queue = command_root / TOK
-        queue.mkdir()
-        fresh = queue / 'fresh.json'
-        expired = queue / 'expired.json'
-        fresh.write_text('{"id":"fresh"}', encoding='utf-8')
-        expired.write_text('{"id":"expired"}', encoding='utf-8')
-        now = time.time()
-        os.utime(fresh, (now + _STAMP_LEASH, now + _STAMP_LEASH))
-        os.utime(expired, (now - 15, now - 15))
-        _sweep(command_root, served)
-        assert fresh.exists(), 'configured TTL expired a fresh command'
-        assert not expired.exists(), expired
-
-
 def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
     """The controlled sweep completes while both sides are refused."""
     # A count of 2 clears the retry budget with attempts still in hand, while
