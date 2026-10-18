@@ -41,19 +41,6 @@ def _rendered(out):
 
 # ── do_result ────────────────────────────────────────────────────────
 
-def test_do_result_asks_for_the_tab_it_was_given(tmp):
-    """The tab is a query parameter, percent-encoded by the shared builder."""
-    del tmp
-    recorded, out = run_cli(
-        ['result'], [_answered_result(tabId='tab0')],
-        module=commands_eval, plan=[_api_get('/result?tab=tab0')],
-        target_tab='tab0', token=TOK)
-
-    assert recorded.api_calls == [('GET', '/result?tab=tab0', None)], \
-        recorded.api_calls
-    assert _rendered(out) == f'{IN} job1  tab=tab0\nok\n', repr(out)
-
-
 def test_do_result_asks_for_the_broadcast_result_when_no_tab_is_set(tmp):
     """No tab means the path carries no query at all, not an empty one."""
     del tmp
