@@ -1,0 +1,1730 @@
+{
+  ".claude/skills/changing-daedalus/ci_gate.py": [
+    8001,
+    9979
+  ],
+  ".claude/skills/changing-daedalus/ci_wait.py": [
+    10253,
+    18319
+  ],
+  ".claude/skills/changing-daedalus/gh_client.py": [
+    5614,
+    13805
+  ],
+  ".claude/skills/changing-daedalus/gh_head_prs.py": [
+    1567,
+    2207
+  ],
+  ".claude/skills/changing-daedalus/gh_rate_limit.py": [
+    6040,
+    8278
+  ],
+  ".claude/skills/changing-daedalus/plant.py": [
+    2694,
+    8882
+  ],
+  ".githooks/pre-commit": [
+    360,
+    462
+  ],
+  ".githooks/pre-push": [
+    470,
+    762
+  ],
+  ".github/dependabot.yml": [
+    2468,
+    3041
+  ],
+  ".github/workflows/audit.yml": [
+    5114,
+    7326
+  ],
+  ".github/workflows/claim.yml": [
+    2264,
+    2820
+  ],
+  ".github/workflows/codeql.yml": [
+    2375,
+    3310
+  ],
+  ".github/workflows/coverage-comment.yml": [
+    3368,
+    12492
+  ],
+  ".github/workflows/gate-freshness.yml": [
+    1669,
+    2357
+  ],
+  ".github/workflows/pr-gate.yml": [
+    728,
+    1384
+  ],
+  ".github/workflows/release.yml": [
+    5905,
+    9672
+  ],
+  ".github/workflows/scorecard.yml": [
+    432,
+    1438
+  ],
+  ".github/workflows/secrets.yml": [
+    2055,
+    2915
+  ],
+  ".github/workflows/tests.yml": [
+    30321,
+    51987
+  ],
+  ".github/workflows/version.yml": [
+    2093,
+    3143
+  ],
+  "daedalus_bridge/__init__.py": [
+    67,
+    67
+  ],
+  "daedalus_bridge/atomic_file.py": [
+    1225,
+    1922
+  ],
+  "daedalus_bridge/command_queue.py": [
+    6976,
+    12212
+  ],
+  "daedalus_bridge/config.py": [
+    2277,
+    3621
+  ],
+  "daedalus_bridge/dashboard_drain.py": [
+    2076,
+    3841
+  ],
+  "daedalus_bridge/data_root_lock.py": [
+    573,
+    1171
+  ],
+  "daedalus_bridge/delivery_stripes.py": [
+    513,
+    699
+  ],
+  "daedalus_bridge/env_config.py": [
+    1316,
+    2132
+  ],
+  "daedalus_bridge/http_transport.py": [
+    7302,
+    14060
+  ],
+  "daedalus_bridge/json_body.py": [
+    1949,
+    2811
+  ],
+  "daedalus_bridge/legacy_ids.py": [
+    3215,
+    3693
+  ],
+  "daedalus_bridge/log_safe.py": [
+    1145,
+    1347
+  ],
+  "daedalus_bridge/mcp_bootstrap.py": [
+    1239,
+    2127
+  ],
+  "daedalus_bridge/path_safety.py": [
+    5524,
+    8246
+  ],
+  "daedalus_bridge/queue_order.py": [
+    3420,
+    4684
+  ],
+  "daedalus_bridge/result_routes.py": [
+    2884,
+    9167
+  ],
+  "daedalus_bridge/result_store.py": [
+    4994,
+    9789
+  ],
+  "daedalus_bridge/route_answer.py": [
+    446,
+    598
+  ],
+  "daedalus_bridge/segment_jobs.py": [
+    2197,
+    5247
+  ],
+  "daedalus_bridge/segment_routes.py": [
+    4129,
+    8640
+  ],
+  "daedalus_bridge/segment_store.py": [
+    12250,
+    17185
+  ],
+  "daedalus_bridge/static_routes.py": [
+    811,
+    1797
+  ],
+  "daedalus_bridge/stream_route.py": [
+    1450,
+    4930
+  ],
+  "daedalus_bridge/stream_service.py": [
+    7245,
+    13549
+  ],
+  "daedalus_bridge/tab_registry.py": [
+    1062,
+    3153
+  ],
+  "daedalus_bridge/upload_routes.py": [
+    5308,
+    12473
+  ],
+  "daedalus_cli/__init__.py": [
+    798,
+    1405
+  ],
+  "daedalus_cli/cli.py": [
+    702,
+    2753
+  ],
+  "daedalus_cli/commands_content.py": [
+    1747,
+    8742
+  ],
+  "daedalus_cli/commands_media.py": [
+    649,
+    3643
+  ],
+  "daedalus_cli/invoke.py": [
+    381,
+    1591
+  ],
+  "daedalus_cli/output.py": [
+    499,
+    2133
+  ],
+  "daedalus_cli/result_view.py": [
+    68,
+    243
+  ],
+  "daedalus_cli/transport.py": [
+    5679,
+    10441
+  ],
+  "daedalus_mcp/__init__.py": [
+    64,
+    64
+  ],
+  "daedalus_mcp/auth.py": [
+    1734,
+    3897
+  ],
+  "daedalus_mcp/server.py": [
+    5678,
+    12263
+  ],
+  "daedalus_mcp/tools_cookies.py": [
+    419,
+    1764
+  ],
+  "daedalus_mcp/tools_css.py": [
+    690,
+    2204
+  ],
+  "daedalus_mcp/tools_eval.py": [
+    1863,
+    4974
+  ],
+  "daedalus_mcp/tools_hotfixes.py": [
+    1317,
+    2665
+  ],
+  "daedalus_mcp/tools_media.py": [
+    2005,
+    5369
+  ],
+  "daedalus_mcp/tools_network.py": [
+    1197,
+    3220
+  ],
+  "daedalus_mcp/tools_tabs.py": [
+    886,
+    2625
+  ],
+  "daedalus_mcp/transport.py": [
+    3020,
+    8107
+  ],
+  "dashboard/api.js": [
+    1880,
+    5237
+  ],
+  "dashboard/app.js": [
+    639,
+    4234
+  ],
+  "dashboard/sections/_util.js": [
+    2534,
+    8642
+  ],
+  "dashboard/sections/css-injector.js": [
+    2371,
+    6875
+  ],
+  "dashboard/sections/screenshot.js": [
+    779,
+    4915
+  ],
+  "dashboard/sections/uploads.js": [
+    1408,
+    6699
+  ],
+  "dashboard/sse.js": [
+    1542,
+    4304
+  ],
+  "eslint.config.js": [
+    1048,
+    2008
+  ],
+  "examples/hls-segment-relay.js": [
+    4026,
+    7104
+  ],
+  "examples/kill-hls.js": [
+    679,
+    1329
+  ],
+  "examples/open-tabs.js": [
+    68,
+    187
+  ],
+  "examples/react-fill-input.js": [
+    794,
+    1213
+  ],
+  "examples/request-log-hotfix.js": [
+    1772,
+    2954
+  ],
+  "extension/background.js": [
+    2135,
+    5261
+  ],
+  "extension/content.js": [
+    4489,
+    11239
+  ],
+  "extension/options.js": [
+    286,
+    1655
+  ],
+  "extension/page.js": [
+    2231,
+    10960
+  ],
+  "extension/worker/blocking.js": [
+    1114,
+    3490
+  ],
+  "extension/worker/capture.js": [
+    645,
+    2302
+  ],
+  "extension/worker/cdp.js": [
+    865,
+    3747
+  ],
+  "extension/worker/cdp_attach.js": [
+    3463,
+    5271
+  ],
+  "extension/worker/config.js": [
+    2791,
+    5854
+  ],
+  "extension/worker/cookies.js": [
+    337,
+    2185
+  ],
+  "extension/worker/evaluate.js": [
+    3145,
+    8930
+  ],
+  "extension/worker/gm_storage.js": [
+    3755,
+    7479
+  ],
+  "extension/worker/hotfix_scope.js": [
+    868,
+    2441
+  ],
+  "extension/worker/hotfixes.js": [
+    5587,
+    14069
+  ],
+  "extension/worker/messaging.js": [
+    3431,
+    8185
+  ],
+  "extension/worker/netcapture.js": [
+    1784,
+    6652
+  ],
+  "extension/worker/registry.js": [
+    1237,
+    3028
+  ],
+  "extension/worker/segment_mint.js": [
+    1092,
+    3752
+  ],
+  "extension/worker/stream.js": [
+    3269,
+    7097
+  ],
+  "extension/worker/tabs.js": [
+    973,
+    6102
+  ],
+  "extension/worker/util.js": [
+    2595,
+    4620
+  ],
+  "run_tests.py": [
+    1719,
+    5684
+  ],
+  "scripts/check_versions.py": [
+    6814,
+    12770
+  ],
+  "scripts/ci/actionlint_asset.py": [
+    3751,
+    5052
+  ],
+  "scripts/ci/aggregate_gate.py": [
+    3257,
+    11053
+  ],
+  "scripts/ci/cache_action_releases.py": [
+    1296,
+    7206
+  ],
+  "scripts/ci/classify_changes.py": [
+    2102,
+    5566
+  ],
+  "scripts/ci/coverage_combine.py": [
+    746,
+    1118
+  ],
+  "scripts/ci/coverage_suites.py": [
+    1221,
+    4011
+  ],
+  "scripts/ci/diff_coverage.py": [
+    5393,
+    13658
+  ],
+  "scripts/ci/gate_freshness.py": [
+    5201,
+    15449
+  ],
+  "scripts/ci/install_lint_tools.py": [
+    9016,
+    16612
+  ],
+  "scripts/ci/journey_artifact.py": [
+    7803,
+    15222
+  ],
+  "scripts/ci/journey_budget.py": [
+    7904,
+    15285
+  ],
+  "scripts/ci/journey_child_env.py": [
+    2986,
+    3317
+  ],
+  "scripts/ci/journey_counters.py": [
+    8078,
+    15676
+  ],
+  "scripts/ci/journey_function_rows.py": [
+    5309,
+    7537
+  ],
+  "scripts/ci/journey_gates.py": [
+    5397,
+    9979
+  ],
+  "scripts/ci/journey_rebaseline.py": [
+    7669,
+    13306
+  ],
+  "scripts/ci/journey_recording.py": [
+    3543,
+    6417
+  ],
+  "scripts/ci/journey_report.py": [
+    6989,
+    14843
+  ],
+  "scripts/ci/journey_residual.py": [
+    1652,
+    2250
+  ],
+  "scripts/ci/journey_thread_rows.py": [
+    3187,
+    4328
+  ],
+  "scripts/ci/journey_threads.py": [
+    17960,
+    21033
+  ],
+  "scripts/ci/js_module_coverage.py": [
+    1138,
+    4240
+  ],
+  "scripts/ci/line_lengths.py": [
+    808,
+    3805
+  ],
+  "scripts/ci/ratchet_push.py": [
+    1925,
+    3844
+  ],
+  "scripts/ci/reseed.py": [
+    1549,
+    3178
+  ],
+  "scripts/ci/size_baseline.py": [
+    669,
+    3563
+  ],
+  "scripts/ci/suite_bound.py": [
+    6451,
+    11341
+  ],
+  "scripts/ci/thresholds.py": [
+    1833,
+    10674
+  ],
+  "scripts/ci/type_error_baseline.py": [
+    1553,
+    6162
+  ],
+  "scripts/ci/yamlanchor.py": [
+    351,
+    1830
+  ],
+  "scripts/ci/yamlblock.py": [
+    474,
+    2968
+  ],
+  "scripts/ci/yamlscalar.py": [
+    1993,
+    5847
+  ],
+  "scripts/gen_gitignore.py": [
+    3621,
+    7267
+  ],
+  "scripts/mcp_probe.py": [
+    663,
+    2407
+  ],
+  "scripts/version_regions.py": [
+    2917,
+    10447
+  ],
+  "server.py": [
+    5152,
+    14847
+  ],
+  "tests/_actionlint.py": [
+    10797,
+    20010
+  ],
+  "tests/_block_field_probes.py": [
+    562,
+    3462
+  ],
+  "tests/_boundary.py": [
+    1928,
+    4641
+  ],
+  "tests/_bridge.py": [
+    7904,
+    13238
+  ],
+  "tests/_case_fold.py": [
+    1796,
+    2722
+  ],
+  "tests/_child_boot_env.py": [
+    1223,
+    1653
+  ],
+  "tests/_child_ready.py": [
+    3812,
+    5894
+  ],
+  "tests/_ci_imports.py": [
+    1118,
+    2487
+  ],
+  "tests/_ci_reseed_fixtures.py": [
+    1602,
+    5361
+  ],
+  "tests/_ci_wait_fixtures.py": [
+    2399,
+    3529
+  ],
+  "tests/_classifier_calls.py": [
+    576,
+    867
+  ],
+  "tests/_cli_arg_audit_resolver.py": [
+    3627,
+    18282
+  ],
+  "tests/_cli_dispatch.py": [
+    6098,
+    11504
+  ],
+  "tests/_cli_handler_wire.py": [
+    917,
+    1509
+  ],
+  "tests/_cli_helpers.py": [
+    1535,
+    2933
+  ],
+  "tests/_cli_parse.py": [
+    106,
+    690
+  ],
+  "tests/_clientstate.py": [
+    1662,
+    3249
+  ],
+  "tests/_cmdqueue_faults.py": [
+    2695,
+    6568
+  ],
+  "tests/_command_candidates.py": [
+    322,
+    925
+  ],
+  "tests/_command_type_readers.py": [
+    4532,
+    14528
+  ],
+  "tests/_completion.py": [
+    396,
+    932
+  ],
+  "tests/_controlled_call.py": [
+    276,
+    512
+  ],
+  "tests/_coverage_bindings.py": [
+    10715,
+    18026
+  ],
+  "tests/_coverage_comment_workflow.py": [
+    1089,
+    4046
+  ],
+  "tests/_coverage_guard.py": [
+    5728,
+    21230
+  ],
+  "tests/_coverage_launch_stubs.py": [
+    3419,
+    7219
+  ],
+  "tests/_coverage_memo.py": [
+    3276,
+    4140
+  ],
+  "tests/_coverage_source_fixtures.py": [
+    257,
+    462
+  ],
+  "tests/_coverage_suite_fixture.py": [
+    5070,
+    10247
+  ],
+  "tests/_dashfetch.py": [
+    1205,
+    1959
+  ],
+  "tests/_dashfield.py": [
+    1102,
+    4349
+  ],
+  "tests/_dashnode.py": [
+    3989,
+    18025
+  ],
+  "tests/_dashnode_dom.py": [
+    1174,
+    5404
+  ],
+  "tests/_dashnode_retry_control.py": [
+    750,
+    4804
+  ],
+  "tests/_dashqueue.py": [
+    294,
+    503
+  ],
+  "tests/_dashsection.py": [
+    4516,
+    13278
+  ],
+  "tests/_dashsection_wave1.py": [
+    2683,
+    4804
+  ],
+  "tests/_dashshell.py": [
+    1995,
+    10680
+  ],
+  "tests/_deadline_reach.py": [
+    347,
+    460
+  ],
+  "tests/_diff_coverage_fixtures.py": [
+    648,
+    768
+  ],
+  "tests/_drain.py": [
+    631,
+    1190
+  ],
+  "tests/_fake_gh.py": [
+    5218,
+    11412
+  ],
+  "tests/_fanout.py": [
+    879,
+    1748
+  ],
+  "tests/_frontend.py": [
+    832,
+    3735
+  ],
+  "tests/_gate_freshness_fixtures.py": [
+    451,
+    534
+  ],
+  "tests/_gc_handshake.py": [
+    2429,
+    7692
+  ],
+  "tests/_ghexpr.py": [
+    2404,
+    10389
+  ],
+  "tests/_gitignore_control.py": [
+    4202,
+    6912
+  ],
+  "tests/_gm_harness.py": [
+    2575,
+    14898
+  ],
+  "tests/_hotfix_outcome.py": [
+    501,
+    680
+  ],
+  "tests/_journey_contract.py": [
+    10027,
+    20666
+  ],
+  "tests/_journey_profile_fixture.py": [
+    1719,
+    2105
+  ],
+  "tests/_journey_typed.py": [
+    11829,
+    20006
+  ],
+  "tests/_journeys.py": [
+    10841,
+    18963
+  ],
+  "tests/_jsread.py": [
+    1814,
+    8021
+  ],
+  "tests/_jsroute_keys.py": [
+    414,
+    1901
+  ],
+  "tests/_lint_tool_mechanisms.py": [
+    9132,
+    12881
+  ],
+  "tests/_lint_tool_refusals.py": [
+    6880,
+    13591
+  ],
+  "tests/_lint_tool_roles.py": [
+    12201,
+    22125
+  ],
+  "tests/_log_safe_cases.py": [
+    1185,
+    1981
+  ],
+  "tests/_mcp_arm_derivation.py": [
+    4681,
+    8812
+  ],
+  "tests/_mcp_code_eval.py": [
+    10374,
+    21455
+  ],
+  "tests/_mcp_dead_code.py": [
+    3146,
+    3924
+  ],
+  "tests/_mcp_guard_floor.py": [
+    7098,
+    21571
+  ],
+  "tests/_mcp_import_closure.py": [
+    12388,
+    24032
+  ],
+  "tests/_mcp_import_fixtures.py": [
+    1074,
+    1978
+  ],
+  "tests/_mcp_load.py": [
+    3084,
+    9957
+  ],
+  "tests/_mcp_poll_outcome.py": [
+    236,
+    383
+  ],
+  "tests/_mcp_ready.py": [
+    733,
+    1277
+  ],
+  "tests/_mcp_selection_fold.py": [
+    10581,
+    20131
+  ],
+  "tests/_mcp_tools_helpers.py": [
+    705,
+    3948
+  ],
+  "tests/_netcapture_harness.py": [
+    2856,
+    12884
+  ],
+  "tests/_node_harness_fixtures.py": [
+    278,
+    351
+  ],
+  "tests/_node_launch_routing.py": [
+    2265,
+    3087
+  ],
+  "tests/_noderun.py": [
+    3430,
+    7258
+  ],
+  "tests/_noglibc.py": [
+    578,
+    935
+  ],
+  "tests/_outer_bound.py": [
+    3203,
+    4786
+  ],
+  "tests/_overlap.py": [
+    3219,
+    15684
+  ],
+  "tests/_overlap_clients.py": [
+    1189,
+    4328
+  ],
+  "tests/_pip_cache.py": [
+    412,
+    913
+  ],
+  "tests/_plant_fixture.py": [
+    1787,
+    4106
+  ],
+  "tests/_processtree.py": [
+    3328,
+    7821
+  ],
+  "tests/_queueread.py": [
+    949,
+    1677
+  ],
+  "tests/_ratchet_fixture.py": [
+    564,
+    1317
+  ],
+  "tests/_realbrowser.py": [
+    7128,
+    19832
+  ],
+  "tests/_realbrowser_broken_worker.py": [
+    1374,
+    2524
+  ],
+  "tests/_realbrowser_controls.py": [
+    259,
+    1114
+  ],
+  "tests/_realbrowser_errors.py": [
+    247,
+    908
+  ],
+  "tests/_realbrowser_workers.py": [
+    2346,
+    9716
+  ],
+  "tests/_repo.py": [
+    484,
+    908
+  ],
+  "tests/_segment_job_record.py": [
+    286,
+    431
+  ],
+  "tests/_segments.py": [
+    1307,
+    2403
+  ],
+  "tests/_service_loader.py": [
+    329,
+    524
+  ],
+  "tests/_speedharness.py": [
+    430,
+    2055
+  ],
+  "tests/_stream_fake.py": [
+    2467,
+    12144
+  ],
+  "tests/_suite_bound_stubs.py": [
+    2463,
+    5996
+  ],
+  "tests/_suite_jobs.py": [
+    8330,
+    12785
+  ],
+  "tests/_teardown.py": [
+    369,
+    841
+  ],
+  "tests/_token_policy.py": [
+    682,
+    3157
+  ],
+  "tests/_upload_fixture.py": [
+    368,
+    737
+  ],
+  "tests/_util.py": [
+    10272,
+    20527
+  ],
+  "tests/_version_contract.py": [
+    1654,
+    3663
+  ],
+  "tests/_version_contract_dashboard_duplicates.py": [
+    418,
+    1731
+  ],
+  "tests/_version_contract_scanners.py": [
+    1907,
+    6670
+  ],
+  "tests/_watcher_fixtures.py": [
+    1483,
+    2284
+  ],
+  "tests/_wffixtures.py": [
+    4836,
+    12831
+  ],
+  "tests/_wfgraph.py": [
+    1518,
+    7063
+  ],
+  "tests/_wfjobs.py": [
+    1540,
+    4876
+  ],
+  "tests/_wfpins.py": [
+    9680,
+    21112
+  ],
+  "tests/_wfskip.py": [
+    369,
+    1662
+  ],
+  "tests/_worker_chrome_fake.py": [
+    357,
+    789
+  ],
+  "tests/_worker_routes.py": [
+    372,
+    2140
+  ],
+  "tests/_worker_sources.py": [
+    3978,
+    9583
+  ],
+  "tests/_workflows.py": [
+    3159,
+    10709
+  ],
+  "tests/_write_faults.py": [
+    357,
+    555
+  ],
+  "tests/_yamllines.py": [
+    771,
+    2405
+  ],
+  "tests/_yamlscalar.py": [
+    1046,
+    2882
+  ],
+  "tests/_yamlsteps.py": [
+    2070,
+    13352
+  ],
+  "tests/test_aggregate_needs.py": [
+    2245,
+    9314
+  ],
+  "tests/test_bridge_credentials.py": [
+    2729,
+    16184
+  ],
+  "tests/test_bridge_fake_oracle.py": [
+    3410,
+    17317
+  ],
+  "tests/test_bridge_requests.py": [
+    3033,
+    14674
+  ],
+  "tests/test_bridge_results_slots.py": [
+    2433,
+    13567
+  ],
+  "tests/test_bridge_results_stripes.py": [
+    2220,
+    14050
+  ],
+  "tests/test_bridge_startup.py": [
+    4295,
+    19653
+  ],
+  "tests/test_bridge_streams.py": [
+    3425,
+    22256
+  ],
+  "tests/test_bridge_streams_legacy.py": [
+    3478,
+    8123
+  ],
+  "tests/test_bridge_uploads.py": [
+    5314,
+    23124
+  ],
+  "tests/test_case_fold_parent.py": [
+    11399,
+    21340
+  ],
+  "tests/test_checkout_pin.py": [
+    2142,
+    10336
+  ],
+  "tests/test_ci_gate.py": [
+    11072,
+    20254
+  ],
+  "tests/test_ci_lint_tool_refusals.py": [
+    1544,
+    2662
+  ],
+  "tests/test_ci_lint_tools.py": [
+    10870,
+    23282
+  ],
+  "tests/test_ci_pip_cache.py": [
+    790,
+    3932
+  ],
+  "tests/test_ci_tool_declarations.py": [
+    8647,
+    16645
+  ],
+  "tests/test_ci_wait.py": [
+    6426,
+    20513
+  ],
+  "tests/test_ci_wait_gate.py": [
+    9769,
+    23720
+  ],
+  "tests/test_ci_wait_published.py": [
+    10965,
+    23719
+  ],
+  "tests/test_ci_wait_required.py": [
+    8694,
+    16778
+  ],
+  "tests/test_ci_workflows.py": [
+    4941,
+    25029
+  ],
+  "tests/test_claim_workflow.py": [
+    708,
+    3580
+  ],
+  "tests/test_cli_browser_commands.py": [
+    3280,
+    13445
+  ],
+  "tests/test_cli_browser_handlers.py": [
+    2769,
+    13036
+  ],
+  "tests/test_cli_browser_tabs.py": [
+    2540,
+    8448
+  ],
+  "tests/test_cli_content_block.py": [
+    3604,
+    11174
+  ],
+  "tests/test_cli_content_capture.py": [
+    4593,
+    12448
+  ],
+  "tests/test_cli_content_commands.py": [
+    1052,
+    3914
+  ],
+  "tests/test_cli_content_css.py": [
+    1961,
+    6019
+  ],
+  "tests/test_cli_content_hotfixes.py": [
+    3527,
+    8601
+  ],
+  "tests/test_cli_dispatch.py": [
+    8670,
+    19853
+  ],
+  "tests/test_cli_duplicate_admission.py": [
+    733,
+    3267
+  ],
+  "tests/test_cli_error_reporting.py": [
+    1884,
+    7043
+  ],
+  "tests/test_cli_eval_commands.py": [
+    1628,
+    8220
+  ],
+  "tests/test_cli_eval_handlers.py": [
+    5752,
+    17877
+  ],
+  "tests/test_cli_helpers.py": [
+    934,
+    2750
+  ],
+  "tests/test_cli_hotfixes.py": [
+    1490,
+    3887
+  ],
+  "tests/test_cli_invoke.py": [
+    473,
+    2038
+  ],
+  "tests/test_cli_media_commands.py": [
+    1566,
+    9325
+  ],
+  "tests/test_cli_output.py": [
+    1442,
+    3851
+  ],
+  "tests/test_cli_result_handlers.py": [
+    1472,
+    3298
+  ],
+  "tests/test_cli_result_wait.py": [
+    4654,
+    17855
+  ],
+  "tests/test_cli_typed_commands.py": [
+    948,
+    3669
+  ],
+  "tests/test_cli_waits.py": [
+    5503,
+    18812
+  ],
+  "tests/test_command_admission.py": [
+    488,
+    2333
+  ],
+  "tests/test_command_queue_aliased.py": [
+    3520,
+    19299
+  ],
+  "tests/test_command_queue_ordering.py": [
+    4362,
+    9096
+  ],
+  "tests/test_config_boot_generation.py": [
+    5312,
+    17096
+  ],
+  "tests/test_coverage_combine.py": [
+    1022,
+    5270
+  ],
+  "tests/test_coverage_comment_boundary.py": [
+    3605,
+    19404
+  ],
+  "tests/test_coverage_suites_launch.py": [
+    3315,
+    7510
+  ],
+  "tests/test_dashboard_accessibility.py": [
+    3927,
+    12301
+  ],
+  "tests/test_dashboard_app_shell.py": [
+    4152,
+    20665
+  ],
+  "tests/test_dashboard_drain_blocking.py": [
+    2165,
+    6051
+  ],
+  "tests/test_dashboard_eval.py": [
+    4369,
+    19178
+  ],
+  "tests/test_dashboard_fanout.py": [
+    5700,
+    19216
+  ],
+  "tests/test_dashboard_hotfixes.py": [
+    2437,
+    8276
+  ],
+  "tests/test_dashboard_section_block_rules.py": [
+    2965,
+    10650
+  ],
+  "tests/test_dashboard_section_cdp.py": [
+    5226,
+    13982
+  ],
+  "tests/test_dashboard_section_cookies.py": [
+    2940,
+    11457
+  ],
+  "tests/test_dashboard_section_css_injector.py": [
+    7423,
+    25578
+  ],
+  "tests/test_dashboard_section_fetch_timings.py": [
+    5982,
+    17873
+  ],
+  "tests/test_dashboard_section_net_capture.py": [
+    8120,
+    23131
+  ],
+  "tests/test_dashboard_section_overview.py": [
+    3813,
+    16423
+  ],
+  "tests/test_dashboard_sse.py": [
+    4455,
+    14477
+  ],
+  "tests/test_debugger_attachment.py": [
+    4366,
+    9468
+  ],
+  "tests/test_debugger_teardown.py": [
+    7496,
+    12343
+  ],
+  "tests/test_delivery_stripe_acceptance.py": [
+    1641,
+    4511
+  ],
+  "tests/test_delivery_stripes.py": [
+    3875,
+    13032
+  ],
+  "tests/test_diff_coverage_javascript.py": [
+    3672,
+    12509
+  ],
+  "tests/test_eval_relay.py": [
+    5242,
+    14158
+  ],
+  "tests/test_examples_parse.py": [
+    235,
+    1138
+  ],
+  "tests/test_exclusive_bind.py": [
+    6408,
+    20457
+  ],
+  "tests/test_extension_boundary.py": [
+    5252,
+    17273
+  ],
+  "tests/test_extension_policy.py": [
+    4832,
+    21612
+  ],
+  "tests/test_fetch_timings_count.py": [
+    498,
+    2843
+  ],
+  "tests/test_gate_extensions.py": [
+    2558,
+    9400
+  ],
+  "tests/test_gate_freshness_ratchet.py": [
+    1816,
+    4090
+  ],
+  "tests/test_gate_freshness_run.py": [
+    2923,
+    18839
+  ],
+  "tests/test_gh_client.py": [
+    7593,
+    16083
+  ],
+  "tests/test_gh_client_lifetime.py": [
+    6922,
+    18756
+  ],
+  "tests/test_gh_rate_limit.py": [
+    10123,
+    19556
+  ],
+  "tests/test_gitignore_control.py": [
+    4311,
+    13753
+  ],
+  "tests/test_gitignore_generator.py": [
+    5815,
+    17820
+  ],
+  "tests/test_gm_relay_authority.py": [
+    4189,
+    18098
+  ],
+  "tests/test_gm_segment_job.py": [
+    1701,
+    8272
+  ],
+  "tests/test_gm_storage.py": [
+    6141,
+    17400
+  ],
+  "tests/test_gm_transfers.py": [
+    2776,
+    16607
+  ],
+  "tests/test_hotfix_commands.py": [
+    13091,
+    25756
+  ],
+  "tests/test_hotfix_document_binding.py": [
+    10234,
+    18979
+  ],
+  "tests/test_hotfix_scope.py": [
+    9744,
+    22285
+  ],
+  "tests/test_hotfix_scope_clear.py": [
+    4826,
+    11018
+  ],
+  "tests/test_hotfix_store.py": [
+    5208,
+    11507
+  ],
+  "tests/test_http_transport.py": [
+    4730,
+    17026
+  ],
+  "tests/test_install_lint_tools.py": [
+    7735,
+    22136
+  ],
+  "tests/test_journey_baseline.py": [
+    7860,
+    22900
+  ],
+  "tests/test_journey_boundary.py": [
+    2317,
+    6454
+  ],
+  "tests/test_journey_budget.py": [
+    6214,
+    19336
+  ],
+  "tests/test_journey_budget_cli.py": [
+    8295,
+    25105
+  ],
+  "tests/test_journey_budget_gates.py": [
+    7226,
+    24346
+  ],
+  "tests/test_journey_counters.py": [
+    5098,
+    21254
+  ],
+  "tests/test_journey_payloads.py": [
+    9104,
+    18516
+  ],
+  "tests/test_journey_placement.py": [
+    2044,
+    4721
+  ],
+  "tests/test_journey_real_profile.py": [
+    3234,
+    6157
+  ],
+  "tests/test_journey_rebaseline.py": [
+    2972,
+    13826
+  ],
+  "tests/test_journey_report.py": [
+    5308,
+    13866
+  ],
+  "tests/test_journey_thread_rows.py": [
+    2968,
+    12671
+  ],
+  "tests/test_journey_threads.py": [
+    9167,
+    21713
+  ],
+  "tests/test_journey_tighten.py": [
+    2770,
+    15812
+  ],
+  "tests/test_js_lines.py": [
+    1915,
+    8308
+  ],
+  "tests/test_js_module_coverage.py": [
+    4149,
+    14203
+  ],
+  "tests/test_jsread_mask.py": [
+    4016,
+    11844
+  ],
+  "tests/test_mcp_closure_limits.py": [
+    2191,
+    7554
+  ],
+  "tests/test_mcp_guard_floor.py": [
+    4738,
+    18664
+  ],
+  "tests/test_mcp_hotfix_scope.py": [
+    2072,
+    6367
+  ],
+  "tests/test_mcp_import_refusals.py": [
+    5838,
+    19214
+  ],
+  "tests/test_mcp_live_tools.py": [
+    4303,
+    18741
+  ],
+  "tests/test_mcp_path_authority.py": [
+    822,
+    4644
+  ],
+  "tests/test_mcp_poll_pause.py": [
+    426,
+    1971
+  ],
+  "tests/test_mcp_probe.py": [
+    1674,
+    8138
+  ],
+  "tests/test_mcp_server_load.py": [
+    1843,
+    10882
+  ],
+  "tests/test_mcp_server_serve.py": [
+    2760,
+    17079
+  ],
+  "tests/test_mcp_transport.py": [
+    1191,
+    7930
+  ],
+  "tests/test_mcp_transport_guards.py": [
+    2827,
+    16731
+  ],
+  "tests/test_path_safety.py": [
+    4536,
+    20390
+  ],
+  "tests/test_plant_report.py": [
+    4881,
+    19998
+  ],
+  "tests/test_plant_restore.py": [
+    4302,
+    21751
+  ],
+  "tests/test_pyright_scope.py": [
+    1220,
+    4265
+  ],
+  "tests/test_queued_command.py": [
+    2863,
+    12039
+  ],
+  "tests/test_ratchet_push.py": [
+    3994,
+    12974
+  ],
+  "tests/test_real_browser_eval.py": [
+    4187,
+    11394
+  ],
+  "tests/test_real_browser_harness.py": [
+    3090,
+    19227
+  ],
+  "tests/test_receiver_descent.py": [
+    6580,
+    13215
+  ],
+  "tests/test_relay_example_placeholders.py": [
+    1401,
+    5208
+  ],
+  "tests/test_release_scan.py": [
+    1738,
+    6546
+  ],
+  "tests/test_result_command_write_retry.py": [
+    901,
+    5242
+  ],
+  "tests/test_result_routes.py": [
+    2335,
+    13029
+  ],
+  "tests/test_result_stripe.py": [
+    6620,
+    14708
+  ],
+  "tests/test_run_tests.py": [
+    8226,
+    24794
+  ],
+  "tests/test_runner_refuses_unawaited.py": [
+    3604,
+    14374
+  ],
+  "tests/test_screenshot_quality.py": [
+    622,
+    3020
+  ],
+  "tests/test_secret_scan.py": [
+    937,
+    6080
+  ],
+  "tests/test_segment_capability.py": [
+    2072,
+    9952
+  ],
+  "tests/test_segment_job_names.py": [
+    3549,
+    7820
+  ],
+  "tests/test_segment_jobs.py": [
+    4670,
+    21574
+  ],
+  "tests/test_segment_lock_key.py": [
+    3770,
+    7528
+  ],
+  "tests/test_segment_lock_stripes.py": [
+    10066,
+    20767
+  ],
+  "tests/test_segment_mint.py": [
+    2805,
+    18651
+  ],
+  "tests/test_segment_routes.py": [
+    5741,
+    22491
+  ],
+  "tests/test_segment_storage.py": [
+    5059,
+    22562
+  ],
+  "tests/test_segment_store.py": [
+    3231,
+    20071
+  ],
+  "tests/test_speed_gate_jobs.py": [
+    1343,
+    3931
+  ],
+  "tests/test_speedharness.py": [
+    1543,
+    7489
+  ],
+  "tests/test_starvation_bounds.py": [
+    2004,
+    7754
+  ],
+  "tests/test_stream_fake_oracle.py": [
+    427,
+    1863
+  ],
+  "tests/test_stream_lifecycle.py": [
+    6306,
+    21310
+  ],
+  "tests/test_stream_registration.py": [
+    899,
+    2480
+  ],
+  "tests/test_stream_route.py": [
+    3357,
+    13037
+  ],
+  "tests/test_stream_service_legacy_ids.py": [
+    4014,
+    10336
+  ],
+  "tests/test_suite_bound.py": [
+    7361,
+    22670
+  ],
+  "tests/test_suite_bound_survivor.py": [
+    4736,
+    10210
+  ],
+  "tests/test_tab_registry.py": [
+    1272,
+    7411
+  ],
+  "tests/test_type_errors.py": [
+    2013,
+    11293
+  ],
+  "tests/test_upload_routes.py": [
+    2032,
+    12769
+  ],
+  "tests/test_version_contract.py": [
+    2715,
+    14270
+  ],
+  "tests/test_version_contract_empty_rev.py": [
+    992,
+    2674
+  ],
+  "tests/test_version_contract_quote_duplicates.py": [
+    1047,
+    3518
+  ],
+  "tests/test_version_empty_values.py": [
+    1132,
+    4900
+  ],
+  "tests/test_version_set_atomic.py": [
+    855,
+    2466
+  ],
+  "tests/test_worker_command_types.py": [
+    4856,
+    21131
+  ],
+  "tests/test_worker_module_boundary.py": [
+    3372,
+    19953
+  ],
+  "tests/test_worker_netcapture.py": [
+    2950,
+    19454
+  ],
+  "tests/test_worker_sources.py": [
+    1366,
+    4554
+  ],
+  "tests/test_worker_tabs_misc.py": [
+    1661,
+    4846
+  ],
+  "tests/test_workflow_job_timeouts.py": [
+    3640,
+    14370
+  ],
+  "tests/test_workflow_suite_base.py": [
+    5985,
+    11171
+  ]
+}
