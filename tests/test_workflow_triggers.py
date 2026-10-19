@@ -198,7 +198,8 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
     assert not _workflow_runs_for_paths(tests, 'push', [records])
     assert _workflow_runs_for_paths(tests, 'push', [records, source])
     assert _workflow_runs_for_paths(tests, 'pull_request', [records])
-    triggers = _workflow_triggers(tests.read_text(encoding='utf-8'), tests.name)
+    triggers = _workflow_triggers(
+        tests.read_text(encoding='utf-8'), tests.name)
     assert _workflow_path_filters(triggers['push'], tests.name)[
         'paths-ignore'][2] == records
 
@@ -548,7 +549,8 @@ def test_concurrency_groups_scope_per_commit_and_per_pull(tmp):
 def _comment_share_steps():
     path = ROOT / '.github' / 'workflows' / 'comment-share.yml'
     assert path.is_file(), 'comment-share workflow is missing'
-    job = complete_job_mapping(path.read_text(encoding='utf-8'), 'comment-share')
+    job = complete_job_mapping(
+        path.read_text(encoding='utf-8'), 'comment-share')
     assert job is not None, 'comment-share job is missing'
     return job['steps']
 
