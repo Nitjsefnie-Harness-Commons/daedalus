@@ -21,12 +21,12 @@ name: gate freshness
 # would take its workflow text from the merge ref while running a script from
 # the branch SHA, and the two can disagree.)
 #
-# THE BOUND, SIZED. The run refuses when its worst case (open PRs x gate
-# commits compares + per-head overhead) exceeds DEFAULT_CALL_BUDGET calls. At
-# ASSUMED_SECONDS_PER_CALL (1.5 s, the conservative measured rate) that budget
-# needs 1200*1.5/60 = 30 minutes, so `timeout-minutes` below is 35: the timeout
-# clears the enforced budget rather than merely sitting above it. See THE BOUND
-# in scripts/ci/gate_freshness.py, whose test pins this relation.
+# THE BOUND, SIZED. The run refuses when its fixed estimate (open PRs x gate
+# commit compares + per-head overhead) exceeds DEFAULT_CALL_BUDGET calls.
+# This assumes one old check per head; duplicate old ids can exceed it, with
+# one extra PATCH per additional id. At ASSUMED_SECONDS_PER_CALL (1.5 s/call),
+# the 1200-call budget is 30 minutes; the 35-minute workflow timeout provides
+# slack for that residual. See THE BOUND in scripts/ci/gate_freshness.py.
 on:
   push:
     branches: [main]
