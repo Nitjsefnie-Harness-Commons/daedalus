@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """The aggregate job's verdict: which `needs` results gate this run.
 
-A `cancelled` dependency used to fail the aggregate blindly: with
-`cancel-in-progress` on, every superseding push left a red aggregate on
-the old SHA. The rule ci_wait.py settled holds here: a cancelled run
-with a strictly newer run of the same workflow gates nothing, while a
-deliberate cancel stays a failure.
+A cancelled dependency superseded by a strictly newer run of the same
+workflow gates nothing. Otherwise, a cancelled job with an observed empty
+steps array diagnoses GitHub-side runner acquisition and names the rerun
+remedy. Without that evidence, the deliberate-cancel failure stands.
 
 The supersession query reads the head branch from
 `github.event.pull_request.head.ref || github.ref_name` — the pushed
@@ -43,21 +42,21 @@ POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
 READ_TIMEOUT_S = 120
 # The poll bound IS the gitleaks job's own 10-minute backstop: no queueing is
 # left in it, so a scan unreported by then is refused rather than waited on.
-# FOUR reads spend wall time around that wait. TWO of them are BEFORE it:
-# own_run and branch_runs, both inside evaluate on the cancelled-dependency
-# path, which main() calls before the scan. TWO can finish AFTER the deadline
+# FIVE reads spend wall time around that wait. THREE of them are BEFORE it:
+# own_run, branch_runs and scan_jobs inside evaluate on the non-superseded
+# cancelled-dependency path. TWO can finish AFTER the deadline
 # — the poll whose read straddles it, because the deadline is checked only
 # after that read, and scan_jobs once that poll finds a completed run; the
 # loop either trips the deadline OR judges, and judging spends the jobs read
-# on top of its own. So the budget is bound + 4 x READ_TIMEOUT_S against the
-# 1200 s the job carries, which leaves 120 s of report margin here.
+# on top of its own. So the budget is bound + 5 x READ_TIMEOUT_S against the
+# 1200 s the job carries, which spends the full ceiling at the default.
 DEFAULT_POLL_BOUND_S = 600.0
 POLL_INTERVAL_S = 20.0
 # A bound at or over the job's own 20-minute ceiling is a wait the runner
 # cuts off mid-verdict, so the module refuses it rather than accept a
-# number that can no longer report. 660 s is where the stop sits: it is
-# 60 s above the default and, with the four reads above, still lands
-# under the 1200 s ceiling the job carries.
+# number that can no longer report. 660 s remains the accepted cap, 60 s
+# above the default; five reads at their ceilings can exhaust the job's
+# 1200 s budget even at the default.
 MAX_POLL_BOUND_S = 660.0
 STRICT = frozenset(
     {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
@@ -70,6 +69,7 @@ PASSED = 'passed'
 FAILED = 'failed'
 STRICT_SKIPPED = 'strict-skipped'
 CANCEL_SUPERSEDED = 'cancelled-superseded'
+CANCEL_UNSTARTED = 'cancelled-unstarted'
 CANCEL_DELIBERATE = 'cancelled-deliberate'
 QUERY_FAILED = 'query-failed'
 SCAN_MISSING = 'secrets-missing'
@@ -192,7 +192,25 @@ def evaluate(needs, repository, run_id, branch, read):
         return decide(needs)
     mine = own_run(repository, run_id, read)
     runs = branch_runs(repository, branch, read)
-    return decide(needs, mine, runs)
+    verdict, message = decide(needs, mine, runs)
+    if verdict != CANCEL_DELIBERATE:
+        return verdict, message
+    jobs = scan_jobs(repository, run_id, read)
+    cancelled = classify_needs(needs)[1]
+    unstarted = [job['name'] for job in jobs or []
+                 if job.get('conclusion') == CANCELLED
+                 and job.get('steps') == []
+                 and isinstance(job.get('name'), str)
+                 and any(job['name'] == key
+                         or job['name'].startswith(key + ' (')
+                         for key in cancelled)]
+    if unstarted:
+        return CANCEL_UNSTARTED, (
+            'cancelled jobs never started (0 steps): '
+            + ', '.join(unstarted)
+            + '; GitHub-side runner-acquisition failure; '
+            f'retry with gh run rerun --failed {run_id}')
+    return verdict, message
 
 
 def scan_runs(repository, head_sha, read):
