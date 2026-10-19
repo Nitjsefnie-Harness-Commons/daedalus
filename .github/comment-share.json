@@ -1541,7 +1541,7 @@
   ],
   "tests/test_ratchet_push.py": [
     3994,
-    12974
+    13126
   ],
   "tests/test_real_browser_eval.py": [
     4187,
@@ -1556,8 +1556,8 @@
     13215
   ],
   "tests/test_relay_example_placeholders.py": [
-    1401,
-    5208
+    1398,
+    5247
   ],
   "tests/test_release_scan.py": [
     1738,
