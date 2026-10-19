@@ -1,3 +1,4 @@
+(() => {
 // Destroy a page's HLS.js instance.
 //
 // Why: an HLS.js player that can no longer reach its segments does not stop
@@ -39,4 +40,5 @@ for (const k of Object.keys(window)) {
   } catch(e) {}
 }
 
-destroyed.length ? 'killed: ' + destroyed.join(', ') : 'no hls instance found';
+return destroyed.length ? 'killed: ' + destroyed.join(', ') : 'no hls instance found';
+})();

@@ -200,8 +200,8 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
     assert _workflow_runs_for_paths(tests, 'pull_request', [records])
     triggers = _workflow_triggers(
         tests.read_text(encoding='utf-8'), tests.name)
-    assert _workflow_path_filters(triggers['push'], tests.name)[
-        'paths-ignore'][2] == records
+    assert records in _workflow_path_filters(
+        triggers['push'], tests.name)['paths-ignore']
 
     audit = workflows / 'audit.yml'
     assert _workflow_runs_for_paths(audit, 'push', [threshold])
