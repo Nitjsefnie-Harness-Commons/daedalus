@@ -195,4 +195,4 @@ async function run() {
 }
 
 run();
-return `relay started: job=${JOB} concurrency=${CONCURRENCY}`;
+`relay started: job=${JOB} concurrency=${CONCURRENCY}`;

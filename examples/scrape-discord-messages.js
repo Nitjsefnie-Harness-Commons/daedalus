@@ -87,10 +87,12 @@ async function scrollBackUntil(cutoffIso) {
   };
 }
 
+let result;
 if (action === "scroll-back") {
-  return await scrollBackUntil(args.cutoffIso);
+  result = await scrollBackUntil(args.cutoffIso);
+} else if (action === "extract-only") {
+  result = extract();
+} else {
+  result = { error: "unknown action " + action };
 }
-if (action === "extract-only") {
-  return extract();
-}
-return { error: "unknown action " + action };
+result;
