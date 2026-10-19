@@ -72,6 +72,7 @@
 !/.github/
 !/.github/PULL_REQUEST_TEMPLATE.md
 !/.github/ci-thresholds.json
+!/.github/comment-share.json
 !/.github/dependabot.yml
 !/.github/journey-budget.json
 
@@ -86,6 +87,7 @@
 !/.github/workflows/audit.yml
 !/.github/workflows/claim.yml
 !/.github/workflows/codeql.yml
+!/.github/workflows/comment-share.yml
 !/.github/workflows/coverage-comment.yml
 !/.github/workflows/gate-freshness.yml
 !/.github/workflows/pr-gate.yml
