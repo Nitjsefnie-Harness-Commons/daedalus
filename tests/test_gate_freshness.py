@@ -420,7 +420,8 @@ def _publish_read(existing_ids, recorded, runs=(), suites=None,
     return read
 
 
-def _run(run_id=10, suite=50, path='.github/workflows/other.yml', **extra):
+def _run(run_id: int | str = 10, suite=50,
+         path: str | None = '.github/workflows/other.yml', **extra):
     return {'id': run_id, 'check_suite_id': suite, 'path': path, **extra}
 
 
