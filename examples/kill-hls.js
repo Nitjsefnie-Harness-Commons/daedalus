@@ -39,4 +39,4 @@ for (const k of Object.keys(window)) {
   } catch(e) {}
 }
 
-return destroyed.length ? 'killed: ' + destroyed.join(', ') : 'no hls instance found';
+destroyed.length ? 'killed: ' + destroyed.join(', ') : 'no hls instance found';

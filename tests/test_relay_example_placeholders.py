@@ -96,7 +96,7 @@ const context = {
 };
 // vm-load-exempt: runs placeholder-substituted example text, not a file
 const started = vm.runInNewContext(
-  '(async () => {' + plan.source + '\n})()', context);
+  plan.source, context);
 (async () => {
   const returned = await started;
   for (let turn = 0; turn < 20; turn++) await Promise.resolve();

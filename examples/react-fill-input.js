@@ -25,7 +25,9 @@ function setReactInput(el, value) {
 }
 
 const input = document.querySelector('__SELECTOR__');
-if (!input) return 'NO_INPUT';
-
-setReactInput(input, '__VALUE__');
-return 'filled len=' + input.value.length;
+let result = 'NO_INPUT';
+if (input) {
+  setReactInput(input, '__VALUE__');
+  result = 'filled len=' + input.value.length;
+}
+result;
