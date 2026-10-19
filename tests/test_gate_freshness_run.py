@@ -472,12 +472,12 @@ def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
             calls.append(argv)
             target = next(t for t in argv if t.startswith('repos/'))
             if '/check-runs?' in target:
-                return '\n'.join(f'{i} 50' for i in ids)
+                return '\n'.join(f'{i} 73' for i in ids)
             if '/actions/runs?' in target:
                 assert '--paginate' in argv and '--slurp' in argv
                 return _encode([{'workflow_runs': [
-                    {'id': 1, 'path': 'workflow.yml', 'check_suite_id': 50},
-                    {'id': 2, 'path': 'workflow.yml', 'check_suite_id': 51}]}])
+                    {'id': 1, 'path': 'workflow.yml', 'check_suite_id': 73},
+                    {'id': 2, 'path': 'workflow.yml', 'check_suite_id': 74}]}])
             return base(argv)
         gate_list = m.enumerate_gates(read, 'o/r')
         estimate = m.required_calls(1, len(gate_list))
