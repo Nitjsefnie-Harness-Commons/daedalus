@@ -459,32 +459,35 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 
 # ---- the bound ----
 
-def test_stranded_flow_counts_both_extra_calls_in_the_bound(tmp):
+def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
     m = _mod()
-    published = []
-    calls = []
-    gates = {pattern: [G1] for pattern in m.GATE_PATTERNS}
-    gate_list = [(pattern, G1) for pattern in m.GATE_PATTERNS]
-    base = _flow_read(m, gates, {7: HEAD}, published)
+    for old_ids in (('99',), ('99', '100', '101')):
+        published, calls = [], []
+        gates = {m._request_path(p): [G1] for p in m.GATE_PATTERNS}
+        base = _flow_read(m, gates, {7: HEAD}, published)
 
-    def read(argv):
-        calls.append(argv)
-        target = next(t for t in argv if t.startswith('repos/'))
-        if '/check-runs?' in target:
-            return '99 50'
-        if '/actions/runs?' in target:
-            assert '--paginate' in argv and '--slurp' in argv
-            return _encode([{'workflow_runs': [
-                {'id': 1, 'path': 'workflow.yml', 'check_suite_id': 50},
-                {'id': 2, 'path': 'workflow.yml', 'check_suite_id': 51}]}])
-        return base(argv)
-    code, verdicts = m.process(
-        read, 'o/r', m.select_heads([_pr(7)]), gate_list, RUN)
-    assert code == 0 and verdicts
-    assert [method for _, method in published] == ['POST', 'PATCH']
-    assert len(calls) == len(m.GATE_PATTERNS) + m.PER_HEAD_OVERHEAD, (
-        f'one head issued {len(calls)} calls; the shipped overhead is '
-        f'{m.PER_HEAD_OVERHEAD}')
+        def read(argv, ids=old_ids, calls=calls, base=base):
+            calls.append(argv)
+            target = next(t for t in argv if t.startswith('repos/'))
+            if '/check-runs?' in target:
+                return '\n'.join(f'{i} 50' for i in ids)
+            if '/actions/runs?' in target:
+                assert '--paginate' in argv and '--slurp' in argv
+                return _encode([{'workflow_runs': [
+                    {'id': 1, 'path': 'workflow.yml', 'check_suite_id': 50},
+                    {'id': 2, 'path': 'workflow.yml', 'check_suite_id': 51}]}])
+            return base(argv)
+        gate_list = m.enumerate_gates(read, 'o/r')
+        estimate = m.required_calls(1, len(gate_list))
+        code, verdicts = m.process(
+            read, 'o/r', m.select_heads([_pr(7)]), gate_list, RUN,
+            call_budget=estimate)
+        assert code == 0 and verdicts, 'duplicate-id overrun must publish'
+        assert [v for _, v in published] == ['POST'] + ['PATCH'] * len(old_ids)
+        assert len(calls) == estimate + len(old_ids) - 1, (
+            f'issued {len(calls)} calls; estimate {estimate}, ids {old_ids}')
+        if len(old_ids) == 3:
+            assert len(calls) > estimate, 'duplicate overrun not reached'
 
 
 def test_every_read_carries_the_no_cache_header(tmp):
@@ -516,19 +519,18 @@ def test_every_read_carries_the_no_cache_header(tmp):
         assert 'Cache-Control: no-cache' in joined, joined
 
 
-def test_over_the_bound_refuses_and_publishes_nothing(tmp):
-    """With readable heads the entry can only pass through the refusal."""
+def test_refusal_discloses_estimate_before_publishing_nothing(tmp):
     m = _mod()
     published = []
     heads = m.select_heads([_pr(i) for i in range(1, 6)])
     read = _flow_read(m, {'.pylintrc': [G1]},
                       {i: HEAD for i in range(1, 6)}, published)
-    code, _ = m.process(read, 'o/r', heads, [('.pylintrc', G1)], RUN,
-                        call_budget=5)
-    assert code != 0
-    assert published == [], 'a truncated run must publish nothing'
-    # All heads were readable, so nothing could have been skipped.
-    assert code == 1, code
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        code, _ = m.process(read, 'o/r', heads, [('.pylintrc', G1)], RUN,
+                            call_budget=5)
+    assert code == 1 and not published, 'a refusal must publish nothing'
+    assert 'estimated' in stderr.getvalue(), stderr.getvalue()
 
 
 def test_within_the_bound_publishes_every_head(tmp):
@@ -596,9 +598,7 @@ def test_workflow_is_well_formed(tmp):
     assert 'thresholds.py --check' not in text
 
 
-def test_the_workflow_timeout_clears_the_enforced_call_budget(tmp):
-    """The RELATION, not a literal: budget x assumed-rate < timeout. A bound
-    with no per-call rate is not a bound."""
+def test_workflow_timeout_leaves_slack_above_the_call_estimate(tmp):
     text = _workflow_text()
     m = _mod()
     assert 'scripts/ci/gate_freshness.py' in text, 'no pointer to the script'
@@ -609,6 +609,7 @@ def test_the_workflow_timeout_clears_the_enforced_call_budget(tmp):
                            'publish-freshness']['timeout-minutes'])
     needed_minutes = (m.DEFAULT_CALL_BUDGET
                       * m.ASSUMED_SECONDS_PER_CALL / 60)
+    assert (needed_minutes, timeout) == (30, 35)
     assert needed_minutes < timeout, (
         f'budget {m.DEFAULT_CALL_BUDGET} at '
         f'{m.ASSUMED_SECONDS_PER_CALL}s/call needs {needed_minutes:.1f} min, '
