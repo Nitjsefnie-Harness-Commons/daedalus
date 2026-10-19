@@ -293,11 +293,11 @@
   ],
   "examples/hls-segment-relay.js": [
     4026,
-    7104
+    7126
   ],
   "examples/kill-hls.js": [
     679,
-    1329
+    1346
   ],
   "examples/open-tabs.js": [
     68,
@@ -1307,10 +1307,6 @@
     5242,
     14158
   ],
-  "tests/test_examples_parse.py": [
-    235,
-    1138
-  ],
   "tests/test_exclusive_bind.py": [
     6408,
     20457
@@ -1554,10 +1550,6 @@
   "tests/test_receiver_descent.py": [
     6580,
     13215
-  ],
-  "tests/test_relay_example_placeholders.py": [
-    1398,
-    5247
   ],
   "tests/test_release_scan.py": [
     1738,
