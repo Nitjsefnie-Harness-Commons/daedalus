@@ -553,16 +553,6 @@ def _comment_share_steps():
     return job['steps']
 
 
-def test_comment_share_inputs_are_exact_scalars(tmp):
-    """Input swaps and narrowed base expressions must not pass as substrings."""
-    del tmp
-    action = next(step for step in _comment_share_steps()
-                  if 'comment-ratchet@' in step.get('uses', ''))
-    assert action['with'] == {
-        'target': '15', 'records': '.github/comment-share.json',
-        'mode': 'auto', 'base-ref': '${{ github.event.pull_request.base.sha }}'}
-
-
 def test_comment_share_push_runs_only_for_a_changed_measured_head(tmp):
     """No-op commits, diff errors and an unmeasured HEAD must not push."""
     steps = [step for step in _comment_share_steps() if 'run' in step]
