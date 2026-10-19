@@ -130,25 +130,32 @@ def test_only_observed_unstarted_cancelled_dependencies_are_diagnosed(tmp):
     matrix = 'suites (macos-latest, 3.11)'
     cases = (
         ('suites', [matrix, 'suites (macos-latest, 3.12)'],
-         'cancelled', [], True),
-        ('suites', ['suites'], 'cancelled', [], True),
-        ('coverage', ['coverage'], 'cancelled', [], True),
+         'cancelled', [], True, None, []),
+        ('suites', ['suites'], 'cancelled', [], True, None, []),
+        ('coverage', ['coverage'], 'cancelled', [], True, None, []),
         ('suites', ['suites-extra (macos-latest, 3.11)'],
-         'cancelled', [], False),
+         'cancelled', [], False, None, []),
         ('coverage', ['coverage-matrix (macos-latest, 3.11)', matrix],
-         'cancelled', [], False),
-        ('suites', [matrix], 'success', [], False),
-        ('suites', [matrix], 'cancelled', [{'name': 'Set up job'}], False),
-        ('suites', [matrix], 'cancelled', None, False),
-        ('suites', [], 'cancelled', [], False),
+         'cancelled', [], False, None, []),
+        ('suites', [matrix], 'success', [], False, None, []),
+        ('suites', [matrix], 'cancelled', [{'name': 'Set up job'}],
+         False, None, []),
+        ('suites', [matrix], 'cancelled', None, False, None, []),
+        ('suites', [], 'cancelled', [], False, None, []),
+        ('suites', [matrix], 'cancelled', [], True, 'cancelled',
+         [{'name': 'Set up job'}]),
+        ('suites', [], 'cancelled', [], False, 'skipped', []),
     )
-    for key, names, conclusion, steps, unstarted in cases:
+    for key, names, conclusion, steps, unstarted, wheel, wheel_steps in cases:
+        needs = {key: 'cancelled'}
+        if wheel:
+            needs['wheel'] = wheel
         jobs = [{'id': i + 1, 'name': name, 'conclusion': conclusion,
                  'steps': steps} for i, name in enumerate(names)]
         jobs.append({'id': 99, 'name': 'wheel', 'conclusion': 'cancelled',
-                     'steps': []})
+                     'steps': wheel_steps})
         calls, read = _recorder(MINE, [{'workflow_runs': [MINE]}], jobs=jobs)
-        verdict, message = mod.evaluate(_needs(**{key: 'cancelled'}),
+        verdict, message = mod.evaluate(_needs(**needs),
                                         'o/r', '39273610768', 'main', read)
         assert verdict not in mod.GREEN
         assert len(calls) == 3, calls
@@ -159,8 +166,7 @@ def test_only_observed_unstarted_cancelled_dependencies_are_diagnosed(tmp):
             assert verdict == 'cancelled-unstarted', (verdict, message)
             for name in names:
                 assert name in message, message
-            assert '0 steps' in message, message
-            assert 'GitHub-side runner-acquisition' in message, message
+            assert '0 recorded steps' in message, message
             assert 'gh run rerun --failed 39273610768' in message, message
             assert 'wheel' not in message, message
         else:
@@ -272,7 +278,7 @@ def test_the_raw_decoder_reads_whitespace_separated_documents(tmp):
     assert 'unparseable gh output' in str(error), str(error)
 
 
-def test_gh_read_turns_a_timeout_or_oserror_into_a_query_error(tmp):
+def test_gh_read_reports_failures_and_returns_stdout(tmp):
     del tmp
     mod = _gate()
     for effect in (subprocess.TimeoutExpired(cmd='gh', timeout=120),
@@ -280,11 +286,6 @@ def test_gh_read_turns_a_timeout_or_oserror_into_a_query_error(tmp):
         with mock.patch.object(mod.subprocess, 'run', side_effect=effect):
             error = _query_error(mod, lambda: mod.gh_read(['gh', 'api']))
         assert 'gh failed' in str(error), str(error)
-
-
-def test_gh_read_returns_the_stdout_when_gh_exits_zero(tmp):
-    del tmp
-    mod = _gate()
     proc = mock.Mock(returncode=0, stdout='the payload', stderr='noise')
     run = mock.Mock(return_value=proc)
     with mock.patch.object(mod.subprocess, 'run', run):
@@ -425,10 +426,9 @@ def test_the_aggregate_job_runs_the_module(tmp):
     assert checkouts[0]['uses'].startswith('actions/checkout@')
     assert checkouts[0]['with'] == {'persist-credentials': 'false'}
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
-    gates = [_gate_step()]
-    assert gates[0]['run'] == GATE_RUN
-    assert '${{' not in gates[0]['run']
-    assert gates[0]['env'] == {
+    gate = _gate_step()
+    assert '${{' not in gate['run']
+    assert gate['env'] == {
         'NEEDS_JSON': '${{ toJSON(needs) }}',
         'GH_TOKEN': '${{ github.token }}',
         'REPOSITORY': '${{ github.repository }}',

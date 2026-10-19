@@ -1461,12 +1461,13 @@ jobs:
     # 10-minute backstop: no queueing is left in it, so a scan unreported
     # by then is refused rather than waited on.
     #
-    # THREE reads happen BEFORE the wait begins — the cancelled-dependency
-    # run, supersession and jobs reads — and TWO can finish after it: the
-    # poll that straddles the deadline, and the jobs read after that poll
-    # finds a run. So five read ceilings of 2 minutes sit either side of
-    # the 10, which is 20 of these 20. At those ceilings there is no
-    # reporting margin; raising the wait would exceed the job's budget.
+    # A superseded cancellation makes two reads before the scan wait,
+    # without reading its own jobs. The deadline-straddling poll and the
+    # scan's jobs read add two read ceilings after the wait. Ten minutes
+    # plus four two-minute read ceilings reserves 18 of these 20;
+    # poll-sleep overshoot and reporting use the remaining allowance.
+    # A non-superseded cancellation makes three reads and returns red,
+    # without polling for the secrets scan.
     timeout-minutes: 20
     # A job-level block replaces the workflow-level one rather than adding
     # to it: contents read pays for the checkout, actions read is what lets
