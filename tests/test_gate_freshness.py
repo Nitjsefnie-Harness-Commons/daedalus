@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for gate-freshness decisions and check publication.
-Injected read fakes drive the real module; orchestration is covered by
-``test_gate_freshness_run.py``.
-"""
+"""Contracts for gate-freshness decisions and check publication."""
 import os
 import re
 import subprocess
@@ -434,12 +431,13 @@ def _run(run_id: int | str = 10, suite=50,
     return {'id': run_id, 'check_suite_id': suite, 'path': path, **extra}
 
 
-def test_stranded_green_is_posted_before_all_old_ids_are_renamed(tmp):
+def test_stranded_publication_payload_precedes_name_only_retirement(tmp):
     m, recorded, requests = _mod(), [], []
-    read = _publish_read([7, 8], recorded, suites={7: 99},
+    read = _publish_read([7, 8], recorded, suites={7: 91, 8: 73},
                          requests=requests,
-                         runs=[{'workflow_runs': [_run()]},
-                               {'workflow_runs': [_run(11, 51)]}])
+                         runs=[{'workflow_runs': [_run(5, 91, 'healthy.yml'),
+                                                  _run(suite=73)]},
+                               {'workflow_runs': [_run(11, 74)]}])
     m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
     assert [(v, t.rsplit('/', 1)[-1]) for v, t, _ in recorded] == [
         ('POST', 'check-runs'), ('PATCH', '7'), ('PATCH', '8')]
@@ -457,38 +455,42 @@ def test_stranded_green_is_posted_before_all_old_ids_are_renamed(tmp):
     assert all('Cache-Control: no-cache' in a for a in requests)
 
 
-def test_healthy_or_ambiguous_suite_keeps_the_verdict_patch(tmp):
+def test_malformed_or_wrong_owner_cannot_trigger_republication(tmp):
     m = _mod()
-    owner = _run()
+    owner = _run(suite=73)
     cases = [[], [{'workflow_runs': []}],
              [{'workflow_runs': [owner]}],
-             [{'workflow_runs': [_run(9, 51), owner]}],
-             [{'workflow_runs': [owner, _run(11, 51, 'different.yml')]}],
-             [{'workflow_runs': [_run(suite=99), _run(11, 51)]}],
-             [{'workflow_runs': [owner, _run(10, 51)]}],
-             [{'workflow_runs': [owner, _run(11)]}],
+             [{'workflow_runs': [_run(9, 74), owner]}],
+             [{'workflow_runs': [owner, _run(11, 74, 'different.yml')]}],
+             [{'workflow_runs': [_run(suite=91), _run(11, 74)]}],
+             [{'workflow_runs': [owner, _run(10, 74)]}],
+             [{'workflow_runs': [owner, _run(11, 73)]}],
              [{'workflow_runs': [owner, {}]}],
-             [{'workflow_runs': [owner, _run('11', 51)]}],
-             [{'workflow_runs': [owner, _run(11, 51, None)]}],
-             [{'workflow_runs': [owner, _run(11, 51, '')]}],
+             [{'workflow_runs': [owner, _run('11', 74)]}],
+             [{'workflow_runs': [owner, _run(11, 74, None)]}],
+             [{'workflow_runs': [owner, _run(11, 74, '')]}],
              [{'workflow_runs': [owner, None]}],
              [{'workflow_runs': 'bad'}], {}, [{'missing': []}],
              [None], 'unparseable',
-             [{'workflow_runs': [owner, _run(True, 51)]}],
+             [{'workflow_runs': [_run(True, 73), _run(11, 74)]}],
+             [{'workflow_runs': [_run(suite=50), _run(11, 74)]}],
              [{'workflow_runs': [owner, _run(11, True)]}]]
     for runs in cases:
         recorded = []
-        m.publish(_publish_read([7, 8], recorded, runs=runs),
+        m.publish(_publish_read([7, 8], recorded, runs=runs,
+                                suites={7: 73, 8: 73}),
                   'o/r', HEAD, 'success', 't', 's', RUN)
         assert [v for v, _, _ in recorded] == ['PATCH', 'PATCH'], runs
         assert all('name=gate freshness' in a for _, _, a in recorded)
 
 
-def test_missing_suite_pair_keeps_the_existing_id_patch(tmp):
+def test_wrong_or_missing_suite_cannot_borrow_another_runs_owner(tmp):
     m = _mod()
-    for listing in ('7', '7 null', '7 50 extra', '\ninvalid 50\n7 50\n'):
+    for listing in ('7', '7 null', '7 73 extra', '\ninvalid 50\n7 91\n'):
         recorded = []
-        read = _publish_read([7], recorded, listing=listing)
+        read = _publish_read(
+            [7], recorded, listing=listing,
+            runs=[{'workflow_runs': [_run(suite=50), _run(11, 74)]}])
         m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN)
         assert [(v, t) for v, t, _ in recorded] == [
             ('PATCH', 'repos/o/r/check-runs/7')], listing
@@ -507,7 +509,9 @@ def test_failed_republish_or_retirement_raises_without_more_writes(tmp):
     for fail, attempted in (('POST', ['POST']), ('PATCH', ['POST', 'PATCH'])):
         recorded = []
         read = _publish_read([7, 8], recorded, fail=fail, error=m.QueryError,
-                             runs=[{'workflow_runs': [_run(), _run(11, 51)]}])
+                             suites={7: 83, 8: 83},
+                             runs=[{'workflow_runs': [_run(suite=83),
+                                                      _run(11, 84)]}])
         try:
             m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
         except m.QueryError:
