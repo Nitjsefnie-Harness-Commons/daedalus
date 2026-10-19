@@ -1584,8 +1584,8 @@
     3020
   ],
   "tests/test_secret_scan.py": [
-    937,
-    6055
+    909,
+    6027
   ],
   "tests/test_segment_capability.py": [
     2072,

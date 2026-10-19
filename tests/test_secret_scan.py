@@ -107,8 +107,8 @@ def test_the_checkout_reads_full_history_without_credentials(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     checkout = steps[0]
-    # Which revision of checkout runs is the workflow's business; the
-    # credential posture is what this pins.
+    # The scan needs full history.
+    # Checkout must not persist credentials.
     assert checkout['with'].get('persist-credentials') == 'false', checkout
     assert checkout['with'].get('fetch-depth') == '0', checkout
 
