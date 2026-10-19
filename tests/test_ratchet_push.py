@@ -346,12 +346,15 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
 
 def test_push_secrets_bind_only_the_main_push_environment(tmp):
     del tmp
-    jobs = jobs_mapping((ROOT / '.github/workflows/tests.yml').read_text(
-        encoding='utf-8'))
-    assert jobs is not None
-    consumers = {name: job for name, job in jobs.items()
-                 if _uses_secrets_context(job)}
-    assert {'coverage', 'journey-budget'} <= consumers.keys()
+    consumers = {}
+    for workflow in ('tests.yml', 'comment-share.yml'):
+        jobs = jobs_mapping((ROOT / '.github/workflows' / workflow).read_text(
+            encoding='utf-8'))
+        assert jobs is not None, workflow
+        consumers.update(((workflow, name), job) for name, job in jobs.items()
+                         if _uses_secrets_context(job))
+    assert {('tests.yml', 'coverage'), ('tests.yml', 'journey-budget'),
+            ('comment-share.yml', 'comment-share')} <= consumers.keys()
     for name, job in consumers.items():
         expression = job.get('environment', '')
         for event, ref, expected in (

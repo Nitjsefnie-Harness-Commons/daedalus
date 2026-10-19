@@ -12,6 +12,10 @@ jobs:
   comment-share:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The branch policy refuses other refs; an empty name binds no
+    # environment, so pull requests can still run these checks.
+    environment: ${{ github.event_name == 'push'
+      && github.ref == 'refs/heads/main' && 'main-push' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

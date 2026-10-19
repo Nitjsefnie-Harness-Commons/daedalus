@@ -5,8 +5,8 @@ The example's contract is textual: every `__NAME__` is replaced throughout
 the file before `daedalus put` sends it. A sentinel spelled as the
 placeholder itself is rewritten by that same replacement, so a script
 handed a real sig would compare the sig with itself and mint anyway. These
-run the substituted text the way the bridge does, wrapped as an async
-function body, against a stubbed `window.GM`, and read which branch ran.
+run the substituted text directly in a VM against a stubbed `window.GM`,
+read the script's completion value, and record which branch ran.
 
 The `GM.xmlhttpRequest` stub answers the playlist read and leaves the segment
 read unresolved, so the run reads the status, learns nothing from it, and
@@ -171,9 +171,10 @@ def test_a_substituted_sig_is_used_as_given_and_never_minted(tmp):
 
 def test_concurrency_defaults_when_unsubstituted_and_reads_a_value(tmp):
     del tmp
-    assert _run(_substitute())['returned'].endswith('concurrency=3')
-    assert _run(_substitute(__CONC__='4'))['returned'].endswith(
-        'concurrency=4')
+    assert _run(_substitute())['returned'] == (
+        'relay started: job=relay_job-1 concurrency=3')
+    assert _run(_substitute(__CONC__='4'))['returned'] == (
+        'relay started: job=relay_job-1 concurrency=4')
 
 
 if __name__ == '__main__':
