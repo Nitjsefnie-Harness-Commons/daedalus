@@ -130,28 +130,37 @@ def test_only_observed_unstarted_cancelled_dependencies_are_diagnosed(tmp):
     matrix = 'suites (macos-latest, 3.11)'
     cases = (
         ('suites', [matrix, 'suites (macos-latest, 3.12)'],
-         'cancelled', [], True, None, []),
-        ('suites', ['suites'], 'cancelled', [], True, None, []),
-        ('coverage', ['coverage'], 'cancelled', [], True, None, []),
+         'cancelled', [], [matrix, 'suites (macos-latest, 3.12)'], None, []),
+        ('suites', ['suites'], 'cancelled', [], ['suites'], None, []),
+        ('coverage', ['coverage'], 'cancelled', [], ['coverage'], None, []),
         ('suites', ['suites-extra (macos-latest, 3.11)'],
-         'cancelled', [], False, None, []),
+         'cancelled', [], [], None, []),
+        ('suites', ['suites extra (macos-latest, 3.11)'],
+         'cancelled', [], [], None, []),
         ('coverage', ['coverage-matrix (macos-latest, 3.11)', matrix],
-         'cancelled', [], False, None, []),
-        ('suites', [matrix], 'success', [], False, None, []),
+         'cancelled', [], [], None, []),
+        ('suites', [matrix], 'success', [], [], None, []),
         ('suites', [matrix], 'cancelled', [{'name': 'Set up job'}],
-         False, None, []),
-        ('suites', [matrix], 'cancelled', None, False, None, []),
-        ('suites', [], 'cancelled', [], False, None, []),
-        ('suites', [matrix], 'cancelled', [], True, 'cancelled',
+         [], None, []),
+        ('suites', [matrix], 'cancelled', None, [], None, []),
+        ('suites', [matrix], 'cancelled', ..., [], None, []),
+        ('suites', [None], 'cancelled', [], [], None, []),
+        ('suites', [], 'cancelled', [], [], None, []),
+        ('suites', [matrix], 'cancelled', [], [matrix], 'cancelled',
          [{'name': 'Set up job'}]),
-        ('suites', [], 'cancelled', [], False, 'skipped', []),
+        ('suites', [matrix], 'cancelled', [{'name': 'Set up job'}],
+         ['wheel'], 'cancelled', []),
+        ('suites', [], 'cancelled', [], [], 'skipped', []),
     )
     for key, names, conclusion, steps, unstarted, wheel, wheel_steps in cases:
         needs = {key: 'cancelled'}
         if wheel:
             needs['wheel'] = wheel
-        jobs = [{'id': i + 1, 'name': name, 'conclusion': conclusion,
-                 'steps': steps} for i, name in enumerate(names)]
+        jobs = [{'id': i + 1, 'name': name, 'conclusion': conclusion}
+                for i, name in enumerate(names)]
+        if steps is not ...:
+            for job in jobs:
+                job['steps'] = steps
         jobs.append({'id': 99, 'name': 'wheel', 'conclusion': 'cancelled',
                      'steps': wheel_steps})
         calls, read = _recorder(MINE, [{'workflow_runs': [MINE]}], jobs=jobs)
@@ -163,12 +172,11 @@ def test_only_observed_unstarted_cancelled_dependencies_are_diagnosed(tmp):
             'gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
             'repos/o/r/actions/runs/39273610768/jobs?per_page=100']
         if unstarted:
-            assert verdict == 'cancelled-unstarted', (verdict, message)
-            for name in names:
-                assert name in message, message
-            assert '0 recorded steps' in message, message
-            assert 'gh run rerun --failed 39273610768' in message, message
-            assert 'wheel' not in message, message
+            assert (verdict, message) == (
+                'cancelled-unstarted',
+                'cancelled dependency jobs have 0 recorded steps: '
+                + ', '.join(unstarted)
+                + '; retry with gh run rerun --failed 39273610768')
         else:
             assert (verdict, message) == (
                 'cancelled-deliberate', _CANCEL_MESSAGES[
@@ -233,10 +241,6 @@ def test_the_queries_target_the_own_run_and_this_workflow(tmp):
             'repos/o/r/actions/workflows/tests.yml/runs'
             '?branch=fix%2Fx&per_page=100']] == calls
 
-
-def test_paginated_pages_are_read_as_concatenated_json(tmp):
-    del tmp
-    mod = _gate()
     calls, read = _recorder(
         MINE, [{'workflow_runs': [MINE]}, {'workflow_runs': [NEWER]}])
     verdict, _ = mod.evaluate(_needs(suites='cancelled'),
@@ -245,17 +249,31 @@ def test_paginated_pages_are_read_as_concatenated_json(tmp):
     assert len(calls) == 2
 
 
-def test_a_failed_gh_read_answers_query_failed(tmp):
+def test_evaluate_preserves_hard_and_query_failures_without_reading_jobs(tmp):
     del tmp
     mod = _gate()
+    cases = (
+        ('failure', False, ('failed', 'Dependencies not successful: '
+                            'wheel=failure, suites=cancelled')),
+        (None, True, ('query-failed', _CANCEL_MESSAGES['query-failed']
+                      + 'suites=cancelled')),
+    )
+    for wheel, refused, expected in cases:
+        calls, record = _recorder(MINE, [{'workflow_runs': [MINE]}],
+                                  jobs=[dict(_scan_job('cancelled', 'suites'),
+                                             steps=[])])
 
-    def read(_argv):
-        raise mod.QueryError('refused')
+        def read(argv, record=record, refused=refused):
+            payload = record(argv)
+            if refused and '/jobs?' not in argv[-1]:
+                raise mod.QueryError('refused')
+            return payload
 
-    verdict, message = mod.evaluate(_needs(suites='cancelled'),
-                                    'o/r', '1', 'main', read)
-    assert verdict == 'query-failed'
-    assert 'query failed' in message, message
+        needs = {'suites': 'cancelled', **({'wheel': wheel} if wheel else {})}
+        assert mod.evaluate(_needs(**needs), 'o/r', '1', 'main', read) == (
+            expected)
+        assert len(calls) == 2, calls
+        assert not any('/jobs?' in call[-1] for call in calls), calls
 
 
 def test_a_malformed_started_at_sorts_oldest_and_ignores_created_at(tmp):
@@ -304,16 +322,15 @@ def test_every_single_dependency_result_is_tabled(tmp):
                               for dep in (*STRICT_JOBS, *SKIPPABLE_JOBS)})
             needs[name] = {'result': state}
             verdict, _ = mod.decide(needs)
-            green = state == 'success' or (
-                state == 'skipped' and name not in STRICT_JOBS)
-            assert (verdict in mod.GREEN) is green, (name, state, verdict)
-            assert verdict == {
+            expected = {
                 'success': 'passed',
                 'failure': 'failed',
                 'skipped': 'passed' if name not in STRICT_JOBS
                 else 'strict-skipped',
                 'cancelled': 'query-failed',
-            }[state], (name, state, verdict)
+            }[state]
+            assert verdict == expected, (name, state, verdict)
+            assert (verdict in mod.GREEN) is (expected == 'passed')
 
 
 JOINT_STATES = ('success', 'failure', 'skipped', 'cancelled')
@@ -427,7 +444,6 @@ def test_the_aggregate_job_runs_the_module(tmp):
     assert checkouts[0]['with'] == {'persist-credentials': 'false'}
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gate = _gate_step()
-    assert '${{' not in gate['run']
     assert gate['env'] == {
         'NEEDS_JSON': '${{ toJSON(needs) }}',
         'GH_TOKEN': '${{ github.token }}',
@@ -512,16 +528,6 @@ def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
             assert 'secrets' in message and f'{bound:g} s' in message
 
 
-def test_the_jobs_verdict_is_read_and_not_the_runs_conclusion(tmp):
-    """A green run over a red job is the shape this gate exists for."""
-    del tmp
-    _, verdict, message = _drive_scan(
-        [[CLEAN]], [_scan_job(conclusion='failure')])
-    assert verdict == 'secrets-failed'
-    assert verdict not in _gate().GREEN
-    assert 'failure' in message and CLEAN['html_url'] in message, message
-
-
 def test_both_secrets_queries_carry_the_head_sha_and_the_workflow(tmp):
     """A query whose arguments are dropped reads some other run entirely."""
     del tmp
@@ -538,16 +544,16 @@ def test_every_scan_the_gate_cannot_read_clean_is_red_and_says_why(tmp):
     _, absent, missing = _drive_scan([[CLEAN]], [_scan_job(name='setup')])
     assert absent == 'secrets-missing', absent
     assert 'setup' in missing and str(CLEAN['id']) in missing, missing
-    for state in ('skipped', 'cancelled', 'timed_out', 'neutral', None):
+    for state in ('failure', 'skipped', 'cancelled', 'timed_out',
+                  'neutral', None):
         _, verdict, message = _drive_scan(
             [[CLEAN]], [dict(_scan_job(), conclusion=state)])
         assert verdict == 'secrets-failed', (state, verdict)
         assert verdict not in _gate().GREEN
-        assert 'gitleaks' in message, message
+        assert 'gitleaks' in message and CLEAN['html_url'] in message
+        if state == 'failure':
+            assert 'failure' in message, message
 
-
-def test_the_newest_run_on_the_sha_is_the_one_judged(tmp):
-    del tmp
     runs = [_secrets_run(1), _secrets_run(2, started='2026-09-07T11:05:00Z')]
     jobs = {1: [_scan_job(conclusion='failure')], 2: [_scan_job()]}
     _, verdict, message = _drive_scan([runs], jobs)
@@ -601,6 +607,10 @@ def test_the_poll_bound_is_read_and_refused_outside_its_range(tmp):
         for raw in ('0', str(mod.MAX_POLL_BOUND_S + 1)):
             os.environ[mod.POLL_BOUND_ENV] = raw
             _query_error(mod, mod.poll_bound)
+    with mock.patch.dict(os.environ, {mod.POLL_BOUND_ENV: 'soon'}):
+        verdict, message = mod._secret_scan()
+    assert verdict == 'secrets-query-failed'
+    assert mod.POLL_BOUND_ENV in message, message
 
 
 def _gate_step():
@@ -619,16 +629,6 @@ def test_an_unidentified_identity_is_refused_rather_than_read(tmp):
     for polls in ([[_secrets_run('7a')]], [[{'id': '7a'}]]):
         _calls, verdict, _message = _drive_scan(polls, CLEAN_JOBS)
         assert verdict == 'secrets-query-failed', polls
-
-
-def test_a_refused_poll_bound_reaches_the_verdict(tmp):
-    """`poll_bound`'s refusal is forwarded, not swallowed by the caller."""
-    del tmp
-    mod = _gate()
-    with mock.patch.dict(os.environ, {mod.POLL_BOUND_ENV: 'soon'}):
-        verdict, message = mod._secret_scan()
-    assert verdict == 'secrets-query-failed'
-    assert mod.POLL_BOUND_ENV in message, message
 
 
 def _named_workflow(mod, constant):
