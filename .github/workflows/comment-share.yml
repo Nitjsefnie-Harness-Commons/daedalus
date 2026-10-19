@@ -1,0 +1,50 @@
+name: comment share
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: comment-share-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  comment-share:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Nitjsefnie-Actions/comment-ratchet@721426819be9e05deb76d56364f671b87fa05fbf # v1.0.0
+        with:
+          target: '15'
+          records: '.github/comment-share.json'
+          mode: 'auto'
+          base-ref: ${{ github.event.pull_request.base.sha }}
+      - name: Guard the measured records
+        id: records
+        if: github.event_name == 'push'
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          if git diff --quiet -- .github/comment-share.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then
+              exit "$status"
+            fi
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit the tighten
+        if: success() && steps.records.outputs.changed == 'true'
+        env:
+          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/ci/ratchet_push.py .github/comment-share.json \
+            'ci: tighten the comment-share records'

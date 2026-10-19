@@ -38,6 +38,7 @@ from _wfpins import (  # noqa: E402
     assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate,
     assert_the_pip_install_reader_refuses_what_it_cannot_model,
     assert_the_zizmor_manifest_is_hash_pinned)
+from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
                       _job_names, _job_section, _tests_yml)
@@ -676,15 +677,73 @@ def test_every_run_step_names_only_tracked_paths(tmp):
     assert not unresolved, '\n'.join(unresolved)
 
 
-def test_threshold_push_comment_matches_current_trigger_policy(_tmp):
-    workflow = _tests_yml()
-    items = workflow_step_items(workflow, 'coverage') or ()
-    step = next(item for item in items if item.name == 'Commit the raise')
-    comment = workflow[step.start:step.end]
-    assert 'does not re-run tests or CodeQL' in comment
-    assert 'audit.yml remains unfiltered' in comment
-    assert 'DOES start the workflows again' not in comment
-    assert 'remeasures' not in comment
+def _comment_share_steps():
+    path = ROOT / '.github' / 'workflows' / 'comment-share.yml'
+    assert path.is_file(), 'comment-share workflow is missing'
+    return complete_job_mapping(path.read_text(encoding='utf-8'),
+                                'comment-share')['steps']
+
+
+def test_comment_share_inputs_are_exact_scalars(tmp):
+    """Input swaps and narrowed base expressions must not pass as substrings."""
+    del tmp
+    action = next(step for step in _comment_share_steps()
+                  if 'comment-ratchet@' in step.get('uses', ''))
+    assert action['with'] == {
+        'target': '15', 'records': '.github/comment-share.json',
+        'mode': 'auto', 'base-ref': '${{ github.event.pull_request.base.sha }}'}
+
+
+def test_comment_share_push_runs_only_for_a_changed_measured_head(tmp):
+    """No-op commits, diff errors and an unmeasured HEAD must not push."""
+    steps = [step for step in _comment_share_steps() if 'run' in step]
+    for event, diff, head, failed, pushed in (
+            ('push', 0, 'measured', False, False),
+            ('push', 1, 'measured', False, True),
+            ('push', 2, 'measured', True, False),
+            ('push', 1, 'different', True, False),
+            ('pull_request', 1, 'measured', False, False)):
+        calls, output = Path(tmp) / 'calls', Path(tmp) / 'output'
+        calls.write_text('', encoding='utf-8')
+        context = {'github': {'event_name': event, 'sha': 'measured',
+                             'repository': 'owner/repo'}, 'steps': {},
+                   'secrets': {'MASTER_PUSH_DEPLOY_KEY': 'deploy-key'},
+                   'status': {'success': True, 'failure': False,
+                              'cancelled': False}}
+        for step in steps:
+            if 'id' in step:
+                context['steps'][step['id']] = {'outputs': {}}
+            if not evaluate_if(step.get('if', 'success()'), context):
+                continue
+            output.write_text('', encoding='utf-8')
+            env = {key: str(evaluate(value, context))
+                   for key, value in step.get('env', {}).items()}
+            stub = (
+                'git() { case "$*" in "rev-parse HEAD") echo "$ACTUAL_HEAD";; '
+                '"diff --quiet -- .github/comment-share.json") '
+                'return "$DIFF_CODE";; *) return 99;; esac; }\n'
+                'python3() { printf "%s\\n" python3 "$@" '
+                '"$MASTER_PUSH_DEPLOY_KEY" "$REPO" >> "$CALLS"; }\n')
+            done = subprocess.run(
+                [_util.workflow_bash(), '-e', '-c', stub + step['run']],
+                cwd=tmp, capture_output=True, text=True, timeout=30,
+                env=_util.child_coverage('scrub', {
+                    **os.environ, **env, 'GITHUB_SHA': 'measured',
+                    'ACTUAL_HEAD': head, 'DIFF_CODE': str(diff),
+                    'CALLS': str(calls), 'GITHUB_OUTPUT': str(output)}))
+            context['status']['success'] = done.returncode == 0
+            context['status']['failure'] = done.returncode != 0
+            if 'id' in step:
+                context['steps'][step['id']] = {'outputs': dict(
+                    row.split('=', 1) for row in output.read_text(
+                        encoding='utf-8').splitlines())}
+        assert context['status']['failure'] is failed, (event, diff, head)
+        expected = ['python3', 'scripts/ci/ratchet_push.py',
+                    '.github/comment-share.json',
+                    'ci: tighten the comment-share records',
+                    'deploy-key', 'owner/repo'] if pushed else []
+        assert calls.read_text(encoding='utf-8').splitlines() == expected, (
+            event, diff, head, done.stdout, done.stderr)
 
 
 def main():
