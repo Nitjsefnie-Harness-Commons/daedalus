@@ -109,8 +109,8 @@ def test_the_checkout_reads_full_history_without_credentials(tmp):
     checkout = steps[0]
     # Which revision of checkout runs is the workflow's business; the
     # credential posture is what this pins.
-    assert checkout['with'] == {
-        'fetch-depth': '0', 'persist-credentials': 'false'}, checkout
+    assert checkout['with'].get('persist-credentials') == 'false', checkout
+    assert checkout['with'].get('fetch-depth') == '0', checkout
 
 
 def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):

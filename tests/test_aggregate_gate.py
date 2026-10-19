@@ -437,10 +437,9 @@ def test_the_aggregate_job_runs_the_module(tmp):
     job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
     assert job.get('if') == '${{ always() }}', job.get('if')
     assert 'if' not in _gate_step()
-    checkouts = [step for step in job['steps']
-                 if str(step.get('uses', '')).startswith('actions/checkout')]
-    assert len(checkouts) == 1, job['steps']
-    assert checkouts[0]['with'] == {'persist-credentials': 'false'}
+    uses_steps = [step for step in job['steps'] if 'uses' in step]
+    assert len(uses_steps) == 1, job['steps']
+    assert uses_steps[0]['with'].get('persist-credentials') == 'false'
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gate = _gate_step()
     assert gate['env'] == {

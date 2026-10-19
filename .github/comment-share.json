@@ -1019,6 +1019,10 @@
     2070,
     13352
   ],
+  "tests/test_aggregate_gate.py": [
+    1159,
+    19840
+  ],
   "tests/test_aggregate_needs.py": [
     2245,
     9314
@@ -1581,7 +1585,7 @@
   ],
   "tests/test_secret_scan.py": [
     937,
-    6080
+    6055
   ],
   "tests/test_segment_capability.py": [
     2072,
