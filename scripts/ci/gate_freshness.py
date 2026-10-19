@@ -29,15 +29,9 @@ the tree is what a branch carries, so a branch runs the tests it brings.
 
   .github/ci-thresholds.json  and
   .github/journey-budget.json  the recorded counts two gates compare against.
-                               Not configurations: each is COMPUTED BY a gate
-                               and committed to main by it, and a ratchet move
-                               LOWERS one. A head predating such a commit was
-                               checked against the OLD, higher numbers, so its
-                               code can cost more within them and merge green,
-                               turning main's post-merge gate red. So there is
-                               no carried-by-the-branch exclusion, and the
-                               premise behind one was false of both. Every open
-                               head is RED until it rebases and is re-measured.
+                               Gate-computed counts: a ratchet tightens them.
+                               A head predating that commit used the old limits
+                               and must rebase to be checked against the new.
 
 The set is derived only as far as a workflow NAMES a file: the suite reads
 every `.github/workflows/*.yml` and requires every tracked file a workflow
@@ -66,12 +60,22 @@ reported and skipped WITHOUT failing the run: its new head gets its own
 verdict from its own `pull_request_target` event. A revalidation that could
 not be READ is a failure, not a skip. All print a loud line to stderr.
 
-THE BOUND. Per open pull request the worst case is, for each of G gate
-commits, one compare, plus one head revalidation, one check-runs listing, a
-second head revalidation, and one write: G + PER_HEAD_OVERHEAD. The run refuses
-LOUDLY -- publishing nothing, exiting nonzero -- if the worst case exceeds the
-call budget, rather than truncating the head set, which is the silent-pass
-shape. The budget is a CALL count; the timeout is sized against it at
+STRANDED CHECKS. A check is stranded when its suite's workflow run has a
+newer run of the same workflow path on the head. PATCH cannot move a check to
+another suite, so a stranded member causes one new check to be POSTed before
+all old matching checks receive a name-only retirement PATCH. A failed POST
+leaves them untouched. Missing owners and unreadable or ambiguous run data
+keep today's verdict PATCH behavior.
+
+THE BOUND. For one existing check per open pull request, the worst case is,
+for each of G gate commits, one compare, plus two head revalidations, one
+check-runs listing, and one verdict write, plus one paginated workflow-runs
+read and one POST when stranded: G + PER_HEAD_OVERHEAD (G + 6). The retirement
+PATCH replaces the verdict PATCH; each additional existing id costs another
+PATCH. The run refuses LOUDLY -- publishing nothing, exiting nonzero -- if
+this per-head estimate exceeds the call budget, rather than truncating the
+head set, which is the silent-pass shape. The budget counts logical calls
+(pagination is one read); the timeout is sized against it at
 ASSUMED_SECONDS_PER_CALL (below), and a test pins that relation.
 """
 import json
@@ -81,13 +85,11 @@ import sys
 from urllib.parse import quote
 
 NAME = 'gate freshness'
+NAME_RETIRED = 'superseded gate freshness'
 EXTERNAL_ID = 'daedalus-gate-freshness/v1'
 APP_SLUG = 'github-actions'
 BASE_BRANCH = 'main'
 
-# THE SET. Order is readability only; every entry is checked against every
-# head, and every entry must keep one commit on main permanently: a pattern
-# that resolves to none is a global refusal, publishing nothing at all.
 GATE_PATTERNS = (
     '.github/workflows/**',
     '.github/ci-thresholds.json',
@@ -109,14 +111,11 @@ GATE_PATTERNS = (
 
 _HEX40 = frozenset('0123456789abcdef')
 
-# Per-head worst case that is not a compare: 2 revalidations, 1 listing, 1
-# write. Each gate commit adds one compare.
-PER_HEAD_OVERHEAD = 4
+# Two revalidations, two listings, one POST and one PATCH for one old check.
+PER_HEAD_OVERHEAD = 6
 
 DEFAULT_CALL_BUDGET = 1200
 
-# The per-call rate the timeout is sized against (see THE BOUND). Measured
-# live at ~1.2 s/call; 1.5 s is the conservative figure the timeout clears.
 ASSUMED_SECONDS_PER_CALL = 1.5
 
 
@@ -141,9 +140,7 @@ def _hex40(value):
 
 
 def matches(pattern, path):
-    """Whether `pattern` selects `path`: a `/**` directory prefix or an exact
-    path. A path is repository-relative POSIX, so it carries no `..`.
-    """
+    """Match a directory-prefix pattern or exact repository-relative path."""
     if pattern.endswith('/**'):
         return path.startswith(pattern[:-2])
     if any(char in pattern for char in '*?['):
@@ -157,7 +154,6 @@ def is_gate_defining(path):
 
 
 def _one(read, argv):
-    """One JSON object/array through the read seam, parsed."""
     try:
         return json.loads(read(argv))
     except ValueError as error:
@@ -165,37 +161,23 @@ def _one(read, argv):
 
 
 def _api(url, *extra):
-    """The one `gh api` call shape. Every read routes through here so the
-    `Cache-Control: no-cache` convention has a single site to hold."""
+    """Build a gh request with the shared no-cache header."""
     return ['gh', 'api', '-H', 'Cache-Control: no-cache', url, *extra]
 
 
 def _request_path(pattern):
-    """The path the commits endpoint understands for `pattern`. GitHub's
-    `commits?path=` is a DIRECTORY-PREFIX filter and does NOT expand a `**`
-    glob: sending `.github/workflows/**` answers `[]` even though the directory
-    has commits. The endpoint is sent the BARE directory; `pattern` keeps its
-    `/**` spelling for the internal matcher, and the two cannot disagree
-    because this is the single translation between them.
-    """
+    """Use a directory prefix: the commits endpoint does not expand globs."""
     if pattern.endswith('/**'):
         return pattern[:-3]
     return pattern
 
 
 def _gate_error(pattern, cause):
-    """The GLOBAL failure an unreadable or empty gate lookup raises."""
     return QueryError(f'the gate commit lookup for {pattern!r} {cause}')
 
 
 def enumerate_gates(read, repository):
-    """The newest commit on `main` touching each gate path, as (path, sha).
-
-    One request per path, built from `_request_path`. Every failure mode is a
-    GLOBAL failure that NAMES the pattern and is raised, never a silent skip:
-    unreadable, not a list, no readable sha, OR empty; treating an empty
-    answer as "no commits" would drop a gate and turn every head green -- the
-    exact defect this module prevents."""
+    """The newest commit on `main` touching each gate path, as (path, sha)."""
     gates = []
     for pattern in GATE_PATTERNS:
         request = _request_path(pattern)
@@ -220,13 +202,7 @@ def enumerate_gates(read, repository):
 
 
 def merge_base(read, repository, gate, head):
-    """The merge base of `gate` and `head`, or None if it cannot be read.
-
-    One `compare/<gate>...<head_sha>` request; that spelling resolves a fork
-    head (measured against PR 709), so there is no second spelling. Returns
-    (merge_base, attempts); a merge base that is not 40 lowercase hex is a
-    shape failure, distinct from the verdict.
-    """
+    """The merge base of `gate` and `head`, or None if it cannot be read."""
     target = f'repos/{repository}/compare/{gate}...{head["sha"]}'
     try:
         payload = _one(read, _api(target))
@@ -279,8 +255,7 @@ def head_verdict(read, repository, head, gates):
 
 
 def current_head(read, repository, number):
-    """The pull request's current head sha, or None when the read carries no
-    40-hex sha. Raises QueryError when the read fails."""
+    """Read a 40-hex current head sha; raise QueryError on read failure."""
     payload = _one(read, _api(f'repos/{repository}/pulls/{number}'))
     head = payload.get('head') if isinstance(payload, dict) else None
     sha = head.get('sha') if isinstance(head, dict) else None
@@ -288,31 +263,64 @@ def current_head(read, repository, number):
 
 
 def _existing_check_ids(read, repository, head_sha):
-    """The ids of this check already on `head_sha`, filtered server-side."""
+    """The (check id, suite id) pairs on `head_sha`, filtered server-side."""
     listing = _api(
         f'repos/{repository}/commits/{head_sha}/check-runs'
         '?filter=all&per_page=100', '--method', 'GET', '--paginate',
         '--jq', (f'.check_runs[] | select(.name == "{NAME}" and '
                  f'.external_id == "{EXTERNAL_ID}" and '
-                 f'.app.slug == "{APP_SLUG}") | .id'))
+                 f'.app.slug == "{APP_SLUG}") | '
+                 '"\\(.id) \\(.check_suite.id)"'))
     try:
         raw = read(listing)
     except QueryError:
         return None
     ids = []
     for line in raw.splitlines():
-        line = line.strip()
-        if line and line.isdigit():
-            ids.append(line)
+        parts = line.split()
+        if parts and parts[0].isdigit():
+            suite = (int(parts[1]) if len(parts) == 2 and parts[1].isdigit()
+                     else None)
+            ids.append((parts[0], suite))
     return ids
+
+
+def _stranded(read, repository, head_sha, checks):
+    try:
+        pages = _one(read, _api(
+            f'repos/{repository}/actions/runs?head_sha={head_sha}'
+            '&per_page=100',
+            '--paginate', '--slurp'))
+    except QueryError:
+        return False
+    if not isinstance(pages, list):
+        return False
+    runs = []
+    for page in pages:
+        if not isinstance(page, dict) or not isinstance(
+                page.get('workflow_runs'), list):
+            return False
+        runs.extend(page['workflow_runs'])
+    if any(not isinstance(run, dict)
+           or not isinstance(run.get('id'), int)
+           or not isinstance(run.get('check_suite_id'), int)
+           or isinstance(run['id'], bool) or isinstance(
+               run['check_suite_id'], bool)
+           or not isinstance(run.get('path'), str) or not run['path']
+           for run in runs):
+        return False
+    owners = [[run for run in runs if run['check_suite_id'] == suite]
+              for _, suite in checks]
+    if any(len(owner) > 1 for owner in owners):
+        return False
+    return any(owner and any(run['path'] == owner[0]['path']
+                             and run['id'] > owner[0]['id'] for run in runs)
+               for owner in owners)
 
 
 def publish(read, repository, head_sha, conclusion, title, summary,
             details_url):
-    """Write the verdict, PATCHing an existing check or POSTing a new one. A
-    failure overwrites a previously published success on the same head: a stale
-    green left in place is the exact hole this issue is about.
-    """
+    """Write a verdict, republishing stranded checks before retiring them."""
     ids = _existing_check_ids(read, repository, head_sha)
     if ids is None:
         raise QueryError('could not read the existing check runs')
@@ -325,13 +333,14 @@ def publish(read, repository, head_sha, conclusion, title, summary,
         '-f', f'output[title]={title}',
         '-f', f'output[summary]={summary}',
     ]
-    if ids:
-        for check_id in ids:
-            read(_api(f'repos/{repository}/check-runs/{check_id}',
-                      '-X', 'PATCH', *fields))
-    else:
+    stranded = bool(ids) and _stranded(read, repository, head_sha, ids)
+    if not ids or stranded:
         read(_api(f'repos/{repository}/check-runs', '-X', 'POST',
                   '-f', f'head_sha={head_sha}', *fields))
+    for check_id, _ in ids:
+        update = ['-f', f'name={NAME_RETIRED}'] if stranded else fields
+        read(_api(f'repos/{repository}/check-runs/{check_id}',
+                  '-X', 'PATCH', *update))
 
 
 def _pr_head(pr):
@@ -344,7 +353,6 @@ def _pr_head(pr):
 
 
 def select_heads(pulls):
-    """Keep only open pull requests based on `main` (the ruleset's branch)."""
     heads = []
     for pr in pulls:
         head = _pr_head(pr)
@@ -354,18 +362,12 @@ def select_heads(pulls):
 
 
 def required_calls(head_count, gate_count):
-    """Worst-case `gh api` calls: enumeration plus per-head work."""
     return len(GATE_PATTERNS) + head_count * (PER_HEAD_OVERHEAD + gate_count)
 
 
 def process(read, repository, heads, gates, details_url, call_budget=None,
             dry_run=False):
-    """Publish a verdict for each head. Returns (exit_code, published), the
-    exit code nonzero iff a write or a revalidation FAILED, not for a moved
-    head. A head whose write fails is skipped loudly and the run continues:
-    one transient failure must not abandon the later heads, which include
-    stale ones waiting for a red. `dry_run` computes and reports but publishes
-    nothing."""
+    """Return (exit_code, published); failed heads do not abandon siblings."""
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
     needed = required_calls(len(heads), len(gates))
     if needed > budget:
@@ -376,7 +378,6 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
     published = []
     failed = 0
     for head in heads:
-        # Only the two revalidations and the write raise.
         phase = 'read the head of'
         try:
             if current_head(read, repository, head['number']) != head['sha']:

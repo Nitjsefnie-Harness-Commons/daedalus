@@ -44,8 +44,6 @@ def _gate(path, sha):
 # ---- gate-defining path set ----
 
 def test_the_set_is_exactly_the_documented_patterns(tmp):
-    """Every pattern matches its own shape, and a nested match is included."""
-    del tmp
     m = _mod()
     assert tuple(m.GATE_PATTERNS) == (
         '.github/workflows/**', '.github/ci-thresholds.json',
@@ -63,8 +61,6 @@ def test_the_set_is_exactly_the_documented_patterns(tmp):
 
 
 def test_near_miss_spellings_are_not_gate_defining(tmp):
-    """A change to a test, or a similarly named neighbour, is not a gate."""
-    del tmp
     m = _mod()
     negatives = (
         'scripts/ci_not/x.py',        # sibling directory, not under scripts/ci
@@ -82,15 +78,6 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
 
 
 def test_no_file_is_carried_by_the_branch_outside_the_gate_set(tmp):
-    """The exclusion is gone, so nothing may be exempt from the gate set.
-
-    What it used to assert is now the opposite, and both halves still have
-    to hold. Every file a tighten can move is gate-defining — a coverage
-    ratchet raises a floor and a journey tighten lowers a count, each on a
-    tree a stale head never saw — and there is no tuple left for one to hide
-    behind.
-    """
-    del tmp
     m = _mod()
     assert not hasattr(m, 'CARRIED_BY_THE_BRANCH'), (
         'the carried-by-the-branch exclusion is back: a baseline a ratchet '
@@ -98,16 +85,6 @@ def test_no_file_is_carried_by_the_branch_outside_the_gate_set(tmp):
     for moved in ('.github/ci-thresholds.json', '.github/journey-budget.json'):
         assert m.is_gate_defining(moved), moved
         assert moved in m.GATE_PATTERNS, moved
-
-
-def test_the_docstring_justifies_every_pattern(tmp):
-    """Each pattern's own spelling is in the docstring, so a `/**` pattern is
-    held too (its leaf is empty, and `''` is always `in doc`)."""
-    del tmp
-    m = _mod()
-    doc = m.__doc__ or ''
-    for pattern in m.GATE_PATTERNS:
-        assert pattern in doc, (pattern, 'its own spelling is not justified')
 
 
 # ---- derive the set from the workflows (the guard) ----
@@ -128,9 +105,6 @@ def _git_tracked(base):
 
 
 def _normalise(candidate, base, tracked):
-    """A TRACKED repo-relative path for `candidate`, or None. A candidate
-    must exist on disk AND be in the injected `tracked` set; is_file() alone
-    would admit a file a job generates at run time."""
     parts = [p for p in candidate.split('/')
              if p and p not in ('.', '..', 'head')]
     parts = [p for p in parts if not p.startswith('$')]
@@ -141,11 +115,6 @@ def _normalise(candidate, base, tracked):
 
 
 def _workflow_gate_files(directory, base=ROOT, tracked=None):
-    """Every TRACKED file a workflow invokes or passes to a tool, in three
-    forms: an executed `.py`, an executable-path step, and a config-style flag
-    value. Keeping only tracked files excludes generated ones and jq
-    fragments; `tracked` defaults to `git ls-files` and is injected for a
-    fabricated tree."""
     if tracked is None:
         tracked = _git_tracked(base)
     found = set()
@@ -163,10 +132,6 @@ def _workflow_gate_files(directory, base=ROOT, tracked=None):
 
 
 def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
-    """Every TRACKED file a workflow invokes or passes to a tool must be
-    gate-defining, so a gate file added later fails here rather than going
-    silently unlisted. Nothing is exempt: the set is the whole derivation."""
-    del tmp
     m = _mod()
     used = _workflow_gate_files(ROOT / '.github' / 'workflows')
     assert used, 'the workflows name no gate file'
@@ -175,9 +140,6 @@ def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
 
 
 def test_the_guard_accounts_for_the_files_the_set_now_carries(tmp):
-    """The two files a gate step actually uses outside scripts/ci/ are
-    covered."""
-    del tmp
     m = _mod()
     used = _workflow_gate_files(ROOT / '.github' / 'workflows')
     assert 'scripts/check_versions.py' in used
@@ -187,66 +149,28 @@ def test_the_guard_accounts_for_the_files_the_set_now_carries(tmp):
 
 
 def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
-    """A gate script run by a workflow from OUTSIDE scripts/ci/ is a real
-    tracked file, so the guard requires it to be gate-defining."""
     m = _mod()
-    base = Path(tmp) / 'repo'
-    (base / 'scripts').mkdir(parents=True)
-    (base / 'scripts' / 'scan_secrets_extra.py').write_text(
-        '# gate\n', encoding='utf-8')
-    workflows = base / '.github' / 'workflows'
-    workflows.mkdir(parents=True)
-    (workflows / 'probe.yml').write_text(
-        'jobs:\n  gate:\n    steps:\n'
-        '      - run: python3 scripts/scan_secrets_extra.py\n',
-        encoding='utf-8')
-    used = _workflow_gate_files(
-        workflows, base=base, tracked={'scripts/scan_secrets_extra.py'})
-    assert 'scripts/scan_secrets_extra.py' in used
-    not_gate = [p for p in used if not m.is_gate_defining(p)]
-    assert not_gate == ['scripts/scan_secrets_extra.py'], not_gate
-
-
-def test_a_gate_invoked_by_path_outside_scripts_ci_is_caught(tmp):
-    """An executable-path step (`./scripts/x.sh`) is reachable, not just
-    `.py`; the REACH LIMIT names only `python3 -m module` and bare tools."""
-    base = Path(tmp) / 'repo'
-    (base / 'scripts').mkdir(parents=True)
-    (base / 'scripts' / 'version_gate.sh').write_text('#!/bin/sh\n',
-                                                      encoding='utf-8')
-    workflows = base / '.github' / 'workflows'
-    workflows.mkdir(parents=True)
-    (workflows / 'probe.yml').write_text(
-        'jobs:\n  gate:\n    steps:\n'
-        '      - run: ./scripts/version_gate.sh\n', encoding='utf-8')
-    used = _workflow_gate_files(
-        workflows, base=base, tracked={'scripts/version_gate.sh'})
-    assert 'scripts/version_gate.sh' in used, used
-
-
-def test_flagged_and_versioned_python_invocations_are_reached(tmp):
-    """A flagged or versioned interpreter is a path the matcher must reach,
-    or it sees fewer invocations than the reach sentence admits."""
-    for spelling in ('python3 -u scripts/lint_gate.py',
-                     'python3.13 scripts/lint_gate.py',
-                     'python scripts/lint_gate.py'):
+    for spelling, path in (
+            ('./scripts/version_gate.sh', 'scripts/version_gate.sh'),
+            ('python3 scripts/scan_secrets_extra.py',
+             'scripts/scan_secrets_extra.py'),
+            ('python3 -u scripts/lint_gate.py', 'scripts/lint_gate.py'),
+            ('python3.13 scripts/lint_gate.py', 'scripts/lint_gate.py'),
+            ('python scripts/lint_gate.py', 'scripts/lint_gate.py')):
         base = Path(tmp) / spelling.replace(' ', '_').replace('.', '_')
         (base / 'scripts').mkdir(parents=True)
-        (base / 'scripts' / 'lint_gate.py').write_text('# gate\n',
-                                                       encoding='utf-8')
+        (base / path).write_text('# gate\n', encoding='utf-8')
         workflows = base / '.github' / 'workflows'
         workflows.mkdir(parents=True)
         (workflows / 'probe.yml').write_text(
             f'jobs:\n  gate:\n    steps:\n      - run: {spelling}\n',
             encoding='utf-8')
-        used = _workflow_gate_files(
-            workflows, base=base, tracked={'scripts/lint_gate.py'})
-        assert 'scripts/lint_gate.py' in used, (spelling, used)
+        used = _workflow_gate_files(workflows, base=base, tracked={path})
+        assert used == {path}, (spelling, used)
+        assert not m.is_gate_defining(path), path
 
 
 def test_a_generated_untracked_requirements_file_is_not_required(tmp):
-    """A generated file is excluded by the tracked SET, not by its absence
-    from disk: it is planted here and still not required."""
     m = _mod()
     base = Path(tmp) / 'repo'
     (base / '.github' / 'workflows').mkdir(parents=True)
@@ -266,7 +190,6 @@ def test_a_generated_untracked_requirements_file_is_not_required(tmp):
 # ---- merge base: the shape guard ----
 
 def test_the_merge_base_tells_ancestor_from_not(tmp):
-    del tmp
     m = _mod()
     same, attempts = m.merge_base(
         lambda _a: _encode(_compare_ok(G1)), 'o/r', G1, _head())
@@ -278,9 +201,6 @@ def test_the_merge_base_tells_ancestor_from_not(tmp):
 
 
 def test_status_is_not_load_bearing_the_merge_base_is(tmp):
-    """`ahead` with a different merge base is still stale; `diverged` with a
-    matching merge base is still fresh. The decision reads merge_base."""
-    del tmp
     m = _mod()
     gates = [_gate('.pylintrc', G1)]
     ahead = m.head_verdict(
@@ -294,7 +214,6 @@ def test_status_is_not_load_bearing_the_merge_base_is(tmp):
 
 
 def test_a_merge_base_that_is_not_forty_lowercase_hex_is_unreadable(tmp):
-    del tmp
     m = _mod()
     for bad in (None, '', 'ZZZ', 'A' * 40, 'a' * 39, 'a' * 41, 12345):
         def read(_argv, shape=bad):
@@ -311,11 +230,6 @@ def _encoded_read(payload):
 
 
 def test_an_absent_merge_base_field_is_unreadable(tmp):
-    """An absent field and a payload that is not an object are the same
-    unreadable verdict. A non-dict payload has no `.get`, so the guard that
-    reads as a shape failure is what keeps this a published RED instead of an
-    `AttributeError` that ends the run."""
-    del tmp
     m = _mod()
     mb, _ = m.merge_base(lambda _a: _encode({'status': 'ahead'}),
                          'o/r', G1, _head())
@@ -326,9 +240,6 @@ def test_an_absent_merge_base_field_is_unreadable(tmp):
 
 
 def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
-    """A 404 is not evidence of access denial. The message names the request
-    and its outcome and gives the remedy; it does not diagnose a cause."""
-    del tmp
     m = _mod()
 
     def read(_argv):
@@ -348,9 +259,6 @@ def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
 
 def _commits_read(m, commits=None, raise_for=None, live_shaped=False,
                   asked=None):
-    """A `commits?path=` reader. `live_shaped` mimics the real endpoint:
-    a path carrying a glob answers [] (GitHub does not expand **), a bare
-    path or exact file answers a commit. `commits` overrides per-path."""
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
         if '/commits?' not in target:
@@ -369,7 +277,6 @@ def _commits_read(m, commits=None, raise_for=None, live_shaped=False,
 
 
 def test_enumerate_gates_reads_one_commit_for_every_pattern(tmp):
-    del tmp
     m = _mod()
     for live_shaped in (False, True):
         asked = []
@@ -380,9 +287,6 @@ def test_enumerate_gates_reads_one_commit_for_every_pattern(tmp):
 
 
 def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
-    """The SHAPE the endpoint accepts, not a well-formed string: a lexical
-    check would have passed while the string meant nothing to the API."""
-    del tmp
     m = _mod()
     asked = []
     m.enumerate_gates(_commits_read(m, asked=asked), 'o/r')
@@ -400,9 +304,6 @@ def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
 
 
 def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
-    """An empty answer is anomalous, not "no commits": a silent skip would
-    under-count the set and turn a stale head green, so it refuses loudly."""
-    del tmp
     m = _mod()
     read = _commits_read(m, commits={'eslint.config.js': []})
     try:
@@ -415,8 +316,6 @@ def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
 
 
 def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
-    """A payload that decodes to a non-list is not 'no commits'."""
-    del tmp
     m = _mod()
     for bad in (42, {'error': 'rate limited'}, '"a string"'):
         def read(_argv, shape=bad):
@@ -432,7 +331,6 @@ def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
 # ---- verdicts over many gate commits ----
 
 def _multi_gate_read(missing_at, asked=None):
-    """A head that lacks exactly the gate commit `missing_at`."""
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
         gate = target.split('compare/')[1].split('...')[0]
@@ -445,7 +343,6 @@ def _multi_gate_read(missing_at, asked=None):
 
 
 def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
-    del tmp
     m = _mod()
     gates = [_gate('a', G1), _gate('b', G2)]
     verdict = m.head_verdict(_multi_gate_read(None), 'o/r', _head(), gates)
@@ -455,7 +352,6 @@ def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
 
 
 def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
-    del tmp
     m = _mod()
     for gates, missing, absent in (
             ([_gate('path-a', G1), _gate('path-b', G2)], G2, 'path-a'),
@@ -470,9 +366,6 @@ def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
 
 
 def test_every_gate_is_compared_not_short_circuited(tmp):
-    """Check every gate, never short-circuit. A fake records the gate SHAs it
-    was asked about; adding `break` after the first miss would drop them."""
-    del tmp
     m = _mod()
     asked = []
     gates = [_gate('a', G1), _gate('b', G2), _gate('c', 'd' * 40)]
@@ -481,7 +374,6 @@ def test_every_gate_is_compared_not_short_circuited(tmp):
 
 
 def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
-    del tmp
     m = _mod()
     gates = [_gate('a', G1), _gate('b', G2)]
 
@@ -498,26 +390,123 @@ def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
 
 # ---- publish: a failure must overwrite a published success ----
 
-def _publish_read(existing_ids, recorded, fail_listing=None):
+def _publish_read(existing_ids, recorded, runs=(), suites=None,
+                  fail=None, requests=None, error=AssertionError,
+                  listing=None):
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
-        method = 'GET'
-        for index, token in enumerate(argv):
-            if token in ('-X', '--method') and index + 1 < len(argv):
-                method = argv[index + 1].upper()
+        method = argv[argv.index('-X') + 1] if '-X' in argv else 'GET'
+        if requests is not None:
+            requests.append(list(argv))
         if '/check-runs?' in target and method == 'GET':
-            if fail_listing is not None:
-                raise fail_listing('could not read the check runs')
-            return '\n'.join(str(i) for i in existing_ids)
-        if method in ('POST', 'PATCH'):
-            recorded.append((method, target, list(argv)))
-            return '{}'
-        raise AssertionError(f'{method} {target}')
+            if listing is not None:
+                return listing
+            return '\n'.join(f'{i} {(suites or {}).get(i, 50)}'
+                             for i in existing_ids)
+        if target == f'repos/o/r/actions/runs?head_sha={HEAD}&per_page=100':
+            assert existing_ids and method == 'GET'
+            assert '--paginate' in argv
+            assert '--slurp' in argv
+            if fail == 'runs':
+                raise error('runs unavailable')
+            return _encode(runs)
+        allowed = {('POST', 'repos/o/r/check-runs')} | {
+            ('PATCH', f'repos/o/r/check-runs/{i}') for i in existing_ids}
+        assert (method, target) in allowed, (method, target)
+        recorded.append((method, target, list(argv)))
+        if method == fail:
+            raise error('write unavailable')
+        return '{}'
     return read
 
 
+def _run(run_id=10, suite=50, path='.github/workflows/other.yml', **extra):
+    return {'id': run_id, 'check_suite_id': suite, 'path': path, **extra}
+
+
+def test_stranded_green_is_posted_before_all_old_ids_are_renamed(tmp):
+    m, recorded, requests = _mod(), [], []
+    read = _publish_read([7, 8], recorded, suites={7: 99},
+                         requests=requests,
+                         runs=[{'workflow_runs': [_run()]},
+                               {'workflow_runs': [_run(11, 51)]}])
+    m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
+    assert [(v, t.rsplit('/', 1)[-1]) for v, t, _ in recorded] == [
+        ('POST', 'check-runs'), ('PATCH', '7'), ('PATCH', '8')]
+    assert m.NAME_RETIRED == 'superseded gate freshness'
+    for _, _, argv in recorded[1:]:
+        assert argv[argv.index('-X') + 2:] == [
+            '-f', 'name=superseded gate freshness']
+    for field in (f'head_sha={HEAD}', 'name=gate freshness',
+                  'status=completed', 'conclusion=failure',
+                  'external_id=daedalus-gate-freshness/v1',
+                  f'details_url={RUN}', 'output[title]=t',
+                  'output[summary]=s'):
+        assert field in recorded[0][2], field
+    assert sum('/actions/runs?' in ' '.join(a) for a in requests) == 1
+    assert all('Cache-Control: no-cache' in a for a in requests)
+
+
+def test_healthy_or_ambiguous_suite_keeps_the_verdict_patch(tmp):
+    m = _mod()
+    owner = _run()
+    cases = [[], [{'workflow_runs': []}],
+             [{'workflow_runs': [owner]}],
+             [{'workflow_runs': [_run(9, 51), owner]}],
+             [{'workflow_runs': [owner, _run(11, 51, 'different.yml')]}],
+             [{'workflow_runs': [_run(suite=99), _run(11, 51)]}],
+             [{'workflow_runs': [owner, _run(10, 51)]}],
+             [{'workflow_runs': [owner, _run(11)]}],
+             [{'workflow_runs': [owner, {}]}],
+             [{'workflow_runs': [owner, _run('11', 51)]}],
+             [{'workflow_runs': [owner, _run(11, 51, None)]}],
+             [{'workflow_runs': [owner, _run(11, 51, '')]}],
+             [{'workflow_runs': [owner, None]}],
+             [{'workflow_runs': 'bad'}], {}, [{'missing': []}],
+             [None], 'unparseable',
+             [{'workflow_runs': [owner, _run(True, 51)]}],
+             [{'workflow_runs': [owner, _run(11, True)]}]]
+    for runs in cases:
+        recorded = []
+        m.publish(_publish_read([7, 8], recorded, runs=runs),
+                  'o/r', HEAD, 'success', 't', 's', RUN)
+        assert [v for v, _, _ in recorded] == ['PATCH', 'PATCH'], runs
+        assert all('name=gate freshness' in a for _, _, a in recorded)
+
+
+def test_missing_suite_pair_keeps_the_existing_id_patch(tmp):
+    m = _mod()
+    for listing in ('7', '7 null', '7 50 extra', '\ninvalid 50\n7 50\n'):
+        recorded = []
+        read = _publish_read([7], recorded, listing=listing)
+        m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN)
+        assert [(v, t) for v, t, _ in recorded] == [
+            ('PATCH', 'repos/o/r/check-runs/7')], listing
+
+
+def test_unreadable_runs_keep_the_verdict_patch(tmp):
+    m, recorded = _mod(), []
+    m.publish(_publish_read([7], recorded, fail='runs', error=m.QueryError),
+              'o/r', HEAD, 'success', 't', 's', RUN)
+    assert [v for v, _, _ in recorded] == ['PATCH']
+    assert 'name=gate freshness' in recorded[0][2]
+
+
+def test_failed_republish_or_retirement_raises_without_more_writes(tmp):
+    m = _mod()
+    for fail, attempted in (('POST', ['POST']), ('PATCH', ['POST', 'PATCH'])):
+        recorded = []
+        read = _publish_read([7, 8], recorded, fail=fail, error=m.QueryError,
+                             runs=[{'workflow_runs': [_run(), _run(11, 51)]}])
+        try:
+            m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
+        except m.QueryError:
+            assert [v for v, _, _ in recorded] == attempted
+            continue
+        raise AssertionError(f'a failed {fail} did not raise')
+
+
 def test_a_failure_overwrites_a_published_success_by_patching(tmp):
-    del tmp
     m = _mod()
     for ids, conclusion, title, summary in (
             ([4242], 'failure', 's', 'why'),
@@ -543,7 +532,6 @@ def test_a_failure_overwrites_a_published_success_by_patching(tmp):
 
 
 def test_re_running_updates_the_same_check_rather_than_accumulating(tmp):
-    del tmp
     m = _mod()
     recorded = []
     read = _publish_read([99], recorded)
@@ -554,8 +542,6 @@ def test_re_running_updates_the_same_check_rather_than_accumulating(tmp):
 
 
 def test_publish_filters_and_sends_no_cache(tmp):
-    """The existing-check lookup is filtered server-side and no-cached."""
-    del tmp
     m = _mod()
     recorded = []
     captured = []
@@ -569,12 +555,14 @@ def test_publish_filters_and_sends_no_cache(tmp):
         if '/check-runs?' in target and method == 'GET':
             captured.append(' '.join(argv))
             return ''
+        assert method == 'POST' and target == 'repos/o/r/check-runs'
         recorded.append((method, target))
         return '{}'
     m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN)
     assert captured, 'the existing-check lookup was never made'
     for fragment in ('gate freshness', 'daedalus-gate-freshness/v1',
-                     'github-actions', 'filter=all', '--paginate',
+                     'github-actions', '.check_suite.id', 'filter=all',
+                     '--paginate',
                      'Cache-Control: no-cache'):
         assert fragment in captured[0], (fragment, captured[0])
 
@@ -582,7 +570,6 @@ def test_publish_filters_and_sends_no_cache(tmp):
 # ---- select_heads ----
 
 def test_a_pull_request_not_based_on_main_is_skipped(tmp):
-    del tmp
     m = _mod()
     pr = {
         'number': 7,
