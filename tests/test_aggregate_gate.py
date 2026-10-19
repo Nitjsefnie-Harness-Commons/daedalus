@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""The aggregate gate: allowed sets, the superseded-cancel rule, the caller.
-
-aggregate_gate.py owns the whole decision; these drive it in-process and pin
-the wiring: the checkout, the narrowed permissions, the env indirection.
-"""
+"""Aggregate verdicts in-process and the workflow wiring that calls them."""
 import contextlib
 import io
 import json
@@ -128,13 +124,63 @@ MINE = _run(1, 'cancelled', '2026-09-07T10:00:00Z')
 NEWER = _run(2, 'success', '2026-09-07T10:05:00Z')
 
 
-def test_a_deliberate_cancel_fails(tmp):
+def test_only_observed_unstarted_cancelled_dependencies_are_diagnosed(tmp):
     del tmp
     mod = _gate()
-    verdict, message = mod.decide(_needs(suites='cancelled'), MINE, [MINE])
-    assert verdict == 'cancelled-deliberate'
-    assert verdict not in mod.GREEN
-    assert 'deliberate' in message and 'suites=cancelled' in message
+    matrix = 'suites (macos-latest, 3.11)'
+    cases = (
+        ('suites', [matrix, 'suites (macos-latest, 3.12)'],
+         'cancelled', [], True),
+        ('suites', ['suites'], 'cancelled', [], True),
+        ('coverage', ['coverage'], 'cancelled', [], True),
+        ('suites', ['suites-extra (macos-latest, 3.11)'],
+         'cancelled', [], False),
+        ('coverage', ['coverage-matrix (macos-latest, 3.11)', matrix],
+         'cancelled', [], False),
+        ('suites', [matrix], 'success', [], False),
+        ('suites', [matrix], 'cancelled', [{'name': 'Set up job'}], False),
+        ('suites', [matrix], 'cancelled', None, False),
+        ('suites', [], 'cancelled', [], False),
+    )
+    for key, names, conclusion, steps, unstarted in cases:
+        jobs = [{'id': i + 1, 'name': name, 'conclusion': conclusion,
+                 'steps': steps} for i, name in enumerate(names)]
+        jobs.append({'id': 99, 'name': 'wheel', 'conclusion': 'cancelled',
+                     'steps': []})
+        calls, read = _recorder(MINE, [{'workflow_runs': [MINE]}], jobs=jobs)
+        verdict, message = mod.evaluate(_needs(**{key: 'cancelled'}),
+                                        'o/r', '39273610768', 'main', read)
+        assert verdict not in mod.GREEN
+        assert len(calls) == 3, calls
+        assert calls[-1] == [
+            'gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+            'repos/o/r/actions/runs/39273610768/jobs?per_page=100']
+        if unstarted:
+            assert verdict == 'cancelled-unstarted', (verdict, message)
+            for name in names:
+                assert name in message, message
+            assert '0 steps' in message, message
+            assert 'GitHub-side runner-acquisition' in message, message
+            assert 'gh run rerun --failed 39273610768' in message, message
+            assert 'wheel' not in message, message
+        else:
+            assert (verdict, message) == (
+                'cancelled-deliberate', _CANCEL_MESSAGES[
+                    'cancelled-deliberate'] + f'{key}=cancelled')
+
+
+def test_unreadable_cancelled_jobs_preserve_the_prior_verdict(tmp):
+    del tmp
+    mod = _gate()
+    calls, read = _recorder(MINE, [{'workflow_runs': [MINE]}])
+    with mock.patch.object(mod, 'scan_jobs', return_value=None) as jobs:
+        result = mod.evaluate(_needs(suites='cancelled'),
+                              'o/r', '1', 'main', read)
+    jobs.assert_called_once_with('o/r', '1', read)
+    assert len(calls) == 2
+    assert result == ('cancelled-deliberate',
+                      _CANCEL_MESSAGES['cancelled-deliberate']
+                      + 'suites=cancelled')
 
 
 def test_missing_context_fails_without_a_query(tmp):
@@ -151,29 +197,21 @@ def test_equal_start_ties_break_by_id_both_ways(tmp):
     del tmp
     mod = _gate()
     stamp = '2026-09-07T10:00:00Z'
-    older_id = _run(9, None, stamp, status='in_progress')
-    newer_id = _run(10, 'success', stamp)
-    assert mod.superseded(older_id, [older_id, newer_id])
-    assert not mod.superseded(newer_id, [older_id, newer_id])
-
-    started = _run(1, None, '2026-09-07T10:00:00Z', status='in_progress')
-    created = _run(2, None, None, created_at='2026-09-07T10:05:00Z')
-    assert mod.superseded(started, [started, created])
-    assert not mod.superseded(created, [started, created])
-
-    mine = _run(7, None, stamp, status='in_progress')
-    twin = _run(7, 'success', stamp)
-    assert not mod.superseded(mine, [mine, twin])
-
-    assert not mod.superseded(
-        MINE, [MINE, _run(2, 'success', '2026-09-07T10:05:00Z',
-                          workflow=22)])
-
-    mine = _run(1, None, '2026-09-07T10:00:00', status='in_progress')
-    east = _run(2, 'success', '2026-09-07T11:00:00+02:00')
-    assert not mod.superseded(mine, [mine, east])
-    later = _run(3, 'success', '2026-09-07T13:00:00')
-    assert mod.superseded(mine, [mine, later])
+    cases = (
+        (_run(9, None, stamp), _run(10, 'success', stamp), True),
+        (MINE, _run(2, None, None,
+                    created_at='2026-09-07T10:05:00Z'), True),
+        (MINE, dict(MINE, conclusion='success'), False),
+        (MINE, dict(NEWER, workflow_id=22), False),
+        (_run(1, None, '2026-09-07T10:00:00'),
+         _run(2, 'success', '2026-09-07T11:00:00+02:00'), False),
+        (_run(1, None, '2026-09-07T10:00:00'),
+         _run(3, 'success', '2026-09-07T13:00:00'), True),
+    )
+    for mine, other, expected in cases:
+        assert mod.superseded(mine, [mine, other]) is expected
+        if expected:
+            assert not mod.superseded(other, [mine, other])
 
 
 def test_the_queries_target_the_own_run_and_this_workflow(tmp):
@@ -183,11 +221,11 @@ def test_the_queries_target_the_own_run_and_this_workflow(tmp):
     verdict, message = mod.evaluate(_needs(suites='cancelled'),
                                     'o/r', '1', 'fix/x', read)
     assert verdict == 'cancelled-superseded', message
-    assert ['gh', 'api', '-H', 'Cache-Control: no-cache',
-            'repos/o/r/actions/runs/1'] in calls
-    assert ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+    assert [['gh', 'api', '-H', 'Cache-Control: no-cache',
+            'repos/o/r/actions/runs/1'], [
+            'gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
             'repos/o/r/actions/workflows/tests.yml/runs'
-            '?branch=fix%2Fx&per_page=100'] in calls
+            '?branch=fix%2Fx&per_page=100']] == calls
 
 
 def test_paginated_pages_are_read_as_concatenated_json(tmp):
@@ -228,12 +266,8 @@ def test_a_malformed_started_at_sorts_oldest_and_ignores_created_at(tmp):
 
 def test_the_raw_decoder_reads_whitespace_separated_documents(tmp):
     del tmp
-    assert _gate()._decode('{"a": 1}\n  [2]') == [{'a': 1}, [2]]
-
-
-def test_the_raw_decoder_refuses_garbage_after_a_valid_document(tmp):
-    del tmp
     mod = _gate()
+    assert mod._decode('{"a": 1}\n  [2]') == [{'a': 1}, [2]]
     error = _query_error(mod, lambda: mod._decode('{"a": 1} oops'))
     assert 'unparseable gh output' in str(error), str(error)
 
@@ -334,10 +368,8 @@ def test_two_dependencies_are_decided_jointly(tmp):
                     names = (first, second)
                     states = (first_state, second_state)
                     needs = _needs(**dict(zip(names, states)))
-                    if 'cancelled' in states:
-                        contexts = JOINT_CONTEXTS
-                    else:
-                        contexts = NO_CANCEL_CONTEXT
+                    contexts = (JOINT_CONTEXTS if 'cancelled' in states
+                                else NO_CANCEL_CONTEXT)
                     for expected, mine, runs in contexts:
                         verdict, message = mod.decide(needs, mine, runs)
                         assert (verdict, message) == _joint_expectation(
@@ -348,29 +380,27 @@ def test_two_dependencies_are_decided_jointly(tmp):
 def test_main_exits_zero_only_for_green_verdicts(tmp):
     del tmp
     mod = _gate()
-    scan_jobs = list(CLEAN_JOBS)
-    calls, read = _recorder(MINE, [{'workflow_runs': [MINE, NEWER]}],
-                            polls=[[CLEAN]], jobs=scan_jobs)
     cases = (
-        (json.dumps(_needs(suites='cancelled')), 0, CLEAN_JOBS),
-        (json.dumps(_needs(suites='failure')), 1, CLEAN_JOBS),
-        (json.dumps(_needs(changes='skipped')), 1, CLEAN_JOBS),
-        ('{', 1, CLEAN_JOBS),
+        (json.dumps(_needs(suites='cancelled')), 0, CLEAN_JOBS, [NEWER], ''),
+        (json.dumps(_needs(suites='failure')), 1, CLEAN_JOBS, [], ''),
+        (json.dumps(_needs(changes='skipped')), 1, CLEAN_JOBS, [], ''),
+        ('{', 1, CLEAN_JOBS, [], ''),
         (json.dumps(_needs(changes='success', suites='success')), 1,
-         [_scan_job(conclusion='failure')]),
+         [_scan_job(conclusion='failure')], [], 'concluded failure'),
+        (json.dumps(_needs(suites='cancelled')), 1,
+         [dict(_scan_job('cancelled', 'suites'), steps=[])], [],
+         'gh run rerun --failed 1'),
     )
-    for needs_json, expected, jobs in cases:
-        scan_jobs[:] = jobs
-        saved = dict(os.environ)
-        try:
-            os.environ.clear()
-            os.environ.update({
+    for needs_json, expected, jobs, runs, diagnostic in cases:
+        calls, read = _recorder(MINE, [{'workflow_runs': [MINE] + runs}],
+                                polls=[[CLEAN]], jobs=jobs)
+        with mock.patch.dict(os.environ, {
                 'NEEDS_JSON': needs_json,
                 'REPOSITORY': 'o/r',
                 'RUN_ID': '1',
                 'HEAD_BRANCH': 'main',
                 'SECRETS_HEAD_SHA': HEAD,
-            })
+        }, clear=True):
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.object(mod, 'gh_read', read):
                 with contextlib.redirect_stdout(out):
@@ -378,18 +408,17 @@ def test_main_exits_zero_only_for_green_verdicts(tmp):
                         code = mod.main()
             assert code == expected, (needs_json, code, err.getvalue())
             assert bool(out.getvalue()) is (expected == 0), out.getvalue()
-        finally:
-            os.environ.clear()
-            os.environ.update(saved)
-    assert calls, 'the cancelled case never queried'
-    assert _polls(calls), 'the green case never asked about the scan'
-    # A hard `needs:` failure returns without polling.
-    assert len(_polls(calls)) == 2, calls
+            assert bool(err.getvalue()) is (expected == 1), err.getvalue()
+            assert diagnostic in err.getvalue(), err.getvalue()
+        assert len(_polls(calls)) == int(
+            expected == 0 or diagnostic == 'concluded failure'), calls
 
 
 def test_the_aggregate_job_runs_the_module(tmp):
     del tmp
     job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
+    assert job.get('if') == '${{ always() }}', job.get('if')
+    assert 'if' not in _gate_step()
     checkouts = [step for step in job['steps']
                  if str(step.get('uses', '')).startswith('actions/checkout')]
     assert len(checkouts) == 1, job['steps']
@@ -436,20 +465,11 @@ MARKER_STEP = {
 
 
 def test_the_marker_step_is_the_claim_port_verbatim(tmp):
-    """Pins the port by decoded scalars: a one-token drift in the name, the
-    shell or the body is a red row, not a silent port drift."""
-    del tmp
-    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
-    steps = [s for s in job['steps'] if s.get('name') == MARKER_STEP['name']]
-    assert len(steps) == 1, job['steps']
-    assert steps[0] == MARKER_STEP
-
-
-def test_the_marker_step_precedes_the_gate_step(tmp):
-    """The comment's ordering claim: fail fast before the poll-bound
-    verdict."""
+    """Keep the marker port verbatim and immediately before the gate."""
     del tmp
     steps = (complete_job_mapping(_tests_yml(), 'aggregate') or {})['steps']
+    matched = [s for s in steps if s.get('name') == MARKER_STEP['name']]
+    assert matched == [MARKER_STEP], steps
     marker = next(i for i, s in enumerate(steps)
                   if s.get('name') == MARKER_STEP['name'])
     gate = next(i for i, s in enumerate(steps)
@@ -472,29 +492,24 @@ CLEAN_JOBS = [_scan_job(), _scan_job(name='summarize')]
 def test_the_deadline_keeps_a_found_verdict_and_refuses_an_absent_one(tmp):
     """The bound governs the CONTINUE, so a verdict found at it stands."""
     del tmp
-    calls, verdict, message = _drive_scan(
-        [[], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0))
-    assert verdict in _gate().GREEN, message
-    assert len(_polls(calls)) == 2, calls
-    calls, verdict, message = _drive_scan(
-        [[]], CLEAN_JOBS, (EPOCH, EPOCH + 600.0))
-    assert verdict == 'secrets-unreported'
-    assert verdict not in _gate().GREEN
-    bound = _gate().DEFAULT_POLL_BOUND_S
-    assert 'secrets' in message and f'{bound:g} s' in message, message
-    assert len(_polls(calls)) == 2, calls
-
-    calls, verdict, message = _drive_scan(
-        [[], [], [CLEAN]], CLEAN_JOBS, (EPOCH, EPOCH + 420.0, EPOCH + 590.0))
-    assert verdict in _gate().GREEN, message
-    assert 'gitleaks' in message and 'concluded success' in message, message
-    assert len(_polls(calls)) == 3, calls
-
-    calls, verdict, message = _drive_scan(
-        [[_secrets_run(7, status='in_progress')], [CLEAN]], CLEAN_JOBS,
-        (EPOCH, EPOCH + 30.0, EPOCH + 60.0))
-    assert verdict in _gate().GREEN, message
-    assert len(_polls(calls)) == 2, calls
+    cases = (
+        ([[], [CLEAN]], (EPOCH, EPOCH + 600.0), 'passed', 2),
+        ([[]], (EPOCH, EPOCH + 600.0), 'secrets-unreported', 2),
+        ([[], [], [CLEAN]], (EPOCH, EPOCH + 420.0, EPOCH + 590.0),
+         'passed', 3),
+        ([[_secrets_run(7, status='in_progress')], [CLEAN]],
+         (EPOCH, EPOCH + 30.0, EPOCH + 60.0), 'passed', 2),
+    )
+    for pages, readings, expected, count in cases:
+        calls, verdict, message = _drive_scan(pages, CLEAN_JOBS, readings)
+        assert verdict == expected, message
+        assert (verdict in _gate().GREEN) is (expected == 'passed')
+        assert len(_polls(calls)) == count, calls
+        if expected == 'passed':
+            assert 'gitleaks' in message and 'concluded success' in message
+        else:
+            bound = _gate().DEFAULT_POLL_BOUND_S
+            assert 'secrets' in message and f'{bound:g} s' in message
 
 
 def test_the_jobs_verdict_is_read_and_not_the_runs_conclusion(tmp):
@@ -576,12 +591,7 @@ def test_an_unreadable_answer_is_red_not_an_absent_run_and_not_retried(tmp):
 
 
 def test_the_poll_bound_is_read_and_refused_outside_its_range(tmp):
-    """One in-range value, one per side of the range.
-
-    The in-range one is the only route to the return that honours the
-    environment; the two refusals differ only in which limb of the range
-    check they reach, and both land on the same raise.
-    """
+    """Honour an in-range override and refuse values on either side."""
     del tmp
     mod = _gate()
     with mock.patch.dict(os.environ, {}, clear=True):
@@ -622,8 +632,7 @@ def test_a_refused_poll_bound_reaches_the_verdict(tmp):
 
 
 def _named_workflow(mod, constant):
-    """The file a module's workflow selector must name: a PATH here
-    satisfies every control built from it, and the API refuses it."""
+    """A selector names a shipped file, not its API-refused path."""
     name = getattr(mod, constant)
     path = ROOT / '.github' / 'workflows' / name
     assert path.is_file(), f'{name} names no workflow file'
@@ -640,15 +649,6 @@ def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
     assert mod.SECRETS_JOB in _job_names(source)
     job = complete_job_mapping(source, mod.SECRETS_JOB) or {}
     assert job.get('name') in (None, mod.SECRETS_JOB), job.get('name')
-
-
-def test_the_gate_waits_on_a_dispatch_event_too(tmp):
-    """A skip here is a bypass: a dispatch publishes a check on the SHA."""
-    del tmp
-    step = _gate_step()
-    job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
-    assert job.get('if') == '${{ always() }}', job.get('if')
-    assert 'if' not in step, step
 
 
 def main():

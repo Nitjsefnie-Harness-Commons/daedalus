@@ -1461,12 +1461,12 @@ jobs:
     # 10-minute backstop: no queueing is left in it, so a scan unreported
     # by then is refused rather than waited on.
     #
-    # TWO reads happen BEFORE the wait begins — the cancelled-dependency
-    # pair — and TWO can finish after it: the poll that straddles the
-    # deadline, and the jobs read after that poll finds a run. So four
-    # read ceilings of 2 minutes sit either side of the 10, which is 18
-    # of these 20. The job is alive for the last 2 to print the verdict
-    # and conclude; a ceiling under that would kill it instead of judging.
+    # THREE reads happen BEFORE the wait begins — the cancelled-dependency
+    # run, supersession and jobs reads — and TWO can finish after it: the
+    # poll that straddles the deadline, and the jobs read after that poll
+    # finds a run. So five read ceilings of 2 minutes sit either side of
+    # the 10, which is 20 of these 20. At those ceilings there is no
+    # reporting margin; raising the wait would exceed the job's budget.
     timeout-minutes: 20
     # A job-level block replaces the workflow-level one rather than adding
     # to it: contents read pays for the checkout, actions read is what lets
