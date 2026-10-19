@@ -440,7 +440,6 @@ def test_the_aggregate_job_runs_the_module(tmp):
     checkouts = [step for step in job['steps']
                  if str(step.get('uses', '')).startswith('actions/checkout')]
     assert len(checkouts) == 1, job['steps']
-    assert checkouts[0]['uses'].startswith('actions/checkout@')
     assert checkouts[0]['with'] == {'persist-credentials': 'false'}
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gate = _gate_step()

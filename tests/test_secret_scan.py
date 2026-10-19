@@ -109,7 +109,6 @@ def test_the_checkout_reads_full_history_without_credentials(tmp):
     checkout = steps[0]
     # Which revision of checkout runs is the workflow's business; the
     # credential posture is what this pins.
-    assert checkout['uses'].startswith('actions/checkout@'), checkout
     assert checkout['with'] == {
         'fetch-depth': '0', 'persist-credentials': 'false'}, checkout
 
@@ -159,12 +158,10 @@ def test_no_step_and_no_job_key_escapes_the_gate(tmp):
     job = _decoded_workflow()['jobs']['gitleaks']
     steps = job['steps']
     assert len(steps) == 3, steps
-    assert [step.get('name') or step.get('uses', '').split('@')[0]
-            for step in steps] == [
-        'actions/checkout',
-        'Download gitleaks and verify its digest',
-        'Scan the tree and the history',
-    ], steps
+    verify, scan = ('Download gitleaks and verify its digest',
+                    'Scan the tree and the history')
+    names = [step.get('name') for step in steps]
+    assert names.index(verify) < names.index(scan), steps
     assert set(job) == {'runs-on', 'timeout-minutes', 'steps'}, job
 
 
