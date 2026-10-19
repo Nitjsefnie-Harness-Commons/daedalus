@@ -85,12 +85,12 @@
     "extension/worker/capture.js": 2,
     "extension/worker/cdp.js": 10,
     "extension/worker/cookies.js": 29,
-    "extension/worker/evaluate.js": 54,
+    "extension/worker/evaluate.js": 21,
     "extension/worker/gm_storage.js": 7,
     "extension/worker/messaging.js": 16,
     "extension/worker/registry.js": 12,
     "extension/worker/segment_mint.js": 4,
     "extension/worker/stream.js": 6
   },
-  "tests_line_baseline": 139333
+  "tests_line_baseline": 139320
 }
