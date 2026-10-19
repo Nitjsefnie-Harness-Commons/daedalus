@@ -276,7 +276,6 @@ def test_an_unreadable_gate_lookup_publishes_nothing_and_fails(tmp):
 # ---- process(): the per-head flow ----
 
 def test_a_fresh_head_publishes_a_green_check(tmp):
-    del tmp
     m = _mod()
     published = []
     read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published)
@@ -289,7 +288,6 @@ def test_a_fresh_head_publishes_a_green_check(tmp):
 
 
 def test_a_stale_head_publishes_a_red_check(tmp):
-    del tmp
     m = _mod()
     published = []
     read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
@@ -316,7 +314,6 @@ _MOVED = 'gate freshness: head of pull request 7 moved; skipping'
 
 
 def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
-    del tmp
     cases = (({'.pylintrc': [G1]}, {}, {'moved_to': 'z' * 40}),
              ({}, {7: HEAD}, {'moved': 'm' * 40}))
     for gates, current, flow in cases:
@@ -335,7 +332,6 @@ def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
     """A revalidation that could not be READ is not evidence the head moved:
     the run learned nothing about this head, so it exits nonzero and says it
     could not read, rather than reporting a clean skip."""
-    del tmp
     for flow in ({'unreadable': (7,)}, {'fails_from': 2}):
         m = _mod()
         published = []
@@ -354,7 +350,6 @@ def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
 def test_a_healthy_sibling_still_publishes_beside_an_unreadable_head(tmp):
     """An unreadable head is a per-head failure: the later head still gets its
     verdict."""
-    del tmp
     m = _mod()
     published = []
     bad = '9' * 40
@@ -391,7 +386,6 @@ def _writing_read(m, published, current, **flow):
 
 
 def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
-    del tmp
     m = _mod()
     published = []
     heads = m.select_heads([_pr(7), _pr(8)])
@@ -419,7 +413,6 @@ def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
 
 def test_a_head_is_revalidated_before_the_decision(tmp):
     """The first revalidation saves compare work on a superseded head."""
-    del tmp
     m = _mod()
     published = []
     asked = []
@@ -439,7 +432,6 @@ def test_a_head_is_revalidated_before_the_decision(tmp):
 def test_the_run_fails_when_the_only_head_cannot_be_published(tmp):
     """A healthy sibling is not what makes the run red: this is the limb a
     `failed and published` exit code drops."""
-    del tmp
     m = _mod()
     published = []
     bad = 'b' * 40
@@ -454,7 +446,6 @@ def test_the_run_fails_when_the_only_head_cannot_be_published(tmp):
 
 
 def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
-    del tmp
     m = _mod()
     published = []
     read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published)
@@ -469,16 +460,15 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 # ---- the bound ----
 
 def test_stranded_flow_counts_both_extra_calls_in_the_bound(tmp):
-    del tmp
     m = _mod()
     published = []
-    reads = []
+    calls = []
     gates = {pattern: [G1] for pattern in m.GATE_PATTERNS}
     gate_list = [(pattern, G1) for pattern in m.GATE_PATTERNS]
     base = _flow_read(m, gates, {7: HEAD}, published)
 
     def read(argv):
-        reads.append(argv)
+        calls.append(argv)
         target = next(t for t in argv if t.startswith('repos/'))
         if '/check-runs?' in target:
             return '99 50'
@@ -492,8 +482,8 @@ def test_stranded_flow_counts_both_extra_calls_in_the_bound(tmp):
         read, 'o/r', m.select_heads([_pr(7)]), gate_list, RUN)
     assert code == 0 and verdicts
     assert [method for _, method in published] == ['POST', 'PATCH']
-    assert len(reads) == len(m.GATE_PATTERNS) + m.PER_HEAD_OVERHEAD, (
-        f'one head issued {len(reads)} reads; the shipped overhead is '
+    assert len(calls) == len(m.GATE_PATTERNS) + m.PER_HEAD_OVERHEAD, (
+        f'one head issued {len(calls)} calls; the shipped overhead is '
         f'{m.PER_HEAD_OVERHEAD}')
 
 
@@ -528,7 +518,6 @@ def test_every_read_carries_the_no_cache_header(tmp):
 
 def test_over_the_bound_refuses_and_publishes_nothing(tmp):
     """With readable heads the entry can only pass through the refusal."""
-    del tmp
     m = _mod()
     published = []
     heads = m.select_heads([_pr(i) for i in range(1, 6)])
@@ -543,7 +532,6 @@ def test_over_the_bound_refuses_and_publishes_nothing(tmp):
 
 
 def test_within_the_bound_publishes_every_head(tmp):
-    del tmp
     m = _mod()
     published = []
     heads = m.select_heads([_pr(i) for i in range(1, 4)])
@@ -566,7 +554,6 @@ def test_the_job_is_not_named_the_published_check(tmp):
     """On pull_request_target the job's own check lands on the head, so the
     job must not carry the name the ruleset matches, or a ruleset reading by
     context sees two different things under one name."""
-    del tmp
     m = _mod()
     text = _workflow_text()
     assert '  publish-freshness:' in text
@@ -577,7 +564,6 @@ def test_the_job_is_not_named_the_published_check(tmp):
 
 
 def test_workflow_permissions_are_exactly_the_three_scopes(tmp):
-    del tmp
     from _yamlread import top_level_mapping
     permissions = top_level_mapping(_workflow_text(), 'permissions')
     assert permissions == {'checks': 'write', 'contents': 'read',
@@ -585,7 +571,6 @@ def test_workflow_permissions_are_exactly_the_three_scopes(tmp):
 
 
 def test_workflow_declares_both_triggers(tmp):
-    del tmp
     from _workflows import _event_option_keys, _workflow_triggers
     triggers = _workflow_triggers(_workflow_text(), 'gate-freshness.yml')
     assert 'push' in triggers
@@ -599,7 +584,6 @@ def test_workflow_declares_both_triggers(tmp):
 
 
 def test_workflow_is_well_formed(tmp):
-    del tmp
     text = _workflow_text()
     assert 'concurrency:' in text
     from _wfjobs import load
@@ -615,7 +599,6 @@ def test_workflow_is_well_formed(tmp):
 def test_the_workflow_timeout_clears_the_enforced_call_budget(tmp):
     """The RELATION, not a literal: budget x assumed-rate < timeout. A bound
     with no per-call rate is not a bound."""
-    del tmp
     text = _workflow_text()
     m = _mod()
     assert 'scripts/ci/gate_freshness.py' in text, 'no pointer to the script'
