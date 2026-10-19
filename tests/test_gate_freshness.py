@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""Contract for the gate-freshness decision core (issue 1008). Every
-decision function is pure and driven through an injected fake for the ``read``
-seam. "Stale" and "could not be computed" get separate entries, and the publish
-path runs against a head already carrying a published success, because
-overwriting that green is the whole defect. Orchestration lives in
+"""Contracts for gate-freshness decisions and check publication.
+Injected read fakes drive the real module; orchestration is covered by
 ``test_gate_freshness_run.py``.
 """
 import os
@@ -21,6 +18,12 @@ G1 = 'a' * 40
 G2 = 'b' * 40
 HEAD = 'c' * 40
 RUN = 'https://github.com/o/r/actions/runs/1'
+
+_CHECK_LIST = (f'repos/o/r/commits/{HEAD}/check-runs'
+               '?filter=all&per_page=100')
+_SELECTOR = ('.check_runs[] | select(.name == "gate freshness" and '
+             '.external_id == "daedalus-gate-freshness/v1" and '
+             '.app.slug == "github-actions") | "\\(.id) \\(.check_suite.id)"')
 
 
 def _mod():
@@ -395,10 +398,16 @@ def _publish_read(existing_ids, recorded, runs=(), suites=None,
                   listing=None):
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
-        method = argv[argv.index('-X') + 1] if '-X' in argv else 'GET'
+        method = next((argv[i + 1].upper()
+                       for i, flag in enumerate(argv)
+                       if flag in ('-X', '--method')), 'GET')
         if requests is not None:
             requests.append(list(argv))
-        if '/check-runs?' in target and method == 'GET':
+        if target == _CHECK_LIST:
+            assert method == 'GET' and '--paginate' in argv
+            assert '--jq' in argv
+            assert argv[argv.index('--jq') + 1] == _SELECTOR, (
+                'check name, external_id and app slug must all match exactly')
             if listing is not None:
                 return listing
             return '\n'.join(f'{i} {(suites or {}).get(i, 50)}'
@@ -542,30 +551,37 @@ def test_re_running_updates_the_same_check_rather_than_accumulating(tmp):
     assert all(r[1].endswith('/check-runs/99') for r in recorded)
 
 
-def test_publish_filters_and_sends_no_cache(tmp):
-    m = _mod()
-    recorded = []
-    captured = []
+def test_retired_suffix_cannot_pass_the_exact_listing_selector(tmp):
+    requests = []
+    _mod().publish(_publish_read([], [], requests=requests),
+                   'o/r', HEAD, 'success', 't', 's', RUN)
+    assert all('Cache-Control: no-cache' in argv for argv in requests)
+    assert requests[0][requests[0].index('--jq') + 1] == _SELECTOR, (
+        'check name, external_id and app slug must all match exactly')
 
-    def read(argv):
-        target = next(t for t in argv if t.startswith('repos/'))
-        method = 'GET'
-        for index, token in enumerate(argv):
-            if token in ('-X', '--method') and index + 1 < len(argv):
-                method = argv[index + 1].upper()
-        if '/check-runs?' in target and method == 'GET':
-            captured.append(' '.join(argv))
-            return ''
-        assert method == 'POST' and target == 'repos/o/r/check-runs'
-        recorded.append((method, target))
-        return '{}'
-    m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN)
-    assert captured, 'the existing-check lookup was never made'
-    for fragment in ('gate freshness', 'daedalus-gate-freshness/v1',
-                     'github-actions', '.check_suite.id', 'filter=all',
-                     '--paginate',
-                     'Cache-Control: no-cache'):
-        assert fragment in captured[0], (fragment, captured[0])
+
+def test_publish_fake_refuses_unmodelled_listing_calls(tmp):
+    read = _publish_read([7], [])
+    flags = ['--paginate', '--jq', _SELECTOR]
+    for flag in ('-X', '--method'):
+        assert read(['gh', 'api', _CHECK_LIST, flag, 'GET', *flags]) == '7 50'
+    bad = [['gh', 'api', target, '--method', 'GET', *flags] for target in (
+        _CHECK_LIST.replace('o/r', 'unmodelled/repo'),
+        _CHECK_LIST.replace(HEAD, 'wrong-head'),
+        _CHECK_LIST.replace('filter=all', 'filter=latest'))]
+    bad += [['gh', 'api', _CHECK_LIST, flag, 'POST', *flags]
+            for flag in ('-X', '--method')]
+    bad += [['gh', 'api', _CHECK_LIST, '--method', 'GET', *shape]
+            for shape in ([], ['--jq', _SELECTOR], ['--paginate'],
+                          ['--paginate', '--jq', 'unmodelled projection'])]
+    accepted = []
+    for argv in bad:
+        try:
+            read(argv)
+        except AssertionError:
+            continue
+        accepted.append(argv)
+    assert not accepted, f'unmodelled listing calls accepted: {accepted}'
 
 
 # ---- select_heads ----
