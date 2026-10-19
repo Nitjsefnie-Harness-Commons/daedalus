@@ -67,16 +67,15 @@ all old matching checks receive a name-only retirement PATCH. A failed POST
 leaves them untouched. Missing owners and unreadable or ambiguous run data
 keep today's verdict PATCH behavior.
 
-THE BOUND. For one existing check per open pull request, the worst case is,
-for each of G gate commits, one compare, plus two head revalidations, one
-check-runs listing, and one verdict write, plus one paginated workflow-runs
-read and one POST when stranded: G + PER_HEAD_OVERHEAD (G + 6). The retirement
-PATCH replaces the verdict PATCH; each additional existing id costs another
-PATCH. The run refuses LOUDLY -- publishing nothing, exiting nonzero -- if
-this per-head estimate exceeds the call budget, rather than truncating the
-head set, which is the silent-pass shape. The budget counts logical calls
-(pagination is one read); the timeout is sized against it at
-ASSUMED_SECONDS_PER_CALL (below), and a test pins that relation.
+THE BOUND. For one old check per head, estimate G + PER_HEAD_OVERHEAD (G + 6):
+one compare per gate, two head revalidations, one check-runs listing, one
+workflow-runs listing, one verdict PATCH and an extra POST when stranded.
+This fixed estimate can be exceeded by duplicate existing old ids: each
+additional id costs one extra PATCH. The 1200-call budget at
+ASSUMED_SECONDS_PER_CALL (1.5 s/call) is 30 minutes; the 35-minute workflow
+timeout provides slack for that residual. Pagination counts as one logical
+read. A run whose estimate exceeds its budget refuses loudly, publishing
+nothing rather than truncating the head set; tests pin the calls and slack.
 """
 import json
 import os
@@ -111,7 +110,7 @@ GATE_PATTERNS = (
 
 _HEX40 = frozenset('0123456789abcdef')
 
-# Two revalidations, two listings, one POST and one PATCH for one old check.
+# Fixed per-head estimate: two revalidations/listings, one POST, one PATCH.
 PER_HEAD_OVERHEAD = 6
 
 DEFAULT_CALL_BUDGET = 1200
@@ -372,7 +371,7 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
     needed = required_calls(len(heads), len(gates))
     if needed > budget:
         print('gate freshness: refusing to run -- '
-              f'{needed} worst-case calls exceed the budget of {budget}; '
+              f'{needed} estimated calls exceed the budget of {budget}; '
               'publishing nothing', file=sys.stderr)
         return 1, []
     published = []
