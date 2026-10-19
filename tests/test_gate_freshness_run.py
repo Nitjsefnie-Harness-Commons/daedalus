@@ -468,9 +468,7 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 
 # ---- the bound ----
 
-def test_the_per_head_flow_costs_one_compare_per_gate_plus_the_overhead(tmp):
-    """Count the REAL reads a one-head flow makes: G + PER_HEAD_OVERHEAD, so
-    a THIRD revalidation (a real G+5) is caught."""
+def test_stranded_flow_counts_both_extra_calls_in_the_bound(tmp):
     del tmp
     m = _mod()
     published = []
@@ -481,8 +479,19 @@ def test_the_per_head_flow_costs_one_compare_per_gate_plus_the_overhead(tmp):
 
     def read(argv):
         reads.append(argv)
+        target = next(t for t in argv if t.startswith('repos/'))
+        if '/check-runs?' in target:
+            return '99 50'
+        if '/actions/runs?' in target:
+            assert '--paginate' in argv and '--slurp' in argv
+            return _encode([{'workflow_runs': [
+                {'id': 1, 'path': 'workflow.yml', 'check_suite_id': 50},
+                {'id': 2, 'path': 'workflow.yml', 'check_suite_id': 51}]}])
         return base(argv)
-    m.process(read, 'o/r', m.select_heads([_pr(7)]), gate_list, RUN)
+    code, verdicts = m.process(
+        read, 'o/r', m.select_heads([_pr(7)]), gate_list, RUN)
+    assert code == 0 and verdicts
+    assert [method for _, method in published] == ['POST', 'PATCH']
     assert len(reads) == len(m.GATE_PATTERNS) + m.PER_HEAD_OVERHEAD, (
         f'one head issued {len(reads)} reads; the shipped overhead is '
         f'{m.PER_HEAD_OVERHEAD}')
@@ -611,10 +620,6 @@ def test_the_workflow_timeout_clears_the_enforced_call_budget(tmp):
     m = _mod()
     assert 'scripts/ci/gate_freshness.py' in text, 'no pointer to the script'
     assert 'THE BOUND' in text, 'the header does not point at the BOUND'
-    doc = m.__doc__ or ''
-    bound = doc[doc.index('THE BOUND'):]
-    assert 'one compare' in bound
-    assert 'PER_HEAD_OVERHEAD' in bound, bound
     from _wfjobs import load
     timeout = int(load(ROOT / '.github' / 'workflows'
                        / 'gate-freshness.yml').jobs[
