@@ -1,3 +1,4 @@
+(async () => {
 // Discord scraper — runs inside an open Discord tab via Daedalus put.
 // Action dispatched via window.__SCRAPE_ARGS set in a wrapper script
 // (since put cannot pass args). Default action: scroll-back from current
@@ -95,4 +96,5 @@ if (action === "scroll-back") {
 } else {
   result = { error: "unknown action " + action };
 }
-result;
+return result;
+})();

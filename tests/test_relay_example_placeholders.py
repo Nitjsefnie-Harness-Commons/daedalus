@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""The HLS relay example's placeholders survive the substitution they ask for.
+"""Drive substituted HLS examples through the shipped MAIN-world evaluator.
 
-The example's contract is textual: every `__NAME__` is replaced throughout
-the file before `daedalus put` sends it. A sentinel spelled as the
-placeholder itself is rewritten by that same replacement, so a script
-handed a real sig would compare the sig with itself and mint anyway. These
-run the substituted text directly in a VM against a stubbed `window.GM`,
-read the script's completion value, and record which branch ran.
-
-The `GM.xmlhttpRequest` stub answers the playlist read and leaves the segment
-read unresolved, so the run reads the status, learns nothing from it, and
-parks on the first segment it tries to relay — the recording the plan below
-is taken from.
+The GM stub answers the playlist and parks on a segment. The fetch gate
+records the refused status read without talking to a browser or bridge.
 """
 import sys
 from pathlib import Path
@@ -32,27 +23,17 @@ FIXED = {
     '__JOB__': 'relay_job-1',
     '__PLAYLIST__': 'https://media.example.com/live/index.m3u8',
 }
-# The recording, from a run of the substituted example on the pre-change tree
-# (a temporary recorder, no tracked file changed): with the segment read
-# unresolved, the substituted text makes exactly one fetch — the job's
-# status read, which the scenario answers 500 so the run has nothing to skip
-# — and then relays its first segment through the unresolved read. The
-# status is declared as refused-not-ok on purpose: "the relay is not wired"
-# is a claim about the status answer, not a blanket fallback for every
-# route.
 STATUS = 'GET /segment-status?job=relay_job-1'
 
 _HARNESS = r"""
 const vm = require('vm');
+const fs = require('fs');
 
 const planArg = process.argv[process.argv.length - 1];
 const plan = typeof planArg === 'string'
   ? JSON.parse(planArg) : planArg;
 const calls = [];
 
-// The example's own SERVER constant is the bridge origin the gate permits,
-// so its status and segment reads key on the same route the real bridge
-// would see.
 const BRIDGE_URL = 'https://bridge.example.com';
 const streamFetches = [];
 const resultPosts = [];
@@ -64,6 +45,7 @@ const badOrigins = [];
 """ + STRICT_FETCH + r"""
 
 const context = {
+  performance,
   window: { GM: {
     segmentJob: async (job) => {
       calls.push(['segmentJob', job]);
@@ -81,10 +63,6 @@ const context = {
     createElement: () => ({ style: {} }),
     body: { appendChild() {} },
   },
-  // A thin wrapper that DELEGATES to the gate: the answer, the accounting,
-  // the refusal and the record are the gate's. The wrapper only keeps the
-  // suite's own `['fetch', url, headers]` projection, which the sig tests
-  // read to see which capability header the example sent.
   fetch: async (url, init) => {
     calls.push(['fetch', url, (init && init.headers) || {}]);
     return bridgeFetch(url, init);
@@ -94,11 +72,13 @@ const context = {
   encodeURIComponent,
   URL,
 };
-// vm-load-exempt: runs placeholder-substituted example text, not a file
-const started = vm.runInNewContext(
-  plan.source, context);
+const evaluator = require('path').resolve('extension/worker/evaluate.js');
+vm.runInNewContext(fs.readFileSync(evaluator, 'utf8'), context,
+  { filename: evaluator });
 (async () => {
-  const returned = await started;
+  const result = await context._executeMainWorldEval(plan.source);
+  if (result.e) throw new Error(result.e);
+  const returned = result.r === undefined ? '<undefined>' : result.r;
   for (let turn = 0; turn < 20; turn++) await Promise.resolve();
   process.stdout.write(JSON.stringify({
     returned, calls,
@@ -171,10 +151,10 @@ def test_a_substituted_sig_is_used_as_given_and_never_minted(tmp):
 
 def test_concurrency_defaults_when_unsubstituted_and_reads_a_value(tmp):
     del tmp
-    assert _run(_substitute())['returned'] == (
-        'relay started: job=relay_job-1 concurrency=3')
-    assert _run(_substitute(__CONC__='4'))['returned'] == (
-        'relay started: job=relay_job-1 concurrency=4')
+    default = _run(_substitute())['returned']
+    assert default == 'relay started: job=relay_job-1 concurrency=3', default
+    selected = _run(_substitute(__CONC__='4'))['returned']
+    assert selected == 'relay started: job=relay_job-1 concurrency=4', selected
 
 
 if __name__ == '__main__':

@@ -1,3 +1,4 @@
+(async () => {
 // HLS segment relay — a worked example of the /segment + /segment-status API.
 //
 // Run it in a page with `daedalus put` (or the MCP `put` tool). It reads a
@@ -195,4 +196,5 @@ async function run() {
 }
 
 run();
-`relay started: job=${JOB} concurrency=${CONCURRENCY}`;
+return `relay started: job=${JOB} concurrency=${CONCURRENCY}`;
+})();
