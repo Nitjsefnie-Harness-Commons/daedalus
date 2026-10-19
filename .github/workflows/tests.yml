@@ -16,11 +16,12 @@ on:
     # request open is not a tree anyone is reviewing.
     branches: [main]
     # Ratchet commits change only this data; audit still gates those pushes.
-    # The journey budget's counts join them: a tighten commit changes one
-    # JSON file, and the ratchet that wrote it already ran.
+    # The journey budget's counts and comment-share records join them: a
+    # tighten commit changes one JSON file, and its ratchet already ran.
     paths-ignore:
       - '.github/ci-thresholds.json'
       - '.github/journey-budget.json'
+      - '.github/comment-share.json'
     # release.yml needs a run on the tagged SHA; audit remains unfiltered.
     #
     # Documentation-only runs are narrowed inside the workflow instead, by
