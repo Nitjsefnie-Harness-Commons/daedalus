@@ -980,8 +980,8 @@
     4876
   ],
   "tests/_wfpins.py": [
-    9680,
-    21112
+    7390,
+    19492
   ],
   "tests/_wfskip.py": [
     369,
@@ -1104,8 +1104,8 @@
     16778
   ],
   "tests/test_ci_workflows.py": [
-    4805,
-    22395
+    4799,
+    22739
   ],
   "tests/test_claim_workflow.py": [
     708,
@@ -1396,8 +1396,8 @@
     17026
   ],
   "tests/test_install_lint_tools.py": [
-    7735,
-    22136
+    7564,
+    22378
   ],
   "tests/test_journey_baseline.py": [
     7860,
