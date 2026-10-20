@@ -58,7 +58,7 @@ def test_ratchet_commit_blocks_old_heads_until_they_rebase(tmp):
     m = _mod()
     for ratcheted in RATCHETED:
         read, stale_published = _reader(ratcheted, stale=True)
-        enumerated = m.enumerate_gates(read, 'o/r')
+        enumerated = m.enumerate_gates(read, 'o/r', G1)
         assert (ratcheted, RATCHET) in enumerated, enumerated
         code, verdicts = m.process(read, 'o/r', _heads(m), enumerated, RUN, G1)
         assert code == 0, 'a stale head is a verdict, not a script failure'

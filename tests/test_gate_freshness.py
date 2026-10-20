@@ -37,10 +37,6 @@ def _head(number=7, sha=HEAD, owner='octo', ref='feature', base='main'):
             'base': base}
 
 
-def _gate(path, sha):
-    return (path, sha)
-
-
 def test_the_set_is_exactly_the_documented_patterns(tmp):
     m = _mod()
     assert tuple(m.GATE_PATTERNS) == (
@@ -194,7 +190,7 @@ def test_the_merge_base_tells_ancestor_from_not(tmp):
 
 def test_status_is_not_load_bearing_the_merge_base_is(tmp):
     m = _mod()
-    gates = [_gate('.pylintrc', G1)]
+    gates = [('.pylintrc', G1)]
     ahead = m.head_verdict(
         lambda _a: _encode(_compare_ok('d' * 40, 'ahead')), 'o/r', _head(),
         gates)
@@ -234,7 +230,7 @@ def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
 
     def read(_argv):
         raise m.QueryError('HTTP 404')
-    verdict = m.head_verdict(read, 'o/r', _head(), [_gate('.pylintrc', G1)])
+    verdict = m.head_verdict(read, 'o/r', _head(), [('.pylintrc', G1)])
     assert verdict.conclusion == 'failure'
     assert verdict.kind == 'unreadable'
     text = verdict.title + ' ' + verdict.summary
@@ -269,15 +265,14 @@ def test_enumerate_gates_reads_one_commit_for_every_pattern(tmp):
     for live_shaped in (False, True):
         asked = []
         gates = m.enumerate_gates(
-            _commits_read(m, asked=asked, live_shaped=live_shaped), 'o/r')
+            _commits_read(m, asked=asked, live_shaped=live_shaped), 'o/r', G1)
         assert len(gates) == len(m.GATE_PATTERNS)
         assert len(asked) == len(m.GATE_PATTERNS)
 
 
 def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
-    m = _mod()
-    asked = []
-    m.enumerate_gates(_commits_read(m, asked=asked), 'o/r')
+    m, asked = _mod(), []
+    m.enumerate_gates(_commits_read(m, asked=asked), 'o/r', G1)
     assert asked, 'no gate path was looked up'
     for request in asked:
         assert '*' not in request, request
@@ -295,7 +290,7 @@ def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
     m = _mod()
     read = _commits_read(m, commits={'eslint.config.js': []})
     try:
-        m.enumerate_gates(read, 'o/r')
+        m.enumerate_gates(read, 'o/r', G1)
     except m.QueryError as error:
         assert 'eslint.config.js' in str(error), str(error)
         assert 'no commit' in str(error), str(error)
@@ -307,7 +302,7 @@ def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
     m = _mod()
     for bad in (42, {'error': 'rate limited'}, '"a string"'):
         try:
-            m.enumerate_gates(_encoded_read(bad), 'o/r')
+            m.enumerate_gates(_encoded_read(bad), 'o/r', G1)
         except m.QueryError as error:
             assert 'list' in str(error), str(error)
             continue
@@ -328,7 +323,7 @@ def _multi_gate_read(missing_at, asked=None):
 
 def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
     m = _mod()
-    gates = [_gate('a', G1), _gate('b', G2)]
+    gates = [('a', G1), ('b', G2)]
     verdict = m.head_verdict(_multi_gate_read(None), 'o/r', _head(), gates)
     assert verdict.conclusion == 'success'
     assert verdict.kind == 'fresh'
@@ -338,8 +333,8 @@ def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
 def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
     m = _mod()
     for gates, missing, absent in (
-            ([_gate('path-a', G1), _gate('path-b', G2)], G2, 'path-a'),
-            ([_gate('older', G1), _gate('newer', G2)], G1, 'newer')):
+            ([('path-a', G1), ('path-b', G2)], G2, 'path-a'),
+            ([('older', G1), ('newer', G2)], G1, 'newer')):
         verdict = m.head_verdict(
             _multi_gate_read(missing), 'o/r', _head(), gates)
         assert verdict.conclusion == 'failure'
@@ -350,16 +345,15 @@ def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
 
 
 def test_every_gate_is_compared_not_short_circuited(tmp):
-    m = _mod()
-    asked = []
-    gates = [_gate('a', G1), _gate('b', G2), _gate('c', 'd' * 40)]
+    m, asked = _mod(), []
+    gates = [('a', G1), ('b', G2), ('c', 'd' * 40)]
     m.head_verdict(_multi_gate_read(G2, asked), 'o/r', _head(), gates)
     assert asked == [G1, G2, 'd' * 40], asked
 
 
 def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
     m = _mod()
-    gates = [_gate('a', G1), _gate('b', G2)]
+    gates = [('a', G1), ('b', G2)]
 
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
@@ -446,6 +440,19 @@ def test_newest_carries_the_verdict_and_retires_completed_checks(tmp):
                         if field.startswith(('name=', 'conclusion='))))
                 assert [(i, c['conclusion']) for i, c in state.items()
                         if c['name'] == m.NAME] == [(100, 'success')]
+
+
+def test_runner_ownership_beats_a_newer_legacy_id(tmp):
+    m, recorded = _mod(), []
+    m.publish(_publish_read([(9, 'completed', 'runner-uuid'),
+                             (100, 'completed', m.EXTERNAL_ID)], recorded),
+              'o/r', HEAD, 'success', 't', 's', RUN, G1)
+    assert [(method, target.rsplit('/', 1)[-1])
+            for method, target, _ in recorded] == [('PATCH', '9'),
+                                                   ('PATCH', '100')]
+    assert 'conclusion=success' in recorded[0][2]
+    assert recorded[1][2][recorded[1][2].index('-X') + 2:] == [
+        '-f', 'name=superseded gate freshness']
 
 
 def test_a_live_job_is_left_to_the_runner_while_legacy_checks_are_retired(tmp):

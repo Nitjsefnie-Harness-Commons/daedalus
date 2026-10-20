@@ -7,35 +7,51 @@ including the ratcheted threshold and journey counts. Tests change the tree,
 not the gate definition. Directory patterns use literal prefixes; config files
 read by tool discovery are explicitly listed because workflow scans miss them.
 
-For every gate path, enumerate its latest main commit, then read main's head
-once. Compare each gate commit to each PR head: its 40-hex merge base must be
-the gate itself. Revalidate the PR head before comparing and before writing.
-A readable moved head is skipped; unreadable identity or comparison fails.
-Global read/budget failures publish nothing; per-head failures preserve work
-for other heads and fail the run. A dry run computes without publishing.
+Read main's head once FIRST, then enumerate each gate path at that immutable
+snapshot. Compare each gate commit to each PR head: its 40 lowercase hex merge
+base must be the gate itself. Every enumerated commit is checked for misses;
+short-circuiting at the first miss would be an optimisation, not the proof.
+A compare that cannot be read is not evidence of freshness: publish that head
+RED. Only a head predating a new gate must rebase. Ratchet counts are computed
+by the gates; a head predating their recording commit must rebase to be checked
+against the new limits. Revalidate before comparing and before writing.
+A readable moved head is skipped WITHOUT failing the run: its new head gets
+its own pull_request_target event. Global read/budget failures publish nothing
+and exit nonzero. Per-head failures write RED where possible, skip loudly if
+unable to publish, and never abandon siblings. Only orchestration read/write
+failures fail the run on push; the event PR job also fails for a RED verdict.
+A dry run computes without publishing.
+
+REACH LIMIT. Tool discovery never names pyrightconfig.json,
+pyrightconfig.tests.json, setup.cfg, eslint.config.js or pyproject.toml, so
+these five files are hand-held in GATE_PATTERNS. Workflow scans also miss a
+`python3 -m module` invocation.
 
 THE CHECK CARRIER. GitHub chooses suites from repository and SHA. API-created
-checks were observed in the oldest app suite; callers cannot move them when
-it is superseded. A job check belongs to its run's suite, so the job carries
-the context. Select the newest check, PATCH only if completed, otherwise leave
-it to its runner. Retire completed non-carriers, including after a skipped
-verdict write. Without a carrier, POST may still land in a superseded suite.
+checks were observed in the oldest app suite; callers cannot choose it.
+Superseded suites' checks are invisible to the ruleset. A job check belongs to
+its own run's suite, newest for this workflow; the event job's exit code
+decides its own PR. Prefer the newest runner-owned check over API fallbacks,
+PATCH only if completed, otherwise leave it to its runner. Retire completed
+non-carriers, including after a skipped verdict write. Without a job check,
+a POST fallback may still land in a superseded suite.
 
 ORDERING. A writer never replaces a verdict it has observed to rest on a main
-its own snapshot does not contain. Every verdict summary ends with main's SHA;
-unmarked failures are not turned success without ordering evidence. This is
+its own snapshot does not contain. Script-written verdict summaries end with
+main's SHA; the event job's runner-written summary is not stamped here.
+Unmarked failures are not turned success without ordering evidence. This is
 not atomic: two invocations reading the carrier before either writes can still
 race, and an older snapshot can win. The window is one ordering compare wide,
 not a whole run; an older red can still replace a newer green, blocking the
 head until its next event. No retry or repair follows a write.
 
-THE BOUND. Estimate L + 1 + H * (G + 5): L gate-path lookups and one main-head
-read, then G compares, two revalidations, one listing, one write and a
-conditional ordering compare per head. Extra completed ids cost retirement
-PATCHes; pagination counts as one logical read. Neither ids nor pages are
-bounded by the estimate. At 1.5 s/call, 1200 calls take 30 minutes; the
-35-minute timeout provides residual slack under that assumption. An
-oversized estimate refuses without truncating the head set.
+THE BOUND. Estimate L + 2 + H * (G + 5): L gate-path lookups, one main-head
+read and one open-PR listing (unused on the event route), then G compares, two
+revalidations, one listing, one write and a conditional ordering compare per
+head. Extra completed ids cost retirement PATCHes; pagination counts as one
+logical read. Neither ids nor pages are bounded by the estimate. At 1.5 s/call,
+1200 calls take 30 minutes; the 35-minute timeout provides residual slack under
+that assumption. An oversized estimate refuses without truncating the head set.
 """
 import json
 import os
@@ -135,12 +151,12 @@ def _gate_error(pattern, cause):
     return QueryError(f'the gate commit lookup for {pattern!r} {cause}')
 
 
-def enumerate_gates(read, repository):
-    """The newest commit on `main` touching each gate path, as (path, sha)."""
+def enumerate_gates(read, repository, main_sha):
+    """Newest commit at the snapshot for each path, as (path, sha)."""
     gates = []
     for pattern in GATE_PATTERNS:
         request = _request_path(pattern)
-        target = (f'repos/{repository}/commits?sha={BASE_BRANCH}&per_page=1'
+        target = (f'repos/{repository}/commits?sha={main_sha}&per_page=1'
                   f'&path={quote(request, safe="/.*")}')
         try:
             payload = _one(read, _api(target))
@@ -233,7 +249,10 @@ def main_head(read, repository):
 
 
 def _existing_checks(read, repository, head_sha):
-    """Read projected JSON check records, refusing malformed rows."""
+    """Require each JSON line to be an object with int id and string status.
+
+    Other metadata is unchecked; absent/ill-typed summary means no marker.
+    """
     listing = _api(
         f'repos/{repository}/commits/{head_sha}/check-runs'
         '?filter=all&per_page=100', '--method', 'GET', '--paginate',
@@ -277,7 +296,7 @@ def _may_replace(read, repository, carrier, main_sha, conclusion):
 
 def publish(read, repository, head_sha, conclusion, title, summary,
             details_url, main_sha):
-    """Write onto the newest check; leave an unfinished one to its runner.
+    """Prefer the newest job check; leave an unfinished one to its runner.
 
     Never replace a verdict observed to rest on a main ours does not contain.
     Two reads before either write can still race: an older red or green may
@@ -296,7 +315,9 @@ def publish(read, repository, head_sha, conclusion, title, summary,
         '-f', f'output[summary]={summary}\nmain {main_sha}',
     ]
     # Only POST sets external_id; PATCH preserves the runner UUID.
-    carrier = max(checks, key=lambda check: check['id']) if checks else None
+    # Ownership, not id, says which check the ruleset counts.
+    preferred = [c for c in checks if c.get('external_id') != EXTERNAL_ID]
+    carrier = max(preferred or checks, key=lambda c: c['id'], default=None)
     if carrier is None:
         read(_api(f'repos/{repository}/check-runs', '-X', 'POST',
                   '-f', f'head_sha={head_sha}', *fields,
@@ -334,7 +355,7 @@ def select_heads(pulls):
 
 
 def required_calls(head_count, gate_count):
-    return len(GATE_PATTERNS) + 1 + head_count * (
+    return len(GATE_PATTERNS) + 2 + head_count * (
         PER_HEAD_OVERHEAD + gate_count)
 
 
@@ -454,8 +475,8 @@ def main(argv=None, read=None):
             return 1
         heads = select_heads(pulls)
     try:
-        gates = enumerate_gates(read, repository)
         main_sha = main_head(read, repository)
+        gates = enumerate_gates(read, repository, main_sha)
     except QueryError as error:
         print(f'gate freshness: {error}; publishing nothing', file=sys.stderr)
         return 1
