@@ -36,11 +36,11 @@ the `tests` matrix - the workflow that gates the merge - has no run at all.
 Two unrelated short workflows conclude, the tool says acceptable and exits
 0, and every session that reads that exit code reads a false green.
 
-A gate is not always a run, and the same false green has the other shape
-(issue 1360). The `gate freshness` workflow's own run concludes `success` on
-every head, red verdict or not, because publishing that verdict is the run's
-job: `scripts/ci/gate_freshness.py` writes a CHECK RUN of its own onto the
-head, and the rulesets read the check. So this tool read the publisher,
+Read the `gate freshness` check as verdict and its run as container: a push
+to `main` PATCHes other heads' newest completed check, leaving their run
+conclusions unchanged; the event's pull-request run tracks its verdict, but a
+run-only read can certify a head whose gate is red (issue 1360).
+So this tool read the publisher,
 missed the gate, and certified `8ddfec21` - seven green runs and a
 `gate freshness` check that concluded FAILURE. Both are now read, off ONE
 query, and a red verdict is exit 1 like any other conclusion.
@@ -102,7 +102,7 @@ names every run either filter dropped, with its workflow, its run id, its
 conclusion and its URL, and its count is the number of lines printed.
 Both filters are `ci_gate`'s, so a dropped run's name cannot satisfy the
 gate and no reader of it can answer differently (issue #1262). Neither is
-applied to a check run: a publisher PATCHes the one it POSTed.
+applied to a check run: the publisher PATCHes the newest carrier.
 
 This file is AT the 500 ceiling, the room made by cutting prose, which
 cannot be repeated. There is NO SEAM in it - one tool, one contract - so

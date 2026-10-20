@@ -434,16 +434,13 @@ the conclusion is judged before the set is, and so is a present-but-red
 `gate freshness` check - which is why a red check outranks exit 4 even on a
 head whose `tests` run is also absent.
 
-**A PUBLISHED CHECK-RUN is a gate that is not a workflow run, and this
-repository has one** (issue #1360). The `gate freshness` workflow's own run
-concludes `success` on every head, red verdict or not, because publishing
-that verdict is the run's job: `scripts/ci/gate_freshness.py` writes a check
-run of its own through the Checks API onto each open pull-request head, and
-the rulesets read THAT. So a waiter reading only runs reads the publisher
-and misses the gate - head `8ddfec21f32d484657e7ebc56c46a1b395670ca9`
-carried seven green runs and a `gate freshness` check that concluded
-FAILURE, and the tool exited 0. The run is the publisher, the check is the
-gate, and only the second is read by the rulesets.
+**Read the published check as the verdict and its workflow run as the
+container** (issue #1360): a push to `main` PATCHes other heads' newest
+completed `gate freshness` check without changing their run conclusions.
+The event's own pull-request run tracks its verdict, but a waiter reading
+only runs can still certify a head whose gate is red - head
+`8ddfec21f32d484657e7ebc56c46a1b395670ca9` carried seven green runs and a
+`gate freshness` check that concluded FAILURE, and the tool exited 0.
 
 **The predicate for both kinds of gate is `ci_gate.py`'s, and so is the
 direction rule that says which of them an invocation is held to** - the
