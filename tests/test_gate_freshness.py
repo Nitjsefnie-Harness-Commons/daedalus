@@ -393,7 +393,8 @@ def _publish_read(checks, recorded, fail=None, requests=None,
         allowed = {('POST', 'repos/o/r/check-runs')} | {
             ('PATCH', f'repos/o/r/check-runs/{c["id"]}') for c in checks}
         assert (method, target) in allowed, (method, target)
-        recorded.append((method, target, list(argv)))
+        normalized = ['--method' if arg == '-X' else arg for arg in argv]
+        recorded.append((method, target, normalized))
         if fail in (method, target):
             raise error('write unavailable')
         return '{}'
@@ -408,7 +409,7 @@ def test_a_completed_carrier_is_patched_without_rewriting_its_external_id(tmp):
     assert len(recorded) == 1
     method, target, argv = recorded[0]
     assert (method, target) == ('PATCH', 'repos/o/r/check-runs/4242')
-    assert argv[argv.index('-X') + 2:] == [
+    assert argv[argv.index('PATCH') + 1:] == [
         '-f', 'name=gate freshness', '-f', 'status=completed',
         '-f', 'conclusion=failure', '-f', f'details_url={RUN}',
         '-f', 'output[title]=t', '-f', f'output[summary]=s\nmore\nmain {G1}']
@@ -429,7 +430,7 @@ def test_newest_carries_the_verdict_and_retires_completed_checks(tmp):
             assert len(recorded) == (2 if status == 'completed' else 1)
             if status == 'completed':
                 assert recorded[1][:2] == ('PATCH', 'repos/o/r/check-runs/9')
-                assert recorded[1][2][recorded[1][2].index('-X') + 2:] == [
+                assert recorded[1][2][recorded[1][2].index('PATCH') + 1:] == [
                     '-f', 'name=superseded gate freshness']
                 state = {c['id']: {'name': m.NAME,
                                    'conclusion': c['conclusion']}
@@ -451,7 +452,7 @@ def test_runner_ownership_beats_a_newer_legacy_id(tmp):
             for method, target, _ in recorded] == [('PATCH', '9'),
                                                    ('PATCH', '100')]
     assert 'conclusion=success' in recorded[0][2]
-    assert recorded[1][2][recorded[1][2].index('-X') + 2:] == [
+    assert recorded[1][2][recorded[1][2].index('PATCH') + 1:] == [
         '-f', 'name=superseded gate freshness']
 
 
@@ -466,7 +467,7 @@ def test_a_live_job_is_left_to_the_runner_while_legacy_checks_are_retired(tmp):
             assert len(recorded) == len(legacy)
             if legacy:
                 assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/8')
-                assert recorded[0][2][recorded[0][2].index('-X') + 2:] == [
+                assert recorded[0][2][recorded[0][2].index('PATCH') + 1:] == [
                     '-f', 'name=superseded gate freshness']
 
 
