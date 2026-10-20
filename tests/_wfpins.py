@@ -350,6 +350,13 @@ _ESLINT_PINS = (
     ('GLOBALS_VERSION', 'globals'),
 )
 _EXACT_PIN = re.compile(r'\d+\.\d+\.\d+\Z')
+# PEP 440 version shape, including normalized spellings and local labels.
+EXACT_REQUIREMENT = re.compile(
+    r'([\w.-]+)==v?(?:[0-9]+!)?[0-9]+(?:\.[0-9]+)*'
+    r'(?:[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?'
+    r'(?:-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?'
+    r'(?:[-_.]?dev[-_.]?[0-9]*)?'
+    r'(?:\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?', re.IGNORECASE)
 
 
 def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
@@ -391,17 +398,9 @@ def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
 
 
 def _manifest_pins(manifest):
-    """Every pin in a hash-pinned manifest, as (name, hashes, welded, line).
-
-    A pin is the run of lines a trailing backslash joins, and its requirement
-    is named by the FIRST token of that run's own first line. Every token of
-    the run is scanned for the damage, not only those after the first: a
-    dropped continuation welds a second requirement onto a later token, and a
-    second `==` inside the first token welds one onto the name itself.
-    Either way it is reported as the structural damage it is rather than
-    folded into the first name: after the join the name no longer identifies
-    what is pinned, and the joined line's hashes are then counted against a
-    requirement that does not own them.
+    """Pins as (name, hashes, welded, line), with only hash options after
+    each exact requirement. A trailing backslash joins physical lines;
+    other continuation tokens are reported instead of borrowing its hashes.
     """
     pins, tokens, first = [], [], 0
     for number, line in enumerate(manifest.splitlines(), 1):
@@ -411,23 +410,22 @@ def _manifest_pins(manifest):
         if not tokens:
             first = number
         if stripped.endswith('\\'):
-            tokens.append(stripped[:-1].strip())
+            tokens.extend(stripped[:-1].split())
             continue
-        tokens.append(stripped)
+        tokens.extend(stripped.split())
         pins.append((tokens, first))
         tokens = []
     assert not tokens, (
         f'requirements-zizmor.txt:{first} ends in a continuation with no line '
         f'after it, so pip reads the last requirement as unterminated')
     for run, number in pins:
-        assert re.fullmatch(r'[\w.-]+==[^\s=<>!~*,;]+', run[0]), (
+        assert EXACT_REQUIREMENT.fullmatch(run[0]), (
             f'requirements-zizmor.txt:{number}: {run[0]!r} is not an exact '
             f'pin, so the hashes after it belong to no requirement')
     return [(run[0].split('==', 1)[0],
              [token for token in run
               if token.startswith('--hash=sha256:')],
-             [token for index, token in enumerate(run)
-              if token.count('==') > (1 if index == 0 else 0)],
+             [token for token in run[1:] if not token.startswith('--hash=')],
              number)
             for run, number in pins]
 
@@ -435,10 +433,8 @@ def _manifest_pins(manifest):
 def _canonical_name(name):
     """The requirement name the way pip resolves it.
 
-    `canonicalize_name` in `pip/_vendor/packaging/utils.py`, read in pip
-    26.2.1: lowercase the name, fold `_` and `.` onto `-`, then condense a
-    run of separators down to one. Spelled out here because this suite
-    imports no third-party package, and because the rule is three lines.
+    Pip's `canonicalize_name`: lowercase and collapse separator runs.
+    Spelled out because this suite imports no third-party package.
     """
     value = name.lower().replace('_', '-').replace('.', '-')
     while '--' in value:
@@ -487,10 +483,7 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     for name, hashes, welded, number in pins:
         assert not welded, (
             f'requirements-zizmor.txt:{number}: {name} carries {welded}, and '
-            f'a token holding more `==` than its position in the run allows '
-            f'is a second requirement welded onto this pin — so what the run '
-            f'pins is ambiguous, and every hash behind it is counted against '
-            f'{name}')
+            f'only --hash= options may follow an exact requirement')
         # Pip resolves spelling variants to one package, so a second
         # spelling must still be refused as a duplicate pin.
         canonical = _canonical_name(name)
@@ -503,10 +496,7 @@ def assert_the_zizmor_manifest_is_hash_pinned():
             f'line {seen[canonical]} is never read')
         assert hashes, f'{name} carries no sha256 hashes'
         for token in hashes:
-            # Compared the way pip compares it: `Hashes.__init__` lowercases
-            # every digest it is given, and the digest of the bytes is
-            # lowercase by construction, so a value differing only in case
-            # names the artifact the manifest already names.
+            # Pip lowercases supplied digests before comparison.
             digest = token.partition(':')[2].lower()
             assert digest not in listed, (
                 f'requirements-zizmor.txt:{number}: {token} is listed a '

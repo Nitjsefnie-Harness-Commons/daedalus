@@ -32,7 +32,7 @@ from _wffixtures import (  # noqa: E402
     _refuses, assert_the_audit_covers_every_dependency_surface,
     assert_the_audit_retry_is_narrow_and_ordered)
 from _wfpins import (  # noqa: E402
-    assert_ci_tool_pins_live_in_a_watched_manifest,
+    EXACT_REQUIREMENT, assert_ci_tool_pins_live_in_a_watched_manifest,
     assert_every_dependabot_group_family_covers_version_updates,
     assert_every_dependabot_group_has_a_security_mirror,
     assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate,
@@ -329,9 +329,15 @@ def test_the_release_manifest_pins_the_expected_tools(tmp):
         encoding='utf-8')
     lines = [line for line in manifest.splitlines()
              if line.strip() and not line.lstrip().startswith('#')]
-    pins = [re.fullmatch(r'([\w.-]+)==([^\s=<>!~*,;]+)', line)
-            for line in lines]
+    pins = [EXACT_REQUIREMENT.fullmatch(line) for line in lines]
     assert [pin and pin[1] for pin in pins] == ['build', 'twine'], lines
+    for values, accepted in (
+            (('1!1.2.0rc1', '1.0.post1', '1.0+local', '2025.1.0',
+              '0.11.0.1', '1.0.dev1'), True),
+            (('banana', '1.*', '1.0banana', '', '1.0+'), False)):
+        for value in values:
+            assert bool(EXACT_REQUIREMENT.fullmatch(f'build=={value}')) \
+                == accepted, value
 
 
 def test_every_dependabot_group_has_a_security_mirror(tmp):
