@@ -49,10 +49,14 @@ _ACTIONLINT = 'actionlint'
 # EXTENSION is added by the platform, never written here.
 ACTIONLINT_BINARY = 'actionlint'
 # A real wheel's name, so a version refusal can tell it from another.
-SHELLCHECK_VERSION, = re.findall(
-    r'^shellcheck-py==(.+)$',
-    (ROOT / 'requirements-test.txt').read_text(encoding='utf-8'),
-    re.MULTILINE)
+_SHELLCHECK_PINS = [line.split(';')[0].strip() for line in
+                    (ROOT / 'requirements-test.txt').read_text(
+                        encoding='utf-8').splitlines()
+                    if line.split(';')[0].strip().startswith(
+                        'shellcheck-py==')]
+assert len(_SHELLCHECK_PINS) == 1, (
+    f'expected one shellcheck-py pin; found {_SHELLCHECK_PINS!r}')
+SHELLCHECK_VERSION = _SHELLCHECK_PINS[0].split('==', 1)[1]
 DEFAULT_WHEEL = f'shellcheck_py-{SHELLCHECK_VERSION}-py3-none-any.whl'
 SCRIPTS = f'shellcheck_py-{SHELLCHECK_VERSION}.data/scripts'
 
