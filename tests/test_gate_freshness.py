@@ -413,7 +413,7 @@ def _publish_read(checks, recorded, fail=None, requests=None,
             ('PATCH', f'repos/o/r/check-runs/{i}') for i, _, _ in checks}
         assert (method, target) in allowed, (method, target)
         recorded.append((method, target, list(argv)))
-        if method == fail:
+        if fail in (method, target):
             raise error('write unavailable')
         return '{}'
     return read
@@ -433,21 +433,30 @@ def test_a_completed_carrier_is_patched_without_rewriting_its_external_id(tmp):
         '-f', 'output[title]=t', '-f', 'output[summary]=s']
 
 
-def test_newest_carries_the_verdict_and_only_legacy_is_retired(tmp):
+def test_newest_carries_the_verdict_and_retires_completed_checks(tmp):
     m = _mod()
-    for external in (m.EXTERNAL_ID, 'runner-uuid', None, 'other id'):
-        recorded = []
-        checks = [(100, 'completed', 'carrier-uuid'),
-                  (9, 'completed', external)]
-        m.publish(_publish_read(checks, recorded),
-                  'o/r', HEAD, 'success', 't', 's', RUN)
-        assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/100')
-        assert 'conclusion=success' in recorded[0][2]
-        assert len(recorded) == (2 if external == m.EXTERNAL_ID else 1)
-        if external == m.EXTERNAL_ID:
-            assert recorded[1][:2] == ('PATCH', 'repos/o/r/check-runs/9')
-            assert recorded[1][2][recorded[1][2].index('-X') + 2:] == [
-                '-f', 'name=superseded gate freshness']
+    for external in ('runner-uuid', m.EXTERNAL_ID, None, 'other id'):
+        for status in ('completed', 'in_progress', 'queued'):
+            recorded = []
+            checks = [(100, 'completed', 'carrier-uuid'),
+                      (9, status, external)]
+            m.publish(_publish_read(checks, recorded),
+                      'o/r', HEAD, 'success', 't', 's', RUN)
+            assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/100')
+            assert 'conclusion=success' in recorded[0][2]
+            assert len(recorded) == (2 if status == 'completed' else 1)
+            if status == 'completed':
+                assert recorded[1][:2] == ('PATCH', 'repos/o/r/check-runs/9')
+                assert recorded[1][2][recorded[1][2].index('-X') + 2:] == [
+                    '-f', 'name=superseded gate freshness']
+                state = {i: {'name': m.NAME, 'conclusion': 'failure'}
+                         for i in (100, 9)}
+                for _, target, argv in recorded:
+                    state[int(target.rsplit('/', 1)[-1])].update(dict(
+                        field.split('=', 1) for field in argv
+                        if field.startswith(('name=', 'conclusion='))))
+                assert [(i, c['conclusion']) for i, c in state.items()
+                        if c['name'] == m.NAME] == [(100, 'success')]
 
 
 def test_a_live_job_is_left_to_the_runner_while_legacy_checks_are_retired(tmp):
@@ -485,16 +494,21 @@ def test_listing_and_write_failures_raise_without_further_writes(tmp):
     for checks, fail, expected in (
             ([], 'GET', []), ([], 'POST', ['POST']),
             ([(9, 'completed', 'runner-uuid'),
-              (8, 'completed', m.EXTERNAL_ID)], 'PATCH', ['PATCH'])):
+              (8, 'completed', m.EXTERNAL_ID)], 'PATCH', ['PATCH']),
+            ([(100, 'completed', 'runner-uuid'),
+              (9, 'completed', m.EXTERNAL_ID),
+              (8, 'completed', m.EXTERNAL_ID)],
+             'repos/o/r/check-runs/9', ['PATCH', 'PATCH'])):
         recorded = []
         try:
             m.publish(_publish_read(checks, recorded, fail=fail,
                                     error=m.QueryError),
                       'o/r', HEAD, 'failure', 't', 's', RUN)
-        except m.QueryError as error:
+        except m.QueryError:
             assert [v for v, _, _ in recorded] == expected
-            if fail == 'GET':
-                assert str(error) == 'could not read the existing check runs'
+            if fail == 'repos/o/r/check-runs/9':
+                assert [t.rsplit('/', 1)[-1] for _, t, _ in recorded] == [
+                    '100', '9']
             continue
         raise AssertionError(f'a failed {fail} did not raise')
 
@@ -503,10 +517,26 @@ def test_listing_parses_paginated_lines_and_keeps_external_ids(tmp):
     m, requests = _mod(), []
     checks = [(9, 'completed', None), (100, 'in_progress', 'uuid with spaces')]
     read = _publish_read(checks, [], requests=requests,
-                         listing='invalid completed -\n9 completed -\n'
+                         listing='9 completed -\n'
                                  '100 in_progress uuid with spaces\n')
     assert m._existing_checks(read, 'o/r', HEAD) == checks
     assert all('Cache-Control: no-cache' in argv for argv in requests)
+
+
+def test_a_malformed_listing_refuses_before_any_write(tmp):
+    m = _mod()
+    for row in ('invalid completed -', '100', '100 completed',
+                '100  -', '100 completed ', '² completed uuid', ''):
+        for raw in (f'{row}\n', f'9 completed -\n{row}\n'):
+            recorded = []
+            try:
+                m.publish(_publish_read([(9, 'completed', None)], recorded,
+                                        listing=raw),
+                          'o/r', HEAD, 'success', 't', 's', RUN)
+            except m.QueryError:
+                assert recorded == []
+                continue
+            raise AssertionError(f'malformed listing accepted: {raw!r}')
 
 
 def test_publish_fake_refuses_unmodelled_listing_calls(tmp):

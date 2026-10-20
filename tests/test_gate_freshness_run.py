@@ -36,13 +36,7 @@ def _pr(number, sha=HEAD, base='main', owner='octo', ref='feature'):
 def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
                fail_listing_for=(), moved_to=None, unreadable=(),
                fails_from=None):
-    """The per-head flow. `moved` changes the head after the first read;
-    `fail_listing_for` names heads whose listing fails; `moved_to` is the
-    sha a pull request missing from `current` has moved to. A
-    `GET /pulls/<n>` raises QueryError, as a transient 502 would, for the
-    numbers in `unreadable` (so one head can fail beside a readable one) or
-    for every read from the `fails_from`-th onward (so a revalidation can
-    fail only at the second one)."""
+    """The per-head API, with movement and read-failure controls."""
     state = {'reads': 0}
 
     def read(argv):
@@ -87,9 +81,7 @@ def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
 # ---- main(): the two trigger routes ----
 
 def _main_env(tmp, event_name, event, monkey=None, moved=None):
-    """Run main() with GITHUB_* env and a fake gh_read; return (code,
-    calls). `moved` names a pull request whose revalidation reads back a
-    different sha than the enumeration saw."""
+    """Run main against the event and fake API; return code and calls."""
     m = _mod()
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
@@ -180,10 +172,19 @@ def test_event_job_conclusion_tracks_only_its_own_pr_verdict(tmp):
     assert code == 0 and published == []
 
 
+def test_event_head_identity_must_be_readable(tmp):
+    for sha in (None, '', 'z' * 40, 'A' * 40, 'a' * 39, 123):
+        pr = {'number': 7, 'head': {'sha': sha}, 'base': {'ref': 'main'}}
+        code, _calls, published = _main_env(
+            tmp, 'pull_request_target', {'pull_request': pr})
+        assert code == 1 and published == [], sha
+    code, _calls, published = _main_env(
+        tmp, 'pull_request_target', {'pull_request': _pr(7, base='release')})
+    assert code == 0 and published == []
+
+
 def test_the_pull_request_target_route_refuses_a_missing_event(tmp):
-    """A route that cannot establish WHICH pull request it is deciding fails
-    closed: a missing or unparseable event must not become "no heads" and exit
-    0 as "fresh"."""
+    """A missing event fails without publishing."""
     m = _mod()
     published = []
 
@@ -206,9 +207,7 @@ def _run_main(tmp, m, reader, event):
 
 
 def _run_main_event(tmp, m, reader, event_name, event):
-    """Run main() on `event_name`, capturing stderr. `m` is the caller's module
-    instance: the reader raises that instance's QueryError and main catches the
-    SAME class, so the two share it."""
+    """Run main with the caller's module and capture stderr."""
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
     os.environ.update({'GITHUB_EVENT_NAME': event_name,
@@ -236,9 +235,7 @@ def _only_fail(target_marker, m):
 
 
 def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
-    """A GLOBAL failure on the open-PR list publishes NOTHING and exits 1.
-    The fake fails ONLY this read, so the gate-lookup branch does NOT fire; the
-    stderr line is asserted so a DIFFERENT global failure cannot satisfy it."""
+    """A failed open-PR read is a global failure."""
     m = _mod()
     code, err = _run_main(tmp, m, _only_fail('/pulls?state=open', m), {})
     assert code == 1, code
@@ -246,9 +243,7 @@ def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
 
 
 def test_a_non_list_open_pull_request_payload_publishes_nothing_and_fails(tmp):
-    """A non-list `/pulls` answer at HTTP 200 is a GLOBAL failure, not
-    "none": an error OBJECT at status 200 is a successful read whose payload is
-    malformed, distinct from the QueryError limb."""
+    """A malformed open-PR answer is a global failure."""
     m = _mod()
     published = []
 
@@ -267,9 +262,7 @@ def test_a_non_list_open_pull_request_payload_publishes_nothing_and_fails(tmp):
 
 
 def test_an_unreadable_gate_lookup_publishes_nothing_and_fails(tmp):
-    """A GLOBAL failure on the gate lookup publishes NOTHING and exits 1.
-    The fake SUCCEEDS on the open-PR list and fails only the gate lookup, so
-    this entry is satisfied by the gate branch alone."""
+    """A failed gate lookup is a global failure."""
     m = _mod()
     published = []
 
@@ -330,8 +323,8 @@ _MOVED = 'gate freshness: head of pull request 7 moved; skipping'
 
 
 def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
-    cases = (({'.pylintrc': [G1]}, {}, {'moved_to': 'z' * 40}),
-             ({}, {7: HEAD}, {'moved': 'm' * 40}))
+    cases = (({'.pylintrc': [G1]}, {}, {'moved_to': 'd' * 40}),
+             ({}, {7: HEAD}, {'moved': 'e' * 40}))
     for gates, current, flow in cases:
         m = _mod()
         published = []
@@ -345,9 +338,7 @@ def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
 
 
 def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
-    """A revalidation that could not be READ is not evidence the head moved:
-    the run learned nothing about this head, so it exits nonzero and says it
-    could not read, rather than reporting a clean skip."""
+    """Unreadable revalidations fail rather than claiming movement."""
     for flow in ({'unreadable': (7,)}, {'fails_from': 2}):
         m = _mod()
         published = []
@@ -361,6 +352,28 @@ def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
         assert code == 1, 'an unreadable revalidation must fail the run'
         assert _MOVED not in err, 'an unreadable read was reported as a move'
         assert 'could not read' in err and 'pull request 7' in err, err
+
+
+def test_an_unreadable_sha_fails_either_revalidation(tmp):
+    m, calls = _mod(), []
+    for payload in ({}, {'head': {}}, {'head': {'sha': None}},
+                    {'head': {'sha': 'z' * 40}}, {'head': {'sha': 'a' * 39}}):
+        for invalid_at in (1, 2):
+            published = []
+            calls.clear()
+            base = _flow_read(m, {}, {7: HEAD}, published)
+
+            def read(argv, invalid_at=invalid_at,
+                     payload=_encode(payload), base=base):
+                if re.search(r'/pulls/\d+$', ' '.join(argv)):
+                    calls.append(argv)
+                    if len(calls) == invalid_at:
+                        return payload
+                return base(argv)
+            code, verdicts, err = _process_capturing_stderr(
+                m, read, m.select_heads([_pr(7)]))
+            assert code == 1 and verdicts == [] and published == []
+            assert _MOVED not in err and 'could not read' in err
 
 
 def test_a_healthy_sibling_still_publishes_beside_an_unreadable_head(tmp):
@@ -381,10 +394,7 @@ def test_a_healthy_sibling_still_publishes_beside_an_unreadable_head(tmp):
 
 
 def _writing_read(m, published, current, **flow):
-    """A `_flow_read` whose recorded writes carry the head sha each was
-    written onto, so a test can say which head was written. `m` is the
-    caller's module instance, as `_only_fail` also takes it: the reader
-    raises that instance's QueryError and process catches the same class."""
+    """Record which head each real publication writes onto."""
     base = _flow_read(m, {'.pylintrc': [G1]}, current, published, **flow)
 
     def read(argv):
@@ -433,7 +443,7 @@ def test_a_head_is_revalidated_before_the_decision(tmp):
     published = []
     asked = []
     base = _flow_read(m, {'.pylintrc': [G1]}, {}, published,
-                      moved_to='z' * 40)
+                      moved_to='d' * 40)
 
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
@@ -569,8 +579,6 @@ def _workflow_text():
 def test_the_job_carries_the_required_check_context(tmp):
     from _wfjobs import load
     m = _mod()
-    text = _workflow_text()
-    assert '    name: gate freshness' in text
     assert load(ROOT / '.github' / 'workflows' / 'gate-freshness.yml').jobs[
         'publish-freshness']['name'] == m.NAME == 'gate freshness'
 
@@ -587,6 +595,9 @@ def test_workflow_declares_both_triggers(tmp):
     triggers = _workflow_triggers(_workflow_text(), 'gate-freshness.yml')
     assert 'push' in triggers
     assert 'pull_request_target' in triggers
+    from _yamlsteps import workflow_mapping
+    assert workflow_mapping(_workflow_text())['on'][
+        'pull_request_target'].get('branches') == ['main']
     assert 'branches' in _event_option_keys(triggers['push'], 'g')
     assert 'main' in ' '.join(triggers['push'])
     assert 'types' in _event_option_keys(triggers['pull_request_target'], 'g')

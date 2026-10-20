@@ -49,7 +49,7 @@ A PUBLISHED CHECK-RUN is the verdict; a workflow run is its container.
 The `gate freshness` job carries that context in its own run's check suite,
 and on pull_request_target the script's exit code makes the job fail when
 that head's verdict is not success. A push to main re-decides other heads
-by PATCHing their newest completed check, so their check verdict can change
+by PATCHing their newest check only if completed, so its verdict can change
 without their workflow run's conclusion changing. The rulesets read the
 check, and a waiter reading only runs can still certify a red gate (issue
 #1360). Both the run and the check must therefore be read.

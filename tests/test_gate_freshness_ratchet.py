@@ -10,7 +10,7 @@ Nothing here asserts the spelling of `GATE_PATTERNS` — that is the decision
 core's control. This drives the module's own enumeration and per-head flow
 and reads the verdict each produces, so what is proved is that a ratchet
 commit on main turns an older head red and leaves a head that carries it
-green. Its stand-in for `gh` answers only the four endpoints that flow
+green. Its stand-in for `gh` answers only the endpoints that flow
 reads, rather than the run suite's fuller one, because this control reaches
 no other one.
 """
@@ -63,6 +63,10 @@ def _reader(ratcheted, stale):
                             'merge_base_commit': {'sha': gate}})
         if target.rsplit('/', 1)[1].isdigit():
             return _encode({'head': {'sha': HEAD}})
+        if '/check-runs?' in target:
+            assert '--method' in argv and 'GET' in argv
+            return ''
+        assert target == 'repos/o/r/check-runs' and 'POST' in argv
         published.append(target)
         return '{}'
     return read, published
