@@ -1,35 +1,31 @@
 name: gate freshness
 
-# Publish a `gate freshness` verdict on every open pull request head based on
-# `main`, so only branches that PREDATE A NEW GATE are forced to rebase. The
-# decision, the gate-defining path set, and the bound all live in
-# scripts/ci/gate_freshness.py; its module docstring is the contract.
+# Publish freshness for open heads based on main: only heads predating a new
+# gate must rebase. scripts/ci/gate_freshness.py owns the decision, path set
+# and bound; its module docstring is the contract.
 #
-# WHY THE JOB CARRIES THE CONTEXT. Its check run is created in this run's
-# own suite, the newest suite of this workflow on the head, which the ruleset
-# counts. API-created checks were observed in the app's oldest suite, which
-# is invisible once superseded (issue #1655); callers cannot choose it.
+# JOB CONTEXT. A job check lands in this run's own suite, newest for this
+# workflow on the head, which the ruleset counts. API-created checks were
+# observed in the app's oldest suite, invisible once superseded (issue #1655);
+# callers cannot choose that suite.
 #
-# WHY THE SCRIPT PUBLISHES. On a push to `main` this job's check lands
-# on `main`, where no ruleset reads it. The script re-decides every open head
-# and prefers each head's newest job check over API fallbacks. It PATCHes only
-# when that carrier is completed, leaving an unfinished carrier to its runner.
+# SCRIPT PUBLICATION. On a push to main the job check lands on main, where no
+# ruleset reads it. The script re-decides other open heads, preferring their
+# newest job check over API fallbacks. It PATCHes only a completed carrier;
+# an unfinished carrier stays with its runner.
 #
-# WHY `pull_request_target` IS SAFE HERE. On this trigger BOTH halves come from
-# the BASE: the workflow text and the `actions/checkout` copy are the trusted
-# base branch, and the only head data used is the SHA/ref/owner from the event
-# payload -- the script never checks out, imports, or executes anything from
-# the pull request. That is the whole safety argument. (A `pull_request` run
-# would take its workflow text from the merge ref while running a script from
-# the branch SHA, and the two can disagree.)
+# BASE SAFETY. pull_request_target takes BOTH the workflow and checkout from
+# the trusted base. Only SHA/ref/owner come from the event; no PR content is
+# checked out, imported or executed. pull_request would take workflow text
+# from the merge ref and script from the branch SHA, which may disagree.
 #
-# THE BOUND: gate-path lookups + snapshot + open-PR listing
-# + PRs x (gate compares + five calls). The event route skips the PR listing.
-# Neither extra ids nor pages are bounded by this estimate. At 1.5 s/call,
-# 1200 calls take 30 minutes; the 35-minute timeout provides residual slack.
-# See THE BOUND in scripts/ci/gate_freshness.py.
-# The base filter prevents a green job on a head no main comparison judged;
-# retargeting that SHA to main otherwise reuses the unearned check.
+# THE BOUND: L + 2 + H * (G + 5): L path lookups + snapshot + open-PR listing,
+# then H heads x (G gate compares + five calls). The event skips the PR list.
+# Extra ids and pages are unbounded by this estimate. At 1.5 s/call, 1200 calls
+# take 30 minutes; the 35-minute timeout provides residual slack.
+#
+# BASE FILTER. A non-main PR could earn an authoritative green without a main
+# comparison; retargeting to main reuses that SHA and its unearned check.
 on:
   push:
     branches: [main]
