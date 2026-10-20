@@ -357,7 +357,7 @@ EXACT_REQUIREMENT = re.compile(
     r'(?:-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?'
     r'(?:[-_.]?dev[-_.]?[0-9]*)?'
     r'(?:\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?', re.IGNORECASE | re.ASCII)
-_REQUIREMENT_OPTIONS = ('--hash', '--config-settings', '--global-option')
+_REQUIREMENT_OPTIONS = ('--hash', '--config-settings')
 
 
 def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
@@ -399,10 +399,11 @@ def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
 
 
 def _manifest_pins(manifest):
-    """Pins as (name, hashes, welded, line). Only --hash, --config-settings
-    and --global-option may follow a pin, as --name=value or --name value.
-    Other tokens are welded. Trailing backslashes join physical lines;
-    unfinished nonempty runs are refused.
+    """Pins as (name, hashes, welded, line). One walk accepts only --hash
+    and --config-settings, as --name=value or --name value. Hash values need
+    sha256: plus 64 hex digits (case-insensitive); config values need KEY=VAL.
+    Other tokens and missing/invalid values are welded. Hashes come from this
+    walk in run order. Unfinished nonempty continuations are refused.
     """
     pins, tokens, first = [], [], 0
     for number, line in enumerate(manifest.splitlines(), 1):
@@ -424,12 +425,24 @@ def _manifest_pins(manifest):
         assert EXACT_REQUIREMENT.fullmatch(run[0]), (
             f'requirements-zizmor.txt:{number}: {run[0]!r} is not an exact '
             f'pin, so the hashes after it belong to no requirement')
-        welded, remaining = [], iter(run[1:])
+        hashes, welded, remaining = [], [], iter(run[1:])
         for token in remaining:
-            if (token.partition('=')[0] not in _REQUIREMENT_OPTIONS
-                    or ('=' not in token and next(remaining, None) is None)):
+            option, attached, value = token.partition('=')
+            if option not in _REQUIREMENT_OPTIONS:
                 welded.append(token)
-        hashes = [token for token in run if token.startswith('--hash=sha256:')]
+                continue
+            if not attached:
+                value = next(remaining, None)
+            if value is None:
+                welded.append(token)
+            elif option == '--hash':
+                if re.fullmatch(r'sha256:[0-9a-f]{64}', value,
+                                re.IGNORECASE | re.ASCII):
+                    hashes.append(f'--hash={value}')
+                else:
+                    welded.append(token)
+            elif '=' not in value:
+                welded.append(token)
         parsed.append((run[0].split('==', 1)[0], hashes, welded, number))
     return parsed
 
@@ -447,7 +460,7 @@ def _canonical_name(name):
 
 
 def assert_the_zizmor_manifest_is_hash_pinned():
-    """Distinct hashes are enforced by --require-hashes on executed installs.
+    """Require distinct hashes and --require-hashes on executed pip installs.
     Reading pip commands excludes comment-only lines from the flag check.
     Canonical names and lowercase digests detect duplicate spellings;
     artifact counts may change on a bump.
@@ -459,13 +472,23 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     pins = _manifest_pins((ROOT / 'requirements-zizmor.txt').read_text(
         encoding='utf-8'))
     assert pins, 'the manifest pins no requirement at all'
-    for option in ('--hash', '--config-settings', '--global-option'):
-        for suffix in (f'{option}=value', f'{option} value'):
-            assert not _manifest_pins(f'zizmor==1 {suffix}\n')[0][2], suffix
+    value, other = 'sha256:' + 'a' * 64, 'sha256:' + 'b' * 64
+    hashed = f'--hash={value}'
+    for suffix, hashes in (
+            (hashed, [hashed]), ('--hash ' + value, [hashed]),
+            ('--hash=' + value.upper(), ['--hash=' + value.upper()]),
+            (f'--hash {other} {hashed}', ['--hash=' + other, hashed]),
+            ('--config-settings=x=y', []), ('--config-settings x=y', []),
+            ('--config-settings ' + hashed, [])):
+        assert _manifest_pins(f'zizmor==1 {suffix}\n')[0][1:3] == (
+            hashes, []), suffix
     for invalid in ('other>=1', '--zizmor==9.9.9', '-zizmor==9.9.9',
-                    '--hash', '--config-settings', '--global-option'):
-        assert _manifest_pins(f'zizmor==1 {invalid}\n')[0][2] == [invalid], (
-            invalid)
+                    '--hash', '--config-settings', '--hash=',
+                    '--config-settings banana', '--config-settings=banana',
+                    '--hash=sha256:' + 'a' * 63,
+                    '--hash=sha256:' + 'a' * 65,
+                    '--hash=sha256:' + 'g' * 64):
+        assert _manifest_pins(f'zizmor==1 {invalid}\n')[0][2], invalid
     # Separator folding needs its own cases: no separator spells zizmor.
     for spellings, canonical in (
             (('Zizmor', 'zizmor', 'ZIZMOR'), 'zizmor'),
@@ -483,8 +506,10 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     for name, hashes, welded, number in pins:
         assert not welded, (
             f'requirements-zizmor.txt:{number}: {name} carries {welded}; '
-            f'only --hash, --config-settings and --global-option with =value '
-            f'or a following value are allowed; other tokens are refused')
+            f'only --hash and --config-settings as --name=value or '
+            f'--name value are allowed; hashes need sha256: plus 64 hex '
+            f'digits (case-insensitive), config needs KEY=VAL; other tokens '
+            f'and missing/invalid values are refused')
         canonical = _canonical_name(name)
         assert canonical == 'zizmor', (
             f'requirements-zizmor.txt:{number}: {name} is pinned and this '
