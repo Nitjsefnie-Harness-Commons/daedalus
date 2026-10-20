@@ -15,9 +15,9 @@
 #
 # THE TEST IN tests/_wfpins.py requires one exact `==` pin for zizmor,
 # at least one sha256 hash, and distinct digests compared case-insensitively.
-# Only --hash and --config-settings, as --name=value or --name value, may
-# follow the pin. Hash values need sha256: plus 64 hex digits, ignoring case;
-# config values need KEY=VAL. Other tokens and missing/invalid values fail.
+# --hash accepts only attached =value, validated as sha256: plus 64 hex
+# digits (case-insensitive). --config-settings accepts =KEY=VAL or a
+# following KEY=VAL token. Other tokens and missing/invalid values fail.
 # Hashes come from that same option walk. Unfinished nonempty continuation
 # runs are refused too. The hash count is
 # free to move: a release can gain or lose artifacts on a valid bump.

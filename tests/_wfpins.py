@@ -399,8 +399,8 @@ def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
 
 
 def _manifest_pins(manifest):
-    """Pins as (name, hashes, welded, line). One walk accepts only --hash
-    and --config-settings, as --name=value or --name value. Hash values need
+    """Pins as (name, hashes, welded, line). Hashes need attached --hash=value.
+    --config-settings accepts =KEY=VAL or a following KEY=VAL. Hash values need
     sha256: plus 64 hex digits (case-insensitive); config values need KEY=VAL.
     Other tokens and missing/invalid values are welded. Hashes come from this
     walk in run order. Unfinished nonempty continuations are refused.
@@ -428,7 +428,8 @@ def _manifest_pins(manifest):
         hashes, welded, remaining = [], [], iter(run[1:])
         for token in remaining:
             option, attached, value = token.partition('=')
-            if option not in _REQUIREMENT_OPTIONS:
+            if (option not in _REQUIREMENT_OPTIONS
+                    or (option == '--hash' and not attached)):
                 welded.append(token)
                 continue
             if not attached:
@@ -475,15 +476,16 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     value, other = 'sha256:' + 'a' * 64, 'sha256:' + 'b' * 64
     hashed = f'--hash={value}'
     for suffix, hashes in (
-            (hashed, [hashed]), ('--hash ' + value, [hashed]),
+            (hashed, [hashed]),
             ('--hash=' + value.upper(), ['--hash=' + value.upper()]),
-            (f'--hash {other} {hashed}', ['--hash=' + other, hashed]),
+            (f'--hash={other} {hashed}', ['--hash=' + other, hashed]),
             ('--config-settings=x=y', []), ('--config-settings x=y', []),
             ('--config-settings ' + hashed, [])):
         assert _manifest_pins(f'zizmor==1 {suffix}\n')[0][1:3] == (
             hashes, []), suffix
     for invalid in ('other>=1', '--zizmor==9.9.9', '-zizmor==9.9.9',
-                    '--hash', '--config-settings', '--hash=',
+                    '--hash', '--hash ' + value,
+                    '--config-settings', '--hash=',
                     '--config-settings banana', '--config-settings=banana',
                     '--hash=sha256:' + 'a' * 63,
                     '--hash=sha256:' + 'a' * 65,
@@ -506,10 +508,10 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     for name, hashes, welded, number in pins:
         assert not welded, (
             f'requirements-zizmor.txt:{number}: {name} carries {welded}; '
-            f'only --hash and --config-settings as --name=value or '
-            f'--name value are allowed; hashes need sha256: plus 64 hex '
-            f'digits (case-insensitive), config needs KEY=VAL; other tokens '
-            f'and missing/invalid values are refused')
+            f'--hash is attached only, with sha256: plus 64 hex digits '
+            f'(case-insensitive); --config-settings takes =KEY=VAL or a '
+            f'following KEY=VAL; other tokens and missing/invalid values '
+            f'are refused')
         canonical = _canonical_name(name)
         assert canonical == 'zizmor', (
             f'requirements-zizmor.txt:{number}: {name} is pinned and this '
