@@ -436,7 +436,7 @@ head whose `tests` run is also absent.
 
 **Read the published check as the verdict and its workflow run as the
 container** (issue #1360): a push to `main` PATCHes other heads' newest
-completed `gate freshness` check without changing their run conclusions.
+`gate freshness` check only if completed, leaving run conclusions unchanged.
 The event's own pull-request run tracks its verdict, but a waiter reading
 only runs can still certify a head whose gate is red - head
 `8ddfec21f32d484657e7ebc56c46a1b395670ca9` carried seven green runs and a

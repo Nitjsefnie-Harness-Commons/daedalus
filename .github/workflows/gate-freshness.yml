@@ -7,12 +7,12 @@ name: gate freshness
 #
 # WHY THE JOB CARRIES THE CONTEXT. Its check run is created in this run's
 # own suite, the newest suite of this workflow on the head, which the ruleset
-# counts. An API-created check lands in the app's oldest suite on the commit
-# and is invisible once superseded (issue #1655).
+# counts. API-created checks were observed in the app's oldest suite, which
+# is invisible once superseded (issue #1655); callers cannot choose it.
 #
 # WHY THE SCRIPT PUBLISHES. On a push to `main` this job's check lands
 # on `main`, where no ruleset reads it. The script re-decides every open head
-# and PATCHes each head's newest completed `gate freshness` check instead.
+# and PATCHes each head's newest check only if completed; no older fallback.
 #
 # WHY `pull_request_target` IS SAFE HERE. On this trigger BOTH halves come from
 # the BASE: the workflow text and the `actions/checkout` copy are the trusted
@@ -22,16 +22,17 @@ name: gate freshness
 # would take its workflow text from the merge ref while running a script from
 # the branch SHA, and the two can disagree.)
 #
-# THE BOUND, SIZED. The run refuses when its fixed estimate (open PRs x gate
-# commit compares + four calls per head) exceeds DEFAULT_CALL_BUDGET calls.
-# This assumes one old check per head; duplicate old ids can exceed it, with
-# one extra PATCH per additional id. At ASSUMED_SECONDS_PER_CALL (1.5 s/call),
-# the 1200-call budget is 30 minutes; the 35-minute workflow timeout provides
-# slack for that residual. See THE BOUND in scripts/ci/gate_freshness.py.
+# THE BOUND: gate-path lookups + open PRs x (gate compares + four calls).
+# Neither extra ids nor pages are bounded by this estimate. At 1.5 s/call,
+# 1200 calls take 30 minutes; the 35-minute timeout provides residual slack.
+# See THE BOUND in scripts/ci/gate_freshness.py.
+# The base filter prevents a green job on a head no main comparison judged;
+# retargeting that SHA to main otherwise reuses the unearned check.
 on:
   push:
     branches: [main]
   pull_request_target:  # zizmor: ignore[dangerous-triggers]
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:

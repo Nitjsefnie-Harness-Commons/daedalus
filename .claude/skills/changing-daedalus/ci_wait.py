@@ -37,10 +37,10 @@ Two unrelated short workflows conclude, the tool says acceptable and exits
 0, and every session that reads that exit code reads a false green.
 
 Read the `gate freshness` check as verdict and its run as container: a push
-to `main` PATCHes other heads' newest completed check, leaving their run
+to `main` PATCHes other heads' newest check only if completed, leaving run
 conclusions unchanged; the event's pull-request run tracks its verdict, but a
 run-only read can certify a head whose gate is red (issue 1360).
-So this tool read the publisher,
+So this tool read the publisher (the workflow run),
 missed the gate, and certified `8ddfec21` - seven green runs and a
 `gate freshness` check that concluded FAILURE. Both are now read, off ONE
 query, and a red verdict is exit 1 like any other conclusion.

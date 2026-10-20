@@ -59,20 +59,21 @@ reported and skipped WITHOUT failing the run: its new head gets its own
 verdict from its own `pull_request_target` event. A revalidation that could
 not be READ is a failure, not a skip. All print a loud line to stderr.
 
-THE CHECK CARRIER. GitHub puts API-created checks in the commit's oldest app
-suite; callers cannot choose it. A newer run of that workflow supersedes the
-suite and its checks become invisible to the ruleset. A job's check belongs
-to its own run's suite, newest for this workflow, so the job carries the
-context. Its exit code decides the event's pull request. Other heads' newest
-completed checks are PATCHed; unfinished checks are left to their runners.
-Only legacy API checks are retired; with no carrier the script POSTs one.
+THE CHECK CARRIER. GitHub chooses suites from repository and SHA; the oldest
+app suite is the observed landing for API-created checks, not a caller
+choice. Once superseded, its checks are ignored by the ruleset. A workflow
+job's check belongs to its own run's suite. The job carries the event verdict;
+for other heads, PATCH the newest check only if completed, otherwise leave it
+to its runner. Retire completed non-carriers; POST only without a carrier,
+which can still land in a superseded suite.
 
-THE BOUND. Estimate G + PER_HEAD_OVERHEAD (G + 4): one compare per gate, two
-head revalidations, one check-runs listing and one write. Each extra legacy
-id costs one retirement PATCH beyond this estimate. The 1200-call budget at
-ASSUMED_SECONDS_PER_CALL (1.5 s/call) is 30 minutes; the 35-minute workflow
-timeout absorbs duplicate-id overruns. Pagination counts as one logical read.
-An over-budget estimate refuses loudly without truncating the head set.
+THE BOUND. Estimate L + H * (G + 4): L gate-path lookups, then G compares,
+two head revalidations, one check listing and one write per head. Extra
+completed ids cost retirement PATCHes; pagination counts as one logical read.
+Neither duplicate ids nor pages are bounded by the estimate. At 1.5 s/call,
+the 1200-call budget is 30 minutes; the 35-minute timeout provides slack for
+that residual under this assumption. An over-budget estimate refuses loudly
+without truncating the head set.
 
 """
 import json
@@ -256,7 +257,9 @@ def current_head(read, repository, number):
     payload = _one(read, _api(f'repos/{repository}/pulls/{number}'))
     head = payload.get('head') if isinstance(payload, dict) else None
     sha = head.get('sha') if isinstance(head, dict) else None
-    return sha if _hex40(sha) else None
+    if not _hex40(sha):
+        raise QueryError('could not read a 40-hex current head sha')
+    return sha
 
 
 def _existing_checks(read, repository, head_sha):
@@ -274,15 +277,21 @@ def _existing_checks(read, repository, head_sha):
     checks = []
     for line in raw.splitlines():
         parts = line.split(' ', 2)
-        if len(parts) == 3 and parts[0].isdigit():
-            checks.append((int(parts[0]), parts[1],
-                           None if parts[2] == '-' else parts[2]))
+        if (len(parts) != 3 or not parts[0].isascii()
+                or not parts[0].isdigit() or not parts[1] or not parts[2]):
+            raise QueryError('malformed existing check listing')
+        checks.append((int(parts[0]), parts[1],
+                       None if parts[2] == '-' else parts[2]))
     return checks
 
 
 def publish(read, repository, head_sha, conclusion, title, summary,
             details_url):
-    """Write onto the newest check, whose suite the ruleset counts."""
+    """Write onto the newest check; leave an unfinished one to its runner.
+
+    A head's own job check is the carrier once that job has run. A POST
+    fallback can remain in a superseded suite; this function cannot move it.
+    """
     checks = _existing_checks(read, repository, head_sha)
     if checks is None:
         raise QueryError('could not read the existing check runs')
@@ -294,8 +303,7 @@ def publish(read, repository, head_sha, conclusion, title, summary,
         '-f', f'output[title]={title}',
         '-f', f'output[summary]={summary}',
     ]
-    # POST sets external_id to tag legacy runs for retirement; a carrier PATCH
-    # preserves the runner UUID.
+    # Only POST sets external_id; PATCH preserves the runner UUID.
     carrier = max(checks, key=lambda check: check[0]) if checks else None
     if carrier is None:
         read(_api(f'repos/{repository}/check-runs', '-X', 'POST',
@@ -305,11 +313,11 @@ def publish(read, repository, head_sha, conclusion, title, summary,
         read(_api(f'repos/{repository}/check-runs/{carrier[0]}',
                   '-X', 'PATCH', *fields))
     # An unfinished carrier gets its verdict from its job's exit code.
-    for check_id, _status, external_id in checks:
+    for check_id, status, _external_id in checks:
         if carrier is not None:
             if check_id == carrier[0]:
                 continue
-        if external_id == EXTERNAL_ID:
+        if status == 'completed':
             read(_api(f'repos/{repository}/check-runs/{check_id}',
                       '-X', 'PATCH', '-f', f'name={NAME_RETIRED}'))
 
@@ -428,11 +436,9 @@ def main(argv=None, read=None):
     name = os.environ.get('GITHUB_EVENT_NAME', '')
     if name == 'pull_request_target':
         pr = event.get('pull_request') or {}
-        if not isinstance(pr, dict) or not pr.get('head'):
-            # A route that cannot establish WHICH pull request it is deciding
-            # must fail closed. Treating a missing event as "no heads" would
-            # publish nothing and exit 0, i.e. "fresh", and the ruleset would
-            # let it merge -- the silent-pass shape, refused here.
+        head = pr.get('head') if isinstance(pr, dict) else None
+        if not isinstance(head, dict) or not _hex40(head.get('sha')):
+            # An unreadable event head must not produce an empty green run.
             print('gate freshness: the pull_request_target event carried no '
                   'usable pull_request.head; publishing nothing',
                   file=sys.stderr)
