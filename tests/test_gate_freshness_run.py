@@ -95,6 +95,7 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None):
     event_path.write_text(json.dumps(event), encoding='utf-8')
     calls = []
     published = []
+    monkey = monkey or {}
 
     def fake_gh_read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
@@ -106,18 +107,20 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None):
         if '/compare/' in target:
             gate = target.split('compare/')[1].split('...')[0]
             return _encode({'status': 'ahead',
-                            'merge_base_commit': {'sha': gate}})
+                            'merge_base_commit': {'sha': 'f' * 40
+                                                  if monkey.get('stale')
+                                                  else gate}})
         if re.search(r'/pulls/\d+$', target):
             number = int(target.rsplit('/', 1)[1])
             return _encode({'head': {'sha': 'e' * 40 if number == moved
                                      else HEAD}})
         if '/check-runs?' in target and 'GET' in argv:
-            return ''
+            return ('101 in_progress runner-uuid'
+                    if event_name == 'pull_request_target' else '')
         if 'POST' in argv or 'PATCH' in argv:
             published.append(target)
             return '{}'
         raise AssertionError(target)
-    monkey = monkey or {}
     old = {k: os.environ.get(k) for k in
            ('GITHUB_EVENT_NAME', 'GITHUB_EVENT_PATH', 'GITHUB_REPOSITORY',
             'GITHUB_SERVER_URL', 'GITHUB_RUN_ID', 'GATE_FRESHNESS_MAX_CALLS')}
@@ -161,7 +164,20 @@ def test_the_pull_request_target_route_publishes_for_that_head(tmp):
         'pull_request': _pr(7)})
     assert code == 0, code
     assert not any('state=open' in c for c in calls), calls
-    assert len(published) == 1, published
+    assert published == [], published
+
+
+def test_event_job_conclusion_tracks_only_its_own_pr_verdict(tmp):
+    for event_name in ('pull_request_target', 'push'):
+        for stale in (False, True):
+            event = {'pull_request': _pr(7), 'open_pulls': [_pr(7)]}
+            code, _calls, _published = _main_env(
+                tmp, event_name, event, monkey={'stale': stale})
+            assert code == int(event_name == 'pull_request_target' and stale)
+    code, _calls, published = _main_env(
+        tmp, 'pull_request_target', {'pull_request': _pr(7)},
+        monkey={'stale': True, 'argv': ['--dry-run']})
+    assert code == 0 and published == []
 
 
 def test_the_pull_request_target_route_refuses_a_missing_event(tmp):
@@ -472,12 +488,8 @@ def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
             calls.append(argv)
             target = next(t for t in argv if t.startswith('repos/'))
             if '/check-runs?' in target:
-                return '\n'.join(f'{i} 73' for i in ids)
-            if '/actions/runs?' in target:
-                assert '--paginate' in argv and '--slurp' in argv
-                return _encode([{'workflow_runs': [
-                    {'id': 1, 'path': 'workflow.yml', 'check_suite_id': 73},
-                    {'id': 2, 'path': 'workflow.yml', 'check_suite_id': 74}]}])
+                return '\n'.join(
+                    f'{i} completed daedalus-gate-freshness/v1' for i in ids)
             return base(argv)
         gate_list = m.enumerate_gates(read, 'o/r')
         estimate = m.required_calls(1, len(gate_list))
@@ -485,7 +497,7 @@ def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
             read, 'o/r', m.select_heads([_pr(7)]), gate_list, RUN,
             call_budget=estimate)
         assert code == 0 and verdicts, 'duplicate-id overrun must publish'
-        assert [v for _, v in published] == ['POST'] + ['PATCH'] * len(old_ids)
+        assert [v for _, v in published] == ['PATCH'] * len(old_ids)
         assert len(calls) == estimate + len(old_ids) - 1, (
             f'issued {len(calls)} calls; estimate {estimate}, ids {old_ids}')
         if len(old_ids) == 3:
@@ -554,17 +566,13 @@ def _workflow_text():
         encoding='utf-8')
 
 
-def test_the_job_is_not_named_the_published_check(tmp):
-    """On pull_request_target the job's own check lands on the head, so the
-    job must not carry the name the ruleset matches, or a ruleset reading by
-    context sees two different things under one name."""
+def test_the_job_carries_the_required_check_context(tmp):
+    from _wfjobs import load
     m = _mod()
     text = _workflow_text()
-    assert '  publish-freshness:' in text
-    assert 'name: publish freshness' in text
-    assert '  gate-freshness:' not in text, (
-        'the job name collides with the published check context')
-    assert m.NAME == 'gate freshness'
+    assert '    name: gate freshness' in text
+    assert load(ROOT / '.github' / 'workflows' / 'gate-freshness.yml').jobs[
+        'publish-freshness']['name'] == m.NAME == 'gate freshness'
 
 
 def test_workflow_permissions_are_exactly_the_three_scopes(tmp):

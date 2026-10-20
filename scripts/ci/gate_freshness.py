@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Publish a `gate freshness` verdict on every open pull request head.
 
-For each open pull request head based on `main`, decide whether the head
-contains every gate-defining commit on `main`, and publish a `gate freshness`
-check run onto that head. A branch already containing the gates stays green
-without rebasing; only one predating a new gate is forced to rebase.
+Decide whether each open head based on `main` contains every gate-defining
+commit. The event's own job carries its verdict; the Checks API updates other
+heads. Only a head predating a new gate must rebase.
 
 THE GATE-DEFINING PATH SET. A file is gate-defining when a change to it can
 change a required check's verdict FOR THE SAME SOURCE TREE -- it decides *what
@@ -60,22 +59,21 @@ reported and skipped WITHOUT failing the run: its new head gets its own
 verdict from its own `pull_request_target` event. A revalidation that could
 not be READ is a failure, not a skip. All print a loud line to stderr.
 
-STRANDED CHECKS. A check is stranded when its suite's workflow run has a
-newer run of the same workflow path on the head. PATCH cannot move a check to
-another suite, so a stranded member causes one new check to be POSTed before
-all old matching checks receive a name-only retirement PATCH. A failed POST
-leaves them untouched. Missing owners and unreadable or ambiguous run data
-keep today's verdict PATCH behavior.
+THE CHECK CARRIER. GitHub puts API-created checks in the commit's oldest app
+suite; callers cannot choose it. A newer run of that workflow supersedes the
+suite and its checks become invisible to the ruleset. A job's check belongs
+to its own run's suite, newest for this workflow, so the job carries the
+context. Its exit code decides the event's pull request. Other heads' newest
+completed checks are PATCHed; unfinished checks are left to their runners.
+Only legacy API checks are retired; with no carrier the script POSTs one.
 
-THE BOUND. For one old check per head, estimate G + PER_HEAD_OVERHEAD (G + 6):
-one compare per gate, two head revalidations, one check-runs listing, one
-workflow-runs listing, one verdict PATCH and an extra POST when stranded.
-This fixed estimate can be exceeded by duplicate existing old ids: each
-additional id costs one extra PATCH. The 1200-call budget at
+THE BOUND. Estimate G + PER_HEAD_OVERHEAD (G + 4): one compare per gate, two
+head revalidations, one check-runs listing and one write. Each extra legacy
+id costs one retirement PATCH beyond this estimate. The 1200-call budget at
 ASSUMED_SECONDS_PER_CALL (1.5 s/call) is 30 minutes; the 35-minute workflow
-timeout provides slack for that residual. Pagination counts as one logical
-read. A run whose estimate exceeds its budget refuses loudly, publishing
-nothing rather than truncating the head set; tests pin the calls and slack.
+timeout absorbs duplicate-id overruns. Pagination counts as one logical read.
+An over-budget estimate refuses loudly without truncating the head set.
+
 """
 import json
 import os
@@ -110,8 +108,8 @@ GATE_PATTERNS = (
 
 _HEX40 = frozenset('0123456789abcdef')
 
-# Fixed per-head estimate: two revalidations/listings, one POST, one PATCH.
-PER_HEAD_OVERHEAD = 6
+# Fixed per-head estimate: two head revalidations, one listing, one write.
+PER_HEAD_OVERHEAD = 4
 
 DEFAULT_CALL_BUDGET = 1200
 
@@ -261,85 +259,59 @@ def current_head(read, repository, number):
     return sha if _hex40(sha) else None
 
 
-def _existing_check_ids(read, repository, head_sha):
-    """The (check id, suite id) pairs on `head_sha`, filtered server-side."""
+def _existing_checks(read, repository, head_sha):
+    """The (id, status, external_id) triples on `head_sha`, server-side."""
     listing = _api(
         f'repos/{repository}/commits/{head_sha}/check-runs'
         '?filter=all&per_page=100', '--method', 'GET', '--paginate',
         '--jq', (f'.check_runs[] | select(.name == "{NAME}" and '
-                 f'.external_id == "{EXTERNAL_ID}" and '
                  f'.app.slug == "{APP_SLUG}") | '
-                 '"\\(.id) \\(.check_suite.id)"'))
+                 '"\\(.id) \\(.status) \\(.external_id // "-")"'))
     try:
         raw = read(listing)
     except QueryError:
         return None
-    ids = []
+    checks = []
     for line in raw.splitlines():
-        parts = line.split()
-        if parts and parts[0].isdigit():
-            suite = (int(parts[1]) if len(parts) == 2 and parts[1].isdigit()
-                     else None)
-            ids.append((parts[0], suite))
-    return ids
-
-
-def _stranded(read, repository, head_sha, checks):
-    try:
-        pages = _one(read, _api(
-            f'repos/{repository}/actions/runs?head_sha={head_sha}'
-            '&per_page=100',
-            '--paginate', '--slurp'))
-    except QueryError:
-        return False
-    if not isinstance(pages, list):
-        return False
-    runs = []
-    for page in pages:
-        if not isinstance(page, dict) or not isinstance(
-                page.get('workflow_runs'), list):
-            return False
-        runs.extend(page['workflow_runs'])
-    if any(not isinstance(run, dict)
-           or not isinstance(run.get('id'), int)
-           or not isinstance(run.get('check_suite_id'), int)
-           or isinstance(run['id'], bool) or isinstance(
-               run['check_suite_id'], bool)
-           or not isinstance(run.get('path'), str) or not run['path']
-           for run in runs):
-        return False
-    owners = [[run for run in runs if run['check_suite_id'] == suite]
-              for _, suite in checks]
-    if any(len(owner) > 1 for owner in owners):
-        return False
-    return any(owner and any(run['path'] == owner[0]['path']
-                             and run['id'] > owner[0]['id'] for run in runs)
-               for owner in owners)
+        parts = line.split(' ', 2)
+        if len(parts) == 3 and parts[0].isdigit():
+            checks.append((int(parts[0]), parts[1],
+                           None if parts[2] == '-' else parts[2]))
+    return checks
 
 
 def publish(read, repository, head_sha, conclusion, title, summary,
             details_url):
-    """Write a verdict, republishing stranded checks before retiring them."""
-    ids = _existing_check_ids(read, repository, head_sha)
-    if ids is None:
+    """Write onto the newest check, whose suite the ruleset counts."""
+    checks = _existing_checks(read, repository, head_sha)
+    if checks is None:
         raise QueryError('could not read the existing check runs')
     fields = [
         '-f', f'name={NAME}',
         '-f', 'status=completed',
         '-f', f'conclusion={conclusion}',
-        '-f', f'external_id={EXTERNAL_ID}',
         '-f', f'details_url={details_url}',
         '-f', f'output[title]={title}',
         '-f', f'output[summary]={summary}',
     ]
-    stranded = bool(ids) and _stranded(read, repository, head_sha, ids)
-    if not ids or stranded:
+    # POST sets external_id to tag legacy runs for retirement; a carrier PATCH
+    # preserves the runner UUID.
+    carrier = max(checks, key=lambda check: check[0]) if checks else None
+    if carrier is None:
         read(_api(f'repos/{repository}/check-runs', '-X', 'POST',
-                  '-f', f'head_sha={head_sha}', *fields))
-    for check_id, _ in ids:
-        update = ['-f', f'name={NAME_RETIRED}'] if stranded else fields
-        read(_api(f'repos/{repository}/check-runs/{check_id}',
-                  '-X', 'PATCH', *update))
+                  '-f', f'head_sha={head_sha}', *fields,
+                  '-f', f'external_id={EXTERNAL_ID}'))
+    elif carrier[1] == 'completed':
+        read(_api(f'repos/{repository}/check-runs/{carrier[0]}',
+                  '-X', 'PATCH', *fields))
+    # An unfinished carrier gets its verdict from its job's exit code.
+    for check_id, _status, external_id in checks:
+        if carrier is not None:
+            if check_id == carrier[0]:
+                continue
+        if external_id == EXTERNAL_ID:
+            read(_api(f'repos/{repository}/check-runs/{check_id}',
+                      '-X', 'PATCH', '-f', f'name={NAME_RETIRED}'))
 
 
 def _pr_head(pr):
@@ -488,6 +460,9 @@ def main(argv=None, read=None):
         return 1
     code, published = process(read, repository, heads, gates,
                               _details_url(), _call_budget(), dry_run)
+    if name == 'pull_request_target' and not dry_run:
+        if any(v.conclusion != 'success' for v in published):
+            code = 1
     verb = 'would publish' if dry_run else 'published'
     print(f'gate freshness: {verb} {len(published)} verdict(s) for '
           f'{len(heads)} open pull request(s) based on main; resolved '

@@ -45,16 +45,14 @@ and the reason the filter is applied here. The two never meet, so a name a
 caller requires can satisfy the set by its PRESENCE while its conclusion is
 not judged at all: `--required 'pr gate'` is answered by that run existing.
 
-A PUBLISHED CHECK-RUN is a gate that is not a workflow run, and this
-repository has one. The `gate freshness` workflow's own run concludes
-`success` on every head whatever it published, because publishing the
-verdict IS that run's job: `scripts/ci/gate_freshness.py` writes a check run
-of its own through the Checks API onto each pull-request head. The rulesets
-read that check, so the run is the publisher and the check is the gate, and
-a waiter that reads only runs certifies a head whose gate is red (issue
-#1360). The check arrives in a check suite belonging to no workflow run at
-all, which is why it is invisible to a run-shaped read and reachable only
-through the suites' own `checkRuns`.
+A PUBLISHED CHECK-RUN is the verdict; a workflow run is its container.
+The `gate freshness` job carries that context in its own run's check suite,
+and on pull_request_target the script's exit code makes the job fail when
+that head's verdict is not success. A push to main re-decides other heads
+by PATCHing their newest completed check, so their check verdict can change
+without their workflow run's conclusion changing. The rulesets read the
+check, and a waiter reading only runs can still certify a red gate (issue
+#1360). Both the run and the check must therefore be read.
 
 A published check is read by NAME, exactly, like a workflow: `Gate
 freshness` is a different check and cannot satisfy this one.

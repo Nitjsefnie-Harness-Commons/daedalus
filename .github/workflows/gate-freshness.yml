@@ -5,13 +5,14 @@ name: gate freshness
 # decision, the gate-defining path set, and the bound all live in
 # scripts/ci/gate_freshness.py; its module docstring is the contract.
 #
-# WHY THE SCRIPT PUBLISHES RATHER THAN RELYING ON THE JOB. On a push to `main`
-# this job's own check run lands on `main`, where no ruleset reads it, so the
-# verdict every ruleset sees must be written onto each pull request HEAD by the
-# script. The job is therefore named `publish freshness` -- deliberately NOT
-# the published context `gate freshness` -- so no ruleset reading by context
-# can ever match two different things under one name. The job's own check is
-# informational; the published one is the gate.
+# WHY THE JOB CARRIES THE CONTEXT. Its check run is created in this run's
+# own suite, the newest suite of this workflow on the head, which the ruleset
+# counts. An API-created check lands in the app's oldest suite on the commit
+# and is invisible once superseded (issue #1655).
+#
+# WHY THE SCRIPT PUBLISHES. On a push to `main` this job's check lands
+# on `main`, where no ruleset reads it. The script re-decides every open head
+# and PATCHes each head's newest completed `gate freshness` check instead.
 #
 # WHY `pull_request_target` IS SAFE HERE. On this trigger BOTH halves come from
 # the BASE: the workflow text and the `actions/checkout` copy are the trusted
@@ -22,7 +23,7 @@ name: gate freshness
 # the branch SHA, and the two can disagree.)
 #
 # THE BOUND, SIZED. The run refuses when its fixed estimate (open PRs x gate
-# commit compares + per-head overhead) exceeds DEFAULT_CALL_BUDGET calls.
+# commit compares + four calls per head) exceeds DEFAULT_CALL_BUDGET calls.
 # This assumes one old check per head; duplicate old ids can exceed it, with
 # one extra PATCH per additional id. At ASSUMED_SECONDS_PER_CALL (1.5 s/call),
 # the 1200-call budget is 30 minutes; the 35-minute workflow timeout provides
@@ -47,7 +48,7 @@ concurrency:
 
 jobs:
   publish-freshness:
-    name: publish freshness
+    name: gate freshness
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
