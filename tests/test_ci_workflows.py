@@ -331,8 +331,7 @@ def test_the_release_manifest_pins_the_expected_tools(tmp):
              if line.strip() and not line.lstrip().startswith('#')]
     pins = [re.fullmatch(r'([\w.-]+)==([^\s=<>!~*,;]+)', line)
             for line in lines]
-    assert all(pins), lines
-    assert [pin[1] for pin in pins] == ['build', 'twine'], lines
+    assert [pin and pin[1] for pin in pins] == ['build', 'twine'], lines
 
 
 def test_every_dependabot_group_has_a_security_mirror(tmp):
