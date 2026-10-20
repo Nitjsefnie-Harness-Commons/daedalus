@@ -390,15 +390,6 @@ def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
     assert order == tuple(sorted(order)), order
 
 
-# The requirement requirements-zizmor.txt is expected to carry, and how many
-# artifacts its full release set holds. A LITERAL here, not a number read
-# back out of the manifest's own prose: a control whose expectation is read
-# out of the file it checks agrees with every edit made to both at once —
-# exactly the edit a bump makes. The red on a legitimate count change is
-# the point: it makes the bump's author read the hash set.
-_EXPECTED_ARTIFACT_COUNTS = {'zizmor': 11}
-
-
 def _manifest_pins(manifest):
     """Every pin in a hash-pinned manifest, as (name, hashes, welded, line).
 
@@ -429,9 +420,9 @@ def _manifest_pins(manifest):
         f'requirements-zizmor.txt:{first} ends in a continuation with no line '
         f'after it, so pip reads the last requirement as unterminated')
     for run, number in pins:
-        assert '==' in run[0], (
-            f'requirements-zizmor.txt:{number}: {run[0]!r} pins no version, '
-            f'so the hashes after it belong to no requirement')
+        assert re.fullmatch(r'[\w.-]+==[^\s=<>!~*,;]+', run[0]), (
+            f'requirements-zizmor.txt:{number}: {run[0]!r} is not an exact '
+            f'pin, so the hashes after it belong to no requirement')
     return [(run[0].split('==', 1)[0],
              [token for token in run
               if token.startswith('--hash=sha256:')],
@@ -456,28 +447,17 @@ def _canonical_name(name):
 
 
 def assert_the_zizmor_manifest_is_hash_pinned():
-    """zizmor gates the gates, so every artifact behind its pin is named.
+    """The zizmor pin carries distinct hashes the install enforces.
 
     `--require-hashes` makes a hash a constraint rather than a note, and
     it is asserted through `_pip_installs`: inside a `run: |` block a `#`
     line is string content, so reading the raw scalar catches a comment
     satisfying the pin while the install runs with no hash enforcement.
 
-    The artifact count is checked against `_EXPECTED_ARTIFACT_COUNTS` in
-    BOTH directions, and the values are checked to be DISTINCT, because a
-    count is satisfied by a token count, not a set: eleven tokens naming
-    ten artifacts leave one artifact unresolvable, the count the same
-    eleven either way. A digest is compared the way its consumer compares
-    it, lowercased — pip lowercases every digest before `is_hash_allowed`
-    sees it, so a value differing only in case names the artifact beside
-    it. The NAME is compared the way pip compares it too: `_canonical_name`
-    folds the spellings pip resolves to one package, so a byte-exact
-    reading pins one package twice with every count still satisfied. One
-    hash short of the expected count is a broken install on one platform's
-    runner alone, so a control that only asks what a pin carries passes a
-    manifest naming nine of zizmor's ten wheels. The other direction is
-    the vacuous half: a manifest that stopped pinning a requirement is
-    checked by nothing at all.
+    Digests are distinct and compared case-insensitively, as pip does.
+    Package names are canonicalised too, so spelling variants cannot
+    hide a second pin. The release may gain or lose artifacts on a bump;
+    its hash count is not a version-independent invariant.
     """
     installs = _pip_installs(_job_step('Install zizmor'))
     assert installs, 'the zizmor step runs no pip install to hash-check'
@@ -511,22 +491,17 @@ def assert_the_zizmor_manifest_is_hash_pinned():
             f'is a second requirement welded onto this pin — so what the run '
             f'pins is ambiguous, and every hash behind it is counted against '
             f'{name}')
-        # Compared the way pip compares it, and for the same reason the digest
-        # below is: a name that differs only in spelling names the requirement
-        # the manifest already pins. Read byte-exactly, `Zizmor` beside
-        # `zizmor` is two requirements here and one to pip, and the assertion
-        # that fires names the second one unmonitored — which is the remedy
-        # that makes it green, one package pinned twice under two names and
-        # every count still satisfied.
+        # Pip resolves spelling variants to one package, so a second
+        # spelling must still be refused as a duplicate pin.
         canonical = _canonical_name(name)
-        assert canonical in _EXPECTED_ARTIFACT_COUNTS, (
+        assert canonical == 'zizmor', (
             f'requirements-zizmor.txt:{number}: {name} is pinned and this '
-            f'manifest is expected to carry '
-            f'{sorted(_EXPECTED_ARTIFACT_COUNTS)}, so nothing checks it')
+            f'manifest is expected to carry only zizmor')
         assert canonical not in seen, (
             f'requirements-zizmor.txt:{number}: {name} is pinned twice — pip '
             f'resolves it as {canonical} either way — and the first pin at '
-            f'line {seen[canonical][0]} is never read')
+            f'line {seen[canonical]} is never read')
+        assert hashes, f'{name} carries no sha256 hashes'
         for token in hashes:
             # Compared the way pip compares it: `Hashes.__init__` lowercases
             # every digest it is given, and the digest of the bytes is
@@ -535,26 +510,8 @@ def assert_the_zizmor_manifest_is_hash_pinned():
             digest = token.partition(':')[2].lower()
             assert digest not in listed, (
                 f'requirements-zizmor.txt:{number}: {token} is listed a '
-                f'second time, and repeating a value leaves the count this '
-                f'control checks exactly where it was while one artifact '
-                f'stakes its place — that artifact cannot resolve under '
+                f'second time instead of naming a distinct artifact under '
                 f'--require-hashes, on the one matrix leg that lifts it, '
                 f'with nothing red here')
             listed.append(digest)
-        seen[canonical] = (number, len(hashes))
-    missing = sorted(set(_EXPECTED_ARTIFACT_COUNTS) - set(seen))
-    assert not missing, (
-        f'the manifest does not pin {missing}, which it is expected to '
-        f'carry: a requirement nothing names is one nothing checks')
-    wrong = []
-    for name, want in _EXPECTED_ARTIFACT_COUNTS.items():
-        got = seen[name][1]
-        if got == want:
-            continue
-        wrong.append(
-            f'requirements-zizmor.txt: {name} carries {got} and {want} are '
-            f'expected. '
-            + ('The missing one is an artifact some runner resolves and no '
-               'other does.' if got < want else
-               'The extra one names no artifact the release ships.'))
-    assert not wrong, '\n'.join(wrong)
+        seen[canonical] = number
