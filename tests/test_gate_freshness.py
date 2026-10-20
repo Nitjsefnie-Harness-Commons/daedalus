@@ -19,8 +19,8 @@ RUN = 'https://github.com/o/r/actions/runs/1'
 _CHECK_LIST = (f'repos/o/r/commits/{HEAD}/check-runs'
                '?filter=all&per_page=100')
 _SELECTOR = ('.check_runs[] | select(.name == "gate freshness" and '
-             '.external_id == "daedalus-gate-freshness/v1" and '
-             '.app.slug == "github-actions") | "\\(.id) \\(.check_suite.id)"')
+             '.app.slug == "github-actions") | '
+             '"\\(.id) \\(.status) \\(.external_id // "-")"')
 
 
 def _mod():
@@ -390,9 +390,8 @@ def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
 
 # ---- publish: a failure must overwrite a published success ----
 
-def _publish_read(existing_ids, recorded, runs=(), suites=None,
-                  fail=None, requests=None, error=AssertionError,
-                  listing=None):
+def _publish_read(checks, recorded, fail=None, requests=None,
+                  error=AssertionError, listing=None):
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
         method = next((argv[i + 1].upper()
@@ -403,21 +402,15 @@ def _publish_read(existing_ids, recorded, runs=(), suites=None,
         if target == _CHECK_LIST:
             assert method == 'GET' and '--paginate' in argv
             assert '--jq' in argv
-            assert argv[argv.index('--jq') + 1] == _SELECTOR, (
-                'check name, external_id and app slug must all match exactly')
+            assert argv[argv.index('--jq') + 1] == _SELECTOR
+            if fail == 'GET':
+                raise error('listing unavailable')
             if listing is not None:
                 return listing
-            return '\n'.join(f'{i} {(suites or {}).get(i, 50)}'
-                             for i in existing_ids)
-        if target == f'repos/o/r/actions/runs?head_sha={HEAD}&per_page=100':
-            assert existing_ids and method == 'GET'
-            assert '--paginate' in argv
-            assert '--slurp' in argv
-            if fail == 'runs':
-                raise error('runs unavailable')
-            return _encode(runs)
+            return '\n'.join(f'{i} {status} {external or "-"}'
+                             for i, status, external in checks)
         allowed = {('POST', 'repos/o/r/check-runs')} | {
-            ('PATCH', f'repos/o/r/check-runs/{i}') for i in existing_ids}
+            ('PATCH', f'repos/o/r/check-runs/{i}') for i, _, _ in checks}
         assert (method, target) in allowed, (method, target)
         recorded.append((method, target, list(argv)))
         if method == fail:
@@ -426,149 +419,102 @@ def _publish_read(existing_ids, recorded, runs=(), suites=None,
     return read
 
 
-def _run(run_id: int | str = 10, suite=50,
-         path: str | None = '.github/workflows/other.yml', **extra):
-    return {'id': run_id, 'check_suite_id': suite, 'path': path, **extra}
+def test_a_completed_carrier_is_patched_without_rewriting_its_external_id(tmp):
+    recorded = []
+    _mod().publish(_publish_read([(4242, 'completed', 'runner-uuid')],
+                                 recorded),
+                   'o/r', HEAD, 'failure', 't', 's', RUN)
+    assert len(recorded) == 1
+    method, target, argv = recorded[0]
+    assert (method, target) == ('PATCH', 'repos/o/r/check-runs/4242')
+    assert argv[argv.index('-X') + 2:] == [
+        '-f', 'name=gate freshness', '-f', 'status=completed',
+        '-f', 'conclusion=failure', '-f', f'details_url={RUN}',
+        '-f', 'output[title]=t', '-f', 'output[summary]=s']
 
 
-def test_stranded_publication_payload_precedes_name_only_retirement(tmp):
-    m, recorded, requests = _mod(), [], []
-    read = _publish_read([7, 8], recorded, suites={7: 91, 8: 73},
-                         requests=requests,
-                         runs=[{'workflow_runs': [_run(5, 91, 'healthy.yml'),
-                                                  _run(suite=73)]},
-                               {'workflow_runs': [_run(11, 74)]}])
-    m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
-    assert [(v, t.rsplit('/', 1)[-1]) for v, t, _ in recorded] == [
-        ('POST', 'check-runs'), ('PATCH', '7'), ('PATCH', '8')]
-    assert m.NAME_RETIRED == 'superseded gate freshness'
-    for _, _, argv in recorded[1:]:
-        assert argv[argv.index('-X') + 2:] == [
-            '-f', 'name=superseded gate freshness']
+def test_newest_carries_the_verdict_and_only_legacy_is_retired(tmp):
+    m = _mod()
+    for external in (m.EXTERNAL_ID, 'runner-uuid', None, 'other id'):
+        recorded = []
+        checks = [(100, 'completed', 'carrier-uuid'),
+                  (9, 'completed', external)]
+        m.publish(_publish_read(checks, recorded),
+                  'o/r', HEAD, 'success', 't', 's', RUN)
+        assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/100')
+        assert 'conclusion=success' in recorded[0][2]
+        assert len(recorded) == (2 if external == m.EXTERNAL_ID else 1)
+        if external == m.EXTERNAL_ID:
+            assert recorded[1][:2] == ('PATCH', 'repos/o/r/check-runs/9')
+            assert recorded[1][2][recorded[1][2].index('-X') + 2:] == [
+                '-f', 'name=superseded gate freshness']
+
+
+def test_a_live_job_is_left_to_the_runner_while_legacy_checks_are_retired(tmp):
+    m = _mod()
+    for status in ('in_progress', 'queued'):
+        for legacy in ([], [(8, 'completed', m.EXTERNAL_ID)]):
+            recorded = []
+            checks = [(99, status, 'runner-uuid'), *legacy]
+            m.publish(_publish_read(checks, recorded),
+                      'o/r', HEAD, 'failure', 't', 's', RUN)
+            assert len(recorded) == len(legacy)
+            if legacy:
+                assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/8')
+                assert recorded[0][2][recorded[0][2].index('-X') + 2:] == [
+                    '-f', 'name=superseded gate freshness']
+
+
+def test_no_carrier_posts_once_with_the_legacy_external_id(tmp):
+    recorded = []
+    _mod().publish(_publish_read([], recorded),
+                   'o/r', HEAD, 'success', 't', 's', RUN)
+    assert len(recorded) == 1
+    method, target, argv = recorded[0]
+    assert (method, target) == ('POST', 'repos/o/r/check-runs')
     for field in (f'head_sha={HEAD}', 'name=gate freshness',
-                  'status=completed', 'conclusion=failure',
+                  'status=completed', 'conclusion=success',
                   'external_id=daedalus-gate-freshness/v1',
                   f'details_url={RUN}', 'output[title]=t',
                   'output[summary]=s'):
-        assert field in recorded[0][2], field
-    assert sum('/actions/runs?' in ' '.join(a) for a in requests) == 1
-    assert all('Cache-Control: no-cache' in a for a in requests)
+        assert field in argv, field
 
 
-def test_malformed_or_wrong_owner_cannot_trigger_republication(tmp):
+def test_listing_and_write_failures_raise_without_further_writes(tmp):
     m = _mod()
-    owner = _run(suite=73)
-    cases = [[], [{'workflow_runs': []}],
-             [{'workflow_runs': [owner]}],
-             [{'workflow_runs': [_run(9, 74), owner]}],
-             [{'workflow_runs': [owner, _run(11, 74, 'different.yml')]}],
-             [{'workflow_runs': [_run(suite=91), _run(11, 74)]}],
-             [{'workflow_runs': [owner, _run(10, 74)]}],
-             [{'workflow_runs': [owner, _run(11, 73)]}],
-             [{'workflow_runs': [owner, {}]}],
-             [{'workflow_runs': [owner, _run('11', 74)]}],
-             [{'workflow_runs': [owner, _run(11, 74, None)]}],
-             [{'workflow_runs': [owner, _run(11, 74, '')]}],
-             [{'workflow_runs': [owner, None]}],
-             [{'workflow_runs': 'bad'}], {}, [{'missing': []}],
-             [None], 'unparseable',
-             [{'workflow_runs': [_run(True, 73), _run(11, 74)]}],
-             [{'workflow_runs': [_run(suite=50), _run(11, 74)]}],
-             [{'workflow_runs': [owner, _run(11, True)]}]]
-    for runs in cases:
+    for checks, fail, expected in (
+            ([], 'GET', []), ([], 'POST', ['POST']),
+            ([(9, 'completed', 'runner-uuid'),
+              (8, 'completed', m.EXTERNAL_ID)], 'PATCH', ['PATCH'])):
         recorded = []
-        m.publish(_publish_read([7, 8], recorded, runs=runs,
-                                suites={7: 73, 8: 73}),
-                  'o/r', HEAD, 'success', 't', 's', RUN)
-        assert [v for v, _, _ in recorded] == ['PATCH', 'PATCH'], runs
-        assert all('name=gate freshness' in a for _, _, a in recorded)
-
-
-def test_wrong_or_missing_suite_cannot_borrow_another_runs_owner(tmp):
-    m = _mod()
-    for listing in ('7', '7 null', '7 73 extra', '\ninvalid 50\n7 91\n'):
-        recorded = []
-        read = _publish_read(
-            [7], recorded, listing=listing,
-            runs=[{'workflow_runs': [_run(suite=50), _run(11, 74)]}])
-        m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN)
-        assert [(v, t) for v, t, _ in recorded] == [
-            ('PATCH', 'repos/o/r/check-runs/7')], listing
-
-
-def test_unreadable_runs_keep_the_verdict_patch(tmp):
-    m, recorded = _mod(), []
-    m.publish(_publish_read([7], recorded, fail='runs', error=m.QueryError),
-              'o/r', HEAD, 'success', 't', 's', RUN)
-    assert [v for v, _, _ in recorded] == ['PATCH']
-    assert 'name=gate freshness' in recorded[0][2]
-
-
-def test_failed_republish_or_retirement_raises_without_more_writes(tmp):
-    m = _mod()
-    for fail, attempted in (('POST', ['POST']), ('PATCH', ['POST', 'PATCH'])):
-        recorded = []
-        read = _publish_read([7, 8], recorded, fail=fail, error=m.QueryError,
-                             suites={7: 83, 8: 83},
-                             runs=[{'workflow_runs': [_run(suite=83),
-                                                      _run(11, 84)]}])
         try:
-            m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
-        except m.QueryError:
-            assert [v for v, _, _ in recorded] == attempted
+            m.publish(_publish_read(checks, recorded, fail=fail,
+                                    error=m.QueryError),
+                      'o/r', HEAD, 'failure', 't', 's', RUN)
+        except m.QueryError as error:
+            assert [v for v, _, _ in recorded] == expected
+            if fail == 'GET':
+                assert str(error) == 'could not read the existing check runs'
             continue
         raise AssertionError(f'a failed {fail} did not raise')
 
 
-def test_a_failure_overwrites_a_published_success_by_patching(tmp):
-    m = _mod()
-    for ids, conclusion, title, summary in (
-            ([4242], 'failure', 's', 'why'),
-            ([7], 'success', 'f', 'ok'),
-            ([], 'success', 'f', 'ok')):
-        recorded = []
-        m.publish(_publish_read(ids, recorded), 'o/r', HEAD, conclusion,
-                  title, summary, RUN)
-        assert len(recorded) == 1
-        method, target, argv = recorded[0]
-        assert f'conclusion={conclusion}' in argv
-        assert 'name=gate freshness' in argv
-        assert 'external_id=daedalus-gate-freshness/v1' in argv
-        if ids:
-            assert method == 'PATCH', method
-            assert target.endswith(f'/check-runs/{ids[0]}'), target
-            assert not any(str(a).startswith('head_sha') for a in argv), \
-                'a PATCH must not resend head_sha'
-        else:
-            assert method == 'POST', method
-            assert target.endswith('/check-runs'), target
-            assert f'head_sha={HEAD}' in argv
-
-
-def test_re_running_updates_the_same_check_rather_than_accumulating(tmp):
-    m = _mod()
-    recorded = []
-    read = _publish_read([99], recorded)
-    m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
-    m.publish(read, 'o/r', HEAD, 'failure', 't', 's', RUN)
-    assert [r[0] for r in recorded] == ['PATCH', 'PATCH']
-    assert all(r[1].endswith('/check-runs/99') for r in recorded)
-
-
-def test_retired_suffix_cannot_pass_the_exact_listing_selector(tmp):
-    requests = []
-    _mod().publish(_publish_read([], [], requests=requests),
-                   'o/r', HEAD, 'success', 't', 's', RUN)
+def test_listing_parses_paginated_lines_and_keeps_external_ids(tmp):
+    m, requests = _mod(), []
+    checks = [(9, 'completed', None), (100, 'in_progress', 'uuid with spaces')]
+    read = _publish_read(checks, [], requests=requests,
+                         listing='invalid completed -\n9 completed -\n'
+                                 '100 in_progress uuid with spaces\n')
+    assert m._existing_checks(read, 'o/r', HEAD) == checks
     assert all('Cache-Control: no-cache' in argv for argv in requests)
-    assert requests[0][requests[0].index('--jq') + 1] == _SELECTOR, (
-        'check name, external_id and app slug must all match exactly')
 
 
 def test_publish_fake_refuses_unmodelled_listing_calls(tmp):
-    read = _publish_read([7], [])
+    read = _publish_read([(7, 'completed', None)], [])
     flags = ['--paginate', '--jq', _SELECTOR]
     for flag in ('-X', '--method'):
-        assert read(['gh', 'api', _CHECK_LIST, flag, 'GET', *flags]) == '7 50'
+        assert read(['gh', 'api', _CHECK_LIST, flag, 'GET', *flags]) == (
+            '7 completed -')
     bad = [['gh', 'api', target, '--method', 'GET', *flags] for target in (
         _CHECK_LIST.replace('o/r', 'unmodelled/repo'),
         _CHECK_LIST.replace(HEAD, 'wrong-head'),
