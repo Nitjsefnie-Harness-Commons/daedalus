@@ -9,8 +9,8 @@ read by tool discovery are explicitly listed because workflow scans miss them.
 
 Read main's head once FIRST, then enumerate each gate path at that immutable
 snapshot. Compare each gate commit to each PR head: its 40 lowercase hex merge
-base must be the gate itself. Every enumerated commit is checked for misses;
-short-circuiting at the first miss would be an optimisation, not the proof.
+base must be the gate itself. Readable misses do not short-circuit; an
+unreadable comparison ends that head's decision with an unreadable failure.
 A compare that cannot be read is not evidence of freshness: publish that head
 RED. Only a head predating a new gate must rebase. Ratchet counts are computed
 by the gates; a head predating their recording commit must rebase to be checked
@@ -211,7 +211,7 @@ def _stale_summary(head, missing):
 
 
 def head_verdict(read, repository, head, gates):
-    """Decide one head against every gate commit. All are checked."""
+    """Compare every gate; stop only on an unreadable comparison."""
     missing = []
     for path, gate in gates:
         base, attempts = merge_base(read, repository, gate, head)
