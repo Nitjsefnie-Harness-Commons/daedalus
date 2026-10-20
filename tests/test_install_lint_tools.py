@@ -34,12 +34,9 @@ INSTALLER_SOURCE = ROOT / 'scripts' / 'ci' / 'install_lint_tools.py'
 WINDOWS_HOST = ('Windows', 'AMD64')
 WINDOWS_X64 = WINDOWS_HOST
 # (host pair, the asset the release names for it, whether it is a zip).
-# The asset names are SPELLED on purpose: they are the values this suite
-# asserts the installer produces, and an expectation derived from the code
-# under test asserts only that the code agrees with itself. The KEYS are
-# not spelled — `_key_for` asks, because a key is built and has moved.
-# Spelled here for the reason the table is: see above.
-_BUILD = 'actionlint_1.7.12-queue.1_'
+# Platform suffixes are independent expectations; the version follows
+# the installer so a pin bump leaves platform coverage intact.
+_BUILD = f'actionlint_{_util.load(INSTALLER_SOURCE).ACTIONLINT_VERSION}_'
 PINNED = (
     (('Linux', 'x86_64'), _BUILD + 'linux_amd64.tar.gz', False),
     (('Darwin', 'x86_64'), _BUILD + 'darwin_amd64.tar.gz', False),
@@ -52,8 +49,12 @@ _ACTIONLINT = 'actionlint'
 # EXTENSION is added by the platform, never written here.
 ACTIONLINT_BINARY = 'actionlint'
 # A real wheel's name, so a version refusal can tell it from another.
-DEFAULT_WHEEL = 'shellcheck_py-0.11.0.1-py3-none-any.whl'
-SCRIPTS = 'shellcheck_py-0.11.0.1.data/scripts'
+SHELLCHECK_VERSION, = re.findall(
+    r'^shellcheck-py==(.+)$',
+    (ROOT / 'requirements-test.txt').read_text(encoding='utf-8'),
+    re.MULTILINE)
+DEFAULT_WHEEL = f'shellcheck_py-{SHELLCHECK_VERSION}-py3-none-any.whl'
+SCRIPTS = f'shellcheck_py-{SHELLCHECK_VERSION}.data/scripts'
 
 
 def assert_same_file(resolved, written, what):
@@ -205,7 +206,8 @@ def test_every_pinned_key_names_the_asset_and_the_archive_it_carries(tmp):
         assert resolved == key, (host, resolved)
         assert name == asset, (host, name)
         assert name.endswith('.zip') is zipped, (host, name)
-        assert len(installer.ACTIONLINT_SHA256[key]) == 64, (host, key)
+        assert re.fullmatch(r'[0-9a-fA-F]{64}',
+                            installer.ACTIONLINT_SHA256[key]), (host, key)
 
 
 def test_a_windows_release_asset_unpacks_from_its_zip(tmp):

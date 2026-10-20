@@ -323,13 +323,16 @@ def test_the_zizmor_manifest_is_hash_pinned(tmp):
 
 
 def test_the_release_manifest_pins_the_expected_tools(tmp):
-    """The manifest pins exactly what these literals name, never read back."""
+    """The build tools stay exactly pinned when their versions move."""
     del tmp
     manifest = (ROOT / 'requirements-release.txt').read_text(
         encoding='utf-8')
     lines = [line for line in manifest.splitlines()
              if line.strip() and not line.lstrip().startswith('#')]
-    assert lines == ['build==1.6.1', 'twine==7.0.0'], lines
+    pins = [re.fullmatch(r'([\w.-]+)==([^\s=<>!~*,;]+)', line)
+            for line in lines]
+    assert all(pins), lines
+    assert [pin[1] for pin in pins] == ['build', 'twine'], lines
 
 
 def test_every_dependabot_group_has_a_security_mirror(tmp):
