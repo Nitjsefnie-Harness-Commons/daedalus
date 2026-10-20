@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _gate_freshness_fixtures import _encode  # noqa: E402
+from _gate_freshness_fixtures import _check, _encode  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 G1 = 'a' * 40
@@ -20,7 +20,7 @@ _CHECK_LIST = (f'repos/o/r/commits/{HEAD}/check-runs'
                '?filter=all&per_page=100')
 _SELECTOR = ('.check_runs[] | select(.name == "gate freshness" and '
              '.app.slug == "github-actions") | '
-             '"\\(.id) \\(.status) \\(.external_id // "-")"')
+             '{id, status, conclusion, external_id, summary: .output.summary}')
 
 
 def _mod():
@@ -40,8 +40,6 @@ def _head(number=7, sha=HEAD, owner='octo', ref='feature', base='main'):
 def _gate(path, sha):
     return (path, sha)
 
-
-# ---- gate-defining path set ----
 
 def test_the_set_is_exactly_the_documented_patterns(tmp):
     m = _mod()
@@ -79,15 +77,11 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
 
 def test_no_file_is_carried_by_the_branch_outside_the_gate_set(tmp):
     m = _mod()
-    assert not hasattr(m, 'CARRIED_BY_THE_BRANCH'), (
-        'the carried-by-the-branch exclusion is back: a baseline a ratchet '
-        'can move is exactly what a stale head must be refused for')
+    assert not hasattr(m, 'CARRIED_BY_THE_BRANCH')
     for moved in ('.github/ci-thresholds.json', '.github/journey-budget.json'):
         assert m.is_gate_defining(moved), moved
         assert moved in m.GATE_PATTERNS, moved
 
-
-# ---- derive the set from the workflows (the guard) ----
 
 _EXECUTED = re.compile(
     r'python3?(?:\.\d+)? +(?:-[A-Za-z]+ +)*([\w./-]+\.py)\b'
@@ -187,8 +181,6 @@ def test_a_generated_untracked_requirements_file_is_not_required(tmp):
     assert 'extras-requirements.txt' not in real, real
 
 
-# ---- merge base: the shape guard ----
-
 def test_the_merge_base_tells_ancestor_from_not(tmp):
     m = _mod()
     same, attempts = m.merge_base(
@@ -216,10 +208,8 @@ def test_status_is_not_load_bearing_the_merge_base_is(tmp):
 def test_a_merge_base_that_is_not_forty_lowercase_hex_is_unreadable(tmp):
     m = _mod()
     for bad in (None, '', 'ZZZ', 'A' * 40, 'a' * 39, 'a' * 41, 12345):
-        def read(_argv, shape=bad):
-            return _encode(
-                {'status': 'ahead', 'merge_base_commit': {'sha': shape}})
-        mb, _ = m.merge_base(read, 'o/r', G1, _head())
+        mb, _ = m.merge_base(_encoded_read(_compare_ok(bad)),
+                             'o/r', G1, _head())
         assert mb is None, bad
 
 
@@ -254,8 +244,6 @@ def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
     assert 'rebase' in text.lower()
     assert 'not evidence of access denial' in text
 
-
-# ---- gate commit enumeration ----
 
 def _commits_read(m, commits=None, raise_for=None, live_shaped=False,
                   asked=None):
@@ -318,17 +306,13 @@ def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
 def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
     m = _mod()
     for bad in (42, {'error': 'rate limited'}, '"a string"'):
-        def read(_argv, shape=bad):
-            return _encode(shape)
         try:
-            m.enumerate_gates(read, 'o/r')
+            m.enumerate_gates(_encoded_read(bad), 'o/r')
         except m.QueryError as error:
             assert 'list' in str(error), str(error)
             continue
         raise AssertionError(f'a non-list payload {bad!r} was not refused')
 
-
-# ---- verdicts over many gate commits ----
 
 def _multi_gate_read(missing_at, asked=None):
     def read(argv):
@@ -388,10 +372,10 @@ def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
     assert verdict.kind == 'unreadable'
 
 
-# ---- publish: a failure must overwrite a published success ----
-
 def _publish_read(checks, recorded, fail=None, requests=None,
-                  error=AssertionError, listing=None):
+                  error=AssertionError, listing=None, base=None):
+    checks = [_check(*c) if isinstance(c, tuple) else c for c in checks]
+
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
         method = next((argv[i + 1].upper()
@@ -405,12 +389,15 @@ def _publish_read(checks, recorded, fail=None, requests=None,
             assert argv[argv.index('--jq') + 1] == _SELECTOR
             if fail == 'GET':
                 raise error('listing unavailable')
-            if listing is not None:
-                return listing
-            return '\n'.join(f'{i} {status} {external or "-"}'
-                             for i, status, external in checks)
+            return (listing if listing is not None else
+                    '\n'.join(_encode(c) for c in checks))
+        if target.startswith('repos/o/r/compare/'):
+            assert method == 'GET' and base is not None
+            if fail == 'compare':
+                raise error('compare unavailable')
+            return _encode(_compare_ok(base))
         allowed = {('POST', 'repos/o/r/check-runs')} | {
-            ('PATCH', f'repos/o/r/check-runs/{i}') for i, _, _ in checks}
+            ('PATCH', f'repos/o/r/check-runs/{c["id"]}') for c in checks}
         assert (method, target) in allowed, (method, target)
         recorded.append((method, target, list(argv)))
         if fail in (method, target):
@@ -423,14 +410,14 @@ def test_a_completed_carrier_is_patched_without_rewriting_its_external_id(tmp):
     recorded = []
     _mod().publish(_publish_read([(4242, 'completed', 'runner-uuid')],
                                  recorded),
-                   'o/r', HEAD, 'failure', 't', 's', RUN)
+                   'o/r', HEAD, 'failure', 't', 's\nmore', RUN, G1)
     assert len(recorded) == 1
     method, target, argv = recorded[0]
     assert (method, target) == ('PATCH', 'repos/o/r/check-runs/4242')
     assert argv[argv.index('-X') + 2:] == [
         '-f', 'name=gate freshness', '-f', 'status=completed',
         '-f', 'conclusion=failure', '-f', f'details_url={RUN}',
-        '-f', 'output[title]=t', '-f', 'output[summary]=s']
+        '-f', 'output[title]=t', '-f', f'output[summary]=s\nmore\nmain {G1}']
 
 
 def test_newest_carries_the_verdict_and_retires_completed_checks(tmp):
@@ -438,10 +425,11 @@ def test_newest_carries_the_verdict_and_retires_completed_checks(tmp):
     for external in ('runner-uuid', m.EXTERNAL_ID, None, 'other id'):
         for status in ('completed', 'in_progress', 'queued'):
             recorded = []
-            checks = [(100, 'completed', 'carrier-uuid'),
-                      (9, status, external)]
+            checks = [_check(100, external_id='carrier-uuid'),
+                      _check(9, status, external, conclusion='failure'),
+                      _check(100)]
             m.publish(_publish_read(checks, recorded),
-                      'o/r', HEAD, 'success', 't', 's', RUN)
+                      'o/r', HEAD, 'success', 't', 's', RUN, G1)
             assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/100')
             assert 'conclusion=success' in recorded[0][2]
             assert len(recorded) == (2 if status == 'completed' else 1)
@@ -449,8 +437,9 @@ def test_newest_carries_the_verdict_and_retires_completed_checks(tmp):
                 assert recorded[1][:2] == ('PATCH', 'repos/o/r/check-runs/9')
                 assert recorded[1][2][recorded[1][2].index('-X') + 2:] == [
                     '-f', 'name=superseded gate freshness']
-                state = {i: {'name': m.NAME, 'conclusion': 'failure'}
-                         for i in (100, 9)}
+                state = {c['id']: {'name': m.NAME,
+                                   'conclusion': c['conclusion']}
+                         for c in checks}
                 for _, target, argv in recorded:
                     state[int(target.rsplit('/', 1)[-1])].update(dict(
                         field.split('=', 1) for field in argv
@@ -466,7 +455,7 @@ def test_a_live_job_is_left_to_the_runner_while_legacy_checks_are_retired(tmp):
             recorded = []
             checks = [(99, status, 'runner-uuid'), *legacy]
             m.publish(_publish_read(checks, recorded),
-                      'o/r', HEAD, 'failure', 't', 's', RUN)
+                      'o/r', HEAD, 'failure', 't', 's', RUN, G1)
             assert len(recorded) == len(legacy)
             if legacy:
                 assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/8')
@@ -477,7 +466,7 @@ def test_a_live_job_is_left_to_the_runner_while_legacy_checks_are_retired(tmp):
 def test_no_carrier_posts_once_with_the_legacy_external_id(tmp):
     recorded = []
     _mod().publish(_publish_read([], recorded),
-                   'o/r', HEAD, 'success', 't', 's', RUN)
+                   'o/r', HEAD, 'success', 't', 's', RUN, G1)
     assert len(recorded) == 1
     method, target, argv = recorded[0]
     assert (method, target) == ('POST', 'repos/o/r/check-runs')
@@ -485,7 +474,7 @@ def test_no_carrier_posts_once_with_the_legacy_external_id(tmp):
                   'status=completed', 'conclusion=success',
                   'external_id=daedalus-gate-freshness/v1',
                   f'details_url={RUN}', 'output[title]=t',
-                  'output[summary]=s'):
+                  f'output[summary]=s\nmain {G1}'):
         assert field in argv, field
 
 
@@ -503,7 +492,7 @@ def test_listing_and_write_failures_raise_without_further_writes(tmp):
         try:
             m.publish(_publish_read(checks, recorded, fail=fail,
                                     error=m.QueryError),
-                      'o/r', HEAD, 'failure', 't', 's', RUN)
+                      'o/r', HEAD, 'failure', 't', 's', RUN, G1)
         except m.QueryError:
             assert [v for v, _, _ in recorded] == expected
             if fail == 'repos/o/r/check-runs/9':
@@ -515,28 +504,91 @@ def test_listing_and_write_failures_raise_without_further_writes(tmp):
 
 def test_listing_parses_paginated_lines_and_keeps_external_ids(tmp):
     m, requests = _mod(), []
-    checks = [(9, 'completed', None), (100, 'in_progress', 'uuid with spaces')]
-    read = _publish_read(checks, [], requests=requests,
-                         listing='9 completed -\n'
-                                 '100 in_progress uuid with spaces\n')
+    checks = [_check(9), _check(100, 'in_progress', 'uuid with spaces')]
+    read = _publish_read(checks, [], requests=requests)
     assert m._existing_checks(read, 'o/r', HEAD) == checks
     assert all('Cache-Control: no-cache' in argv for argv in requests)
 
 
 def test_a_malformed_listing_refuses_before_any_write(tmp):
     m = _mod()
-    for row in ('invalid completed -', '100', '100 completed',
-                '100  -', '100 completed ', '² completed uuid', ''):
-        for raw in (f'{row}\n', f'9 completed -\n{row}\n'):
+    for row in ('not JSON', '[]', 'null', '1', '{}',
+                '{"id": true, "status": "completed"}',
+                '{"id": 100, "status": null}', ''):
+        for raw in (f'{row}\n', f'{_encode(_check(9))}\n{row}\n'):
             recorded = []
             try:
                 m.publish(_publish_read([(9, 'completed', None)], recorded,
                                         listing=raw),
-                          'o/r', HEAD, 'success', 't', 's', RUN)
+                          'o/r', HEAD, 'success', 't', 's', RUN, G1)
             except m.QueryError:
                 assert recorded == []
                 continue
             raise AssertionError(f'malformed listing accepted: {raw!r}')
+
+
+def test_older_success_cannot_replace_a_marked_newer_verdict(tmp):
+    m, writes, requests = _mod(), [], []
+    checks = [_check(100, conclusion='failure', summary=f's\nmain {G2}')]
+    read = _publish_read(checks, writes, base=G1, requests=requests)
+    m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN, G1)
+    assert writes == []
+    assert any(f'/compare/{G2}...{G1}' in a for argv in requests for a in argv)
+
+
+def test_newer_snapshot_replaces_an_older_verdict_and_retires_on_skip(tmp):
+    m = _mod()
+    for base, expected in ((G1, ['100', '9']), ('d' * 40, ['9'])):
+        writes = []
+        checks = [_check(100, summary=f'old\nmain {G1}'), _check(9)]
+        m.publish(_publish_read(checks, writes, base=base),
+                  'o/r', HEAD, 'failure', 't', 's', RUN, G2)
+        assert [t.rsplit('/', 1)[-1] for _, t, _ in writes] == expected
+        if base == G1:
+            assert f'output[summary]=s\nmain {G2}' in writes[0][2]
+            assert not any(a.startswith('external_id=') for a in writes[0][2])
+
+
+def test_unmarked_failure_is_not_unfrozen_but_green_is_written(tmp):
+    m = _mod()
+    for old, expected in (('failure', 0), ('success', 1)):
+        for summary in (None, 'text', f'main {G2}\nnot the last line'):
+            writes = []
+            checks = [_check(100, conclusion=old, summary=summary)]
+            m.publish(_publish_read(checks, writes),
+                      'o/r', HEAD, 'success', 't', 's', RUN, G1)
+            assert len(writes) == expected
+
+
+def test_an_unreadable_ordering_compare_refuses_without_writing(tmp):
+    m, writes = _mod(), []
+    checks = [_check(100, summary=f'main {G2}')]
+    try:
+        m.publish(_publish_read(checks, writes, fail='compare', base=G1,
+                                error=m.QueryError),
+                  'o/r', HEAD, 'success', 't', 's', RUN, G1)
+    except m.QueryError:
+        assert writes == []
+        return
+    raise AssertionError('unreadable ordering compare was accepted')
+
+
+def test_overlapping_reads_allow_the_older_snapshot_to_write_last(tmp):
+    m, writes, requests = _mod(), [], []
+    checks = [_check(100, summary=f'main {G1}')]
+    older = _publish_read(checks, writes, requests=requests)
+
+    def read(argv):
+        if 'conclusion=success' in argv:
+            newer = _publish_read(checks, writes, base=G1, requests=requests)
+            m.publish(newer, 'o/r', HEAD, 'failure', 't', 's', RUN, G2)
+        return older(argv)
+    m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN, G1)
+    assert len(requests) >= 2 and all(_CHECK_LIST in a for a in requests[:2])
+    assert [next(a for a in argv if a.startswith('conclusion='))
+            for _, _, argv in writes] == ['conclusion=failure',
+                                          'conclusion=success']
+    assert f'output[summary]=s\nmain {G1}' in writes[-1][2]
 
 
 def test_publish_fake_refuses_unmodelled_listing_calls(tmp):
@@ -544,7 +596,7 @@ def test_publish_fake_refuses_unmodelled_listing_calls(tmp):
     flags = ['--paginate', '--jq', _SELECTOR]
     for flag in ('-X', '--method'):
         assert read(['gh', 'api', _CHECK_LIST, flag, 'GET', *flags]) == (
-            '7 completed -')
+            _encode(_check(7)))
     bad = [['gh', 'api', target, '--method', 'GET', *flags] for target in (
         _CHECK_LIST.replace('o/r', 'unmodelled/repo'),
         _CHECK_LIST.replace(HEAD, 'wrong-head'),
@@ -563,8 +615,6 @@ def test_publish_fake_refuses_unmodelled_listing_calls(tmp):
         accepted.append(argv)
     assert not accepted, f'unmodelled listing calls accepted: {accepted}'
 
-
-# ---- select_heads ----
 
 def test_a_pull_request_not_based_on_main_is_skipped(tmp):
     m = _mod()

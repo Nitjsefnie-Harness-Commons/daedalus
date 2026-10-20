@@ -22,7 +22,7 @@ name: gate freshness
 # would take its workflow text from the merge ref while running a script from
 # the branch SHA, and the two can disagree.)
 #
-# THE BOUND: gate-path lookups + open PRs x (gate compares + four calls).
+# THE BOUND: gate-path lookups + snapshot + PRs x (gate compares + five calls).
 # Neither extra ids nor pages are bounded by this estimate. At 1.5 s/call,
 # 1200 calls take 30 minutes; the 35-minute timeout provides residual slack.
 # See THE BOUND in scripts/ci/gate_freshness.py.

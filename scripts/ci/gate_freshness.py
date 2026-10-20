@@ -1,80 +1,41 @@
 #!/usr/bin/env python3
-"""Publish a `gate freshness` verdict on every open pull request head.
+"""Publish a `gate freshness` verdict for open heads based on main.
 
-Decide whether each open head based on `main` contains every gate-defining
-commit. The event's own job carries its verdict; the Checks API updates other
-heads. Only a head predating a new gate must rebase.
+The event's own job carries its verdict; the Checks API updates other heads.
+GATE_PATTERNS names paths that change what a gate computes for a fixed tree,
+including the ratcheted threshold and journey counts. Tests change the tree,
+not the gate definition. Directory patterns use literal prefixes; config files
+read by tool discovery are explicitly listed because workflow scans miss them.
 
-THE GATE-DEFINING PATH SET. A file is gate-defining when a change to it can
-change a required check's verdict FOR THE SAME SOURCE TREE -- it decides *what
-a check computes*, not *what tree it computes it on*. A changed TEST is not:
-the tree is what a branch carries, so a branch runs the tests it brings.
+For every gate path, enumerate its latest main commit, then read main's head
+once. Compare each gate commit to each PR head: its 40-hex merge base must be
+the gate itself. Revalidate the PR head before comparing and before writing.
+A readable moved head is skipped; unreadable identity or comparison fails.
+Global read/budget failures publish nothing; per-head failures preserve work
+for other heads and fail the run. A dry run computes without publishing.
 
-  .github/workflows/**       which checks run, and what each one does
-  scripts/ci/**             the gate implementations under the CI directory
-  scripts/check_versions.py the version gate run on every push to main
-  .gitleaks.toml            the configuration secrets.yml scans with
-  pyrightconfig.json        the type checker's scope and settings
-  pyrightconfig.tests.json  the type checker's scope over the test tree
-  .pylintrc                 pylint's configuration
-  setup.cfg                 pycodestyle's configuration (max-line-length)
-  eslint.config.js          eslint's configuration
-  pyproject.toml            [tool.coverage.*] -- what coverage measures
-  run_tests.py              which suites the suites job runs
-  requirements-dev.txt      the manifests the gates install and run; so are
-  requirements-test.txt     requirements-pip-audit.txt (the vulnerability
-  requirements-release.txt  gate's own tool) and requirements-zizmor.txt,
-                            the hash-pinned analyzer the tests job installs
+THE CHECK CARRIER. GitHub chooses suites from repository and SHA. API-created
+checks were observed in the oldest app suite; callers cannot move them when
+it is superseded. A job check belongs to its run's suite, so the job carries
+the context. Select the newest check, PATCH only if completed, otherwise leave
+it to its runner. Retire completed non-carriers, including after a skipped
+verdict write. Without a carrier, POST may still land in a superseded suite.
 
-  .github/ci-thresholds.json  and
-  .github/journey-budget.json  the recorded counts two gates compare against.
-                               Gate-computed counts: a ratchet tightens them.
-                               A head predating that commit used the old limits
-                               and must rebase to be checked against the new.
+ORDERING. A writer never replaces a verdict it has observed to rest on a main
+its own snapshot does not contain. Every verdict summary ends with main's SHA;
+unmarked failures are not turned success without ordering evidence. This is
+not atomic: two invocations reading the carrier before either writes can still
+race, and an older snapshot can win. The window is one ordering compare wide,
+not a whole run; an older red can still replace a newer green, blocking the
+head until its next event. No retry or repair follows a write.
 
-The set is derived only as far as a workflow NAMES a file: the suite reads
-every `.github/workflows/*.yml` and requires every tracked file a workflow
-invokes by path or passes to a tool to be listed here, so a gate file added
-later fails the suite. The REACH LIMIT is real and stated:
-`pyrightconfig.json`, `pyrightconfig.tests.json`, `setup.cfg`,
-`eslint.config.js` and `pyproject.toml` are read by tool DISCOVERY (a bare
-`pyright` / `eslint` / `pycodestyle` invocation, or a heredoc), never named,
-so the derivation cannot see them; those five are hand-held above, each with
-its reason. A `python3 -m module` invocation is likewise not seen.
-
-THE DECISION, per (gate commit, head): one `compare/<gate>...<head>` request.
-The gate commit is an ancestor of the head IFF the merge base equals the gate
-commit, validated as 40 lowercase hex. Every enumerated gate commit is checked
--- short-circuiting on the first miss would be an optimisation, not the proof.
-A compare that cannot be read is NOT evidence of freshness: that head is
-published RED, the case where a stale green is waiting to be overwritten.
-
-READING FAILURES. A GLOBAL failure (the open-PR list, a gate-commit lookup, the
-call bound, a route that cannot establish its head) publishes NOTHING and exits
-nonzero: an invented verdict is worse than a missing one. A PER-HEAD failure
-(one head's compare unreadable, or its write failing) still writes that head's
-RED verdict where it can, skips it loudly where it cannot, and never abandons
-the rest. A head that MOVED -- a revalidation that READ a different sha -- is
-reported and skipped WITHOUT failing the run: its new head gets its own
-verdict from its own `pull_request_target` event. A revalidation that could
-not be READ is a failure, not a skip. All print a loud line to stderr.
-
-THE CHECK CARRIER. GitHub chooses suites from repository and SHA; the oldest
-app suite is the observed landing for API-created checks, not a caller
-choice. Once superseded, its checks are ignored by the ruleset. A workflow
-job's check belongs to its own run's suite. The job carries the event verdict;
-for other heads, PATCH the newest check only if completed, otherwise leave it
-to its runner. Retire completed non-carriers; POST only without a carrier,
-which can still land in a superseded suite.
-
-THE BOUND. Estimate L + H * (G + 4): L gate-path lookups, then G compares,
-two head revalidations, one check listing and one write per head. Extra
-completed ids cost retirement PATCHes; pagination counts as one logical read.
-Neither duplicate ids nor pages are bounded by the estimate. At 1.5 s/call,
-the 1200-call budget is 30 minutes; the 35-minute timeout provides slack for
-that residual under this assumption. An over-budget estimate refuses loudly
-without truncating the head set.
-
+THE BOUND. Estimate L + 1 + H * (G + 5): L gate-path lookups and one main-head
+read, then G compares, two revalidations, one listing, one write and a
+conditional ordering compare per head. Extra completed ids cost retirement
+PATCHes; pagination counts as one logical read. Neither ids nor pages are
+bounded by the estimate. At 1.5 s/call, 1200 calls take 30 minutes; the
+35-minute timeout provides residual slack under that assumption. An
+oversized estimate refuses without truncating the head set.
 """
 import json
 import os
@@ -109,8 +70,8 @@ GATE_PATTERNS = (
 
 _HEX40 = frozenset('0123456789abcdef')
 
-# Fixed per-head estimate: two head revalidations, one listing, one write.
-PER_HEAD_OVERHEAD = 4
+# Per head: two revalidations, listing, write, conditional ordering compare.
+PER_HEAD_OVERHEAD = 5
 
 DEFAULT_CALL_BUDGET = 1200
 
@@ -262,35 +223,66 @@ def current_head(read, repository, number):
     return sha
 
 
+def main_head(read, repository):
+    """Read the invocation's main snapshot, or fail without a verdict."""
+    payload = _one(read, _api(f'repos/{repository}/commits/{BASE_BRANCH}'))
+    sha = payload.get('sha') if isinstance(payload, dict) else None
+    if not _hex40(sha):
+        raise QueryError('could not read the main snapshot')
+    return sha
+
+
 def _existing_checks(read, repository, head_sha):
-    """The (id, status, external_id) triples on `head_sha`, server-side."""
+    """Read projected JSON check records, refusing malformed rows."""
     listing = _api(
         f'repos/{repository}/commits/{head_sha}/check-runs'
         '?filter=all&per_page=100', '--method', 'GET', '--paginate',
         '--jq', (f'.check_runs[] | select(.name == "{NAME}" and '
                  f'.app.slug == "{APP_SLUG}") | '
-                 '"\\(.id) \\(.status) \\(.external_id // "-")"'))
+                 '{id, status, conclusion, external_id, '
+                 'summary: .output.summary}'))
     try:
         raw = read(listing)
     except QueryError:
         return None
     checks = []
     for line in raw.splitlines():
-        parts = line.split(' ', 2)
-        if (len(parts) != 3 or not parts[0].isascii()
-                or not parts[0].isdigit() or not parts[1] or not parts[2]):
+        try:
+            check = json.loads(line)
+        except ValueError as error:
+            raise QueryError('malformed existing check listing') from error
+        if (not isinstance(check, dict)
+                or not isinstance(check.get('id'), int)
+                or isinstance(check['id'], bool)
+                or not isinstance(check.get('status'), str)):
             raise QueryError('malformed existing check listing')
-        checks.append((int(parts[0]), parts[1],
-                       None if parts[2] == '-' else parts[2]))
+        checks.append(check)
     return checks
 
 
+def _may_replace(read, repository, carrier, main_sha, conclusion):
+    summary = carrier.get('summary')
+    marker = summary.rsplit('\n', 1)[-1] if isinstance(summary, str) else ''
+    theirs = marker[5:] if marker.startswith('main ') else None
+    theirs = theirs if _hex40(theirs) else None
+    if theirs and theirs != main_sha:
+        base, _attempts = merge_base(
+            read, repository, theirs, {'sha': main_sha})
+        if base is None:
+            raise QueryError('could not read the main ordering compare')
+        return base == theirs
+    return not (theirs is None and carrier.get('conclusion') == 'failure'
+                and conclusion == 'success')
+
+
 def publish(read, repository, head_sha, conclusion, title, summary,
-            details_url):
+            details_url, main_sha):
     """Write onto the newest check; leave an unfinished one to its runner.
 
-    A head's own job check is the carrier once that job has run. A POST
-    fallback can remain in a superseded suite; this function cannot move it.
+    Never replace a verdict observed to rest on a main ours does not contain.
+    Two reads before either write can still race: an older red or green may
+    win. The window is one ordering compare wide, not a whole run. A head's
+    job check is its carrier; a POST fallback can remain in a superseded suite.
     """
     checks = _existing_checks(read, repository, head_sha)
     if checks is None:
@@ -301,24 +293,25 @@ def publish(read, repository, head_sha, conclusion, title, summary,
         '-f', f'conclusion={conclusion}',
         '-f', f'details_url={details_url}',
         '-f', f'output[title]={title}',
-        '-f', f'output[summary]={summary}',
+        '-f', f'output[summary]={summary}\nmain {main_sha}',
     ]
     # Only POST sets external_id; PATCH preserves the runner UUID.
-    carrier = max(checks, key=lambda check: check[0]) if checks else None
+    carrier = max(checks, key=lambda check: check['id']) if checks else None
     if carrier is None:
         read(_api(f'repos/{repository}/check-runs', '-X', 'POST',
                   '-f', f'head_sha={head_sha}', *fields,
                   '-f', f'external_id={EXTERNAL_ID}'))
-    elif carrier[1] == 'completed':
-        read(_api(f'repos/{repository}/check-runs/{carrier[0]}',
+    elif carrier['status'] == 'completed' and _may_replace(
+            read, repository, carrier, main_sha, conclusion):
+        read(_api(f'repos/{repository}/check-runs/{carrier["id"]}',
                   '-X', 'PATCH', *fields))
     # An unfinished carrier gets its verdict from its job's exit code.
-    for check_id, status, _external_id in checks:
+    for check in checks:
         if carrier is not None:
-            if check_id == carrier[0]:
+            if check['id'] == carrier['id']:
                 continue
-        if status == 'completed':
-            read(_api(f'repos/{repository}/check-runs/{check_id}',
+        if check['status'] == 'completed':
+            read(_api(f'repos/{repository}/check-runs/{check["id"]}',
                       '-X', 'PATCH', '-f', f'name={NAME_RETIRED}'))
 
 
@@ -341,11 +334,12 @@ def select_heads(pulls):
 
 
 def required_calls(head_count, gate_count):
-    return len(GATE_PATTERNS) + head_count * (PER_HEAD_OVERHEAD + gate_count)
+    return len(GATE_PATTERNS) + 1 + head_count * (
+        PER_HEAD_OVERHEAD + gate_count)
 
 
-def process(read, repository, heads, gates, details_url, call_budget=None,
-            dry_run=False):
+def process(read, repository, heads, gates, details_url, main_sha,
+            call_budget=None, dry_run=False):
     """Return (exit_code, published); failed heads do not abandon siblings."""
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
     needed = required_calls(len(heads), len(gates))
@@ -375,7 +369,7 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
                       f'{verdict.summary}')
             else:
                 publish(read, repository, head['sha'], verdict.conclusion,
-                        verdict.title, verdict.summary, details_url)
+                        verdict.title, verdict.summary, details_url, main_sha)
         except QueryError as error:
             print(f'gate freshness: could not {phase} pull request '
                   f'{head["number"]}: {error}; skipping', file=sys.stderr)
@@ -461,11 +455,13 @@ def main(argv=None, read=None):
         heads = select_heads(pulls)
     try:
         gates = enumerate_gates(read, repository)
+        main_sha = main_head(read, repository)
     except QueryError as error:
         print(f'gate freshness: {error}; publishing nothing', file=sys.stderr)
         return 1
     code, published = process(read, repository, heads, gates,
-                              _details_url(), _call_budget(), dry_run)
+                              _details_url(), main_sha, _call_budget(),
+                              dry_run)
     if name == 'pull_request_target' and not dry_run:
         if any(v.conclusion != 'success' for v in published):
             code = 1
