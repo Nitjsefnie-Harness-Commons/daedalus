@@ -1,11 +1,11 @@
 {
   ".claude/skills/changing-daedalus/ci_gate.py": [
-    8001,
-    9979
+    7903,
+    9881
   ],
   ".claude/skills/changing-daedalus/ci_wait.py": [
-    10253,
-    18319
+    10235,
+    18301
   ],
   ".claude/skills/changing-daedalus/gh_client.py": [
     5614,
@@ -52,8 +52,8 @@
     12492
   ],
   ".github/workflows/gate-freshness.yml": [
-    1669,
-    2357
+    1436,
+    2136
   ],
   ".github/workflows/pr-gate.yml": [
     728,
@@ -432,8 +432,8 @@
     13658
   ],
   "scripts/ci/gate_freshness.py": [
-    5201,
-    15449
+    4534,
+    15428
   ],
   "scripts/ci/install_lint_tools.py": [
     9016,
@@ -722,10 +722,6 @@
   "tests/_frontend.py": [
     832,
     3735
-  ],
-  "tests/_gate_freshness_fixtures.py": [
-    451,
-    534
   ],
   "tests/_gc_handshake.py": [
     2429,
@@ -1326,14 +1322,6 @@
   "tests/test_gate_extensions.py": [
     2558,
     9400
-  ],
-  "tests/test_gate_freshness_ratchet.py": [
-    1816,
-    4090
-  ],
-  "tests/test_gate_freshness_run.py": [
-    2923,
-    18839
   ],
   "tests/test_gh_client.py": [
     7593,
