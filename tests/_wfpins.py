@@ -356,7 +356,7 @@ EXACT_REQUIREMENT = re.compile(
     r'(?:[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?'
     r'(?:-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?'
     r'(?:[-_.]?dev[-_.]?[0-9]*)?'
-    r'(?:\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?', re.IGNORECASE)
+    r'(?:\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?', re.IGNORECASE | re.ASCII)
 
 
 def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
@@ -398,9 +398,8 @@ def assert_the_eslint_job_pins_exact_versions_behind_a_failing_gate():
 
 
 def _manifest_pins(manifest):
-    """Pins as (name, hashes, welded, line), with only hash options after
-    each exact requirement. A trailing backslash joins physical lines;
-    other continuation tokens are reported instead of borrowing its hashes.
+    """Pins as (name, hashes, welded, line), with dash-prefixed options.
+    Trailing backslashes join lines; unfinished nonempty runs are refused.
     """
     pins, tokens, first = [], [], 0
     for number, line in enumerate(manifest.splitlines(), 1):
@@ -416,8 +415,7 @@ def _manifest_pins(manifest):
         pins.append((tokens, first))
         tokens = []
     assert not tokens, (
-        f'requirements-zizmor.txt:{first} ends in a continuation with no line '
-        f'after it, so pip reads the last requirement as unterminated')
+        f'requirements-zizmor.txt:{first}: unterminated nonempty run')
     for run, number in pins:
         assert EXACT_REQUIREMENT.fullmatch(run[0]), (
             f'requirements-zizmor.txt:{number}: {run[0]!r} is not an exact '
@@ -425,7 +423,7 @@ def _manifest_pins(manifest):
     return [(run[0].split('==', 1)[0],
              [token for token in run
               if token.startswith('--hash=sha256:')],
-             [token for token in run[1:] if not token.startswith('--hash=')],
+             [token for token in run[1:] if not token.startswith('-')],
              number)
             for run, number in pins]
 
@@ -483,7 +481,7 @@ def assert_the_zizmor_manifest_is_hash_pinned():
     for name, hashes, welded, number in pins:
         assert not welded, (
             f'requirements-zizmor.txt:{number}: {name} carries {welded}, and '
-            f'only --hash= options may follow an exact requirement')
+            f'only dash-prefixed options may follow an exact requirement')
         # Pip resolves spelling variants to one package, so a second
         # spelling must still be refused as a duplicate pin.
         canonical = _canonical_name(name)

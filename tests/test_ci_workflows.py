@@ -334,7 +334,8 @@ def test_the_release_manifest_pins_the_expected_tools(tmp):
     for values, accepted in (
             (('1!1.2.0rc1', '1.0.post1', '1.0+local', '2025.1.0',
               '0.11.0.1', '1.0.dev1'), True),
-            (('banana', '1.*', '1.0banana', '', '1.0+'), False)):
+            (('banana', '1.*', '1.0banana', '', '1.0+',
+              '1.0+ſ', '1.0+K', '1.0poſt1'), False)):
         for value in values:
             assert bool(EXACT_REQUIREMENT.fullmatch(f'build=={value}')) \
                 == accepted, value
