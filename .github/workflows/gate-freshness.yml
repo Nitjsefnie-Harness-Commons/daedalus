@@ -12,7 +12,8 @@ name: gate freshness
 #
 # WHY THE SCRIPT PUBLISHES. On a push to `main` this job's check lands
 # on `main`, where no ruleset reads it. The script re-decides every open head
-# and PATCHes each head's newest check only if completed; no older fallback.
+# and prefers each head's newest job check over API fallbacks. It PATCHes only
+# when that carrier is completed, leaving an unfinished carrier to its runner.
 #
 # WHY `pull_request_target` IS SAFE HERE. On this trigger BOTH halves come from
 # the BASE: the workflow text and the `actions/checkout` copy are the trusted
@@ -22,7 +23,8 @@ name: gate freshness
 # would take its workflow text from the merge ref while running a script from
 # the branch SHA, and the two can disagree.)
 #
-# THE BOUND: gate-path lookups + snapshot + PRs x (gate compares + five calls).
+# THE BOUND: gate-path lookups + snapshot + open-PR listing
+# + PRs x (gate compares + five calls). The event route skips the PR listing.
 # Neither extra ids nor pages are bounded by this estimate. At 1.5 s/call,
 # 1200 calls take 30 minutes; the 35-minute timeout provides residual slack.
 # See THE BOUND in scripts/ci/gate_freshness.py.
