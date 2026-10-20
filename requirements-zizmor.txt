@@ -15,8 +15,9 @@
 #
 # THE TEST IN tests/_wfpins.py requires one exact `==` pin for zizmor,
 # at least one sha256 hash, and distinct digests compared case-insensitively.
-# Tokens beginning with '-' may follow the requirement; other tokens and
-# unfinished nonempty continuation runs are rejected. The hash count is
+# Only --hash, --config-settings and --global-option, with =value or a
+# following value token, may follow the pin; all other tokens are refused.
+# Unfinished nonempty continuation runs are refused too. The hash count is
 # free to move: a release can gain or lose artifacts on a valid bump.
 #
 # NOTHING ELSE IS PINNED HERE. zizmor 1.29.0 declares no Requires-Dist at all
