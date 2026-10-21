@@ -312,8 +312,8 @@
     2954
   ],
   "extension/background.js": [
-    2135,
-    5261
+    2154,
+    5313
   ],
   "extension/content.js": [
     4489,
@@ -368,8 +368,8 @@
     14069
   ],
   "extension/worker/messaging.js": [
-    3431,
-    8185
+    3562,
+    9528
   ],
   "extension/worker/netcapture.js": [
     1784,
@@ -1351,10 +1351,6 @@
     6141,
     17400
   ],
-  "tests/test_gm_transfers.py": [
-    2776,
-    16607
-  ],
   "tests/test_hotfix_commands.py": [
     13091,
     25756
@@ -1681,7 +1677,7 @@
   ],
   "tests/test_worker_module_boundary.py": [
     3372,
-    19953
+    19974
   ],
   "tests/test_worker_netcapture.py": [
     2950,
