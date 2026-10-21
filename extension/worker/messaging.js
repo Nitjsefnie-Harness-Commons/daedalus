@@ -9,6 +9,8 @@
 // a caller's abort still reaches its controller while it waits for a slot.
 const _fetchControllers = new Map();
 const _RELAY_CEILING = 8;
+// Eight waiting batches bound retained request bodies behind the active batch.
+const _RELAY_QUEUE_LIMIT = 64;
 const _relayWaiters = [];
 let _relayInFlight = 0;
 let _pendingCommands = 0;
@@ -20,6 +22,28 @@ function _drainRelays() {
     _relayInFlight++;
     _relayWaiters.shift()();
   }
+}
+
+function _admitRelay(signal) {
+  return new Promise((resolve, reject) => {
+    const cancel = () => {
+      const index = _relayWaiters.indexOf(start);
+      if (index !== -1) _relayWaiters.splice(index, 1);
+      reject(signal.reason);
+    };
+    const start = () => {
+      signal.removeEventListener('abort', cancel);
+      resolve();
+    };
+    if (signal.aborted) { cancel(); return; }
+    if (_relayWaiters.length >= _RELAY_QUEUE_LIMIT) {
+      reject(Error(`fetch relay queue full (${_RELAY_QUEUE_LIMIT} waiting)`));
+      return;
+    }
+    signal.addEventListener('abort', cancel, { once: true });
+    _relayWaiters.push(start);
+    _drainRelays();
+  });
 }
 
 async function _withRelayPriority(run) {
@@ -84,11 +108,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const t0 = performance.now();
     let tBodyDecoded, tFetchDone, tEncoded;
     (async () => {
-      await new Promise((resolve) => {
-        _relayWaiters.push(resolve);
-        _drainRelays();
-      });
+      let admitted = false;
       try {
+        await _admitRelay(controller.signal);
+        admitted = true;
+        if (controller.signal.aborted) throw controller.signal.reason;
         // Never the user's cookies. The extension holds host permission for
         // every URL, which makes this fetch same-origin to every host for the
         // credentials check — so the default mode sent the user's logged-in
@@ -183,10 +207,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           tooLarge: isTooLarge,
         });
       } finally {
-        _relayInFlight--;
-        // One drain bounds the hold, so continuous commands cannot starve GM.
-        if (_relayInFlight === 0) _relayHold = false;
-        _drainRelays();
+        if (admitted) {
+          _relayInFlight--;
+          // One drain prevents continuous commands from starving GM.
+          if (_relayInFlight === 0) _relayHold = false;
+          _drainRelays();
+        }
       }
     })();
     return true; // async sendResponse

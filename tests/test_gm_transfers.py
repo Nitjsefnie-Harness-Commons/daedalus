@@ -19,7 +19,7 @@ const fs = require('fs');
 const vm = require('vm');
 const [backgroundPath, mode] = process.argv.slice(1);
 const assert = require('assert/strict');
-const started = [], answers = [];
+const started = [], answers = [], completed = [], timers = new Set();
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -44,26 +44,146 @@ function bridgeFetch(url, opts) {
   return relay.promise;
 }
 """ + RELAY_CONTEXT + DELAY_STUB + r"""
+context.setTimeout = (fn, ms) => {
+  const timer = { fn, ms }; timers.add(timer); return timer;
+};
+context.clearTimeout = (timer) => timers.delete(timer);
+if (mode === 'withdraw:pre') context.AbortController = class
+  extends AbortController { constructor() { super(); this.abort(); } };
 vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context,
   { filename: backgroundPath });
+const state = () => vm.runInContext(
+  '[_relayInFlight, _relayWaiters.length, _pendingCommands]', context);
 function send(message) {
   return new Promise((resolve) => {
     const listener = chrome.runtime.onMessage.listeners[0];
-    assert.equal(listener(message, { tab: { id: 7 } }, resolve), true);
+    assert.equal(listener(message, { tab: { id: 7 } }, (value) => {
+      if (message.type === 'fetch') {
+        completed.push({ ...value, id: message.fetchId });
+        if (mode === 'withdraw:grant' && message.fetchId === '0') {
+          queueMicrotask(() => {
+            assert.deepEqual(Array.from(state()).slice(0, 2), [8, 1]);
+            abort(8);
+          });
+        }
+      }
+      resolve(value);
+    }), true);
   });
+}
+function abort(id) {
+  chrome.runtime.onMessage.listeners[0](
+    { type: 'abortFetch', fetchId: String(id) }, {}, () => {});
 }
 function relay() {
   const id = String(answers.length);
   answers.push(send({ type: 'fetch', fetchId: id,
     url: 'https://example.com/relay', responseType: 'arraybuffer',
-    headers: { 'X-Relay-Id': id } }));
+    timeout: 60000 + Number(id), headers: { 'X-Relay-Id': id } }));
 }
 function finish(index, fail = false) {
   if (fail) started[index].reject(Error('relay failed'));
   else started[index].resolve(new Response('body'));
 }
+async function finishAll() {
+  for (let turn = 0; turn < 12; turn++) {
+    for (let i = 0; i < started.length; i++) finish(i);
+    await delay();
+  }
+  assert.equal(completed.length, answers.length, 'terminal answer count');
+  assert.equal(new Set(completed.map((r) => r.id)).size, answers.length);
+  assert.deepEqual(Array.from(state()), [0, 0, 0], 'retained work');
+  assert.equal(timers.size, 0, 'retained timers');
+  assert.equal(vm.runInContext('_fetchControllers.size', context), 0);
+}
+async function withdrawal(kind) {
+  if (kind === 'pre') {
+    relay(); await delay();
+    assert.equal(started.length, 0, 'pre-aborted request fetched');
+    assert.equal(completed[0].timedOut, true);
+  } else {
+    for (let i = 0; i < 8; i++) relay();
+    await delay();
+    for (let i = 0; i < (kind === 'full' ? 65 : 2); i++) relay();
+    await delay();
+    if (kind === 'full') {
+      assert.equal(completed.length, 1, 'queue overflow did not answer');
+      assert.deepEqual(completed[0], { id: '72',
+        error: 'fetch relay queue full (64 waiting)',
+        timedOut: false, aborted: false, tooLarge: false });
+      assert.deepEqual(Array.from(state()), [8, 64, 0]);
+      abort(8); await delay(); relay(); relay(); await delay();
+      assert.equal(completed.at(-1).id, '74');
+      assert.equal(completed.at(-1).error, completed[0].error);
+      assert.deepEqual(Array.from(state()), [8, 64, 0]);
+    } else {
+      if (kind === 'grant') finish(0);
+      else if (kind === 'timeout') {
+        [...timers].find((t) => t.ms === 60008).fn();
+      } else { abort(8); abort(8); }
+      await delay();
+      const cancelled = completed.filter((r) => r.id === '8');
+      assert.equal(cancelled.length, 1, 'queued cancellation did not answer');
+      assert.deepEqual(cancelled[0], { id: '8',
+        error: kind === 'timeout' ? 'fetch timeout after 60008ms'
+          : 'aborted by the caller', timedOut: kind === 'timeout',
+        aborted: kind !== 'timeout', tooLarge: false });
+      assert.equal([...timers].some((t) => t.ms === 60008), false);
+      if (kind !== 'grant') {
+        assert.deepEqual(Array.from(state()), [8, 1, 0]);
+        finish(0); await delay();
+      }
+      assert.deepEqual(started.map((r) => r.id), [0, 1, 2, 3, 4, 5, 6, 7, 9]);
+      relay(); finish(1); await delay();
+      assert.equal(started.at(-1).id, 10);
+      assert.deepEqual(Array.from(state()), [8, 0, 0], 'slot ownership');
+    }
+  }
+  await finishAll();
+  assert.equal(started.some((r) => r.id === 8), false);
+}
+function commandRun(run) {
+  context.commandHandler = run;
+  vm.runInContext('handleReload = commandHandler', context);
+  return vm.runInContext("dispatchCommand({type:'reload',tabId:7})", context);
+}
+async function priority(kind) {
+  relay(); relay(); await delay();
+  const first = deferred(), second = deferred();
+  if (kind === 'first' || kind === 'last') {
+    const a = commandRun(() => first.promise);
+    const b = commandRun(() => second.promise);
+    relay();
+    const early = kind === 'first' ? first : second;
+    early.resolve(); await (kind === 'first' ? a : b); await delay();
+    assert.equal(started.length, 2, 'one command released another hold');
+    (kind === 'first' ? second : first).resolve();
+    await Promise.all([a, b]); await delay();
+    assert.equal(started.length, 3, 'last command did not drain');
+  } else {
+    const result = await commandRun(() => {
+      if (kind === 'throw') throw Error('handler failed');
+      if (kind === 'reject') return Promise.reject(Error('handler failed'));
+      return 42;
+    }).catch((e) => e.message);
+    assert.equal(result, kind === 'sync' ? 42 : 'handler failed');
+    relay(); await delay();
+    assert.equal(started.length, 3, 'handler settlement retained hold');
+    const next = commandRun(() => first.promise);
+    relay(); await delay();
+    assert.equal(started.length, 3, 'fresh command batch did not hold');
+    first.resolve(); await next; await delay();
+    assert.equal(started.length, 4, 'fresh batch did not drain');
+  }
+  await finishAll();
+}
 (async () => {
   await delay();
+  if (mode.includes(':')) {
+    const [group, kind] = mode.split(':');
+    await (group === 'withdraw' ? withdrawal(kind) : priority(kind));
+    process.stdout.write('{}'); return;
+  }
   const full = ['ceiling', 'error', 'abort'].includes(mode);
   const n = full ? 8 : mode === 'idle' ? 0 : 2;
   for (let i = 0; i < n; i++) relay();
@@ -111,9 +231,6 @@ function finish(index, fail = false) {
   await delay();
   for (let i = n; i < started.length; i++) finish(i);
   await delay();
-  const completed = [];
-  for (const answer of answers) answer.then((value) => completed.push(value));
-  await delay();
   process.stdout.write(JSON.stringify({ queued, one, drained, pendingAtDrain,
     startOrder: started.map(({ id }) => id),
     completed: completed.length,
@@ -124,6 +241,7 @@ function finish(index, fail = false) {
 
 def test_relay_admission_yields_to_one_command_drain(tmp):
     del tmp
+    failures = []
     for mode, queued, one, drained, pending, errors in (
         ('ceiling', 8, 9, 11, False, []),
         ('command', 2, 2, 4, True, []),
@@ -133,12 +251,21 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
         ('idle', 2, 2, 2, True, []),
         ('error', 8, 9, 10, False, ['relay failed']),
         ('abort', 8, 9, 10, False, ['aborted by the caller']),
+        *((mode, 0, 0, 0, False, []) for mode in (
+            'withdraw:abort', 'withdraw:timeout', 'withdraw:grant',
+            'withdraw:pre', 'withdraw:full', 'priority:first', 'priority:last',
+            'priority:throw', 'priority:reject', 'priority:sync')),
     ):
         result = run_node_argv(shutil.which('node'), [
             '-e', _RELAY_ADMISSION_HARNESS,
             str(EXTENSION_ROOT / 'background.js'), mode], ROOT)
-        assert result.returncode == 0, (mode, result.stdout, result.stderr)
+        if result.returncode:
+            failures.append((mode, result.stderr))
+            continue
         actual = json.loads(result.stdout)
+        if ':' in mode:
+            assert actual == {}, (mode, actual)
+            continue
         expected = {
             'queued': queued, 'one': one, 'drained': drained,
             'pendingAtDrain': pending,
@@ -146,86 +273,60 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
             'startOrder': list(range(drained + (mode == 'overlap'))),
             'errors': errors,
         }
-        assert actual == expected, (mode, actual, expected)
+        if actual != expected: failures.append((mode, actual, expected))
+    assert not failures, failures
 
 
-_FETCH_RELAY_HARNESS = CONTENT_SCRIPT_PAGE + r"""
-const fs = require('fs');
-const vm = require('vm');
-
-const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
-
-const backgroundResponse = JSON.parse(responseText);
-const listeners = {};
-const messages = [];
-const posted = [];
-const sent = [];
-
+_PAGE_RELAY_SETUP = CONTENT_SCRIPT_PAGE + r"""
+const fs = require('fs'), vm = require('vm');
+const listeners = {}, messages = [], posted = [], sent = [], writes = [];
 const windowObject = {
   addEventListener(type, listener) {
     (listeners[type] ||= []).push(listener);
   },
-  postMessage(message) {
-    posted.push(message);
-    messages.push(message);
-  },
+  postMessage(message) { posted.push(message); messages.push(message); },
 };
-
 const chrome = {
   runtime: {
-    lastError: null,
-    onMessage: { addListener() {} },
+    lastError: null, onMessage: { addListener() {} },
+    getManifest() { return { version: '0.0.0' }; },
+    connect() { return { disconnect() {}, postMessage() {},
+      onDisconnect: { addListener() {} } }; },
     sendMessage(payload, callback) {
       sent.push(payload);
-      // content.js asks for a hotfix replay at load with no callback at all.
       if (typeof callback !== 'function') return;
       if (mode === 'lastError') {
-        // Chrome's shape for an undelivered message: lastError set, and the
-        // callback invoked with no response at all.
-        chrome.runtime.lastError = { message: 'Could not establish'
-          + ' connection.' };
+        chrome.runtime.lastError = {
+          message: 'Could not establish connection.' };
         try { callback(undefined); }
         finally { chrome.runtime.lastError = null; }
-        return;
-      }
-      callback(backgroundResponse);
-    },
-    getManifest() { return { version: '0.0.0' }; },
-    connect() {
-      return {
-        disconnect() {},
-        postMessage() {},
-        onDisconnect: { addListener() {} },
-      };
+      } else callback(backgroundAnswer(payload));
     },
   },
-  storage: {
-    local: {
-      get(keys, callback) { callback({}); },
-      set(values, callback) { callback(); },
-      remove(keys, callback) { callback(); },
-    },
-  },
+  storage: { local: {
+    get(k, cb) { cb({}); }, set(v, cb) { cb(); }, remove(k, cb) { cb(); },
+  } },
 };
-
 const context = {
-  window: windowObject,
+  window: windowObject, chrome,
   document: { documentElement: {}, addEventListener() {} },
-  chrome,
+  navigator: { clipboard: { writeText(text) {
+    writes.push(text);
+    return mode === 'reject' ? Promise.reject(Error('NotAllowedError'))
+      : Promise.resolve();
+  } } },
   location: { hostname: 'page.invalid', href: 'about:blank' },
-  setTimeout, clearTimeout, setInterval, clearInterval,
-  performance,
-  console: { log() {}, error() {} },
-  ...contentScriptPage(),
+  setTimeout, clearTimeout, setInterval, clearInterval, performance,
+  console: { log() {}, error() {} }, ...contentScriptPage(),
 };
 context.globalThis = context;
-vm.runInNewContext(
-  fs.readFileSync(contentPath, 'utf8'), context,
-  { filename: contentPath });
-vm.runInNewContext(
-  fs.readFileSync(pagePath, 'utf8'), context,
-  { filename: pagePath });
-
+function loadPage(extra = {}) {
+  Object.assign(context, extra);
+  for (const path of [contentPath, pagePath]) {
+    vm.runInNewContext(fs.readFileSync(path, 'utf8'), context,
+      { filename: path });
+  }
+}
 function flushMessages() {
   let guard = 0;
   while (messages.length && guard++ < 100) {
@@ -235,7 +336,13 @@ function flushMessages() {
     }
   }
 }
+"""
 
+
+_FETCH_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
+const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
+function backgroundAnswer() { return JSON.parse(responseText); }
+loadPage();
 const events = [];
 let loadDetail = null;
 windowObject.GM.xmlhttpRequest({
@@ -336,87 +443,10 @@ def test_the_background_relays_the_response_url_and_status_text(tmp):
         assert field in response, (field, response)
 
 
-_CLIPBOARD_RELAY_HARNESS = (CONTENT_SCRIPT_PAGE + r"""
-const fs = require('fs');
-const vm = require('vm');
-
+_CLIPBOARD_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
 const [contentPath, pagePath, mode] = process.argv.slice(1);
-
-const listeners = {};
-const messages = [];
-const posted = [];
-const writes = [];
-
-const windowObject = {
-  addEventListener(type, listener) {
-    (listeners[type] ||= []).push(listener);
-  },
-  postMessage(message) {
-    posted.push(message);
-    messages.push(message);
-  },
-};
-
-const navigatorObject = {
-  clipboard: {
-    writeText(text) {
-      writes.push(text);
-      return mode === 'reject'
-        ? Promise.reject(new Error('NotAllowedError'))
-        : Promise.resolve();
-    },
-  },
-};
-
-const chrome = {
-  runtime: {
-    lastError: null,
-    onMessage: { addListener() {} },
-    sendMessage(payload, callback) {
-      if (typeof callback === 'function') callback({});
-    },
-    getManifest() { return { version: '0.0.0' }; },
-    connect() {
-      return {
-        disconnect() {}, postMessage() {},
-        onDisconnect: { addListener() {} },
-      };
-    },
-  },
-  storage: { local: {
-    get(keys, cb) { cb({}); }, set(v, cb) { cb(); }, remove(k, cb) { cb(); },
-  } },
-};
-
-const context = {
-  window: windowObject,
-  document: { documentElement: {}, addEventListener() {} },
-  navigator: navigatorObject,
-  chrome,
-  location: { hostname: 'page.invalid', href: 'about:blank' },
-  setTimeout, clearTimeout, setInterval, clearInterval,
-  performance,
-  console: { log() {}, error() {} },
-  ...contentScriptPage(),
-};
-context.globalThis = context;
-vm.runInNewContext(
-  fs.readFileSync(contentPath, 'utf8'), context,
-  { filename: contentPath });
-vm.runInNewContext(
-  fs.readFileSync(pagePath, 'utf8'), context,
-  { filename: pagePath });
-
-function flushMessages() {
-  let guard = 0;
-  while (messages.length && guard++ < 100) {
-    const data = messages.shift();
-    for (const listener of listeners.message || []) {
-      listener({ source: windowObject, data });
-    }
-  }
-}
-
+function backgroundAnswer() { return {}; }
+loadPage();
 (async () => {
   let settled = 'pending';
   let reported = null;
@@ -424,8 +454,9 @@ function flushMessages() {
   const isPromise = !!(returned && typeof returned.then === 'function');
   if (isPromise) {
     returned.then(() => { settled = 'resolved'; },
-      (error) => { settled = 'rejected'; reported = String(error &&"""
-                            r""" error.message); });
+      (error) => {
+        settled = 'rejected'; reported = String(error && error.message);
+      });
   }
   // Let the clipboard promise settle, then deliver whatever the content
   // script posted back in response to it.
@@ -443,7 +474,7 @@ function flushMessages() {
       .map((m) => ({ error: m.error || null })),
   }), () => process.exit(0));
 })();
-""")
+"""
 
 
 def _run_clipboard_relay_harness(mode):
@@ -482,85 +513,15 @@ def test_the_extension_declares_the_permission_its_clipboard_write_needs(tmp):
     assert 'clipboardWrite' in manifest.get('permissions', []), manifest
 
 
-_DOWNLOAD_RELAY_HARNESS = (CONTENT_SCRIPT_PAGE + r"""
-const fs = require('fs');
-const vm = require('vm');
-
-// The outcome to simulate, or the fire-and-forget page-API pair.
+_DOWNLOAD_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
 const [contentPath, pagePath, mode] = process.argv.slice(1);
-
-const listeners = {};
-const messages = [], posted = [], sent = [];
-
-const windowObject = {
-  addEventListener(type, listener) {
-    (listeners[type] ||= []).push(listener);
-  },
-  postMessage(message) {
-    posted.push(message);
-    messages.push(message);
-  },
-};
-
-const chrome = {
-  runtime: {
-    lastError: null,
-    onMessage: { addListener() {} },
-    getManifest() { return { version: '0.18.0' }; },
-    connect() {
-      return {
-        disconnect() {},
-        postMessage() {},
-        onDisconnect: { addListener() {} },
-      };
-    },
-    sendMessage(message, callback) {
-      sent.push(message);
-      if (!callback) return;
-      if (mode === 'fire-and-forget') return callback({ tabId: 3 });
-      if (mode === 'lastError') {
-        // Chrome's shape for an undelivered message: lastError set, and the
-        // callback invoked with no response at all.
-        chrome.runtime.lastError = { message: 'Could not establish"""
-                           r""" connection.' };
-        try { callback(undefined); } finally { chrome.runtime.lastError"""
-                           r""" = null; }
-        return;
-      }
-      if (mode === 'empty') return callback({});
-      if (mode === 'error') return callback({ error: 'Invalid filename' });
-      callback({ downloadId: 7 });
-    },
-  },
-};
-
-const context = {
-  window: windowObject,
-  chrome,
-  navigator: { clipboard: { writeText: () => Promise.resolve() } },
-  location: { hostname: 'download-test.invalid' },
-  setInterval: () => 1,
-  clearInterval() {},
-  setTimeout: () => 1,
-  console: { log() {}, error() {} },
-  ...contentScriptPage(),
-};
-vm.runInNewContext(
-  fs.readFileSync(contentPath, 'utf8'), context,
-  { filename: contentPath });
-vm.runInNewContext(
-  fs.readFileSync(pagePath, 'utf8'), context,
-  { filename: pagePath });
-
-function flushMessages() {
-  while (messages.length) {
-    const data = messages.shift();
-    for (const listener of listeners.message) {
-      listener({ source: windowObject, data });
-    }
-  }
+function backgroundAnswer() {
+  if (mode === 'fire-and-forget') return { tabId: 3 };
+  if (mode === 'empty') return {};
+  if (mode === 'error') return { error: 'Invalid filename' };
+  return { downloadId: 7 };
 }
-
+loadPage({ setTimeout: () => 1, setInterval: () => 1, clearInterval() {} });
 const events = [];
 if (mode === 'fire-and-forget') {
   windowObject.GM.openInTab('about:blank', { active: false });
@@ -582,7 +543,7 @@ const outcome = mode === 'fire-and-forget' ? {
     .map((m) => ({ handler: m.handler, error: m.error || null })),
 } : { events };
 process.stdout.write(JSON.stringify(outcome), () => process.exit(0));
-""")
+"""
 
 
 def _run_download_relay_harness(mode):
