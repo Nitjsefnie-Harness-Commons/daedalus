@@ -225,10 +225,8 @@ def _push(tmp, **options):
 
 
 def test_push_walks_every_head_and_reports_each_outcome(tmp):
-    m = _mod()
-    pair = [_pr(7), _pr(8, sha='d' * 40, ref='later')]
-    single = [_pr(7)]
-    green = [_check(101)]
+    m, pair = _mod(), [_pr(7), _pr(8, sha='d' * 40, ref='later')]
+    single, green = [_pr(7)], [_check(101)]
     older = _check(80, external_id=m.EXTERNAL_ID, conclusion='failure')
     owned = _check(202, external_id=m.EXTERNAL_ID, conclusion='failure')
     red = _check(202, conclusion='failure')
@@ -240,6 +238,7 @@ def test_push_walks_every_head_and_reports_each_outcome(tmp):
             (green, single, (HEAD,), None, []),
             (green, pair, (HEAD,), None, ['later']),
             (green, pair, (), None, ['feature', 'later']),
+            (green, [_pr(7, sha='not-a-sha'), pair[1]], (), None, ['later']),
             (green, pair, (), (7, 1), ['later']),
             (green, pair, (), (7, 2), ['later'])):
         out, err = io.StringIO(), io.StringIO()
@@ -248,18 +247,19 @@ def test_push_walks_every_head_and_reports_each_outcome(tmp):
                                           monkey={'stale': True, 'move': move,
                                                   'fresh': fresh,
                                                   'checks': checks})
+        total = sum(p['head']['sha'] != 'not-a-sha' for p in heads)
+        if total != len(heads): assert 'repos/o/r/pulls/7' not in calls, calls
         assert code == 0 and refs == expected, (code, refs, expected)
-        target = 'repos/o/r/actions/workflows/gate-freshness.yml/dispatches'
-        assert calls.count(target) == len(expected), calls
+        assert sum(c.endswith('/dispatches') for c in calls) == len(expected)
         if not expected: assert not any('/contents/' in c for c in calls)
         assert len(calls) <= m.required_calls(len(heads), len(m.GATE_PATTERNS))
         if move: assert (_MOVED in err.getvalue()
                          and calls.count('repos/o/r/pulls/8') == 2)
-        handled = len(heads) - bool(move)
+        handled = total - bool(move)
         assert out.getvalue().splitlines()[-1] == (
             f'gate freshness: written 0, dispatched {len(expected)}, kept '
             f'{handled - len(expected)}; evaluated {handled}/'
-            f'{len(heads)} heads; resolved 18/18 gate paths')
+            f'{total} heads; resolved 18/18 gate paths')
 
 
 def _assert_loud_skip(tmp, reason, **options):
