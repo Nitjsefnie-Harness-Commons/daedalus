@@ -48,8 +48,6 @@ context.setTimeout = (fn, ms) => {
   const timer = { fn, ms }; timers.add(timer); return timer;
 };
 context.clearTimeout = (timer) => timers.delete(timer);
-if (mode === 'withdraw:pre') context.AbortController = class
-  extends AbortController { constructor() { super(); this.abort(); } };
 vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context,
   { filename: backgroundPath });
 const state = () => vm.runInContext(
@@ -97,10 +95,24 @@ async function finishAll() {
   assert.equal(vm.runInContext('_fetchControllers.size', context), 0);
 }
 async function withdrawal(kind) {
-  if (kind === 'pre') {
+  if (kind === 'pre' || kind === 'pre-held') {
+    const held = kind === 'pre-held', count = held ? 8 : 0;
+    for (let i = 0; i < count; i++) relay();
+    await delay();
+    const pending = held ? commandRun(() => command.promise) : null;
+    assert.equal(vm.runInContext('_relayHold', context), held);
+    context.AbortController = class extends AbortController {
+      constructor() { super(); this.abort(); }
+    };
     relay(); await delay();
-    assert.equal(started.length, 0, 'pre-aborted request fetched');
-    assert.equal(completed[0].timedOut, true);
+    assert.equal(completed.length, 1, 'pre-aborted request did not answer');
+    assert.equal(started.length, count, 'pre-aborted request fetched');
+    assert.deepEqual(completed[0], { id: String(count),
+      error: `fetch timeout after ${60000 + count}ms`,
+      timedOut: true, aborted: false, tooLarge: false });
+    assert.deepEqual(Array.from(state()), [count, 0, Number(held)]);
+    assert.equal(vm.runInContext('_relayHold', context), held);
+    if (pending) { command.resolve(); await pending; }
   } else {
     for (let i = 0; i < 8; i++) relay();
     await delay();
@@ -253,7 +265,8 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
         ('abort', 8, 9, 10, False, ['aborted by the caller']),
         *((mode, 0, 0, 0, False, []) for mode in (
             'withdraw:abort', 'withdraw:timeout', 'withdraw:grant',
-            'withdraw:pre', 'withdraw:full', 'priority:first', 'priority:last',
+            'withdraw:pre', 'withdraw:pre-held', 'withdraw:full',
+            'priority:first', 'priority:last',
             'priority:throw', 'priority:reject', 'priority:sync')),
     ):
         result = run_node_argv(shutil.which('node'), [
