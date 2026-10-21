@@ -10,23 +10,27 @@ name: gate freshness
 # callers cannot choose that suite.
 #
 # SCRIPT PUBLICATION. On a push to main the job check lands on main, where no
-# ruleset reads it. The script re-decides other open heads, preferring their
-# newest job check over API fallbacks. It PATCHes only a completed carrier;
-# an unfinished carrier stays with its runner.
+# ruleset reads it. The script PATCHes only checks it created; runner-owned
+# verdicts stay with their runner. Push re-decides open heads and dispatches a
+# fresh run on a stale head unless its newest check is already red. Dispatch
+# problems are loud skips. A dispatched run fetches main's snapshot of the
+# gate script and executes that source with a recursion marker.
 #
 # BASE SAFETY. pull_request_target takes BOTH the workflow and checkout from
 # the trusted base. Only SHA/ref/owner come from the event; no PR content is
 # checked out, imported or executed. pull_request would take workflow text
 # from the merge ref and script from the branch SHA, which may disagree.
 #
-# THE BOUND: L + 2 + H * (G + 5): L path lookups + snapshot + open-PR listing,
-# then H heads x (G gate compares + five calls). The event skips the PR list.
+# THE BOUND: L + 4 + H * (G + 7): L path lookups + up to four setup reads
+# (snapshot, PR list, bootstrap source and repeated PR list), then H heads x
+# (G compares + seven calls, including workflow contents and dispatch).
 # Extra ids and pages are unbounded by this estimate. At 1.5 s/call, 1200 calls
 # take 30 minutes; the 35-minute timeout provides residual slack.
 #
 # BASE FILTER. A non-main PR could earn an authoritative green without a main
 # comparison; retargeting to main reuses that SHA and its unearned check.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request_target:  # zizmor: ignore[dangerous-triggers]
@@ -34,6 +38,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
+  actions: write
   checks: write
   contents: read
   pull-requests: read
