@@ -12,18 +12,18 @@ THE CHECK CARRIER. PATCH only completed checks bearing EXTERNAL_ID, choosing
 the newest carrier and retiring completed owned non-carriers. An empty listing
 permits POST; runner-owned checks require a run. API-created checks were
 observed in the oldest app suite, invisible once superseded (issue #1655).
-Push keeps fresh or already-red heads and dispatches other stale heads where
-permitted. Dispatched jobs execute main's fetched source; a snapshot marker
-prevents recursion and keeps its gate lookups on that same snapshot.
+Push dispatches stale heads only with both gate files identical to this
+checkout. Dispatched jobs execute main's fetched source once, retaining its
+snapshot for gate lookups. Fresh or already-red heads are kept.
 
 ORDERING. Keep a verdict whose stamped main our snapshot does not contain.
 Unmarked failures cannot become success without ordering evidence. Two
 writers can still race between the ordering read and write; an older verdict
 may win until the next event. There is no post-write repair.
 
-THE BOUND. Estimate L + 4 + H * (G + 7): L path lookups and up to four setup
+THE BOUND. Estimate L + 4 + H * (G + 8): L path lookups and up to four setup
 reads (main, open PRs, bootstrap source and repeated PR list), then G compares,
-two revalidations, listing, write, ordering compare, workflow read and dispatch
+two revalidations, listing, write, order compare, two file reads and dispatch
 per head. Alternative paths are both reserved. Extra owned ids add retirement
 PATCHes; pagination is one logical read, with no bound on ids or pages.
 At 1.5 s/call, 1200 calls take 30 minutes; the 35-minute timeout leaves slack.
@@ -58,11 +58,9 @@ GATE_PATTERNS = (
 
 _HEX40 = frozenset('0123456789abcdef')
 
-# Revalidations, listing, write/order compare, workflow read and dispatch.
-PER_HEAD_OVERHEAD = 7
-
+# Revalidations, listing, write/order compare, two file reads and dispatch.
+PER_HEAD_OVERHEAD = 8
 DEFAULT_CALL_BUDGET = 1200
-
 ASSUMED_SECONDS_PER_CALL = 1.5
 
 
@@ -309,15 +307,17 @@ def _keep_or_dispatch(read, repository, head, verdict):
     if head['owner'] != repository.split('/')[0]:
         reason = 'cross-repository head has no dispatch ref here'
     else:
-        workflow = _raw_file(read, repository,
-                             '.github/workflows/gate-freshness.yml',
-                             head['sha'])
-        if 'workflow_dispatch' in workflow:
-            read(_api(f'repos/{repository}/actions/workflows/'
-                      'gate-freshness.yml/dispatches', '-X', 'POST',
-                      '-f', f'ref={head["ref"]}'))
-            return
-        reason = 'head workflow has no workflow_dispatch trigger'
+        for path in ('.github/workflows/gate-freshness.yml',
+                     'scripts/ci/gate_freshness.py'):
+            source = _raw_file(read, repository, path, head['sha'])
+            local = Path(__file__).resolve().parents[2] / path
+            if source.encode('utf-8') != local.read_bytes():
+                raise QueryError('head carries an edited gate definition: '
+                                 f'{path}')
+        read(_api(f'repos/{repository}/actions/workflows/'
+                  'gate-freshness.yml/dispatches', '-X', 'POST',
+                  '-f', f'ref={head["ref"]}'))
+        return
     raise QueryError(reason)
 
 
@@ -389,14 +389,15 @@ def process(read, repository, heads, gates, details_url, main_sha,
 def gh_read(argv):
     """The `gh api` seam: return stdout, raise QueryError on any failure."""
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True,
-                              timeout=60)
-    except (subprocess.SubprocessError, OSError) as error:
+        proc = subprocess.run(argv, capture_output=True, timeout=60)
+        stdout = proc.stdout.decode('utf-8')
+    except (subprocess.SubprocessError, OSError, UnicodeError) as error:
         raise QueryError(f'gh failed: {error}') from error
     if proc.returncode != 0:
-        detail = proc.stderr.strip()[:200] or f'gh exit {proc.returncode}'
+        detail = (proc.stderr.decode('utf-8', 'replace').strip()[:200]
+                  or f'gh exit {proc.returncode}')
         raise QueryError(detail)
-    return proc.stdout
+    return stdout
 
 
 def _call_budget():
