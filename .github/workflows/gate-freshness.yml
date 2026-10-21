@@ -1,29 +1,21 @@
 name: gate freshness
 
-# Publish freshness for open heads based on main: only heads predating a new
-# gate must rebase. scripts/ci/gate_freshness.py owns the decision, path set
-# and bound; its module docstring is the contract.
+# scripts/ci/gate_freshness.py owns freshness, gate paths and the call budget.
 #
-# JOB CONTEXT. A job check lands in this run's own suite, newest for this
-# workflow on the head, which the ruleset counts. API-created checks were
-# observed in the app's oldest suite, invisible once superseded (issue #1655);
-# callers cannot choose that suite.
+# JOB CONTEXT. The event job carries its own verdict. API-created checks can
+# land in the app's oldest suite, ignored once superseded (issue #1655).
 #
-# SCRIPT PUBLICATION. On a push to main the job check lands on main, where no
-# ruleset reads it. The script PATCHes only checks it created; runner-owned
-# verdicts stay with their runner. Push re-decides open heads and dispatches a
-# fresh run on a stale head unless its newest check is already red. Dispatch
-# problems are loud skips. A dispatched run fetches main's snapshot of the
-# gate script and executes that source with a recursion marker.
+# SCRIPT PUBLICATION. PATCH only script-owned checks. Push keeps fresh or
+# already-red heads and dispatches others only when this workflow and the
+# gate script match main's checkout byte for byte. Edited definitions and
+# unreadable files skip loudly. Dispatched jobs bootstrap main's source once.
 #
-# BASE SAFETY. pull_request_target takes BOTH the workflow and checkout from
-# the trusted base. Only SHA/ref/owner come from the event; no PR content is
-# checked out, imported or executed. pull_request would take workflow text
-# from the merge ref and script from the branch SHA, which may disagree.
+# BASE SAFETY. pull_request_target uses the base workflow and checkout;
+# only SHA/ref/owner come from the event, and no PR code runs.
 #
-# THE BOUND: L + 4 + H * (G + 7): L path lookups + up to four setup reads
+# THE BOUND: L + 4 + H * (G + 8): L path lookups + up to four setup reads
 # (snapshot, PR list, bootstrap source and repeated PR list), then H heads x
-# (G compares + seven calls, including workflow contents and dispatch).
+# (G compares + eight calls, including both gate files and dispatch).
 # Extra ids and pages are unbounded by this estimate. At 1.5 s/call, 1200 calls
 # take 30 minutes; the 35-minute timeout provides residual slack.
 #
