@@ -230,36 +230,36 @@ def test_push_walks_every_head_and_reports_each_outcome(tmp):
     older = _check(80, external_id=m.EXTERNAL_ID, conclusion='failure')
     owned = _check(202, external_id=m.EXTERNAL_ID, conclusion='failure')
     red = _check(202, conclusion='failure')
-    for checks, heads, fresh, move, expected in (
-            (green, single, (), None, ['feature']),
-            (green + [older], single, (), None, ['feature']),
-            (green + [red], single, (), None, []),
-            (green + [owned], single, (), None, []),
-            (green, single, (HEAD,), None, []),
-            (green, pair, (HEAD,), None, ['later']),
-            (green, pair, (), None, ['feature', 'later']),
-            (green, [_pr(7, sha='not-a-sha'), pair[1]], (), None, ['later']),
-            (green, pair, (), (7, 1), ['later']),
-            (green, pair, (), (7, 2), ['later'])):
+    for checks, heads, options, expected in (
+            (green, single, {}, ['feature']),
+            (green + [older], single, {}, ['feature']),
+            (green + [red], single, {}, []),
+            (green + [owned], single, {}, []),
+            (green, single, {'fresh': (HEAD,)}, []),
+            (green, pair, {'fresh': (HEAD,)}, ['later']),
+            (green, pair, {}, ['feature', 'later']),
+            (green, [_pr(7, sha='not-a-sha'), pair[1]], {}, ['later']),
+            (green, pair, {'move': (7, 1)}, ['later']),
+            (green, pair, {'move': (7, 2)}, ['later']),
+            (green, single, {'argv': ['--dry-run']}, [])):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code, calls, refs = _main_env(tmp, 'push', {'open_pulls': heads},
-                                          monkey={'stale': True, 'move': move,
-                                                  'fresh': fresh,
-                                                  'checks': checks})
+                                          monkey={'stale': True,
+                                                  'checks': checks, **options})
         total = sum(p['head']['sha'] != 'not-a-sha' for p in heads)
         if total != len(heads): assert 'repos/o/r/pulls/7' not in calls, calls
         assert code == 0 and refs == expected, (code, refs, expected)
         assert sum(c.endswith('/dispatches') for c in calls) == len(expected)
         if not expected: assert not any('/contents/' in c for c in calls)
         assert len(calls) <= m.required_calls(len(heads), len(m.GATE_PATTERNS))
-        if move: assert (_MOVED in err.getvalue()
-                         and calls.count('repos/o/r/pulls/8') == 2)
-        handled = total - bool(move)
+        if options.get('move'): assert (
+            _MOVED in err.getvalue() and calls.count('repos/o/r/pulls/8') == 2)
+        handled = total - bool(options.get('move'))
         assert out.getvalue().splitlines()[-1] == (
             f'gate freshness: written 0, dispatched {len(expected)}, kept '
-            f'{handled - len(expected)}; evaluated {handled}/'
-            f'{total} heads; resolved 18/18 gate paths')
+            f'{0 if options.get("argv") else handled - len(expected)}; '
+            f'evaluated {handled}/{total} heads; resolved 18/18 gate paths')
 
 
 def _assert_loud_skip(tmp, reason, **options):
@@ -380,7 +380,8 @@ def test_dispatch_route_selects_only_the_event_sha(tmp):
 def test_dispatch_bootstraps_main_source_once_and_returns_child_exit(tmp):
     from types import SimpleNamespace
     for marker, fail, status, launches in (
-            ('', False, 23, 1), (G1, False, 0, 0), ('', True, 1, 0)):
+            ('', False, 23, 1), ('not-a-sha', False, 23, 1),
+            (G1, False, 0, 0), ('', True, 1, 0)):
         launched, err = [], io.StringIO()
 
         def run(argv, *, env, record=launched.append, **kwargs):
@@ -394,10 +395,10 @@ def test_dispatch_bootstraps_main_source_once_and_returns_child_exit(tmp):
                     'marker': marker, 'contents_fail': fail,
                     'source': 'raise SystemExit(23)\n',
                     'argv': ['--dry-run']}, run=run)
-        assert code == status and writes == [], (code, writes)
-        assert len(launched) == launches, launched
+        assert (code, writes, len(launched)) == (status, [], launches), code
         sources = [c for c in calls if '/contents/scripts/' in c]
-        assert len(sources) == int(not marker), sources
+        assert len(sources) == calls.count('repos/o/r/commits/main') == (
+            int(marker != G1)), calls
         if sources: assert sources[0].endswith(f'?ref={G1}'), sources
         if fail: assert 'HTTP 404' in err.getvalue() and (
             'publishing nothing' in err.getvalue()), err.getvalue()
