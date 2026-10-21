@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""What crosses the GM bridge: a fetch, a clipboard write, a download.
-
-Each of these ends in a browser API that can refuse, redirect or time out,
-and each refusal has its own event. A timeout that arrives as an error, a
-redirect that reports the URL asked for rather than the one answered, or a
-refused clipboard write reported as success would each be a caller acting on
-something that did not happen.
-"""
+"""What crosses the GM bridge: a fetch, a clipboard write, a download."""
 import json
 import shutil
 import sys
@@ -17,7 +10,143 @@ import _util  # noqa: E402
 from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    CONTENT_SCRIPT_PAGE, worker_source_paths)
+    CONTENT_SCRIPT_PAGE, DELAY_STUB, RELAY_CONTEXT, chrome_stub,
+    event_target_stub, worker_source_paths)
+
+
+_RELAY_ADMISSION_HARNESS = event_target_stub() + r"""
+const fs = require('fs');
+const vm = require('vm');
+const [backgroundPath, mode] = process.argv.slice(1);
+const assert = require('assert/strict');
+const started = [], answers = [];
+const released = [];
+let pendingResolve;
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+const command = deferred();
+""" + chrome_stub(
+    "'relay-token'", "''", "(() => { throw Error('CDP'); })") + r"""
+chrome.tabs.reload = () => command.promise;
+const readStorage = chrome.storage.local.get;
+chrome.storage.local.get = (keys) => keys.includes('daedalus-hotfixes')
+  ? command.promise : readStorage(keys);
+function bridgeFetch(url, opts) {
+  if (url === '/result') return Promise.resolve(new Response('{}'));
+  assert.equal(url, 'https://example.com/relay');
+  const relay = deferred();
+  started.push(relay);
+  const abort = () => relay.reject(
+    Object.assign(Error('aborted'), { name: 'AbortError' }));
+  if (opts.signal.aborted) abort();
+  else opts.signal.addEventListener('abort', abort, { once: true });
+  return relay.promise;
+}
+""" + RELAY_CONTEXT + DELAY_STUB + r"""
+vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context,
+  { filename: backgroundPath });
+function send(message) {
+  return new Promise((resolve) => {
+    const listener = chrome.runtime.onMessage.listeners[0];
+    assert.equal(listener(message, { tab: { id: 7 } }, resolve), true);
+  });
+}
+function relay() {
+  const id = String(answers.length);
+  const answer = send({ type: 'fetch', fetchId: id,
+    url: 'https://example.com/relay', responseType: 'arraybuffer' });
+  answers.push(answer);
+}
+function finish(index, fail = false) {
+  if (fail) started[index].reject(Error('relay failed'));
+  else started[index].resolve(new Response('body'));
+}
+(async () => {
+  await delay();
+  const full = ['ceiling', 'error', 'abort'].includes(mode);
+  const n = full ? 8 : mode === 'idle' ? 0 : 2;
+  for (let i = 0; i < n; i++) relay();
+  await delay();
+  let settled = false, pending;
+  if (!full) {
+    pending = mode === 'replay' ? send({ type: 'replayHotfixes' })
+      : vm.runInContext("dispatchCommand({type:'reload',tabId:7})", context);
+    pending.then(() => { settled = true; });
+  }
+  relay();
+  relay();
+  await delay();
+  const queued = started.length;
+  if (mode === 'settled') {
+    command.resolve({});
+    await pending;
+  }
+  if (n) {
+    if (mode === 'abort') {
+      chrome.runtime.onMessage.listeners[0](
+        { type: 'abortFetch', fetchId: '0' }, {}, () => {});
+    } else finish(0, mode === 'error');
+  }
+  await delay();
+  const one = started.length;
+  for (let i = 1; i < n; i++) finish(i);
+  await delay();
+  const drained = started.length, pendingAtDrain = !!pending && !settled;
+  if (mode === 'overlap') {
+    const next = vm.runInContext(
+      "dispatchCommand({type:'reload',tabId:7})", context);
+    pending = Promise.all([pending, next]);
+    relay();
+    await delay();
+    assert.equal(started.length, 5, 'commands rearmed a drained hold');
+  }
+  if (pending) {
+    command.resolve({});
+    await pending;
+  }
+  await delay();
+  for (let i = n; i < started.length; i++) finish(i);
+  await delay();
+  const completed = [];
+  for (const answer of answers) answer.then((value) => completed.push(value));
+  await delay();
+  process.stdout.write(JSON.stringify({ queued, one, drained, pendingAtDrain,
+    completed: completed.length,
+    errors: completed.filter((value) => value.error).map((v) => v.error) }));
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+
+
+def test_relay_admission_yields_to_one_command_drain(tmp):
+    del tmp
+    failures = []
+    for mode, queued, one, drained, pending, errors in (
+        ('ceiling', 8, 9, 10, False, []),
+        ('command', 2, 2, 4, True, []),
+        ('replay', 2, 2, 4, True, []),
+        ('overlap', 2, 2, 4, True, []),
+        ('settled', 2, 4, 4, False, []),
+        ('idle', 2, 2, 2, True, []),
+        ('error', 8, 9, 10, False, ['relay failed']),
+        ('abort', 8, 9, 10, False, ['aborted by the caller']),
+    ):
+        result = run_node_argv(shutil.which('node'), [
+            '-e', _RELAY_ADMISSION_HARNESS,
+            str(EXTENSION_ROOT / 'background.js'), mode], ROOT)
+        assert result.returncode == 0, (mode, result.stdout, result.stderr)
+        actual = json.loads(result.stdout)
+        expected = {
+            'queued': queued, 'one': one, 'drained': drained,
+            'pendingAtDrain': pending,
+            'completed': drained + (mode == 'overlap'),
+            'errors': errors,
+        }
+        if actual != expected:
+            failures.append((mode, actual, expected))
+    assert not failures, failures
 
 
 _FETCH_RELAY_HARNESS = CONTENT_SCRIPT_PAGE + r"""
@@ -147,13 +276,7 @@ def _run_fetch_relay_harness(background_response, mode='answer'):
 
 
 def test_a_fetch_timeout_reaches_ontimeout_and_not_onerror(tmp):
-    """A timeout is its own event, not an error that happens to say so.
-
-    page.js has had an `ontimeout` branch all along, and nothing could reach
-    it: the background flattened an aborted fetch into an error string, and
-    content.js relays anything with an `error` as `event: 'error'`. A caller
-    that distinguished the two saw every timeout as a generic failure.
-    """
+    """A timeout is its own event, not an error that happens to say so."""
     del tmp
     timed_out = _run_fetch_relay_harness(
         {'error': 'fetch timeout after 50ms', 'timedOut': True})
@@ -168,13 +291,7 @@ def test_a_fetch_timeout_reaches_ontimeout_and_not_onerror(tmp):
 
 
 def test_a_fetch_the_worker_never_answered_reaches_onerror(tmp):
-    """An undelivered request is an error, not a load with no body.
-
-    A sendMessage that never reached the service worker hands the callback no
-    response and reports it through lastError, so a relay reading only the
-    response object fell through to the success branch: the caller was told a
-    request it never made came back, with status and headers it never had.
-    """
+    """An undelivered request is an error, not a load with no body."""
     del tmp
     undelivered = _run_fetch_relay_harness(None, 'lastError')
     assert undelivered['events'] == [
@@ -183,12 +300,7 @@ def test_a_fetch_the_worker_never_answered_reaches_onerror(tmp):
 
 
 def test_a_redirected_fetch_reports_where_the_body_came_from(tmp):
-    """finalUrl is the response's URL, not the one the caller asked for.
-
-    The relay filled finalUrl in from the request, so a caller following a
-    redirect chain was told no redirect had happened — and statusText was
-    never carried at all, so the page API always reported an empty one.
-    """
+    """finalUrl is the response's URL, not the one the caller asked for."""
     del tmp
     loaded = _run_fetch_relay_harness({
         'status': 200, 'statusText': 'OK', 'data': 'body', 'headers': {},
@@ -207,12 +319,7 @@ def test_a_redirected_fetch_reports_where_the_body_came_from(tmp):
 
 
 def test_the_background_relays_the_response_url_and_status_text(tmp):
-    """The other half of the same contract, at its source.
-
-    The relay test above starts from what the background answered. This one
-    pins that the background actually reads them off the Response rather than
-    off the request it was handed.
-    """
+    """The other half of the same contract, at its source."""
     del tmp
     marker = 'sendResponse({ status: resp.status,'
     matches = [
@@ -354,13 +461,7 @@ def _run_clipboard_relay_harness(mode):
 
 
 def test_a_refused_clipboard_write_reaches_the_caller(tmp):
-    """A clipboard write that the browser refuses must not report success.
-
-    The content script called writeText, swallowed the rejection with an empty
-    catch, and posted its acknowledgement without waiting for the promise at
-    all — so a page without user activation, where Chromium rejects the write
-    with NotAllowedError, was told the clipboard had been set.
-    """
+    """A clipboard write that the browser refuses must not report success."""
     del tmp
     refused = _run_clipboard_relay_harness('reject')
     assert refused['writes'] == ['replacement'], refused
@@ -385,19 +486,18 @@ _DOWNLOAD_RELAY_HARNESS = (CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs');
 const vm = require('vm');
 
-// Argument is the background outcome to simulate: "lastError" (the worker
-// never answered), "empty" (answered without a downloadId), "error" (answered
-// with one), or "ok".
+// The outcome to simulate, or the fire-and-forget page-API pair.
 const [contentPath, pagePath, mode] = process.argv.slice(1);
 
 const listeners = {};
-const messages = [];
+const messages = [], posted = [], sent = [];
 
 const windowObject = {
   addEventListener(type, listener) {
     (listeners[type] ||= []).push(listener);
   },
   postMessage(message) {
+    posted.push(message);
     messages.push(message);
   },
 };
@@ -415,7 +515,9 @@ const chrome = {
       };
     },
     sendMessage(message, callback) {
+      sent.push(message);
       if (!callback) return;
+      if (mode === 'fire-and-forget') return callback({ tabId: 3 });
       if (mode === 'lastError') {
         // Chrome's shape for an undelivered message: lastError set, and the
         // callback invoked with no response at all.
@@ -460,7 +562,11 @@ function flushMessages() {
 }
 
 const events = [];
-windowObject.GM.download({
+if (mode === 'fire-and-forget') {
+  windowObject.GM.openInTab('about:blank', { active: false });
+  windowObject.GM.notification(
+    { title: 'Run finished', text: 'Nothing failed.' });
+} else windowObject.GM.download({
   url: 'about:blank',
   name: 'file.bin',
   onload: () => events.push('load'),
@@ -468,7 +574,14 @@ windowObject.GM.download({
 });
 flushMessages();
 
-process.stdout.write(JSON.stringify({ events }), () => process.exit(0));
+const outcome = mode === 'fire-and-forget' ? {
+  sent: sent.filter((message) => message.type === 'openTab'
+    || message.type === 'notification'),
+  acknowledged: posted
+    .filter((m) => m.direction === 'daedalus-bg-to-page')
+    .map((m) => ({ handler: m.handler, error: m.error || null })),
+} : { events };
+process.stdout.write(JSON.stringify(outcome), () => process.exit(0));
 """)
 
 
@@ -486,135 +599,22 @@ def _run_download_relay_harness(mode):
 
 
 def test_a_download_that_never_started_reaches_onerror(tmp):
-    """An absent response is a failure, not a success with nothing in it.
-
-    The relay tested `resp && resp.error`, so the one case where Chrome
-    passes NO response — a sendMessage that never reached the worker,
-    reported through lastError — skipped the error branch entirely and the
-    page was handed a load event for a download that was never started.
-    """
+    """An absent response is a failure, not a success with nothing in it."""
     del tmp
-    undelivered = _run_download_relay_harness('lastError')
-    assert undelivered['events'] == [
-        'error:Could not establish connection.'], undelivered
-
-    # Answered, but with no download to point at.
-    empty = _run_download_relay_harness('empty')
-    assert empty['events'] == ['error:background started no download'], empty
-
-    # The failure the relay always did report still reports.
-    refused = _run_download_relay_harness('error')
-    assert refused['events'] == ['error:Invalid filename'], refused
-
-    # And a real download is still a load.
-    started = _run_download_relay_harness('ok')
-    assert started['events'] == ['load'], started
-
-
-_FIRE_AND_FORGET_HARNESS = CONTENT_SCRIPT_PAGE + r"""
-const fs = require('fs');
-const vm = require('vm');
-
-// GM.openInTab and GM.notification are the page's fire-and-forget surface:
-// neither returns a promise, so the observable is what the service worker
-// actually received and the acknowledgement content.js posts back.
-const [contentPath, pagePath] = process.argv.slice(1);
-
-const listeners = {};
-const messages = [];
-const posted = [];
-const sent = [];
-
-const windowObject = {
-  addEventListener(type, listener) {
-    (listeners[type] ||= []).push(listener);
-  },
-  postMessage(message) {
-    posted.push(message);
-    messages.push(message);
-  },
-};
-
-const chrome = {
-  runtime: {
-    lastError: null,
-    onMessage: { addListener() {} },
-    getManifest() { return { version: '0.18.0' }; },
-    connect() {
-      return { disconnect() {}, postMessage() {},
-               onDisconnect: { addListener() {} } };
-    },
-    sendMessage(message, callback) {
-      sent.push(message);
-      // openInTab waits for its answer; notification is sent with no callback.
-      if (typeof callback === 'function') callback({ tabId: 3 });
-    },
-  },
-};
-
-const context = {
-  window: windowObject,
-  chrome,
-  navigator: { clipboard: { writeText: () => Promise.resolve() } },
-  location: { hostname: 'page-api.invalid' },
-  setInterval: () => 1,
-  clearInterval() {},
-  setTimeout: () => 1,
-  console: { log() {}, error() {} },
-  ...contentScriptPage(),
-};
-vm.runInNewContext(
-  fs.readFileSync(contentPath, 'utf8'), context, { filename: contentPath });
-vm.runInNewContext(
-  fs.readFileSync(pagePath, 'utf8'), context, { filename: pagePath });
-
-windowObject.GM.openInTab('about:blank', { active: false });
-windowObject.GM.notification(
-  { title: 'Run finished', text: 'Nothing failed.' });
-
-// Both page messages are queued by the calls above, so one drain delivers them
-// in the order they were made; a second drain would find the queue empty.
-while (messages.length) {
-  const data = messages.shift();
-  for (const listener of listeners.message) {
-    listener({ source: windowObject, data });
-  }
-}
-
-process.stdout.write(JSON.stringify({
-  sent: sent.filter((message) => message.type === 'openTab'
-    || message.type === 'notification'),
-  acknowledged: posted
-    .filter((m) => m.direction === 'daedalus-bg-to-page')
-    .map((m) => ({ handler: m.handler, error: m.error || null })),
-}), () => process.exit(0));
-"""
-
-
-def _run_fire_and_forget_harness():
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension page-API relay'
-    result = run_node_argv(
-        node, ['-e', _FIRE_AND_FORGET_HARNESS,
-               str(ROOT / 'extension' / 'content.js'),
-               str(ROOT / 'extension' / 'page.js')],
-        ROOT)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    for mode, expected in (
+        ('lastError', 'error:Could not establish connection.'),
+        ('empty', 'error:background started no download'),
+        ('error', 'error:Invalid filename'),
+        ('ok', 'load'),
+    ):
+        actual = _run_download_relay_harness(mode)
+        assert actual['events'] == [expected], (mode, actual)
 
 
 def test_the_fire_and_forget_page_apis_reach_the_worker_and_are_acked(tmp):
-    """GM.openInTab and GM.notification cross the relay with their payload.
-
-    Both are documented page APIs whose whole contract is out-and-acked: the
-    URL a tab was asked to open, the title and text of a notification, and an
-    acknowledgement carrying no error. `notification` sends no callback at
-    all, so it is the one arm where the relay must answer the page itself
-    rather than in a callback.
-    """
+    """GM.openInTab and GM.notification cross the relay with their payload."""
     del tmp
-    actual = _run_fire_and_forget_harness()
+    actual = _run_download_relay_harness('fire-and-forget')
     assert actual == {
         'sent': [
             {'type': 'openTab', 'url': 'about:blank', 'active': False},

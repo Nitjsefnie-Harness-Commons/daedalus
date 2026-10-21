@@ -1,13 +1,38 @@
 /* global _takeEvalRelay, postResult, registerTab, handleHotfixReplay */
 /* global readBoundedBody, gmResponseLimit, bytesToBase64, _recordTiming */
 /* global mintSegmentSig, handleGmStorage */
+/* exported _withRelayPriority */
 
 // ─── Message handler (from content scripts) ───
 
-// In-flight GM.xmlhttpRequest relays, by the id the content script minted
-// for each. An entry lives only while its fetch runs, so this never grows
-// past what is in flight.
+// GM.xmlhttpRequest relays by content-script id, including queued ones so
+// a caller's abort still reaches its controller while it waits for a slot.
 const _fetchControllers = new Map();
+const _RELAY_CEILING = 8;
+const _relayWaiters = [];
+let _relayInFlight = 0;
+let _pendingCommands = 0;
+let _relayHold = false;
+
+function _drainRelays() {
+  while (!_relayHold && _relayInFlight < _RELAY_CEILING
+         && _relayWaiters.length) {
+    _relayInFlight++;
+    _relayWaiters.shift()();
+  }
+}
+
+async function _withRelayPriority(run) {
+  if (_pendingCommands++ === 0) _relayHold = _relayInFlight > 0;
+  try {
+    return await run();
+  } finally {
+    if (--_pendingCommands === 0) {
+      _relayHold = false;
+      _drainRelays();
+    }
+  }
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'result') {
@@ -37,9 +62,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // runs either way — Chrome delivers a closed port too, with
       // `lastError` — so what the answer buys is the absence of a spurious
       // port-closed warning in the page, not the token cleanup.
-      handleHotfixReplay(
+      _withRelayPriority(() => handleHotfixReplay(
         sender.tab.id, sender.documentId, sender.url, msg.docToken
-      ).finally(() => {
+      )).finally(() => {
         try { sendResponse(); } catch (_) {}
       });
       return true;
@@ -59,6 +84,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const t0 = performance.now();
     let tBodyDecoded, tFetchDone, tEncoded;
     (async () => {
+      await new Promise((resolve) => {
+        _relayWaiters.push(resolve);
+        _drainRelays();
+      });
       try {
         // Never the user's cookies. The extension holds host permission for
         // every URL, which makes this fetch same-origin to every host for the
@@ -153,6 +182,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           aborted: isCancel,
           tooLarge: isTooLarge,
         });
+      } finally {
+        _relayInFlight--;
+        // One drain bounds the hold, so continuous commands cannot starve GM.
+        if (_relayInFlight === 0) _relayHold = false;
+        _drainRelays();
       }
     })();
     return true; // async sendResponse

@@ -16,7 +16,7 @@
 /* global handleListHotfixes */
 /* global handleAllowSegmentOrigin, handleRevokeSegmentOrigin */
 /* global handleListSegmentOrigins */
-/* global handleEval */
+/* global handleEval, _withRelayPriority */
 /* global config, loadConfig, _executionContext, postResult */
 /* global registerAllTabs */
 /* global sseAbort, startStream, ensureKeepAlive */
@@ -52,45 +52,48 @@ importScripts(
 
 /* eslint-disable-next-line no-unused-vars */
 function dispatchCommand(receivedCommand) {
-  const cmd = Object.freeze({
-    ...receivedCommand,
-    _execution: _executionContext(receivedCommand),
+  return _withRelayPriority(() => {
+    const cmd = Object.freeze({
+      ...receivedCommand,
+      _execution: _executionContext(receivedCommand),
+    });
+    const type = cmd.type || (cmd.code ? 'eval' : 'unknown');
+    switch (type) {
+      case 'screenshot': return handleScreenshot(cmd);
+      case 'cookies': return handleCookies(cmd);
+      case 'set-cookie': return handleSetCookie(cmd);
+      case 'remove-cookie': return handleRemoveCookie(cmd);
+      case 'clear-cookies': return handleClearCookies(cmd);
+      case 'block-requests': return handleBlockRequests(cmd);
+      case 'unblock-requests': return handleUnblockRequests(cmd);
+      case 'list-block-rules': return handleListBlockRules(cmd);
+      case 'fetch-timings': return handleFetchTimings(cmd);
+      case 'ext-reload': return handleExtReload(cmd);
+      case 'open-tab': return handleOpenTab(cmd);
+      case 'open-tabs': return handleOpenTabs(cmd);
+      case 'focus-tab': return handleFocusTab(cmd);
+      case 'navigate': return handleNavigate(cmd);
+      case 'reload': return handleReload(cmd);
+      case 'close-tab': return handleCloseTab(cmd);
+      case 'inject-css': return handleInjectCss(cmd);
+      case 'remove-css': return handleRemoveCss(cmd);
+      case 'cdp': return handleCdp(cmd);
+      case 'net-capture': return handleNetCapture(cmd);
+      case 'net-capture-stop': return handleNetCaptureStop(cmd);
+      case 'net-capture-get': return handleNetCaptureGet(cmd);
+      case 'store-hotfix': return handleStoreHotfix(cmd);
+      case 'clear-hotfix': return handleClearHotfix(cmd);
+      case 'clear-all-hotfixes': return handleClearAllHotfixes(cmd);
+      case 'list-hotfixes': return handleListHotfixes(cmd);
+      case 'set-permanent': return handleSetPermanent(cmd);
+      case 'allow-segment-origin': return handleAllowSegmentOrigin(cmd);
+      case 'revoke-segment-origin': return handleRevokeSegmentOrigin(cmd);
+      case 'list-segment-origins': return handleListSegmentOrigins(cmd);
+      case 'eval': return handleEval(cmd);
+      default: return postResult(
+        cmd._execution, null, 'Unknown command type: ' + type, 'extension');
+    }
   });
-  const type = cmd.type || (cmd.code ? 'eval' : 'unknown');
-  switch (type) {
-    case 'screenshot': return handleScreenshot(cmd);
-    case 'cookies': return handleCookies(cmd);
-    case 'set-cookie': return handleSetCookie(cmd);
-    case 'remove-cookie': return handleRemoveCookie(cmd);
-    case 'clear-cookies': return handleClearCookies(cmd);
-    case 'block-requests': return handleBlockRequests(cmd);
-    case 'unblock-requests': return handleUnblockRequests(cmd);
-    case 'list-block-rules': return handleListBlockRules(cmd);
-    case 'fetch-timings': return handleFetchTimings(cmd);
-    case 'ext-reload': return handleExtReload(cmd);
-    case 'open-tab': return handleOpenTab(cmd);
-    case 'open-tabs': return handleOpenTabs(cmd);
-    case 'focus-tab': return handleFocusTab(cmd);
-    case 'navigate': return handleNavigate(cmd);
-    case 'reload': return handleReload(cmd);
-    case 'close-tab': return handleCloseTab(cmd);
-    case 'inject-css': return handleInjectCss(cmd);
-    case 'remove-css': return handleRemoveCss(cmd);
-    case 'cdp': return handleCdp(cmd);
-    case 'net-capture': return handleNetCapture(cmd);
-    case 'net-capture-stop': return handleNetCaptureStop(cmd);
-    case 'net-capture-get': return handleNetCaptureGet(cmd);
-    case 'store-hotfix': return handleStoreHotfix(cmd);
-    case 'clear-hotfix': return handleClearHotfix(cmd);
-    case 'clear-all-hotfixes': return handleClearAllHotfixes(cmd);
-    case 'list-hotfixes': return handleListHotfixes(cmd);
-    case 'set-permanent': return handleSetPermanent(cmd);
-    case 'allow-segment-origin': return handleAllowSegmentOrigin(cmd);
-    case 'revoke-segment-origin': return handleRevokeSegmentOrigin(cmd);
-    case 'list-segment-origins': return handleListSegmentOrigins(cmd);
-    case 'eval': return handleEval(cmd);
-    default: return postResult(cmd._execution, null, 'Unknown command type: ' + type, 'extension');
-  }
 }
 
 // ─── Alarms: survive MV3 service worker kills ───

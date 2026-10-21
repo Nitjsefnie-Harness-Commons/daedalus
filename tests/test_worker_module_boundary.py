@@ -52,7 +52,7 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
       'chrome.tabs.onRemoved.addListener')),
     ('worker/stream.js', ('sseAbort', '_loadSeenDids', 'startStream',
                           'stopStream', 'ensureKeepAlive'), ()),
-    ('worker/messaging.js', (),
+    ('worker/messaging.js', ('_withRelayPriority',),
      ('chrome.runtime.onMessage.addListener',)),
 )
 _WORKER_REDECLARATION_EXCEPTIONS = (
