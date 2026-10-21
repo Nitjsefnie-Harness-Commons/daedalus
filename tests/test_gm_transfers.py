@@ -20,8 +20,6 @@ const vm = require('vm');
 const [backgroundPath, mode] = process.argv.slice(1);
 const assert = require('assert/strict');
 const started = [], answers = [];
-const released = [];
-let pendingResolve;
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -37,7 +35,7 @@ chrome.storage.local.get = (keys) => keys.includes('daedalus-hotfixes')
 function bridgeFetch(url, opts) {
   if (url === '/result') return Promise.resolve(new Response('{}'));
   assert.equal(url, 'https://example.com/relay');
-  const relay = deferred();
+  const relay = { ...deferred(), id: Number(opts.headers['X-Relay-Id']) };
   started.push(relay);
   const abort = () => relay.reject(
     Object.assign(Error('aborted'), { name: 'AbortError' }));
@@ -56,9 +54,9 @@ function send(message) {
 }
 function relay() {
   const id = String(answers.length);
-  const answer = send({ type: 'fetch', fetchId: id,
-    url: 'https://example.com/relay', responseType: 'arraybuffer' });
-  answers.push(answer);
+  answers.push(send({ type: 'fetch', fetchId: id,
+    url: 'https://example.com/relay', responseType: 'arraybuffer',
+    headers: { 'X-Relay-Id': id } }));
 }
 function finish(index, fail = false) {
   if (fail) started[index].reject(Error('relay failed'));
@@ -77,12 +75,14 @@ function finish(index, fail = false) {
     pending.then(() => { settled = true; });
   }
   relay();
-  relay();
+  if (mode !== 'settled') relay();
   await delay();
   const queued = started.length;
   if (mode === 'settled') {
     command.resolve({});
     await pending;
+    await delay();
+    assert.equal(started.length, 3, 'settlement did not drain the waiter');
   }
   if (n) {
     if (mode === 'abort') {
@@ -92,6 +92,7 @@ function finish(index, fail = false) {
   }
   await delay();
   const one = started.length;
+  if (mode === 'ceiling') relay();
   for (let i = 1; i < n; i++) finish(i);
   await delay();
   const drained = started.length, pendingAtDrain = !!pending && !settled;
@@ -114,6 +115,7 @@ function finish(index, fail = false) {
   for (const answer of answers) answer.then((value) => completed.push(value));
   await delay();
   process.stdout.write(JSON.stringify({ queued, one, drained, pendingAtDrain,
+    startOrder: started.map(({ id }) => id),
     completed: completed.length,
     errors: completed.filter((value) => value.error).map((v) => v.error) }));
 })().catch((error) => { console.error(error); process.exitCode = 1; });
@@ -122,13 +124,12 @@ function finish(index, fail = false) {
 
 def test_relay_admission_yields_to_one_command_drain(tmp):
     del tmp
-    failures = []
     for mode, queued, one, drained, pending, errors in (
-        ('ceiling', 8, 9, 10, False, []),
+        ('ceiling', 8, 9, 11, False, []),
         ('command', 2, 2, 4, True, []),
         ('replay', 2, 2, 4, True, []),
         ('overlap', 2, 2, 4, True, []),
-        ('settled', 2, 4, 4, False, []),
+        ('settled', 2, 3, 3, False, []),
         ('idle', 2, 2, 2, True, []),
         ('error', 8, 9, 10, False, ['relay failed']),
         ('abort', 8, 9, 10, False, ['aborted by the caller']),
@@ -142,11 +143,10 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
             'queued': queued, 'one': one, 'drained': drained,
             'pendingAtDrain': pending,
             'completed': drained + (mode == 'overlap'),
+            'startOrder': list(range(drained + (mode == 'overlap'))),
             'errors': errors,
         }
-        if actual != expected:
-            failures.append((mode, actual, expected))
-    assert not failures, failures
+        assert actual == expected, (mode, actual, expected)
 
 
 _FETCH_RELAY_HARNESS = CONTENT_SCRIPT_PAGE + r"""
