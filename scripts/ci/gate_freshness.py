@@ -1,27 +1,19 @@
 #!/usr/bin/env python3
 """Publish gate freshness for open heads based on main.
 
-Snapshot main, enumerate GATE_PATTERNS, then compare every gate to each head.
-Freshness needs a 40-hex merge base equal to the gate. Misses need a rebase;
-unreadable compares are RED. Revalidate heads before decisions and writes.
-Moved heads skip. Global read/budget failures fail push; head failures skip.
-Event jobs fail for RED; dry runs only compute.
+Snapshot main and compare every gate to each head; only a 40-hex merge base
+equal to the gate proves freshness. Misses need rebase; unreadable is RED.
+Revalidate heads. Push keeps or dispatches; only global read/budget errors fail
+push. Event jobs fail for RED. PATCH/retire completed EXTERNAL_ID checks only;
+POST only on empty listings. Keep newer stamped verdicts; writes can race.
+Record completed verdict writes even when retirement fails. Dry runs compute.
 
-THE CHECK CARRIER. PATCH only completed EXTERNAL_ID checks: newest carries,
-others retire. POST only on empty listings; old suites can hide API checks.
-Push keeps fresh/already-red heads; dispatch needs both gate files identical
-to this checkout. Dispatched jobs execute main's fetched code at its snapshot.
-
-ORDERING. Keep verdicts stamped with main we do not contain; unmarked failures
-cannot become success. Reads and writes can still race; no post-write repair.
-
-THE BOUND. L + 4 + H * (G + 8): L path lookups; four setup reads (main,
-PR list, bootstrap source and repeated PR list); G compares per head plus two
-revalidations, listing, write, ordering compare, two file reads and dispatch.
-Reserve both alternative paths. Extra owned ids add retirement PATCHes; pages
-are one logical read, unbounded. At 1.5 s/call, 1200 calls need 30 minutes of a
-35-minute timeout. Oversized estimates refuse without truncating heads.
-Workflow discovery misses module invocations and five tool configs.
+THE BOUND. L + 4 + H * (G + 8): L path lookups, main, PR list, bootstrap
+source and repeated PR list; G compares per head plus two revalidations,
+listing, write, ordering compare, two file reads and dispatch. Reserve both
+alternative paths. Extra owned ids add retirement PATCHes; pages count as one
+logical read. At 1.5 s/call, 1200 calls need 30 minutes of a 35-minute timeout.
+Oversized estimates refuse without truncating heads.
 """
 import json
 import os
@@ -59,6 +51,7 @@ ASSUMED_SECONDS_PER_CALL = 1.5
 
 class QueryError(RuntimeError):
     """A `gh api` call that could not be read."""
+    verdict_written = False
 
 
 class Verdict:
@@ -280,10 +273,14 @@ def publish(read, repository, head_sha, conclusion, title, summary,
         read(_api(f'repos/{repository}/check-runs/{carrier["id"]}',
                   '-X', 'PATCH', *fields))
         outcome = 'patched'
-    for check in writable:
-        if check['id'] != carrier['id']:
-            read(_api(f'repos/{repository}/check-runs/{check["id"]}',
-                      '-X', 'PATCH', '-f', f'name={NAME_RETIRED}'))
+    try:
+        for check in writable:
+            if check['id'] != carrier['id']:
+                read(_api(f'repos/{repository}/check-runs/{check["id"]}',
+                          '-X', 'PATCH', '-f', f'name={NAME_RETIRED}'))
+    except QueryError as error:
+        error.verdict_written = outcome == 'patched'
+        raise
     return outcome, None
 
 
@@ -351,6 +348,7 @@ def process(read, repository, heads, gates, details_url, main_sha,
     published, failed = [], 0
     for head in heads:
         phase = 'read the head of'
+        verdict = None
         try:
             if current_head(read, repository, head['number']) != head['sha']:
                 print(f'gate freshness: head of pull request '
@@ -379,6 +377,9 @@ def process(read, repository, heads, gates, details_url, main_sha,
             print(f'gate freshness: could not {phase} pull request '
                   f'{head["number"]}: {error}; skipping', file=sys.stderr)
             failed += not may_dispatch
+            if verdict is not None and error.verdict_written:
+                verdict.action = 'written'
+                published.append(verdict)
             continue
         published.append(verdict)
     return (1 if failed else 0), published

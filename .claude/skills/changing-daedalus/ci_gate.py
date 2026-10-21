@@ -46,13 +46,13 @@ caller requires can satisfy the set by its PRESENCE while its conclusion is
 not judged at all: `--required 'pr gate'` is answered by that run existing.
 
 A PUBLISHED CHECK-RUN is the verdict; a workflow run is its container.
-The `gate freshness` job carries that context in its own run's check suite,
-and on pull_request_target the script's exit code makes the job fail when
-that head's verdict is not success. A push to main re-decides other heads
-by PATCHing their newest check only if completed, so its verdict can change
-without their workflow run's conclusion changing. The rulesets read the
-check, and a waiter reading only runs can still certify a red gate (issue
-#1360). Both the run and the check must therefore be read.
+The `gate freshness` job carries the verdict through its exit code. A push
+keeps fresh or already-red heads and dispatches other stale heads only when
+their workflow and gate script match its checkout. Inspect that push run for
+eligibility refusals or dispatch failures, then the head's job check and run.
+The script can PATCH and retire completed checks it created, identified by
+its `external_id`; runner-owned checks stay with their job. Read both the run
+and the published check: a successful dispatch alone supplies no verdict.
 
 A published check is read by NAME, exactly, like a workflow: `Gate
 freshness` is a different check and cannot satisfy this one.
