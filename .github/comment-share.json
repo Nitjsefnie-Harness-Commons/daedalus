@@ -1,11 +1,11 @@
 {
   ".claude/skills/changing-daedalus/ci_gate.py": [
-    7903,
-    9881
+    7899,
+    9877
   ],
   ".claude/skills/changing-daedalus/ci_wait.py": [
-    10235,
-    18301
+    10152,
+    18218
   ],
   ".claude/skills/changing-daedalus/gh_client.py": [
     5614,
@@ -52,8 +52,8 @@
     12492
   ],
   ".github/workflows/gate-freshness.yml": [
-    1436,
-    2136
+    1297,
+    2030
   ],
   ".github/workflows/pr-gate.yml": [
     728,
@@ -430,10 +430,6 @@
   "scripts/ci/diff_coverage.py": [
     5393,
     13658
-  ],
-  "scripts/ci/gate_freshness.py": [
-    4534,
-    15428
   ],
   "scripts/ci/install_lint_tools.py": [
     9016,
