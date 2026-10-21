@@ -106,13 +106,12 @@ def _main_env(tmp, event_name, event, monkey=None, run=None):
             pulls = event.get('open_pulls', [event.get('pull_request')])
             sha = next(p['head']['sha'] for p in pulls
                        if p and p['number'] == number)
+            if (number, calls.count(target)) == monkey.get('move'):
+                sha = 'e' * 40
             return _encode({'head': {'sha': sha}})
         if '/check-runs?' in target and 'GET' in argv:
             if 'checks' in monkey:
                 return '\n'.join(_encode(c) for c in monkey['checks'])
-            if monkey.get('completed'):
-                return _encode(_check(101, external_id=m.EXTERNAL_ID,
-                                      summary=f'main {G1}'))
             return (_encode(_check(101, 'in_progress', 'runner-uuid'))
                     if event_name != 'push' else '')
         if '/contents/' in target:
@@ -134,8 +133,11 @@ def _main_env(tmp, event_name, event, monkey=None, run=None):
             published.append(ref)
             return ''
         if 'POST' in argv or 'PATCH' in argv:
-            assert any(a.endswith('main ' + monkey.get('snapshot', G1))
-                       for a in argv if a.startswith('output[summary]='))
+            if 'name=superseded gate freshness' not in argv:
+                assert any(a.endswith('main ' + monkey.get('snapshot', G1))
+                           for a in argv if a.startswith('output[summary]='))
+            if target == f'repos/o/r/check-runs/{monkey.get("write_fail")}':
+                raise m.QueryError('write unavailable')
             published.append(target)
             return '{}'
         raise AssertionError(target)
@@ -155,22 +157,28 @@ def _main_env(tmp, event_name, event, monkey=None, run=None):
 
 def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
     snapshot = 'd' * 40
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code, calls, published = _main_env(
-            tmp, 'pull_request_target', {'pull_request': _pr(7)},
-            monkey={'snapshot': snapshot, 'completed': True})
-    assert code == 0 and len(published) == 1
-    assert calls.count('repos/o/r/commits/main') == 1
-    lookups = [path for path in calls if '/commits?' in path]
-    assert lookups and all(f'?sha={snapshot}&' in path for path in lookups)
-    assert calls.index('repos/o/r/commits/main') < min(
-        i for i, path in enumerate(calls) if '/commits?' in path)
-    assert all(f'/compare/{G1}...' in path
-               for path in calls if '/compare/' in path)
-    assert out.getvalue().splitlines()[-1] == (
-        'gate freshness: written 1, dispatched 0, kept 0; evaluated 1/1'
-        ' heads; resolved 18/18 gate paths')
+    for fail, written, status in ((None, 1, 0), (101, 0, 1), (100, 1, 1)):
+        checks = [_check(101, external_id=_mod().EXTERNAL_ID,
+                         summary=f'main {G1}')]
+        if fail: checks.append(_check(100, external_id=_mod().EXTERNAL_ID))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code, calls, published = _main_env(
+                tmp, 'pull_request_target', {'pull_request': _pr(7)},
+                monkey={'snapshot': snapshot, 'checks': checks,
+                        'write_fail': fail})
+        assert code == status and len(published) == written, (code, published)
+        assert calls.count('repos/o/r/commits/main') == 1
+        lookups = [path for path in calls if '/commits?' in path]
+        assert lookups and all(f'?sha={snapshot}&' in path for path in lookups)
+        assert calls.index('repos/o/r/commits/main') < min(
+            i for i, path in enumerate(calls) if '/commits?' in path)
+        assert all(f'/compare/{G1}...' in path
+                   for path in calls if '/compare/' in path)
+        assert out.getvalue().splitlines()[-1] == (
+            f'gate freshness: written {written}, dispatched 0, kept 0; '
+            f'evaluated {written}/1 heads; resolved 18/18 gate paths'), (
+                fail, out.getvalue())
 
 
 def test_unreadable_main_snapshot_publishes_nothing(tmp):
@@ -210,28 +218,35 @@ def test_push_walks_every_head_and_reports_each_outcome(tmp):
     green = [_check(101)]
     older = _check(80, external_id=m.EXTERNAL_ID, conclusion='failure')
     owned = _check(202, external_id=m.EXTERNAL_ID, conclusion='failure')
-    for checks, heads, fresh, expected in (
-            (green, single, (), ['feature']),
-            (green + [older], single, (), ['feature']),
-            (green + [_check(202, conclusion='failure')], single, (), []),
-            (green + [owned], single, (), []),
-            (green, single, (HEAD,), []),
-            (green, pair, (HEAD,), ['later']),
-            (green, pair, (), ['feature', 'later'])):
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+    red = _check(202, conclusion='failure')
+    for checks, heads, fresh, move, expected in (
+            (green, single, (), None, ['feature']),
+            (green + [older], single, (), None, ['feature']),
+            (green + [red], single, (), None, []),
+            (green + [owned], single, (), None, []),
+            (green, single, (HEAD,), None, []),
+            (green, pair, (HEAD,), None, ['later']),
+            (green, pair, (), None, ['feature', 'later']),
+            (green, pair, (), (7, 1), ['later']),
+            (green, pair, (), (7, 2), ['later'])):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code, calls, refs = _main_env(tmp, 'push', {'open_pulls': heads},
                                           monkey={'stale': True,
                                                   'fresh': fresh,
+                                                  'move': move,
                                                   'checks': checks})
         assert code == 0 and refs == expected, (code, refs, expected)
         target = 'repos/o/r/actions/workflows/gate-freshness.yml/dispatches'
         assert calls.count(target) == len(expected), calls
         if not expected: assert not any('/contents/' in c for c in calls)
         assert len(calls) <= m.required_calls(len(heads), len(m.GATE_PATTERNS))
+        if move: assert (_MOVED in err.getvalue()
+                         and calls.count('repos/o/r/pulls/8') == 2)
+        handled = len(heads) - bool(move)
         assert out.getvalue().splitlines()[-1] == (
             f'gate freshness: written 0, dispatched {len(expected)}, kept '
-            f'{len(heads) - len(expected)}; evaluated {len(heads)}/'
+            f'{handled - len(expected)}; evaluated {handled}/'
             f'{len(heads)} heads; resolved 18/18 gate paths')
 
 
@@ -451,21 +466,6 @@ def _process_capturing_stderr(m, read, heads, **kwargs):
 
 
 _MOVED = 'gate freshness: head of pull request 7 moved; skipping'
-
-
-def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
-    cases = (({'.pylintrc': [G1]}, {}, {'moved_to': 'd' * 40}),
-             ({}, {7: HEAD}, {'moved': 'e' * 40}))
-    for gates, current, flow in cases:
-        m = _mod()
-        published = []
-        read = _flow_read(m, gates, current, published, **flow)
-        code, verdicts, err = _process_capturing_stderr(
-            m, read, m.select_heads([_pr(7)]))
-        assert published == [], 'published onto a superseded SHA'
-        assert code == 0, 'a moved head gets its own verdict; not a failure'
-        assert verdicts == []
-        assert _MOVED in err, 'a moved head must still be reported on stderr'
 
 
 def test_an_unreadable_sha_fails_either_revalidation(tmp):

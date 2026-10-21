@@ -435,12 +435,12 @@ the conclusion is judged before the set is, and so is a present-but-red
 head whose `tests` run is also absent.
 
 **Read the published check as the verdict and its workflow run as the
-container** (issue #1360): a push to `main` PATCHes other heads' newest
-`gate freshness` check only if completed, leaving run conclusions unchanged.
-The event's own pull-request run tracks its verdict, but a waiter reading
-only runs can still certify a head whose gate is red - head
-`8ddfec21f32d484657e7ebc56c46a1b395670ca9` carried seven green runs and a
-`gate freshness` check that concluded FAILURE, and the tool exited 0.
+container.** A push to `main` keeps fresh or already-red heads and dispatches
+other stale heads only when their workflow and gate script match its checkout.
+Inspect that push run for eligibility refusals or dispatch failures, then the
+head's job check and run. Dispatch alone supplies no verdict. The script can
+still PATCH and retire completed checks bearing its own `external_id`;
+runner-owned checks stay with their job. Read both the run and the check.
 
 **The predicate for both kinds of gate is `ci_gate.py`'s, and so is the
 direction rule that says which of them an invocation is held to** - the
