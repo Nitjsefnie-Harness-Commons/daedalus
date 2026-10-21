@@ -36,14 +36,12 @@ the `tests` matrix - the workflow that gates the merge - has no run at all.
 Two unrelated short workflows conclude, the tool says acceptable and exits
 0, and every session that reads that exit code reads a false green.
 
-Read the `gate freshness` check as verdict and its run as container: a push
-to `main` PATCHes other heads' newest check only if completed, leaving run
-conclusions unchanged; the event's pull-request run tracks its verdict, but a
-run-only read can certify a head whose gate is red (issue 1360).
-So this tool read the publisher (the workflow run),
-missed the gate, and certified `8ddfec21` - seven green runs and a
-`gate freshness` check that concluded FAILURE. Both are now read, off ONE
-query, and a red verdict is exit 1 like any other conclusion.
+Read the `gate freshness` check as the verdict and its run as the container.
+A push to `main` keeps fresh or already-red heads; other stale heads are
+dispatched only when their workflow and gate script match the push checkout.
+Inspect that push run for eligibility refusals or failed dispatches, then the
+head's job check and its dispatched run. Dispatch alone is not a verdict:
+the head's event job supplies its conclusion through its exit code.
 
 The expectation is a constant and stays the DEFAULT: a caller who names
 nothing gets exactly the exit-4 refusal, so a reader cannot switch it off by

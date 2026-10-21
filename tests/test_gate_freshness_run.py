@@ -73,7 +73,7 @@ def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
     return read
 
 
-def _main_env(tmp, event_name, event, monkey=None, moved=None, run=None):
+def _main_env(tmp, event_name, event, monkey=None, run=None):
     m = _mod()
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
@@ -94,9 +94,10 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None, run=None):
                 'sha': monkey.get('snapshot', G1)}))
         if '/compare/' in target:
             gate = target.split('compare/')[1].split('...')[0]
+            stale = monkey.get('stale') and target.rsplit('...', 1)[1] not in (
+                monkey.get('fresh', ()))
             return _encode({'status': 'ahead',
-                            'merge_base_commit': {'sha': 'f' * 40
-                                                  if monkey.get('stale')
+                            'merge_base_commit': {'sha': 'f' * 40 if stale
                                                   else gate}})
         if re.search(r'/pulls/\d+$', target):
             number = int(target.rsplit('/', 1)[1])
@@ -105,8 +106,7 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None, run=None):
             pulls = event.get('open_pulls', [event.get('pull_request')])
             sha = next(p['head']['sha'] for p in pulls
                        if p and p['number'] == number)
-            return _encode({'head': {'sha': 'e' * 40 if number == moved
-                                     else sha}})
+            return _encode({'head': {'sha': sha}})
         if '/check-runs?' in target and 'GET' in argv:
             if 'checks' in monkey:
                 return '\n'.join(_encode(c) for c in monkey['checks'])
@@ -123,14 +123,15 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None, run=None):
             if ref == G1:
                 assert path == 'scripts/ci/gate_freshness.py'
                 return monkey['source']
-            assert ref == HEAD
+            assert ref in {p['head']['sha'] for p in event['open_pulls']}
             key = 'workflow' if path.endswith('.yml') else 'script'
             return monkey.get(key, (ROOT / path).read_bytes().decode())
         if target.endswith('/gate-freshness.yml/dispatches'):
-            assert 'POST' in argv and 'ref=feature' in argv
+            ref = next(a[4:] for a in argv if a.startswith('ref='))
+            assert 'POST' in argv
             if monkey.get('dispatch_fail'):
                 raise m.QueryError('HTTP 403')
-            published.append(target)
+            published.append(ref)
             return ''
         if 'POST' in argv or 'PATCH' in argv:
             assert any(a.endswith('main ' + monkey.get('snapshot', G1))
@@ -154,9 +155,11 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None, run=None):
 
 def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
     snapshot = 'd' * 40
-    code, calls, published = _main_env(
-        tmp, 'pull_request_target', {'pull_request': _pr(7)},
-        monkey={'snapshot': snapshot, 'completed': True})
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code, calls, published = _main_env(
+            tmp, 'pull_request_target', {'pull_request': _pr(7)},
+            monkey={'snapshot': snapshot, 'completed': True})
     assert code == 0 and len(published) == 1
     assert calls.count('repos/o/r/commits/main') == 1
     lookups = [path for path in calls if '/commits?' in path]
@@ -165,6 +168,9 @@ def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
         i for i, path in enumerate(calls) if '/commits?' in path)
     assert all(f'/compare/{G1}...' in path
                for path in calls if '/compare/' in path)
+    assert out.getvalue().splitlines()[-1] == (
+        'gate freshness: written 1, dispatched 0, kept 0; evaluated 1/1'
+        ' heads; resolved 18/18 gate paths')
 
 
 def test_unreadable_main_snapshot_publishes_nothing(tmp):
@@ -197,32 +203,36 @@ def _push(tmp, **options):
         'stale': True, 'checks': [_check(101)], **options})
 
 
-def test_stale_runner_green_dispatches_once_on_the_head_ref(tmp):
+def test_push_walks_every_head_and_reports_each_outcome(tmp):
     m = _mod()
-    for checks in ([_check(101)], [_check(101), _check(
-            80, conclusion='failure', external_id=m.EXTERNAL_ID)]):
-        code, calls, writes = _push(tmp, checks=checks)
+    pair = [_pr(7), _pr(8, sha='d' * 40, ref='later')]
+    single = [_pr(7)]
+    green = [_check(101)]
+    older = _check(80, external_id=m.EXTERNAL_ID, conclusion='failure')
+    owned = _check(202, external_id=m.EXTERNAL_ID, conclusion='failure')
+    for checks, heads, fresh, expected in (
+            (green, single, (), ['feature']),
+            (green + [older], single, (), ['feature']),
+            (green + [_check(202, conclusion='failure')], single, (), []),
+            (green + [owned], single, (), []),
+            (green, single, (HEAD,), []),
+            (green, pair, (HEAD,), ['later']),
+            (green, pair, (), ['feature', 'later'])):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code, calls, refs = _main_env(tmp, 'push', {'open_pulls': heads},
+                                          monkey={'stale': True,
+                                                  'fresh': fresh,
+                                                  'checks': checks})
+        assert code == 0 and refs == expected, (code, refs, expected)
         target = 'repos/o/r/actions/workflows/gate-freshness.yml/dispatches'
-        assert (code, writes) == (0, [target]), writes
-        assert calls.count(target) == 1
-        assert (f'repos/o/r/contents/.github/workflows/gate-freshness.yml'
-                f'?ref={HEAD}') in calls
-        assert len(calls) <= m.required_calls(1, len(m.GATE_PATTERNS)), calls
-
-
-def test_newest_failure_across_all_suites_is_kept(tmp):
-    for external in (None, 'daedalus-gate-freshness/v1'):
-        checks = [_check(101),
-                  _check(202, conclusion='failure', external_id=external)]
-        code, calls, writes = _push(tmp, checks=checks)
-        assert code == 0 and writes == [], writes
-        assert not any('/contents/' in c for c in calls), calls
-
-
-def test_fresh_runner_head_never_dispatches_or_writes(tmp):
-    code, calls, writes = _push(tmp, stale=False)
-    assert code == 0 and writes == [], writes
-    assert not any('/contents/' in c for c in calls), calls
+        assert calls.count(target) == len(expected), calls
+        if not expected: assert not any('/contents/' in c for c in calls)
+        assert len(calls) <= m.required_calls(len(heads), len(m.GATE_PATTERNS))
+        assert out.getvalue().splitlines()[-1] == (
+            f'gate freshness: written 0, dispatched {len(expected)}, kept '
+            f'{len(heads) - len(expected)}; evaluated {len(heads)}/'
+            f'{len(heads)} heads; resolved 18/18 gate paths')
 
 
 def _assert_loud_skip(tmp, reason, **options):
@@ -234,16 +244,17 @@ def _assert_loud_skip(tmp, reason, **options):
     return calls
 
 
-def test_cross_repository_head_is_a_loud_skip(tmp):
-    calls = _assert_loud_skip(tmp, 'cross-repository', owner='fork-owner')
-    assert not any('/contents/' in c for c in calls), calls
-
-
-def test_edited_workflow_is_a_loud_skip(tmp):
-    for text in (_workflow_text() + '# edited\n',
-                 _workflow_text().replace('\n', '\r\n'), 'on: [push]'):
-        _assert_loud_skip(tmp, 'head carries an edited gate definition',
-                          workflow=text)
+def test_push_refusals_are_loud_skips(tmp):
+    edited = 'head carries an edited gate definition'
+    for reason, options in (
+            ('cross-repository', {'owner': 'fork-owner'}),
+            (edited, {'workflow': _workflow_text() + '# edited\n'}),
+            (edited, {'workflow': _workflow_text().replace('\n', '\r\n')}),
+            (edited, {'workflow': 'on: [push]'}),
+            ('HTTP 404', {'contents_fail': True}),
+            ('HTTP 403', {'dispatch_fail': True})):
+        calls = _assert_loud_skip(tmp, reason, **options)
+        if 'owner' in options: assert not any('/contents/' in c for c in calls)
 
 
 def _entrypoint(tmp, event_name, answers):
@@ -313,14 +324,6 @@ def test_push_real_adapter_refuses_crlf_workflow(tmp):
     assert result.returncode == 0, result.stderr
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
     assert 'head carries an edited gate definition' in result.stderr
-
-
-def test_unreadable_workflow_is_a_loud_skip(tmp):
-    _assert_loud_skip(tmp, 'HTTP 404', contents_fail=True)
-
-
-def test_refused_dispatch_is_a_loud_skip(tmp):
-    _assert_loud_skip(tmp, 'HTTP 403', dispatch_fail=True)
 
 
 def test_push_head_failure_does_not_abandon_siblings_or_fail_main(tmp):

@@ -1,34 +1,27 @@
 #!/usr/bin/env python3
 """Publish gate freshness for open heads based on main.
 
-Snapshot main before enumerating GATE_PATTERNS. Compare every gate commit to
-its head; only a 40-hex merge base equal to the gate proves freshness. Missing
-gates require a rebase. An unreadable compare is RED, never evidence of access
-denial. Revalidate heads before deciding and publishing; moved heads skip.
-Global listing, main-read, gate-enumeration and budget failures fail push;
-per-head problems skip loudly. Event jobs fail for RED. Dry runs only compute.
+Snapshot main, enumerate GATE_PATTERNS, then compare every gate to each head.
+Freshness needs a 40-hex merge base equal to the gate. Misses need a rebase;
+unreadable compares are RED. Revalidate heads before decisions and writes.
+Moved heads skip. Global read/budget failures fail push; head failures skip.
+Event jobs fail for RED; dry runs only compute.
 
-THE CHECK CARRIER. PATCH only completed checks bearing EXTERNAL_ID, choosing
-the newest carrier and retiring completed owned non-carriers. An empty listing
-permits POST; runner-owned checks require a run. API-created checks were
-observed in the oldest app suite, invisible once superseded (issue #1655).
-Push dispatches stale heads only with both gate files identical to this
-checkout. Dispatched jobs execute main's fetched source once, retaining its
-snapshot for gate lookups. Fresh or already-red heads are kept.
+THE CHECK CARRIER. PATCH only completed EXTERNAL_ID checks: newest carries,
+others retire. POST only on empty listings; old suites can hide API checks.
+Push keeps fresh/already-red heads; dispatch needs both gate files identical
+to this checkout. Dispatched jobs execute main's fetched code at its snapshot.
 
-ORDERING. Keep a verdict whose stamped main our snapshot does not contain.
-Unmarked failures cannot become success without ordering evidence. Two
-writers can still race between the ordering read and write; an older verdict
-may win until the next event. There is no post-write repair.
+ORDERING. Keep verdicts stamped with main we do not contain; unmarked failures
+cannot become success. Reads and writes can still race; no post-write repair.
 
-THE BOUND. Estimate L + 4 + H * (G + 8): L path lookups and up to four setup
-reads (main, open PRs, bootstrap source and repeated PR list), then G compares,
-two revalidations, listing, write, order compare, two file reads and dispatch
-per head. Alternative paths are both reserved. Extra owned ids add retirement
-PATCHes; pagination is one logical read, with no bound on ids or pages.
-At 1.5 s/call, 1200 calls take 30 minutes; the 35-minute timeout leaves slack.
-Oversized estimates refuse without truncating heads. Workflow discovery misses
-module invocations and five tool configs explicitly carried in GATE_PATTERNS.
+THE BOUND. L + 4 + H * (G + 8): L path lookups; four setup reads (main,
+PR list, bootstrap source and repeated PR list); G compares per head plus two
+revalidations, listing, write, ordering compare, two file reads and dispatch.
+Reserve both alternative paths. Extra owned ids add retirement PATCHes; pages
+are one logical read, unbounded. At 1.5 s/call, 1200 calls need 30 minutes of a
+35-minute timeout. Oversized estimates refuse without truncating heads.
+Workflow discovery misses module invocations and five tool configs.
 """
 import json
 import os
@@ -77,6 +70,7 @@ class Verdict:
         self.title = title
         self.summary = summary
         self.paths = list(paths)
+        self.action = 'computed'
 
 
 def _hex40(value):
@@ -299,11 +293,11 @@ def _raw_file(read, repository, path, sha):
 
 
 def _keep_or_dispatch(read, repository, head, verdict):
-    if verdict.conclusion == 'success': return
+    if verdict.conclusion == 'success': return 'kept'
     checks = _existing_checks(read, repository, head['sha'])
     if checks is None: raise QueryError('could not read existing check runs')
     newest = max(checks, key=lambda c: c['id'], default={})
-    if newest.get('conclusion') == 'failure': return
+    if newest.get('conclusion') == 'failure': return 'kept'
     if head['owner'] != repository.split('/')[0]:
         reason = 'cross-repository head has no dispatch ref here'
     else:
@@ -317,7 +311,7 @@ def _keep_or_dispatch(read, repository, head, verdict):
         read(_api(f'repos/{repository}/actions/workflows/'
                   'gate-freshness.yml/dispatches', '-X', 'POST',
                   '-f', f'ref={head["ref"]}'))
-        return
+        return 'dispatched'
     raise QueryError(reason)
 
 
@@ -346,7 +340,7 @@ def required_calls(head_count, gate_count):
 
 def process(read, repository, heads, gates, details_url, main_sha,
             call_budget=None, dry_run=False, may_dispatch=False):
-    """Return (exit_code, published); failed heads do not abandon siblings."""
+    """Return (exit_code, handled heads); failures do not abandon siblings."""
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
     needed = required_calls(len(heads), len(gates))
     if needed > budget:
@@ -373,10 +367,14 @@ def process(read, repository, heads, gates, details_url, main_sha,
                       f'{verdict.conclusion:>7} [{verdict.kind}] '
                       f'{verdict.summary}')
             elif may_dispatch:
-                _keep_or_dispatch(read, repository, head, verdict)
+                verdict.action = _keep_or_dispatch(
+                    read, repository, head, verdict)
             else:
-                publish(read, repository, head['sha'], verdict.conclusion,
-                        verdict.title, verdict.summary, details_url, main_sha)
+                outcome, _ = publish(
+                    read, repository, head['sha'], verdict.conclusion,
+                    verdict.title, verdict.summary, details_url, main_sha)
+                verdict.action = ('written' if outcome in ('posted', 'patched')
+                                  else 'kept')
         except QueryError as error:
             print(f'gate freshness: could not {phase} pull request '
                   f'{head["number"]}: {error}; skipping', file=sys.stderr)
@@ -488,9 +486,11 @@ def main(argv=None, read=None, run=None):
                               dry_run, may_dispatch=name == 'push')
     if name in ('pull_request_target', 'workflow_dispatch') and not dry_run:
         if any(v.conclusion != 'success' for v in published): code = 1
-    verb = 'would publish' if dry_run else 'published'
-    print(f'gate freshness: {verb} {len(published)} verdict(s) for '
-          f'{len(heads)} open pull request(s) based on main; resolved '
+    counts = {action: sum(v.action == action for v in published)
+              for action in ('written', 'dispatched', 'kept')}
+    print(f'gate freshness: written {counts["written"]}, '
+          f'dispatched {counts["dispatched"]}, kept {counts["kept"]}; '
+          f'evaluated {len(published)}/{len(heads)} heads; resolved '
           f'{len(gates)}/{len(GATE_PATTERNS)} gate paths')
     return code
 
