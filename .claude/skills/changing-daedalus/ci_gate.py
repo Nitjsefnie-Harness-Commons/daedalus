@@ -46,13 +46,13 @@ caller requires can satisfy the set by its PRESENCE while its conclusion is
 not judged at all: `--required 'pr gate'` is answered by that run existing.
 
 A PUBLISHED CHECK-RUN is the verdict; a workflow run is its container.
-The `gate freshness` job carries the verdict through its exit code. A push
-keeps fresh or already-red heads and dispatches other stale heads only when
-their workflow and gate script match its checkout. Inspect that push run for
+The `gate freshness` job reports its verdict through its exit code. A push
+keeps fresh or already-red heads and dispatches stale heads only when
+their workflow and gate script match its checkout. Read the push run for
 eligibility refusals or dispatch failures, then the head's job check and run.
-The script can PATCH and retire completed checks it created, identified by
-its `external_id`; runner-owned checks stay with their job. Read both the run
-and the published check: a successful dispatch alone supplies no verdict.
+The script PATCHes and retires its completed checks, identified by
+its `external_id`; runner-owned checks stay with their job. Read the run and
+published check: dispatch alone supplies no verdict.
 
 A published check is read by NAME, exactly, like a workflow: `Gate
 freshness` is a different check and cannot satisfy this one.

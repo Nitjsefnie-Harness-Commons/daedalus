@@ -79,6 +79,9 @@ def _main_env(tmp, event_name, event, monkey=None, run=None):
     event_path.write_text(json.dumps(event), encoding='utf-8')
     calls, published = [], []
     monkey = monkey or {}
+    files = {p: (ROOT / p).read_bytes().decode() for p in (
+        '.github/workflows/gate-freshness.yml',
+        'scripts/ci/gate_freshness.py')}
 
     def fake_gh_read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
@@ -110,21 +113,23 @@ def _main_env(tmp, event_name, event, monkey=None, run=None):
                 sha = 'e' * 40
             return _encode({'head': {'sha': sha}})
         if '/check-runs?' in target and 'GET' in argv:
+            if monkey.get('listing_fail'): raise m.QueryError('listing failed')
+            if 'listing' in monkey: return monkey['listing']
             if 'checks' in monkey:
                 return '\n'.join(_encode(c) for c in monkey['checks'])
             return (_encode(_check(101, 'in_progress', 'runner-uuid'))
                     if event_name != 'push' else '')
         if '/contents/' in target:
             assert 'Accept: application/vnd.github.raw+json' in argv
-            if monkey.get('contents_fail'):
-                raise m.QueryError('HTTP 404')
             path, ref = target.split('/contents/')[1].split('?ref=')
+            if monkey.get('contents_fail') in (True, path):
+                raise m.QueryError('HTTP 404')
             if ref == G1:
                 assert path == 'scripts/ci/gate_freshness.py'
                 return monkey['source']
             assert ref in {p['head']['sha'] for p in event['open_pulls']}
             key = 'workflow' if path.endswith('.yml') else 'script'
-            return monkey.get(key, (ROOT / path).read_bytes().decode())
+            return monkey.get(key, files[path])
         if target.endswith('/gate-freshness.yml/dispatches'):
             ref = next(a[4:] for a in argv if a.startswith('ref='))
             assert 'POST' in argv
@@ -147,11 +152,16 @@ def _main_env(tmp, event_name, event, monkey=None, run=None):
         'GITHUB_REPOSITORY': 'o/r',
         'GITHUB_SHA': monkey.get('sha', HEAD),
         'GATE_FRESHNESS_MAIN_SOURCE': monkey.get('marker', G1),
+        'GATE_FRESHNESS_MAX_CALLS': str(monkey.get('budget', 1200)),
     }):
-        for key in ('GITHUB_SERVER_URL', 'GITHUB_RUN_ID',
-                    'GATE_FRESHNESS_MAX_CALLS'):
+        for key in ('GITHUB_SERVER_URL', 'GITHUB_RUN_ID'):
             os.environ.pop(key, None)
-        code = m.main(monkey.get('argv', []), read=fake_gh_read, run=run)
+        local_read = (patch.object(Path, 'read_bytes',
+                                   side_effect=OSError('local unreadable'))
+                      if monkey.get('local_fail')
+                      else contextlib.nullcontext())
+        with local_read:
+            code = m.main(monkey.get('argv', []), read=fake_gh_read, run=run)
     return code, calls, published
 
 
@@ -183,10 +193,13 @@ def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
 
 def test_unreadable_main_snapshot_publishes_nothing(tmp):
     for options in ({'main_fail': True}, {'main_answer': {}},
-                    {'main_answer': {'sha': 'z' * 40}}):
-        code, _calls, published = _main_env(
-            tmp, 'push', {'open_pulls': [_pr(7)]}, monkey=options)
-        assert code == 1 and published == []
+                    {'main_answer': {'sha': 'z' * 40}}, {'budget': 1}):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code, _calls, published = _main_env(
+                tmp, 'push', {'open_pulls': [_pr(7)]}, monkey=options)
+        assert code == 1 and published == [], (options, code, published)
+        if 'budget' in options: assert 'estimated calls' in err.getvalue()
 
 
 def test_event_job_conclusion_tracks_only_its_own_pr_verdict(tmp):
@@ -232,9 +245,8 @@ def test_push_walks_every_head_and_reports_each_outcome(tmp):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code, calls, refs = _main_env(tmp, 'push', {'open_pulls': heads},
-                                          monkey={'stale': True,
+                                          monkey={'stale': True, 'move': move,
                                                   'fresh': fresh,
-                                                  'move': move,
                                                   'checks': checks})
         assert code == 0 and refs == expected, (code, refs, expected)
         target = 'repos/o/r/actions/workflows/gate-freshness.yml/dispatches'
@@ -251,11 +263,12 @@ def test_push_walks_every_head_and_reports_each_outcome(tmp):
 
 
 def _assert_loud_skip(tmp, reason, **options):
-    err = io.StringIO()
-    with contextlib.redirect_stderr(err):
+    err, out = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
         code, calls, writes = _push(tmp, **options)
-    assert code == 0 and writes == [], writes
-    assert reason in err.getvalue(), err.getvalue()
+    assert code == 0 and writes == [], (reason, writes)
+    assert reason in err.getvalue(), (reason, err.getvalue())
+    assert 'kept 0;' in out.getvalue(), out.getvalue()
     return calls
 
 
@@ -267,6 +280,10 @@ def test_push_refusals_are_loud_skips(tmp):
             (edited, {'workflow': _workflow_text().replace('\n', '\r\n')}),
             (edited, {'workflow': 'on: [push]'}),
             ('HTTP 404', {'contents_fail': True}),
+            ('HTTP 404', {'contents_fail': 'scripts/ci/gate_freshness.py'}),
+            ('could not read existing check runs', {'listing_fail': True}),
+            ('malformed existing check listing', {'listing': 'not JSON'}),
+            ('local unreadable', {'local_fail': True}),
             ('HTTP 403', {'dispatch_fail': True})):
         calls = _assert_loud_skip(tmp, reason, **options)
         if 'owner' in options: assert not any('/contents/' in c for c in calls)
@@ -349,50 +366,41 @@ def test_push_head_failure_does_not_abandon_siblings_or_fail_main(tmp):
 
 
 def test_dispatch_route_selects_only_the_event_sha(tmp):
-    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
-        'open_pulls': [_pr(8, sha='d' * 40), _pr(7)]},
-        monkey={'stale': True})
-    assert code == 1 and writes == [], (code, writes)
-    assert 'repos/o/r/pulls/7' in calls
-    assert 'repos/o/r/pulls/8' not in calls, calls
-
-
-def test_dispatch_route_without_a_matching_head_publishes_nothing(tmp):
-    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
-        'open_pulls': [_pr(7, sha='d' * 40), _pr(8, base='release')]})
-    assert code == 0 and writes == [], writes
-    assert not any('/compare/' in c or '/commits/' in c for c in calls)
+    for pulls, status in (([_pr(8, sha='d' * 40), _pr(7)], 1),
+                          ([_pr(7, sha='d' * 40), _pr(8, base='release')], 0)):
+        code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
+            'open_pulls': pulls}, monkey={'stale': True})
+        assert code == status and writes == [], (code, writes)
+        assert 'repos/o/r/pulls/8' not in calls, calls
+        if status: assert 'repos/o/r/pulls/7' in calls, calls
+        else: assert calls == [
+            'repos/o/r/pulls?state=open&base=main&per_page=100'], calls
 
 
 def test_dispatch_bootstraps_main_source_once_and_returns_child_exit(tmp):
     from types import SimpleNamespace
+    for marker, fail, status, launches in (
+            ('', False, 23, 1), (G1, False, 0, 0), ('', True, 1, 0)):
+        launched, err = [], io.StringIO()
 
-    def run(argv, *, env, **kwargs):
-        assert argv[1] == '-I' and argv[3:] == ['--dry-run'], argv
-        assert env['GATE_FRESHNESS_MAIN_SOURCE'] == G1, env
-        return SimpleNamespace(returncode=23)
-    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
-        'open_pulls': [_pr(7)]}, monkey={
-            'marker': '', 'source': 'raise SystemExit(23)\n',
-            'argv': ['--dry-run']}, run=run)
-    assert code == 23 and writes == [], (code, writes)
-    assert calls.count('repos/o/r/contents/scripts/ci/'
-                       f'gate_freshness.py?ref={G1}') == 1
-    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
-        'open_pulls': [_pr(7)]}, monkey={'marker': G1}, run=run)
-    assert code == 0 and writes == []
-    assert not any('/contents/scripts/' in c for c in calls), calls
-
-
-def test_unreadable_main_source_refuses_without_publishing(tmp):
-    err = io.StringIO()
-    with contextlib.redirect_stderr(err):
-        code, _calls, writes = _main_env(tmp, 'workflow_dispatch', {
-            'open_pulls': [_pr(7)]}, monkey={
-                'marker': '', 'contents_fail': True})
-    assert code == 1 and writes == [], (code, writes)
-    assert 'publishing nothing' in err.getvalue(), err.getvalue()
-    assert 'HTTP 404' in err.getvalue(), err.getvalue()
+        def run(argv, *, env, record=launched.append, **kwargs):
+            record(argv)
+            assert argv[1] == '-I' and argv[3:] == ['--dry-run'], argv
+            assert env['GATE_FRESHNESS_MAIN_SOURCE'] == G1, env
+            return SimpleNamespace(returncode=23)
+        with contextlib.redirect_stderr(err):
+            code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
+                'open_pulls': [_pr(7)]}, monkey={
+                    'marker': marker, 'contents_fail': fail,
+                    'source': 'raise SystemExit(23)\n',
+                    'argv': ['--dry-run']}, run=run)
+        assert code == status and writes == [], (code, writes)
+        assert len(launched) == launches, launched
+        sources = [c for c in calls if '/contents/scripts/' in c]
+        assert len(sources) == int(not marker), sources
+        if sources: assert sources[0].endswith(f'?ref={G1}'), sources
+        if fail: assert 'HTTP 404' in err.getvalue() and (
+            'publishing nothing' in err.getvalue()), err.getvalue()
 
 
 def test_event_head_identity_must_be_readable(tmp):
@@ -496,17 +504,21 @@ def test_an_unreadable_sha_fails_either_revalidation(tmp):
 def test_a_healthy_sibling_still_publishes_beside_a_skipped_head(tmp):
     m = _mod()
     bad = '9' * 40
-    for current, flow, expected, reason in (
-            ('e' * 40, {}, 0, 'moved'),
-            (bad, {'unreadable': (7,)}, 1, 'could not read'),
-            (bad, {'fail_listing_for': (bad,)}, 1, 'could not publish')):
+    for current, flow, expected, reason, sibling in (
+            ('e' * 40, {}, 0, 'moved', True),
+            (bad, {'unreadable': (7,)}, 1, 'could not read', True),
+            (bad, {'fail_listing_for': (bad,)}, 1, 'could not publish', True),
+            (bad, {'fail_listing_for': (bad,)}, 1,
+             'could not publish', False)):
         published = []
         read = _flow_read(m, {}, {7: current, 8: HEAD}, published, **flow)
+        heads = [_pr(7, sha=bad)] + ([_pr(8)] if sibling else [])
         code, verdicts, err = _process_capturing_stderr(
-            m, read, m.select_heads([_pr(7, sha=bad), _pr(8)]))
-        assert published == [('repos/o/r/check-runs', 'POST')], published
-        assert code == expected and len(verdicts) == 1, (code, verdicts)
-        assert verdicts[0].conclusion == 'success'
+            m, read, m.select_heads(heads))
+        assert published == ([('repos/o/r/check-runs', 'POST')]
+                             if sibling else []), published
+        assert code == expected and len(verdicts) == int(sibling), verdicts
+        if sibling: assert verdicts[0].conclusion == 'success'
         assert reason in err, err
 
 
@@ -524,19 +536,6 @@ def test_a_head_is_revalidated_before_the_decision(tmp):
     m.process(read, 'o/r', m.select_heads([_pr(7)]),
               [('.pylintrc', G1)], RUN, G1)
     assert asked == [], 'a superseded head was compared before revalidation'
-
-
-def test_the_run_fails_when_the_only_head_cannot_be_published(tmp):
-    m, published = _mod(), []
-    bad = 'b' * 40
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: bad}, published,
-                      fail_listing_for=(bad,))
-    code, verdicts, err = _process_capturing_stderr(
-        m, read, m.select_heads([_pr(7, sha=bad)]))
-    assert published == [], 'published onto a head whose write failed'
-    assert verdicts == []
-    assert code == 1, 'a run with no verdict published at all must fail'
-    assert 'could not publish the verdict for pull request 7' in err, err
 
 
 def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):

@@ -29,7 +29,6 @@ EXTERNAL_ID = 'daedalus-gate-freshness/v1'
 APP_SLUG = 'github-actions'
 BASE_BRANCH = 'main'
 MAIN_SOURCE = 'GATE_FRESHNESS_MAIN_SOURCE'
-
 GATE_PATTERNS = (
     '.github/workflows/**', '.github/ci-thresholds.json',
     '.github/journey-budget.json', 'scripts/ci/**',
@@ -42,7 +41,6 @@ GATE_PATTERNS = (
 )
 
 _HEX40 = frozenset('0123456789abcdef')
-
 # Revalidations, listing, write/order compare, two file reads and dispatch.
 PER_HEAD_OVERHEAD = 8
 DEFAULT_CALL_BUDGET = 1200
@@ -302,7 +300,9 @@ def _keep_or_dispatch(read, repository, head, verdict):
                      'scripts/ci/gate_freshness.py'):
             source = _raw_file(read, repository, path, head['sha'])
             local = Path(__file__).resolve().parents[2] / path
-            if source.encode('utf-8') != local.read_bytes():
+            try: local_bytes = local.read_bytes()
+            except OSError as error: raise QueryError(str(error)) from error
+            if source.encode('utf-8') != local_bytes:
                 raise QueryError('head carries an edited gate definition: '
                                  f'{path}')
         read(_api(f'repos/{repository}/actions/workflows/'
