@@ -17,10 +17,10 @@ from _tabs_harness import command, run_tabs  # noqa: E402
 
 RUNTIME_RELOAD = 'runtime.reload'
 
-# Read from extension/background.js (`const VERSION = '0.27.0';`). Pinned as
+# Read from extension/background.js (`const VERSION = '0.27.1';`). Pinned as
 # an independent literal, NOT the harness readout: comparing the posted
 # version to the readout would move with a real bump and stay green forever.
-VERSION = '0.27.0'
+VERSION = '0.27.1'
 
 # Distinctive ring entries. These are world state the handler reads back out
 # of _fetchTimings, never values it received and must echo, so a substituted
