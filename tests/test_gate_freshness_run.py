@@ -5,7 +5,6 @@ import io
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -247,34 +246,73 @@ def test_edited_workflow_is_a_loud_skip(tmp):
                           workflow=text)
 
 
-def test_dispatch_entrypoint_runs_main_and_rejects_an_edited_script(tmp):
+def _entrypoint(tmp, event_name, answers):
+    from _workflowrun import run_step
+    from _yamlsteps import workflow_mapping
     if os.name == 'nt': _util.skip('the gh executable fixture needs POSIX')
-    event = Path(tmp) / 'dispatch.json'
+    work = Path(tmp) / 'tree'
+    for path in ('scripts/ci/gate_freshness.py',
+                 '.github/workflows/gate-freshness.yml'):
+        target = work / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / path).read_bytes())
+    event = Path(tmp) / 'event.json'
     event.write_text('{}', encoding='utf-8')
-    gh = Path(tmp) / 'gh'
+    calls, gh = Path(tmp) / 'calls', Path(tmp) / 'gh'
     gh.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
                   'url = next(a for a in sys.argv if a.startswith("repos/"))\n'
+                  'with open(os.environ["FRESHNESS_CALLS"], "a") as log:\n'
+                  '    log.write(json.dumps(sys.argv[1:]) + "\\n")\n'
                   'answers = json.loads(os.environ["FRESHNESS_RESPONSES"])\n'
-                  'sys.stdout.write(answers[url])\n', encoding='utf-8')
+                  'if "/commits?" in url: url = "gates"\n'
+                  'sys.stdout.buffer.write(answers[url].encode("utf-8"))\n',
+                  encoding='utf-8')
     gh.chmod(0o700)
+    answers = {
+        'repos/o/r/pulls?state=open&base=main&per_page=100': _encode([_pr(7)]),
+        'repos/o/r/commits/main': _encode({'sha': G1}),
+        'repos/o/r/contents/scripts/ci/gate_freshness.py?ref=' + G1:
+            'import sys\nassert sys.flags.isolated\nraise SystemExit(23)',
+        **answers}
     environment = {**os.environ,
                    'PATH': str(tmp) + os.pathsep + os.environ['PATH'],
-                   'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                   'GITHUB_EVENT_NAME': event_name,
                    'GITHUB_REPOSITORY': 'o/r', 'GITHUB_EVENT_PATH': str(event),
                    'GITHUB_SHA': HEAD, 'GATE_FRESHNESS_MAIN_SOURCE': '',
-                   'FRESHNESS_RESPONSES': json.dumps({
-                       'repos/o/r/pulls?state=open&base=main&per_page=100':
-                           json.dumps([_pr(7)]),
-                       'repos/o/r/commits/main': json.dumps({'sha': G1}),
-                       'repos/o/r/contents/scripts/ci/'
-                       f'gate_freshness.py?ref={G1}': 'raise SystemExit(23)'})}
-    result = subprocess.run(
-        ['python3', 'scripts/ci/gate_freshness.py'], cwd=ROOT,
-        env=_util.child_coverage('keep', environment, cwd=ROOT),
-        capture_output=True, text=True, timeout=20)
-    assert result.returncode == 23, result.stdout + result.stderr
+                   'FRESHNESS_CALLS': str(calls),
+                   'FRESHNESS_RESPONSES': json.dumps(answers)}
+    workflow = workflow_mapping(_workflow_text())
+    job = workflow['jobs']['publish-freshness']
+    step = next(step for step in job['steps'] if 'run' in step)
+    return run_step(work, step, environment, workflow=workflow, job=job), calls
+
+
+def test_dispatch_entrypoint_ignores_adjacent_imports(tmp):
+    shadow = Path(tmp) / 'tree/scripts/ci/json.py'
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text('raise SystemExit(17)\n', encoding='utf-8')
+    result, _ = _entrypoint(tmp, 'workflow_dispatch', {})
+    assert result.returncode == 23, (result.returncode, result.stderr)
     _assert_loud_skip(tmp, 'head carries an edited gate definition',
                       script='raise SystemExit(0)\n')
+
+
+def test_push_real_adapter_refuses_crlf_workflow(tmp):
+    from _workflowrun import recorded_writes
+    result, calls = _entrypoint(tmp, 'push', {
+        'gates': _encode([{'sha': G1}]),
+        'repos/o/r/pulls/7': _encode({'head': {'sha': HEAD}}),
+        f'repos/o/r/compare/{G1}...{HEAD}':
+            _encode({'merge_base_commit': {'sha': 'f' * 40}}),
+        f'repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100': '',
+        f'repos/o/r/contents/.github/workflows/gate-freshness.yml?ref={HEAD}':
+            _workflow_text().replace('\n', '\r\n'),
+        f'repos/o/r/contents/scripts/ci/gate_freshness.py?ref={HEAD}':
+            (ROOT / 'scripts/ci/gate_freshness.py').read_bytes().decode(),
+        'repos/o/r/actions/workflows/gate-freshness.yml/dispatches': '{}'})
+    assert result.returncode == 0, result.stderr
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
+    assert 'head carries an edited gate definition' in result.stderr
 
 
 def test_unreadable_workflow_is_a_loud_skip(tmp):
@@ -312,7 +350,7 @@ def test_dispatch_bootstraps_main_source_once_and_returns_child_exit(tmp):
     from types import SimpleNamespace
 
     def run(argv, *, env, **kwargs):
-        assert argv[2:] == ['--dry-run'], argv
+        assert argv[1] == '-I' and argv[3:] == ['--dry-run'], argv
         assert env['GATE_FRESHNESS_MAIN_SOURCE'] == G1, env
         return SimpleNamespace(returncode=23)
     code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
@@ -351,27 +389,19 @@ def test_event_head_identity_must_be_readable(tmp):
 
 
 def test_the_pull_request_target_route_refuses_a_missing_event(tmp):
-    m, published = _mod(), []
+    m = _mod()
 
-    def read(argv):
-        if 'POST' in argv or 'PATCH' in argv:
-            published.append(next(t for t in argv if t.startswith('repos/')))
-            return '{}'
+    def read(_argv):
         raise AssertionError('no read should be needed to refuse')
     for event in ({}, {'pull_request': {}},
                   {'pull_request': {'number': 7}}):
-        code, err = _run_main_event(tmp, m, read, 'pull_request_target',
-                                    event)
+        code, err = _run_main_event(tmp, m, read, event,
+                                    event_name='pull_request_target')
         assert code == 1, (event, code)
         assert 'pull_request' in err, err
-    assert published == [], 'a missing event published a verdict'
 
 
-def _run_main(tmp, m, reader, event):
-    return _run_main_event(tmp, m, reader, 'push', event)
-
-
-def _run_main_event(tmp, m, reader, event_name, event):
+def _run_main_event(tmp, m, reader, event, event_name='push'):
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
     os.environ.update({'GITHUB_EVENT_NAME': event_name,
@@ -404,7 +434,7 @@ def test_global_read_failures_publish_nothing_and_fail(tmp):
             if '/pulls?state=open' in target:
                 return _encode([_pr(7)])
             return base(argv)
-        code, err = _run_main(tmp, m, read, {})
+        code, err = _run_main_event(tmp, m, read, {})
         assert code == 1 and published == [], (code, published)
         assert reason in err and 'publishing nothing' in err, err
 
@@ -565,7 +595,7 @@ def test_every_read_carries_the_no_cache_header(tmp):
             return '{}'
         return _flow_read(m, {p: [G1] for p in m.GATE_PATTERNS},
                           {7: HEAD}, published)(argv)
-    _run_main(tmp, m, read, {})
+    _run_main_event(tmp, m, read, {})
     joined_all = ' '.join(' '.join(a) for a in reads)
     assert 'state=open' in joined_all, 'the open-PR listing was never read'
     assert f'commits?sha={G1}' in joined_all

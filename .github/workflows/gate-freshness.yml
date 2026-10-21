@@ -12,6 +12,8 @@ name: gate freshness
 #
 # BASE SAFETY. pull_request_target uses the base workflow and checkout;
 # only SHA/ref/owner come from the event, and no PR code runs.
+# -I excludes adjacent modules, PYTHONPATH and user site imports; the bootstrap
+# child uses it too, so imports cannot bypass main's judge.
 #
 # THE BOUND: L + 4 + H * (G + 8): L path lookups + up to four setup reads
 # (snapshot, PR list, bootstrap source and repeated PR list), then H heads x
@@ -63,4 +65,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/gate_freshness.py
+        run: python3 -I scripts/ci/gate_freshness.py

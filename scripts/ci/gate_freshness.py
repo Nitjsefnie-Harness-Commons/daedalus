@@ -436,7 +436,7 @@ def _main_source(read, repository, main_sha, arguments, run):
         path = Path(directory) / 'gate_freshness.py'
         path.write_text(source, encoding='utf-8')
         try:
-            return run([sys.executable, str(path), *arguments],
+            return run([sys.executable, '-I', str(path), *arguments],
                        env={**os.environ, MAIN_SOURCE: main_sha},
                        check=False).returncode
         except (subprocess.SubprocessError, OSError) as error:

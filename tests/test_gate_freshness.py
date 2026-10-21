@@ -173,23 +173,11 @@ def test_the_merge_base_tells_ancestor_from_not(tmp):
 
 def test_status_is_not_load_bearing_the_merge_base_is(tmp):
     m = _mod()
-    gates = [('.pylintrc', G1)]
-    ahead = m.head_verdict(
-        lambda _a: _encode(_compare_ok('d' * 40, 'ahead')), 'o/r', _head(),
-        gates)
-    assert ahead.conclusion == 'failure'
-    diverged = m.head_verdict(
-        lambda _a: _encode(_compare_ok(G1, 'diverged')), 'o/r', _head(),
-        gates)
-    assert diverged.conclusion == 'success'
-
-
-def test_a_merge_base_that_is_not_forty_lowercase_hex_is_unreadable(tmp):
-    m = _mod()
-    for bad in (None, '', 'ZZZ', 'A' * 40, 'a' * 39, 'a' * 41, 12345):
-        mb, _ = m.merge_base(_encoded_read(_compare_ok(bad)),
-                             'o/r', G1, _head())
-        assert mb is None, bad
+    for base, status, conclusion in (('d' * 40, 'ahead', 'failure'),
+                                     (G1, 'diverged', 'success')):
+        verdict = m.head_verdict(_encoded_read(_compare_ok(base, status)),
+                                 'o/r', _head(), [('.pylintrc', G1)])
+        assert verdict.conclusion == conclusion
 
 
 def _encoded_read(payload):
@@ -198,30 +186,32 @@ def _encoded_read(payload):
     return read
 
 
-def test_an_absent_merge_base_field_is_unreadable(tmp):
+def test_an_unreadable_merge_base_payload_is_refused(tmp):
     m = _mod()
-    mb, _ = m.merge_base(lambda _a: _encode({'status': 'ahead'}),
-                         'o/r', G1, _head())
-    assert mb is None
-    for shape in ([], 'text', 12345, None, True):
-        mb, _ = m.merge_base(_encoded_read(shape), 'o/r', G1, _head())
-        assert mb is None, shape
+    payloads = [{'status': 'ahead'}, [], 'text', 12345, None, True]
+    payloads.extend(_compare_ok(bad) for bad in (
+        None, '', 'ZZZ', 'A' * 40, 'a' * 39, 'a' * 41, 12345))
+    for payload in payloads:
+        mb, _ = m.merge_base(_encoded_read(payload), 'o/r', G1, _head())
+        assert mb is None, payload
 
 
 def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
     m = _mod()
-
-    def read(_argv):
-        raise m.QueryError('HTTP 404')
-    verdict = m.head_verdict(read, 'o/r', _head(), [('.pylintrc', G1)])
-    assert verdict.conclusion == 'failure'
-    assert verdict.kind == 'unreadable'
-    text = verdict.title + ' ' + verdict.summary
-    assert 'compare' in text
-    assert f'compare/{G1}...{HEAD}' in text
-    assert 'HTTP 404' in text
-    assert 'rebase' in text.lower()
-    assert 'not evidence of access denial' in text
+    for unreadable in (G1, G2):
+        def read(argv, unreadable=unreadable):
+            if f'/compare/{unreadable}...' in ' '.join(argv):
+                raise m.QueryError('HTTP 404')
+            return _encode(_compare_ok(G1))
+        verdict = m.head_verdict(read, 'o/r', _head(), [('a', G1), ('b', G2)])
+        assert verdict.conclusion == 'failure'
+        assert verdict.kind == 'unreadable'
+        text = verdict.title + ' ' + verdict.summary
+        assert 'compare' in text
+        assert f'compare/{unreadable}...{HEAD}' in text
+        assert 'HTTP 404' in text
+        assert 'rebase' in text.lower()
+        assert 'not evidence of access denial' in text
 
 
 def _commits_read(m, commits=None, raise_for=None, live_shaped=False,
@@ -316,37 +306,17 @@ def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
 def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
     m = _mod()
     for gates, missing, absent in (
-            ([('path-a', G1), ('path-b', G2)], G2, 'path-a'),
+            ([('path-a', G1), ('path-b', G2), ('c', 'd' * 40)], G2, 'path-a'),
             ([('older', G1), ('newer', G2)], G1, 'newer')):
+        asked = []
         verdict = m.head_verdict(
-            _multi_gate_read(missing), 'o/r', _head(), gates)
+            _multi_gate_read(missing, asked), 'o/r', _head(), gates)
+        assert asked == [gate for _, gate in gates], asked
         assert verdict.conclusion == 'failure'
         assert verdict.kind == 'stale'
         assert missing[:12] in verdict.summary
         assert gates[0 if missing == G1 else 1][0] in verdict.summary
         assert absent not in verdict.summary
-
-
-def test_every_gate_is_compared_not_short_circuited(tmp):
-    m, asked = _mod(), []
-    gates = [('a', G1), ('b', G2), ('c', 'd' * 40)]
-    m.head_verdict(_multi_gate_read(G2, asked), 'o/r', _head(), gates)
-    assert asked == [G1, G2, 'd' * 40], asked
-
-
-def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
-    m = _mod()
-    gates = [('a', G1), ('b', G2)]
-
-    def read(argv):
-        target = next(t for t in argv if t.startswith('repos/'))
-        gate = target.split('compare/')[1].split('...')[0]
-        if gate == G2:
-            raise m.QueryError('HTTP 404')
-        return _encode(_compare_ok(gate, 'ahead'))
-    verdict = m.head_verdict(read, 'o/r', _head(), gates)
-    assert verdict.conclusion == 'failure'
-    assert verdict.kind == 'unreadable'
 
 
 def _publish_read(checks, recorded, fail=None, requests=None,
