@@ -204,8 +204,7 @@ def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
                 raise m.QueryError('HTTP 404')
             return _encode(_compare_ok(G1))
         verdict = m.head_verdict(read, 'o/r', _head(), [('a', G1), ('b', G2)])
-        assert verdict.conclusion == 'failure'
-        assert verdict.kind == 'unreadable'
+        assert (verdict.conclusion, verdict.kind) == ('failure', 'unreadable')
         text = verdict.title + ' ' + verdict.summary
         assert 'compare' in text
         assert f'compare/{unreadable}...{HEAD}' in text
@@ -298,8 +297,7 @@ def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
     m = _mod()
     gates = [('a', G1), ('b', G2)]
     verdict = m.head_verdict(_multi_gate_read(None), 'o/r', _head(), gates)
-    assert verdict.conclusion == 'success'
-    assert verdict.kind == 'fresh'
+    assert (verdict.conclusion, verdict.kind) == ('success', 'fresh')
     assert not verdict.paths
 
 
@@ -312,8 +310,7 @@ def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
         verdict = m.head_verdict(
             _multi_gate_read(missing, asked), 'o/r', _head(), gates)
         assert asked == [gate for _, gate in gates], asked
-        assert verdict.conclusion == 'failure'
-        assert verdict.kind == 'stale'
+        assert (verdict.conclusion, verdict.kind) == ('failure', 'stale')
         assert missing[:12] in verdict.summary
         assert gates[0 if missing == G1 else 1][0] in verdict.summary
         assert absent not in verdict.summary
