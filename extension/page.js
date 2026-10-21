@@ -353,7 +353,7 @@
       });
     },
 
-    info: { script: { version: '0.26.1' }, scriptHandler: 'Daedalus' },
+    info: { script: { version: '0.27.0' }, scriptHandler: 'Daedalus' },
   };
 
   console.log('[Daedalus] GM bridge v' + window.GM.info.script.version + ' ready');
