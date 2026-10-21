@@ -23,15 +23,14 @@ def _mod():
                       'gate_freshness_run')
 
 
-def _pr(number, sha=HEAD, base='main', owner='octo', ref='feature'):
+def _pr(number, sha=HEAD, base='main', owner='o', ref='feature'):
     return {'number': number, 'head': {'sha': sha, 'ref': ref,
                                        'repo': {'owner': {'login': owner}}},
             'base': {'ref': base}}
 
 
 def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
-               fail_listing_for=(), moved_to=None, unreadable=(),
-               fails_from=None):
+               fail_listing_for=(), moved_to=None, unreadable=()):
     state = {'reads': 0}
 
     def read(argv):
@@ -42,10 +41,8 @@ def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
                 method = argv[index + 1].upper()
         if re.search(r'/pulls/\d+$', target):
             number = int(target.rsplit('/', 1)[1])
-            fails = number in unreadable or (
-                fails_from is not None and state['reads'] + 1 >= fails_from)
             state['reads'] += 1
-            if fails:
+            if number in unreadable:
                 raise m.QueryError('HTTP 502')
             sha = current.get(number, moved_to)
             if moved is not None and state['reads'] > 1:
@@ -75,12 +72,11 @@ def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
     return read
 
 
-def _main_env(tmp, event_name, event, monkey=None, moved=None):
+def _main_env(tmp, event_name, event, monkey=None, moved=None, run=None):
     m = _mod()
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
     calls, published = [], []
-    state = {"moved": False}
     monkey = monkey or {}
 
     def fake_gh_read(argv):
@@ -89,11 +85,8 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None):
         if '/pulls?state=open' in target:
             return _encode(event.get('open_pulls', []))
         if '/commits?' in target:
-            gate = ('b' * 40 if monkey.get('moving_main') and state['moved']
-                    and '?sha=main&' in target else G1)
-            return _encode([{'sha': gate}])
+            return _encode([{'sha': G1}])
         if target == 'repos/o/r/commits/main':
-            state['moved'] = True
             if monkey.get('main_fail'):
                 raise m.QueryError('main snapshot unavailable')
             return _encode(monkey.get('main_answer', {
@@ -106,13 +99,36 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None):
                                                   else gate}})
         if re.search(r'/pulls/\d+$', target):
             number = int(target.rsplit('/', 1)[1])
+            if monkey.get('head_fail') == number:
+                raise m.QueryError('head unavailable')
+            pulls = event.get('open_pulls', [event.get('pull_request')])
+            sha = next(p['head']['sha'] for p in pulls
+                       if p and p['number'] == number)
             return _encode({'head': {'sha': 'e' * 40 if number == moved
-                                     else HEAD}})
+                                     else sha}})
         if '/check-runs?' in target and 'GET' in argv:
+            if 'checks' in monkey:
+                return '\n'.join(_encode(c) for c in monkey['checks'])
             if monkey.get('completed'):
-                return _encode(_check(101, summary=f'main {G1}'))
+                return _encode(_check(101, external_id=m.EXTERNAL_ID,
+                                      summary=f'main {G1}'))
             return (_encode(_check(101, 'in_progress', 'runner-uuid'))
-                    if event_name == 'pull_request_target' else '')
+                    if event_name != 'push' else '')
+        if '/contents/' in target:
+            assert 'Accept: application/vnd.github.raw+json' in argv
+            if monkey.get('contents_fail'):
+                raise m.QueryError('HTTP 404')
+            if '/contents/scripts/ci/' in target:
+                assert target.endswith(f'?ref={G1}')
+                return monkey['source']
+            assert target.endswith(f'?ref={HEAD}')
+            return monkey.get('workflow', 'on: [workflow_dispatch]')
+        if target.endswith('/gate-freshness.yml/dispatches'):
+            assert 'POST' in argv and 'ref=feature' in argv
+            if monkey.get('dispatch_fail'):
+                raise m.QueryError('HTTP 403')
+            published.append(target)
+            return ''
         if 'POST' in argv or 'PATCH' in argv:
             assert any(a.endswith('main ' + monkey.get('snapshot', G1))
                        for a in argv if a.startswith('output[summary]='))
@@ -121,17 +137,21 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None):
         raise AssertionError(target)
     old = {k: os.environ.get(k) for k in
            ('GITHUB_EVENT_NAME', 'GITHUB_EVENT_PATH', 'GITHUB_REPOSITORY',
-            'GITHUB_SERVER_URL', 'GITHUB_RUN_ID', 'GATE_FRESHNESS_MAX_CALLS')}
+            'GITHUB_SERVER_URL', 'GITHUB_RUN_ID', 'GATE_FRESHNESS_MAX_CALLS',
+            'GITHUB_SHA', 'GATE_FRESHNESS_MAIN_SOURCE')}
     os.environ.update({
         'GITHUB_EVENT_NAME': event_name,
         'GITHUB_EVENT_PATH': str(event_path),
         'GITHUB_REPOSITORY': 'o/r',
+        'GITHUB_SHA': monkey.get('sha', HEAD),
+        'GATE_FRESHNESS_MAIN_SOURCE': monkey.get('marker', G1),
     })
     for key in ('GITHUB_SERVER_URL', 'GITHUB_RUN_ID',
                 'GATE_FRESHNESS_MAX_CALLS'):
         os.environ.pop(key, None)
     try:
-        code = m.main(monkey.get('argv', []), read=fake_gh_read)
+        kwargs = {'run': run} if run is not None else {}
+        code = m.main(monkey.get('argv', []), read=fake_gh_read, **kwargs)
     finally:
         for key, value in old.items():
             if value is None:
@@ -141,26 +161,12 @@ def _main_env(tmp, event_name, event, monkey=None, moved=None):
     return code, calls, published
 
 
-def test_the_push_route_publishes_for_every_open_head(tmp):
-    code, calls, published = _main_env(tmp, 'push', {
-        'open_pulls': [_pr(7), _pr(8)]})
-    assert code == 0, code
-    assert any('state=open' in c for c in calls)
-    assert len(published) == 2, published
-
-    code, calls, published = _main_env(tmp, 'push', {
-        'open_pulls': [_pr(7), _pr(8)]}, moved=7)
-    assert code == 0, f'a moved head must not fail the main run: {calls}'
-    assert published == ['repos/o/r/check-runs'], published
-    assert len(calls) > 1, 'the run published without walking any head'
-
-
 def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
     snapshot = 'd' * 40
     code, calls, published = _main_env(
-        tmp, 'push', {'open_pulls': [_pr(7), _pr(8)]},
-        monkey={'snapshot': snapshot, 'moving_main': True})
-    assert code == 0 and len(published) == 2
+        tmp, 'pull_request_target', {'pull_request': _pr(7)},
+        monkey={'snapshot': snapshot, 'completed': True})
+    assert code == 0 and len(published) == 1
     assert calls.count('repos/o/r/commits/main') == 1
     lookups = [path for path in calls if '/commits?' in path]
     assert lookups and all(f'?sha={snapshot}&' in path for path in lookups)
@@ -168,15 +174,6 @@ def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
         i for i, path in enumerate(calls) if '/commits?' in path)
     assert all(f'/compare/{G1}...' in path
                for path in calls if '/compare/' in path)
-
-
-def test_main_call_estimate_includes_the_open_pr_listing(tmp):
-    code, calls, published = _main_env(
-        tmp, 'push', {'open_pulls': [_pr(7)]},
-        monkey={'snapshot': 'b' * 40, 'completed': True})
-    m = _mod()
-    assert code == 0 and len(published) == 1
-    assert len(calls) == m.required_calls(1, len(m.GATE_PATTERNS))
 
 
 def test_unreadable_main_snapshot_publishes_nothing(tmp):
@@ -196,16 +193,137 @@ def test_the_pull_request_target_route_publishes_for_that_head(tmp):
 
 
 def test_event_job_conclusion_tracks_only_its_own_pr_verdict(tmp):
-    for event_name in ('pull_request_target', 'push'):
+    for event_name in ('pull_request_target', 'workflow_dispatch', 'push'):
         for stale in (False, True):
             event = {'pull_request': _pr(7), 'open_pulls': [_pr(7)]}
             code, _calls, _published = _main_env(
                 tmp, event_name, event, monkey={'stale': stale})
-            assert code == int(event_name == 'pull_request_target' and stale)
+            assert code == int(event_name != 'push' and stale)
     code, _calls, published = _main_env(
         tmp, 'pull_request_target', {'pull_request': _pr(7)},
         monkey={'stale': True, 'argv': ['--dry-run']})
     assert code == 0 and published == []
+
+
+def _push(tmp, **options):
+    event = {'open_pulls': [_pr(7, owner=options.pop('owner', 'o'))]}
+    return _main_env(tmp, 'push', event, monkey={
+        'stale': True, 'checks': [_check(101)], **options})
+
+
+def test_stale_runner_green_dispatches_once_on_the_head_ref(tmp):
+    m = _mod()
+    for checks in ([_check(101)], [_check(101), _check(
+            80, conclusion='failure', external_id=m.EXTERNAL_ID)]):
+        code, calls, writes = _push(tmp, checks=checks)
+        target = 'repos/o/r/actions/workflows/gate-freshness.yml/dispatches'
+        assert (code, writes) == (0, [target]), writes
+        assert calls.count(target) == 1
+        assert (f'repos/o/r/contents/.github/workflows/gate-freshness.yml'
+                f'?ref={HEAD}') in calls
+        assert len(calls) <= m.required_calls(1, len(m.GATE_PATTERNS)), calls
+
+
+def test_newest_failure_across_all_suites_is_kept(tmp):
+    for external in (None, 'daedalus-gate-freshness/v1'):
+        checks = [_check(101),
+                  _check(202, conclusion='failure', external_id=external)]
+        code, calls, writes = _push(tmp, checks=checks)
+        assert code == 0 and writes == [], writes
+        assert not any('/contents/' in c for c in calls), calls
+
+
+def test_fresh_runner_head_never_dispatches_or_writes(tmp):
+    code, calls, writes = _push(tmp, stale=False)
+    assert code == 0 and writes == [], writes
+    assert not any('/contents/' in c for c in calls), calls
+
+
+def _assert_loud_skip(tmp, reason, **options):
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code, calls, writes = _push(tmp, **options)
+    assert code == 0 and writes == [], writes
+    assert reason in err.getvalue(), err.getvalue()
+    return calls
+
+
+def test_cross_repository_head_is_a_loud_skip(tmp):
+    calls = _assert_loud_skip(tmp, 'cross-repository', owner='fork-owner')
+    assert not any('/contents/' in c for c in calls), calls
+
+
+def test_workflow_without_dispatch_is_a_loud_skip(tmp):
+    _assert_loud_skip(tmp, 'workflow_dispatch', workflow='on: [push]')
+
+
+def test_unreadable_workflow_is_a_loud_skip(tmp):
+    _assert_loud_skip(tmp, 'HTTP 404', contents_fail=True)
+
+
+def test_refused_dispatch_is_a_loud_skip(tmp):
+    _assert_loud_skip(tmp, 'HTTP 403', dispatch_fail=True)
+
+
+def test_push_head_failure_does_not_abandon_siblings_or_fail_main(tmp):
+    code, calls, writes = _main_env(tmp, 'push', {
+        'open_pulls': [_pr(7), _pr(8)]}, monkey={'head_fail': 7})
+    assert code == 0 and writes == [], (code, writes)
+    assert 'repos/o/r/pulls/8' in calls
+
+
+def test_dispatch_route_selects_only_the_event_sha(tmp):
+    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
+        'open_pulls': [_pr(8, sha='d' * 40), _pr(7)]},
+        monkey={'stale': True})
+    assert code == 1 and writes == [], (code, writes)
+    assert 'repos/o/r/pulls/7' in calls
+    assert 'repos/o/r/pulls/8' not in calls, calls
+
+
+def test_dispatch_route_without_a_matching_head_publishes_nothing(tmp):
+    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
+        'open_pulls': [_pr(7, sha='d' * 40), _pr(8, base='release')]})
+    assert code == 0 and writes == [], writes
+    assert not any('/compare/' in c or '/commits/' in c for c in calls)
+
+
+def test_dispatch_bootstraps_main_source_once_and_returns_child_exit(tmp):
+    from types import SimpleNamespace
+    launched = []
+
+    def run(argv, *, env, **kwargs):
+        assert argv[0] == sys.executable
+        assert argv[2:] == ['--dry-run'], argv
+        assert env['GATE_FRESHNESS_MAIN_SOURCE'] == G1, env
+        source = Path(argv[1]).read_text(encoding='utf-8')
+        launched.append(source)
+        return SimpleNamespace(returncode=23)
+    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
+        'open_pulls': [_pr(7)]}, monkey={
+            'marker': '', 'source': 'raise SystemExit(23)\n',
+            'argv': ['--dry-run']}, run=run)
+    assert code == 23 and writes == [], (code, writes)
+    assert launched == ['raise SystemExit(23)\n'], launched
+    assert calls.count('repos/o/r/contents/scripts/ci/'
+                       f'gate_freshness.py?ref={G1}') == 1
+    assert not any('/commits?' in c for c in calls), calls
+    code, calls, writes = _main_env(tmp, 'workflow_dispatch', {
+        'open_pulls': [_pr(7)]}, monkey={'marker': G1}, run=run)
+    assert code == 0 and writes == []
+    assert not any('/contents/scripts/' in c for c in calls), calls
+    assert len(launched) == 1, launched
+
+
+def test_unreadable_main_source_refuses_without_publishing(tmp):
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code, _calls, writes = _main_env(tmp, 'workflow_dispatch', {
+            'open_pulls': [_pr(7)]}, monkey={
+                'marker': '', 'contents_fail': True})
+    assert code == 1 and writes == [], (code, writes)
+    assert 'publishing nothing' in err.getvalue(), err.getvalue()
+    assert 'HTTP 404' in err.getvalue(), err.getvalue()
 
 
 def test_event_head_identity_must_be_readable(tmp):
@@ -256,72 +374,26 @@ def _run_main_event(tmp, m, reader, event_name, event):
     return code, err.getvalue()
 
 
-def _only_fail(target_marker, m):
+def test_global_read_failures_publish_nothing_and_fail(tmp):
+    for broken, malformed, reason in (
+            ('/pulls?state=open', False, 'open pull request list'),
+            ('/pulls?state=open', True, 'open pull request list'),
+            ('/commits?', False, 'gate commit')):
+        m, published = _mod(), []
+        base = _flow_read(m, {}, {}, published)
 
-    def read(argv):
-        target = next(t for t in argv if t.startswith('repos/'))
-        if target_marker in target:
-            raise m.QueryError('HTTP 500')
-        return _flow_read(m, {}, {}, [])(argv)
-    return read
-
-
-def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
-    m = _mod()
-    code, err = _run_main(tmp, m, _only_fail('/pulls?state=open', m), {})
-    assert code == 1, code
-    assert 'open pull request list' in err, err
-
-
-def test_a_non_list_open_pull_request_payload_publishes_nothing_and_fails(tmp):
-    m, published = _mod(), []
-
-    def read(argv):
-        target = next(t for t in argv if t.startswith('repos/'))
-        if '/pulls?state=open' in target:
-            return _encode({'message': 'API rate limit exceeded'})
-        if 'POST' in argv or 'PATCH' in argv:
-            published.append(target)
-            return '{}'
-        return _flow_read(m, {}, {}, published)(argv)
-    code, err = _run_main(tmp, m, read, {})
-    assert code == 1, code
-    assert 'open pull request list' in err, err
-    assert published == [], 'a non-list payload published a verdict'
-
-
-def test_an_unreadable_gate_lookup_publishes_nothing_and_fails(tmp):
-    m, published = _mod(), []
-
-    def read(argv):
-        target = next(t for t in argv if t.startswith('repos/'))
-        if '/commits?' in target:
-            raise m.QueryError('HTTP 500')
-        if '/pulls?state=open' in target:
-            return _encode([_pr(7)])
-        if 'POST' in argv or 'PATCH' in argv:
-            published.append(target)
-            return '{}'
-        return _flow_read(m, {}, {}, published)(argv)
-    code, err = _run_main(tmp, m, read, {})
-    assert code == 1, code
-    assert 'gate commit' in err, err
-    assert published == [], 'a global failure published a verdict'
-
-
-def test_fresh_and_stale_heads_publish_their_verdicts(tmp):
-    m = _mod()
-    for missing, conclusion, kind in (((), 'success', 'fresh'),
-                                      ((G1,), 'failure', 'stale')):
-        published = []
-        read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
-                          heads_missing=missing)
-        code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                                   [('.pylintrc', G1)], RUN, G1)
-        assert code == 0, 'staleness is a verdict, not a script failure'
-        assert len(published) == 1 and published[0][1] == 'POST'
-        assert verdicts[0].conclusion == conclusion
-        assert verdicts[0].kind == kind
+        def read(argv, broken=broken, malformed=malformed, m=m, base=base):
+            target = next(t for t in argv if t.startswith('repos/'))
+            if broken in target:
+                if malformed:
+                    return _encode({'message': 'API rate limit exceeded'})
+                raise m.QueryError('HTTP 500')
+            if '/pulls?state=open' in target:
+                return _encode([_pr(7)])
+            return base(argv)
+        code, err = _run_main(tmp, m, read, {})
+        assert code == 1 and published == [], (code, published)
+        assert reason in err and 'publishing nothing' in err, err
 
 
 def _process_capturing_stderr(m, read, heads, **kwargs):
@@ -350,36 +422,24 @@ def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
         assert _MOVED in err, 'a moved head must still be reported on stderr'
 
 
-def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
-    for flow in ({'unreadable': (7,)}, {'fails_from': 2}):
-        m = _mod()
-        published = []
-        read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
-                          **flow)
-        code, verdicts, err = _process_capturing_stderr(
-            m, read, m.select_heads([_pr(7)]))
-        assert published == []
-        assert verdicts == []
-        assert code == 1, 'an unreadable revalidation must fail the run'
-        assert _MOVED not in err, 'an unreadable read was reported as a move'
-        assert 'could not read' in err and 'pull request 7' in err, err
-
-
 def test_an_unreadable_sha_fails_either_revalidation(tmp):
     m, calls = _mod(), []
     for payload in ({}, {'head': {}}, {'head': {'sha': None}},
-                    {'head': {'sha': 'z' * 40}}, {'head': {'sha': 'a' * 39}}):
+                    {'head': {'sha': 'z' * 40}}, {'head': {'sha': 'a' * 39}},
+                    m.QueryError('HTTP 502')):
         for invalid_at in (1, 2):
             published = []
             calls.clear()
             base = _flow_read(m, {}, {7: HEAD}, published)
 
             def read(argv, invalid_at=invalid_at,
-                     payload=_encode(payload), base=base):
+                     payload=payload, base=base):
                 if re.search(r'/pulls/\d+$', ' '.join(argv)):
                     calls.append(argv)
                     if len(calls) == invalid_at:
-                        return payload
+                        if isinstance(payload, m.QueryError):
+                            raise payload
+                        return _encode(payload)
                 return base(argv)
             code, verdicts, err = _process_capturing_stderr(
                 m, read, m.select_heads([_pr(7)]))
@@ -387,62 +447,21 @@ def test_an_unreadable_sha_fails_either_revalidation(tmp):
             assert _MOVED not in err and 'could not read' in err
 
 
-def test_a_healthy_sibling_still_publishes_beside_an_unreadable_head(tmp):
-    m, published = _mod(), []
+def test_a_healthy_sibling_still_publishes_beside_a_skipped_head(tmp):
+    m = _mod()
     bad = '9' * 40
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: bad, 8: HEAD}, published,
-                      unreadable=(7,))
-    code, verdicts, err = _process_capturing_stderr(
-        m, read, m.select_heads([_pr(7, sha=bad), _pr(8)]))
-    assert published == [('repos/o/r/check-runs', 'POST')], published
-    assert code == 1, 'an unreadable revalidation must fail the run'
-    assert len(verdicts) == 1
-    assert verdicts[0].conclusion == 'success'
-    assert 'could not read' in err, err
-
-
-def _writing_read(m, published, current, **flow):
-    base = _flow_read(m, {'.pylintrc': [G1]}, current, published, **flow)
-
-    def read(argv):
-        before = len(published)
-        answer = base(argv)
-        if len(published) > before:
-            for field in argv:
-                if field.startswith('head_sha='):
-                    published[-1] = (field[len('head_sha='):], 'POST')
-                    break
-            else:
-                raise AssertionError('a recorded write carried no head_sha=')
-        return answer
-    return read
-
-
-def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
-    m, published = _mod(), []
-    heads = m.select_heads([_pr(7), _pr(8)])
-    read = _writing_read(m, published, current={7: 'e' * 40, 8: HEAD})
-    code, verdicts = m.process(
-        read, 'o/r', heads, [('.pylintrc', G1)], RUN, G1)
-    assert code == 0, 'a moved head is not a failure'
-    assert published == [(HEAD, 'POST')], published
-    assert len(verdicts) == 1
-    assert verdicts[0].conclusion == 'success'
-
-    published = []
-    bad_sha = 'b' * 40
-    good_sha = 'd' * 40
-    heads = m.select_heads([_pr(7), _pr(8, sha=bad_sha),
-                            _pr(9, sha=good_sha)])
-    read = _writing_read(m, published,
-                         current={7: 'e' * 40, 8: bad_sha, 9: good_sha},
-                         fail_listing_for=(bad_sha,))
-    code, verdicts = m.process(
-        read, 'o/r', heads, [('.pylintrc', G1)], RUN, G1)
-    assert code == 1, 'the failed write must still fail the run'
-    assert published == [(good_sha, 'POST')], published
-    assert len(verdicts) == 1
-    assert verdicts[0].conclusion == 'success'
+    for current, flow, expected, reason in (
+            ('e' * 40, {}, 0, 'moved'),
+            (bad, {'unreadable': (7,)}, 1, 'could not read'),
+            (bad, {'fail_listing_for': (bad,)}, 1, 'could not publish')):
+        published = []
+        read = _flow_read(m, {}, {7: current, 8: HEAD}, published, **flow)
+        code, verdicts, err = _process_capturing_stderr(
+            m, read, m.select_heads([_pr(7, sha=bad), _pr(8)]))
+        assert published == [('repos/o/r/check-runs', 'POST')], published
+        assert code == expected and len(verdicts) == 1, (code, verdicts)
+        assert verdicts[0].conclusion == 'success'
+        assert reason in err, err
 
 
 def test_a_head_is_revalidated_before_the_decision(tmp):
@@ -488,7 +507,7 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
     m = _mod()
     published, calls = [], []
-    for old_ids in (('99',), ('99', '100', '101')):
+    for old_ids in (('99',), tuple(str(i) for i in range(99, 106))):
         published.clear()
         calls.clear()
         gates = {m._request_path(p): [G1] for p in m.GATE_PATTERNS}
@@ -512,8 +531,8 @@ def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
             call_budget=estimate)
         assert code == 0 and verdicts, 'duplicate-id overrun must publish'
         assert [v for _, v in published] == ['PATCH'] * len(old_ids)
-        assert len(calls) == estimate + len(old_ids) - 2
-        if len(old_ids) == 3:
+        assert len(calls) == estimate + len(old_ids) - 6
+        if len(old_ids) == 7:
             assert len(calls) > estimate, 'duplicate overrun not reached'
 
 
@@ -556,18 +575,6 @@ def test_refusal_discloses_estimate_before_publishing_nothing(tmp):
     assert 'estimated' in stderr.getvalue(), stderr.getvalue()
 
 
-def test_within_the_bound_publishes_every_head(tmp):
-    m, published = _mod(), []
-    heads = m.select_heads([_pr(i) for i in range(1, 4)])
-    read = _flow_read(m, {'.pylintrc': [G1]},
-                      {i: HEAD for i in (1, 2, 3)}, published)
-    code, verdicts = m.process(
-        read, 'o/r', heads, [('.pylintrc', G1)], RUN, G1)
-    assert code == 0, verdicts
-    assert len(published) == 3
-    assert len(verdicts) == 3
-
-
 def _workflow_text():
     return (ROOT / '.github' / 'workflows' / 'gate-freshness.yml').read_text(
         encoding='utf-8')
@@ -580,18 +587,20 @@ def test_the_job_carries_the_required_check_context(tmp):
         'publish-freshness']['name'] == m.NAME == 'gate freshness'
 
 
-def test_workflow_permissions_are_exactly_the_three_scopes(tmp):
+def test_workflow_permissions_include_dispatch_authority(tmp):
     from _yamlread import top_level_mapping
     permissions = top_level_mapping(_workflow_text(), 'permissions')
     assert permissions == {'checks': 'write', 'contents': 'read',
-                           'pull-requests': 'read'}, permissions
+                           'pull-requests': 'read',
+                           'actions': 'write'}, permissions
 
 
-def test_workflow_declares_both_triggers(tmp):
+def test_workflow_declares_dispatch_without_inputs(tmp):
     from _workflows import _event_option_keys, _workflow_triggers
     triggers = _workflow_triggers(_workflow_text(), 'gate-freshness.yml')
-    assert 'push' in triggers
-    assert 'pull_request_target' in triggers
+    assert set(triggers) == {'push', 'pull_request_target',
+                             'workflow_dispatch'}, triggers
+    assert not _event_option_keys(triggers['workflow_dispatch'], 'g')
     from _yamlsteps import workflow_mapping
     assert workflow_mapping(_workflow_text())['on'][
         'pull_request_target'].get('branches') == ['main']

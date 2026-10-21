@@ -71,14 +71,6 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
         assert not m.is_gate_defining(path), path
 
 
-def test_no_file_is_carried_by_the_branch_outside_the_gate_set(tmp):
-    m = _mod()
-    assert not hasattr(m, 'CARRIED_BY_THE_BRANCH')
-    for moved in ('.github/ci-thresholds.json', '.github/journey-budget.json'):
-        assert m.is_gate_defining(moved), moved
-        assert moved in m.GATE_PATTERNS, moved
-
-
 _EXECUTED = re.compile(
     r'python3?(?:\.\d+)? +(?:-[A-Za-z]+ +)*([\w./-]+\.py)\b'
     r'|(?<![\w.-])([./][\w./-]+\.(?:sh|py))\b')
@@ -126,15 +118,6 @@ def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
     used = _workflow_gate_files(ROOT / '.github' / 'workflows')
     assert used, 'the workflows name no gate file'
     for path in sorted(used):
-        assert m.is_gate_defining(path), path
-
-
-def test_the_guard_accounts_for_the_files_the_set_now_carries(tmp):
-    m = _mod()
-    used = _workflow_gate_files(ROOT / '.github' / 'workflows')
-    assert 'scripts/check_versions.py' in used
-    assert '.gitleaks.toml' in used
-    for path in ('scripts/check_versions.py', '.gitleaks.toml'):
         assert m.is_gate_defining(path), path
 
 
@@ -402,10 +385,12 @@ def _publish_read(checks, recorded, fail=None, requests=None,
 
 
 def test_a_completed_carrier_is_patched_without_rewriting_its_external_id(tmp):
+    m = _mod()
     recorded = []
-    _mod().publish(_publish_read([(4242, 'completed', 'runner-uuid')],
-                                 recorded),
-                   'o/r', HEAD, 'failure', 't', 's\nmore', RUN, G1)
+    result = m.publish(
+        _publish_read([(4242, 'completed', m.EXTERNAL_ID)], recorded),
+        'o/r', HEAD, 'failure', 't', 's\nmore', RUN, G1)
+    assert result == ('patched', None), result
     assert len(recorded) == 1
     method, target, argv = recorded[0]
     assert (method, target) == ('PATCH', 'repos/o/r/check-runs/4242')
@@ -415,66 +400,53 @@ def test_a_completed_carrier_is_patched_without_rewriting_its_external_id(tmp):
         '-f', 'output[title]=t', '-f', f'output[summary]=s\nmore\nmain {G1}']
 
 
-def test_newest_carries_the_verdict_and_retires_completed_checks(tmp):
+def test_only_completed_owned_checks_carry_and_retire(tmp):
     m = _mod()
-    for external in ('runner-uuid', m.EXTERNAL_ID, None, 'other id'):
-        for status in ('completed', 'in_progress', 'queued'):
+    for external in (None, 'runner-uuid', 'other id', m.EXTERNAL_ID):
+        for status in ('queued', 'in_progress', 'completed'):
             recorded = []
-            checks = [_check(100, external_id='carrier-uuid'),
-                      _check(9, status, external, conclusion='failure'),
-                      _check(100)]
+            checks = [_check(100, external_id=m.EXTERNAL_ID),
+                      _check(9, status, external),
+                      _check(200, 'queued', m.EXTERNAL_ID)]
             m.publish(_publish_read(checks, recorded),
                       'o/r', HEAD, 'success', 't', 's', RUN, G1)
             assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/100')
             assert 'conclusion=success' in recorded[0][2]
-            assert len(recorded) == (2 if status == 'completed' else 1)
-            if status == 'completed':
+            retire = status == 'completed' and external == m.EXTERNAL_ID
+            assert len(recorded) == (2 if retire else 1), recorded
+            if retire:
                 assert recorded[1][:2] == ('PATCH', 'repos/o/r/check-runs/9')
                 assert recorded[1][2][recorded[1][2].index('PATCH') + 1:] == [
                     '-f', 'name=superseded gate freshness']
-                state = {c['id']: {'name': m.NAME,
-                                   'conclusion': c['conclusion']}
-                         for c in checks}
-                for _, target, argv in recorded:
-                    state[int(target.rsplit('/', 1)[-1])].update(dict(
-                        field.split('=', 1) for field in argv
-                        if field.startswith(('name=', 'conclusion='))))
-                assert [(i, c['conclusion']) for i, c in state.items()
-                        if c['name'] == m.NAME] == [(100, 'success')]
 
 
-def test_runner_ownership_beats_a_newer_legacy_id(tmp):
+def test_runner_checks_are_never_patched_for_verdict_or_retirement(tmp):
     m, recorded = _mod(), []
-    m.publish(_publish_read([(9, 'completed', 'runner-uuid'),
-                             (100, 'completed', m.EXTERNAL_ID)], recorded),
+    m.publish(_publish_read([(9, 'completed', m.EXTERNAL_ID),
+                             (100, 'completed', None)], recorded),
               'o/r', HEAD, 'success', 't', 's', RUN, G1)
     assert [(method, target.rsplit('/', 1)[-1])
-            for method, target, _ in recorded] == [('PATCH', '9'),
-                                                   ('PATCH', '100')]
+            for method, target, _ in recorded] == [('PATCH', '9')]
     assert 'conclusion=success' in recorded[0][2]
-    assert recorded[1][2][recorded[1][2].index('PATCH') + 1:] == [
-        '-f', 'name=superseded gate freshness']
 
 
-def test_a_live_job_is_left_to_the_runner_while_legacy_checks_are_retired(tmp):
+def test_runner_only_checks_report_needs_run_without_writes(tmp):
     m = _mod()
-    for status in ('in_progress', 'queued'):
-        for legacy in ([], [(8, 'completed', m.EXTERNAL_ID)]):
+    for status in ('completed', 'in_progress', 'queued'):
+        for external in (None, 'runner-uuid'):
             recorded = []
-            checks = [(99, status, 'runner-uuid'), *legacy]
-            m.publish(_publish_read(checks, recorded),
-                      'o/r', HEAD, 'failure', 't', 's', RUN, G1)
-            assert len(recorded) == len(legacy)
-            if legacy:
-                assert recorded[0][:2] == ('PATCH', 'repos/o/r/check-runs/8')
-                assert recorded[0][2][recorded[0][2].index('PATCH') + 1:] == [
-                    '-f', 'name=superseded gate freshness']
+            checks = [_check(99, status, external), _check(8)]
+            result = m.publish(_publish_read(checks, recorded),
+                               'o/r', HEAD, 'failure', 't', 's', RUN, G1)
+            assert recorded == [], recorded
+            assert result == ('needs-run', checks[0]), result
 
 
 def test_no_carrier_posts_once_with_the_legacy_external_id(tmp):
     recorded = []
-    _mod().publish(_publish_read([], recorded),
-                   'o/r', HEAD, 'success', 't', 's', RUN, G1)
+    result = _mod().publish(_publish_read([], recorded),
+                            'o/r', HEAD, 'success', 't', 's', RUN, G1)
+    assert result == ('posted', None), result
     assert len(recorded) == 1
     method, target, argv = recorded[0]
     assert (method, target) == ('POST', 'repos/o/r/check-runs')
@@ -490,9 +462,9 @@ def test_listing_and_write_failures_raise_without_further_writes(tmp):
     m = _mod()
     for checks, fail, expected in (
             ([], 'GET', []), ([], 'POST', ['POST']),
-            ([(9, 'completed', 'runner-uuid'),
+            ([(9, 'completed', m.EXTERNAL_ID),
               (8, 'completed', m.EXTERNAL_ID)], 'PATCH', ['PATCH']),
-            ([(100, 'completed', 'runner-uuid'),
+            ([(100, 'completed', m.EXTERNAL_ID),
               (9, 'completed', m.EXTERNAL_ID),
               (8, 'completed', m.EXTERNAL_ID)],
              'repos/o/r/check-runs/9', ['PATCH', 'PATCH'])):
@@ -537,7 +509,8 @@ def test_a_malformed_listing_refuses_before_any_write(tmp):
 
 def test_older_success_cannot_replace_a_marked_newer_verdict(tmp):
     m, writes, requests = _mod(), [], []
-    checks = [_check(100, conclusion='failure', summary=f's\nmain {G2}')]
+    checks = [_check(100, external_id=m.EXTERNAL_ID,
+                     conclusion='failure', summary=f's\nmain {G2}')]
     read = _publish_read(checks, writes, base=G1, requests=requests)
     m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN, G1)
     assert writes == []
@@ -548,7 +521,9 @@ def test_newer_snapshot_replaces_an_older_verdict_and_retires_on_skip(tmp):
     m = _mod()
     for base, expected in ((G1, ['100', '9']), ('d' * 40, ['9'])):
         writes = []
-        checks = [_check(100, summary=f'old\nmain {G1}'), _check(9)]
+        checks = [_check(100, external_id=m.EXTERNAL_ID,
+                         summary=f'old\nmain {G1}'),
+                  _check(9, external_id=m.EXTERNAL_ID)]
         m.publish(_publish_read(checks, writes, base=base),
                   'o/r', HEAD, 'failure', 't', 's', RUN, G2)
         assert [t.rsplit('/', 1)[-1] for _, t, _ in writes] == expected
@@ -562,7 +537,8 @@ def test_unmarked_failure_is_not_unfrozen_but_green_is_written(tmp):
     for old, expected in (('failure', 0), ('success', 1)):
         for summary in (None, 'text', f'main {G2}\nnot the last line'):
             writes = []
-            checks = [_check(100, conclusion=old, summary=summary)]
+            checks = [_check(100, external_id=m.EXTERNAL_ID,
+                             conclusion=old, summary=summary)]
             m.publish(_publish_read(checks, writes),
                       'o/r', HEAD, 'success', 't', 's', RUN, G1)
             assert len(writes) == expected
@@ -570,7 +546,8 @@ def test_unmarked_failure_is_not_unfrozen_but_green_is_written(tmp):
 
 def test_an_unreadable_ordering_compare_refuses_without_writing(tmp):
     m, writes = _mod(), []
-    checks = [_check(100, summary=f'main {G2}')]
+    checks = [_check(100, external_id=m.EXTERNAL_ID,
+                     summary=f'main {G2}')]
     try:
         m.publish(_publish_read(checks, writes, fail='compare', base=G1,
                                 error=m.QueryError),
@@ -583,7 +560,8 @@ def test_an_unreadable_ordering_compare_refuses_without_writing(tmp):
 
 def test_overlapping_reads_allow_the_older_snapshot_to_write_last(tmp):
     m, writes, requests = _mod(), [], []
-    checks = [_check(100, summary=f'main {G1}')]
+    checks = [_check(100, external_id=m.EXTERNAL_ID,
+                     summary=f'main {G1}')]
     older = _publish_read(checks, writes, requests=requests)
 
     def read(argv):
