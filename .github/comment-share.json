@@ -1041,7 +1041,7 @@
   ],
   "tests/test_bridge_streams.py": [
     3425,
-    22256
+    22290
   ],
   "tests/test_bridge_streams_legacy.py": [
     3478,
