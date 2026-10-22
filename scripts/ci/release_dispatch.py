@@ -122,7 +122,8 @@ def wait(read, repository, sha, *, release=False, timeout=2700, grace=300,
     """Use the release waiter's gate predicate, or require release success."""
     started = time.monotonic()
     kind = 'release' if release else 'gates'
-    while True:
+    state = ''
+    while time.monotonic() - started < timeout:
         rows = _runs(read, repository, sha)
         rows = ([row for row in rows if row['name'] == 'release'] if release
                 else [row for row in rows
@@ -134,23 +135,24 @@ def wait(read, repository, sha, *, release=False, timeout=2700, grace=300,
                and row['conclusion'] not in accepted]
         state = '\n'.join(f'{row["name"]} ({row["conclusion"]}) '
                           f'{row["status"]}' for row in rows)
+        elapsed = time.monotonic() - started
+        if elapsed >= timeout:
+            break
         if bad:
             raise ValueError(f'{kind} on {sha} did not pass:\n{state}')
         if rows and not pending:
             print(f'{len(rows)} {kind} on {sha}, all green:\n{state}')
             return
-        elapsed = time.monotonic() - started
         if not rows and elapsed >= grace:
             raise ValueError(f'no workflow for {kind} ran on {sha} '
                              f'within the {grace:g}s registration grace')
-        if elapsed >= timeout:
-            raise ValueError(f'{kind} on {sha} reached the '
-                             f'{timeout:g}s deadline:\n{state}')
         print(f'waiting: {len(rows)} {kind}, {len(pending)} still running',
               flush=True)
         remaining = min(timeout - elapsed,
                         grace - elapsed if not rows else timeout)
         time.sleep(min(interval, remaining))
+    raise ValueError(f'{kind} on {sha} reached the '
+                     f'{timeout:g}s deadline:\n{state}')
 
 
 def _duration(value):
