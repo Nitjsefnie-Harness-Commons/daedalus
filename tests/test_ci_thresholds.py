@@ -475,7 +475,7 @@ def test_absent_budget_measurement_failure_preserves_document(tmp):
     def fail():
         raise OSError('measurement refused')
 
-    policy.tracked_test_lines = fail
+    setattr(policy, 'tracked_test_lines', fail)
     status, _stdout, stderr = _captured_main(
         policy, ['--tighten', '--thresholds', str(target)])
     assert status == 1 and 'measurement refused' in stderr, stderr
