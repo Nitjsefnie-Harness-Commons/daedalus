@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Drive release dispatch through real git remotes and the gh executable."""
+import contextlib
+import io
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -13,6 +18,7 @@ from _fake_gh import FakeGh  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _ratchet_fixture import _git  # noqa: E402
 from _workflowrun import run_step  # noqa: E402
+from _version_contract import _run_checker  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
 
 ROOT = _util.ROOT
@@ -47,6 +53,7 @@ def _repo(tmp):
         target.parent.mkdir(parents=True, exist_ok=True)
         assert (ROOT / relative).is_file(), f'missing {relative}'
         shutil.copy2(ROOT / relative, target)
+    _ok(_run_checker(work, '--set', '0.0.0'))
     _git(work, 'add', '.')
     _git(work, 'commit', '--quiet', '-m', 'base')
     _git(work, 'config', f'url.{bare}.insteadOf', 'git@github.com:o/r.git')
@@ -228,11 +235,57 @@ def test_wait_gates_zero_grace_and_deadline(tmp):
             ('empty', [{'workflow_runs': []}],
              ['--grace', '0'], 1, 'no workflow', 1),
             ('deadline', [{'workflow_runs': [_row(status='queued')]}],
-             ['--timeout', '0'], 1, 'deadline', 1)):
+             ['--timeout', '0'], 1, 'deadline', 0)):
         result, fake = _wait(Path(tmp) / name, 'wait-gates', pages, *args)
         assert result.returncode == status, result.stdout + result.stderr
         assert wanted in result.stdout + result.stderr, result.stderr
         assert len(fake.calls()) == count, fake.calls()
+
+
+def test_wait_gate_default_exceeds_publishing_deadline(tmp):
+    del tmp
+    dispatch = _util.load(ROOT / SCRIPT, 'scripts.ci.release_dispatch')
+    workflows = ROOT / '.github/workflows'
+    workflow = workflow_mapping(
+        (workflows / 'release-dispatch.yml').read_text())
+    job, = workflow['jobs'].values()
+    step = next(s for s in job['steps']
+                if ' wait-gates ' in s.get('run', ''))
+    argv = [arg.replace('$SHA', SHA)
+            for arg in shlex.split(step['run'])[2:]]
+    deadline = re.search(r'deadline=.*\+ (\d+) \* (\d+)',
+                         (workflows / 'release.yml').read_text())
+    assert deadline, 'missing publishing deadline'
+    minutes, seconds = map(int, deadline.groups())
+    with patch.dict(os.environ, REPO='o/r'), \
+            patch.object(dispatch, 'wait') as selected:
+        assert dispatch.main(argv) == 0
+    assert selected.call_args.kwargs['timeout'] > minutes * seconds
+
+
+def test_wait_green_response_must_arrive_before_deadline(tmp):
+    del tmp
+    dispatch = _util.load(ROOT / SCRIPT, 'scripts.ci.release_dispatch')
+    for elapsed, expected in ((9.99, 0), (10, 1), (10.01, 1)):
+        clock = [0.0]
+        out, err = io.StringIO(), io.StringIO()
+
+        def read(_argv):
+            clock[0] = elapsed
+            return json.dumps({'workflow_runs': [_row()]})
+
+        with (patch.dict(os.environ, REPO='o/r'),
+              patch.object(dispatch.time, 'monotonic', lambda: clock[0]),
+              contextlib.redirect_stdout(out),
+              contextlib.redirect_stderr(err)):
+            status = dispatch.main(
+                ['wait-gates', SHA, '--timeout', '10'], read=read)
+        assert status == expected, out.getvalue() + err.getvalue()
+        if expected:
+            assert 'deadline' in err.getvalue(), err.getvalue()
+            assert 'all green' not in out.getvalue(), out.getvalue()
+        else:
+            assert 'all green' in out.getvalue(), out.getvalue()
 
 
 def test_wait_release_requires_success(tmp):
