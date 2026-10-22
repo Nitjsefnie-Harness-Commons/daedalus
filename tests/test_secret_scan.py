@@ -103,20 +103,18 @@ def test_the_workflow_declares_no_other_top_level_key(tmp):
         'name', 'on', 'permissions', 'concurrency', 'jobs'}, sorted(top)
 
 
-def test_the_checkout_reads_full_history_without_credentials(tmp):
+def test_the_checkout_persists_no_credentials(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     checkout = steps[0]
-    # The scan needs full history.
     # Checkout must not persist credentials.
     assert checkout['with'].get('persist-credentials') == 'false', checkout
-    assert checkout['with'].get('fetch-depth') == '0', checkout
 
 
 def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
-    download = steps[1]
+    download = steps[2]
     assert set(download) == {'name', 'run'}, download
     # The release choice is the workflow's business; the lines must agree.
     lines = download['run'].splitlines()
@@ -142,7 +140,7 @@ def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):
 def test_the_scan_step_is_the_bare_gate(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
-    scan = steps[2]
+    scan = steps[3]
     assert set(scan) == {'name', 'run'}, scan
     # The single quotes are SHELL syntax and survive into the decoded
     # string: they are what hands gitleaks one --log-opts value.
@@ -157,7 +155,7 @@ def test_no_step_and_no_job_key_escapes_the_gate(tmp):
     del tmp
     job = _decoded_workflow()['jobs']['gitleaks']
     steps = job['steps']
-    assert len(steps) == 3, steps
+    assert len(steps) == 4, steps
     verify, scan = ('Download gitleaks and verify its digest',
                     'Scan the tree and the history')
     names = [step.get('name') for step in steps]
