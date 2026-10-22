@@ -60,6 +60,28 @@ def _out(*argv):
                           text=True).stdout.strip()
 
 
+def prepare_ssh(key):
+    """Install the deploy key and select it for subsequent git calls."""
+    ssh = Path.home() / '.ssh'
+    ssh.mkdir(mode=0o700, parents=True, exist_ok=True)
+    ssh.chmod(0o700)
+    secret = ssh / 'ratchet'
+    secret.write_text(f'{key}\n', encoding='utf-8')
+    secret.chmod(0o600)
+    hosts = ssh / 'known_hosts'
+    hosts.write_text(f'{HOST_KEY}\n', encoding='utf-8')
+    hosts.chmod(0o600)
+
+    os.environ['GIT_SSH_COMMAND'] = (
+        f'ssh -i {ssh / "ratchet"} -o IdentitiesOnly=yes'
+        f' -o UserKnownHostsFile={hosts}')
+
+
+def push(repository, refspec):
+    """Push one refspec through the repository deploy key."""
+    _git('push', f'git@github.com:{repository}.git', refspec)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) != 2 or not argv[0] or not argv[1]:
@@ -79,15 +101,7 @@ def main(argv=None):
               file=sys.stderr)
         return 2
 
-    ssh = Path.home() / '.ssh'
-    ssh.mkdir(mode=0o700, parents=True, exist_ok=True)
-    ssh.chmod(0o700)
-    secret = ssh / 'ratchet'
-    secret.write_text(f'{key}\n', encoding='utf-8')
-    secret.chmod(0o600)
-    hosts = ssh / 'known_hosts'
-    hosts.write_text(f'{HOST_KEY}\n', encoding='utf-8')
-    hosts.chmod(0o600)
+    prepare_ssh(key)
 
     _git('config', 'user.name', AUTHOR)
     _git('config', 'user.email', EMAIL)
@@ -96,12 +110,9 @@ def main(argv=None):
     _git('commit', '-m', message)
     # HEAD:main, never a force: overwriting someone's commit to record a
     # number is never the right trade.
-    os.environ['GIT_SSH_COMMAND'] = (
-        f'ssh -i {ssh / "ratchet"} -o IdentitiesOnly=yes'
-        f' -o UserKnownHostsFile={hosts}')
     remote = f'git@github.com:{repository}.git'
     try:
-        _git('push', remote, 'HEAD:main')
+        push(repository, 'HEAD:main')
     except subprocess.CalledProcessError:
         pass
     else:

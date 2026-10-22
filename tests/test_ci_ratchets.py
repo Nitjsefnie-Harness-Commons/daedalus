@@ -82,6 +82,8 @@ PROMOTED_MODULES = (
     'scripts.ci.js_module_coverage',
     'scripts.ci.line_lengths',
     'scripts.ci.ratchet',
+    'scripts.ci.ratchet_push',
+    'scripts.ci.release_dispatch',
     'scripts.ci.size_baseline',
     'scripts.ci.thresholds',
     'scripts.ci.thresholds_guard',

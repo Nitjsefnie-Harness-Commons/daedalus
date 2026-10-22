@@ -97,30 +97,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
-        # v0.19.0 went public two seconds before `tests` concluded and nine
-        # minutes before the slowest gate beside it, because a tag started
-        # every workflow independently and this one never read the others.
-        #
-        # Every `push:` trigger is filtered to `branches: [main]`, so a tag
-        # push now starts this workflow alone — the other gates ran when the
-        # commit landed on main, against this exact SHA. What is left is to
-        # read them.
-        #
-        # A ZERO count is a failure rather than a pass. A tag on a commit
-        # whose gates never ran, or whose runs have aged out of retention,
-        # would otherwise satisfy "nothing is pending" on the first tick,
-        # which is how a gate comes to report clean forever. Zero is tolerated
-        # only for the first few minutes, because a branch push and its tag
-        # can arrive together and the branch's runs take a moment to register.
-        #
-        # No individual workflow is named as required. `version` and
-        # `actionlint` carry path filters, so a name that legitimately did
-        # not run would deadlock this wait — and the suite is not the thing at
-        # risk here anyway, since the job runs it again below against the
-        # tree it is about to build.
-        #
-        # `pr gate` runs on `pull_request_target`, so its run is anchored on
-        # the base tip and judges that pull request, never this commit.
+        # Wait for every workflow run on this tagged commit except release
+        # itself, pr gate (anchored on the base tip, not this commit), and
+        # issue_comment events. The tests matrix is among these gates: a
+        # cell queued for a macOS runner holds this job until it concludes.
+        # ZERO runs is a failure after the registration grace, never a pass.
+        # Release dispatch waits for this same set to go green before tagging,
+        # so its tag usually finds every gate already concluded here.
         run: |
           grace=$(( $(date +%s) + 5 * 60 ))
           deadline=$(( $(date +%s) + 30 * 60 ))
