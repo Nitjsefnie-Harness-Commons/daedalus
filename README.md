@@ -212,3 +212,5 @@ artifact.
   [`<endpoints>` section of `AGENTS.md`](AGENTS.md).
 - Contributor setup, tests, house style, issues, and pull requests are
   documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+CI probes: a disposable branch used to verify CI behavior on a live pull request; it is never merged.
