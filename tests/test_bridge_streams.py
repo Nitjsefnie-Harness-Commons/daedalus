@@ -405,7 +405,7 @@ def test_stream_survives_a_surrogate_id_in_a_queued_command(tmp):
     """A queued command whose id holds a lone surrogate must not kill the
     stream: the frame escapes it, and the log line carries it."""
     for legacy in (False, True):
-        _surrogate_command(tmp, legacy)
+        _surrogate_command(Path(tmp, 'legacy' if legacy else 'queue'), legacy)
 
 
 def _surrogate_command(tmp, legacy):
