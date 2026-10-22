@@ -28,23 +28,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary import run_extension_hotfix_quota  # noqa: E402
-from _repo import EXTENSION_ROOT  # noqa: E402
+from _repo import EXTENSION_ROOT, declared_version  # noqa: E402
 
 # The constant as the production module declares it, read out of the shipped
 # source: a boundary derived from it moves with the cap rather than restating
 # it, and a module that declares no cap fails to parse here.
 HOTFIX_KEY = 'daedalus-hotfixes'
 
-
-def _background_version():
-    """The record's `version` field: the version background.js declares."""
-    source = (EXTENSION_ROOT / 'background.js').read_text(encoding='utf-8')
-    match = re.search(r"const VERSION = '([^']+)'", source)
-    assert match, 'background.js declares no VERSION'
-    return match.group(1)
-
-
-VERSION = _background_version()
+VERSION = declared_version()
 # Chrome's documented QUOTA_BYTES for `local`, which is why every cap in the
 # worker sums below it. The relationship is checked, not the constants: the
 # two caps are numbers the modules own, and what must hold is that they fit.

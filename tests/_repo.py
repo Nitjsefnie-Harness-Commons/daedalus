@@ -6,6 +6,7 @@ These suites read the tree rather than run the bridge, so what they share is
 where the tree is and how to walk the part of it that ships.
 """
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,14 @@ import _util  # noqa: E402
 
 ROOT = _util.ROOT
 EXTENSION_ROOT = ROOT / 'extension'
+
+
+def declared_version():
+    """The record's `version` field: the version background.js declares."""
+    source = (EXTENSION_ROOT / 'background.js').read_text(encoding='utf-8')
+    match = re.search(r"const VERSION = '([^']+)'", source)
+    assert match, 'background.js declares no VERSION'
+    return match.group(1)
 
 
 def iter_tree_files(root):
