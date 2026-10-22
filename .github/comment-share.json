@@ -60,8 +60,8 @@
     1384
   ],
   ".github/workflows/release.yml": [
-    5905,
-    9672
+    5263,
+    9030
   ],
   ".github/workflows/scorecard.yml": [
     432,
@@ -492,8 +492,8 @@
     4076
   ],
   "scripts/ci/ratchet_push.py": [
-    1925,
-    3844
+    2033,
+    4068
   ],
   "scripts/ci/size_baseline.py": [
     669,
@@ -629,7 +629,7 @@
   ],
   "tests/_coverage_guard.py": [
     5728,
-    21230
+    21351
   ],
   "tests/_coverage_launch_stubs.py": [
     3419,
