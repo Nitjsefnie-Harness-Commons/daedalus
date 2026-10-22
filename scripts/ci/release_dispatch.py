@@ -9,7 +9,6 @@ import re
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level,no-name-in-module
@@ -99,6 +98,7 @@ def tag(version, sha):
 
 
 def _read(argv):
+    argv = [os.environ.get('DAEDALUS_GH', argv[0]), *argv[1:]]
     return subprocess.run(argv, check=True, capture_output=True,
                           text=True, timeout=60).stdout
 
@@ -197,8 +197,8 @@ def main(argv=None, read=_read):
     except (OSError, ValueError, KeyError,
             subprocess.SubprocessError) as error:
         print(f'release dispatch: {error}', file=sys.stderr)
-        if isinstance(error, subprocess.CalledProcessError) and error.stderr:
-            print(error.stderr, file=sys.stderr)
+        if detail := getattr(error, 'stderr', None):
+            print(detail, file=sys.stderr)
         return 1
     return 0
 
