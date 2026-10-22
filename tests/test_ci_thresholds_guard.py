@@ -259,6 +259,7 @@ def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
     with patch.object(policy, 'ROOT', repo):
         assert policy.resolve('push', head_rev, '', '') == head_rev
         assert policy.resolve('push', 'unknown', '', '') == rev
+        assert policy.resolve('push', '', '', '') == rev
         for target in ('missing-target', 'unrelated', ''):
             with patch.dict('os.environ', event | {'BASE_SHA': target}):
                 status, _out, err = _captured_main(runner, [])
