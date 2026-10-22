@@ -247,14 +247,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Resolve threshold base
-        uses: ./.github/actions/thresholds-base
 
       # actions/setup-python v7.0.0
       - uses: >-
           actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
+
+      - name: Resolve threshold base
+        env:
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: python scripts/ci/threshold_base.py
 
       # The pip cache is restored on every event and saved only from a push
       # of main, as in the matrix and coverage jobs — `cache: pip` saves in
@@ -611,12 +617,18 @@ jobs:
           # tests/test_workflow_job_timeouts.py pins this.
           fetch-depth: 0
 
-      - name: Resolve threshold base
-        uses: ./.github/actions/thresholds-base
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+
+      - name: Resolve threshold base
+        env:
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: python scripts/ci/threshold_base.py
 
       # The suites this job runs skip on node, so it declares node rather
       # than inheriting whatever the hosted image happens to carry; a
@@ -822,12 +834,18 @@ jobs:
           # suites job.
           fetch-depth: 0
 
-      - name: Resolve threshold base
-        uses: ./.github/actions/thresholds-base
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+
+      - name: Resolve threshold base
+        env:
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: python scripts/ci/threshold_base.py
 
       # Same reason and the same order as the suites job: the suites reached
       # here skip on node, so this job declares it instead of inheriting the
@@ -982,8 +1000,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Resolve threshold base
-        uses: ./.github/actions/thresholds-base
 
       # No `cache: pip`. It saves in a post-job step, after the job has run
       # untrusted code, so the cache is two explicit steps instead: restore on
@@ -992,6 +1008,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.13"
+
+      - name: Resolve threshold base
+        env:
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: python scripts/ci/threshold_base.py
 
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0

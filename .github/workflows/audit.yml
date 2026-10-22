@@ -219,7 +219,12 @@ jobs:
         run: python3 scripts/ci/thresholds.py --check
 
       - name: Resolve threshold base
-        uses: ./.github/actions/thresholds-base
+        env:
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: python3 scripts/ci/threshold_base.py
 
       - name: Threshold direction guard
         run: |

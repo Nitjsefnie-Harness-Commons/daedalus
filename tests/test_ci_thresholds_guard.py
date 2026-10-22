@@ -81,6 +81,9 @@ def test_feature_anywhere_in_range_allows_recording_a_raise(tmp):
         status, _out, err = _judge(repo, rev, base, head)
         assert status == 0, err
 
+    base, head = _raised()
+    repo, _rev_before = _history(tmp, 'insufficient', ['feat: add tests'],
+                                 base, head)
     ci = repo / 'scripts/ci'
     ci.mkdir(parents=True)
     for name in ('tests_lines.py', 'thresholds.py'):
@@ -204,22 +207,22 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     from _yamlsteps import complete_job_mapping, workflow_mapping
     workflow = (ROOT / '.github/workflows/audit.yml').read_text()
     job = complete_job_mapping(workflow, 'thresholds')
+    assert job is not None
     step = next(s for s in job['steps']
                 if s.get('name') == 'Threshold direction guard')
     checkout = next(s for s in job['steps']
                     if 'checkout@' in s.get('uses', ''))
     assert str(checkout['with']['fetch-depth']) == '0'
-    action_path = ROOT / '.github/actions/thresholds-base/action.yml'
-    action = workflow_mapping(action_path.read_text())
+    resolver = next(s for s in job['steps']
+                    if s.get('name') == 'Resolve threshold base')
     jobs = workflow_mapping((ROOT / '.github/workflows/tests.yml').read_text())
     for name in ('suites', 'coverage-matrix', 'coverage', 'pyright'):
         steps = jobs['jobs'][name]['steps']
-        assert sum(s.get('uses') == './.github/actions/thresholds-base'
+        assert sum(s.get('run') == 'python scripts/ci/threshold_base.py'
                    for s in steps) == 1
         assert all(str(s['with']['fetch-depth']) == '0' for s in steps
                    if 'checkout@' in s.get('uses', ''))
-    script = (action['runs']['steps'][0]['run']
-              + 'export DAEDALUS_THRESHOLDS_BASE_REV="$base"\n' + step['run'])
+    script = resolver['run'] + '\n. "$GITHUB_ENV"\n' + step['run']
     assert not any(key in obj for obj in (job, step)
                    for key in ('if', 'continue-on-error'))
     base, head = _raised()
@@ -227,7 +230,7 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     ci = repo / 'scripts/ci'
     ci.mkdir(parents=True)
     for name in ('thresholds.py', 'thresholds_guard.py',
-                 'thresholds_removed.py'):
+                 'thresholds_removed.py', 'threshold_base.py'):
         shutil.copy2(GUARD.with_name(name), ci / name)
     _git(repo, 'commit', '--allow-empty', '-qm', 'chore: followup')
     _git(repo, 'branch', 'target', rev)
@@ -240,9 +243,12 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     _git(repo, 'checkout', '-q', '-')
     shim = repo / 'bin'
     shim.mkdir()
+    shutil.copy2(sys.executable, shim / 'python')
     executable = shim / 'git'
     real_git = shutil.which('git')
+    assert real_git is not None
     executable.write_text('#!/bin/sh\n'
+                          'if [ "${GIT_FAIL:-}" = "$1" ]; then exit 128; fi\n'
                           'if [ "$1" = fetch ]; then\n'
                           '  exec "$REAL_GIT" fetch --no-tags "$LOCAL_REPO" '
                           'refs/heads/target\n'
@@ -266,6 +272,13 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
         if event == 'pull_request' or before == rev:
             assert rev in result.stdout, result.stdout
             assert 'feat:' in result.stderr, result.stderr
+    for command in ('fetch', 'merge-base'):
+        env.update(EVENT='pull_request', GIT_FAIL=command)
+        result = subprocess.run([_util.workflow_bash(), '-e', '-c', script],
+                                cwd=repo, env=env, capture_output=True,
+                                text=True, timeout=60)
+        assert result.returncode != 0 and result.stderr.strip(), result.stdout
+    env.pop('GIT_FAIL')
     _git(repo, 'checkout', '--orphan', 'root-only')
     _git(repo, 'add', '.github/ci-thresholds.json')
     _git(repo, 'commit', '-qm', 'fix: root')
