@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -116,11 +117,20 @@ def test_nonfeatures_refuse_raise_with_remedy(tmp):
 def test_unproved_ranges_fail_even_when_documents_match(tmp):
     base, head = _raised()
     repo, rev = _history(tmp, 'ranges', ['feat: eligible'], base, head)
-    shallow = Path(tmp) / 'shallow'
-    _git(repo, 'clone', '--no-local', '--depth=1', '.', str(shallow))
+    resolver = _util.load(GUARD.with_name('threshold_base.py'), 'shallow_base')
+    runner = SimpleNamespace(main=lambda _: resolver.main())
     assert _judge(repo, rev, base, base)[0] == 0
-    status, _out, err = _judge(shallow, rev, base, base)
-    assert status == 1 and 'history' in err, err
+    for depth, selected in ((1, 'HEAD'), (2, 'HEAD^')):
+        shallow = Path(tmp) / f'shallow-{depth}'
+        _git(repo, 'clone', '--no-local', f'--depth={depth}',
+             '.', str(shallow))
+        status, _out, err = _judge(shallow, selected, base, base)
+        assert status == 1 and 'history' in err, err
+        with (patch.object(resolver, 'ROOT', shallow),
+              patch.dict('os.environ', EVENT='push', BEFORE=selected,
+                         GITHUB_ENV=str(Path(tmp) / 'env'))):
+            status, _out, err = _captured_main(runner, [])
+        assert status == 1 and 'history' in err, err
     for revs in (
             [], ['--base-rev', ''], ['--base-rev', ' '],
             ['--base-rev', 'unknown'],
@@ -137,7 +147,7 @@ def test_history_failures_refuse_both_reads(tmp):
     base, head = _raised()
     repo, rev = _history(tmp, 'failures', ['feat: eligible'], base, head)
     real = subprocess.run
-    for kind in ('--format=%s', '--format=%B'):
+    for kind in ('--format=%s', '--format=%B', '--is-shallow-repository'):
         for failure in (OSError('unreadable history'),
                         subprocess.TimeoutExpired('git', 10), 128):
             def read(argv, kind=kind, failure=failure, **kwargs):
@@ -147,7 +157,7 @@ def test_history_failures_refuse_both_reads(tmp):
                     if isinstance(failure, Exception):
                         raise failure
                     return subprocess.CompletedProcess(
-                        argv, failure, b'', b'bad range')
+                        argv, failure, b'false', b'bad range')
                 return real(argv, **kwargs)
 
             with patch.object(subprocess, 'run', read):
@@ -158,6 +168,11 @@ def test_history_failures_refuse_both_reads(tmp):
 def test_feature_does_not_waive_validation_removal_or_map_policy(tmp):
     base, head = _raised()
     repo, rev = _history(tmp, 'limits', ['feat: eligible'], base, head)
+    for language in ('python', 'javascript'):
+        lower = copy.deepcopy(base)
+        for field in ('measured', 'floor'):
+            lower['coverage'][language][field] -= 1
+        assert _judge(repo, rev, base, lower)[0] == 1
     for value in (None, False, 0, -1, 1.5, '12', {}):
         bad = dict(head, tests_line_baseline=value)
         status, _out, err = _judge(repo, rev, base, bad)
@@ -207,6 +222,67 @@ def test_unreadable_base_and_head_are_refusals(tmp):
     assert status == 1 and 'cannot read thresholds' in err, err
 
 
+def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
+    base, head = _raised()
+    repo, rev = _history(tmp, 'event', ['feat: shared'], base, head)
+    head_rev = _rev(repo)
+    _git(repo, 'branch', 'shared', 'HEAD^')
+    _git(repo, 'branch', 'judged-head')
+    _git(repo, 'branch', 'target', rev)
+    _git(repo, 'checkout', '--orphan', 'unrelated')
+    _git(repo, 'add', '.github/ci-thresholds.json')
+    _git(repo, 'commit', '-qm', 'fix: disconnected target')
+    _git(repo, 'checkout', '-qb', 'merge', 'target')
+    _git(repo, 'merge', '--no-ff', '--no-edit', 'judged-head')
+    merge_rev = _rev(repo)
+    second = Path(tmp) / 'consumer'
+    _git(repo, 'clone', '--no-local', '.', str(second))
+    for consumer in (repo, second):
+        _git(consumer, 'config', f'url.{repo.as_posix()}.insteadOf',
+             'https://github.com/unused/repo.git')
+    policy = _util.load(GUARD.with_name('threshold_base.py'), 'event_base')
+    runner = SimpleNamespace(main=lambda _: policy.main())
+    env_file = Path(tmp) / 'event-env'
+    event = {'EVENT': 'pull_request', 'BASE_SHA': rev,
+             'REPO': 'unused/repo', 'GITHUB_ENV': str(env_file)}
+    for index, consumer in enumerate((repo, repo, second)):
+        assert _rev(consumer) == merge_rev
+        env_file.write_bytes(b'')
+        with (patch.object(policy, 'ROOT', consumer),
+              patch.dict('os.environ', event)):
+            status, _out, err = _captured_main(runner, [])
+        assert status == 0, err
+        assert env_file.read_text() == f'DAEDALUS_THRESHOLDS_BASE_REV={rev}\n'
+        assert _judge(consumer, rev, base, head)[0] == 0
+        if index == 0:
+            _git(repo, 'branch', '-f', 'target', 'shared')
+    with patch.object(policy, 'ROOT', repo):
+        assert policy.resolve('push', head_rev, '', '') == head_rev
+        assert policy.resolve('push', 'unknown', '', '') == rev
+        for target in ('missing-target', 'unrelated', ''):
+            with patch.dict('os.environ', event | {'BASE_SHA': target}):
+                status, _out, err = _captured_main(runner, [])
+            assert status == 1 and err.strip(), err
+        real_git = policy._git
+
+        def unreadable(*args):
+            if args == ('rev-parse', '--is-shallow-repository'):
+                return subprocess.CompletedProcess(args, 128, 'false', 'error')
+            return real_git(*args)
+
+        with (patch.object(policy, '_git', unreadable),
+              patch.dict('os.environ', event)):
+            status, _out, err = _captured_main(runner, [])
+        assert status == 1 and 'history' in err, err
+        _git(repo, 'checkout', '--orphan', 'root-only')
+        _git(repo, 'add', '.github/ci-thresholds.json')
+        _git(repo, 'commit', '-qm', 'fix: root')
+        missing = event | {'EVENT': 'push', 'BEFORE': 'unknown'}
+        with patch.dict('os.environ', missing):
+            status, _out, err = _captured_main(runner, [])
+        assert status == 1 and 'HEAD^' in err, err
+
+
 def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     from _yamlsteps import complete_job_mapping, workflow_mapping
     workflow = (ROOT / '.github/workflows/audit.yml').read_text()
@@ -216,11 +292,16 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
                 if s.get('name') == 'Threshold direction guard')
     resolver = next(s for s in job['steps']
                     if s.get('name') == 'Resolve threshold base')
+    binding = '${{ github.event.pull_request.base.sha }}'
+    assert resolver['env']['BASE_SHA'] == binding
     jobs = workflow_mapping((ROOT / '.github/workflows/tests.yml').read_text())
     for name in ('suites', 'coverage-matrix', 'coverage', 'pyright'):
         steps = jobs['jobs'][name]['steps']
         assert sum(s.get('run') == 'python scripts/ci/threshold_base.py'
                    for s in steps) == 1
+        bound = next(s for s in steps
+                     if s.get('name') == 'Resolve threshold base')
+        assert bound['env']['BASE_SHA'] == binding
     script = resolver['run'] + '\n. "$GITHUB_ENV"\n' + step['run']
     assert not any(key in obj for obj in (job, step)
                    for key in ('if', 'continue-on-error'))
@@ -250,7 +331,7 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     script = 'python3() { "$REAL_PYTHON" "$@"; }\n' + script
     env = dict(_util.child_coverage('scrub'),
                REAL_PYTHON=sys.executable, RUNNER_TEMP=str(repo),
-               REPO='unused/repo', BASE_REF='target',
+               REPO='unused/repo', BASE_SHA=rev,
                GITHUB_ENV=str(repo / 'env'))
     for event, before, status in (('pull_request', '', 1), ('push', rev, 1),
                                   ('push', 'unknown', 0),
@@ -266,12 +347,12 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
             assert rev in result.stdout, (result.stdout, result.stderr)
             assert 'feat:' in result.stderr, result.stderr
     for target in ('missing-target', 'unrelated'):
-        env.update(EVENT='pull_request', BASE_REF=target)
+        env.update(EVENT='pull_request', BASE_SHA=target)
         result = subprocess.run([_util.workflow_bash(), '-e', '-c', script],
                                 cwd=repo, env=env, capture_output=True,
                                 text=True, timeout=60)
         assert result.returncode != 0 and result.stderr.strip(), result.stdout
-    env.update(BASE_REF='target')
+    env.update(BASE_SHA=rev)
     _git(repo, 'checkout', '--orphan', 'root-only')
     _git(repo, 'add', '.github/ci-thresholds.json')
     _git(repo, 'commit', '-qm', 'fix: root')

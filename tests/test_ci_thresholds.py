@@ -7,9 +7,11 @@ import subprocess
 import sys
 from decimal import Decimal, localcontext
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _ratchet_fixture  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _ratchet_fixture import (  # noqa: E402
     _budget_repo, _captured_main, _normalised)
@@ -82,7 +84,7 @@ def _assert_document_contract(path):
         assert set(data['coverage'][language]) == {'measured', 'floor'}
     for member in _BASELINE_ACCESSORS:
         baseline = getattr(thresholds, member)(data)
-        assert baseline == data[member], member
+        assert baseline == data.get(member, {}), member
         assert all(count > 0 for count in baseline.values()), member
     assert thresholds.tests_line_baseline(data) == data.get(
         'tests_line_baseline')
@@ -102,8 +104,38 @@ def _restrictive_mode(platform_name):
 
 
 def test_shipped_document_is_exact_and_cli_checkable(tmp):
-    del tmp
     _assert_document_contract(DATA_PATH)
+    for member in _BASELINE_ACCESSORS:
+        absent = _valid()
+        absent.pop(member, None)
+        path = Path(tmp) / f'{member}.json'
+        _write_json(path, absent)
+        _assert_document_contract(path)
+
+
+def test_absent_maps_remain_valid_in_derived_fixtures(tmp):
+    data = _valid()
+    for member in _BASELINE_ACCESSORS:
+        data.pop(member, None)
+    path = Path(tmp) / 'without-maps.json'
+    _write_json(path, data)
+    with (patch.dict(globals(), DATA_PATH=path),
+          patch.object(_ratchet_fixture, 'THRESHOLDS_SOURCE', path)):
+        test_shipped_document_is_exact_and_cli_checkable(tmp)
+        test_absent_budget_round_trips_and_preserves_other_validation(tmp)
+        test_tests_line_budget_tightens_a_drop_and_never_raises(tmp)
+
+
+def test_coverage_floor_cli_emits_the_loaded_numeric_floor(tmp):
+    del tmp
+    thresholds = _thresholds()
+    for language in ('python', 'javascript'):
+        expected = thresholds.coverage(thresholds.load(DATA_PATH), language)[1]
+        done = subprocess.run(
+            [sys.executable, str(SCRIPT), '--coverage-floor', language],
+            capture_output=True, text=True, timeout=60, env=_CHILD_ENV)
+        assert done.returncode == 0, done.stderr
+        assert Decimal(done.stdout.strip()) == expected, done.stdout
 
 
 def test_required_and_unknown_fields_are_rejected(tmp):
@@ -368,7 +400,7 @@ def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
     after = _thresholds().load(target)
     assert after['tests_line_baseline'] == 7
     for member in ('coverage', *_BASELINE_ACCESSORS):
-        assert after[member] == source[member], member
+        assert after.get(member) == source.get(member), member
     for budget in (7, 2):
         other, other_target = _budget_repo(
             tmp, _tests_files(4, 3), budget, f'steady-{budget}')
@@ -418,16 +450,21 @@ def test_absent_budget_measures_and_tighten_seeds(tmp):
     repo, target = _budget_repo(
         tmp, _tests_files(4, 3), None, 'absent')
     before = target.read_bytes()
-    done = _run_lines_cli(repo)
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert '7' in done.stdout and 'no budget' in done.stdout, done.stdout
+    source = _thresholds().load(target)
+    policy = _util.load(POLICY_SOURCE, 'seed_lines')
+    reader = policy.tracked_test_lines
+    setattr(policy, 'tracked_test_lines', lambda: reader(repo))
+    assert [policy.tightened(n, 7) for n in (None, 20, 2, 7)] == [
+        7, 7, None, None]
+    status, out, err = _captured_main(policy, ['--thresholds', str(target)])
+    assert status == 0 and '7' in out and 'no budget' in out, err
     assert target.read_bytes() == before
-    done = _run_lines_cli(repo, '--tighten')
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert _thresholds().load(target)['tests_line_baseline'] == 7
+    args = ['--tighten', '--thresholds', str(target)]
+    assert _captured_main(policy, args)[0] == 0
+    assert _thresholds().load(target) == dict(source, tests_line_baseline=7)
     assert _run_lines_cli(repo).returncode == 0
     seeded = target.read_bytes()
-    assert _run_lines_cli(repo, '--tighten').returncode == 0
+    assert _captured_main(policy, args)[0] == 0
     assert target.read_bytes() == seeded
 
 
@@ -444,7 +481,7 @@ def test_absent_budget_round_trips_and_preserves_other_validation(tmp):
         _assert_normalise_refused(thresholds, invalid, 'tests_line_baseline')
     for member in _BASELINE_ACCESSORS:
         absent = dict(data)
-        del absent[member]
+        absent.pop(member, None)
         thresholds.write(target, absent)
         assert member not in thresholds.load(target)
         assert getattr(thresholds, member)(thresholds.load(target)) == {}

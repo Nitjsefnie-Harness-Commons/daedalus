@@ -32,9 +32,16 @@ def _has_feature_commits(base_rev, head_rev):
     if not base_rev or not base_rev.strip():
         raise ValueError('cannot read feature history: no judged base')
     try:
+        root = str(Path(__file__).resolve().parents[2])
+        history = subprocess.run(
+            ['git', '-C', root, 'rev-parse', '--is-shallow-repository'],
+            capture_output=True, check=False, timeout=10)
+        if history.returncode or history.stdout.strip() != b'false':
+            raise ValueError('cannot read feature history: shallow or '
+                             'unreadable repository')
         proc = subprocess.run(
-            ['git', '-C', str(Path(__file__).resolve().parents[2]),
-             'log', '--format=%s', f'{base_rev}..{head_rev}'],
+            ['git', '-C', root, 'log', '--format=%s',
+             f'{base_rev}..{head_rev}'],
             capture_output=True, check=False, timeout=10)
     except (OSError, subprocess.SubprocessError) as error:
         raise ValueError(f'cannot read feature history: {error}') from None

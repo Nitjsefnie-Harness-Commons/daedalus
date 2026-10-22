@@ -220,8 +220,9 @@ its definition changed.** Declare the reason in the judged range with
 family declaring its entries. A path whose file is no longer tracked needs
 no declaration. A breach is never a removal reason. The audit workflow's
 direction guard compares the documents at the judged base and head: the
-fetched target's merge base on a PR, the event's before SHA on a push
-(`HEAD^` when that SHA is unusable). Unreadable history is a refusal.
+merge base with the event's fixed base SHA on a PR, the event's before SHA
+on a push (`HEAD^` when that SHA is unusable). Every consumer uses that
+event snapshot; shallow or unreadable history is a refusal.
 
 Map measurement gates exempt only declared paths actually removed since the
 judged base, intersected with their own complaints. CI exports that base as

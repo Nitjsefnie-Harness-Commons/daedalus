@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _wffixtures import _value_error  # noqa: E402
 from test_ci_thresholds_guard import (  # noqa: E402
     FAMILIES, GUARD, _captured_main, _document, _git, _history, _judge,
     _raised)
@@ -82,6 +83,8 @@ def test_path_tokens_expand_only_their_own_family(tmp):
         candidates = ['backend/kept.py', 'backend/new.py']
         assert declarations.paths(family, candidates) == {'backend/kept.py'}
         assert declarations.paths('tests_line_baseline', candidates) == set()
+        assert removed.exempt_paths(rev, 'HEAD', repo, family,
+                                    base[family], candidates) == set()
         head[family] = {}
         status, _out, err = _judge(repo, rev, base, head)
         assert status == 1 and f'{family}.backend/second.py' in err, err
@@ -181,6 +184,11 @@ def test_exemptions_fail_closed_on_unreadable_base_document(tmp):
     repo, rev = _history(tmp, 'bad-base', [
         f'fix: remove\n\nThresholds-Removed: {family}=bug'])
     removed = _util.load(GUARD.with_name('thresholds_removed.py'), 'bad_base')
+    for missing in (None, '', ' '):
+        assert _value_error(lambda missing=missing: removed.declared(
+            missing, 'HEAD', repo)) is not None
+        assert removed.exempt_paths(missing, 'HEAD', repo, family,
+                                    {}, ['backend/kept.py']) == set()
     real = subprocess.run
     for failure in (b'{', b'[]', b'{"schema_version":2}', 128,
                     OSError('unreadable'),
