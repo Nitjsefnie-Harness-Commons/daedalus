@@ -104,6 +104,9 @@ _KEEP_ALLOWLIST = frozenset({
     # is run against a real repository, so scrubbing the collector would
     # report zero coverage of the one file the controls exist to measure.
     'tests/test_ratchet_push.py::_drive_push',
+    'tests/test_release_dispatch.py::_drive',
+    'tests/test_release_dispatch.py::'
+    'test_bump_current_main_all_sites_and_output',
     'tests/_plant_fixture.py::_run_plant',
     'tests/test_plant_restore.py::_states_while_restoring',
     'tests/test_plant_restore.py::_link_sees_after_restore',

@@ -91,6 +91,7 @@
 !/.github/workflows/coverage-comment.yml
 !/.github/workflows/gate-freshness.yml
 !/.github/workflows/pr-gate.yml
+!/.github/workflows/release-dispatch.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
 !/.github/workflows/secrets.yml
@@ -260,6 +261,7 @@
 !/scripts/ci/line_lengths.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/ratchet_push.py
+!/scripts/ci/release_dispatch.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/suite_bound.py
 !/scripts/ci/tests_lines.py
@@ -605,6 +607,7 @@
 !/tests/test_real_browser_harness.py
 !/tests/test_receiver_descent.py
 !/tests/test_relay_example_placeholders.py
+!/tests/test_release_dispatch.py
 !/tests/test_release_scan.py
 !/tests/test_result_command_write_retry.py
 !/tests/test_result_routes.py
