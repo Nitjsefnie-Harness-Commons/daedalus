@@ -126,13 +126,12 @@ def _race(work, permanent=False):
         '-c user.name=Tests -c user.email=tests@example.invalid '
         'commit-tree "$tree" -p "$old")\n'
         'git --git-dir="../bare.git" update-ref refs/heads/main "$next"\n'
-        + ('' if permanent else 'rm -- "$0"\n'), encoding='utf-8')
+        + ('' if permanent else 'rm -- "$0"\n'), encoding='utf-8',
+        newline='\n')
     hook.chmod(0o755)
 
 
 def test_bump_retries_a_moved_main(tmp):
-    if sys.platform == 'win32':
-        _util.skip('the race uses a POSIX pre-push hook')
     work, bare = _repo(tmp)
     _race(work)
     result = _drive(work, 'bump', VERSION)
@@ -144,12 +143,11 @@ def test_bump_retries_a_moved_main(tmp):
 
 
 def test_bump_permanent_refusal_is_loud_and_bounded(tmp):
-    if sys.platform == 'win32':
-        _util.skip('the refusal uses a POSIX git hook')
     work, bare = _repo(tmp)
     before = _out(bare, 'rev-parse', 'main')
     hook = bare / 'hooks/pre-receive'
-    hook.write_text('#!/bin/sh\necho "fixture refusal" >&2\nexit 1\n')
+    hook.write_text('#!/bin/sh\necho "fixture refusal" >&2\nexit 1\n',
+                    encoding='utf-8', newline='\n')
     hook.chmod(0o755)
     result = _drive(work, 'bump', VERSION)
     assert result.returncode != 0, result.stdout
@@ -186,7 +184,7 @@ def _wait(tmp, mode, pages, *args):
         source = ROOT / SCRIPT.parent / name
         assert source.is_file(), f'missing {source.name}'
         shutil.copy2(source, work / SCRIPT.parent / name)
-    endpoint = f'repos/o/r/actions/runs?head_sha={SHA}&per_page=100'
+    endpoint = f'repos/o/r/actions/runs?head_sha={SHA}'
     fake = FakeGh(Path(tmp) / 'gh', {endpoint: pages})
     result = _drive(work, mode, SHA, '--interval', '0.001', *args,
                     env=fake.env())
@@ -326,6 +324,7 @@ def test_workflow_orders_release_and_protects_secret(tmp):
     assert workflow['permissions'] == {'actions': 'read', 'contents': 'read'}
     assert workflow['concurrency']['cancel-in-progress'] == 'false'
     job, = workflow['jobs'].values()
+    assert job['runs-on'] == 'ubuntu-latest'
     for ref, expected in (('refs/heads/main', 'main-push'),
                           ('refs/heads/other', ''), ('refs/tags/v1', '')):
         context = {'github': {'ref': ref}}
@@ -334,8 +333,9 @@ def test_workflow_orders_release_and_protects_secret(tmp):
     assert steps[0]['name'].startswith('Refuse'), steps[0]
     assert 'refs/heads/main' in steps[0]['if'], steps[0]
     assert 'exit 1' in steps[0]['run'], steps[0]
-    runs = [s for s in steps if str(SCRIPT) in s.get('run', '')]
-    assert [s['run'].split(str(SCRIPT))[1].split()[0] for s in runs] == [
+    script = SCRIPT.as_posix()
+    runs = [s for s in steps if script in s.get('run', '')]
+    assert [s['run'].split(script)[1].split()[0] for s in runs] == [
         'bump', 'wait-gates', 'tag', 'wait-release', 'bump']
     assert '--successor' in runs[-1]['run'] and all(
         'if' not in s for s in runs), runs
