@@ -52,8 +52,8 @@
     12492
   ],
   ".github/workflows/gate-freshness.yml": [
-    1297,
-    2030
+    1218,
+    1933
   ],
   ".github/workflows/pr-gate.yml": [
     728,
