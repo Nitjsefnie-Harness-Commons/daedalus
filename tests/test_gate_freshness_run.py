@@ -17,6 +17,9 @@ from _repo import ROOT  # noqa: E402
 G1 = 'a' * 40
 HEAD = 'c' * 40
 RUN = 'https://github.com/o/r/actions/runs/1'
+_RUN = {'id': 77, 'event': 'pull_request_target', 'status': 'completed',
+        'path': '.github/workflows/gate-freshness.yml',
+        'head_branch': 'feature', 'head_repository': {'full_name': 'o/r'}}
 
 
 def _mod():
@@ -26,7 +29,7 @@ def _mod():
 
 def _pr(number, sha=HEAD, base='main', owner='o', ref='feature'):
     return {'number': number, 'head': {'sha': sha, 'ref': ref,
-                                       'repo': {'owner': {'login': owner}}},
+                                       'repo': {'full_name': owner + '/r'}},
             'base': {'ref': base}}
 
 
@@ -142,9 +145,7 @@ def _main_env(tmp, event_name, event, monkey=None):
             if sha in monkey.get('run_listing', {}):
                 return monkey['run_listing'][sha]
             return '\n'.join(_encode(r) for r in monkey.get('runs', [{
-                'id': 77 if sha == HEAD else 78,
-                'event': 'pull_request_target', 'status': 'completed',
-                'path': '.github/workflows/gate-freshness.yml',
+                **_RUN, 'id': 77 if sha == HEAD else 78,
                 'head_branch': 'feature' if sha == HEAD else 'later'}]))
         if target.endswith('/rerun'):
             assert 'POST' in argv
@@ -243,29 +244,33 @@ def _push(tmp, heads=None, **options):
 def test_push_walks_every_head_and_reports_each_outcome(tmp):
     m, pair = _mod(), [_pr(7), _pr(8, sha='d' * 40, ref='later')]
     single, green = [_pr(7)], [_check(101)]
-    good = {'id': 77, 'event': 'pull_request_target', 'status': 'completed',
-            'path': '.github/workflows/gate-freshness.yml',
-            'head_branch': 'feature'}
-    runs = [{**good, 'id': 2}, good,
-            {**good, 'id': 999, 'event': 'workflow_dispatch'},
-            {**good, 'id': 998, 'path': 'other.yml'},
-            {**good, 'id': 997, 'status': 'in_progress'},
-            {**good, 'id': 78, 'head_branch': 'other'}, {**good, 'id': 3}]
+    runs = [{**_RUN, 'id': 2}, _RUN,
+            {**_RUN, 'id': 999, 'event': 'workflow_dispatch'},
+            {**_RUN, 'id': 998, 'path': 'other.yml'},
+            {**_RUN, 'id': 997, 'status': 'in_progress'},
+            {**_RUN, 'id': 78, 'head_branch': 'other'}, {**_RUN, 'id': 3}]
     cases = [
+        ([_pr(7, owner='fork-a'), _pr(8, owner='fork-b')], {'runs': [
+            {**_RUN, 'head_repository': {'full_name': 'fork-a/r'}},
+            {**_RUN, 'id': 88, 'head_repository': {'full_name': 'fork-b/r'}}]},
+         [77, 88], ''),
         ([_pr(7), _pr(8, ref='other')], {'runs': runs}, [77, 78], ''),
-        ([_pr(7, owner='fork-owner')], {}, [77], ''),
         (single, {'checks': green + [_check(80, conclusion='failure')]},
          [77], ''),
         (single, {'checks': [_check(202, conclusion='failure')]}, [], ''),
         (single, {'checks': [_check(202, external_id=m.EXTERNAL_ID,
                                     conclusion='failure')]}, [], ''),
-        (single, {'fresh': (HEAD,)}, [], ''),
         (pair, {'fresh': (HEAD,)}, [78], ''), (pair, {}, [77, 78], ''),
         ([_pr(7, sha='not-a-sha'), pair[1]], {}, [78], ''),
         (pair, {'move': (7, 1)}, [78], _MOVED),
         (pair, {'move': (7, 2)}, [78], _MOVED),
         (single, {'argv': ['--dry-run']}, [], '')]
     edited = 'head carries an edited gate definition'
+    cases += [(single, {'runs': [_RUN, {**_RUN, 'id': 88, 'event': 'push',
+                                        k: None}]}, [77], '')
+              for k in ('head_branch', 'status')]
+    cases += [(single, {'runs': [{**_RUN, 'head_repository': repo}]}, [],
+               'no completed pull_request_target run') for repo in (None, {})]
     cases += [(single, options, [], reason) for reason, options in (
         ('no completed pull_request_target run', {'runs': []}),
         (edited, {'workflow': _workflow_text() + '# edited\n'}),
@@ -305,9 +310,8 @@ def _entrypoint(tmp, event_name, answers):
     calls, gh = Path(tmp) / 'calls', Path(tmp) / 'gh'
     gh.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
                   'if "--slurp" in sys.argv and "--jq" in sys.argv:\n'
-                  '    sys.stderr.write("the `--slurp` option is not "\n'
-                  '                     "supported with `--jq` or "\n'
-                  '                     "`--template`"); sys.exit(1)\n'
+                  '    sys.exit("the `--slurp` option is not supported "\n'
+                  '             "with `--jq` or `--template`")\n'
                   'url = next(a for a in sys.argv if a.startswith("repos/"))\n'
                   'with open(os.environ["FRESHNESS_CALLS"], "a") as log:\n'
                   '    log.write(json.dumps(sys.argv[1:]) + "\\n")\n'
@@ -362,10 +366,8 @@ def test_push_real_adapter_refusals_are_loud_named_skips(tmp):
                 '\n', '\r\n') if crlf else _workflow_text(),
             f'repos/o/r/contents/scripts/ci/gate_freshness.py?ref={HEAD}':
                 (ROOT / 'scripts/ci/gate_freshness.py').read_bytes().decode(),
-            f'repos/o/r/actions/runs?head_sha={HEAD}&per_page=100': _encode({
-                'id': 7, 'event': 'pull_request_target', 'status': 'completed',
-                'path': '.github/workflows/gate-freshness.yml',
-                'head_branch': 'feature'}),
+            f'repos/o/r/actions/runs?head_sha={HEAD}&per_page=100':
+                _encode({**_RUN, 'id': 7}),
             'repos/o/r/actions/runs/7/rerun':
                 [1, 'gh: workflow run is older than 30 days']})
         assert result.returncode == 0, result.stderr
@@ -379,15 +381,13 @@ def test_push_real_adapter_refusals_are_loud_named_skips(tmp):
 
 
 def test_unreadable_run_rows_skip_only_their_head(tmp):
-    good = {'id': 77, 'event': 'pull_request_target', 'status': 'completed',
-            'path': '.github/workflows/gate-freshness.yml',
-            'head_branch': 'feature'}
     bad = [None, 'null', '[null]', '[{}]', '{}', '[]', 'not JSON',
-           _encode(good) + '\n\n']
-    bad += [_encode({**good, 'id': v}) for v in (True, 0, -1, '77', None)]
-    bad += [_encode({**good, k: None}) for k in (
-        'event', 'path', 'status', 'head_branch')]
-    bad += [_encode(good) + '\n' + _encode({**good, 'id': '78'})]
+           _encode(_RUN) + '\n\n']
+    bad += [_encode({**_RUN, 'id': v}) for v in (True, 0, -1, '77', None)]
+    bad += [_encode({**_RUN, k: None}) for k in ('event', 'path')]
+    bad += [_encode({**_RUN, k: True}) for k in (
+        'status', 'head_branch', 'head_repository')]
+    bad += [_encode(_RUN) + '\n' + _encode({**_RUN, 'id': '78'})]
     for listing in bad:
         code, _calls, writes, _out, err = _push(tmp, [
             _pr(7), _pr(8, sha='d' * 40, ref='later')],
