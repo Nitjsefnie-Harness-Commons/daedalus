@@ -108,6 +108,7 @@ def test_bump_no_change_and_illegal_version_refuse(tmp):
     _ok(_drive(work, 'bump', VERSION))
     before = _out(bare, 'rev-parse', 'main')
     for value, wanted in ((VERSION, 'already claims'),
+                          (VERSION + '.2', 'successor'),
                           ('not-a-version', 'FAIL:')):
         result = _drive(work, 'bump', value)
         assert result.returncode != 0, result.stdout
@@ -116,7 +117,6 @@ def test_bump_no_change_and_illegal_version_refuse(tmp):
 
 
 def _race(work, permanent=False):
-    # pre-push advances the remote after bump's fetch, before its real push.
     hook = work / '.git/hooks/pre-push'
     hook.write_text(
         '#!/bin/sh\n'

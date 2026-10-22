@@ -48,6 +48,9 @@ def _commit(message):
 
 def bump(version, successor=False):
     """Rebuild the claim on current main when a fast-forward push races."""
+    if not successor and len(version.split('.')) > 3:
+        raise ValueError('release version must leave room for its .1 '
+                         'successor within Chrome\'s four-segment limit')
     repository = _credentials()
     released = version
     if successor:
