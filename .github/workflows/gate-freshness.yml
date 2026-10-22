@@ -14,8 +14,8 @@ name: gate freshness
 # only SHA/ref/owner come from the event, and no PR code runs.
 # -I excludes adjacent modules, PYTHONPATH and user site imports.
 #
-# THE BOUND: L + 2 + H * (G + 7): L path lookups + snapshot and PR list,
-# then H heads x (G compares + seven calls, including both gate files,
+# THE BOUND: L + 2 + H * (G + 8): L path lookups + snapshot and PR list,
+# then H heads x (G compares + eight calls, including both gate files,
 # one runs-list read and one rerun POST).
 # Extra ids and pages are unbounded by this estimate. At 1.5 s/call, 1200 calls
 # take 30 minutes; the 35-minute timeout provides residual slack.

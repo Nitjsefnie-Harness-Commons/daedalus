@@ -580,31 +580,6 @@ def test_a_pull_request_not_based_on_main_is_skipped(tmp):
     assert m.select_heads([pr]) == []
 
 
-def test_push_reruns_the_newest_completed_event_run_of_this_workflow(tmp):
-    m = _mod()
-    good = {'id': 77, 'event': 'pull_request_target', 'status': 'completed',
-            'path': '.github/workflows/gate-freshness.yml'}
-
-    def read(argv):
-        target = next(t for t in argv if t.startswith('repos/'))
-        if target == _CHECK_LIST: return _encode(_check(101))
-        if '/contents/' in target:
-            path = target.split('/contents/')[1].split('?ref=')[0]
-            return (ROOT / path).read_bytes().decode()
-        if target == f'repos/o/r/actions/runs?head_sha={HEAD}&per_page=100':
-            assert all(a in argv for a in ('--paginate', '--slurp', 'GET'))
-            assert argv[argv.index('--jq') + 1] == '[.[].workflow_runs[]]'
-            return _encode([{**good, 'id': 2}, good,
-                            {**good, 'id': 999, 'event': 'workflow_dispatch'},
-                            {**good, 'id': 998, 'path': 'other.yml'},
-                            {**good, 'id': 997, 'status': 'in_progress'},
-                            {**good, 'id': 3}])
-        assert target == 'repos/o/r/actions/runs/77/rerun' and 'POST' in argv
-        return ''
-    assert m._keep_or_rerun(read, 'o/r', _head(owner='o'),
-                            m.Verdict('failure', 'stale', 't', 's')) == 'reran'
-
-
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='gatefresh_')
 

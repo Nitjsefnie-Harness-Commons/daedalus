@@ -84,6 +84,10 @@ def _main_env(tmp, event_name, event, monkey=None):
         'scripts/ci/gate_freshness.py')}
 
     def fake_gh_read(argv):
+        if 'argvs' in monkey: monkey['argvs'].append(argv)
+        if '--slurp' in argv and '--jq' in argv:
+            raise m.QueryError('the `--slurp` option is not supported with '
+                               '`--jq` or `--template`')
         target = next(t for t in argv if t.startswith('repos/'))
         calls.append(target)
         if '/pulls?state=open' in target:
@@ -109,7 +113,8 @@ def _main_env(tmp, event_name, event, monkey=None):
             pulls = event.get('open_pulls', [event.get('pull_request')])
             sha = next(p['head']['sha'] for p in pulls
                        if p and p['number'] == number)
-            if (number, calls.count(target)) == monkey.get('move'):
+            if ((number, calls.count(target)) == monkey.get('move')
+                    or number == monkey.get('moved_after_listing')):
                 sha = 'e' * 40
             return _encode({'head': {'sha': sha}})
         if '/check-runs?' in target and 'GET' in argv:
@@ -128,13 +133,19 @@ def _main_env(tmp, event_name, event, monkey=None):
             key = 'workflow' if path.endswith('.yml') else 'script'
             return monkey.get(key, files[path])
         if '/actions/runs?head_sha=' in target:
-            assert '--paginate' in argv and '--slurp' in argv
+            assert '--paginate' in argv
+            assert argv[argv.index('--jq') + 1] == '.workflow_runs[]'
             assert 'Cache-Control: no-cache' in argv
             sha = target.split('head_sha=')[1].split('&')[0]
-            return _encode(monkey.get('runs', [{
+            if monkey.get('move_at_listing'):
+                monkey['moved_after_listing'] = 7
+            if sha in monkey.get('run_listing', {}):
+                return monkey['run_listing'][sha]
+            return '\n'.join(_encode(r) for r in monkey.get('runs', [{
                 'id': 77 if sha == HEAD else 78,
                 'event': 'pull_request_target', 'status': 'completed',
-                'path': '.github/workflows/gate-freshness.yml'}]))
+                'path': '.github/workflows/gate-freshness.yml',
+                'head_branch': 'feature' if sha == HEAD else 'later'}]))
         if target.endswith('/rerun'):
             assert 'POST' in argv
             if monkey.get('rerun_fail'):
@@ -220,75 +231,63 @@ def test_event_job_conclusion_tracks_only_its_own_pr_verdict(tmp):
     assert code == 0 and published == []
 
 
+def _push(tmp, heads=None, **options):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code, calls, writes = _main_env(tmp, 'push', {
+            'open_pulls': heads or [_pr(7)]}, monkey={
+                'stale': True, 'checks': [_check(101)], **options})
+    return code, calls, writes, out.getvalue(), err.getvalue()
+
+
 def test_push_walks_every_head_and_reports_each_outcome(tmp):
     m, pair = _mod(), [_pr(7), _pr(8, sha='d' * 40, ref='later')]
     single, green = [_pr(7)], [_check(101)]
-    older = _check(80, external_id=m.EXTERNAL_ID, conclusion='failure')
-    owned = _check(202, external_id=m.EXTERNAL_ID, conclusion='failure')
-    red = _check(202, conclusion='failure')
-    for checks, heads, options, expected in (
-            (green, single, {}, [77]),
-            (green, [_pr(7, owner='fork-owner')], {}, [77]),
-            (green + [older], single, {}, [77]),
-            (green + [red], single, {}, []),
-            (green + [owned], single, {}, []),
-            (green, single, {'fresh': (HEAD,)}, []),
-            (green, pair, {'fresh': (HEAD,)}, [78]),
-            (green, pair, {}, [77, 78]),
-            (green, [_pr(7, sha='not-a-sha'), pair[1]], {}, [78]),
-            (green, pair, {'move': (7, 1)}, [78]),
-            (green, pair, {'move': (7, 2)}, [78]),
-            (green, single, {'argv': ['--dry-run']}, [])):
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code, calls, refs = _main_env(tmp, 'push', {'open_pulls': heads},
-                                          monkey={'stale': True,
-                                                  'checks': checks, **options})
-        total = sum(p['head']['sha'] != 'not-a-sha' for p in heads)
-        if total != len(heads): assert 'repos/o/r/pulls/7' not in calls, calls
-        assert code == 0 and refs == expected, (code, refs, expected)
-        assert sum(c.endswith('/rerun') for c in calls) == len(expected)
-        if not expected: assert not any('/contents/' in c for c in calls)
-        assert len(calls) <= m.required_calls(len(heads), len(m.GATE_PATTERNS))
-        if options.get('move'): assert (
-            _MOVED in err.getvalue() and calls.count('repos/o/r/pulls/8') == 2)
-        handled = total - bool(options.get('move'))
-        assert out.getvalue().splitlines()[-1] == (
-            f'gate freshness: written 0, reran {len(expected)}, kept '
-            f'{0 if options.get("argv") else handled - len(expected)}; '
-            f'evaluated {handled}/{total} heads; resolved 18/18 gate paths')
-
-
-def _assert_loud_skip(tmp, reason, **options):
-    err, out = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-        code, _calls, writes = _main_env(
-            tmp, 'push', {'open_pulls': [_pr(7)]}, monkey={
-                'stale': True, 'checks': [_check(101)], **options})
-    assert code == 0 and writes == [], (reason, writes)
-    assert reason in err.getvalue(), (reason, err.getvalue())
-    assert HEAD in err.getvalue() and 'skipping' in err.getvalue()
-    assert 'kept 0;' in out.getvalue(), out.getvalue()
-
-
-def test_push_refusals_are_loud_skips(tmp):
+    good = {'id': 77, 'event': 'pull_request_target', 'status': 'completed',
+            'path': '.github/workflows/gate-freshness.yml',
+            'head_branch': 'feature'}
+    runs = [{**good, 'id': 2}, good,
+            {**good, 'id': 999, 'event': 'workflow_dispatch'},
+            {**good, 'id': 998, 'path': 'other.yml'},
+            {**good, 'id': 997, 'status': 'in_progress'},
+            {**good, 'id': 78, 'head_branch': 'other'}, {**good, 'id': 3}]
+    cases = [
+        ([_pr(7), _pr(8, ref='other')], {'runs': runs}, [77, 78], ''),
+        ([_pr(7, owner='fork-owner')], {}, [77], ''),
+        (single, {'checks': green + [_check(80, conclusion='failure')]},
+         [77], ''),
+        (single, {'checks': [_check(202, conclusion='failure')]}, [], ''),
+        (single, {'checks': [_check(202, external_id=m.EXTERNAL_ID,
+                                    conclusion='failure')]}, [], ''),
+        (single, {'fresh': (HEAD,)}, [], ''),
+        (pair, {'fresh': (HEAD,)}, [78], ''), (pair, {}, [77, 78], ''),
+        ([_pr(7, sha='not-a-sha'), pair[1]], {}, [78], ''),
+        (pair, {'move': (7, 1)}, [78], _MOVED),
+        (pair, {'move': (7, 2)}, [78], _MOVED),
+        (single, {'argv': ['--dry-run']}, [], '')]
     edited = 'head carries an edited gate definition'
-    for reason, options in (
-            ('no completed pull_request_target run', {'runs': []}),
-            (edited, {'workflow': _workflow_text() + '# edited\n'}),
-            (edited, {'workflow': _workflow_text().replace('\n', '\r\n')}),
-            (edited, {'workflow': 'on: [push]'}),
-            (edited, {'script': 'raise SystemExit(0)\n'}),
-            ('HTTP 404', {'contents_fail': True}),
-            ('HTTP 404', {'contents_fail': 'scripts/ci/gate_freshness.py'}),
-            ('could not read existing check runs', {'listing_fail': True}),
-            ('malformed existing check listing', {'listing': 'not JSON'}),
-            ('local unreadable', {'local_fail': True})):
-        _assert_loud_skip(tmp, reason, **options)
-    for reason in ('older than 30 days', 'maximum of 50 re-runs',
-                   'run is not completed'):
-        _assert_loud_skip(tmp, f'run 77: gh: {reason}',
-                          rerun_fail=f'gh: {reason}')
+    cases += [(single, options, [], reason) for reason, options in (
+        ('no completed pull_request_target run', {'runs': []}),
+        (edited, {'workflow': _workflow_text() + '# edited\n'}),
+        (edited, {'script': 'raise SystemExit(0)\n'}),
+        ('HTTP 404', {'contents_fail': True}),
+        ('HTTP 404', {'contents_fail': 'scripts/ci/gate_freshness.py'}),
+        ('could not read existing check runs', {'listing_fail': True}),
+        ('malformed existing check listing', {'listing': 'not JSON'}),
+        ('local unreadable', {'local_fail': True}))]
+    cases += [(single, {'rerun_fail': f'gh: {r}'}, [], f'run 77: gh: {r}')
+              for r in ('older than 30 days', 'maximum of 50 re-runs',
+                        'run is not completed')]
+    for heads, options, expected, reason in cases:
+        argvs = []
+        code, calls, writes, out, err = _push(
+            tmp, heads, argvs=argvs, **options)
+        assert not any('--slurp' in a and '--jq' in a for a in argvs)
+        assert code == 0 and writes == expected, (code, writes, expected)
+        assert f'reran {len(expected)},' in out, out
+        if reason: assert reason in err and 'skipping' in err, err
+        if reason and not expected: assert HEAD in err and 'kept 0;' in out
+        assert len(calls) <= m.required_calls(len(heads), len(m.GATE_PATTERNS))
 
 
 def _entrypoint(tmp, event_name, answers):
@@ -305,6 +304,10 @@ def _entrypoint(tmp, event_name, answers):
     event.write_text('{}', encoding='utf-8')
     calls, gh = Path(tmp) / 'calls', Path(tmp) / 'gh'
     gh.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+                  'if "--slurp" in sys.argv and "--jq" in sys.argv:\n'
+                  '    sys.stderr.write("the `--slurp` option is not "\n'
+                  '                     "supported with `--jq` or "\n'
+                  '                     "`--template`"); sys.exit(1)\n'
                   'url = next(a for a in sys.argv if a.startswith("repos/"))\n'
                   'with open(os.environ["FRESHNESS_CALLS"], "a") as log:\n'
                   '    log.write(json.dumps(sys.argv[1:]) + "\\n")\n'
@@ -359,9 +362,10 @@ def test_push_real_adapter_refusals_are_loud_named_skips(tmp):
                 '\n', '\r\n') if crlf else _workflow_text(),
             f'repos/o/r/contents/scripts/ci/gate_freshness.py?ref={HEAD}':
                 (ROOT / 'scripts/ci/gate_freshness.py').read_bytes().decode(),
-            f'repos/o/r/actions/runs?head_sha={HEAD}&per_page=100': _encode([{
+            f'repos/o/r/actions/runs?head_sha={HEAD}&per_page=100': _encode({
                 'id': 7, 'event': 'pull_request_target', 'status': 'completed',
-                'path': '.github/workflows/gate-freshness.yml'}]),
+                'path': '.github/workflows/gate-freshness.yml',
+                'head_branch': 'feature'}),
             'repos/o/r/actions/runs/7/rerun':
                 [1, 'gh: workflow run is older than 30 days']})
         assert result.returncode == 0, result.stderr
@@ -374,11 +378,32 @@ def test_push_real_adapter_refusals_are_loud_named_skips(tmp):
         assert 'skipping' in result.stderr and 'kept 0;' in result.stdout
 
 
-def test_push_head_failure_does_not_abandon_siblings_or_fail_main(tmp):
-    code, calls, writes = _main_env(tmp, 'push', {
-        'open_pulls': [_pr(7), _pr(8)]}, monkey={'head_fail': 7})
-    assert code == 0 and writes == [], (code, writes)
-    assert 'repos/o/r/pulls/8' in calls
+def test_unreadable_run_rows_skip_only_their_head(tmp):
+    good = {'id': 77, 'event': 'pull_request_target', 'status': 'completed',
+            'path': '.github/workflows/gate-freshness.yml',
+            'head_branch': 'feature'}
+    bad = [None, 'null', '[null]', '[{}]', '{}', '[]', 'not JSON',
+           _encode(good) + '\n\n']
+    bad += [_encode({**good, 'id': v}) for v in (True, 0, -1, '77', None)]
+    bad += [_encode({**good, k: None}) for k in (
+        'event', 'path', 'status', 'head_branch')]
+    bad += [_encode(good) + '\n' + _encode({**good, 'id': '78'})]
+    for listing in bad:
+        code, _calls, writes, _out, err = _push(tmp, [
+            _pr(7), _pr(8, sha='d' * 40, ref='later')],
+            head_fail=7 if listing is None else None,
+            run_listing={HEAD: listing})
+        assert code == 0 and writes == [78], (listing, code, writes)
+        assert HEAD in err and 'skipping' in err, err
+        reason = ('head unavailable' if listing is None else
+                  'malformed workflow runs listing')
+        assert reason in err, listing
+
+
+def test_head_moving_at_run_listing_is_not_rerun(tmp):
+    code, _calls, writes, _out, err = _push(tmp, move_at_listing=True)
+    assert code == 0 and writes == [], writes
+    assert HEAD in err and 'moved to ' + 'e' * 40 in err and 'skipping' in err
 
 
 def test_event_head_identity_must_be_readable(tmp):
@@ -554,7 +579,7 @@ def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
             call_budget=estimate)
         assert code == 0 and verdicts, 'duplicate-id overrun must publish'
         assert [v for _, v in published] == ['PATCH'] * len(old_ids)
-        assert len(calls) == estimate + len(old_ids) - 4
+        assert len(calls) == estimate + len(old_ids) - 5
         if len(old_ids) == 8:
             assert len(calls) > estimate, 'duplicate overrun not reached'
 
