@@ -6,25 +6,23 @@ name: gate freshness
 # land in the app's oldest suite, ignored once superseded (issue #1655).
 #
 # SCRIPT PUBLICATION. PATCH only script-owned checks. Push keeps fresh or
-# already-red heads and dispatches others only when this workflow and the
-# gate script match main's checkout byte for byte. Edited definitions and
-# unreadable files skip loudly. Dispatched jobs bootstrap main's source once.
+# already-red heads and re-runs other heads' event runs only when this workflow
+# and gate script match main's checkout byte for byte. Edited definitions and
+# unreadable files skip loudly. Re-runs retain the PR-associated check suite.
 #
 # BASE SAFETY. pull_request_target uses the base workflow and checkout;
 # only SHA/ref/owner come from the event, and no PR code runs.
-# -I excludes adjacent modules, PYTHONPATH and user site imports; the bootstrap
-# child uses it too, so imports cannot bypass main's judge.
+# -I excludes adjacent modules, PYTHONPATH and user site imports.
 #
-# THE BOUND: L + 4 + H * (G + 8): L path lookups + up to four setup reads
-# (snapshot, PR list, bootstrap source and repeated PR list), then H heads x
-# (G compares + eight calls, including both gate files and dispatch).
+# THE BOUND: L + 2 + H * (G + 7): L path lookups + snapshot and PR list,
+# then H heads x (G compares + seven calls, including both gate files,
+# one runs-list read and one rerun POST).
 # Extra ids and pages are unbounded by this estimate. At 1.5 s/call, 1200 calls
 # take 30 minutes; the 35-minute timeout provides residual slack.
 #
 # BASE FILTER. A non-main PR could earn an authoritative green without a main
 # comparison; retargeting to main reuses that SHA and its unearned check.
 on:
-  workflow_dispatch:
   push:
     branches: [main]
   pull_request_target:  # zizmor: ignore[dangerous-triggers]

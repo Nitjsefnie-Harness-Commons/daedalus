@@ -3,15 +3,15 @@
 
 Snapshot main and compare every gate to each head; only a 40-hex merge base
 equal to the gate proves freshness. Misses need rebase; unreadable is RED.
-Revalidate heads. Push keeps or dispatches; only global read/budget errors fail
+Revalidate heads. Push keeps or re-runs; only global read/budget errors fail
 push. Event jobs fail for RED. PATCH/retire completed EXTERNAL_ID checks only;
 POST only on empty listings. Keep newer stamped verdicts; writes can race.
 Record completed verdict writes even when retirement fails. Dry runs compute.
 
-THE BOUND. L + 4 + H * (G + 8): L path lookups, main, PR list, bootstrap
-source and repeated PR list; G compares per head plus two revalidations,
-listing, write, ordering compare, two file reads and dispatch. Reserve both
-alternative paths. Extra owned ids add retirement PATCHes; pages count as one
+THE BOUND. L + 2 + H * (G + 7): L path lookups, main and PR list;
+G compares per head plus two revalidations, check listing, two file reads,
+one runs-list read and one rerun POST. Reserve the alternative publish path.
+Extra owned ids add retirement PATCHes; pages count as one
 logical read. At 1.5 s/call, 1200 calls need 30 minutes of a 35-minute timeout.
 Oversized estimates refuse without truncating heads.
 """
@@ -19,7 +19,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -28,7 +27,6 @@ NAME_RETIRED = 'superseded gate freshness'
 EXTERNAL_ID = 'daedalus-gate-freshness/v1'
 APP_SLUG = 'github-actions'
 BASE_BRANCH = 'main'
-MAIN_SOURCE = 'GATE_FRESHNESS_MAIN_SOURCE'
 GATE_PATTERNS = (
     '.github/workflows/**', '.github/ci-thresholds.json',
     '.github/journey-budget.json', 'scripts/ci/**',
@@ -41,8 +39,8 @@ GATE_PATTERNS = (
 )
 
 _HEX40 = frozenset('0123456789abcdef')
-# Revalidations, listing, write/order compare, two file reads and dispatch.
-PER_HEAD_OVERHEAD = 8
+# Revalidations, check listing, two file reads, runs listing and rerun.
+PER_HEAD_OVERHEAD = 7
 DEFAULT_CALL_BUDGET = 1200
 ASSUMED_SECONDS_PER_CALL = 1.5
 
@@ -287,29 +285,38 @@ def _raw_file(read, repository, path, sha):
                      '-H', 'Accept: application/vnd.github.raw+json'))
 
 
-def _keep_or_dispatch(read, repository, head, verdict):
+def _keep_or_rerun(read, repository, head, verdict):
     if verdict.conclusion == 'success': return 'kept'
     checks = _existing_checks(read, repository, head['sha'])
     if checks is None: raise QueryError('could not read existing check runs')
     newest = max(checks, key=lambda c: c['id'], default={})
     if newest.get('conclusion') == 'failure': return 'kept'
-    if head['owner'] != repository.split('/')[0]:
-        reason = 'cross-repository head has no dispatch ref here'
-    else:
-        for path in ('.github/workflows/gate-freshness.yml',
-                     'scripts/ci/gate_freshness.py'):
-            source = _raw_file(read, repository, path, head['sha'])
-            local = Path(__file__).resolve().parents[2] / path
-            try: local_bytes = local.read_bytes()
-            except OSError as error: raise QueryError(str(error)) from error
-            if source.encode('utf-8') != local_bytes:
-                raise QueryError('head carries an edited gate definition: '
-                                 f'{path}')
-        read(_api(f'repos/{repository}/actions/workflows/'
-                  'gate-freshness.yml/dispatches', '-X', 'POST',
-                  '-f', f'ref={head["ref"]}'))
-        return 'dispatched'
-    raise QueryError(reason)
+    for path in ('.github/workflows/gate-freshness.yml',
+                 'scripts/ci/gate_freshness.py'):
+        source = _raw_file(read, repository, path, head['sha'])
+        local = Path(__file__).resolve().parents[2] / path
+        try: local_bytes = local.read_bytes()
+        except OSError as error: raise QueryError(str(error)) from error
+        if source.encode('utf-8') != local_bytes:
+            raise QueryError('head carries an edited gate definition: '
+                             f'{path}')
+    runs = _one(read, _api(
+        f'repos/{repository}/actions/runs?head_sha={head["sha"]}&per_page=100',
+        '--method', 'GET', '--paginate', '--slurp', '--jq',
+        '[.[].workflow_runs[]]'))
+    run_id = max((r['id'] for r in runs
+                  if r['event'] == 'pull_request_target'
+                  and r['path'] == '.github/workflows/gate-freshness.yml'
+                  and r['status'] == 'completed'), default=None)
+    if run_id is None:
+        raise QueryError('no completed pull_request_target run of '
+                         '.github/workflows/gate-freshness.yml for this head')
+    try:
+        read(_api(f'repos/{repository}/actions/runs/{run_id}/rerun',
+                  '-X', 'POST'))
+    except QueryError as error:
+        raise QueryError(f'could not rerun run {run_id}: {error}') from error
+    return 'reran'
 
 
 def _pr_head(pr):
@@ -331,12 +338,12 @@ def select_heads(pulls):
 
 
 def required_calls(head_count, gate_count):
-    return len(GATE_PATTERNS) + 4 + head_count * (
+    return len(GATE_PATTERNS) + 2 + head_count * (
         PER_HEAD_OVERHEAD + gate_count)
 
 
 def process(read, repository, heads, gates, details_url, main_sha,
-            call_budget=None, dry_run=False, may_dispatch=False):
+            call_budget=None, dry_run=False, may_rerun=False):
     """Return (exit_code, handled heads); failures do not abandon siblings."""
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
     needed = required_calls(len(heads), len(gates))
@@ -364,8 +371,8 @@ def process(read, repository, heads, gates, details_url, main_sha,
                 print(f'PR #{head["number"]} {head["sha"][:12]} '
                       f'{verdict.conclusion:>7} [{verdict.kind}] '
                       f'{verdict.summary}')
-            elif may_dispatch:
-                verdict.action = _keep_or_dispatch(
+            elif may_rerun:
+                verdict.action = _keep_or_rerun(
                     read, repository, head, verdict)
             else:
                 outcome, _ = publish(
@@ -375,8 +382,9 @@ def process(read, repository, heads, gates, details_url, main_sha,
                                   else 'kept')
         except QueryError as error:
             print(f'gate freshness: could not {phase} pull request '
-                  f'{head["number"]}: {error}; skipping', file=sys.stderr)
-            failed += not may_dispatch
+                  f'{head["number"]} head {head["sha"]}: {error}; skipping',
+                  file=sys.stderr)
+            failed += not may_rerun
             if verdict is not None and error.verdict_written:
                 verdict.action = 'written'
                 published.append(verdict)
@@ -428,22 +436,7 @@ def _open_pulls(read, repository):
         f'&per_page=100', '--paginate'))
 
 
-def _main_source(read, repository, main_sha, arguments, run):
-    source = _raw_file(read, repository, 'scripts/ci/gate_freshness.py',
-                       main_sha)
-    with tempfile.TemporaryDirectory(prefix='gate-freshness-') as directory:
-        path = Path(directory) / 'gate_freshness.py'
-        path.write_text(source, encoding='utf-8')
-        try:
-            return run([sys.executable, '-I', str(path), *arguments],
-                       env={**os.environ, MAIN_SOURCE: main_sha},
-                       check=False).returncode
-        except (subprocess.SubprocessError, OSError) as error:
-            raise QueryError(f'could not run main gate source: {error}') \
-                from error
-
-
-def main(argv=None, read=None, run=None):
+def main(argv=None, read=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
     dry_run = '--dry-run' in arguments
     read = gh_read if read is None else read
@@ -468,29 +461,20 @@ def main(argv=None, read=None, run=None):
                 raise QueryError('the open pull request list did not decode '
                                  'as a list')
             heads = select_heads(pulls)
-            if name == 'workflow_dispatch':
-                heads = [h for h in heads
-                         if h['sha'] == os.environ.get('GITHUB_SHA')][:1]
-                if not heads: return 0
-        marker = os.environ.get(MAIN_SOURCE, '')
-        bootstrapped = name == 'workflow_dispatch' and _hex40(marker)
-        main_sha = marker if bootstrapped else main_head(read, repository)
-        if name == 'workflow_dispatch' and not bootstrapped:
-            return _main_source(read, repository, main_sha, arguments,
-                                subprocess.run if run is None else run)
+        main_sha = main_head(read, repository)
         gates = enumerate_gates(read, repository, main_sha)
     except QueryError as error:
         print(f'gate freshness: {error}; publishing nothing', file=sys.stderr)
         return 1
     code, published = process(read, repository, heads, gates,
                               _details_url(), main_sha, _call_budget(),
-                              dry_run, may_dispatch=name == 'push')
-    if name in ('pull_request_target', 'workflow_dispatch') and not dry_run:
+                              dry_run, may_rerun=name == 'push')
+    if name == 'pull_request_target' and not dry_run:
         if any(v.conclusion != 'success' for v in published): code = 1
     counts = {action: sum(v.action == action for v in published)
-              for action in ('written', 'dispatched', 'kept')}
+              for action in ('written', 'reran', 'kept')}
     print(f'gate freshness: written {counts["written"]}, '
-          f'dispatched {counts["dispatched"]}, kept {counts["kept"]}; '
+          f'reran {counts["reran"]}, kept {counts["kept"]}; '
           f'evaluated {len(published)}/{len(heads)} heads; resolved '
           f'{len(gates)}/{len(GATE_PATTERNS)} gate paths')
     return code
