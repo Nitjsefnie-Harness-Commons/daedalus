@@ -18,8 +18,8 @@ from _tabs_harness import command, run_tabs  # noqa: E402
 
 RUNTIME_RELOAD = 'runtime.reload'
 
-# Source text is independent of the VM readout: a wrong handler value fails.
-# Comparing the post to outcome['version'] would agree by construction.
+# Read from background.js's source, not from the VM readout outcome['version']:
+# the post is held to what the extension declares, and a wrong value fails.
 VERSION = declared_version()
 
 # Distinctive ring entries. These are world state the handler reads back out

@@ -3,7 +3,7 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 These suites read the tree rather than run the bridge, so what they share is
-where the tree is and how to walk the part of it that ships.
+where the tree is, how to walk the part that ships, and its version.
 """
 import os
 import re
@@ -19,7 +19,7 @@ EXTENSION_ROOT = ROOT / 'extension'
 
 
 def declared_version():
-    """The record's `version` field: the version background.js declares."""
+    """The VERSION constant extension/background.js declares."""
     source = (EXTENSION_ROOT / 'background.js').read_text(encoding='utf-8')
     match = re.search(r"const VERSION = '([^']+)'", source)
     assert match, 'background.js declares no VERSION'
