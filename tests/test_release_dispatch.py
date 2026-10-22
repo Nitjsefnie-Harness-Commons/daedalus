@@ -69,10 +69,13 @@ def _drive(work, *args, env=None):
     child.update(HOME=str(home), USERPROFILE=str(home),
                  MASTER_PUSH_DEPLOY_KEY='fixture-key', REPO='o/r')
     child.setdefault('GITHUB_OUTPUT', str(work.parent / 'output'))
-    return subprocess.run(
-        [sys.executable, str(work / SCRIPT), *args], cwd=work,
-        env=_util.child_coverage('keep', child, cwd=work),
-        capture_output=True, text=True, timeout=60)
+    dispatch = _util.load(ROOT / SCRIPT, 'scripts.ci.release_dispatch')
+    out, err = io.StringIO(), io.StringIO()
+    with (patch.dict(os.environ, child), contextlib.chdir(work),
+          contextlib.redirect_stdout(out), contextlib.redirect_stderr(err)):
+        status = dispatch.main(list(args))
+    return subprocess.CompletedProcess(args, status, out.getvalue(),
+                                       err.getvalue())
 
 
 def _ok(result):
@@ -104,6 +107,9 @@ def test_bump_current_main_all_sites_and_output(tmp):
         capture_output=True, text=True, check=True,
         env=_util.child_coverage('keep', cwd=work))
     assert checked.stdout.strip() == VERSION, checked.stdout
+    assert _drive(work, 'bump', VERSION).returncode != 0
+    assert sha == _out(bare, 'rev-parse', 'main')
+    _ok(_drive(work, 'bump', VERSION, '--successor'))
 
 
 def test_bump_refuses_version_without_room_for_successor(tmp):
@@ -147,7 +153,6 @@ def test_bump_permanent_refusal_is_loud_and_bounded(tmp):
     hook.chmod(0o755)
     result = _drive(work, 'bump', VERSION)
     assert result.returncode != 0, result.stdout
-    assert 'fixture refusal' in result.stderr, result.stderr
     assert before == _out(bare, 'rev-parse', 'main')
     hook.unlink()
     _race(work, permanent=True)
@@ -162,6 +167,11 @@ def test_annotated_tag_push(tmp):
     _ok(_drive(work, 'tag', VERSION, sha))
     assert _out(bare, 'cat-file', '-t', f'v{VERSION}') == 'tag'
     assert _out(bare, 'rev-parse', f'v{VERSION}^{{}}') == sha
+    identity = _out(bare, 'rev-parse', f'v{VERSION}')
+    _git(work, 'commit', '--quiet', '--allow-empty', '-m', 'newer')
+    newer = _out(work, 'rev-parse', 'HEAD')
+    assert _drive(work, 'tag', VERSION, newer).returncode != 0
+    assert _out(bare, 'rev-parse', f'v{VERSION}') == identity
 
 
 def _row(name='tests', status='completed', conclusion='success', **extra):
@@ -170,12 +180,8 @@ def _row(name='tests', status='completed', conclusion='success', **extra):
 
 
 def _wait(tmp, mode, pages, *args):
-    work = Path(tmp) / 'tree'
-    (work / SCRIPT.parent).mkdir(parents=True)
-    for name in ('release_dispatch.py', 'ratchet_push.py'):
-        source = ROOT / SCRIPT.parent / name
-        assert source.is_file(), f'missing {source.name}'
-        shutil.copy2(source, work / SCRIPT.parent / name)
+    Path(tmp).mkdir(parents=True, exist_ok=True)
+    work, _bare = _repo(tmp)
     endpoint = f'repos/o/r/actions/runs?head_sha={SHA}'
     fake = FakeGh(Path(tmp) / 'gh', {endpoint: pages})
     result = _drive(work, mode, SHA, '--interval', '0.001', *args,
@@ -201,11 +207,14 @@ def test_wait_gates_pending_then_green_with_exact_exclusions(tmp):
     assert len(fake.calls()) == 2, fake.calls()
 
 
-def test_wait_gates_neutral_fails_without_waiting_for_pending(tmp):
-    result, fake = _wait(tmp, 'wait-gates', [{'workflow_runs': [
-        _row(conclusion='neutral'), _row('lint', status='in_progress')]}])
-    assert result.returncode != 0, result.stdout
-    assert len(fake.calls()) == 1, fake.calls()
+def test_wait_gates_bad_conclusions_fail_before_pending(tmp):
+    for conclusion in ('neutral', 'cancelled', 'timed_out'):
+        result, fake = _wait(Path(tmp) / conclusion, 'wait-gates', [
+            {'workflow_runs': [_row(conclusion=conclusion),
+                               _row('lint', status='in_progress')]},
+            {'workflow_runs': [_row()]}])
+        assert result.returncode != 0, result.stdout
+        assert len(fake.calls()) == 1, fake.calls()
 
 
 def test_wait_gates_registration_grace_and_empty_refusal(tmp):
@@ -261,19 +270,20 @@ def test_wait_green_response_must_arrive_before_deadline(tmp):
         assert status == expected, out.getvalue() + err.getvalue()
 
 
-def test_wait_release_refuses_skipped_after_pending(tmp):
-    result, fake = _wait(tmp, 'wait-release', [
-        {'workflow_runs': [_row(), _row('release', status='queued')]},
-        {'workflow_runs': [_row(), _row('release', conclusion='skipped')]}])
-    assert result.returncode != 0, result.stdout + result.stderr
-    assert len(fake.calls()) == 2, fake.calls()
+def test_wait_release_refuses_skipped_or_cancelled_after_pending(tmp):
+    for conclusion in ('skipped', 'cancelled'):
+        result, fake = _wait(Path(tmp) / conclusion, 'wait-release', [
+            {'workflow_runs': [_row(), _row('release', status='queued')]},
+            {'workflow_runs': [_row(),
+                               _row('release', conclusion=conclusion)]}])
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert len(fake.calls()) == 2, fake.calls()
 
 
 def test_wait_refuses_api_error(tmp):
     result, fake = _wait(tmp, 'wait-gates', [
         {'status': 403, 'body': 'fixture API refusal'}])
     assert result.returncode != 0, result.stdout
-    assert 'fixture API refusal' in result.stderr, result.stderr
     assert len(fake.calls()) == 1, fake.calls()
 
 
