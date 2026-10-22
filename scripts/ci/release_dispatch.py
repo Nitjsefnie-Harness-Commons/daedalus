@@ -106,7 +106,7 @@ def _read(argv):
 def _runs(read, repository, sha):
     raw = read(['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
                 f'repos/{repository}/actions/runs'
-                f'?head_sha={sha}&per_page=100'])
+                f'?head_sha={sha}'])
     decoder = json.JSONDecoder()
     rows = []
     # gh emits one JSON document per page; consume every page.
