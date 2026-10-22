@@ -266,14 +266,14 @@ def test_wait_gate_default_exceeds_publishing_deadline(tmp):
 def test_wait_green_response_must_arrive_before_deadline(tmp):
     del tmp
     dispatch = _util.load(ROOT / SCRIPT, 'scripts.ci.release_dispatch')
+    clock = [0.0]
     for elapsed, expected in ((9.99, 0), (10, 1), (10.01, 1)):
-        clock = [0.0]
+        clock[0] = 0.0
         out, err = io.StringIO(), io.StringIO()
 
-        def read(_argv):
+        def read(_argv, elapsed=elapsed):
             clock[0] = elapsed
             return json.dumps({'workflow_runs': [_row()]})
-
         with (patch.dict(os.environ, REPO='o/r'),
               patch.object(dispatch.time, 'monotonic', lambda: clock[0]),
               contextlib.redirect_stdout(out),
