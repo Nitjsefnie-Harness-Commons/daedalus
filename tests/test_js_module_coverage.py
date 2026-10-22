@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -47,12 +48,21 @@ def _main(policy, argv):
 def test_the_seed_names_only_tracked_javascript_that_still_has_code(tmp):
     del tmp
     baseline = _thresholds().js_coverage_baseline(_document())
-    assert baseline, 'the ratchet records nothing, so it exempts everything'
     sources = js_coverage.tracked_sources(ROOT)
     for rel, count in baseline.items():
         assert rel in sources, rel
         assert count > 0, rel
         assert sources[rel].strip(), rel
+
+
+def test_absent_family_is_valid_for_live_checks(tmp):
+    data = _document()
+    data.pop(MEMBER, None)
+    with patch.dict(globals(), _document=lambda: data):
+        test_the_seed_names_only_tracked_javascript_that_still_has_code(tmp)
+        test_every_tracked_module_satisfies_the_per_module_policy(tmp)
+    assert _policy().violations({'new.js': 1}, {})['unrecorded'] == {
+        'new.js': 1}
 
 
 def test_unrecorded_carries_its_own_remedy_naming_both_actions(tmp):
@@ -166,7 +176,6 @@ def test_every_tracked_module_satisfies_the_per_module_policy(tmp):
     del tmp
     policy = _policy()
     baseline = _thresholds().js_coverage_baseline(_document())
-    assert baseline, 'the ratchet records nothing, so it exempts everything'
     sources = js_coverage.tracked_sources(ROOT)
     counts = dict.fromkeys(sources, 0) | dict(baseline)
     found = policy.violations(counts, baseline)

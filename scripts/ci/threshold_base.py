@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve and export the judged threshold base once per CI job."""
+"""Resolve the event-pinned threshold base for every CI consumer."""
 import os
 import subprocess
 import sys
@@ -14,15 +14,20 @@ def _git(*args):
         check=False, timeout=10)
 
 
-def resolve(event, before, repository, base_ref):
+def resolve(event, before, repository, base_sha):
+    history = _git('rev-parse', '--is-shallow-repository')
+    if history.returncode or history.stdout.strip() != 'false':
+        raise ValueError('cannot resolve threshold history: shallow or '
+                         'unreadable repository')
     if event == 'pull_request':
+        if not base_sha.strip():
+            raise ValueError('cannot resolve base: missing event base SHA')
         fetched = _git('fetch', '--no-tags',
-                       f'https://github.com/{repository}.git',
-                       f'refs/heads/{base_ref}')
+                       f'https://github.com/{repository}.git', base_sha)
         if fetched.returncode:
             raise ValueError(
                 f'cannot fetch threshold target: {fetched.stderr}')
-        merged = _git('merge-base', 'HEAD', 'FETCH_HEAD')
+        merged = _git('merge-base', 'HEAD', base_sha)
         if merged.returncode or not merged.stdout.strip():
             raise ValueError(f'cannot resolve threshold merge base: '
                              f'{merged.stderr}')
@@ -42,7 +47,7 @@ def main():
         base = resolve(os.environ.get('EVENT', ''),
                        os.environ.get('BEFORE', ''),
                        os.environ.get('REPO', ''),
-                       os.environ.get('BASE_REF', ''))
+                       os.environ.get('BASE_SHA', ''))
         with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
             stream.write(f'DAEDALUS_THRESHOLDS_BASE_REV={base}\n')
         print(f'Threshold base: {base}')
