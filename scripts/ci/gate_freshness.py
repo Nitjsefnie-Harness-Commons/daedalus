@@ -308,13 +308,19 @@ def _keep_or_rerun(read, repository, head, verdict):
         raise QueryError('malformed workflow runs listing') from error
     if any(not isinstance(r, dict) or not isinstance(r.get('id'), int)
            or isinstance(r['id'], bool) or r['id'] <= 0
-           or any(not isinstance(r.get(k), str) for k in (
-               'event', 'path', 'status', 'head_branch')) for r in runs):
+           or (r.get('head_repository') is not None
+               and not isinstance(r['head_repository'], dict))
+           or any(not isinstance(r.get(k), str) for k in ('event', 'path'))
+           or any(k not in r or not isinstance(r[k], (str, type(None)))
+                  for k in ('status', 'head_branch')) for r in runs):
         raise QueryError('malformed workflow runs listing')
     run_id = max((r['id'] for r in runs
                   if r['event'] == 'pull_request_target'
                   and r['path'] == '.github/workflows/gate-freshness.yml'
                   and r['head_branch'] == head['ref']
+                  and head['repo']
+                  and head['repo'] == (r.get('head_repository') or {}).get(
+                      'full_name')
                   and r['status'] == 'completed'), default=None)
     if run_id is None:
         raise QueryError('no completed pull_request_target run of '
@@ -333,9 +339,8 @@ def _keep_or_rerun(read, repository, head, verdict):
 def _pr_head(pr):
     head = pr.get('head') or {}
     repo = head.get('repo') or {}
-    owner = (repo.get('owner') or {}).get('login')
     return {'number': pr.get('number'), 'sha': head.get('sha'),
-            'owner': owner, 'ref': head.get('ref'),
+            'repo': repo.get('full_name'), 'ref': head.get('ref'),
             'base': (pr.get('base') or {}).get('ref')}
 
 

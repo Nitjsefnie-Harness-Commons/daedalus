@@ -11,7 +11,7 @@ name: gate freshness
 # unreadable files skip loudly. Re-runs retain the PR-associated check suite.
 #
 # BASE SAFETY. pull_request_target uses the base workflow and checkout;
-# only SHA/ref/owner come from the event, and no PR code runs.
+# Head SHA, ref and repository come from the event; no PR code runs.
 # -I excludes adjacent modules, PYTHONPATH and user site imports.
 #
 # THE BOUND: L + 2 + H * (G + 8): L path lookups + snapshot and PR list,
