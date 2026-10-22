@@ -81,6 +81,8 @@ def test_path_tokens_expand_only_their_own_family(tmp):
                              'removed_paths')
         declarations = removed.declared(rev, 'HEAD', repo)
         candidates = ['backend/kept.py', 'backend/new.py']
+        assert removed.exempt_paths('HEAD', 'HEAD', repo, family,
+                                    {}, candidates) == set()
         assert declarations.paths(family, candidates) == {'backend/kept.py'}
         assert declarations.paths('tests_line_baseline', candidates) == set()
         assert removed.exempt_paths(rev, 'HEAD', repo, family,
