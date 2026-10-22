@@ -116,6 +116,11 @@ def test_nonfeatures_refuse_raise_with_remedy(tmp):
 def test_unproved_ranges_fail_even_when_documents_match(tmp):
     base, head = _raised()
     repo, rev = _history(tmp, 'ranges', ['feat: eligible'], base, head)
+    shallow = Path(tmp) / 'shallow'
+    _git(repo, 'clone', '--no-local', '--depth=1', '.', str(shallow))
+    assert _judge(repo, rev, base, base)[0] == 0
+    status, _out, err = _judge(shallow, rev, base, base)
+    assert status == 1 and 'history' in err, err
     for revs in (
             [], ['--base-rev', ''], ['--base-rev', ' '],
             ['--base-rev', 'unknown'],
@@ -209,9 +214,6 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     assert job is not None
     step = next(s for s in job['steps']
                 if s.get('name') == 'Threshold direction guard')
-    checkout = next(s for s in job['steps']
-                    if 'checkout@' in s.get('uses', ''))
-    assert str(checkout['with']['fetch-depth']) == '0'
     resolver = next(s for s in job['steps']
                     if s.get('name') == 'Resolve threshold base')
     jobs = workflow_mapping((ROOT / '.github/workflows/tests.yml').read_text())
@@ -219,8 +221,6 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
         steps = jobs['jobs'][name]['steps']
         assert sum(s.get('run') == 'python scripts/ci/threshold_base.py'
                    for s in steps) == 1
-        assert all(str(s['with']['fetch-depth']) == '0' for s in steps
-                   if 'checkout@' in s.get('uses', ''))
     script = resolver['run'] + '\n. "$GITHUB_ENV"\n' + step['run']
     assert not any(key in obj for obj in (job, step)
                    for key in ('if', 'continue-on-error'))
