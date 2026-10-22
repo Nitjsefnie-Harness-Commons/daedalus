@@ -212,7 +212,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate the threshold document
         run: python3 scripts/ci/thresholds.py --check
+
+      - name: Resolve threshold base
+        uses: ./.github/actions/thresholds-base
+
+      - name: Threshold direction guard
+        run: |
+          base="${DAEDALUS_THRESHOLDS_BASE_REV:?Threshold base missing}"
+          echo "Threshold direction: base=$base head=$(git rev-parse HEAD)"
+          git show "${base}:.github/ci-thresholds.json" > "$RUNNER_TEMP/base-thresholds.json"
+          python3 scripts/ci/thresholds_guard.py \
+            --base "$RUNNER_TEMP/base-thresholds.json" \
+            --head .github/ci-thresholds.json --base-rev "$base" --head-rev HEAD

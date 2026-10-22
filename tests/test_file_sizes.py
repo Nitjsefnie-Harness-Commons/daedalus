@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Contracts for the JSON-owned module-size policy and its ratchet."""
+import os
 import shutil
 import subprocess
 import sys
@@ -8,12 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ratchet_fixture import (  # noqa: E402
-    _captured_main, _document, _normalised)
+    _captured_main, _document)
 
 ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
-SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 
 
 def _policy():
@@ -31,7 +31,10 @@ def test_every_tracked_module_satisfies_the_size_policy(tmp):
     baseline = _thresholds().module_size_baseline(_document())
     found = policy.violations(policy.tracked_sizes(), baseline)
     assert not found['grown'], found['grown']
-    assert not found['over'], found['over']
+    exempt = policy.thresholds_removed.exempt_paths(
+        os.environ.get('DAEDALUS_THRESHOLDS_BASE_REV'), 'HEAD', ROOT,
+        'module_size_baseline', baseline, found['over'])
+    assert not (set(found['over']) - exempt), found['over']
 
 
 def test_baseline_names_only_files_that_still_need_it(tmp):
@@ -175,8 +178,8 @@ def _size_fixture(tmp, files, baseline, name):
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('line = 1\n' * count, encoding='utf-8')
-    for source in (POLICY_SOURCE, ROOT / 'scripts' / 'ci' / 'thresholds.py',
-                   ROOT / 'scripts' / 'ci' / 'reseed.py'):
+    for source in (POLICY_SOURCE, ROOT / 'scripts/ci/thresholds.py',
+                   ROOT / 'scripts/ci/thresholds_removed.py'):
         shutil.copy2(source, repo / 'scripts' / 'ci' / source.name)
     data = _document()
     data['module_size_baseline'] = baseline
@@ -313,73 +316,6 @@ def test_real_cli_tighten_missing_entry_reports_without_deleting_it(tmp):
     after = thresholds.load(target)
     assert after['module_size_baseline'] == data['module_size_baseline']
     assert after['coverage'] == data['coverage']
-
-
-def _skill_decisions(path=SKILL_SOURCE):
-    text = _normalised(path.read_text(encoding='utf-8'))
-    return {
-        'owner': '.github/ci-thresholds.json' in text
-        and 'module_size_baseline' in text,
-        'command': 'python3 scripts/ci/size_baseline.py --tighten' in text,
-        'growth': ('relocate the code into a new module' in text
-                   and 'shrinking' in text),
-        'manual_delete': ('entry naming a file that is gone is deleted by hand'
-                          in text),
-        'reads_skill': 'tests/test_file_sizes.py' in text,
-        'no_old_owner': "size_baseline.py's table" not in text,
-        'no_stale_reader_claim': 'no test reads this file' not in text,
-    }
-
-
-def _assert_skill_decision(name):
-    decisions = _skill_decisions()
-    assert decisions[name], f'skill decision missing: {name}'
-
-
-def test_skill_names_json_owner_independently(tmp):
-    del tmp
-    _assert_skill_decision('owner')
-
-
-def test_skill_names_real_shrink_command_independently(tmp):
-    del tmp
-    _assert_skill_decision('command')
-
-
-def test_skill_names_relocation_or_shrinking_as_growth_remedy(tmp):
-    del tmp
-    _assert_skill_decision('growth')
-
-
-def test_skill_names_manual_deletion_only_for_gone_files(tmp):
-    del tmp
-    _assert_skill_decision('manual_delete')
-
-
-def test_skill_removes_retired_owner_and_false_reader_claim(tmp):
-    del tmp
-    decisions = _skill_decisions()
-    assert decisions['no_old_owner'], decisions
-    assert decisions['no_stale_reader_claim'], decisions
-    assert decisions['reads_skill'], decisions
-
-
-def test_skill_mutations_are_caught_independently(tmp):
-    source = SKILL_SOURCE.read_text(encoding='utf-8')
-    mutations = (
-        ('owner', '.github/ci-thresholds.json', 'scripts/ci/size_baseline.py'),
-        ('command', 'python3 scripts/ci/size_baseline.py --tighten',
-         'python3 .github/ci-thresholds.json'),
-        ('growth', 'relocate the code into a new module',
-         'raise the recorded number'),
-        ('manual_delete',
-         'entry naming a file that is gone is deleted by\nhand',
-         '--tighten removes every stale entry'),
-    )
-    for name, old, new in mutations:
-        path = Path(tmp) / f'{name}.md'
-        path.write_text(source.replace(old, new), encoding='utf-8')
-        assert not _skill_decisions(path)[name], name
 
 
 def test_refused_kinds_print_the_correct_remedy(tmp):

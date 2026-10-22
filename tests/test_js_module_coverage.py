@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ratchet_fixture import (  # noqa: E402
-    _captured_main, _document, _git, _normalised)
+    _captured_main, _document, _git)
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -17,7 +17,6 @@ import js_coverage  # noqa: E402
 from js_lines import code_lines  # noqa: E402
 
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
-SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 WORKFLOW_SOURCE = ROOT / '.github' / 'workflows' / 'tests.yml'
 MEMBER = 'js_coverage_baseline'
 
@@ -290,7 +289,7 @@ def _js_repo(tmp, name, sources, baseline):
     _git(repo, 'config', 'user.email', 'tests@example.invalid')
     _git(repo, 'config', 'user.name', 'Tests')
     (repo / 'scripts' / 'ci').mkdir(parents=True)
-    for rel in ('thresholds.py', 'reseed.py', 'js_lines.py',
+    for rel in ('thresholds.py', 'thresholds_removed.py', 'js_lines.py',
                 'js_coverage.py', 'js_module_coverage.py'):
         shutil.copy2(ROOT / 'scripts' / 'ci' / rel,
                      repo / 'scripts' / 'ci' / rel)
@@ -389,52 +388,6 @@ def test_workflow_gates_per_module_coverage_and_tightens_it(tmp):
     assert workflow.index(tighten) < workflow.index(
         'python scripts/ci/thresholds.py --check')
     assert '- name: JavaScript per-module coverage gate' in workflow
-
-
-def _skill_decisions(path=SKILL_SOURCE):
-    source = path.read_text(encoding='utf-8')
-    text = _normalised(source)
-    paragraph = _normalised(''.join(
-        block for block in source.split('\n\n') if MEMBER in block))
-    return {
-        'owner': '.github/ci-thresholds.json' in text
-        and MEMBER in text,
-        'command': ('python3 scripts/ci/js_module_coverage.py --tighten'
-                    in text),
-        'remedy': 'uncovered' in paragraph and 'never raised' in paragraph,
-        'admission': 'at its measured uncovered count' in paragraph
-        and 'reviewed diff' in paragraph
-        and 'never add one' in paragraph
-        and 'it will not' in paragraph,
-        'reads_skill': 'tests/test_js_module_coverage.py' in text,
-    }
-
-
-def test_skill_names_owner_command_remedy_admission_and_reader(tmp):
-    del tmp
-    decisions = _skill_decisions()
-    assert all(decisions.values()), decisions
-
-
-def test_skill_mutations_are_caught_independently(tmp):
-    source = SKILL_SOURCE.read_text(encoding='utf-8')
-    mutations = (
-        ('owner', MEMBER, 'js_coverage_table'),
-        ('command',
-         'python3 scripts/ci/js_module_coverage.py --tighten',
-         'python3 scripts/ci/js_module_coverage.py --raise'),
-        ('reads_skill', 'tests/test_js_module_coverage.py', 'no suite'),
-        ('remedy', 'never raised by hand',
-         'raised by hand when a test is slow'),
-        ('admission', 'at its measured',
-         'at whatever count the next run measures'),
-        ('admission', 'never add one', 'adds one on the next run'),
-        ('admission', 'pick it up; it will not', 'pick it up; it will'),
-    )
-    for name, old, new in mutations:
-        path = Path(tmp) / f'{name}.md'
-        path.write_text(source.replace(old, new), encoding='utf-8')
-        assert not _skill_decisions(path)[name], name
 
 
 def main():

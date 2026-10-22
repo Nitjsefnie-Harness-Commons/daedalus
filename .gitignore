@@ -81,6 +81,12 @@
 !/.github/ISSUE_TEMPLATE/
 !/.github/ISSUE_TEMPLATE/issue.md
 
+# ─── .github/actions/thresholds-base ───
+!/.github/
+!/.github/actions/
+!/.github/actions/thresholds-base/
+!/.github/actions/thresholds-base/action.yml
+
 # ─── .github/workflows ───
 !/.github/
 !/.github/workflows/
@@ -260,11 +266,12 @@
 !/scripts/ci/line_lengths.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/ratchet_push.py
-!/scripts/ci/reseed.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/suite_bound.py
 !/scripts/ci/tests_lines.py
 !/scripts/ci/thresholds.py
+!/scripts/ci/thresholds_guard.py
+!/scripts/ci/thresholds_removed.py
 !/scripts/ci/type_error_baseline.py
 !/scripts/ci/workflow_yaml.py
 !/scripts/ci/workflow_yaml_scan.py
@@ -287,7 +294,6 @@
 !/tests/_child_ready.py
 !/tests/_ci_imports.py
 !/tests/_ci_publisher.py
-!/tests/_ci_reseed_fixtures.py
 !/tests/_ci_wait_fixtures.py
 !/tests/_classifier_calls.py
 !/tests/_cli_arg_audit_resolver.py
@@ -454,6 +460,8 @@
 !/tests/test_ci_pip_cache.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_thresholds.py
+!/tests/test_ci_thresholds_guard.py
+!/tests/test_ci_thresholds_removed.py
 !/tests/test_ci_tool_declarations.py
 !/tests/test_ci_wait.py
 !/tests/test_ci_wait_gate.py

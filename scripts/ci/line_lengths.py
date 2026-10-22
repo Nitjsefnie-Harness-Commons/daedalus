@@ -15,15 +15,17 @@ line left, and an entry naming a file that is gone is deleted by hand.
 """
 import argparse
 import importlib
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level,no-name-in-module
-    from . import thresholds
+    from . import thresholds, thresholds_removed
 else:
     thresholds = importlib.import_module('thresholds')
+    thresholds_removed = importlib.import_module('thresholds_removed')
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -133,6 +135,11 @@ def main(argv=None):
             return 0
 
         found = violations(counts, baseline)
+        exempt = thresholds_removed.exempt_paths(
+            os.environ.get('DAEDALUS_THRESHOLDS_BASE_REV'), 'HEAD', ROOT,
+            'long_line_baseline', baseline, found['over'])
+        for path in exempt:
+            del found['over'][path]
         if not any(found.values()):
             print(f'{len(counts)} tracked modules within the line-length '
                   'policy')

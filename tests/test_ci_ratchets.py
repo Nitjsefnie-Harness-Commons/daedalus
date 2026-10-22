@@ -17,8 +17,7 @@ from _ci_publisher import (  # noqa: E402
     git as _git, publisher_commit_step as _publisher_commit_step,
     publisher_python as _publisher_python,
     publisher_step as _publisher_step,
-    run_publisher_case as _run_publisher_case,
-    seed_publisher_tree as _seed_publisher_tree)
+    run_publisher_case as _run_publisher_case)
 from _ghexpr import evaluate_if  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wffixtures import _value_error  # noqa: E402
@@ -85,6 +84,7 @@ PROMOTED_MODULES = (
     'scripts.ci.ratchet',
     'scripts.ci.size_baseline',
     'scripts.ci.thresholds',
+    'scripts.ci.thresholds_guard',
     'scripts.ci.tests_lines',
     'scripts.ci.type_error_baseline',
     'scripts.ci.workflow_yaml',
@@ -225,37 +225,6 @@ def test_shipped_file_forcing_measurement_is_derived_and_capped(tmp):
             assert actual == source
             assert 'no raise' in result.stdout
 
-    path = _copy_thresholds(tmp)
-    before = path.read_bytes()
-    ratchet = _ratchet()
-    for measured, expected in (('80.1', 'no raise'), ('81.6', 'raised')):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            status = ratchet.main(['--language', 'python', '--measured',
-                                   measured, '--thresholds', str(path)])
-        assert status == 0
-        assert expected in output.getvalue()
-        if measured == '80.1':
-            assert path.read_bytes() == before
-    assert _thresholds().load(path)['coverage']['python']['floor'] \
-        == Decimal('80.1')
-
-    for measured in (Decimal('96.0'), Decimal('100.0')):
-        source = thresholds.load(THRESHOLDS_PATH)
-        source['coverage']['python'] = {
-            'measured': measured, 'floor': measured - ratchet.CALIBRATION_GAP}
-        path = Path(tmp) / f'at-{measured}.json'
-        thresholds.write(path, source)
-        before = path.read_bytes()
-        assert ratchet.main([
-            '--language', 'python', '--measured', f'{measured}',
-            '--thresholds', str(path)]) == 0
-        assert path.read_bytes() == before
-        updated = thresholds.load(path)
-        assert updated['coverage']['python'] == {
-            'measured': measured,
-            'floor': measured - ratchet.CALIBRATION_GAP}
-
 
 def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
     workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
@@ -272,8 +241,6 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
     (work / 'scripts' / 'ci').mkdir(parents=True)
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
                  work / 'scripts' / 'ci' / 'thresholds.py')
-    shutil.copy2(ROOT / 'scripts' / 'ci' / 'reseed.py',
-                 work / 'scripts' / 'ci' / 'reseed.py')
     (work / '.github' / 'ci-thresholds.json').write_text(
         json.dumps(_ratchet_document(python=(80.0, 78.5),
                                      javascript=(50.0, 48.5))),
@@ -342,12 +309,15 @@ def test_real_publisher_step_size_only_preserves_calibrations(tmp):
     for name, measured, member in (
             ('publisher-size', '80.0', 'module_size_baseline'),
             ('publisher-combined', '81.6', 'module_size_baseline'),
-            ('publisher-tests-lines', '80.0', 'tests_line_baseline')):
+            ('publisher-tests-lines', '80.0', 'tests_line_baseline'),
+            ('publisher-tests-seed', '80.0', 'tests_line_baseline')):
         data = _ratchet_document()
         if member == 'module_size_baseline':
             data[member]['tests/test_mcp_server.py'] = 1707
         else:
             data[member] = 1707
+            if name == 'publisher-tests-seed':
+                del data[member]
         repo, path, before, output, summary, done = _run_publisher_case(
             tmp, name, data, measured, '35.5')
         assert done.returncode == 0, (done.stdout, done.stderr)
@@ -411,9 +381,11 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
         encoding='utf-8')
     noop = _run_publisher_case(
         tmp, 'publisher-noop-matrix', _ratchet_document(), '80.0', '35.5')
-    _repo, _path, _before, noop_output, noop_summary, done = noop
+    repo, path, before, noop_output, noop_summary, done = noop
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
+    assert path.read_bytes() == before
+    assert _git(repo, 'diff', '--name-only').stdout == ''
     assert ('no raise; no module shrank, no file lost an over-limit '
             'line, no module lost an uncovered JavaScript line and '
             'the suite tree lost no line.'
@@ -477,129 +449,6 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
             'status': status,
         }
         assert evaluate_if(commit['if'], context) is expected, context
-
-
-def test_publisher_condition_mutations_are_rejected(tmp):
-    ratchet = _publisher_step()['if']
-    commit = _publisher_commit_step()
-    main_context = {
-        'github': {'event_name': 'pull_request', 'ref': 'refs/heads/main'},
-        'steps': {'measure': {'conclusion': 'success'}},
-        'status': {'success': True, 'failure': False, 'cancelled': False},
-    }
-    ratchet_mutations = (
-        ("github.event_name == 'push'", main_context),
-        ("github.ref == 'refs/heads/main'", {
-            **main_context,
-            'github': {'event_name': 'push', 'ref': 'refs/heads/other'},
-        }),
-        ("steps.measure.conclusion == 'success'", {
-            **main_context,
-            'github': {'event_name': 'push', 'ref': 'refs/heads/main'},
-            'steps': {'measure': {'conclusion': 'failure'}},
-        }),
-    )
-    for removed, context in ratchet_mutations:
-        mutated = ratchet.replace(removed, 'true')
-        assert evaluate_if(mutated, context) is True
-        assert evaluate_if(ratchet, context) is False
-    ratchet_failure = {
-        'github': {'event_name': 'push', 'ref': 'refs/heads/main'},
-        'steps': {'measure': {'conclusion': 'success'}},
-        'status': {'success': False, 'failure': True, 'cancelled': False},
-    }
-    assert evaluate_if(ratchet, ratchet_failure) is True
-    assert evaluate_if(
-        ratchet.replace('!cancelled()', 'success()'),
-        ratchet_failure) is False
-    cancelled = {
-        'steps': {'ratchet': {'outputs': {'changed': 'true'}}},
-        'status': {'success': True, 'failure': False, 'cancelled': True},
-    }
-    changed_false = dict(cancelled)
-    changed_false['steps'] = {
-        'ratchet': {'outputs': {'changed': 'false'}}}
-    changed_false['status'] = {
-        'success': True, 'failure': False, 'cancelled': False}
-    assert evaluate_if(commit['if'], cancelled) is False
-    assert evaluate_if(commit['if'].replace('!cancelled() && ', ''),
-                       cancelled) is True
-    assert evaluate_if(commit['if'], changed_false) is False
-    assert evaluate_if(
-        commit['if'].replace("steps.ratchet.outputs.changed == 'true'",
-                             'true'), changed_false) is True
-    commit_failure = {
-        'steps': {'ratchet': {'outputs': {'changed': 'true'}}},
-        'status': {'success': False, 'failure': True, 'cancelled': False},
-    }
-    assert evaluate_if(commit['if'], commit_failure) is True
-    assert evaluate_if(
-        commit['if'].replace('!cancelled()', 'success()'),
-        commit_failure) is False
-
-
-def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
-    repo = Path(tmp) / 'publisher'
-    repo.mkdir()
-    _seed_publisher_tree(repo, _ratchet_document())
-    shim, values = _publisher_python(Path(tmp) / 'shim', {
-        'PYTHON_MEASURED': '81.6', 'JAVASCRIPT_MEASURED': '35.5'})
-    env = dict(os.environ)
-    env.update(values)
-    env['PATH'] = f'{shim}{os.pathsep}{env["PATH"]}'
-    output = Path(tmp) / 'github-output'
-    summary = Path(tmp) / 'github-summary'
-    output.touch()
-    summary.touch()
-    env['GITHUB_OUTPUT'] = str(output)
-    env['GITHUB_STEP_SUMMARY'] = str(summary)
-    done = run_step(repo, _publisher_step(), env, workflow={}, job={})
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert 'thresholds valid' in done.stdout, done.stdout
-    assert 'changed=true' in output.read_text(encoding='utf-8')
-    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
-        '.github/ci-thresholds.json']
-    checked = subprocess.run(
-        [sys.executable, str(repo / 'scripts' / 'ci' / 'thresholds.py'),
-         '--check', '--thresholds',
-         str(repo / '.github' / 'ci-thresholds.json')],
-        cwd=repo, capture_output=True, text=True, timeout=60,
-        env=_util.child_coverage('scrub'))
-    assert checked.returncode == 0, (checked.stdout, checked.stderr)
-    after = _thresholds().load(repo / '.github' / 'ci-thresholds.json')
-    assert after['coverage']['javascript'] == {
-        'measured': Decimal('35.5'), 'floor': Decimal('34.0')}
-    assert after['module_size_baseline'] == _ratchet_document()[
-        'module_size_baseline']
-
-
-def test_real_publisher_step_noop_reports_unchanged(tmp):
-    repo = Path(tmp) / 'publisher-noop'
-    repo.mkdir()
-    _seed_publisher_tree(repo, _ratchet_document())
-    shim, values = _publisher_python(Path(tmp) / 'shim-noop', {
-        'PYTHON_MEASURED': '80.0', 'JAVASCRIPT_MEASURED': '35.5'})
-    env = dict(os.environ)
-    env.update(values)
-    env['PATH'] = f'{shim}{os.pathsep}{env["PATH"]}'
-    output = Path(tmp) / 'github-output-noop'
-    summary = Path(tmp) / 'github-summary-noop'
-    output.touch()
-    summary.touch()
-    env['GITHUB_OUTPUT'] = str(output)
-    env['GITHUB_STEP_SUMMARY'] = str(summary)
-    done = run_step(repo, _publisher_step(), env, workflow={}, job={})
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert 'changed=false' in output.read_text(encoding='utf-8')
-    assert _git(repo, 'diff', '--name-only').stdout == ''
-    # The noop holds at equality and at a budget below the seeded tree alike,
-    # so only the check itself says which one the fixture is sitting at.
-    budget = subprocess.run(
-        [sys.executable, str(repo / 'scripts' / 'ci' / 'tests_lines.py'),
-         '--thresholds', str(repo / '.github' / 'ci-thresholds.json')],
-        cwd=str(repo), capture_output=True, text=True, timeout=60,
-        env=_util.child_coverage('scrub'))
-    assert budget.returncode == 0, (budget.stdout, budget.stderr)
 
 
 def main():

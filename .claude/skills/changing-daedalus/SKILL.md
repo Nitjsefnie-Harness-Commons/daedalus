@@ -182,10 +182,8 @@ listed file past its number, relocate the code into a new module. A stale
 entry is the one hand edit that is correct:
 `python3 scripts/ci/size_baseline.py --tighten` drops an entry whose file is
 back under its ceiling, but an entry naming a file that is gone is deleted by
-hand. `tests/test_file_sizes.py` gates the policy, pins the script's docstring
-to the remedy a refusal prints, pins the whole policy source to the rule
-above, and reads this paragraph so the named state owner and tightening
-command cannot drift from the implementation.
+hand. `tests/test_file_sizes.py` gates the measurement, refusal and tightening
+behavior.
 
 **The same file's `long_line_baseline` holds the 79-column policy on the same
 terms.** It records how many over-limit lines each tracked Python file still
@@ -193,7 +191,7 @@ carries; a number is never raised by hand and no entry is ever added by hand.
 The remedy for a refusal is to wrap the line, and the shrink is recorded with
 `python3 scripts/ci/line_lengths.py --tighten`, which also drops an entry
 whose file has no over-limit line left. `tests/test_line_lengths.py` gates
-the policy and reads this paragraph the same way.
+the measurement, refusal and tightening behavior.
 
 **`.github/ci-thresholds.json`'s `type_error_baseline` holds the test tree's
 type-error count on the same terms.** It records how many type errors each
@@ -208,31 +206,35 @@ is removed by hand. `tests/test_type_errors.py` gates the policy and reads
 this paragraph the same way.
 
 **`.github/ci-thresholds.json`'s `tests_line_baseline` holds the test tree's
-own size on the same terms.** It records the text lines of every tracked file
-under `tests/`, summed, as one tree-wide number rather than a row per file —
-the subject is the directory, so there is no path to key on. A number is
-never raised by hand, and there is no command that raises one: the test tree
-pays for growth by deleting as many lines elsewhere under `tests/` as the
-change added. The remedy for a refusal is therefore a deletion, not a
-re-baseline, and the fall is recorded with
-`python3 scripts/ci/tests_lines.py --tighten`. A recorded number is also
-never rewritten, so a re-seed — delete the row, then seed it at the count
-the gate measures — has exactly one sanctioned bridge over the rowless
-intermediate the loader refuses: a commit whose message carries
-`[tests-line-re-seed]` may carry the document WITHOUT the row. The marker
-is read by a bounded, fail-closed walk of the commit's ancestry, never a
-single read of the tip, so a publisher commit landing between the delete
-and the seed does not close the window and a shallow checkout reads as no
-marker. The marker buys the absence only: the next recorded value is the
-seed at the count the gate measures on that tree, and the push-to-main
-publisher tightens the row from there. The row's first recorded value is a
-seed on the same terms, taken at the count the gate measures, so the seed
-absorbs whatever the introducing branch added under `tests/`: the recorded
-number stands above main's own count by that branch's net growth rather
-than by a raise, and no number main carried is increased. A pull request is
-checked on its MERGE ref, so a branch that net-adds lines goes red on merge
-however few it adds at its head. `tests/test_ci_thresholds.py` gates the
-policy and reads this paragraph the same way.
+own size.** It sums text lines of every tracked file under `tests/` as one
+budget. A recorded budget may rise only when the judged range contains a
+commit whose subject starts with `feat:` or `feat(scope):`. Non-feature
+changes pay for growth by trimming their own tests: drop redundant cases,
+merge parametrisations, or delete repeated assertions. A feature must still
+record a sufficient budget; its subject does not waive the line gate.
+
+**Remove a recorded threshold only when the measurement is defective or
+its definition changed.** Declare the reason in the judged range with
+`Thresholds-Removed: <entry>=<bug|definition>`; the scalar's entry is exactly
+`tests_line_baseline`, and path entries use `family.path` or a bare baseline
+family declaring its entries. A path whose file is no longer tracked needs
+no declaration. A breach is never a removal reason. The audit workflow's
+direction guard compares the documents at the judged base and head: the
+fetched target's merge base on a PR, the event's before SHA on a push
+(`HEAD^` when that SHA is unusable). Unreadable history is a refusal.
+
+Map measurement gates exempt only declared paths actually removed since the
+judged base, intersected with their own complaints. CI exports that base as
+`DAEDALUS_THRESHOLDS_BASE_REV`; a local check may set the same variable.
+Unreadable or absent history grants no exemption. Map writers only lower or
+drop existing rows; they never seed a removed entry or add a new one.
+
+**An absent budget stays absent until measured.** The check still measures
+and reports, with no budget to compare and no write. Main's publisher runs
+`python3 scripts/ci/tests_lines.py --tighten`, which seeds an absent scalar
+at that run's measured total, lowers an existing one when tests shrink,
+and never raises it. Coverage updates preserve scalar absence. PR checks
+run on the MERGE ref, so the merged test tree must fit the recorded budget.
 
 **The same file's `js_coverage_baseline` holds the per-module JavaScript
 coverage policy on the same terms.** It records how many uncovered
@@ -256,7 +258,7 @@ after which the ordinary ratchet applies to it like any other. The
 alternative is to cover its lines, and then it needs no entry at all. Do
 not leave a new module unrecorded expecting the next tightening run to
 pick it up; it will not. `tests/test_js_module_coverage.py` gates the
-policy and reads both paragraphs the same way.
+measurement, refusal and tightening behavior.
 
 ## Git and CI
 

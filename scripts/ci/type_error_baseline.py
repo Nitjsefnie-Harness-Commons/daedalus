@@ -21,6 +21,7 @@ tracked.
 """
 import argparse
 import importlib
+import os
 import json
 import subprocess
 import sys
@@ -28,9 +29,10 @@ from pathlib import Path
 
 if __package__:
     # pylint: disable-next=relative-beyond-top-level,no-name-in-module
-    from . import thresholds
+    from . import thresholds, thresholds_removed
 else:
     thresholds = importlib.import_module('thresholds')
+    thresholds_removed = importlib.import_module('thresholds_removed')
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -200,6 +202,11 @@ def main(argv=None):
             print('tightened the type-error baseline')
             return 0
 
+        exempt = thresholds_removed.exempt_paths(
+            os.environ.get('DAEDALUS_THRESHOLDS_BASE_REV'), 'HEAD', args.root,
+            'type_error_baseline', baseline, found['over'])
+        for path in exempt:
+            del found['over'][path]
         if not any(found.values()):
             print(f'{analysed} test modules analysed, within the '
                   'type-error policy')

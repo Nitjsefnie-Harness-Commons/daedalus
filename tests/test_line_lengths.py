@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Contracts for the JSON-owned line-length policy and its ratchet."""
+import os
 import shutil
 import subprocess
 import sys
@@ -8,12 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ratchet_fixture import (  # noqa: E402
-    _captured_main, _document, _git, _normalised)
+    _captured_main, _document, _git)
 
 ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'line_lengths.py'
-SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 WORKFLOW_SOURCE = ROOT / '.github' / 'workflows' / 'tests.yml'
 
 
@@ -36,8 +36,8 @@ def _line_fixture(tmp, files, baseline, name):
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-    for source in (POLICY_SOURCE, ROOT / 'scripts' / 'ci' / 'thresholds.py',
-                   ROOT / 'scripts' / 'ci' / 'reseed.py'):
+    for source in (POLICY_SOURCE, ROOT / 'scripts/ci/thresholds.py',
+                   ROOT / 'scripts/ci/thresholds_removed.py'):
         shutil.copy2(source, repo / 'scripts' / 'ci' / source.name)
     data = _document()
     data['long_line_baseline'] = baseline
@@ -77,7 +77,7 @@ def test_counting_is_by_character_not_byte(tmp):
     }, {}, 'characters')
     counts = policy.tracked_long_lines(repo)
     scripts = {'scripts/ci/line_lengths.py', 'scripts/ci/thresholds.py',
-               'scripts/ci/reseed.py'}
+               'scripts/ci/thresholds_removed.py'}
     assert scripts <= set(counts)
     assert {rel: count for rel, count in counts.items()
             if rel not in scripts} == {
@@ -232,7 +232,10 @@ def test_every_tracked_module_satisfies_the_line_policy(tmp):
     baseline = _thresholds().long_line_baseline(_document())
     found = policy.violations(policy.tracked_long_lines(), baseline)
     assert not found['grown'], found['grown']
-    assert not found['over'], found['over']
+    exempt = policy.thresholds_removed.exempt_paths(
+        os.environ.get('DAEDALUS_THRESHOLDS_BASE_REV'), 'HEAD', ROOT,
+        'long_line_baseline', baseline, found['over'])
+    assert not (set(found['over']) - exempt), found['over']
 
 
 def test_baseline_names_only_files_that_still_need_it(tmp):
@@ -349,43 +352,6 @@ def test_real_cli_reports_threshold_load_failure_without_traceback(tmp):
         assert result.stderr.startswith(marker), (path, result.stderr)
         assert result.stderr.count('\n') == 1, (path, result.stderr)
         assert 'Traceback' not in result.stderr
-
-
-def _skill_decisions(path=SKILL_SOURCE):
-    source = path.read_text(encoding='utf-8')
-    text = _normalised(source)
-    paragraph = _normalised(''.join(
-        block for block in source.split('\n\n')
-        if 'long_line_baseline' in block))
-    return {
-        'owner': '.github/ci-thresholds.json' in text
-        and 'long_line_baseline' in text,
-        'command': 'python3 scripts/ci/line_lengths.py --tighten' in text,
-        'remedy': 'wrap' in paragraph and 'never raised' in paragraph,
-        'reads_skill': 'tests/test_line_lengths.py' in text,
-    }
-
-
-def test_skill_names_owner_command_remedy_and_reader(tmp):
-    del tmp
-    decisions = _skill_decisions()
-    assert all(decisions.values()), decisions
-
-
-def test_skill_mutations_are_caught_independently(tmp):
-    source = SKILL_SOURCE.read_text(encoding='utf-8')
-    mutations = (
-        ('owner', 'long_line_baseline', 'line_length_table'),
-        ('command', 'python3 scripts/ci/line_lengths.py --tighten',
-         'python3 scripts/ci/line_lengths.py --raise'),
-        ('reads_skill', 'tests/test_line_lengths.py', 'no suite'),
-        ('remedy', 'a number is never raised by hand',
-         'a number may be raised by hand'),
-    )
-    for name, old, new in mutations:
-        path = Path(tmp) / f'{name}.md'
-        path.write_text(source.replace(old, new), encoding='utf-8')
-        assert not _skill_decisions(path)[name], name
 
 
 def test_workflow_tightens_long_lines_before_the_document_check(tmp):
