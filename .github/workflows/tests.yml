@@ -244,7 +244,11 @@ jobs:
         with:
           # Nothing here pushes, and a token left in .git/config
           # is reusable by every later step in the job.
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve threshold base
+        uses: ./.github/actions/thresholds-base
 
       # actions/setup-python v7.0.0
       - uses: >-
@@ -607,6 +611,9 @@ jobs:
           # tests/test_workflow_job_timeouts.py pins this.
           fetch-depth: 0
 
+      - name: Resolve threshold base
+        uses: ./.github/actions/thresholds-base
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -815,6 +822,9 @@ jobs:
           # suites job.
           fetch-depth: 0
 
+      - name: Resolve threshold base
+        uses: ./.github/actions/thresholds-base
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -969,7 +979,11 @@ jobs:
           # diff describe one tree even if GitHub recomputes the merge ref
           # between the two jobs.
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve threshold base
+        uses: ./.github/actions/thresholds-base
 
       # No `cache: pip`. It saves in a post-job step, after the job has run
       # untrusted code, so the cache is two explicit steps instead: restore on

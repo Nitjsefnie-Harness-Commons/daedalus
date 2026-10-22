@@ -37,7 +37,7 @@
   ],
   ".github/workflows/audit.yml": [
     5114,
-    7326
+    7778
   ],
   ".github/workflows/claim.yml": [
     2264,
@@ -73,7 +73,7 @@
   ],
   ".github/workflows/tests.yml": [
     30321,
-    51987
+    52269
   ],
   ".github/workflows/version.yml": [
     2093,
@@ -485,35 +485,27 @@
   ],
   "scripts/ci/js_module_coverage.py": [
     1138,
-    4240
+    4530
   ],
   "scripts/ci/line_lengths.py": [
     808,
-    3805
+    4076
   ],
   "scripts/ci/ratchet_push.py": [
     1925,
     3844
   ],
-  "scripts/ci/reseed.py": [
-    1549,
-    3178
-  ],
   "scripts/ci/size_baseline.py": [
     669,
-    3563
+    3836
   ],
   "scripts/ci/suite_bound.py": [
     6451,
     11341
   ],
-  "scripts/ci/thresholds.py": [
-    1833,
-    10674
-  ],
   "scripts/ci/type_error_baseline.py": [
     1553,
-    6162
+    6439
   ],
   "scripts/ci/yamlanchor.py": [
     351,
@@ -574,10 +566,6 @@
   "tests/_ci_imports.py": [
     1118,
     2487
-  ],
-  "tests/_ci_reseed_fixtures.py": [
-    1602,
-    5361
   ],
   "tests/_ci_wait_fixtures.py": [
     2399,
@@ -870,10 +858,6 @@
   "tests/_queueread.py": [
     949,
     1677
-  ],
-  "tests/_ratchet_fixture.py": [
-    564,
-    1317
   ],
   "tests/_realbrowser.py": [
     7128,
@@ -1441,7 +1425,7 @@
   ],
   "tests/test_js_module_coverage.py": [
     4149,
-    14203
+    14215
   ],
   "tests/test_jsread_mask.py": [
     4016,

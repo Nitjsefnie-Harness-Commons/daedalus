@@ -38,20 +38,14 @@ def read_calibration(data, language):
     return thresholds.coverage(data, language)
 
 
-def update(data, measured, language, reseed_in_flight=None):
-    """Return an updated document, or ``None`` when no raise is justified.
-
-    A re-seed mid-flight is no reason to refuse to raise a coverage
-    calibration: reading strict here would redden the ratchet step on
-    every push for as long as the window is open.
-    """
+def update(data, measured, language):
+    """Raise coverage when justified, preserving other absent budgets."""
     if language not in LANGUAGES:
         raise ValueError(f'unknown coverage language: {language}')
-    declared = thresholds.verdict(reseed_in_flight)
-    candidate = thresholds.normalise(data, declared)
+    candidate = thresholds.normalise(data)
     measured = _measurement(measured)
     recorded_measured, _floor = thresholds.coverage(
-        candidate, language, declared)
+        candidate, language)
     should_raise = measured - recorded_measured > RAISE_HYSTERESIS
     if not should_raise:
         return None
@@ -59,7 +53,7 @@ def update(data, measured, language, reseed_in_flight=None):
         'measured': measured,
         'floor': measured - CALIBRATION_GAP,
     }
-    return thresholds.normalise(candidate, declared)
+    return thresholds.normalise(candidate)
 
 
 def _parser():

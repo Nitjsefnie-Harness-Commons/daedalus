@@ -20,8 +20,11 @@ else:
 ROOT = Path(__file__).resolve().parents[2]
 
 GROWTH_REMEDY = (
-    'A recorded number is never raised: delete as many lines elsewhere '
-    'under tests/ as this change added, or land them after this row moves.')
+    'Record a higher tests/ budget only with a feat: or feat(scope): '
+    'commit in the judged range. A non-feature change must trim its own '
+    'tests: drop redundant cases, merge parametrisations, or delete tests '
+    'that repeat assertions. A feature still needs a sufficient recorded '
+    'budget to pass this gate.')
 
 
 def tracked_test_lines(root=ROOT):
@@ -37,8 +40,8 @@ def tracked_test_lines(root=ROOT):
 
 
 def tightened(recorded, measured):
-    """Return a lowered budget, or ``None`` when there is no drop."""
-    return measured if measured < recorded else None
+    """Seed absence or lower a budget; return None when unchanged."""
+    return measured if recorded is None or measured < recorded else None
 
 
 def _parser():
@@ -55,10 +58,6 @@ def main(argv=None):
     try:
         data = thresholds.load(args.thresholds)
         recorded = thresholds.tests_line_baseline(data)
-        if recorded is None:
-            print('the re-seed window is open: no budget is recorded, so '
-                  'the line gate measures nothing to compare or tighten')
-            return 0
         measured = tracked_test_lines()
         if args.tighten:
             updated = tightened(recorded, measured)
@@ -68,9 +67,13 @@ def main(argv=None):
                 return 0
             data['tests_line_baseline'] = updated
             thresholds.write(args.thresholds, data)
-            print(f'tightened the tests/ line budget to {updated}')
+            action = 'seeded' if recorded is None else 'tightened'
+            print(f'{action} the tests/ line budget to {updated}')
             return 0
 
+        if recorded is None:
+            print(f'tests/ carries {measured} lines; no budget recorded')
+            return 0
         if measured > recorded:
             print(f'tests/ carries {measured} lines against a recorded '
                   f'budget of {recorded}', file=sys.stderr)

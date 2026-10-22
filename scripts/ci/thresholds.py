@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Read, validate, and atomically publish CI threshold state."""
 import argparse
-import importlib
 import json
 import os
 import stat
@@ -143,41 +142,10 @@ def _module_path(value):
     return value
 
 
-def verdict(reseed_in_flight=None):
-    """The verdict to validate under: the tree's answer unless one is given.
-
-    Every helper that re-validates a document another helper produced
-    asks through here, so the tree is consulted in one named place;
-    ``normalise`` takes no default for exactly that reason. The reseed
-    import sits inside the function so the git-reading module stays off
-    every loader consumer's import graph.
-    """
-    if reseed_in_flight is not None:
-        return reseed_in_flight
-    if __package__:
-        # pylint: disable-next=relative-beyond-top-level,no-name-in-module
-        from . import reseed
-    else:
-        reseed = importlib.import_module('reseed')
-    return reseed.in_flight()
-
-
-def normalise(data, reseed_in_flight):
-    """The document in canonical form, or a refusal naming the offender.
-
-    ``reseed_in_flight`` is REQUIRED and is the re-seed marker's verdict
-    (reseed.py), never a mode a caller picks for its own convenience:
-    with it, ``tests_line_baseline`` may be ABSENT, and stays absent in
-    the result, so the document's bytes round-trip unchanged. Everything
-    else is unchanged, so the marker buys the absence and nothing else.
-    """
-    if not isinstance(reseed_in_flight, bool):
-        raise ValueError(
-            'reseed_in_flight must be a bool: ask thresholds.verdict() '
-            'for the tree answer')
-    optional = _SCALAR_FIELDS if reseed_in_flight else ()
+def normalise(data):
+    """Validate recorded values and preserve absent budgets."""
     _required_fields(data, _TOP_LEVEL_FIELDS, 'thresholds',
-                     optional=optional)
+                     optional=(*_BASELINE_FIELDS, *_SCALAR_FIELDS))
     schema = _number(data['schema_version'], 'schema_version')
     if schema != _SCHEMA_VERSION or schema != schema.to_integral_value():
         raise ValueError(
@@ -207,9 +175,10 @@ def normalise(data, reseed_in_flight):
         'coverage': normalised_coverage,
     }
     for member in _BASELINE_FIELDS:
-        normalised[member] = _baseline(data[member], member)
+        if member in data:
+            normalised[member] = _baseline(data[member], member)
     for member in _SCALAR_FIELDS:
-        if reseed_in_flight and member not in data:
+        if member not in data:
             continue
         normalised[member] = _positive_int(data[member], member)
     return normalised
@@ -232,54 +201,43 @@ def _positive_int(value, name):
     return int(count)
 
 
-def load(path=THRESHOLDS, reseed_in_flight=None):
-    """Read and validate a thresholds document.
-
-    The verdict defaults to the tree's own, so every reader — the gates,
-    the ratchets, the suites — gets the one sanctioned tolerance without
-    having to remember to ask; a caller that means to be strict passes
-    False explicitly. An unreadable tree is not a marker: the probe
-    fails closed, and the document is gated exactly as it always was.
-    """
+def load(path=THRESHOLDS):
+    """Read and validate a thresholds document."""
     target = Path(path)
     try:
         raw = target.read_bytes()
     except OSError as error:
         raise ValueError(f'cannot read thresholds: {error}') from None
-    return normalise(_decode(raw), verdict(reseed_in_flight))
+    return normalise(_decode(raw))
 
 
-def coverage(data, language, reseed_in_flight=None):
+def coverage(data, language):
     if language not in _COVERAGE_LANGUAGES:
         raise ValueError(f'unknown coverage language: {language}')
-    normalised = normalise(data, verdict(reseed_in_flight))
+    normalised = normalise(data)
     record = normalised['coverage'][language]
     return record['measured'], record['floor']
 
 
-def module_size_baseline(data, reseed_in_flight=None):
-    return dict(normalise(data, verdict(reseed_in_flight))
-                ['module_size_baseline'])
+def module_size_baseline(data):
+    return dict(normalise(data).get('module_size_baseline', {}))
 
 
-def long_line_baseline(data, reseed_in_flight=None):
-    return dict(normalise(data, verdict(reseed_in_flight))
-                ['long_line_baseline'])
+def long_line_baseline(data):
+    return dict(normalise(data).get('long_line_baseline', {}))
 
 
-def type_error_baseline(data, reseed_in_flight=None):
-    return dict(normalise(data, verdict(reseed_in_flight))
-                ['type_error_baseline'])
+def type_error_baseline(data):
+    return dict(normalise(data).get('type_error_baseline', {}))
 
 
-def js_coverage_baseline(data, reseed_in_flight=None):
-    return dict(normalise(data, verdict(reseed_in_flight))
-                ['js_coverage_baseline'])
+def js_coverage_baseline(data):
+    return dict(normalise(data).get('js_coverage_baseline', {}))
 
 
-def tests_line_baseline(data, reseed_in_flight=None):
-    """None inside the window: no budget exists to read or tighten."""
-    return normalise(data, verdict(reseed_in_flight)).get(
+def tests_line_baseline(data):
+    """Return None when no budget is recorded."""
+    return normalise(data).get(
         'tests_line_baseline')
 
 
@@ -293,15 +251,14 @@ def _json_ready(value):
     return value
 
 
-def _render(data, reseed_in_flight):
-    reseed_in_flight = verdict(reseed_in_flight)
-    normalised = normalise(data, reseed_in_flight)
+def _render(data):
+    normalised = normalise(data)
     ready = _json_ready(normalised)
     text = json.dumps(
         ready, ensure_ascii=True, indent=2, sort_keys=False,
         allow_nan=False) + '\n'
     encoded = text.encode('utf-8')
-    if normalise(_decode(encoded), reseed_in_flight) != normalised:
+    if normalise(_decode(encoded)) != normalised:
         raise ValueError('serialized thresholds failed validation')
     return encoded
 
@@ -355,14 +312,9 @@ def publish(path, payload):
             _remove_temp(temporary_path)
 
 
-def write(path, data, reseed_in_flight=None):
-    """Validate and atomically replace ``path`` with canonical JSON bytes.
-
-    A document the window exempted round-trips like any other: the
-    absent row is written back absent, under the same verdict the reader
-    will apply.
-    """
-    publish(path, _render(data, verdict(reseed_in_flight)))
+def write(path, data):
+    """Validate and atomically publish canonical JSON, preserving absence."""
+    publish(path, _render(data))
 
 
 def _parser():
