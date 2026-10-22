@@ -13,14 +13,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _netcapture_harness import apis  # noqa: E402
+from _repo import declared_version  # noqa: E402
 from _tabs_harness import command, run_tabs  # noqa: E402
 
 RUNTIME_RELOAD = 'runtime.reload'
 
-# Read from extension/background.js (`const VERSION = '0.27.1';`). Pinned as
-# an independent literal, NOT the harness readout: comparing the posted
-# version to the readout would move with a real bump and stay green forever.
-VERSION = '0.27.1'
+# Source text is independent of the VM readout: a wrong handler value fails.
+# Comparing the post to outcome['version'] would agree by construction.
+VERSION = declared_version()
 
 # Distinctive ring entries. These are world state the handler reads back out
 # of _fetchTimings, never values it received and must echo, so a substituted
@@ -131,7 +131,7 @@ def test_ext_reload_runs_the_reload_when_the_timer_fires(tmp):
         'reloading': True, 'version': VERSION}, outcome
     assert apis(outcome, RUNTIME_RELOAD) == [
         [RUNTIME_RELOAD, []]], outcome
-    # The version the boot actually installed is the pinned literal.
+    # Check the source-text parse against the VM-evaluated global.
     assert outcome['version'] == VERSION, outcome
 
 
