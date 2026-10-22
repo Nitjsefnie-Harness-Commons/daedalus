@@ -8,8 +8,8 @@ push. Event jobs fail for RED. PATCH/retire completed EXTERNAL_ID checks only;
 POST only on empty listings. Keep newer stamped verdicts; writes can race.
 Record completed verdict writes even when retirement fails. Dry runs compute.
 
-THE BOUND. L + 2 + H * (G + 7): L path lookups, main and PR list;
-G compares per head plus two revalidations, check listing, two file reads,
+THE BOUND. L + 2 + H * (G + 8): L path lookups, main and PR list;
+G compares per head plus three revalidations, check listing, two file reads,
 one runs-list read and one rerun POST. Reserve the alternative publish path.
 Extra owned ids add retirement PATCHes; pages count as one
 logical read. At 1.5 s/call, 1200 calls need 30 minutes of a 35-minute timeout.
@@ -40,7 +40,7 @@ GATE_PATTERNS = (
 
 _HEX40 = frozenset('0123456789abcdef')
 # Revalidations, check listing, two file reads, runs listing and rerun.
-PER_HEAD_OVERHEAD = 7
+PER_HEAD_OVERHEAD = 8
 DEFAULT_CALL_BUDGET = 1200
 ASSUMED_SECONDS_PER_CALL = 1.5
 
@@ -300,17 +300,28 @@ def _keep_or_rerun(read, repository, head, verdict):
         if source.encode('utf-8') != local_bytes:
             raise QueryError('head carries an edited gate definition: '
                              f'{path}')
-    runs = _one(read, _api(
+    raw = read(_api(
         f'repos/{repository}/actions/runs?head_sha={head["sha"]}&per_page=100',
-        '--method', 'GET', '--paginate', '--slurp', '--jq',
-        '[.[].workflow_runs[]]'))
+        '--method', 'GET', '--paginate', '--jq', '.workflow_runs[]'))
+    try: runs = [json.loads(line) for line in raw.splitlines()]
+    except ValueError as error:
+        raise QueryError('malformed workflow runs listing') from error
+    if any(not isinstance(r, dict) or not isinstance(r.get('id'), int)
+           or isinstance(r['id'], bool) or r['id'] <= 0
+           or any(not isinstance(r.get(k), str) for k in (
+               'event', 'path', 'status', 'head_branch')) for r in runs):
+        raise QueryError('malformed workflow runs listing')
     run_id = max((r['id'] for r in runs
                   if r['event'] == 'pull_request_target'
                   and r['path'] == '.github/workflows/gate-freshness.yml'
+                  and r['head_branch'] == head['ref']
                   and r['status'] == 'completed'), default=None)
     if run_id is None:
         raise QueryError('no completed pull_request_target run of '
                          '.github/workflows/gate-freshness.yml for this head')
+    current = current_head(read, repository, head['number'])
+    if current != head['sha']:
+        raise QueryError(f'head moved to {current}')
     try:
         read(_api(f'repos/{repository}/actions/runs/{run_id}/rerun',
                   '-X', 'POST'))
