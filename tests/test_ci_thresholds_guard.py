@@ -81,6 +81,21 @@ def test_feature_anywhere_in_range_allows_recording_a_raise(tmp):
         status, _out, err = _judge(repo, rev, base, head)
         assert status == 0, err
 
+    ci = repo / 'scripts/ci'
+    ci.mkdir(parents=True)
+    for name in ('tests_lines.py', 'thresholds.py'):
+        shutil.copy2(GUARD.with_name(name), ci / name)
+    (repo / 'tests').mkdir()
+    (repo / 'tests/cost.py').write_text('pass\n' * 12)
+    _git(repo, 'add', 'tests/cost.py')
+    _git(repo, 'commit', '-qm', 'feat: add tests')
+    result = subprocess.run(
+        [sys.executable, str(ci / 'tests_lines.py')], cwd=repo,
+        env=_util.child_coverage('scrub'), capture_output=True,
+        text=True, timeout=60, check=False)
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert '12' in result.stderr and '11' in result.stderr, result.stderr
+
 
 def test_nonfeatures_refuse_raise_with_remedy(tmp):
     for index, subject in enumerate((
