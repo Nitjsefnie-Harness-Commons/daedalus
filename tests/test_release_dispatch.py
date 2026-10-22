@@ -175,8 +175,8 @@ def test_annotated_tag_push_and_no_overwrite(tmp):
 
 
 def _row(name='tests', status='completed', conclusion='success', **extra):
-    return dict(name=name, status=status, conclusion=conclusion,
-                event='push', **extra)
+    return {'name': name, 'status': status, 'conclusion': conclusion,
+            'event': 'push', **extra}
 
 
 def _wait(tmp, mode, pages, *args):
@@ -203,9 +203,9 @@ def test_wait_gates_pending_then_green_with_exact_exclusions(tmp):
     comment = _row('comment gate', conclusion='failure')
     comment['event'] = 'issue_comment'
     excluded.append(comment)
-    pages = [dict(workflow_runs=[_row(status='queued')] + excluded),
-             dict(workflow_runs=[_row(), _row('lint', conclusion='skipped')]
-                  + excluded)]
+    pages = [{'workflow_runs': [_row(status='queued')] + excluded},
+             {'workflow_runs': [_row(), _row('lint', conclusion='skipped')]
+              + excluded}]
     result, fake = _wait(tmp, 'wait-gates', pages)
     _ok(result)
     assert len(fake.calls()) == 2, fake.calls()
@@ -215,8 +215,8 @@ def test_wait_gates_pending_then_green_with_exact_exclusions(tmp):
 def test_wait_gates_red_neutral_cancelled_and_timed_out(tmp):
     for conclusion in ('failure', 'neutral', 'cancelled', 'timed_out'):
         child = Path(tmp) / conclusion
-        result, fake = _wait(child, 'wait-gates', [dict(workflow_runs=[
-            _row(conclusion=conclusion), _row('lint', status='in_progress')])])
+        result, fake = _wait(child, 'wait-gates', [{'workflow_runs': [
+            _row(conclusion=conclusion), _row('lint', status='in_progress')]}])
         assert result.returncode != 0, result.stdout
         assert f'tests ({conclusion})' in result.stderr, result.stderr
         assert len(fake.calls()) == 1, fake.calls()
@@ -224,12 +224,12 @@ def test_wait_gates_red_neutral_cancelled_and_timed_out(tmp):
 
 def test_wait_gates_zero_grace_and_deadline(tmp):
     for name, pages, args, status, wanted, count in (
-            ('registration', [dict(workflow_runs=[]),
-                              dict(workflow_runs=[_row()])],
+            ('registration', [{'workflow_runs': []},
+                              {'workflow_runs': [_row()]}],
              ['--grace', '10'], 0, '1 gates', 2),
-            ('empty', [dict(workflow_runs=[])],
+            ('empty', [{'workflow_runs': []}],
              ['--grace', '0'], 1, 'no workflow', 1),
-            ('deadline', [dict(workflow_runs=[_row(status='queued')])],
+            ('deadline', [{'workflow_runs': [_row(status='queued')]}],
              ['--timeout', '0'], 1, 'deadline', 1)):
         result, fake = _wait(Path(tmp) / name, 'wait-gates', pages, *args)
         assert result.returncode == status, result.stdout + result.stderr
@@ -240,9 +240,9 @@ def test_wait_gates_zero_grace_and_deadline(tmp):
 def test_wait_release_requires_success(tmp):
     for conclusion in ('success', 'failure', 'cancelled', 'skipped'):
         result, fake = _wait(Path(tmp) / conclusion, 'wait-release', [
-            dict(workflow_runs=[_row(), _row('release', status='queued')]),
-            dict(workflow_runs=[_row(), _row('release',
-                                            conclusion=conclusion)])])
+            {'workflow_runs': [_row(), _row('release', status='queued')]},
+            {'workflow_runs': [_row(), _row('release',
+                                            conclusion=conclusion)]}])
         assert result.returncode == int(conclusion != 'success'), (
             result.stdout + result.stderr)
         assert f'release ({conclusion})' in result.stdout + result.stderr
@@ -251,7 +251,7 @@ def test_wait_release_requires_success(tmp):
 
 def test_wait_refuses_api_error(tmp):
     result, fake = _wait(tmp, 'wait-gates', [
-        dict(status=403, body='fixture API refusal')])
+        {'status': 403, 'body': 'fixture API refusal'}])
     assert result.returncode != 0, result.stdout
     assert 'fixture API refusal' in result.stderr, result.stderr
     assert len(fake.calls()) == 1, fake.calls()
@@ -270,8 +270,8 @@ def test_workflow_failure_stops_tag_or_successor(tmp):
         work, bare = _repo(directory)
         before = _out(bare, 'rev-parse', 'main')
         fake = FakeGh(directory / 'gh', {'actions/runs?head_sha=': [
-            dict(workflow_runs=[_row(conclusion=gate)]),
-            dict(workflow_runs=[_row('release', conclusion=release)])]})
+            {'workflow_runs': [_row(conclusion=gate)]},
+            {'workflow_runs': [_row('release', conclusion=release)]}]})
         home = directory / 'home'
         home.mkdir()
         context = {'inputs': {'version': VERSION}, 'steps': {},
@@ -307,10 +307,10 @@ def test_workflow_failure_stops_tag_or_successor(tmp):
 
 
 def test_paginated_runs_do_not_hide_a_red_gate(tmp):
-    first = json.dumps(dict(workflow_runs=[_row()]))
-    second = json.dumps(dict(workflow_runs=[
-        _row('lint', conclusion='failure')]))
-    result, fake = _wait(tmp, 'wait-gates', [dict(body=first + '\n' + second)])
+    first = json.dumps({'workflow_runs': [_row()]})
+    second = json.dumps({'workflow_runs': [
+        _row('lint', conclusion='failure')]})
+    result, fake = _wait(tmp, 'wait-gates', [{'body': first + '\n' + second}])
     assert result.returncode != 0, result.stdout
     assert 'lint (failure)' in result.stderr, result.stderr
     assert len(fake.calls()) == 1, fake.calls()
@@ -337,8 +337,8 @@ def test_workflow_orders_release_and_protects_secret(tmp):
     runs = [s for s in steps if str(SCRIPT) in s.get('run', '')]
     assert [s['run'].split(str(SCRIPT))[1].split()[0] for s in runs] == [
         'bump', 'wait-gates', 'tag', 'wait-release', 'bump']
-    assert '--successor' in runs[-1]['run']
-    assert all('if' not in s for s in runs), runs
+    assert '--successor' in runs[-1]['run'] and all(
+        'if' not in s for s in runs), runs
     assert runs[1]['env']['SHA'] == '${{ steps.bump.outputs.sha }}'
     assert runs[2]['env']['SHA'] == '${{ steps.bump.outputs.sha }}'
     assert runs[3]['env']['SHA'] == '${{ steps.bump.outputs.sha }}'
@@ -354,4 +354,4 @@ def test_workflow_orders_release_and_protects_secret(tmp):
 
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(globals()),
-                                 tmp_prefix='release_dispatch_'))
+                                  tmp_prefix='release_dispatch_'))
