@@ -2,7 +2,6 @@
 """Judged histories authorize only the scalar's numeric raises."""
 import copy
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -233,6 +232,7 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
                  'thresholds_removed.py', 'threshold_base.py'):
         shutil.copy2(GUARD.with_name(name), ci / name)
     _git(repo, 'commit', '--allow-empty', '-qm', 'chore: followup')
+    _git(repo, 'branch', 'judged-head')
     _git(repo, 'branch', 'target', rev)
     _git(repo, 'checkout', '-q', 'target')
     target_doc = dict(base, tests_line_baseline=20)
@@ -240,23 +240,16 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     path.write_text(json.dumps(target_doc, default=float))
     _git(repo, 'add', '.github/ci-thresholds.json')
     _git(repo, 'commit', '-qm', 'feat: target-side feature')
-    _git(repo, 'checkout', '-q', '-')
-    shim = repo / 'bin'
-    shim.mkdir()
-    shutil.copy2(sys.executable, shim / 'python')
-    executable = shim / 'git'
-    real_git = shutil.which('git')
-    assert real_git is not None
-    executable.write_text('#!/bin/sh\n'
-                          'if [ "${GIT_FAIL:-}" = "$1" ]; then exit 128; fi\n'
-                          'if [ "$1" = fetch ]; then\n'
-                          '  exec "$REAL_GIT" fetch --no-tags "$LOCAL_REPO" '
-                          'refs/heads/target\n'
-                          'fi\nexec "$REAL_GIT" "$@"\n')
-    executable.chmod(0o755)
+    _git(repo, 'checkout', '-q', 'judged-head')
+    _git(repo, 'config', f'url.{repo.as_posix()}.insteadOf',
+         'https://github.com/unused/repo.git')
+    _git(repo, 'checkout', '--orphan', 'unrelated')
+    _git(repo, 'add', '.github/ci-thresholds.json')
+    _git(repo, 'commit', '-qm', 'fix: disconnected target')
+    _git(repo, 'checkout', '-q', 'judged-head')
+    script = 'python3() { "$REAL_PYTHON" "$@"; }\n' + script
     env = dict(_util.child_coverage('scrub'),
-               PATH=str(shim) + os.pathsep + os.environ['PATH'],
-               REAL_GIT=real_git, LOCAL_REPO=str(repo), RUNNER_TEMP=str(repo),
+               REAL_PYTHON=sys.executable, RUNNER_TEMP=str(repo),
                REPO='unused/repo', BASE_REF='target',
                GITHUB_ENV=str(repo / 'env'))
     for event, before, status in (('pull_request', '', 1), ('push', rev, 1),
@@ -270,15 +263,15 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
         assert result.returncode == status, (
             event, before, result.stdout, result.stderr)
         if event == 'pull_request' or before == rev:
-            assert rev in result.stdout, result.stdout
+            assert rev in result.stdout, (result.stdout, result.stderr)
             assert 'feat:' in result.stderr, result.stderr
-    for command in ('fetch', 'merge-base'):
-        env.update(EVENT='pull_request', GIT_FAIL=command)
+    for target in ('missing-target', 'unrelated'):
+        env.update(EVENT='pull_request', BASE_REF=target)
         result = subprocess.run([_util.workflow_bash(), '-e', '-c', script],
                                 cwd=repo, env=env, capture_output=True,
                                 text=True, timeout=60)
         assert result.returncode != 0 and result.stderr.strip(), result.stdout
-    env.pop('GIT_FAIL')
+    env.update(BASE_REF='target')
     _git(repo, 'checkout', '--orphan', 'root-only')
     _git(repo, 'add', '.github/ci-thresholds.json')
     _git(repo, 'commit', '-qm', 'fix: root')
