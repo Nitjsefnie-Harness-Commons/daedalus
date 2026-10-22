@@ -896,8 +896,8 @@
     9716
   ],
   "tests/_repo.py": [
-    484,
-    908
+    548,
+    1182
   ],
   "tests/_segment_job_record.py": [
     286,
@@ -1688,8 +1688,8 @@
     4554
   ],
   "tests/test_worker_tabs_misc.py": [
-    1661,
-    4846
+    1611,
+    4837
   ],
   "tests/test_workflow_job_timeouts.py": [
     3640,
