@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
+from _wfjobs import workflow_files  # noqa: E402
+from _yamlsteps import workflow_mapping  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
@@ -25,6 +27,23 @@ from _yamlread import (  # noqa: E402
     YAMLReadError, _indent, job_mapping, job_scalar,
     step_scalar, step_scalars,
 )
+
+
+def test_workflow_run_downloads_select_the_triggering_run(tmp):
+    del tmp
+    downloads = []
+    for path in workflow_files():
+        workflow = workflow_mapping(path.read_text(encoding='utf-8'))
+        if 'workflow_run' not in workflow.get('on', {}):
+            continue
+        for name, job in workflow.get('jobs', {}).items():
+            for step in job.get('steps', []):
+                if step.get('uses', '').casefold().startswith(
+                        'actions/download-artifact'):
+                    downloads.append((path.name, name, step))
+                    assert step.get('with', {}).get('run-id') == (
+                        '${{ github.event.workflow_run.id }}'), downloads[-1]
+    assert downloads, 'no artifact download found in workflow_run workflows'
 
 
 def _step_outputs(path):

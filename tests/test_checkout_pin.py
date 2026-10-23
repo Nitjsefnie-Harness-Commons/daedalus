@@ -8,9 +8,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 import _wfcheckout  # noqa: E402
+from _wfjobs import workflow_files  # noqa: E402
+from _yamlsteps import workflow_mapping  # noqa: E402
 
 
 _FORBIDDEN_CHECKOUT_NAMES = ('head', 'branch', 'ref', 'sha', 'commit')
+
+
+def _checkout_steps(paths):
+    for path in paths:
+        source = workflow_mapping(path.read_text(encoding='utf-8'))
+        groups = list(source.get('jobs', {}).values())
+        runs = source.get('runs', {})
+        if runs.get('using') == 'composite':
+            groups.append(runs)
+        for group in groups:
+            for step in group.get('steps', []):
+                if step.get('uses', '').casefold().startswith(
+                        'actions/checkout'):
+                    yield path, step
+
+
+def test_checkout_census_covers_workflows_and_composite_actions(tmp):
+    del tmp
+    paths = workflow_files() + sorted(ROOT.rglob('action.y*ml'))
+    checkouts = list(_checkout_steps(paths))
+    assert checkouts, 'no checkout step found in workflows or composites'
 
 
 def _assert_checkout_refs_safe(workflow, workflow_name='fixture.yml'):
