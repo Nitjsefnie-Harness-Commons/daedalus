@@ -185,7 +185,7 @@
   ],
   "daedalus_cli/__init__.py": [
     798,
-    1405
+    1407
   ],
   "daedalus_cli/cli.py": [
     702,
@@ -325,7 +325,7 @@
   ],
   "extension/page.js": [
     2231,
-    10960
+    10962
   ],
   "extension/worker/blocking.js": [
     1114,
