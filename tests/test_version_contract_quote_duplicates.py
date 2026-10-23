@@ -65,7 +65,7 @@ def test_check_versions_package_value_may_contain_a_different_quote(tmp):
 
 def test_check_versions_ignores_page_js_comment_and_string_decoys(tmp):
     for index, expected_path, decoys in (
-            (3, 'extension/page.js', (
+            (2, 'extension/page.js', (
                 '\n'
                 "// script: { version: '9.9.9' }\n"
                 '// script: { version: "8.8.8" }\n'

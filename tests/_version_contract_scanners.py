@@ -27,7 +27,7 @@ def _surviving(regions, path, text, needle):
     spans = regions.regions_for(path, text)
     pattern = re.compile(re.escape(needle))
     return sum(1 for found in pattern.finditer(text)
-               if not regions.is_decoy(found, spans, False))
+               if not regions.is_decoy(found, spans))
 
 
 def _covered_kind(text, regions, needle):

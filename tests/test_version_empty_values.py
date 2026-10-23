@@ -55,14 +55,13 @@ def _assert_spelling_refused(result):
     assert 'ok:' not in result.stdout, result.stdout
 
 
-def test_check_versions_refuses_an_empty_header_version_duplicate(tmp):
-    # Append the header last so its \s+ cannot consume a following line.
+def test_check_versions_refuses_an_empty_version_duplicate(tmp):
     for index, expected_path, expected_desc, duplicate in (
-            (1, 'extension/background.js', '@version header', None),
-            (3, 'extension/page.js', None, _duplicate_the_page_js_version),
+            (1, 'extension/background.js', 'VERSION constant', None),
+            (2, 'extension/page.js', None, _duplicate_the_page_js_version),
             (-1, 'daedalus_cli/__init__.py', None,
              _duplicate_the_package_version),
-            (5, 'dashboard/index.html', 'dashboard status line',
+            (4, 'dashboard/index.html', 'dashboard status line',
              _duplicate_the_status_line_version)):
         copy_root = Path(tmp) / 'tree'
         checker = _copy_versioned_tree(copy_root)
@@ -71,9 +70,10 @@ def test_check_versions_refuses_an_empty_header_version_duplicate(tmp):
         if expected_desc is not None:
             assert desc == expected_desc, desc
         if duplicate is None:
-            header = copy_root / 'extension' / 'background.js'
-            header.write_text(
-                header.read_text(encoding='utf-8') + '// @version \n',
+            background = copy_root / 'extension' / 'background.js'
+            background.write_text(
+                background.read_text(encoding='utf-8')
+                + "\nconst VERSION = '';\n",
                 encoding='utf-8')
         else:
             duplicate(copy_root, second_value='')
@@ -85,7 +85,7 @@ def test_check_versions_print_refuses_an_empty_value_duplicate(tmp):
     competes with the first, so stdout stays empty (#324)."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
-    _path, _desc, _pattern = checker.SITES[3]
+    _path, _desc, _pattern = checker.SITES[2]
     assert _path == 'extension/page.js', _path
     _duplicate_the_page_js_version(copy_root, second_value='')
     result = _run_checker(copy_root, '--print')
@@ -101,7 +101,7 @@ def test_check_versions_set_refuses_an_empty_value_duplicate(tmp):
     the flag take the same refusal: the separated token and `--set=<value>`."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
-    _path, _desc, _pattern = checker.SITES[3]
+    _path, _desc, _pattern = checker.SITES[2]
     assert _path == 'extension/page.js', _path
     page = copy_root / 'extension' / 'page.js'
     _duplicate_the_page_js_version(copy_root, second_value='')

@@ -37,19 +37,16 @@ def regions_for(path, text):
     return []
 
 
-def is_decoy(match, regions, allow_comments):
+def is_decoy(match, regions):
     """Whether `match` starts inside a region, so it is not a site.
 
-    A comment region filters only when the site has not opted in: the one
-    `@version` header lives in a line comment by design. A match beginning at
-    a region's first character stays code, which is what keeps a quoted key
-    or a `<tag` a site.
+    A match beginning at a region's first character stays code, which is
+    what keeps a quoted key or a `<tag` a site.
     """
     position = match.start()
-    for start, end, kind in regions:
+    for start, end, _kind in regions:
         if start < position < end:
-            if kind != 'comment' or not allow_comments:
-                return True
+            return True
     return False
 
 

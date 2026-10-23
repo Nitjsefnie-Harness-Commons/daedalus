@@ -1,5 +1,4 @@
 // Daedalus Extension — background service worker
-// @version 0.28.0.1
 /* global handleScreenshot */
 /* global handleCookies, handleSetCookie */
 /* global handleRemoveCookie, handleClearCookies */

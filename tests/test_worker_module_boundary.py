@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """The classic service worker's module-boundary contract."""
+import json
 import re
 import shutil
 import sys
@@ -143,7 +144,12 @@ def test_background_has_only_the_residual_worker_surface(tmp):
     """The split leaves only orchestration and worker boot at top level."""
     del tmp
     source = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
-    assert len(re.findall(r'^// @version .+$', source, re.MULTILINE)) == 1
+    assert not re.search(r'^\s*//\s*@version\b', source, re.MULTILINE)
+    versions = re.findall(r"^const VERSION = '([^']+)';$",
+                          source, re.MULTILINE)
+    manifest = json.loads(
+        (ROOT / 'extension' / 'manifest.json').read_text(encoding='utf-8'))
+    assert versions == [manifest['version']], versions
     expected = [
         'VERSION',
         'DEFAULT_SERVER',

@@ -69,8 +69,6 @@ def spelling_error(version):
 SITES = [
     ('extension/manifest.json', 'manifest version',
      r'"version"\s*:\s*"(?P<v>[^"]*)"'),
-    ('extension/background.js', '@version header',
-     r'@version\s+(?P<v>\S*)'),
     ('extension/background.js', 'VERSION constant',
      r"const VERSION\s*=\s*'(?P<v>[^']*)'"),
     # Same reasoning as the __version__ site below: a second assignment
@@ -174,7 +172,6 @@ SITES = [
 # The site every other site is compared against.
 CANONICAL = ('extension/background.js', 'VERSION constant')
 MANIFEST = ('extension/manifest.json', 'manifest version')
-_COMMENT_SITES = {('extension/background.js', '@version header')}
 
 
 def read_source(path, staged, rev):
@@ -189,7 +186,7 @@ def read_source(path, staged, rev):
     return out.stdout
 
 
-def _find_site(path, desc, pattern, text, allow_comments=False):
+def _find_site(path, desc, pattern, text):
     """The site's one match in `text`, or a FAIL naming why there wasn't one.
 
     A second assignment further down the file is invisible to `re.search`,
@@ -200,7 +197,7 @@ def _find_site(path, desc, pattern, text, allow_comments=False):
     """
     regions = regions_for(path, text)
     matches = [m for m in re.finditer(pattern, text)
-               if not is_decoy(m, regions, allow_comments)]
+               if not is_decoy(m, regions)]
     if not matches:
         raise SystemExit(
             f'FAIL: no version found for {desc} in {path} — the file changed '
@@ -224,9 +221,7 @@ def collect(staged=False, rev=None):
     for path, desc, pattern in SITES:
         if path not in cache:
             cache[path] = read_source(path, staged, rev)
-        m = _find_site(
-            path, desc, pattern, cache[path],
-            allow_comments=(path, desc) in _COMMENT_SITES)
+        m = _find_site(path, desc, pattern, cache[path])
         found.append((path, desc, m.group('v')))
     return found
 
@@ -276,9 +271,7 @@ def apply(version):
         target = REPO / path
         text = target.read_text(encoding='utf-8')
         for desc, pattern in entries:
-            m = _find_site(
-                path, desc, pattern, text,
-                allow_comments=(path, desc) in _COMMENT_SITES)
+            m = _find_site(path, desc, pattern, text)
             # Replace only the 'v' group so surrounding markup stays byte-identical.
             start, end = m.span('v')
             text = text[:start] + version + text[end:]
