@@ -244,6 +244,7 @@ def test_a_bodiless_answer_to_a_request_is_a_failure_not_a_result(tmp):
 def test_probe_prefers_prefixed_token_and_accepts_legacy_fallback(tmp):
     if importlib.util.find_spec('httpx') is None:
         _util.skip('scripts/mcp_probe.py dependency (httpx) not installed')
+    import httpx
     del tmp
     for primary, legacy, want in (('new', 'old', 'new'),
                                   (None, 'old', 'old'),
@@ -253,10 +254,9 @@ def test_probe_prefers_prefixed_token_and_accepts_legacy_fallback(tmp):
         if primary is not None: env['DAEDALUS_TOKEN'] = primary
         with mock.patch.dict(os.environ, env, clear=True):
             probe = _util.load(PROBE, 'probe_environment')
-        import httpx
         seen = []
 
-        def reply(request):
+        def reply(request, seen=seen):
             seen.append(request.headers['Authorization'])
             return httpx.Response(202)
         with httpx.Client(transport=httpx.MockTransport(reply)) as client:
