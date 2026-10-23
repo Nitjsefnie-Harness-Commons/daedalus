@@ -1,4 +1,4 @@
-"""Resolver tables and isolated CLI dispatch controls; the namespace-storage"""
+"""Resolver tables and isolated CLI dispatch controls."""
 import argparse
 import builtins
 import contextlib

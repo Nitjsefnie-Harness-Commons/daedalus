@@ -83,7 +83,7 @@ installed. This repository includes a minimal client for checking one tool
 call:
 
 ```bash
-DAEDALUS_TOKEN_OVERRIDE=<token> python3 scripts/mcp_probe.py call title \
+DAEDALUS_TOKEN=<token> python3 scripts/mcp_probe.py call title \
   '{"tab_id":"<tab-id>"}'
 ```
 

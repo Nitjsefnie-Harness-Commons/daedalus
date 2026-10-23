@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Starting and serving the MCP front end's in-process"""
+"""Test in-process MCP startup and requests."""
 import asyncio
 import contextlib
 import http.client
@@ -13,6 +13,7 @@ import sys
 import types
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -544,8 +545,12 @@ def test_mcp_initialize_accepts_nested_application_token_members(tmp):
                 'clientInfo': {'name': 'application-data', 'version': '0'},
             },
         }
-        status, session_id, raw = _mcp_load._mcp_request(port, initialize)
-        assert status == 200 and session_id, (status, session_id, raw)
+        for legacy in ('', 'ambient-legacy-token'):
+            with patch.dict(os.environ, TOKEN=legacy):
+                status, session_id, raw = _mcp_load._mcp_request(
+                    port, initialize)
+            assert status == 200 and session_id, (
+                legacy, status, session_id, raw)
 
 
 def test_bearer_middleware_fails_closed_without_configured_token(tmp):

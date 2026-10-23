@@ -432,6 +432,10 @@ def test_main_exits_zero_only_for_green_verdicts(tmp):
             assert diagnostic in err.getvalue(), err.getvalue()
         assert len(_polls(calls)) == int(
             expected == 0 or diagnostic == 'concluded failure'), calls
+        if runs:
+            assert [c[-1] for c in calls if '?branch=' in c[-1]] == [
+                'repos/o/r/actions/workflows/tests.yml/runs'
+                '?branch=main&per_page=100'], (primary, calls)
 
 
 def test_the_aggregate_job_runs_the_module(tmp):
