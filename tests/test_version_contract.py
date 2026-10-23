@@ -241,7 +241,7 @@ def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
     the widened pattern needs to catch it the same as the other two."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
-    path, desc, _pattern = checker.SITES[3]
+    path, desc, _pattern = checker.SITES[2]
     assert path == 'extension/page.js', path
     _duplicate_the_page_js_version(copy_root, quote='`')
     r = _run_checker(copy_root)
@@ -264,7 +264,7 @@ def test_check_versions_refuses_a_page_js_version_with_quoted_keys(tmp):
     for spelling in spellings:
         copy_root = Path(tmp) / 'tree'
         checker = _copy_versioned_tree(copy_root)
-        path, desc, pattern = checker.SITES[3]
+        path, desc, pattern = checker.SITES[2]
         assert path == 'extension/page.js', path
         page_copy = copy_root / 'extension' / 'page.js'
         text = page_copy.read_text(encoding='utf-8')
