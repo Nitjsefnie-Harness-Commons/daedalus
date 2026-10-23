@@ -789,35 +789,40 @@ jobs:
       - pyright
       - eslint
       - actionlint
-    # Coverage data is collected on one supported runner per OS. The normal
-    # suites matrix still owns the full Python-version test matrix; keeping
-    # this job at one interpreter makes the artifact set a platform union,
-    # not twelve copies of the same measurement.
+    # Coverage uses one interpreter per OS, with suites split across shards.
+    # The suites job still owns the full Python-version test matrix.
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.13"]
+        include:
+          - os: ubuntu-latest
+            python: "3.13"
+            shard: 1
+            shards: 1
+          - os: windows-latest
+            python: "3.13"
+            shard: 1
+            shards: 3
+          - os: windows-latest
+            python: "3.13"
+            shard: 2
+            shards: 3
+          - os: windows-latest
+            python: "3.13"
+            shard: 3
+            shards: 3
+          - os: macos-latest
+            python: "3.13"
+            shard: 1
+            shards: 2
+          - os: macos-latest
+            python: "3.13"
+            shard: 2
+            shards: 2
     runs-on: ${{ matrix.os }}
-    # A hang backstop, sized from the measurement rather than tuned to pass,
-    # and this is the number a future reader will otherwise "correct".
-    # On main this cell took 29.4, 23.9, 29.4 and 28.5 minutes over its last
-    # four completed runs — 98% of a 30-minute budget before this change
-    # existed. On this branch the windows-latest cell ran 23:53 to 00:23 and
-    # was KILLED at 30 having reported no failed step, which is what
-    # `timeout-minutes` produces and not what a failure produces. The cause
-    # is that #1307's workflow-lint tests now RUN on Windows instead of
-    # skipping there: this branch installs actionlint and shellcheck on
-    # every door, so the suite spends real time linting twelve workflows on
-    # a cell that previously skipped it. The budget grew because the job now
-    # does more work, not because the work got slower.
-    #
-    # 45 leaves headroom over both observations without pretending to know
-    # the true duration: the four main runs are all under 30, this branch's
-    # exceeded it, and nothing here measures a completed run of the new
-    # shape. A per-SUITE bound is a different mechanism and PR 1368 owns it.
+    # Keep the 45-minute hang backstop while the shards are measured in CI.
     timeout-minutes: 45
 
     env:
@@ -874,7 +879,7 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-${{ matrix.python }}-
 
-      # This job runs every suite too, so it needs the toolchain those suites
+      # Each shard needs the toolchain its suites
       # invoke: test_type_errors drives the real pyright binary. A needs:
       # relation sequences jobs without sharing an environment between them,
       # so the lint jobs installing this file do not put pyright here.
@@ -914,7 +919,7 @@ jobs:
         id: measure
         env:
           COVERAGE_PROCESS_START: ${{ github.workspace }}/pyproject.toml
-        run: python scripts/ci/coverage_suites.py --require-all
+        run: python scripts/ci/coverage_suites.py --require-all --shard ${{ matrix.shard }}/${{ matrix.shards }}
 
       # Same gate as the suites job: a pull-request or workflow_dispatch run
       # restores a cache and never writes one. Nothing between the install
@@ -937,7 +942,7 @@ jobs:
                 && matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: coverage-data-${{ matrix.os }}
+          name: coverage-data-${{ matrix.os }}-shard${{ matrix.shard }}
           path: |
             .coverage.*
             .node-v8-coverage
@@ -949,7 +954,7 @@ jobs:
                 && matrix.os != 'ubuntu-latest' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: coverage-data-${{ matrix.os }}
+          name: coverage-data-${{ matrix.os }}-shard${{ matrix.shard }}
           path: .coverage.*
           include-hidden-files: true
           if-no-files-found: error
@@ -1064,7 +1069,7 @@ jobs:
         run: |
           python scripts/ci/coverage_combine.py coverage-data/coverage-data-*
           mkdir -p "$NODE_V8_COVERAGE"
-          find coverage-data/coverage-data-ubuntu-latest/.node-v8-coverage \
+          find coverage-data/coverage-data-ubuntu-latest-shard*/.node-v8-coverage \
             -type f -name 'coverage-*.json' \
             -exec cp {} "$NODE_V8_COVERAGE" \;
 
