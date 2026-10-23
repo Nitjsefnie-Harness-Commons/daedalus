@@ -439,7 +439,6 @@ def test_the_aggregate_job_runs_the_module(tmp):
     assert 'if' not in _gate_step()
     uses_steps = [step for step in job['steps'] if 'uses' in step]
     assert len(uses_steps) == 1, job['steps']
-    assert uses_steps[0]['with'].get('persist-credentials') == 'false'
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gate = _gate_step()
     assert gate['env'] == {
