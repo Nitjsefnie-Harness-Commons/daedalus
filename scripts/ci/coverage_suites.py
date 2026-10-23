@@ -57,15 +57,36 @@ def _run_suite(suite, outputs, bound):
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
-    if argv not in ([], ["--require-all"]):
-        print("usage: coverage_suites.py [--require-all]", file=sys.stderr)
+    require_all = False
+    if argv[:1] == ["--require-all"]:
+        require_all, argv = True, argv[1:]
+    elif argv[-1:] == ["--require-all"]:
+        require_all, argv = True, argv[:-1]
+    shard = None
+    try:
+        if argv:
+            if len(argv) != 2 or argv[0] != "--shard":
+                raise ValueError
+            index, count = (int(part) for part in argv[1].split("/"))
+            if not 1 <= index <= count:
+                raise ValueError
+            shard = index, count
+    except ValueError:
+        print("usage: coverage_suites.py [--require-all] [--shard i/N]",
+              file=sys.stderr)
         return 2
-    require_all = argv == ["--require-all"]
 
     _report_safely()
     bound = suite_timeout()
     suites = sorted((ROOT / "tests").glob("test_*.py"))
-    if not suites:
+    if shard is not None:
+        index, count = shard
+        suites = suites[index - 1::count]
+        if not suites:
+            print("usage: coverage_suites.py [--require-all] [--shard i/N]",
+                  file=sys.stderr)
+            return 2
+    elif not suites:
         print("no suites found — refusing to report 0% as a pass",
               file=sys.stderr)
         return 1

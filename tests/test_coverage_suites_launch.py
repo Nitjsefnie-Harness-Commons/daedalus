@@ -101,8 +101,8 @@ def test_an_argument_the_runner_does_not_take_prints_the_usage_it_takes(
     """
     outcome = _launch.run_main(tmp, argv=('--bogus',))
     assert outcome.status == 2, (outcome.stdout, outcome.stderr)
-    assert outcome.stderr == (
-        'usage: coverage_suites.py [--require-all]\n'), outcome.stderr
+    assert outcome.stderr == ('usage: coverage_suites.py [--require-all] '
+                              '[--shard i/N]\n'), outcome.stderr
     assert outcome.stdout == '', outcome.stdout
     assert not outcome.launch.calls, outcome.launch.calls
 

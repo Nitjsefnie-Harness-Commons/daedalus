@@ -10,8 +10,9 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _coverage_launch_stubs as _launch  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
-    SYNTHETIC_PROCESS_START, coverage_tree)
+    SYNTHETIC_PROCESS_START, coverage_tree as _coverage_tree)
 from _repo import ROOT  # noqa: E402
 
 
@@ -97,9 +98,6 @@ print('{label} first', flush=True)
 time.sleep(0.2)
 print('{label} second', flush=True)
 """
-
-
-_coverage_tree = coverage_tree
 
 
 def _group(stdout, name):
@@ -202,19 +200,60 @@ def _replay_events(lines):
 
 
 def test_every_suite_is_measured_in_its_own_process(tmp):
-    """Dropping a suite or process isolation must fail."""
-    suites = {'test_alpha.py': "print('alpha')\n",
-              'test_beta.py': "print('beta')\n",
-              'test_gamma.py': "print('gamma')\n"}
-    result, invocations = _coverage_tree(tmp, suites)
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    assert len(invocations) == len(suites), invocations
-    process_ids = {invocation['pid'] for invocation in invocations}
-    assert len(process_ids) == len(suites), invocations
-    tree = Path(tmp) / 'tree'
-    expected = {(tree / 'tests' / name).resolve() for name in suites}
-    measured = {(tree / item['argv'][-1]).resolve() for item in invocations}
-    assert measured == expected, invocations
+    names = sorted(suite.name for suite in (ROOT / 'tests').glob('test_*.py'))
+    cases = (((), names), (('--shard', '1/1'), 'abcmz'),
+             (('--shard', '1/2'), 'acz'), (('--shard', '2/2'), 'bm'),
+             (('--shard', '1/3'), 'am'),
+             (('--shard', '2/3'), 'bz'), (('--shard', '3/3'), 'c'))
+    for number, (args, selected) in enumerate(cases):
+        suites = (dict.fromkeys(names, '') if not args else
+                  {f'test_{c}.py': '' for c in 'zambc'})
+        expected = {f'test_{c}.py' if args else c for c in selected}
+        result, invocations = _coverage_tree(
+            Path(tmp) / str(number), suites, args=args)
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        assert len(invocations) == len(expected), invocations
+        assert len({item['pid'] for item in invocations}) == len(expected)
+        assert {Path(x['argv'][-1]).name for x in invocations} == expected
+
+
+def test_require_all_applies_only_to_the_shard(tmp):
+    cases = (((), 0, 3), (('--require-all',), 1, 3),
+             (('--shard', '1/2'), 0, 2),
+             (('--require-all', '--shard', '1/2'), 1, 2),
+             (('--shard', '2/2', '--require-all'), 0, 1))
+    for argv, expected, total in cases:
+        outcome = _launch.run_main(
+            tmp, suites=('test_a.py', 'test_b.py', 'test_c.py'), argv=argv,
+            scripts={'test_a': {'result': (1, '')}})
+        assert outcome.status == expected, (argv, outcome)
+        if expected:
+            message = (f'1 of the {total} suites failed — refusing '
+                       'partial coverage')
+            assert message in outcome.stderr, outcome
+
+
+def test_invalid_or_empty_shards_refuse_before_launch(tmp):
+    cases = (('--bogus',), ('--shard',), ('--shard=1/2',),
+             ('--shard', '1/2', 'extra'), ('--require-all', '--require-all'))
+    cases += tuple(('--shard', value) for value in (
+        '', '1', '1/2/3', 'x/2', '1/x', '1.0/2', '1/0', '0/2', '-1/2',
+        '3/2', '1/-2', '4/4'))
+    for number, argv in enumerate(cases):
+        result, invocations = _coverage_tree(
+            Path(tmp) / str(number), dict.fromkeys(
+                ('test_a.py', 'test_b.py', 'test_c.py'), ''), args=argv)
+        assert result.returncode == 2, (argv, result.stdout, result.stderr)
+        assert result.stderr == (
+            'usage: coverage_suites.py [--require-all] [--shard i/N]\n')
+        assert not result.stdout, result.stdout
+        assert not invocations, invocations
+    for args, status in (((), 1), (('--shard', '1/1'), 2)):
+        result, invocations = _coverage_tree(
+            Path(tmp) / f'empty-{status}', {}, args=args)
+        assert result.returncode == status and not invocations, result
+        message = 'no suites found' if status == 1 else 'usage:'
+        assert message in result.stderr and not result.stdout, result
 
 
 def test_concurrent_measurements_write_distinct_coverage_files(tmp):
@@ -597,26 +636,6 @@ def test_one_failing_suite_does_not_fail_the_run(tmp):
     assert _FAILURE_MARKER + '\n' in failed_group, failed_group
 
 
-def test_require_all_refuses_one_failing_suite(tmp):
-    """A measurement gate must not publish partial suite coverage."""
-    suites = {'test_failing.py': 'raise SystemExit(1)\n',
-              'test_passing.py': "print('passed')\n"}
-    result, _invocations = _coverage_tree(
-        tmp, suites, args=('--require-all',))
-    assert result.returncode != 0, (result.stdout, result.stderr)
-    assert '1 of the 2 suites failed — refusing partial coverage' in (
-        result.stderr), result.stderr
-
-
-def test_unknown_argument_exits_with_usage(tmp):
-    result, invocations = _coverage_tree(tmp, {}, args=('--bogus',))
-    assert result.returncode == 2, (result.stdout, result.stderr)
-    assert result.stdout == '', result.stdout
-    assert result.stderr == (
-        'usage: coverage_suites.py [--require-all]\n'), result.stderr
-    assert not invocations, invocations
-
-
 def test_every_suite_failing_fails_the_run(tmp):
     """A coverage number is refused when no suite completed successfully."""
     suites = {'test_failing_a.py': 'raise SystemExit(1)\n',
@@ -626,25 +645,6 @@ def test_every_suite_failing_fails_the_run(tmp):
     message = ('every one of the 2 suites failed — refusing to\n'
                'report a coverage number for a program that did not run.')
     assert message in result.stderr, result.stderr
-
-
-def test_no_suites_fails_the_run(tmp):
-    """An empty tree must not report zero-percent coverage as a pass."""
-    result, invocations = _coverage_tree(tmp, {})
-    assert result.returncode != 0, (result.stdout, result.stderr)
-    assert not invocations, invocations
-    assert ('no suites found — refusing to report 0% as a pass'
-            in result.stderr), result.stderr
-
-
-def test_every_repository_suite_name_is_discovered(tmp):
-    """No matching repository suite may disappear from measurement."""
-    names = sorted(suite.name for suite in (ROOT / 'tests').glob('test_*.py'))
-    result, invocations = _coverage_tree(tmp, {name: '' for name in names})
-    assert result.returncode == 0, (result.stdout, result.stderr)
-    measured = {Path(item['argv'][-1]).name for item in invocations}
-    assert measured == set(names), (set(names) - measured,
-                                    measured - set(names))
 
 
 def test_unterminated_suite_output_gets_a_group_separator(tmp):
