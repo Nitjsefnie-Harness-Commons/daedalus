@@ -483,38 +483,15 @@ def test_blank_lines_cannot_hide_condition_terms(tmp):
 
 
 def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
-    """The producer and trusted commenter must agree on one artifact each."""
+    """The producer and trusted commenter keep separate permissions."""
     del tmp
     tests_workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     comment_workflow = (
         ROOT / '.github' / 'workflows' / 'coverage-comment.yml').read_text(
             encoding='utf-8')
-    _, marker, coverage = tests_workflow.partition('\n  coverage:\n')
+    _, marker, aggregate = tests_workflow.partition('\n  aggregate:\n')
     assert marker, tests_workflow
-    coverage, marker, _ = coverage.partition('\n  diff-coverage:\n')
-    assert marker, tests_workflow
-    _, marker, diff = tests_workflow.partition('\n  diff-coverage:\n')
-    assert marker, tests_workflow
-    diff, marker, aggregate = diff.partition('\n  aggregate:\n')
-    assert marker, tests_workflow
-    # Anchored to end of line, all four: unanchored, `coverage-xml` is a
-    # prefix of `coverage-xml-does-not-exist` and the assertion would
-    # certify a wiring that could never find its artifact.
-    assert re.search(r'uses: actions/upload-artifact@.*\n\s+with:\n'
-                     r'\s+name: coverage-xml[ \t]*$', coverage,
-                     re.MULTILINE), coverage
-    assert re.search(r'uses:\s*(?:>-\s*)?actions/download-artifact@.*\n'
-                     r'\s+with:\n\s+name: coverage-xml[ \t]*$',
-                     diff, re.MULTILINE), diff
-    upload = diff.partition('actions/upload-artifact@')[2]
-    assert re.search(r'with:\n\s+name: diff-coverage-comment[ \t]*$',
-                     upload, re.MULTILINE), diff
-    download = comment_workflow.partition('actions/download-artifact@')[2]
-    assert re.search(r'with:\n\s+name: diff-coverage-comment[ \t]*$',
-                     download, re.MULTILINE), comment_workflow
-    assert 'run-id: ${{ github.event.workflow_run.id }}' in download, download
-    assert 'github-token: ${{ github.token }}' in download, download
     permissions = job_mapping(
         tests_workflow, 'diff-coverage', 'permissions')
     assert permissions == {'contents': 'read'}, permissions

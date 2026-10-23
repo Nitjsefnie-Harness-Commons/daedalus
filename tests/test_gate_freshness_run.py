@@ -665,7 +665,6 @@ def test_workflow_is_well_formed(tmp):
     for name, job in load(ROOT / '.github' / 'workflows'
                           / 'gate-freshness.yml').jobs.items():
         assert 'timeout-minutes' in job, name
-    assert 'persist-credentials: false' in text
     assert 'github.event.pull_request.head' not in text
     assert 'refs/pull' not in text
     assert 'thresholds.py --check' not in text

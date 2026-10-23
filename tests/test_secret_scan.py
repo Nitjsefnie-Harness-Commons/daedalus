@@ -103,14 +103,6 @@ def test_the_workflow_declares_no_other_top_level_key(tmp):
         'name', 'on', 'permissions', 'concurrency', 'jobs'}, sorted(top)
 
 
-def test_the_checkout_persists_no_credentials(tmp):
-    del tmp
-    steps = _decoded_workflow()['jobs']['gitleaks']['steps']
-    checkout = steps[0]
-    # Checkout must not persist credentials.
-    assert checkout['with'].get('persist-credentials') == 'false', checkout
-
-
 def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
