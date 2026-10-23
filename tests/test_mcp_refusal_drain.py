@@ -13,7 +13,7 @@ import _util  # noqa: E402
 
 TOK = 'mcptok'
 REFUSED_PAYLOAD = bytes(range(256)) * 32
-os.environ['TOKEN'] = ''
+os.environ['DAEDALUS_TOKEN_OVERRIDE'] = ''
 os.environ['DAEDALUS_TOKEN'] = TOK
 
 
@@ -156,7 +156,7 @@ def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
 
 
 def _load_mcp(max_body_size=None):
-    applied = {'TOKEN': '', 'DAEDALUS_TOKEN': TOK}
+    applied = {'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': TOK}
     if max_body_size is not None:
         applied['DAEDALUS_MCP_MAX_BODY_SIZE'] = str(max_body_size)
     with _daedalus_env.isolated(applied):
@@ -189,11 +189,11 @@ def test_mcp_load_restores_an_absent_token(_tmp):
     _mcp_load._need_deps()
     original = dict(os.environ)
     try:
-        os.environ.pop('TOKEN', None)
+        os.environ.pop('DAEDALUS_TOKEN_OVERRIDE', None)
         os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
         snapshot = dict(os.environ)
         _mcp_load._load_mcp('http://127.0.0.1:1')
-        assert 'TOKEN' not in os.environ, 'TOKEN remained set after load'
+        assert 'DAEDALUS_TOKEN_OVERRIDE' not in os.environ, 'override leaked'
         assert os.environ == snapshot, 'environment leaked'
     finally:
         os.environ.clear()
@@ -204,11 +204,11 @@ def test_mcp_load_restores_a_different_prior_token(_tmp):
     _mcp_load._need_deps()
     original = dict(os.environ)
     try:
-        os.environ['TOKEN'] = 'shell-token'
+        os.environ['DAEDALUS_TOKEN_OVERRIDE'] = 'shell-token'
         os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
         snapshot = dict(os.environ)
         _mcp_load._load_mcp('http://127.0.0.1:1')
-        assert os.environ['TOKEN'] == 'shell-token', 'prior TOKEN was lost'
+        assert os.environ['DAEDALUS_TOKEN_OVERRIDE'] == 'shell-token'
         assert os.environ == snapshot, 'environment leaked'
     finally:
         os.environ.clear()
@@ -218,11 +218,12 @@ def test_mcp_load_restores_a_different_prior_token(_tmp):
 def test_isolated_restores_an_absent_token(_tmp):
     original = dict(os.environ)
     try:
-        os.environ.pop('TOKEN', None)
+        os.environ.pop('DAEDALUS_TOKEN_OVERRIDE', None)
         os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
         snapshot = dict(os.environ)
-        with _daedalus_env.isolated({'TOKEN': 'applied-token'}):
-            assert os.environ['TOKEN'] == 'applied-token'
+        with _daedalus_env.isolated({
+                'DAEDALUS_TOKEN_OVERRIDE': 'applied-token'}):
+            assert os.environ['DAEDALUS_TOKEN_OVERRIDE'] == 'applied-token'
             assert 'DAEDALUS_ISOLATED_PROBE' not in os.environ
         assert os.environ == snapshot, 'environment leaked'
     finally:
@@ -233,11 +234,12 @@ def test_isolated_restores_an_absent_token(_tmp):
 def test_isolated_restores_a_different_prior_token(_tmp):
     original = dict(os.environ)
     try:
-        os.environ['TOKEN'] = 'shell-token'
+        os.environ['DAEDALUS_TOKEN_OVERRIDE'] = 'shell-token'
         os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
         snapshot = dict(os.environ)
-        with _daedalus_env.isolated({'TOKEN': 'applied-token'}):
-            assert os.environ['TOKEN'] == 'applied-token'
+        with _daedalus_env.isolated({
+                'DAEDALUS_TOKEN_OVERRIDE': 'applied-token'}):
+            assert os.environ['DAEDALUS_TOKEN_OVERRIDE'] == 'applied-token'
             assert 'DAEDALUS_ISOLATED_PROBE' not in os.environ
         assert os.environ == snapshot, 'environment leaked'
     finally:
@@ -264,11 +266,11 @@ def test_isolated_restores_an_overlapping_daedalus_key(_tmp):
 def test_isolated_restores_environment_after_exception(_tmp):
     original = dict(os.environ)
     try:
-        os.environ['TOKEN'] = 'shell-token'
+        os.environ['DAEDALUS_TOKEN_OVERRIDE'] = 'shell-token'
         os.environ['DAEDALUS_ISOLATED_SHARED'] = 'shell-value'
         os.environ['DAEDALUS_ISOLATED_PROBE'] = 'shell-probe'
         applied = {
-            'TOKEN': 'applied-token',
+            'DAEDALUS_TOKEN_OVERRIDE': 'applied-token',
             'DAEDALUS_ISOLATED_SHARED': 'applied-value',
             'DAEDALUS_ISOLATED_NEW': 'new-value',
         }
@@ -277,7 +279,7 @@ def test_isolated_restores_environment_after_exception(_tmp):
         escaped = False
         try:
             with _daedalus_env.isolated(applied):
-                assert os.environ['TOKEN'] == 'applied-token'
+                assert os.environ['DAEDALUS_TOKEN_OVERRIDE'] == 'applied-token'
                 assert os.environ['DAEDALUS_ISOLATED_SHARED'] == (
                     'applied-value')
                 assert os.environ['DAEDALUS_ISOLATED_NEW'] == 'new-value'

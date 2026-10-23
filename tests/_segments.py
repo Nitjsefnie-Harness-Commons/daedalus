@@ -1,13 +1,4 @@
-"""Shared fixtures for the segment-relay suites.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
-`BRIDGE_ENV` is what every bridge child of these suites carries, applied
-per spawn because `_util.bridge()` strips every inherited `DAEDALUS_*`
-variable before applying the caller's `env=`. Nothing here writes to the
-suite process's own environment: a suite reads the credential from `TOK` and
-hands `BRIDGE_ENV` to the child it spawns.
-"""
+"""Shared fixtures for the segment-relay suites."""
 import functools
 import sys
 import uuid
@@ -20,9 +11,9 @@ import _util  # noqa: E402
 TOK = 'segtok'
 
 # The child env applied at every bridge spawn of these suites: the credential
-# the suites' requests present, with `TOKEN` cleared so an ambient one-off
-# override cannot shadow it.
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+# the suites' requests present, with `DAEDALUS_TOKEN_OVERRIDE` cleared so an
+# ambient one-off override cannot shadow it.
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
 # Segment storage lives under the bridge's own data root (<docroot>/segments/)
 # since the capability fix; the pre-auth server wrote to a world-shared

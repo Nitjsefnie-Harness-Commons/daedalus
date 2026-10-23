@@ -220,10 +220,10 @@ jobs:
 
       - name: Resolve threshold base
         env:
-          REPO: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAEDALUS_EVENT: ${{ github.event_name }}
+          DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python3 scripts/ci/threshold_base.py
 
       - name: Threshold direction guard

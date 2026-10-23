@@ -1,16 +1,4 @@
-"""Run and read one block of the coverage-comment workflow.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
-Split out of tests/test_coverage_comment_workflow.py, which three suites
-imported whole to reach these seven names. All three now import from
-here, and so does that suite. A wrong reader here would fail every
-caller at once, so tests/test_coverage_comment_boundary.py pins the two
-refusals.
-
-`write_executable` is the one copy of that helper, and
-tests/test_coverage_comment_boundary.py pins both halves of what it does.
-"""
+"""Run and read one block of the coverage-comment workflow."""
 import json
 import os
 import subprocess
@@ -77,8 +65,8 @@ def run_artifact_check(tmp, response, extra_env=None):
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
         'GH_TOKEN': 'stub',
-        'REPO': 'owner/repo',
-        'RUN_ID': '123',
+        'DAEDALUS_REPO': 'owner/repo',
+        'DAEDALUS_RUN_ID': '123',
         'GITHUB_OUTPUT': str(output),
         'STUB_RESPONSE': json.dumps(response),
     }
@@ -117,16 +105,17 @@ def run_comment_block(tmp, block_name, *, state, current_head='B',
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
         'GH_TOKEN': 'stub',
-        'REPO': 'owner/repo', 'HEAD_REPO': 'owner/repo', 'RUN_ID': '123',
-        'PR_NUMBER': pr_number,
-        'HEAD_SHA': head_sha,
+        'DAEDALUS_REPO': 'owner/repo',
+        'DAEDALUS_HEAD_REPO': 'owner/repo', 'DAEDALUS_RUN_ID': '123',
+        'DAEDALUS_PR_NUMBER': pr_number,
+        'DAEDALUS_HEAD_SHA': head_sha,
         'CURRENT_HEAD': current_head,
-        'EVENT_NUMBERS': json.dumps([int(pr_number)]),
+        'DAEDALUS_EVENT_NUMBERS': json.dumps([int(pr_number)]),
         'GITHUB_OUTPUT': str(output),
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls),
         'STUB_JOBS': json.dumps(jobs or []),
-        'RUN_CONCLUSION': run_conclusion or '',
+        'DAEDALUS_RUN_CONCLUSION': run_conclusion or '',
     }
     result = run_shell_block(
         workdir, run_block(workflow(), block_name), env)

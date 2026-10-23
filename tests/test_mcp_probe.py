@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Suite for scripts/mcp_probe.py, the documented manual MCP client.
-
-The probe is run as a subprocess against a stub that answers the way the
-pinned MCP transport does, because the defect it pins was invisible to any
-test that spoke to the probe's functions directly: the transport answers a
-notification with 202 and no body, and the probe's helper read that body
-as JSON. The rpc() response-guard controls instead call rpc() in-process
-over httpx.MockTransport.
-"""
+"""Suite for scripts/mcp_probe.py, the documented manual MCP client."""
 import contextlib
 import http.server
 import importlib.util
@@ -65,7 +57,8 @@ def _rpc_mock(mode):
 def _rpc_answer(mode):
     transport, seen = _rpc_mock(mode)
     with mock.patch.dict(os.environ, {
-            'TOKEN': TOKEN, 'DAEDALUS_MCP_URL': 'http://127.0.0.1:8086/mcp'}):
+        'DAEDALUS_TOKEN': TOKEN,
+            'DAEDALUS_MCP_URL': 'http://127.0.0.1:8086/mcp'}):
         probe = _util.load(PROBE, 'mcp_probe_rpc_test')
     import httpx
     with httpx.Client(transport=transport) as client:
@@ -187,7 +180,7 @@ def _mcp_stub(empty_for=()):
 def _run_probe(url, *argv):
     if importlib.util.find_spec('httpx') is None:
         _util.skip('scripts/mcp_probe.py dependency (httpx) not installed')
-    env = dict(os.environ, TOKEN=TOKEN, DAEDALUS_MCP_URL=url,
+    env = dict(os.environ, DAEDALUS_TOKEN=TOKEN, DAEDALUS_MCP_URL=url,
                PYTHONDONTWRITEBYTECODE='1')
     return subprocess.run(
         [sys.executable, str(PROBE), *argv], cwd=str(_util.ROOT), env=env,
@@ -195,14 +188,7 @@ def _run_probe(url, *argv):
 
 
 def test_the_probe_survives_the_bodiless_answer_to_its_notification(tmp):
-    """`list` sends a real notification and survives the 202 it earns.
-
-    rpc() gave every message an id, `notifications/initialized` included,
-    so the transport answered it as an unknown request and the handshake
-    was never completed. Without the id the transport answers 202 with no
-    body, and the helper ended with `r.json()` on that nothing: dropping
-    the id alone moved the traceback rather than removing it.
-    """
+    """`list` sends a real notification and survives the 202 it earns."""
     del tmp
     with _mcp_stub() as url:
         run = _run_probe(url, 'list')
@@ -239,13 +225,7 @@ def test_the_probe_calls_a_tool_after_the_bodiless_notification(tmp):
 
 
 def test_a_bodiless_answer_to_a_request_is_a_failure_not_a_result(tmp):
-    """initialize, tools/list and tools/call each need a body.
-
-    Routing only the two tool calls through answer() let an empty answer
-    to initialize proceed to the notification and the listing, print the
-    tools and exit 0: an initialization the server never confirmed was
-    reported as a working front end.
-    """
+    """initialize, tools/list and tools/call each need a body."""
     del tmp
     for method, argv in (('initialize', ['list']),
                          ('tools/list', ['list']),
@@ -259,6 +239,29 @@ def test_a_bodiless_answer_to_a_request_is_a_failure_not_a_result(tmp):
         assert seen[-1]['method'] == method, (method, seen)
         if method == 'initialize':
             assert 'ping' not in run.stdout, (method, run.stdout)
+
+
+def test_probe_prefers_prefixed_token_and_accepts_legacy_fallback(tmp):
+    if importlib.util.find_spec('httpx') is None:
+        _util.skip('scripts/mcp_probe.py dependency (httpx) not installed')
+    del tmp
+    for primary, legacy, want in (('new', 'old', 'new'),
+                                  (None, 'old', 'old'),
+                                  ('', 'old', 'old'),
+                                  ('new', None, 'new')):
+        env = {'TOKEN': legacy} if legacy is not None else {}
+        if primary is not None: env['DAEDALUS_TOKEN'] = primary
+        with mock.patch.dict(os.environ, env, clear=True):
+            probe = _util.load(PROBE, 'probe_environment')
+        import httpx
+        seen = []
+
+        def reply(request):
+            seen.append(request.headers['Authorization'])
+            return httpx.Response(202)
+        with httpx.Client(transport=httpx.MockTransport(reply)) as client:
+            probe.rpc(client, None, 'notifications/initialized')
+        assert seen == ['Bearer ' + want], seen
 
 
 if __name__ == '__main__':

@@ -36,7 +36,7 @@ from ci_gate import _started_key, _workflow_of  # noqa: E402
 WORKFLOW = 'tests.yml'
 SECRETS_WORKFLOW = 'secrets.yml'
 SECRETS_JOB = 'gitleaks'
-POLL_BOUND_ENV = 'SECRETS_POLL_BOUND_S'
+POLL_BOUND_ENV = 'DAEDALUS_SECRETS_POLL_BOUND_S'
 # One `gh` read, bounded, because a hung query must not outlive the bound
 # it is being counted against.
 READ_TIMEOUT_S = 120
@@ -314,7 +314,8 @@ def poll_bound():
     prevent, and a bound past the job's ceiling is a wait the runner ends
     before it can report.
     """
-    raw = os.environ.get(POLL_BOUND_ENV)
+    raw = (os.environ.get(POLL_BOUND_ENV)
+           or os.environ.get('SECRETS_POLL_BOUND_S'))
     if raw is None:
         return DEFAULT_POLL_BOUND_S
     try:
@@ -345,20 +346,26 @@ def _secret_scan():
     except QueryError as exc:
         return SCAN_QUERY_FAILED, str(exc)
     return require_secret_scan(
-        os.environ.get('REPOSITORY', ''),
-        os.environ.get('SECRETS_HEAD_SHA', ''), bound, gh_read,
+        os.environ.get('DAEDALUS_REPOSITORY')
+        or os.environ.get('REPOSITORY', ''),
+        os.environ.get('DAEDALUS_SECRETS_HEAD_SHA')
+        or os.environ.get('SECRETS_HEAD_SHA', ''), bound, gh_read,
         time.monotonic, time.sleep)
 
 
 def main():
     try:
-        needs = json.loads(os.environ['NEEDS_JSON'])
+        needs = json.loads(os.environ.get('DAEDALUS_NEEDS_JSON')
+                           or os.environ['NEEDS_JSON'])
     except (KeyError, ValueError):
-        print('NEEDS_JSON is missing or not JSON', file=sys.stderr)
+        print('DAEDALUS_NEEDS_JSON is missing or not JSON', file=sys.stderr)
         return 1
     verdict, message = evaluate(
-        needs, os.environ.get('REPOSITORY', ''),
-        os.environ.get('RUN_ID', ''), os.environ.get('HEAD_BRANCH', ''),
+        needs, os.environ.get('DAEDALUS_REPOSITORY')
+        or os.environ.get('REPOSITORY', ''),
+        os.environ.get('DAEDALUS_RUN_ID') or os.environ.get('RUN_ID', ''),
+        os.environ.get('DAEDALUS_HEAD_BRANCH')
+        or os.environ.get('HEAD_BRANCH', ''),
         gh_read)
     if verdict in GREEN:
         # Only once the dependencies are green: the aggregate is red

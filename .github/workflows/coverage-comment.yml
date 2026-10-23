@@ -66,8 +66,8 @@ jobs:
         id: artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
 
@@ -76,10 +76,10 @@ jobs:
           # call would print `false` and be reported as "no artifact" — the
           # comment silently never appears and nothing goes red.
           if ! gh api -H 'Cache-Control: no-cache' --paginate \
-            "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            "repos/$DAEDALUS_REPO/actions/runs/$DAEDALUS_RUN_ID/artifacts" \
             --jq '.artifacts[]' > artifacts.json
           then
-            echo "listing the artifacts of run $RUN_ID failed" >&2
+            echo "listing the artifacts of run $DAEDALUS_RUN_ID failed" >&2
             exit 1
           fi
           # Collect every paginated object into one array before selecting.
@@ -100,27 +100,30 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
-          EVENT_NUMBERS: >-
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DAEDALUS_HEAD_REPO: >-
+            ${{ github.event.workflow_run.head_repository.full_name }}
+          DAEDALUS_EVENT_NUMBERS: >-
             ${{ toJSON(github.event.workflow_run.pull_requests.*.number) }}
         run: |
           set -euo pipefail
 
           # Deliberately before the download: the destination is settled
           # while nothing the pull request produced is on disk.
-          numbers="$(printf '%s' "$EVENT_NUMBERS" | jq -r 'arrays | .[]' \
+          numbers="$(printf '%s' "$DAEDALUS_EVENT\
+          _NUMBERS" | jq -r 'arrays | .[]' \
             | sort -u)"
           if [ -z "$numbers" ]; then
             # A fork pull request arrives with an empty `pull_requests`, and
             # the base repository does not associate its head commit with a
             # pull request, so ask the head repository which one owns it.
             if ! gh api -H 'Cache-Control: no-cache' --paginate \
-              "repos/$HEAD_REPO/commits/$HEAD_SHA/pulls" \
+              "repos/$DAEDALUS_HEAD_REPO/commits/$DAEDALUS_HEAD_SHA/pulls" \
               --jq '.[].number' > pulls.txt
             then
-              echo "listing the pull requests for $HEAD_SHA failed" >&2
+              echo "listing the pull requests for $DAEDALUS_HEAD_SHA" \
+                "failed" >&2
               exit 1
             fi
             numbers="$(sort -u pulls.txt)"
@@ -133,7 +136,8 @@ jobs:
             exit 0
           fi
           if [ "$count" -ne 1 ]; then
-            echo "expected one pull request for $HEAD_SHA, found $count" >&2
+            echo "expected one pull request for $DAEDALUS_HEAD_SHA, found" \
+              "$count" >&2
             printf '%s\n' "$numbers" >&2
             exit 1
           fi
@@ -144,7 +148,7 @@ jobs:
               ;;
           esac
           if ! current_sha="$(gh api -H 'Cache-Control: no-cache' \
-            "repos/$REPO/pulls/$numbers" --jq '.head.sha')"
+            "repos/$DAEDALUS_REPO/pulls/$numbers" --jq '.head.sha')"
           then
             echo "reading the current head of pull request $numbers failed" \
               >&2
@@ -155,8 +159,9 @@ jobs:
             exit 1
           fi
           echo "current_sha=$current_sha" >> "$GITHUB_OUTPUT"
-          if [ "$current_sha" != "$HEAD_SHA" ]; then
-            echo "run $HEAD_SHA is stale; current pull request head is " \
+          if [ "$current_sha" != "$DAEDALUS_HEAD_SHA" ]; then
+            echo "run $DAEDALUS_HEAD_SHA is stale; current pull request" \
+              "head is " \
               "$current_sha"
             echo 'stale=true' >> "$GITHUB_OUTPUT"
             exit 0
@@ -172,11 +177,11 @@ jobs:
           && steps.pr.outputs.present != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DAEDALUS_RUN_ID: ${{ github.event.workflow_run.id }}
+          DAEDALUS_PR_NUMBER: ${{ steps.pr.outputs.number }}
+          DAEDALUS_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
 
@@ -185,16 +190,16 @@ jobs:
           # land on main instead.
           echo 'verdict=failure' >> "$GITHUB_OUTPUT"
           if ! gh api -H 'Cache-Control: no-cache' --paginate \
-            "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            "repos/$DAEDALUS_REPO/actions/runs/$DAEDALUS_RUN_ID/jobs" \
             --jq '.jobs[]' > jobs.json
           then
-            echo "listing the jobs of run $RUN_ID failed" >&2
+            echo "listing the jobs of run $DAEDALUS_RUN_ID failed" >&2
             exit 1
           fi
           # Credit is keyed on the run conclusion, not the coverage
           # job's: a failed run that skipped coverage is a failure,
           # not a documentation-only skip.
-          case "${RUN_CONCLUSION:-}" in
+          case "${DAEDALUS_RUN_CONCLUSION:-}" in
             cancelled)
               # A cancelled run's coverage job may be `cancelled` or
               # gate-skipped; the run's own conclusion is the authority.
@@ -231,13 +236,13 @@ jobs:
           {
             printf '%s\n\n' "$marker"
             printf 'Patch coverage was not measured for commit %s.\n' \
-              "$HEAD_SHA"
+              "$DAEDALUS_HEAD_SHA"
           } > comment.md
           if ! gh api -H 'Cache-Control: no-cache' --paginate \
-            "repos/$REPO/issues/$PR_NUMBER/comments" \
+            "repos/$DAEDALUS_REPO/issues/$DAEDALUS_PR_NUMBER/comments" \
             --jq '.[]' > comments.json
           then
-            echo "listing the comments on $PR_NUMBER failed" >&2
+            echo "listing the comments on $DAEDALUS_PR_NUMBER failed" >&2
             exit 1
           fi
           existing="$(
@@ -248,18 +253,22 @@ jobs:
           )"
           revalidate_head() {
             if ! current_sha="$(gh api -H 'Cache-Control: no-cache' \
-              "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+              "repos/$DAEDALUS_REPO/pulls/$DAEDALUS_PR_NUMBER" --jq \
+                '.head.sha')"
             then
-              echo "reading the current head of pull request $PR_NUMBER" \
+              echo "reading the current head of pull request" \
+                "$DAEDALUS_PR_NUMBER" \
                 "failed" >&2
               exit 1
             fi
             if [ -z "$current_sha" ]; then
-              echo "pull request $PR_NUMBER has no current head SHA" >&2
+              echo "pull request $DAEDALUS_PR_NUMBER has no current head" \
+                "SHA" >&2
               exit 1
             fi
-            if [ "$current_sha" != "$HEAD_SHA" ]; then
-              echo "run $HEAD_SHA is stale; current pull request head is " \
+            if [ "$current_sha" != "$DAEDALUS_HEAD_SHA" ]; then
+              echo "run $DAEDALUS_HEAD_SHA is stale; current pull request" \
+                "head is " \
                 "$current_sha"
               return 1
             fi
@@ -274,9 +283,11 @@ jobs:
               if ! revalidate_head; then
                 exit 0
               fi
-              gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
+              gh api -X PATCH \
+                "repos/$DAEDALUS_REPO/issues/comments/$existing" \
                 -F body=@comment.md >/dev/null
-              echo "marked patch coverage as unavailable for $HEAD_SHA"
+              echo "marked patch coverage as unavailable for" \
+                "$DAEDALUS_HEAD_SHA"
               exit 0
               ;;
           esac
@@ -301,9 +312,9 @@ jobs:
           && steps.pr.outputs.present != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DAEDALUS_PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
 
@@ -312,9 +323,9 @@ jobs:
 
           # Checked, never obeyed. See the header: the producer is untrusted.
           claimed="$(cat pr-number.txt)"
-          if [ "$claimed" != "$PR_NUMBER" ]; then
+          if [ "$claimed" != "$DAEDALUS_PR_NUMBER" ]; then
             echo "the artifact names pull request '$claimed' but the run" \
-              "belongs to '$PR_NUMBER'; refusing to post" >&2
+              "belongs to '$DAEDALUS_PR_NUMBER'; refusing to post" >&2
             exit 1
           fi
 
@@ -330,14 +341,14 @@ jobs:
           marker='<!-- daedalus-diff-coverage -->'
           {
             printf '%s\n\n' "$marker"
-            printf 'Patch coverage for commit %s.\n\n' "$HEAD_SHA"
+            printf 'Patch coverage for commit %s.\n\n' "$DAEDALUS_HEAD_SHA"
             cat body.md
           } > comment.md
           if ! gh api -H 'Cache-Control: no-cache' --paginate \
-            "repos/$REPO/issues/$PR_NUMBER/comments" \
+            "repos/$DAEDALUS_REPO/issues/$DAEDALUS_PR_NUMBER/comments" \
             --jq '.[]' > comments.json
           then
-            echo "listing the comments on $PR_NUMBER failed" >&2
+            echo "listing the comments on $DAEDALUS_PR_NUMBER failed" >&2
             exit 1
           fi
           # Slurped, so pagination cannot yield one id per page, and the
@@ -350,18 +361,22 @@ jobs:
           )"
           revalidate_head() {
             if ! current_sha="$(gh api -H 'Cache-Control: no-cache' \
-              "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')"
+              "repos/$DAEDALUS_REPO/pulls/$DAEDALUS_PR_NUMBER" --jq \
+                '.head.sha')"
             then
-              echo "reading the current head of pull request $PR_NUMBER" \
+              echo "reading the current head of pull request" \
+                "$DAEDALUS_PR_NUMBER" \
                 "failed" >&2
               exit 1
             fi
             if [ -z "$current_sha" ]; then
-              echo "pull request $PR_NUMBER has no current head SHA" >&2
+              echo "pull request $DAEDALUS_PR_NUMBER has no current head" \
+                "SHA" >&2
               exit 1
             fi
-            if [ "$current_sha" != "$HEAD_SHA" ]; then
-              echo "run $HEAD_SHA is stale; current pull request head is " \
+            if [ "$current_sha" != "$DAEDALUS_HEAD_SHA" ]; then
+              echo "run $DAEDALUS_HEAD_SHA is stale; current pull request" \
+                "head is " \
                 "$current_sha"
               return 1
             fi
@@ -371,7 +386,8 @@ jobs:
               if ! revalidate_head; then
                 exit 0
               fi
-              gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" \
+              gh api -X POST \
+                "repos/$DAEDALUS_REPO/issues/$DAEDALUS_PR_NUMBER/comments" \
                 -F body=@comment.md >/dev/null
               echo 'posted a new comment'
               ;;
@@ -383,7 +399,8 @@ jobs:
               if ! revalidate_head; then
                 exit 0
               fi
-              gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
+              gh api -X PATCH \
+                "repos/$DAEDALUS_REPO/issues/comments/$existing" \
                 -F body=@comment.md >/dev/null
               echo "updated comment $existing"
               ;;
@@ -394,44 +411,47 @@ jobs:
           always() && steps.pr.outputs.present != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          RUN_URL: >-
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DAEDALUS_RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
-          STATUS: ${{ job.status }}
-          JOB_SKIPPED: ${{ steps.missing.outputs.skipped }}
-          NOT_MEASURED_REASON: ${{ steps.missing.outputs.not_measured_reason }}
-          VERDICT: ${{ steps.missing.outputs.verdict }}
+          DAEDALUS_STATUS: ${{ job.status }}
+          DAEDALUS_JOB_SKIPPED: ${{ steps.missing.outputs.skipped }}
+          DAEDALUS_NOT_MEASURED_REASON: >-
+            ${{ steps.missing.outputs.not_measured_reason }}
+          DAEDALUS_VERDICT: ${{ steps.missing.outputs.verdict }}
         run: |
           set -euo pipefail
 
-          STATUS="${VERDICT:-$STATUS}"
+          DAEDALUS_STATUS="${DAEDALUS_VERDICT:-$DAEDALUS_STATUS}"
 
-          case "$STATUS" in
+          case "$DAEDALUS_STATUS" in
             success|failure|cancelled) ;;
             *)
-              echo "unexpected workflow-run conclusion: $STATUS" >&2
+              echo "unexpected workflow-run conclusion: $DAEDALUS_STATUS" >&2
               exit 1
               ;;
           esac
 
-          if [ "$STATUS" = success ] && [ "${JOB_SKIPPED:-}" = true ]; then
-            if [ -z "${NOT_MEASURED_REASON:-}" ]; then
+          if [ "$DAEDALUS_STATUS" = success ] && \
+            [ "${DAEDALUS_JOB_SKIPPED:-}" = true ]; then
+            if [ -z "${DAEDALUS_NOT_MEASURED_REASON:-}" ]; then
               echo 'skipped=true reached the publish step without a ' \
                 'not_measured_reason output' >&2
               exit 1
             fi
-            STATUS=neutral
+            DAEDALUS_STATUS=neutral
           fi
 
-          external_id="daedalus-coverage-comment/v1/$HEAD_SHA"
+          external_id="daedalus-coverage-comment/v1/$DAEDALUS_HEAD_SHA"
           if ! gh api --method GET -H 'Cache-Control: no-cache' --paginate \
-            "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+            "repos/$DAEDALUS_REPO/commits/$DAEDALUS_HEAD_SHA/check-runs" \
             -f filter=all -f per_page=100 \
             --jq '.check_runs[]' > check-runs.json
           then
-            echo "listing coverage comment checks for $HEAD_SHA failed" >&2
+            echo "listing coverage comment checks for $DAEDALUS_HEAD_SHA" \
+              "failed" >&2
             exit 1
           fi
           if ! jq -s --arg name 'coverage comment' \
@@ -462,18 +482,18 @@ jobs:
               -X "$method" "$target"
               -f name='coverage comment'
               -f status=completed
-              -f conclusion="$STATUS"
+              -f conclusion="$DAEDALUS_STATUS"
               -f external_id="$external_id"
-              -f details_url="$RUN_URL"
+              -f details_url="$DAEDALUS_RUN_URL"
             )
-            if [ "$STATUS" = neutral ]; then
+            if [ "$DAEDALUS_STATUS" = neutral ]; then
               local summary='Coverage was not measured for '
-              summary+="$NOT_MEASURED_REASON."
+              summary+="$DAEDALUS_NOT_MEASURED_REASON."
               args+=( -f 'output[title]=Coverage not measured'
                 -f "output[summary]=$summary" )
             fi
             if [ "$method" = POST ]; then
-              args+=( -f head_sha="$HEAD_SHA" )
+              args+=( -f head_sha="$DAEDALUS_HEAD_SHA" )
             fi
             if ! gh api "${args[@]}" >/dev/null
             then
@@ -484,12 +504,12 @@ jobs:
           }
 
           if [ ! -s check-ids.txt ]; then
-            write_check POST "repos/$REPO/check-runs"
-            echo "created coverage comment check for $HEAD_SHA"
+            write_check POST "repos/$DAEDALUS_REPO/check-runs"
+            echo "created coverage comment check for $DAEDALUS_HEAD_SHA"
           else
             while IFS= read -r check_id; do
               check_id="${check_id%$'\r'}"
-              write_check PATCH "repos/$REPO/check-runs/$check_id"
+              write_check PATCH "repos/$DAEDALUS_REPO/check-runs/$check_id"
             done < check-ids.txt
-            echo "updated coverage comment checks for $HEAD_SHA"
+            echo "updated coverage comment checks for $DAEDALUS_HEAD_SHA"
           fi

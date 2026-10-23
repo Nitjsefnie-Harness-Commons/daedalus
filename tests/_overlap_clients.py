@@ -77,7 +77,7 @@ def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
     import _overlap  # noqa: E402  pylint: disable=import-outside-toplevel
 
     owners = ('owner-a', 'owner-b')
-    bridge_env = {'TOKEN': '', 'DAEDALUS_TOKEN': token}
+    bridge_env = {'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token}
     bridge_log = []
     with _util.bridge(
             tmp, env=bridge_env, output=bridge_log) as (base, docroot):

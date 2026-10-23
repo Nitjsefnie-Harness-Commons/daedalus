@@ -1,11 +1,4 @@
-"""Shared helpers for the Daedalus suites.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
-Stdlib only and OS-agnostic: these run on Linux, macOS and Windows in CI, and a
-POSIX-only assumption here would surface as a test failure rather than as the
-platform difference it actually is.
-"""
+"""Shared helpers for the Daedalus suites."""
 import contextlib
 import importlib.util
 import json
@@ -425,7 +418,8 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
     child_env = {name: value for name, value in os.environ.items()
-                 if not name.startswith('DAEDALUS_')}
+                 if not name.startswith('DAEDALUS_')
+                 and name not in ('TOKEN', 'ID')}
     child_env.update({
         'DAEDALUS_DIR': str(docroot),
         'DAEDALUS_PORT': '0',

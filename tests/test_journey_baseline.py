@@ -263,7 +263,7 @@ def test_bridge_only_spawns_the_bridge_and_is_not_a_journey(tmp):
                                   '--root', str(ROOT)]) == 0
     assert rendering == {'journey': 'bridge-only'}, rendering
     assert entered == [({'DAEDALUS_TOKEN': journeys.BRIDGE_TOKEN,
-                         'TOKEN': ''}, True)] * 2, entered
+                         'DAEDALUS_TOKEN_OVERRIDE': ''}, True)] * 2, entered
     # Nothing printed, the way `startup-only` prints nothing: this run is a
     # constant to subtract, not a journey whose rendering anyone compares.
     assert journeys.RECORD_MARKER not in printed.getvalue(), printed.getvalue()

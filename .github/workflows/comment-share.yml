@@ -32,9 +32,9 @@ jobs:
         id: records
         if: github.event_name == 'push'
         env:
-          EXPECTED_SHA: ${{ github.sha }}
+          DAEDALUS_EXPECTED_SHA: ${{ github.sha }}
         run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$DAEDALUS_EXPECTED_SHA"
           if git diff --quiet -- .github/comment-share.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -47,8 +47,9 @@ jobs:
       - name: Commit the tighten
         if: success() && steps.records.outputs.changed == 'true'
         env:
-          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          REPO: ${{ github.repository }}
+          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
+            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          DAEDALUS_REPO: ${{ github.repository }}
         run: |
           python3 scripts/ci/ratchet_push.py .github/comment-share.json \
             'ci: tighten the comment-share records'

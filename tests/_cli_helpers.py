@@ -26,7 +26,7 @@ from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 
 TOK = 'clitok'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
 
 def cli_env(**overrides):

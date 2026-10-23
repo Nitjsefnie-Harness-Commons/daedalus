@@ -164,17 +164,17 @@ def _pinned_actionlint_version(job=None):
     if job is None:
         job = complete_job_mapping(_tests_yml(), _ACTIONLINT_JOB) or {}
     env = job.get('env') or {}
-    assert 'ACTIONLINT_VERSION' in env, env
-    return env['ACTIONLINT_VERSION']
+    assert 'DAEDALUS_ACTIONLINT_VERSION' in env, env
+    return env['DAEDALUS_ACTIONLINT_VERSION']
 
 
 def _pin():
-    """ACTIONLINT_VERSION, read out of the workflow's own bytes.
+    """DAEDALUS_ACTIONLINT_VERSION, read out of the workflow's own bytes.
 
     A second reader on purpose, where `_yamlsteps` is the first: a pin
     written down rather than read has to disagree with something.
     """
-    found = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
+    found = re.findall(r'^\s*DAEDALUS_ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
                        _tests_yml(), re.MULTILINE)
     assert len(found) == 1, found
     return found[0].strip('\'"')
@@ -345,7 +345,7 @@ def assert_pin_read_from_the_job():
     Two directions for the same reason `_pinned_actionlint_version` takes a
     parameter: read from the job, and equal to what the job actually pins.
     """
-    job = {'env': {'ACTIONLINT_VERSION': '9.9.9'}}
+    job = {'env': {'DAEDALUS_ACTIONLINT_VERSION': '9.9.9'}}
     assert _pinned_actionlint_version(job) == '9.9.9'
     assert _pinned_actionlint_version() == _pin()
 

@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Suite for daedalus_cli — what a command's wait admits and survives.
-
-Same fixture style as the other tests/test_cli_*.py suites: the CLI is always
-run as a subprocess, the way a shell would run it, against
-a real bridge() or against a stub front end that answers the way a proxy in
-front of the bridge does.
-"""
+"""Suite for daedalus_cli — what a command's wait admits and survives."""
 import json
 import subprocess
 import sys
@@ -27,7 +21,7 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 # tests/test_cli_output.py).
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
 
 def _run(argv, env):
@@ -138,7 +132,8 @@ def test_a_zero_timeout_on_exec_and_put_reads_as_the_default(tmp):
     source = Path(tmp) / 'job.js'
     source.write_text('document.title', encoding='utf-8')
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab0')
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                      DAEDALUS_ID='tab0')
         cases = (
             ['exec', 'job0', 'document.title', '-t', '0'],
             ['put', 'job1', str(source), '--timeout', '0'],
@@ -213,7 +208,8 @@ def test_the_result_wait_outlives_a_truncated_peek(tmp):
     """
     del tmp
     with truncating_front_end(truncate=2) as base:
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                      DAEDALUS_ID='tab4')
         r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
         seen = list(TruncatingFrontEndHandler.seen)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
@@ -294,7 +290,8 @@ def test_the_result_wait_reports_a_timeout_when_every_peek_is_cut_off(tmp):
     """Retrying is bounded by the deadline, and ends the usual way."""
     del tmp
     with truncating_front_end(truncate=None) as base:
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                      DAEDALUS_ID='tab4')
         r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
         seen = list(TruncatingFrontEndHandler.seen)
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
@@ -342,7 +339,8 @@ def test_the_result_wait_outlives_a_truncated_error_peek(tmp):
     the HTTPError handler reads the body for its report (issue 700)."""
     del tmp
     with truncating_front_end(truncate=2, status=502) as base:
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                      DAEDALUS_ID='tab4')
         r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
         seen = list(TruncatingFrontEndHandler.seen)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
@@ -359,7 +357,8 @@ def test_the_result_wait_reports_a_timeout_when_every_error_peek_is_cut(
         tmp):
     del tmp
     with truncating_front_end(truncate=None, status=502) as base:
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab4')
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                      DAEDALUS_ID='tab4')
         r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
         seen = list(TruncatingFrontEndHandler.seen)
     assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)

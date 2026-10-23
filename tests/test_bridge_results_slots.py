@@ -144,8 +144,9 @@ def test_result_path_component_byte_boundaries(tmp):
     """Result names honor both the component and derived-filename budgets."""
     token = 'lengthtoken'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (
-                base, docroot):
+        tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '',
+                  'DAEDALUS_TOKEN': token}) as (
+            base, docroot):
         # This 239-byte tab makes a 256-byte derived filename for this token,
         # one byte beyond filesystems with a 255-byte component limit.
         status, body = _util.post_json(
@@ -232,12 +233,8 @@ def test_unencodable_result_is_refused_without_poisoning_the_existing_slot(
 
 
 def test_result_with_a_surrogate_id_is_answered_and_the_bridge_survives(tmp):
-    """A lone surrogate in a result's id must not drop the request unanswered.
-
-    json.loads accepts "\\ud800"; the [RESULT] log line used to raise
-    UnicodeEncodeError at the stdout encode, killing the request thread before
-    any HTTP answer. The line now logs the value escaped, and the existing
-    encoding guard below it answers 400.
+    """
+    A lone surrogate in a result's id must not drop the request unanswered.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         raw_result = b'{"token":"httptok","id":"\\ud800","result":1}'

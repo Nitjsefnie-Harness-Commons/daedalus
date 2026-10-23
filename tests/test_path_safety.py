@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
 
 TOKEN = 'toksafety'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOKEN, 'TOKEN': ''}
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOKEN, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 # One component up from the docroot, plus a name no legitimate handler writes.
 ESCAPES = ('../escaped', '..', 'a/b', 'a\\b')
 WINDOWS_UNSAFE = (

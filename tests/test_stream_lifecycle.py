@@ -78,7 +78,7 @@ def test_port_zero_binds_an_ephemeral_port_and_announces_it(tmp):
         'DAEDALUS_PORT': '0',
         'DAEDALUS_MCP_PORT': '0',
         'DAEDALUS_TOKEN': 'lifecycle-test',
-        'TOKEN': '',
+        'DAEDALUS_TOKEN_OVERRIDE': '',
         'PYTHONDONTWRITEBYTECODE': '1',
         'PYTHONUNBUFFERED': '1',
     })
@@ -251,7 +251,7 @@ def test_readiness_does_not_wait_for_the_mcp_front_end_to_import(tmp):
         'DAEDALUS_PORT': '0',
         'DAEDALUS_MCP_PORT': '0',
         'DAEDALUS_TOKEN': 'lifecycle-test',
-        'TOKEN': '',
+        'DAEDALUS_TOKEN_OVERRIDE': '',
         'PYTHONDONTWRITEBYTECODE': '1',
         'PYTHONUNBUFFERED': '1',
         'PYTHONPATH': _held_mcp_import(tmp, entered, release, left),
@@ -415,7 +415,7 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
 def test_an_ended_stream_closes_its_socket(tmp):
     env = {
         'DAEDALUS_STREAM_MAX_AGE': str(MAX_AGE),
-        'TOKEN': '',
+        'DAEDALUS_TOKEN_OVERRIDE': '',
         'DAEDALUS_TOKEN': 'lifecycle-test',
         # The MCP thread would otherwise try the default port, which another
         # bridge in this suite may already hold; 0 lets the kernel pick.
@@ -443,7 +443,7 @@ def test_an_ended_stream_closes_its_socket(tmp):
 
 
 def test_same_key_reconnect_replaces_and_closes_the_first_stream(tmp):
-    env = {'TOKEN': '', 'DAEDALUS_TOKEN': 'lifecycle-test'}
+    env = {'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': 'lifecycle-test'}
     with _util.bridge(tmp, env=env) as (base, _docroot):
         first_conn, first = _open_stream(base, 'same')
         second_conn, second = _open_stream(base, 'same')
@@ -566,7 +566,7 @@ def test_an_invalid_mcp_setting_stops_the_bridge_naming_it(tmp):
             'DAEDALUS_DIR': str(Path(tmp) / name.lower()),
             'DAEDALUS_PORT': '0',
             'DAEDALUS_TOKEN': 'lifecycle-test',
-            'TOKEN': '',
+            'DAEDALUS_TOKEN_OVERRIDE': '',
             'PYTHONDONTWRITEBYTECODE': '1',
             name: value,
         })
@@ -629,7 +629,7 @@ def test_the_stream_expires_a_command_by_the_ttl_not_the_max_age(tmp):
     first.
     """
     env = {
-        'TOKEN': '',
+        'DAEDALUS_TOKEN_OVERRIDE': '',
         'DAEDALUS_TOKEN': 'lifecycle-test',
         'DAEDALUS_CMD_TTL': '60',
         'DAEDALUS_STREAM_MAX_AGE': '3600',

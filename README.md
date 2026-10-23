@@ -66,7 +66,7 @@ Back in the extension options, set **Server URL** to
 page that the extension can control, then evaluate its title with the CLI:
 
 ```bash
-DAEDALUS_TOKEN=<token> ID=<tab-id> \
+DAEDALUS_TOKEN=<token> DAEDALUS_ID=<tab-id> \
   daedalus exec page-title 'document.title'
 ```
 
@@ -83,7 +83,7 @@ installed. This repository includes a minimal client for checking one tool
 call:
 
 ```bash
-TOKEN=<token> python3 scripts/mcp_probe.py call title \
+DAEDALUS_TOKEN_OVERRIDE=<token> python3 scripts/mcp_probe.py call title \
   '{"tab_id":"<tab-id>"}'
 ```
 
@@ -104,7 +104,8 @@ The dashboard can also drive the extension's tab, screenshot, cookie, hotfix,
 request-blocking, network-capture, CDP, CSS, timing, and upload capabilities.
 A broadcast evaluation (`-b`, `broadcast=True`) is sent with no tab and runs in
 the browser's active tab — with the dashboard focused, that is the dashboard
-itself. Select a tab in the dashboard, or set `ID` and omit `-b`, to run it
+itself. Select a tab in the dashboard, or set `DAEDALUS_ID` and omit `-b`, to
+run it
 elsewhere.
 
 ## GM Bridge

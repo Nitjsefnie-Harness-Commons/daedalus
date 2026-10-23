@@ -534,7 +534,7 @@ def hostile_eval_matrix(tmp):
     token = 'cdpevaltok'
     matrix = {}
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             page_url = pages + '/hostile.html'

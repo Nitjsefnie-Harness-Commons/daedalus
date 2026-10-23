@@ -1,13 +1,4 @@
-#!/usr/bin/env python3
-"""What the one shared `cli_env` strips and sets.
-
-Every suite that drives the CLI builds the subcommand's environment from the
-`cli_env` in tests/_cli_helpers.py, so what it promises is what makes their
-results mean anything: the subcommand must not inherit the runner's own
-bridge configuration, token or stream encoding, and an override is the
-caller's last word. A failure names the name it is about; the environment
-itself is not one to print.
-"""
+"""What the one shared `cli_env` strips and sets."""
 import contextlib
 import os
 import sys
@@ -17,25 +8,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _cli_helpers import cli_env  # noqa: E402
 
-# The names a subcommand must not read from us: the DAEDALUS_ configuration
-# vars, the bare TOKEN the CLI resolves as a fallback, and the stream encoding
-# it applies its own rule to. The first group is a sample, not the rule — the
-# rule is the prefix, and the last case below is what pins it.
-BRIDGE_NAMES = ('DAEDALUS_TOKEN', 'DAEDALUS_URL', 'DAEDALUS_MCP_PORT')
+BRIDGE_NAMES = ('DAEDALUS_TOKEN', 'DAEDALUS_URL', 'DAEDALUS_MCP_PORT',
+                'DAEDALUS_TOKEN_OVERRIDE', 'DAEDALUS_ID')
 RUNNER_NAMES = ('TOKEN', 'ID', 'PYTHONIOENCODING')
-# A real CLI var the sample never names: a helper that filtered these three
-# by name instead of by prefix is caught here rather than passing every case.
 OFF_LIST_NAME = 'DAEDALUS_DIR'
 NEUTRAL = 'CLIHELPER_SUITE_NEUTRAL'
 
 
 @contextlib.contextmanager
 def _runner_environment():
-    """Stand in for the runner that launches the suite.
-
-    A name this process already carries is captured and put back, so the pin
-    reads the same on a developer machine and on a bare CI leg.
-    """
+    """Stand in for the runner that launches the suite."""
     seeded: dict[str, str] = dict.fromkeys(
         BRIDGE_NAMES + RUNNER_NAMES + (OFF_LIST_NAME, NEUTRAL), 'seeded')
     saved = {name: os.environ[name] for name in seeded if name in os.environ}
@@ -81,12 +63,35 @@ def test_the_cli_environment_never_writes_bytecode(tmp):
 def test_an_override_is_applied_over_the_stripped_environment(tmp):
     del tmp
     with _runner_environment():
-        env = cli_env(DAEDALUS_TOKEN='clitok', TOKEN='clitok',
+        env = cli_env(DAEDALUS_TOKEN='clitok',
+                      DAEDALUS_TOKEN_OVERRIDE='clitok',
                       PYTHONIOENCODING='utf-8')
     applied = {name: env.get(name) for name in
-               ('DAEDALUS_TOKEN', 'TOKEN', 'PYTHONIOENCODING', 'ID')}
-    assert applied == {'DAEDALUS_TOKEN': 'clitok', 'TOKEN': 'clitok',
-                       'PYTHONIOENCODING': 'utf-8', 'ID': None}, applied
+               ('DAEDALUS_TOKEN', 'DAEDALUS_TOKEN_OVERRIDE',
+                   'PYTHONIOENCODING', 'DAEDALUS_ID')}
+    assert applied == {'DAEDALUS_TOKEN': 'clitok',
+                       'DAEDALUS_TOKEN_OVERRIDE': 'clitok',
+                       'PYTHONIOENCODING': 'utf-8',
+                       'DAEDALUS_ID': None}, applied
+
+
+def test_prefixed_token_and_tab_precede_legacy_environment(tmp):
+    from unittest.mock import patch
+    transport = _util.load(_util.ROOT / 'daedalus_cli/transport.py')
+    del tmp
+    for primary, legacy, want in (('new', 'old', 'new'),
+                                  (None, 'old', 'old'),
+                                  ('', 'old', 'old'),
+                                  ('new', None, 'new'),
+                                  (None, None, '')):
+        env = {'DAEDALUS_TOKEN': 'durable'}
+        for name, value in (('DAEDALUS_TOKEN_OVERRIDE', primary),
+                            ('DAEDALUS_ID', primary), ('TOKEN', legacy),
+                            ('ID', legacy)):
+            if value is not None: env[name] = value
+        with patch.dict(os.environ, env, clear=True):
+            assert transport.token() == (want or 'durable')
+            assert transport.tab() == want
 
 
 if __name__ == '__main__':

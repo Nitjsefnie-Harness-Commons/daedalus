@@ -2,18 +2,19 @@
 """Minimal MCP client for manual verification of daedalus MCP tools.
 
 Usage:
-  TOKEN=<bridge-token> python3 scripts/mcp_probe.py list
-  TOKEN=<bridge-token> python3 scripts/mcp_probe.py call <tool> [json-args]
-  TOKEN=<bridge-token> DAEDALUS_MCP_URL=http://127.0.0.1:8086/mcp \
+  DAEDALUS_TOKEN=<bridge-token> python3 scripts/mcp_probe.py list
+  DAEDALUS_TOKEN=<bridge-token> python3 scripts/mcp_probe.py \
+    call <tool> [json-args]
+  DAEDALUS_TOKEN=<bridge-token> DAEDALUS_MCP_URL=http://127.0.0.1:8086/mcp \
     python3 scripts/mcp_probe.py ...
 """
 import json, os, sys, uuid
 import httpx
 
 URL = os.environ.get('DAEDALUS_MCP_URL', 'http://127.0.0.1:8086/mcp')
-TOKEN = os.environ.get('TOKEN', '')
+TOKEN = os.environ.get('DAEDALUS_TOKEN') or os.environ.get('TOKEN', '')
 if not TOKEN:
-    sys.exit('TOKEN env var required')
+    sys.exit('DAEDALUS_TOKEN env var required')
 
 
 def rpc(client, session_id, method, params=None):

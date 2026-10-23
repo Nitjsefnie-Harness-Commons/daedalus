@@ -45,36 +45,44 @@ jobs:
       - name: Claim the release version on current main
         id: bump
         env:
-          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          REPO: ${{ github.repository }}
-          VERSION: ${{ inputs.version }}
-        run: python3 scripts/ci/release_dispatch.py bump "$VERSION"
+          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
+            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_VERSION: ${{ inputs.version }}
+        run: python3 scripts/ci/release_dispatch.py bump "$DAEDALUS_VERSION"
 
       - name: Wait for the release commit's gates to go green
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ steps.bump.outputs.sha }}
-        run: python3 scripts/ci/release_dispatch.py wait-gates "$SHA"
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_SHA: ${{ steps.bump.outputs.sha }}
+        run: python3 scripts/ci/release_dispatch.py wait-gates "$DAEDALUS_SHA"
 
       - name: Push the annotated release tag
         env:
-          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          REPO: ${{ github.repository }}
-          VERSION: ${{ inputs.version }}
-          SHA: ${{ steps.bump.outputs.sha }}
-        run: python3 scripts/ci/release_dispatch.py tag "$VERSION" "$SHA"
+          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
+            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_VERSION: ${{ inputs.version }}
+          DAEDALUS_SHA: ${{ steps.bump.outputs.sha }}
+        run: >-
+          python3 scripts/ci/release_dispatch.py tag "$DAEDALUS_VERSION"
+          "$DAEDALUS_SHA"
 
       - name: Require successful release publication
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ steps.bump.outputs.sha }}
-        run: python3 scripts/ci/release_dispatch.py wait-release "$SHA"
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_SHA: ${{ steps.bump.outputs.sha }}
+        run: >-
+          python3 scripts/ci/release_dispatch.py wait-release "$DAEDALUS_SHA"
 
       - name: Stop main claiming the published version
         env:
-          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          REPO: ${{ github.repository }}
-          VERSION: ${{ inputs.version }}
-        run: python3 scripts/ci/release_dispatch.py bump "$VERSION" --successor
+          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
+            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_VERSION: ${{ inputs.version }}
+        run: >-
+          python3 scripts/ci/release_dispatch.py bump "$DAEDALUS_VERSION"
+          --successor

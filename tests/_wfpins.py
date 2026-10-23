@@ -345,9 +345,9 @@ def assert_ci_tool_pins_live_in_a_watched_manifest():
 _ESLINT_INSTALL = 'Install eslint (pinned, no package.json, no build step)'
 _ESLINT_GATE = "Check the pins against the registries' latest majors"
 _ESLINT_PINS = (
-    ('ESLINT_VERSION', 'eslint'),
-    ('ESLINT_JS_VERSION', '@eslint/js'),
-    ('GLOBALS_VERSION', 'globals'),
+    ('DAEDALUS_ESLINT_VERSION', 'eslint'),
+    ('DAEDALUS_ESLINT_JS_VERSION', '@eslint/js'),
+    ('DAEDALUS_GLOBALS_VERSION', 'globals'),
 )
 _EXACT_PIN = re.compile(r'\d+\.\d+\.\d+\Z')
 # PEP 440 version shape, including normalized spellings and local labels.

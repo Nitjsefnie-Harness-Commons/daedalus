@@ -84,8 +84,8 @@ jobs:
         id: classify
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BEFORE_SHA: ${{ github.event.before }}
+          DAEDALUS_PR_NUMBER: ${{ github.event.pull_request.number }}
+          DAEDALUS_BEFORE_SHA: ${{ github.event.before }}
         run: python3 scripts/ci/classify_changes.py
 
   # Two gates, one job each so a failure says which tool found it.
@@ -256,10 +256,10 @@ jobs:
 
       - name: Resolve threshold base
         env:
-          REPO: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAEDALUS_EVENT: ${{ github.event_name }}
+          DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
       # The pip cache is restored on every event and saved only from a push
@@ -343,9 +343,9 @@ jobs:
       # check, so the installed version and the checked version cannot
       # diverge. @eslint/js carries the recommended rules and globals the
       # browser/serviceworker environments; eslint itself depends on neither.
-      ESLINT_VERSION: "10.9.1"
-      ESLINT_JS_VERSION: "10.0.1"
-      GLOBALS_VERSION: "17.12.0"
+      DAEDALUS_ESLINT_VERSION: "10.9.1"
+      DAEDALUS_ESLINT_JS_VERSION: "10.0.1"
+      DAEDALUS_GLOBALS_VERSION: "17.12.0"
 
     steps:
       # actions/checkout v7.0.1
@@ -374,9 +374,9 @@ jobs:
         # below exists because the top-level pin itself is what rots.
         run: >-
           npm install --no-save --no-package-lock --no-audit --no-fund
-          "eslint@${ESLINT_VERSION}"
-          "@eslint/js@${ESLINT_JS_VERSION}"
-          "globals@${GLOBALS_VERSION}"
+          "eslint@${DAEDALUS_ESLINT_VERSION}"
+          "@eslint/js@${DAEDALUS_ESLINT_JS_VERSION}"
+          "globals@${DAEDALUS_GLOBALS_VERSION}"
 
       # Three pins ride one install command, so one of them rotting is
       # enough to break the job: each is compared here with its own
@@ -391,9 +391,9 @@ jobs:
           stale=0
           drift=0
           for pin in \
-            "ESLINT_VERSION:eslint" \
-            "ESLINT_JS_VERSION:@eslint/js" \
-            "GLOBALS_VERSION:globals"
+            "DAEDALUS_ESLINT_VERSION:eslint" \
+            "DAEDALUS_ESLINT_JS_VERSION:@eslint/js" \
+            "DAEDALUS_GLOBALS_VERSION:globals"
           do
             var="${pin%%:*}"
             package="${pin#*:}"
@@ -497,10 +497,10 @@ jobs:
       # v1.7.12 tag, two of which are behavioural (service-container
       # `entrypoint`/`command`, and a darwin shellcheck deadlock fix), so
       # returning to upstream is a pin change and no merge.
-      ACTIONLINT_VERSION: 1.7.12-queue.1
+      DAEDALUS_ACTIONLINT_VERSION: 1.7.12-queue.1
       # sha256 of actionlint_1.7.12-queue.1_linux_amd64.tar.gz, from the
       # release's own checksums file. Bump both together.
-      ACTIONLINT_SHA256: >-
+      DAEDALUS_ACTIONLINT_SHA256: >-
         dcc2c42a7caaa197dfe63584a3851f62ef260f80b2cf221baaf05479661e1521
 
     steps:
@@ -524,12 +524,13 @@ jobs:
         # whatever that URL serves at run time. The transfer is bounded so a
         # hung mirror fails the step instead of holding the runner.
         run: |
-          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tarball="actionlint_${DAEDALUS_ACTIONLINT_VERSION}"
+          tarball="${tarball}_linux_amd64.tar.gz"
           url='https://github.com/Nitjsefnie-OSC/actionlint/releases/download'
-          url="${url}/v${ACTIONLINT_VERSION}/${tarball}"
+          url="${url}/v${DAEDALUS_ACTIONLINT_VERSION}/${tarball}"
           curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
             -o "$tarball" "$url"
-          echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum -c -
+          echo "${DAEDALUS_ACTIONLINT_SHA256}  ${tarball}" | sha256sum -c -
           tar -xzf "$tarball" actionlint
           ./actionlint --version
 
@@ -624,10 +625,10 @@ jobs:
 
       - name: Resolve threshold base
         env:
-          REPO: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAEDALUS_EVENT: ${{ github.event_name }}
+          DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
       # The suites this job runs skip on node, so it declares node rather
@@ -838,10 +839,10 @@ jobs:
 
       - name: Resolve threshold base
         env:
-          REPO: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAEDALUS_EVENT: ${{ github.event_name }}
+          DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
       # Same reason and the same order as the suites job: the suites reached
@@ -1008,10 +1009,10 @@ jobs:
 
       - name: Resolve threshold base
         env:
-          REPO: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAEDALUS_EVENT: ${{ github.event_name }}
+          DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
       - name: Restore the pip cache
@@ -1205,8 +1206,9 @@ jobs:
         # audit.yml remains unfiltered.
         if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true' }}
         env:
-          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          REPO: ${{ github.repository }}
+          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
+            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          DAEDALUS_REPO: ${{ github.repository }}
         run: |
           python3 scripts/ci/ratchet_push.py .github/ci-thresholds.json \
             'ci: update CI ratchets'
@@ -1274,9 +1276,9 @@ jobs:
 
       - name: Package the comment for the trusted commenter
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DAEDALUS_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          printf '%s\n' "$PR_NUMBER" > pr-number.txt
+          printf '%s\n' "$DAEDALUS_PR_NUMBER" > pr-number.txt
 
       - name: Upload the comment for the trusted commenter
         # actions/upload-artifact v7.0.1
@@ -1318,7 +1320,7 @@ jobs:
       # nothing. A higher value exists to derive a tolerance from a spread,
       # once, and is not what every run should pay for — three is how each
       # baseline's tolerance has been measured, on the per-journey number.
-      JOURNEY_ROUNDS: "1"
+      DAEDALUS_JOURNEY_ROUNDS: "1"
 
     steps:
       # actions/checkout v7.0.1
@@ -1421,8 +1423,9 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 scripts/ci/journey_budget.py probe --summary
 
-      # The rounds are the job's `JOURNEY_ROUNDS`, and the committed default
-      # is one: these counts are deterministic, so a discarded warm-up round
+      # The rounds are the job's `DAEDALUS_JOURNEY_ROUNDS`, and the committed
+      # default is one: these counts are deterministic, so a discarded
+      # warm-up round
       # buys nothing. More than one round is for deriving the tolerance from
       # a spread, once.
       - name: Measure the journeys
@@ -1440,10 +1443,10 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
           DAEDALUS_JOURNEY_THREAD_ROWS: "1"
           DAEDALUS_JOURNEY_FUNCTION_ROWS: "1"
-          COUNTS: ${{ runner.temp }}/journey-counts.json
+          DAEDALUS_COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py measure --root . \
-            --rounds "${JOURNEY_ROUNDS:-1}" --out "$COUNTS"
+            --rounds "${DAEDALUS_JOURNEY_ROUNDS:-1}" --out "$DAEDALUS_COUNTS"
 
       # A re-baseline raises a recorded count, so it stays a reviewed commit.
       # What the refusal below prints is one command over THIS run's own
@@ -1464,10 +1467,10 @@ jobs:
         id: check
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-          COUNTS: ${{ runner.temp }}/journey-counts.json
+          DAEDALUS_COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py check --root . \
-            --measurements "$COUNTS" --summary
+            --measurements "$DAEDALUS_COUNTS" --summary
 
       # The budget must follow a journey down on its own, or it sits at old
       # high counts until somebody remembers to lower them and a later
@@ -1487,10 +1490,10 @@ jobs:
                 && github.ref == 'refs/heads/main' }}
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-          COUNTS: ${{ runner.temp }}/journey-counts.json
+          DAEDALUS_COUNTS: ${{ runner.temp }}/journey-counts.json
         run: |
           python3 scripts/ci/journey_budget.py check --root . \
-            --measurements "$COUNTS" --tighten
+            --measurements "$DAEDALUS_COUNTS" --tighten
           if git diff --quiet -- .github/journey-budget.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -1504,8 +1507,9 @@ jobs:
       - name: Commit the tighten
         if: ${{ !cancelled() && steps.tighten.outputs.changed == 'true' }}
         env:
-          MASTER_PUSH_DEPLOY_KEY: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          REPO: ${{ github.repository }}
+          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
+            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          DAEDALUS_REPO: ${{ github.repository }}
         run: |
           python3 scripts/ci/ratchet_push.py .github/journey-budget.json \
             'ci: tighten the journey budget'
@@ -1527,8 +1531,8 @@ jobs:
       - journey-budget
     runs-on: ubuntu-latest
     # Two numbers, and the gap between them is the reason for both. The
-    # poll bound (SECRETS_POLL_BOUND_S below) IS the gitleaks job's own
-    # 10-minute backstop: no queueing is left in it, so a scan unreported
+    # poll bound (DAEDALUS_SECRETS_POLL_BOUND_S below) IS the gitleaks job's
+    # own 10-minute backstop: no queueing is left in it, so a scan unreported
     # by then is refused rather than waited on.
     #
     # A superseded cancellation makes two reads before the scan wait,
@@ -1613,10 +1617,12 @@ jobs:
       - name: Check dependency results
         env:
           GH_TOKEN: ${{ github.token }}
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          REPOSITORY: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          HEAD_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          SECRETS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          SECRETS_POLL_BOUND_S: '600'
+          DAEDALUS_NEEDS_JSON: ${{ toJSON(needs) }}
+          DAEDALUS_REPOSITORY: ${{ github.repository }}
+          DAEDALUS_RUN_ID: ${{ github.run_id }}
+          DAEDALUS_HEAD_BRANCH: >-
+            ${{ github.event.pull_request.head.ref || github.ref_name }}
+          DAEDALUS_SECRETS_HEAD_SHA: >-
+            ${{ github.event.pull_request.head.sha || github.sha }}
+          DAEDALUS_SECRETS_POLL_BOUND_S: '600'
         run: python3 scripts/ci/aggregate_gate.py

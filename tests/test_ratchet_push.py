@@ -1,11 +1,4 @@
-#!/usr/bin/env python3
-"""Exercise ratchet pushes against real local git repositories.
-
-Git's URL rewrite directs the real script to a bare fixture repository,
-covering successful, refused and concurrent pushes without a network.
-The script runs from the fixture's scripts/ci path so coverage's source
-root and */tree alias map its executed lines onto the real module.
-"""
+"""Exercise ratchet pushes against real local git repositories."""
 import os
 import re
 import shlex
@@ -24,8 +17,6 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 ROOT = _util.ROOT
 
 PUSH = ROOT / 'scripts' / 'ci' / 'ratchet_push.py'
-# Only ratchet pushes read secrets today; any new reader needs review.
-# Every expression using the secrets context must bind the environment.
 SECRET_CONTEXT = re.compile(r'\bsecrets\b', re.IGNORECASE)
 
 
@@ -67,30 +58,13 @@ def _uses_secrets_context(value):
 
 
 def _summary_text(summary):
-    """What the step summary says, or '' when nothing wrote one.
-
-    An absent summary is not an error here: several correct paths write
-    nothing, and "no Main moved line" is exactly what those paths should
-    leave behind.
-    """
+    """What the step summary says, or '' when nothing wrote one."""
     return summary.read_text(encoding='utf-8') if summary.exists() else ''
 
 
 def _push_repo(base, remote_at=None):
-    """A checkout and bare remote, using git's URL rewrite rather than stubs.
-
-    `remote_at` redirects only the script's own push/fetch after setup; a
-    non-repository path represents a remote that cannot answer.
-    """
-    # Under a `tree` component: pyproject maps `*/tree` back onto this
-    # repository, which is what `child_coverage('keep')' proves at
-    # runtime before it retains the collector.
+    """A checkout and bare remote, redirected through git's URL rewrite."""
     root = Path(base) / 'tree'
-    # The tree ROOT is the checkout, so the copied script stands where the
-    # collector's `source = ["."]` — resolved against the child's cwd —
-    # can see it, and `paths: repo = [".", "*/tree"]` maps that path back
-    # onto `scripts/ci/ratchet_push.py`. A copy anywhere else is measured
-    # under a path the report cannot resolve, or not measured at all.
     work, bare = root, root / 'bare.git'
     subject = root / 'scripts' / 'ci' / 'ratchet_push.py'
     subject.parent.mkdir(parents=True)
@@ -107,7 +81,6 @@ def _push_repo(base, remote_at=None):
     _git(work, 'commit', '--quiet', '-m', 'base')
     _git(work, 'push', '--quiet', 'origin', 'main')
     if remote_at:
-        # Re-point AFTER the setup push, so the checkout has a real history
         # on the bare repo and only the script's own push and fetch find a
         # remote that cannot answer.
         _git(work, 'config', f'url.{remote_at}.insteadOf',
@@ -117,12 +90,7 @@ def _push_repo(base, remote_at=None):
 
 
 def _drive_push(work, refuse, change=True, arguments=None, environment=None):
-    """Run the copied script against a real repository.
-
-    `refuse` installs a rejecting pre-receive hook; `change=False` leaves
-    nothing to commit. `arguments` and `environment` override script inputs;
-    an environment value of None removes that variable from the child.
-    """
+    """Run the copied script against a real repository."""
     if refuse:
         hook = work / 'bare.git' / 'hooks' / 'pre-receive'
         hook.write_text('#!/bin/sh\nexit 1\n', encoding='utf-8')
@@ -140,8 +108,8 @@ def _drive_push(work, refuse, change=True, arguments=None, environment=None):
     # `paths` maps that path back onto the repository's own file.
     child = dict(os.environ,
                  HOME=str(work.parent / 'home'),
-                 REPO='o/r',
-                 MASTER_PUSH_DEPLOY_KEY='not-a-real-key',
+                 DAEDALUS_REPO='o/r',
+                 DAEDALUS_MASTER_PUSH_DEPLOY_KEY='not-a-real-key',
                  GITHUB_STEP_SUMMARY=str(summary))
     for name, value in (environment or {}).items():
         if value is None:
@@ -157,20 +125,7 @@ def _drive_push(work, refuse, change=True, arguments=None, environment=None):
 
 
 def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
-    """Both branches of the discrimination, driven through the real script.
-
-    A rejected push has two causes and they must not be confused. Main
-    moving under a run is ordinary and the next push retries; a rejection
-    with main standing still is a real failure — a revoked key, a ruleset
-    refusal, a hook — and reporting that green is how it goes unnoticed. The
-    converse reds a required context on an ordinary concurrent push.
-
-    This runs the script rather than reading it, because the connective
-    between two `git rev-parse` lines is exactly what no grep can see: `=`
-    and `!=` are two behaviourally different versions of the same three
-    tokens, and a control that accepts both pins neither. Both jobs call this
-    one script, so there is no second copy to drift.
-    """
+    """Both branches of the discrimination, driven through the real script."""
     base = Path(tmp) / 'stood-still'
     work, _ = _push_repo(base)
     outcome, _summary = _drive_push(work, refuse=True)
@@ -204,14 +159,7 @@ def test_the_push_script_tells_a_refusal_from_a_concurrent_push(tmp):
 
 
 def test_a_push_that_succeeds_says_nothing_about_main_moving(tmp):
-    """The third branch of the script: the one where the push works.
-
-    Without an early exit a successful push falls through to the recovery
-    path, the comparison there is false, and every run that pushed
-    successfully writes "Main moved while this run measured" into its
-    summary. The refusal legs cannot see it, because they never get that
-    far.
-    """
+    """The third branch of the script: the one where the push works."""
     base = Path(tmp) / 'success'
     work, _bare = _push_repo(base)
     outcome, summary = _drive_push(work, refuse=False)
@@ -226,15 +174,7 @@ def test_a_push_that_succeeds_says_nothing_about_main_moving(tmp):
 
 
 def test_a_failed_fetch_aborts_rather_than_claiming_main_moved(tmp):
-    """A fetch that cannot read main is a failure, not evidence of movement.
-
-    This is the route the inline block this script replaced handled by
-    aborting red under the shell Actions runs a `run:` step with. Without
-    that, an unreadable `FETCH_HEAD` compares unequal to `HEAD^`, the
-    comparison is false, and the script concludes — in the summary, with
-    exit 0 — that main moved. On a required context that is a false green
-    dressed as the exact reassurance the discrimination exists to give.
-    """
+    """A fetch that cannot read main is a failure, not evidence of movement."""
     base = Path(tmp) / 'unreadable-main'
     # The remote cannot answer at all, so both the push and the fetch fail.
     work, _bare = _push_repo(base, remote_at=str(base / 'no-such-remote'))
@@ -249,13 +189,7 @@ def test_a_failed_fetch_aborts_rather_than_claiming_main_moved(tmp):
 
 
 def test_a_commit_with_nothing_to_commit_aborts(tmp):
-    """A push recording nothing is a failure, not a green.
-
-    `git add` matches nothing when the file a previous step already
-    committed, or when it was renamed away. `git commit` then fails, and a
-    script that carries on pushes a no-op fast-forward and reports success
-    having written no ratchet commit at all.
-    """
+    """A push recording nothing is a failure, not a green."""
     base = Path(tmp) / 'nothing-to-commit'
     work, bare = _push_repo(base)
     before = subprocess.run(['git', '-C', str(bare), 'rev-parse', 'main'],
@@ -290,15 +224,17 @@ def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
             ([message], {}, usage),
             (['ratcheted.json', ''], {}, usage),
             (['', message], {}, usage),
-            (['ratcheted.json', message], {'MASTER_PUSH_DEPLOY_KEY': None},
-             'MASTER_PUSH_DEPLOY_KEY is not set; '
+            (['ratcheted.json', message],
+             {'DAEDALUS_MASTER_PUSH_DEPLOY_KEY': None},
+             'DAEDALUS_MASTER_PUSH_DEPLOY_KEY is not set; '
              'ratchet change is not pushed'),
-            (['ratcheted.json', message], {'MASTER_PUSH_DEPLOY_KEY': ''},
-             'MASTER_PUSH_DEPLOY_KEY is not set; '
+            (['ratcheted.json', message],
+             {'DAEDALUS_MASTER_PUSH_DEPLOY_KEY': ''},
+             'DAEDALUS_MASTER_PUSH_DEPLOY_KEY is not set; '
              'ratchet change is not pushed'),
-            (['ratcheted.json', message], {'REPO': None},
+            (['ratcheted.json', message], {'DAEDALUS_REPO': None},
              'the repository is not set; there is nowhere to push'),
-            (['ratcheted.json', message], {'REPO': ''},
+            (['ratcheted.json', message], {'DAEDALUS_REPO': ''},
              'the repository is not set; there is nowhere to push')):
         outcome, _summary = _drive_push(
             work, refuse=False, change=False, arguments=arguments,
@@ -327,9 +263,9 @@ def test_both_jobs_call_the_one_push_implementation(tmp):
         assert job is not None, f'the {name} job is not in tests.yml'
         for step in job['steps']:
             body = step.get('run') or ''
-            if 'MASTER_PUSH_DEPLOY_KEY' not in str(step):
+            if 'DAEDALUS_MASTER_PUSH_DEPLOY_KEY' not in str(step):
                 continue
-            assert step['env']['MASTER_PUSH_DEPLOY_KEY'] == (
+            assert step['env']['DAEDALUS_MASTER_PUSH_DEPLOY_KEY'] == (
                 '${{ secrets.MASTER_PUSH_DEPLOY_KEY }}'), step
             assert 'ratchet_push.py' in body, (
                 f'the {step.get("name")!r} step holds the deploy key and does '
@@ -373,6 +309,23 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
 
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='ratchetpush_')
+
+
+def test_prefixed_credentials_precede_legacy_environment(tmp):
+    from unittest.mock import patch
+    mod = _util.load(PUSH, 'ratchet_environment')
+    for primary in ('new', '', None):
+        values = {'REPO': 'o/r', 'MASTER_PUSH_DEPLOY_KEY': 'fixture-key'}
+        env = {k: 'ignored' if primary else v for k, v in values.items()}
+        env.update(('DAEDALUS_' + k, v if primary else primary)
+                   for k, v in values.items() if primary is not None)
+        env['HOME'] = str(tmp)
+        with (patch.dict(os.environ, env, clear=True),
+              patch.object(mod, '_git') as git):
+            assert mod.main(['ratcheted.json', 'ci: tighten']) == 0
+        assert git.call_args.args == ('push', 'git@github.com:o/r.git',
+                                      'HEAD:main'), git.call_args
+        assert (Path(tmp) / '.ssh/ratchet').read_text() == 'fixture-key\n'
 
 
 if __name__ == '__main__':

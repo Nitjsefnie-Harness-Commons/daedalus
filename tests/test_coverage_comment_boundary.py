@@ -252,7 +252,7 @@ def _run_hostile_post(tmp, label, body, workflow=None):
     calls_path.write_text('', encoding='utf-8')
     (workdir / 'body.md').write_text(body, encoding='utf-8')
     # BYTES: the step reads this with `claimed="$(cat pr-number.txt)"` and
-    # compares it to $PR_NUMBER. Text mode makes that trailing `\n` a
+    # compares it to $DAEDALUS_PR_NUMBER. Text mode makes that trailing `\n` a
     # `\r\n` on Windows, the `\r` survives command substitution, and the
     # check refuses to post a matching claim.
     (workdir / 'pr-number.txt').write_bytes(b'170\n')
@@ -260,9 +260,9 @@ def _run_hostile_post(tmp, label, body, workflow=None):
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
         'GH_TOKEN': _SENTINEL,
-        'REPO': 'owner/repo',
-        'PR_NUMBER': '170',
-        'HEAD_SHA': _HEAD_SHA,
+        'DAEDALUS_REPO': 'owner/repo',
+        'DAEDALUS_PR_NUMBER': '170',
+        'DAEDALUS_HEAD_SHA': _HEAD_SHA,
         'CURRENT_HEAD': _HEAD_SHA,
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls_path),
@@ -352,9 +352,9 @@ def test_commits_query_is_refused_loudly(tmp):
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
         'GH_TOKEN': _SENTINEL,
-        'REPO': 'owner/repo', 'HEAD_REPO': 'owner/repo',
-        'HEAD_SHA': _HEAD_SHA, 'CURRENT_HEAD': _HEAD_SHA,
-        'EVENT_NUMBERS': '',
+        'DAEDALUS_REPO': 'owner/repo', 'DAEDALUS_HEAD_REPO': 'owner/repo',
+        'DAEDALUS_HEAD_SHA': _HEAD_SHA, 'CURRENT_HEAD': _HEAD_SHA,
+        'DAEDALUS_EVENT_NUMBERS': '',
         'GITHUB_OUTPUT': str(output_path),
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls_path),
@@ -375,7 +375,7 @@ def test_privileged_steps_are_an_exact_allowlist(tmp):
     workflow = _workflow()
     _ccs.assert_privileged_step_allowlist(workflow, EXPECTED_STEP_MAPPINGS)
     post_run = (
-        '          PR_NUMBER: ${{ steps.pr.outputs.number }}\n'
+        '          DAEDALUS_PR_NUMBER: ${{ steps.pr.outputs.number }}\n'
         '        run: |\n')
     field_mutations = (
         '        shell: bash\n',
@@ -394,8 +394,9 @@ def test_privileged_steps_are_an_exact_allowlist(tmp):
             '          run-id: ${{ github.event.workflow_run.id }}\n',
             '          run-id: ${{ github.run_id }}\n', 1),
         workflow.replace(
-            '          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}\n',
-            '          HEAD_SHA: ${{ github.sha }}\n', 1),
+            '          DAEDALUS_HEAD_SHA: ${{ '
+            'github.event.workflow_run.head_sha }}\n',
+            '          DAEDALUS_HEAD_SHA: ${{ github.sha }}\n', 1),
         workflow.replace('        id: artifact\n', '        id: other\n', 1),
         workflow.replace(
             "          steps.artifact.outputs.present == 'true'\n",
@@ -565,13 +566,7 @@ def test_pinned_action_refuses_a_malformed_sha(tmp):
 
 
 def test_the_shared_comment_harness_refuses_a_step_it_cannot_read(tmp):
-    """The relocated reader keeps what its suite relied on.
-
-    No caller ever reached the refusals — the suites that shared the helper
-    only ever named a step the workflow has — and the helpers now live in
-    one module every suite reads, where a reader that ran off the end of a
-    step would feed a later step's shell to an earlier step's fixture.
-    """
+    """The relocated reader keeps what its suite relied on."""
     del tmp
     from _wffixtures import _refuses  # noqa: PLC0415
 

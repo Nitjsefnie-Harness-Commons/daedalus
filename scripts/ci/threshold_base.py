@@ -44,10 +44,12 @@ def resolve(event, before, repository, base_sha):
 
 def main():
     try:
-        base = resolve(os.environ.get('EVENT', ''),
-                       os.environ.get('BEFORE', ''),
-                       os.environ.get('REPO', ''),
-                       os.environ.get('BASE_SHA', ''))
+        base = resolve(
+            os.environ.get('DAEDALUS_EVENT') or os.environ.get('EVENT', ''),
+            os.environ.get('DAEDALUS_BEFORE') or os.environ.get('BEFORE', ''),
+            os.environ.get('DAEDALUS_REPO') or os.environ.get('REPO', ''),
+            os.environ.get('DAEDALUS_BASE_SHA')
+            or os.environ.get('BASE_SHA', ''))
         with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
             stream.write(f'DAEDALUS_THRESHOLDS_BASE_REV={base}\n')
         print(f'Threshold base: {base}')
