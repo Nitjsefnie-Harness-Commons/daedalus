@@ -31,8 +31,7 @@ _SUPPORTED_MATRIX = {'include': [
     {'os': os, 'python': '3.13', 'shard': shard, 'shards': shards}
     for os, shard, shards in (
         ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
-        ('windows-latest', '2', '3'), ('windows-latest', '3', '3'),
-        ('macos-latest', '1', '1'))]}
+        ('windows-latest', '2', '3'), ('windows-latest', '3', '3'))]}
 _STATUS_NAMES = ('success', 'failure', 'cancelled')
 _PYTHON_CAPTURE_CONDITION = (
     "${{ matrix.os == 'ubuntu-latest' "
@@ -386,7 +385,7 @@ def _assert_coverage_artifact_flow(workflow, tmp):
     python_only = [step for step in uploads if step not in javascript]
     assert len(python_only) == 1, uploads
     assert _matrix_rows(python_only[0].get('if') or '') == {
-        'windows-latest', 'macos-latest'}
+        'windows-latest'}
 
     job_env = matrix_job.get('env', {})
     assert _CAPTURE_KEY not in job_env, job_env

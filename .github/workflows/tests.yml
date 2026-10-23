@@ -789,8 +789,12 @@ jobs:
       - pyright
       - eslint
       - actionlint
-    # Coverage uses one interpreter per OS, with suites split across shards.
-    # The suites job still owns the full Python-version test matrix.
+    # Coverage measures ubuntu and windows only: every line macOS executes is
+    # also executed on ubuntu (the shipped source splits only win32-vs-POSIX;
+    # combining the per-OS coverage artifacts with and without the macOS leg
+    # yields identical covered-line sets), and dropping the leg takes the
+    # hosted macOS queue off the coverage gate's critical path (#1705). The
+    # suites job still owns the full Python-version test matrix.
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true' }}
     strategy:
@@ -813,10 +817,6 @@ jobs:
             python: "3.13"
             shard: 3
             shards: 3
-          - os: macos-latest
-            python: "3.13"
-            shard: 1
-            shards: 1
     runs-on: ${{ matrix.os }}
     # Keep the 45-minute hang backstop while the shards are measured in CI.
     timeout-minutes: 45
@@ -968,7 +968,7 @@ jobs:
     # a skipped required check reports success rather than going missing.
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true' }}
-    # The matrix above measures one interpreter on every supported OS. This
+    # The matrix above measures one interpreter on ubuntu and windows. This
     # job owns the single combined gate: a Python line is covered when any OS
     # executed it, while JavaScript remains the Ubuntu measurement because
     # V8 records embed runner-specific file URLs.
