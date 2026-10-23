@@ -15,24 +15,17 @@ from _yamlsteps import workflow_mapping  # noqa: E402
 _FORBIDDEN_CHECKOUT_NAMES = ('head', 'branch', 'ref', 'sha', 'commit')
 
 
-def _checkout_steps(paths):
-    for path in paths:
+def test_checkout_census_covers_workflows_and_composite_actions(_tmp):
+    checkouts = []
+    for path in workflow_files() + sorted(ROOT.rglob('action.y*ml')):
         source = workflow_mapping(path.read_text(encoding='utf-8'))
         groups = list(source.get('jobs', {}).values())
-        runs = source.get('runs', {})
-        if runs.get('using') == 'composite':
-            groups.append(runs)
-        for group in groups:
-            for step in group.get('steps', []):
-                if step.get('uses', '').casefold().startswith(
-                        'actions/checkout'):
-                    yield path, step
-
-
-def test_checkout_census_covers_workflows_and_composite_actions(tmp):
-    del tmp
-    paths = workflow_files() + sorted(ROOT.rglob('action.y*ml'))
-    checkouts = list(_checkout_steps(paths))
+        if source.get('runs', {}).get('using') == 'composite':
+            groups.append(source['runs'])
+        checkouts.extend(step for group in groups
+                         for step in group.get('steps', [])
+                         if step.get('uses', '').casefold().startswith(
+                             'actions/checkout'))
     assert checkouts, 'no checkout step found in workflows or composites'
 
 

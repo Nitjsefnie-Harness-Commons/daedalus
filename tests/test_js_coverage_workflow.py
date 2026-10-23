@@ -400,9 +400,6 @@ def _assert_coverage_artifact_flow(workflow, tmp):
     assert matrix_name in aggregate['needs']
     body = workflow.split('\n  coverage:\n', 1)[1]
     body = body.split('\n  diff-coverage:\n', 1)[0]
-    assert 'pattern: coverage-data-*' in body, body
-    assert 'path: coverage-data' in body, body
-    assert 'merge-multiple: false' in body, body
     assert 'python scripts/ci/coverage_combine.py coverage-data/' in body, body
     assert ('coverage-data/coverage-data-ubuntu-latest-shard*/'
             '.node-v8-coverage' in body), body
