@@ -42,9 +42,7 @@ RECORDED = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
 
 
 def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
-    """Counts are comparable only for a fixed binary; a changed toolchain
-    must report that it compared nothing rather than claim a regression.
-    """
+    """A changed toolchain reports an unmeasured run, not a regression."""
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
     artifact.write_bytes(policy.render(recorded_document()))
@@ -95,10 +93,7 @@ def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
 
 
 def test_only_the_main_tighten_may_write_the_artefact(tmp):
-    """Only main's successful check may auto-tighten;
-    re-baselines are reviewed.
-    Other jobs may name the artefact only as a paths-ignore entry.
-    """
+    """Only successful main runs may tighten; re-baselines need review."""
     del tmp
     artefact = '.github/journey-budget.json'
     workflows = ROOT / '.github' / 'workflows'
@@ -487,9 +482,7 @@ def _decoder_says(source):
 
 
 def test_an_input_the_run_cannot_read_is_refused_in_its_own_words(tmp):
-    """Missing budgets and unreadable measurements must report their cause
-    with exit 1, without a traceback or a write to the artefact.
-    """
+    """Unreadable inputs report their cause and leave budgets alone."""
     policy = _journey_contract.policy()
     absent = Path(tmp) / 'no-such-budget.json'
     spoken = io.StringIO()
@@ -558,10 +551,7 @@ def test_a_recorded_exclusion_survives_a_render_and_reload(tmp):
 
 
 def test_a_journey_that_renders_differently_is_not_compared(tmp):
-    """Changed and missing journey shas report without comparing counts.
-    Disagreement between rounds is checked separately by
-    test_rounds_that_disagree.
-    """
+    """Changed and missing shas must report without comparing counts."""
     policy = _journey_contract.policy()
     names = journeys().NAMES
     artifact = Path(tmp) / 'journey-budget.json'
@@ -610,13 +600,20 @@ def test_nothing_recorded_is_a_refusal_rather_than_a_pass(tmp):
 
 def test_valgrind_install_restores_and_replenishes_debs_and_refuses_missing(
         tmp):
+    if sys.platform == 'win32':
+        _util.skip('the journey-budget install step uses POSIX-only paths '
+                   'and sudo; this control is exercised on Linux and macOS')
     job = complete_job_mapping(_tests_yml(), 'journey-budget')
     assert job is not None, 'the journey-budget job is not in tests.yml'
     name = 'Install valgrind, which supplies the instruction counter'
     script = next(step['run'] for step in job['steps']
                   if step.get('name') == name)
     stub = ('sudo() { "$@"; }\n'
-            'apt-get() { printf "%s\\n" "$@" >> "$APT_LOG"; }\n')
+            'apt-get() { printf "%s\\n" "$@" >> "$APT_LOG";\n'
+            '  if [[ -f "$RUNNER_TEMP/vg-debs/cached.deb" '
+            '&& ! -f "$ARCHIVES/cached.deb" ]]; then\n'
+            '    echo "archive not seeded at apt install" >&2; return 1;\n'
+            '  fi; }\n')
     for state in ('warm', 'cold', 'missing'):
         root = Path(tmp) / state
         cache, archives = root / 'vg-debs', root / 'archives'
@@ -635,17 +632,18 @@ def test_valgrind_install_restores_and_replenishes_debs_and_refuses_missing(
                 '/var/cache/apt/archives/', f'{archives.as_posix()}/')],
             cwd=root, capture_output=True, text=True, timeout=10,
             env=_util.child_coverage('scrub', dict(
-                os.environ, RUNNER_TEMP=str(root), APT_LOG=str(log))))
+                os.environ, RUNNER_TEMP=str(root), APT_LOG=str(log),
+                ARCHIVES=str(archives))))
+        if state == 'missing':
+            assert done.returncode != 0 and 'absent.deb' in done.stderr, done
+        else:
+            assert done.returncode == 0, done.stderr
         assert log.read_text(encoding='utf-8').splitlines() == [
             '-o', 'Acquire::http::Timeout=30', '-o', 'Acquire::Retries=5',
             'install', '-y', '--no-install-recommends', 'valgrind']
         assert (cache / 'candidate.deb').read_bytes() == b'candidate'
         if state != 'cold':
             assert (archives / 'cached.deb').read_bytes() == b'cached'
-        if state == 'missing':
-            assert done.returncode != 0 and 'absent.deb' in done.stderr, done
-        else:
-            assert done.returncode == 0, done.stderr
 
 
 def main():
