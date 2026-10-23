@@ -77,8 +77,6 @@ def _runtime_observations(watched_by_source=None):
             'probes': globals_ | _directive_names(source, 'exported'),
             'watched': watched_by_source.get(relative, ()),
         })
-    # The shipped background's boot opens the stream and syncs the tab list;
-    # declared on the shared gate so an invented request is refused.
     observed = observe_worker_runtime(
         details, plan=_BOOT_PLAN)
     return {
@@ -151,13 +149,9 @@ def test_background_has_only_the_residual_worker_surface(tmp):
         (ROOT / 'extension' / 'manifest.json').read_text(encoding='utf-8'))
     assert versions == [manifest['version']], versions
     expected = [
-        'VERSION',
-        'DEFAULT_SERVER',
-        'importScripts',
-        'dispatchCommand',
-        'chrome.alarms.onAlarm.addListener',
-        'chrome.runtime.onConnect.addListener',
-        'loadConfig.then',
+        'VERSION', 'DEFAULT_SERVER', 'importScripts',
+        'dispatchCommand', 'chrome.alarms.onAlarm.addListener',
+        'chrome.runtime.onConnect.addListener', 'loadConfig.then',
     ]
     observed = _background_top_level_kinds(source)
     assert observed == expected, f'background top-level residual: {observed}'
