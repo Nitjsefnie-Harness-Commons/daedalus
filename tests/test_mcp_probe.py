@@ -254,14 +254,10 @@ def test_probe_prefers_prefixed_token_and_accepts_legacy_fallback(tmp):
         if primary is not None: env['DAEDALUS_TOKEN'] = primary
         with mock.patch.dict(os.environ, env, clear=True):
             probe = _util.load(PROBE, 'probe_environment')
-        seen = []
-
-        def reply(request, seen=seen):
-            seen.append(request.headers['Authorization'])
-            return httpx.Response(202)
-        with httpx.Client(transport=httpx.MockTransport(reply)) as client:
-            probe.rpc(client, None, 'notifications/initialized')
-        assert seen == ['Bearer ' + want], seen
+        transport, seen = _rpc_mock('202-with-body')
+        with httpx.Client(transport=transport) as client:
+            probe.rpc(client, None, 'tools/list')
+        assert [r['authorization'] for r in seen] == ['Bearer ' + want], seen
 
 
 if __name__ == '__main__':
