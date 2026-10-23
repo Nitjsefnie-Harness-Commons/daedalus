@@ -5,8 +5,6 @@ Usage:
   DAEDALUS_TOKEN=<bridge-token> python3 scripts/mcp_probe.py list
   DAEDALUS_TOKEN=<bridge-token> python3 scripts/mcp_probe.py \
     call <tool> [json-args]
-  DAEDALUS_TOKEN=<bridge-token> DAEDALUS_MCP_URL=http://127.0.0.1:8086/mcp \
-    python3 scripts/mcp_probe.py ...
 """
 import json, os, sys, uuid
 import httpx

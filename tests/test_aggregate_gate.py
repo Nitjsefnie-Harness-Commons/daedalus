@@ -411,9 +411,9 @@ def test_main_exits_zero_only_for_green_verdicts(tmp):
         needs_json, expected, jobs, runs, diagnostic = case
         calls, read = _recorder(MINE, [{'workflow_runs': [MINE] + runs}],
                                 polls=[[CLEAN]], jobs=jobs)
-        env = dict(zip(('NEEDS_JSON', 'REPOSITORY', 'RUN_ID',
-                        'HEAD_BRANCH', 'SECRETS_HEAD_SHA'),
-                       (needs_json, 'o/r', '1', 'main', HEAD)))
+        env: dict[str, str] = dict(zip(
+            ('NEEDS_JSON', 'REPOSITORY', 'RUN_ID', 'HEAD_BRANCH',
+             'SECRETS_HEAD_SHA'), (needs_json, 'o/r', '1', 'main', HEAD)))
         if primary is not None:
             env.update(('DAEDALUS_' + k, v if primary else '')
                        for k, v in list(env.items()))
