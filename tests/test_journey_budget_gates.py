@@ -95,7 +95,8 @@ def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
 
 
 def test_only_the_main_tighten_may_write_the_artefact(tmp):
-    """Only main's successful check may auto-tighten; re-baselines are reviewed.
+    """Only main's successful check may auto-tighten;
+    re-baselines are reviewed.
     Other jobs may name the artefact only as a paths-ignore entry.
     """
     del tmp
@@ -558,7 +559,8 @@ def test_a_recorded_exclusion_survives_a_render_and_reload(tmp):
 
 def test_a_journey_that_renders_differently_is_not_compared(tmp):
     """Changed and missing journey shas report without comparing counts.
-    Disagreement between rounds is checked separately by test_rounds_that_disagree.
+    Disagreement between rounds is checked separately by
+    test_rounds_that_disagree.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -606,13 +608,15 @@ def test_nothing_recorded_is_a_refusal_rather_than_a_pass(tmp):
     del names
 
 
-def test_valgrind_install_restores_and_replenishes_debs_and_refuses_missing(tmp):
+def test_valgrind_install_restores_and_replenishes_debs_and_refuses_missing(
+        tmp):
     job = complete_job_mapping(_tests_yml(), 'journey-budget')
     assert job is not None, 'the journey-budget job is not in tests.yml'
-    script = next(step['run'] for step in job['steps'] if step.get('name')
-                  == 'Install valgrind, which supplies the instruction counter')
+    name = 'Install valgrind, which supplies the instruction counter'
+    script = next(step['run'] for step in job['steps']
+                  if step.get('name') == name)
     stub = ('sudo() { "$@"; }\n'
-            'apt-get() { printf "%s\\n" "$*" >> "$APT_LOG"; }\n')
+            'apt-get() { printf "%s\\n" "$@" >> "$APT_LOG"; }\n')
     for state in ('warm', 'cold', 'missing'):
         root = Path(tmp) / state
         cache, archives = root / 'vg-debs', root / 'archives'
@@ -633,8 +637,8 @@ def test_valgrind_install_restores_and_replenishes_debs_and_refuses_missing(tmp)
             env=_util.child_coverage('scrub', dict(
                 os.environ, RUNNER_TEMP=str(root), APT_LOG=str(log))))
         assert log.read_text(encoding='utf-8').splitlines() == [
-            '-o Acquire::http::Timeout=30 -o Acquire::Retries=5 '
-            'install -y --no-install-recommends valgrind']
+            '-o', 'Acquire::http::Timeout=30', '-o', 'Acquire::Retries=5',
+            'install', '-y', '--no-install-recommends', 'valgrind']
         assert (cache / 'candidate.deb').read_bytes() == b'candidate'
         if state != 'cold':
             assert (archives / 'cached.deb').read_bytes() == b'cached'
