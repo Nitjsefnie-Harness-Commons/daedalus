@@ -77,8 +77,7 @@ def _runtime_observations(watched_by_source=None):
             'probes': globals_ | _directive_names(source, 'exported'),
             'watched': watched_by_source.get(relative, ()),
         })
-    observed = observe_worker_runtime(
-        details, plan=_BOOT_PLAN)
+    observed = observe_worker_runtime(details, plan=_BOOT_PLAN)
     return {
         Path(path).relative_to(ROOT).as_posix(): details
         for path, details in observed['sources'].items()
@@ -90,8 +89,7 @@ def _directive_names(source, directive):
 
 
 def _masked_code_mentions(masked_source, name):
-    pattern = re.compile(
-        rf'(?<![\w$]){re.escape(name)}(?![\w$])')
+    pattern = re.compile(rf'(?<![\w$]){re.escape(name)}(?![\w$])')
     for match in pattern.finditer(masked_source):
         previous = match.start() - 1
         while previous >= 0 and masked_source[previous].isspace():
@@ -143,8 +141,10 @@ def test_background_has_only_the_residual_worker_surface(tmp):
     del tmp
     source = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
     assert not re.search(r'^\s*//\s*@version\b', source, re.MULTILINE)
-    versions = re.findall(r"^const VERSION = '([^']+)';$",
-                          source, re.MULTILINE)
+    mask = js_mask(source)
+    versions = [m[2] for m in re.finditer(
+        r'''^const VERSION = (['"])(.*?)\1;$''', source, re.MULTILINE)
+        if mask.startswith('const VERSION', m.start())]
     manifest = json.loads(
         (ROOT / 'extension' / 'manifest.json').read_text(encoding='utf-8'))
     assert versions == [manifest['version']], versions
