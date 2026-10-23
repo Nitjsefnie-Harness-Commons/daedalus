@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Where a journey's own work RUNS, as distinct from which thread the"""
+"""Verify where each journey's work runs."""
 import contextlib
 import contextvars
 import sys

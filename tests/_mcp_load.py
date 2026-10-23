@@ -29,12 +29,10 @@ DEPS = all(importlib.util.find_spec(name) is not None
            for name in ('httpx', 'mcp', 'starlette'))
 
 TOK = 'mcptok'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': TOK}
 
-# The listener's bind re-reads the process environment after the load's
-# isolation has ended, so the token has to be published here, beside the
-# fixture that owns it — a suite that imported a sibling for this side
-# effect read a copy of another suite's environment.
+# Requests resolve credentials after load isolation ends, so publish a
+# nonempty override to keep a legacy shell alias from replacing TOK.
 os.environ.update(BRIDGE_ENV)
 
 
