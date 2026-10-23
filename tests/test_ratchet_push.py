@@ -319,7 +319,7 @@ def test_prefixed_credentials_precede_legacy_environment(tmp):
         env = {k: 'ignored' if primary else v for k, v in values.items()}
         env.update(('DAEDALUS_' + k, v if primary else primary)
                    for k, v in values.items() if primary is not None)
-        env['HOME'] = str(tmp)
+        env['USERPROFILE' if os.name == 'nt' else 'HOME'] = str(tmp)
         with (patch.dict(os.environ, env, clear=True),
               patch.object(mod, '_git') as git):
             assert mod.main(['ratcheted.json', 'ci: tighten']) == 0
