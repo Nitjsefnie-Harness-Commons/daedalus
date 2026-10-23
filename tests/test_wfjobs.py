@@ -459,7 +459,7 @@ def test_a_bare_empty_strategy_elsewhere_still_finds_the_matrix_job(tmp):
         for os, shard, shards in (
             ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
             ('windows-latest', '2', '3'), ('windows-latest', '3', '3'),
-            ('macos-latest', '1', '2'), ('macos-latest', '2', '2'))]}
+            ('macos-latest', '1', '1'))]}
     name, _job = _matrix_job_running(real, matrix, 'coverage_suites.py')
     header = '    name: Aggregate workflow checks\n'
     install = '      - name: Install the coverage toolchain and the project\n'

@@ -816,11 +816,7 @@ jobs:
           - os: macos-latest
             python: "3.13"
             shard: 1
-            shards: 2
-          - os: macos-latest
-            python: "3.13"
-            shard: 2
-            shards: 2
+            shards: 1
     runs-on: ${{ matrix.os }}
     # Keep the 45-minute hang backstop while the shards are measured in CI.
     timeout-minutes: 45
