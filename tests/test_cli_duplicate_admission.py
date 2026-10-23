@@ -20,7 +20,7 @@ from _cli_helpers import CLI, cli_env, run_cli  # noqa: E402
 # tests/test_cli_output.py).
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
 
 def test_a_retried_exec_announces_and_reuses_the_live_delivery(tmp):

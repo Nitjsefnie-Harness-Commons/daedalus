@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""What each journey CARRIES, against what the product carries.
-
-Every journey's payload is sized from a cited product basis, so a journey's
-own work is separable from the fixed background every child shares.
-
-WHAT IS PINNED HERE, and what is not, is worth stating exactly, because the
-difference is what a reviewer is being asked to trust:
-
-  - Pinned: every size is the number this file holds, AND the thing that
-    builds it produces exactly that many of them — the capture's base64
-    encodes to the capture's byte count, each segment is the segment size,
-    and the tab list the fan-out posts is the tab count.
-  - Pinned: the product still makes the CALL the basis names, and still
-    says the NUMBER the basis names, in a file that has to exist.
-  - NOT pinned: that the size is REPRESENTATIVE. No control can derive
-    that and none tries. A size moved together with its pin here is not
-    caught by anything in the tree — that is what makes it a reviewable
-    commit and not a quiet loosening of a budget, and it is the judgement
-    the citation exists to inform. What these controls buy is that the
-    tripwire fires on the common case (a number edited, the pin not), and
-    that each number still rests on a claim the product has to keep making.
-
-No journey is RUN here. A journey costs what the machine it ran on costs, so
-a control that drove one would be asserting a number this repository must
-not write down; what is asserted is the shape the journey builds, the basis
-the size comes from, and the call the size made necessary.
-"""
+"""What each journey CARRIES, against what the product carries."""
 import ast
 import re
 import sys
@@ -300,7 +274,8 @@ def test_no_journey_buys_its_own_headroom_from_a_product_setting(tmp):
             f'{setting} is set on a journey\'s own bridge, so that journey is '
             'measured against a configuration no other one runs under: '
             f'{sorted(environment)}')
-    assert sorted(environment) == ['DAEDALUS_TOKEN', 'TOKEN'], \
+    assert sorted(environment) == [
+        'DAEDALUS_TOKEN', 'DAEDALUS_TOKEN_OVERRIDE'], \
         sorted(environment)
 
 

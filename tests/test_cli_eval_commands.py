@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Suite for daedalus_cli — the eval-family subcommands on the wire.
-
-exec, put, navigate, reload and the tabs listing build an eval command
-and queue it or wait for its result, the result subcommand reads and
-consumes the shared slot, and the token each request carries is resolved
-in a documented precedence. Everything runs against a real bridge, so
-what is checked is the command the bridge receives, not a model of it.
-"""
+"""Suite for daedalus_cli — the eval-family subcommands on the wire."""
 import json
 import subprocess
 import sys
@@ -43,7 +36,8 @@ def test_exec_no_result_enqueues_broadcast(tmp):
 def test_exec_full_round_trip(tmp):
     """exec without --no-result waits; we play the extension over HTTP."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab9')
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                      DAEDALUS_ID='tab9')
         proc = subprocess.Popen(
             CLI + ['exec', 'job7', 'document.title', '-t', '20'],
             cwd=str(_util.ROOT), env=env,
@@ -107,7 +101,8 @@ def test_reload_dispatches_to_the_tab_and_to_every_tab(tmp):
     tested one at a time, and this was the one nobody wrote.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID='tab-7')
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                      DAEDALUS_ID='tab-7')
         r = run_cli(['reload'], env)
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
         assert 'AttributeError' not in r.stderr, r.stderr
@@ -168,7 +163,7 @@ def test_result_encodes_delimiter_and_unicode_tab_id(tmp):
         assert status == 200, (status, body)
         result = run_cli(
             ['result', '--raw'],
-            cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, ID=tab_id))
+            cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK, DAEDALUS_ID=tab_id))
         assert result.returncode == 0, (result.returncode, result.stderr)
         assert 'encoded-tab-result' in result.stdout, result.stdout
         assert (Path(docroot) / 'results' / f'{TOK}_{tab_id}.json').exists()
@@ -197,7 +192,7 @@ def test_tabs_encodes_every_accepted_custom_token(tmp):
         with _util.bridge(
                 case,
                 env={'DAEDALUS_TOKEN': custom_token,
-                     'TOKEN': ''}) as (base, _docroot):
+                     'DAEDALUS_TOKEN_OVERRIDE': ''}) as (base, _docroot):
             status, body = _util.post_json(base + '/sync-tabs', {
                 'token': custom_token,
                 'tabs': [{'tabId': str(index),
@@ -218,10 +213,12 @@ def test_token_one_off_override_wins(tmp):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [
             {'tabId': '11', 'url': 'https://example.com/override',
              'title': 'O'}]})
-        # TOKEN shadows DAEDALUS_TOKEN: the request must go out with TOK even
+        # DAEDALUS_TOKEN_OVERRIDE shadows DAEDALUS_TOKEN: the request must go
+        # out with TOK even
         # though DAEDALUS_TOKEN names a token with no tabs.
         r = run_cli(['tabs'], cli_env(DAEDALUS_URL=base,
-                                      DAEDALUS_TOKEN='tokghost', TOKEN=TOK))
+                                      DAEDALUS_TOKEN='tokghost',
+                                      DAEDALUS_TOKEN_OVERRIDE=TOK))
         assert r.returncode == 0, (r.returncode, r.stderr)
         assert 'https://example.com/override' in r.stdout, r.stdout
 

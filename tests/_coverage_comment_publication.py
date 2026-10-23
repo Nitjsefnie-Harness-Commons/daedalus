@@ -37,8 +37,9 @@ def _runner(tmp, workflow_reader, extract_block, shell_runner,
         env = {
             **os.environ,
             'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
-            'GH_TOKEN': 'stub', 'REPO': 'owner/repo',
-            'HEAD_SHA': head_sha, 'RUN_URL': run_url, 'STATUS': status,
+            'GH_TOKEN': 'stub', 'DAEDALUS_REPO': 'owner/repo',
+            'DAEDALUS_HEAD_SHA': head_sha, 'DAEDALUS_RUN_URL': run_url,
+            'DAEDALUS_STATUS': status,
             'STUB_STATE': str(state_path), 'STUB_CALLS': str(calls),
         }
         if real_jq:
@@ -81,22 +82,23 @@ def _mapping(workflow_reader):
     assert step['if'] == publish_gate, step
     assert step['env'] == {
         'GH_TOKEN': '${{ github.token }}',
-        'REPO': '${{ github.repository }}',
-        'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
-        'RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
-                   '/actions/runs/${{ github.run_id }}',
-        'STATUS': '${{ job.status }}',
-        'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
-        'NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
-                               'not_measured_reason }}',
-        'VERDICT': '${{ steps.missing.outputs.verdict }}',
+        'DAEDALUS_REPO': '${{ github.repository }}',
+        'DAEDALUS_HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
+        'DAEDALUS_RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
+        '/actions/runs/${{ github.run_id }}',
+        'DAEDALUS_STATUS': '${{ job.status }}',
+        'DAEDALUS_JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
+        'DAEDALUS_NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
+        'not_measured_reason }}',
+        'DAEDALUS_VERDICT': '${{ steps.missing.outputs.verdict }}',
     }, step
     script = step['run']
     assert "-f name='coverage comment'" in script, script
-    assert 'external_id="daedalus-coverage-comment/v1/$HEAD_SHA"' in script
-    assert 'head_sha="$HEAD_SHA"' in script
-    assert 'details_url="$RUN_URL"' in script
-    assert 'case "$STATUS"' in script
+    assert ('external_id="daedalus-coverage-comment/v1/'
+            '$DAEDALUS_HEAD_SHA"') in script
+    assert 'head_sha="$DAEDALUS_HEAD_SHA"' in script
+    assert 'details_url="$DAEDALUS_RUN_URL"' in script
+    assert 'case "$DAEDALUS_STATUS"' in script
     assert not any(name in script for name in (
         'body.md', 'pr-number.txt', 'artifact', 'github.workspace'))
     return step, steps
@@ -218,7 +220,8 @@ def _failures(run):
     head_sha = 'c' * 40
     result, state, calls, _script = run(
         label='fork', head_sha=head_sha,
-        extra_env={'HEAD_REPO': 'attacker/fork', 'PR_NUMBER': '999'})
+        extra_env={'DAEDALUS_HEAD_REPO': 'attacker/fork',
+                   'DAEDALUS_PR_NUMBER': '999'})
     assert result.returncode == 0, (result.stdout, result.stderr)
     write = write_list(calls)[0]
     assert 'repos/owner/repo/check-runs' in write
@@ -281,8 +284,8 @@ def _neutral_reasons(run):
     for label, reason in (('reason-cancelled', 'a cancelled tests run'),
                           ('reason-doc-only', 'a documentation-only change')):
         result, state, calls, _script = run(
-            label=label, extra_env={'JOB_SKIPPED': 'true',
-                                    'NOT_MEASURED_REASON': reason})
+            label=label, extra_env={'DAEDALUS_JOB_SKIPPED': 'true',
+                                    'DAEDALUS_NOT_MEASURED_REASON': reason})
         assert result.returncode == 0, (result.stdout, result.stderr)
         check = state['checks'][0]
         assert check['conclusion'] == 'neutral', (label, check)
@@ -291,7 +294,8 @@ def _neutral_reasons(run):
         assert len(write_list(calls)) == 1, label
     unlabeled, state, calls, _script = run(
         label='reason-unlabeled',
-        extra_env={'JOB_SKIPPED': 'true', 'NOT_MEASURED_REASON': ''})
+        extra_env={'DAEDALUS_JOB_SKIPPED': 'true',
+                   'DAEDALUS_NOT_MEASURED_REASON': ''})
     assert unlabeled.returncode != 0, (unlabeled.stdout, unlabeled.stderr)
     assert write_list(calls) == [], calls.read_text(encoding='utf-8')
     assert state['checks'] == [], state
@@ -382,7 +386,7 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
 
 
 ABSENT_SCENARIOS = (
-    # (label, RUN_CONCLUSION, jobs, exit, check conclusion, reason):
+    # (label, DAEDALUS_RUN_CONCLUSION, jobs, exit, check conclusion, reason):
     # the run-conclusion-keyed credit truth table, end to end.
     ('cancelled-run-cancelled-job', 'cancelled',
      [{'name': 'coverage', 'conclusion': 'cancelled'}], 0,
@@ -429,11 +433,13 @@ def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
     env = {
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
-        'GH_TOKEN': 'stub', 'REPO': 'owner/repo', 'RUN_ID': '123',
-        'HEAD_SHA': 'a' * 40, 'CURRENT_HEAD': 'a' * 40, 'PR_NUMBER': '170',
+        'GH_TOKEN': 'stub', 'DAEDALUS_REPO': 'owner/repo',
+        'DAEDALUS_RUN_ID': '123',
+        'DAEDALUS_HEAD_SHA': 'a' * 40, 'CURRENT_HEAD': 'a' * 40,
+        'DAEDALUS_PR_NUMBER': '170',
         'GITHUB_OUTPUT': str(output), 'STUB_STATE': str(state),
         'STUB_CALLS': str(calls), 'STUB_JOBS': json.dumps(jobs),
-        'RUN_CONCLUSION': run_conclusion,
+        'DAEDALUS_RUN_CONCLUSION': run_conclusion,
         'STUB_RESPONSE': '{"total_count": 0, "artifacts": []}',
         'STUB_FAIL_JOBS': '1' if fail_jobs else '',
     }
@@ -458,10 +464,10 @@ def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
     result, checks, _calls, _script = run(
         label=workdir.name + '-publish',
         status='failure' if missing.returncode else 'success',
-        extra_env={'JOB_SKIPPED': outputs.get('skipped', ''),
-                   'NOT_MEASURED_REASON': outputs.get(
+        extra_env={'DAEDALUS_JOB_SKIPPED': outputs.get('skipped', ''),
+                   'DAEDALUS_NOT_MEASURED_REASON': outputs.get(
                        'not_measured_reason', ''),
-                   'VERDICT': outputs.get('verdict', '')})
+                   'DAEDALUS_VERDICT': outputs.get('verdict', '')})
     assert result.returncode == 0, (result.stdout, result.stderr)
     check = checks['checks'][0]
     assert check['conclusion'] == ('failure' if fail_jobs else conclusion), (
@@ -488,44 +494,46 @@ EXPECTED_PUBLICATION_STEP = {
     'if': "always() && steps.pr.outputs.present != 'false'",
     'env': {
         'GH_TOKEN': '${{ github.token }}',
-        'REPO': '${{ github.repository }}',
-        'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
-        'RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
-                   '/actions/runs/${{ github.run_id }}',
-        'STATUS': '${{ job.status }}',
-        'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
-        'NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
-                               'not_measured_reason }}',
-        'VERDICT': '${{ steps.missing.outputs.verdict }}',
+        'DAEDALUS_REPO': '${{ github.repository }}',
+        'DAEDALUS_HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
+        'DAEDALUS_RUN_URL': '${{ github.server_url }}/${{ github.repository }}'
+        '/actions/runs/${{ github.run_id }}',
+        'DAEDALUS_STATUS': '${{ job.status }}',
+        'DAEDALUS_JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
+        'DAEDALUS_NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
+        'not_measured_reason }}',
+        'DAEDALUS_VERDICT': '${{ steps.missing.outputs.verdict }}',
     },
     'run': r'''set -euo pipefail
 
-STATUS="${VERDICT:-$STATUS}"
+DAEDALUS_STATUS="${DAEDALUS_VERDICT:-$DAEDALUS_STATUS}"
 
-case "$STATUS" in
+case "$DAEDALUS_STATUS" in
   success|failure|cancelled) ;;
   *)
-    echo "unexpected workflow-run conclusion: $STATUS" >&2
+    echo "unexpected workflow-run conclusion: $DAEDALUS_STATUS" >&2
     exit 1
     ;;
 esac
 
-if [ "$STATUS" = success ] && [ "${JOB_SKIPPED:-}" = true ]; then
-  if [ -z "${NOT_MEASURED_REASON:-}" ]; then
+if [ "$DAEDALUS_STATUS" = success ] && \
+  [ "${DAEDALUS_JOB_SKIPPED:-}" = true ]; then
+  if [ -z "${DAEDALUS_NOT_MEASURED_REASON:-}" ]; then
     echo 'skipped=true reached the publish step without a ' \
       'not_measured_reason output' >&2
     exit 1
   fi
-  STATUS=neutral
+  DAEDALUS_STATUS=neutral
 fi
 
-external_id="daedalus-coverage-comment/v1/$HEAD_SHA"
+external_id="daedalus-coverage-comment/v1/$DAEDALUS_HEAD_SHA"
 if ! gh api --method GET -H 'Cache-Control: no-cache' --paginate \
-  "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+  "repos/$DAEDALUS_REPO/commits/$DAEDALUS_HEAD_SHA/check-runs" \
   -f filter=all -f per_page=100 \
   --jq '.check_runs[]' > check-runs.json
 then
-  echo "listing coverage comment checks for $HEAD_SHA failed" >&2
+  echo "listing coverage comment checks for $DAEDALUS_HEAD_SHA" \
+    "failed" >&2
   exit 1
 fi
 if ! jq -s --arg name 'coverage comment' \
@@ -556,18 +564,18 @@ write_check() {
     -X "$method" "$target"
     -f name='coverage comment'
     -f status=completed
-    -f conclusion="$STATUS"
+    -f conclusion="$DAEDALUS_STATUS"
     -f external_id="$external_id"
-    -f details_url="$RUN_URL"
+    -f details_url="$DAEDALUS_RUN_URL"
   )
-  if [ "$STATUS" = neutral ]; then
+  if [ "$DAEDALUS_STATUS" = neutral ]; then
     local summary='Coverage was not measured for '
-    summary+="$NOT_MEASURED_REASON."
+    summary+="$DAEDALUS_NOT_MEASURED_REASON."
     args+=( -f 'output[title]=Coverage not measured'
       -f "output[summary]=$summary" )
   fi
   if [ "$method" = POST ]; then
-    args+=( -f head_sha="$HEAD_SHA" )
+    args+=( -f head_sha="$DAEDALUS_HEAD_SHA" )
   fi
   if ! gh api "${args[@]}" >/dev/null
   then
@@ -578,14 +586,14 @@ write_check() {
 }
 
 if [ ! -s check-ids.txt ]; then
-  write_check POST "repos/$REPO/check-runs"
-  echo "created coverage comment check for $HEAD_SHA"
+  write_check POST "repos/$DAEDALUS_REPO/check-runs"
+  echo "created coverage comment check for $DAEDALUS_HEAD_SHA"
 else
   while IFS= read -r check_id; do
     check_id="${check_id%$'\r'}"
-    write_check PATCH "repos/$REPO/check-runs/$check_id"
+    write_check PATCH "repos/$DAEDALUS_REPO/check-runs/$check_id"
   done < check-ids.txt
-  echo "updated coverage comment checks for $HEAD_SHA"
+  echo "updated coverage comment checks for $DAEDALUS_HEAD_SHA"
 fi
 ''',
 }

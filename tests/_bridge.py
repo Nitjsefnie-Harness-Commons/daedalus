@@ -1,19 +1,4 @@
-"""Shared fixtures for the bridge HTTP suites.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
-`BRIDGE_ENV` is what every bridge child of these suites carries, applied
-per spawn because `_util.bridge()` strips every inherited `DAEDALUS_*`
-variable before applying the caller's `env=`. Nothing here writes to the
-suite process's own environment: a suite reads the credential from `TOK` and
-hands `BRIDGE_ENV` to the child it spawns.
-
-`_patch_env` and `_wait_for_delivery_health` moved here out of
-tests/test_bridge_results_{deliveries,slots}.py and
-tests/test_bridge_streams.py, which the stripes and legacy suites imported
-for them; both are the fixtures every bridge suite in this family needs,
-next to the env and the stream readers they are built on.
-"""
+"""Shared fixtures for the bridge HTTP suites."""
 import http.client
 import json
 import socket
@@ -28,9 +13,9 @@ TOK = 'httptok'
 PNG = b'\x89PNG\r\n\x1a\n' + b'not-really-a-png-but-the-bridge-does-not-care'
 
 # The child env applied at every bridge spawn of these suites: the credential
-# the suites' requests present, with `TOKEN` cleared so an ambient one-off
-# override cannot shadow it.
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+# the suites' requests present, with `DAEDALUS_TOKEN_OVERRIDE` cleared so an
+# ambient one-off override cannot shadow it.
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
 
 def _patch_env(patch_dir, **extra):

@@ -97,13 +97,7 @@ def _stripe_holder_lock(gate_dir):
 
 
 def test_delivery_post_waits_for_its_target_stripe_only(tmp):
-    """A held target stripe blocks that target's delivery, nothing else.
-
-    The stripe is held inside the bridge process; the test only observes what
-    that does to real requests. The injected patch records the lock selected by
-    the holder and every caller, so a failure can distinguish a holder error
-    from a request that took a different lock.
-    """
+    """A held target stripe blocks that target's delivery, nothing else."""
     held_tab = 'stripe-held'
     other_tab = 'stripe-other'
     gate_dir, env = _stripe_holder_setup(tmp, held_tab)
@@ -377,10 +371,12 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
     docroot = Path(tmp) / 'stripe-docroot'
     saved = {name: os.environ.get(name) for name in (
         'DAEDALUS_DIR', 'DAEDALUS_PORT', 'DAEDALUS_MCP_PORT', 'TOKEN',
+        'DAEDALUS_TOKEN_OVERRIDE',
         'DAEDALUS_TOKEN')}
     os.environ.update({
         'DAEDALUS_DIR': str(docroot), 'DAEDALUS_PORT': '0',
-        'DAEDALUS_MCP_PORT': '0', 'TOKEN': '', 'DAEDALUS_TOKEN': TOK})
+        'DAEDALUS_MCP_PORT': '0', 'TOKEN': '',
+        'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': TOK})
     try:
         repo = Path(__file__).resolve().parents[1]
         sys.path.insert(0, str(repo))

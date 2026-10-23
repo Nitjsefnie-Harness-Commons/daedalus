@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""The extension in a real Chrome, driven over CDP.
-
-Everything else about eval is checked against a Node VM, which cannot answer
-what a page's own CSP does to an injection or what the debugger banner costs.
-These load the unpacked extension into a real browser, point it at pages that
-forbid what the relay needs, and read which channel each value came back on —
-a hostile page can choose the value, never the claim about how it was run.
-"""
+"""The extension in a real Chrome, driven over CDP."""
 import json
 import shutil
 import sys
@@ -85,7 +78,7 @@ def test_worker_configures_under_a_slow_boot_read(tmp):
 
     token = 'slowbootcfg'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             with real_extension_page(
@@ -99,7 +92,7 @@ def test_main_world_transport_failure_and_genuine_null_are_distinct(tmp):
     token = 'mainworldtok'
     actual = {}
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             cases = (
@@ -143,7 +136,8 @@ def test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp):
     machine skips only when the control fails to load too.
     """
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': BROKEN_WORKER_TOKEN,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '',
+                      'DAEDALUS_TOKEN': BROKEN_WORKER_TOKEN,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             assert_broken_worker_is_a_failure(tmp, bridge_url, pages)
@@ -165,7 +159,7 @@ def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):
     """
     token = 'readyboundarytok'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             # Served as a 404, so nothing ever sets __evalPageReady.
@@ -214,7 +208,7 @@ def test_the_fixture_reaches_its_own_worker_past_another_extension(tmp):
 
     token = 'decoyworkertok'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             with real_extension_page(
@@ -241,7 +235,7 @@ def test_a_hotfix_replays_on_a_page_that_forbids_eval_and_blob(tmp):
     """
     token = 'hotfixcsptok'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             with real_extension_page(
@@ -278,7 +272,7 @@ def test_strict_csp_page_uses_cdp_once_after_source_free_preflight(tmp):
     """A source-free CSP probe falls back before the command runs once."""
     token = 'cspevaltok'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             page_url = pages + '/strict.html'
@@ -307,7 +301,7 @@ def test_cdp_eval_throw_is_terminal(tmp):
     """An exception is returned once and never retried on another evaluator."""
     token = 'cdpthrowtok'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
             page_url = pages + '/strict.html'

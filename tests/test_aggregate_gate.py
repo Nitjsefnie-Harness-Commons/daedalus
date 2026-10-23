@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
 """Aggregate verdicts in-process and the workflow wiring that calls them."""
 import contextlib
 import io
+import itertools
 import json
 import os
 import re
@@ -23,7 +23,6 @@ STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
 SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage')
 HEAD = 'c2ae15819d9374fda4720e59a46c3a991c0319be'
-# Non-zero origin: at 0.0 a deadline ignoring the clock is the same number.
 EPOCH = 1e6
 FROZEN = (lambda: EPOCH, lambda _seconds: None)
 
@@ -64,7 +63,6 @@ def _recorder(own, pages, polls=None, jobs=None):
             rid = int(target.split('/runs/')[1].split('/')[0])
             found = jobs if not isinstance(jobs, dict) else jobs.get(rid)
             return json.dumps({'jobs': found})
-        # Dispatch on the query's SHAPE, not on a constant.
         if 'head_sha=' in target:
             page = remaining.pop(0) if len(remaining) > 1 else remaining[0]
             return json.dumps({'workflow_runs': page})
@@ -409,16 +407,20 @@ def test_main_exits_zero_only_for_green_verdicts(tmp):
          [dict(_scan_job('cancelled', 'suites'), steps=[])], [],
          'gh run rerun --failed 1'),
     )
-    for needs_json, expected, jobs, runs, diagnostic in cases:
+    for case, primary in itertools.product(cases, ('new', '', None)):
+        needs_json, expected, jobs, runs, diagnostic = case
         calls, read = _recorder(MINE, [{'workflow_runs': [MINE] + runs}],
                                 polls=[[CLEAN]], jobs=jobs)
-        with mock.patch.dict(os.environ, {
-                'NEEDS_JSON': needs_json,
-                'REPOSITORY': 'o/r',
-                'RUN_ID': '1',
-                'HEAD_BRANCH': 'main',
-                'SECRETS_HEAD_SHA': HEAD,
-        }, clear=True):
+        env = dict(zip(('NEEDS_JSON', 'REPOSITORY', 'RUN_ID',
+                        'HEAD_BRANCH', 'SECRETS_HEAD_SHA'),
+                       (needs_json, 'o/r', '1', 'main', HEAD)))
+        if primary is not None:
+            env.update(('DAEDALUS_' + k, v if primary else '')
+                       for k, v in list(env.items()))
+        if primary:
+            env.update((k, 'ignored') for k in list(env)
+                       if not k.startswith('DAEDALUS_'))
+        with mock.patch.dict(os.environ, env, clear=True):
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.object(mod, 'gh_read', read):
                 with contextlib.redirect_stdout(out):
@@ -442,15 +444,15 @@ def test_the_aggregate_job_runs_the_module(tmp):
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gate = _gate_step()
     assert gate['env'] == {
-        'NEEDS_JSON': '${{ toJSON(needs) }}',
+        'DAEDALUS_NEEDS_JSON': '${{ toJSON(needs) }}',
         'GH_TOKEN': '${{ github.token }}',
-        'REPOSITORY': '${{ github.repository }}',
-        'RUN_ID': '${{ github.run_id }}',
-        'HEAD_BRANCH': '${{ github.event.pull_request.head.ref'
-                       ' || github.ref_name }}',
-        'SECRETS_HEAD_SHA': '${{ github.event.pull_request.head.sha'
-                            ' || github.sha }}',
-        'SECRETS_POLL_BOUND_S': '600',
+        'DAEDALUS_REPOSITORY': '${{ github.repository }}',
+        'DAEDALUS_RUN_ID': '${{ github.run_id }}',
+        'DAEDALUS_HEAD_BRANCH': '${{ github.event.pull_request.head.ref'
+        ' || github.ref_name }}',
+        'DAEDALUS_SECRETS_HEAD_SHA': '${{ github.event.pull_request.head.sha'
+        ' || github.sha }}',
+        'DAEDALUS_SECRETS_POLL_BOUND_S': '600',
     }
 
 
@@ -492,8 +494,6 @@ def test_the_marker_step_is_the_claim_port_verbatim(tmp):
 
 def test_the_checkout_pin_is_the_one_the_sibling_jobs_use(tmp):
     del tmp
-    # Derived from tests.yml itself: one revision across its checkouts —
-    # a split hand edit reddens, a coordinated bump stays green.
     refs = set(re.findall(r'actions/checkout@\S+', _tests_yml()))
     assert len(refs) == 1, refs
 
@@ -651,6 +651,19 @@ def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='aggregategate_')
+
+
+def test_poll_bound_environment_precedence(tmp):
+    del tmp
+    mod = _gate()
+    for primary, legacy, want in (('17', '9', 17), (None, '9', 9),
+                                  ('', '9', 9), ('17', None, 17),
+                                  (None, None, mod.DEFAULT_POLL_BOUND_S)):
+        env = {} if legacy is None else {'SECRETS_POLL_BOUND_S': legacy}
+        if primary is not None:
+            env['DAEDALUS_SECRETS_POLL_BOUND_S'] = primary
+        with mock.patch.dict(os.environ, env, clear=True):
+            assert mod.poll_bound() == want
 
 
 if __name__ == '__main__':

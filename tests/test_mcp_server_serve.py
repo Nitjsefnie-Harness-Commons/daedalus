@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Starting and serving the MCP front end's in-process
-listeners.
-
-Split from tests/test_mcp_server.py.
-"""
+"""Starting and serving the MCP front end's in-process"""
 import asyncio
 import contextlib
 import http.client
@@ -265,7 +261,8 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
         with _util.bridge(
                 tmp,
                 env={'DAEDALUS_MCP_PORT': str(taken),
-                     'DAEDALUS_TOKEN': _mcp_load.TOK, 'TOKEN': ''},
+                     'DAEDALUS_TOKEN': _mcp_load.TOK,
+                     'DAEDALUS_TOKEN_OVERRIDE': ''},
                 output=output) as (_base, _docroot):
             crash_line = None
             deadline = time.time() + 300
@@ -371,7 +368,7 @@ def test_port_zero_bridge_mcp_list_tabs_round_trip(tmp):
     _mcp_load._need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'TOKEN': ''}
+    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
     with _bridge_with_live_mcp(tmp, env) as (base, port):
         status, body = _util.post_json(base + '/sync-tabs', {
             'token': _mcp_load.TOK,
@@ -397,7 +394,7 @@ def test_an_unauthenticated_body_is_refused_before_it_is_read(tmp):
     _mcp_load._need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'TOKEN': '',
+    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'DAEDALUS_TOKEN_OVERRIDE': '',
            'DAEDALUS_MCP_MAX_BODY_SIZE': '4096'}
     with _bridge_with_live_mcp(tmp, env) as (_base, port):
         url = f'http://127.0.0.1:{port}/mcp'
@@ -436,7 +433,7 @@ def test_bearer_middleware_requires_configured_token_on_live_mcp_port(tmp):
     _mcp_load._need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'TOKEN': ''}
+    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
     with _bridge_with_live_mcp(tmp, env) as (_base, port):
         url = f'http://127.0.0.1:{port}/mcp'
         rpc = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}}
@@ -468,7 +465,7 @@ def test_bearer_middleware_rejects_duplicate_authorization_headers(tmp):
     _mcp_load._need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'TOKEN': ''}
+    env = {'DAEDALUS_TOKEN': _mcp_load.TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
     with _bridge_with_live_mcp(tmp, env) as (base, port):
         rpc = json.dumps({
             'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}
@@ -556,7 +553,7 @@ def test_bearer_middleware_fails_closed_without_configured_token(tmp):
     _mcp_load._need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {'DAEDALUS_TOKEN': '', 'TOKEN': ''}
+    env = {'DAEDALUS_TOKEN': '', 'DAEDALUS_TOKEN_OVERRIDE': ''}
     with _bridge_with_live_mcp(tmp, env) as (_base, port):
         url = f'http://127.0.0.1:{port}/mcp'
         rpc = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}}

@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Commands into the queue, and the SSE stream that drains it.
-
-`PUT /command` writes a file into a per-target directory queue and the stream
-delivers it exactly once, so these tests drive both halves together: what the
-enqueue writes, what the stream frames, what it does with an entry it cannot
-read, and what the queue does with one nobody claimed.
-"""
+"""Commands into the queue, and the SSE stream that drains it."""
 import http.client
 import json
 import os
@@ -65,8 +59,9 @@ def test_put_command_derived_queue_name_byte_boundary(tmp):
     """Derived command queue names honor the component byte ceiling."""
     token = '123e4567-e89b-12d3-a456-426614174000'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (
-                base, docroot):
+        tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '',
+                  'DAEDALUS_TOKEN': token}) as (
+            base, docroot):
         boundary_tab = 't' * 198
         status, body = put_command(
             base, {'token': token, 'tab': boundary_tab,
@@ -305,8 +300,9 @@ def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
 def test_stream_derived_queue_name_matches_command_enqueue(tmp):
     token = '123e4567-e89b-12d3-a456-426614174000'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token}) as (
-                base, _docroot):
+        tmp, env={'DAEDALUS_TOKEN_OVERRIDE': '',
+                  'DAEDALUS_TOKEN': token}) as (
+            base, _docroot):
         boundary_tab = 't' * 198
         status, body = put_command(
             base, {'token': token, 'tab': boundary_tab,
@@ -321,9 +317,10 @@ def test_stream_derived_queue_name_matches_command_enqueue(tmp):
 def test_stream_modes_deliver_end_to_end(tmp):
     tab_token = 'stream-tab'
     with _util.bridge(
-            Path(tmp) / 'tab',
-            env={'TOKEN': '', 'DAEDALUS_TOKEN': tab_token}) as (
-                base, _docroot):
+        Path(tmp) / 'tab',
+        env={'DAEDALUS_TOKEN_OVERRIDE': '',
+             'DAEDALUS_TOKEN': tab_token}) as (
+            base, _docroot):
         status, body = put_command(
             base, {'token': tab_token, 'tab': 'tab1',
                    'id': 'tab', 'code': '1'})
@@ -331,7 +328,7 @@ def test_stream_modes_deliver_end_to_end(tmp):
         assert read_stream_data(base, tab_token, 'tab1')['id'] == 'tab'
 
     dashboard_token = 'stream-dashboard'
-    env = {'TOKEN': '', 'DAEDALUS_TOKEN': dashboard_token}
+    env = {'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': dashboard_token}
     with _util.bridge(Path(tmp) / 'dashboard', env=env) as (base, _docroot):
         status, body = _util.post_json(base + '/result', {
             'token': dashboard_token, 'tabId': '7', 'id': 'dashboard-result',
@@ -345,7 +342,7 @@ def test_stream_modes_deliver_end_to_end(tmp):
         assert dashboard['world'] == 'page:cdp', dashboard
 
     extension_token = 'stream-extension'
-    env = {'TOKEN': '', 'DAEDALUS_TOKEN': extension_token}
+    env = {'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': extension_token}
     with _util.bridge(Path(tmp) / 'extension', env=env) as (base, _docroot):
         status, body = put_command(
             base, {'token': extension_token, 'tab': 'extension',
@@ -355,7 +352,7 @@ def test_stream_modes_deliver_end_to_end(tmp):
             base, extension_token, 'extension')['id'] == 'extension'
 
     broadcast_token = 'stream-broadcast'
-    env = {'TOKEN': '', 'DAEDALUS_TOKEN': broadcast_token}
+    env = {'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': broadcast_token}
     with _util.bridge(Path(tmp) / 'broadcast', env=env) as (base, _docroot):
         status, body = put_command(
             base, {'token': broadcast_token, 'id': 'broadcast', 'code': '2'})

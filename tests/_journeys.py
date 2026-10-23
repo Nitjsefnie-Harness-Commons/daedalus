@@ -421,7 +421,7 @@ RECORD_MARKER = '##JOURNEY## '
 
 def bridge_env(token):
     """The child environment a journey's bridge is spawned with."""
-    return {'DAEDALUS_TOKEN': token, 'TOKEN': ''}
+    return {'DAEDALUS_TOKEN': token, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
 
 def _against_a_fresh_bridge(token, run):
@@ -530,7 +530,7 @@ def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--journey', required=True,
                         help=f'one of {", ".join(NAMES)}, or '
-                             f'{STARTUP_ONLY} or {BRIDGE_ONLY}')
+                        f'{STARTUP_ONLY} or {BRIDGE_ONLY}')
     parser.add_argument('--root', type=Path, default=_util.ROOT)
     return parser
 

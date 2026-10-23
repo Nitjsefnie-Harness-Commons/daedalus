@@ -29,7 +29,7 @@ DEPS = all(importlib.util.find_spec(name) is not None
            for name in ('httpx', 'mcp', 'starlette'))
 
 TOK = 'mcptok'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
 # The listener's bind re-reads the process environment after the load's
 # isolation has ended, so the token has to be published here, beside the

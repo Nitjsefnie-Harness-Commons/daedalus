@@ -1,20 +1,4 @@
-"""Resolver tables and isolated CLI dispatch controls; the namespace-storage
-contract is stated in test_cli_arg_audit.py's own docstring.
-FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
-namespace, planted into a real module and read one per row; they are
-plants, not the rule's inputs — the rule answers once, from the member
-set read off types.FrameType. Three rows are each the sole plant dying with
-one arm — the callee that is itself a call, the starred expansion, and
-the getattr whose name is an expression; removing any arm reds
-test_cli_audit_refuses_every_frame_namespace_plant on its row. That
-starred row is not sole among the controls —
-test_cli_audit_reports_namespace_escapes reads it too. The
-unreadable-subscript arm is pinned on both sides: four rows are the sole
-catchers of its refusal, and the real tree reds on the eleven correct
-slices the CLI has when the exemption is removed.
-A guard operand ADDED to the resolver may fire nothing here, and one
-blind spot survives: no control DISTINGUISHES frame_read's attribute arm
-from the member test inside it."""
+"""Resolver tables and isolated CLI dispatch controls; the namespace-storage"""
 import argparse
 import builtins
 import contextlib
@@ -38,7 +22,8 @@ _BUILTINS_GETATTR_ESCAPE = (
 
 
 KNOWN_INDIRECT_ARG_READS = (('tabs', 'json', 'do_tabs'),)
-BRIDGE_ENV_NAMES = ('DAEDALUS_URL', 'DAEDALUS_TOKEN', 'TOKEN')
+BRIDGE_ENV_NAMES = ('DAEDALUS_URL', 'DAEDALUS_TOKEN',
+                    'DAEDALUS_TOKEN_OVERRIDE', 'TOKEN')
 DISPATCH_PROBE_ERROR = 'real dispatch did not read undeclared_probe'
 REAL_STORAGE_DISPATCH_CASES = (
     ('optional',

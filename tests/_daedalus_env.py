@@ -7,9 +7,9 @@ import os
 def isolated(applied):
     """Keep shell settings out of test imports."""
     saved = {key: value for key, value in os.environ.items()
-             if key.startswith('DAEDALUS_')}
+             if key.startswith('DAEDALUS_') or key in ('TOKEN', 'ID')}
     other = {key: os.environ.get(key) for key in applied
-             if not key.startswith('DAEDALUS_')}
+             if not key.startswith('DAEDALUS_') and key not in ('TOKEN', 'ID')}
     for key in saved:
         del os.environ[key]
     try:
@@ -17,7 +17,7 @@ def isolated(applied):
         yield
     finally:
         for key in applied:
-            if key.startswith('DAEDALUS_') and key not in saved:
+            if key not in saved and key not in other:
                 os.environ.pop(key, None)
         for key, value in other.items():
             if value is None:

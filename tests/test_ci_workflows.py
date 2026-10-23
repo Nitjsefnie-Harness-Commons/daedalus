@@ -420,7 +420,7 @@ def test_a_release_waits_for_the_gates_on_its_own_commit(tmp):
     _, marker, after = workflow.partition('- name: Wait for the gates')
     assert marker, 'the release does not wait for anything'
     step, _, _ = after.partition('- uses: actions/checkout')
-    assert 'head_sha=$SHA' in step, step
+    assert 'head_sha=$DAEDALUS_SHA' in step, step
     # Itself excluded, or the wait waits for its own run to finish; and the
     # admission gate, which reports against the base tip, is no gate here.
     assert 'select(.name != "release")' in step, step

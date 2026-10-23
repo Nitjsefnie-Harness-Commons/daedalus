@@ -311,7 +311,8 @@ def test_trusted_destination_and_body_bound_are_executable(tmp):
 
     script = _run_block(
         _workflow(), 'Post or update the pull request comment')
-    assert not re.search(r'^\s*PR_NUMBER\s*=', script, re.MULTILINE), script
+    assert not re.search(r'^\s*DAEDALUS_PR_NUMBER\s*=',
+                         script, re.MULTILINE), script
 
 
 def test_a_success_then_b_failure_replaces_the_marker(tmp):
@@ -433,7 +434,7 @@ def test_commenter_runs_every_completed_run_and_orders_stale_gate(
     assert resolve < missing, workflow
     resolve_script = _run_block(
         workflow, 'Resolve the target pull request from the event')
-    assert 'HEAD_SHA' in resolve_script
+    assert 'DAEDALUS_HEAD_SHA' in resolve_script
     assert 'current_sha' in resolve_script
     current = _step_context('true', 'false')
     stale = _step_context('true', 'true')
@@ -523,10 +524,13 @@ def test_the_coverage_commenter_guards_its_privileged_shell(tmp):
     assert len(guarded) == workflow.count('run: |') == 5, workflow
     assert 'cancel-in-progress: true' in workflow, workflow
     # The destination comes from the event; the artifact's copy is compared.
-    assert 'repos/$HEAD_REPO/commits/$HEAD_SHA/pulls' in workflow, workflow
-    assert 'PR_NUMBER: ${{ steps.pr.outputs.number }}' in workflow, workflow
-    assert 'repos/$REPO/issues/$PR_NUMBER/comments' in workflow, workflow
-    assert '"$claimed" != "$PR_NUMBER"' in workflow, workflow
+    assert ('repos/$DAEDALUS_HEAD_REPO/commits/'
+            '$DAEDALUS_HEAD_SHA/pulls') in workflow, workflow
+    assert ('DAEDALUS_PR_NUMBER: ${{ steps.pr.outputs.number '
+            '}}') in workflow, workflow
+    assert ('repos/$DAEDALUS_REPO/issues/'
+            '$DAEDALUS_PR_NUMBER/comments') in workflow, workflow
+    assert '"$claimed" != "$DAEDALUS_PR_NUMBER"' in workflow, workflow
     assert '(.body // "")' in workflow, workflow
 
 

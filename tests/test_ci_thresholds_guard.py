@@ -127,7 +127,8 @@ def test_unproved_ranges_fail_even_when_documents_match(tmp):
         status, _out, err = _judge(shallow, selected, base, base)
         assert status == 1 and 'history' in err, err
         with (patch.object(resolver, 'ROOT', shallow),
-              patch.dict('os.environ', EVENT='push', BEFORE=selected,
+              patch.dict('os.environ', DAEDALUS_EVENT='push',
+                         DAEDALUS_BEFORE=selected,
                          GITHUB_ENV=str(Path(tmp) / 'env'))):
             status, _out, err = _captured_main(runner, [])
         assert status == 1 and 'history' in err, err
@@ -243,8 +244,8 @@ def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
     policy = _util.load(GUARD.with_name('threshold_base.py'), 'event_base')
     runner = SimpleNamespace(main=lambda _: policy.main())
     env_file = Path(tmp) / 'event-env'
-    event = {'EVENT': 'pull_request', 'BASE_SHA': rev,
-             'REPO': 'unused/repo', 'GITHUB_ENV': str(env_file)}
+    event = {'DAEDALUS_EVENT': 'pull_request', 'DAEDALUS_BASE_SHA': rev,
+             'DAEDALUS_REPO': 'unused/repo', 'GITHUB_ENV': str(env_file)}
     for index, consumer in enumerate((repo, repo, second)):
         assert _rev(consumer) == merge_rev
         env_file.write_bytes(b'')
@@ -261,7 +262,8 @@ def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
         assert policy.resolve('push', 'unknown', '', '') == rev
         assert policy.resolve('push', '', '', '') == rev
         for target in ('missing-target', 'unrelated', ''):
-            with patch.dict('os.environ', event | {'BASE_SHA': target}):
+            with patch.dict('os.environ',
+                            event | {'DAEDALUS_BASE_SHA': target}):
                 status, _out, err = _captured_main(runner, [])
             assert status == 1 and err.strip(), err
         real_git = policy._git
@@ -278,7 +280,8 @@ def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
         _git(repo, 'checkout', '--orphan', 'root-only')
         _git(repo, 'add', '.github/ci-thresholds.json')
         _git(repo, 'commit', '-qm', 'fix: root')
-        missing = event | {'EVENT': 'push', 'BEFORE': 'unknown'}
+        missing = event | {'DAEDALUS_EVENT': 'push',
+                           'DAEDALUS_BEFORE': 'unknown'}
         with patch.dict('os.environ', missing):
             status, _out, err = _captured_main(runner, [])
         assert status == 1 and 'HEAD^' in err, err
@@ -294,7 +297,7 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     resolver = next(s for s in job['steps']
                     if s.get('name') == 'Resolve threshold base')
     binding = '${{ github.event.pull_request.base.sha }}'
-    assert resolver['env']['BASE_SHA'] == binding
+    assert resolver['env']['DAEDALUS_BASE_SHA'] == binding
     jobs = workflow_mapping((ROOT / '.github/workflows/tests.yml').read_text())
     for name in ('suites', 'coverage-matrix', 'coverage', 'pyright'):
         steps = jobs['jobs'][name]['steps']
@@ -302,7 +305,7 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
                    for s in steps) == 1
         bound = next(s for s in steps
                      if s.get('name') == 'Resolve threshold base')
-        assert bound['env']['BASE_SHA'] == binding
+        assert bound['env']['DAEDALUS_BASE_SHA'] == binding
     script = resolver['run'] + '\n. "$GITHUB_ENV"\n' + step['run']
     assert not any(key in obj for obj in (job, step)
                    for key in ('if', 'continue-on-error'))
@@ -332,13 +335,13 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     script = 'python3() { "$REAL_PYTHON" "$@"; }\n' + script
     env = dict(_util.child_coverage('scrub'),
                REAL_PYTHON=sys.executable, RUNNER_TEMP=str(repo),
-               REPO='unused/repo', BASE_SHA=rev,
+               DAEDALUS_REPO='unused/repo', DAEDALUS_BASE_SHA=rev,
                GITHUB_ENV=str(repo / 'env'))
     for event, before, status in (('pull_request', '', 1), ('push', rev, 1),
                                   ('push', 'unknown', 0),
                                   ('push', '0' * 40, 0),
                                   ('schedule', '', 0)):
-        env.update(EVENT=event, BEFORE=before)
+        env.update(DAEDALUS_EVENT=event, DAEDALUS_BEFORE=before)
         result = subprocess.run([_util.workflow_bash(), '-e', '-o', 'pipefail',
                                  '-c', script], cwd=repo, env=env,
                                 capture_output=True, text=True, timeout=60)
@@ -348,16 +351,16 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
             assert rev in result.stdout, (result.stdout, result.stderr)
             assert 'feat:' in result.stderr, result.stderr
     for target in ('missing-target', 'unrelated'):
-        env.update(EVENT='pull_request', BASE_SHA=target)
+        env.update(DAEDALUS_EVENT='pull_request', DAEDALUS_BASE_SHA=target)
         result = subprocess.run([_util.workflow_bash(), '-e', '-c', script],
                                 cwd=repo, env=env, capture_output=True,
                                 text=True, timeout=60)
         assert result.returncode != 0 and result.stderr.strip(), result.stdout
-    env.update(BASE_SHA=rev)
+    env.update(DAEDALUS_BASE_SHA=rev)
     _git(repo, 'checkout', '--orphan', 'root-only')
     _git(repo, 'add', '.github/ci-thresholds.json')
     _git(repo, 'commit', '-qm', 'fix: root')
-    env.update(EVENT='push', BEFORE='unknown')
+    env.update(DAEDALUS_EVENT='push', DAEDALUS_BEFORE='unknown')
     result = subprocess.run([_util.workflow_bash(), '-e', '-c', script],
                             cwd=repo, env=env, capture_output=True, text=True,
                             timeout=60)
@@ -367,6 +370,24 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
 
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='thguard_')
+
+
+def test_threshold_base_prefixed_environment_precedes_legacy(tmp):
+    import os
+    policy = _util.load(GUARD.with_name('threshold_base.py'), 'base_env')
+    for primary in ('new', '', None):
+        env = {'GITHUB_ENV': str(Path(tmp) / 'resolved')}
+        values = ('push', 'new-before', 'new/repo', 'new-base')
+        names = ('EVENT', 'BEFORE', 'REPO', 'BASE_SHA')
+        old = ('ignored',) * 4 if primary else values
+        env.update(zip(names, old))
+        if primary is not None:
+            env.update(('DAEDALUS_' + n, v if primary else '')
+                       for n, v in zip(names, values))
+        with (patch.dict(os.environ, env, clear=True),
+              patch.object(policy, 'resolve', return_value='resolved') as run):
+            assert policy.main() == 0
+        assert run.call_args.args == values, run.call_args
 
 
 if __name__ == '__main__':

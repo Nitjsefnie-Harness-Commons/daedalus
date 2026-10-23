@@ -27,10 +27,11 @@ def _load_result_store(tmp):
         return _SERVER
     saved = {name: os.environ.get(name) for name in (
         'DAEDALUS_DIR', 'DAEDALUS_PORT', 'DAEDALUS_MCP_PORT', 'TOKEN',
+        'DAEDALUS_TOKEN_OVERRIDE',
         'DAEDALUS_TOKEN')}
     os.environ.update({
         'DAEDALUS_DIR': str(tmp), 'DAEDALUS_PORT': '0',
-        'DAEDALUS_MCP_PORT': '0', 'TOKEN': '',
+        'DAEDALUS_MCP_PORT': '0', 'TOKEN': '', 'DAEDALUS_TOKEN_OVERRIDE': '',
         'DAEDALUS_TOKEN': 'stripe-token'})
     sys.path.insert(0, str(_util.ROOT))
     try:
@@ -76,15 +77,7 @@ def test_same_directory_is_stable_and_server_reuses_lock(tmp):
 
 
 def test_two_names_for_one_entry_take_one_stripe(tmp):
-    """One entry is one stripe, whichever path names it.
-
-    The property the stripe exists on, pinned where a case-insensitive
-    parent is not available: two paths that reach the same entry take the
-    same lock. A symlink is the case-sensitive host's own way of putting two
-    names on one entry, and it is the shape the fold fixtures reach by
-    another route -- `os.stat` follows it, as it follows a parent's case
-    folding, so the entry is what both names reach.
-    """
+    """One entry is one stripe, whichever path names it."""
     result_store = _load_result_store(tmp)
     deliveries = Path(tmp) / 'results' / 'deliveries'
     real = deliveries / 'stripe-token_real'

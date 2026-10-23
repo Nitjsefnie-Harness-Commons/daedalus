@@ -111,8 +111,8 @@ def test_main_propagates_classify_value_error(tmp):
             'GITHUB_EVENT_NAME': 'pull_request',
             'GITHUB_REPOSITORY': 'octo/daedalus',
             'GITHUB_SHA': 'a' * 40,
-            'PR_NUMBER': '248',
-            'BEFORE_SHA': 'b' * 40,
+            'DAEDALUS_PR_NUMBER': '248',
+            'DAEDALUS_BEFORE_SHA': 'b' * 40,
             'GITHUB_OUTPUT': str(out),
         })
         with mock.patch.object(mod, 'DOCUMENTATION_PATTERNS',

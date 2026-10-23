@@ -16,7 +16,7 @@ logical read. At 1.5 s/call, 1200 calls need 30 minutes of a 35-minute timeout.
 Oversized estimates refuse without truncating heads.
 """
 import json
-import os
+from os import getenv as e
 import subprocess
 import sys
 from pathlib import Path
@@ -424,19 +424,19 @@ def gh_read(argv):
 
 
 def _call_budget():
-    raw = os.environ.get('GATE_FRESHNESS_MAX_CALLS', '')
-    return int(raw) if raw.isdigit() else DEFAULT_CALL_BUDGET
+    v = e('DAEDALUS_GATE_FRESHNESS_MAX_CALLS') or e('GATE_FRESHNESS_MAX_CALLS')
+    return int(v) if v and v.isdigit() else DEFAULT_CALL_BUDGET
 
 
 def _details_url():
-    server = os.environ.get('GITHUB_SERVER_URL', 'https://github.com')
-    repo = os.environ.get('GITHUB_REPOSITORY', '')
-    run = os.environ.get('GITHUB_RUN_ID', '')
+    server = e('GITHUB_SERVER_URL', 'https://github.com')
+    repo = e('GITHUB_REPOSITORY', '')
+    run = e('GITHUB_RUN_ID', '')
     return f'{server}/{repo}/actions/runs/{run}'
 
 
 def _event():
-    path = os.environ.get('GITHUB_EVENT_PATH')
+    path = e('GITHUB_EVENT_PATH')
     if not path:
         return {}
     try:
@@ -456,9 +456,9 @@ def main(argv=None, read=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
     dry_run = '--dry-run' in arguments
     read = gh_read if read is None else read
-    repository = os.environ.get('GITHUB_REPOSITORY', '')
+    repository = e('GITHUB_REPOSITORY', '')
     event = _event()
-    name = os.environ.get('GITHUB_EVENT_NAME', '')
+    name = e('GITHUB_EVENT_NAME', '')
     try:
         if name == 'pull_request_target':
             pr = event.get('pull_request') or {}

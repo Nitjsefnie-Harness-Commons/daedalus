@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Routing, snapshot flow and workflow contracts for freshness."""
-import contextlib
-import io
-import json
+import contextlib, io, json
 import os
 import re
 import sys
@@ -166,7 +164,7 @@ def _main_env(tmp, event_name, event, monkey=None):
         'GITHUB_EVENT_NAME': event_name,
         'GITHUB_EVENT_PATH': str(event_path),
         'GITHUB_REPOSITORY': 'o/r',
-        'GATE_FRESHNESS_MAX_CALLS': str(monkey.get('budget', 1200)),
+        'DAEDALUS_GATE_FRESHNESS_MAX_CALLS': str(monkey.get('budget', 1200)),
     }):
         for key in ('GITHUB_SERVER_URL', 'GITHUB_RUN_ID'):
             os.environ.pop(key, None)
@@ -684,6 +682,18 @@ def test_workflow_timeout_leaves_slack_above_the_call_estimate(tmp):
 
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='gatefreshrun_')
+
+
+def test_call_budget_environment_precedence(tmp):
+    m = _mod()
+    for primary, legacy, want in (('17', '9', 17), (None, '9', 9),
+                                  ('', '9', 9), ('17', None, 17),
+                                  (None, None, m.DEFAULT_CALL_BUDGET)):
+        env = {} if legacy is None else {'GATE_FRESHNESS_MAX_CALLS': legacy}
+        if primary is not None:
+            env['DAEDALUS_GATE_FRESHNESS_MAX_CALLS'] = primary
+        with patch.dict(os.environ, env, clear=True):
+            assert m._call_budget() == want
 
 
 if __name__ == '__main__':

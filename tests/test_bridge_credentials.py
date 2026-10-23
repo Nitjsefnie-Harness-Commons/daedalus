@@ -55,7 +55,7 @@ def test_token_validation_across_endpoints(tmp):
 
 def test_bridge_storage_fails_closed_without_a_configured_token(tmp):
     """A path-safe caller token is not authorization when no secret exists."""
-    env = {'TOKEN': '', 'DAEDALUS_TOKEN': ''}
+    env = {'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': ''}
     with _util.bridge(tmp, env=env) as (base, docroot):
         calls = (
             ('PUT', '/command',

@@ -67,7 +67,8 @@ def _drive(work, *args, env=None):
     home.mkdir(exist_ok=True)
     child = dict(os.environ, **(env or {}))
     child.update(HOME=str(home), USERPROFILE=str(home),
-                 MASTER_PUSH_DEPLOY_KEY='fixture-key', REPO='o/r')
+                 DAEDALUS_MASTER_PUSH_DEPLOY_KEY='fixture-key',
+                 DAEDALUS_REPO='o/r')
     child.setdefault('GITHUB_OUTPUT', str(work.parent / 'output'))
     dispatch = _util.load(ROOT / SCRIPT, 'scripts.ci.release_dispatch')
     out, err = io.StringIO(), io.StringIO()
@@ -238,13 +239,13 @@ def test_wait_gate_default_exceeds_publishing_deadline(tmp):
     job, = workflow['jobs'].values()
     step = next(s for s in job['steps']
                 if ' wait-gates ' in s.get('run', ''))
-    argv = [arg.replace('$SHA', SHA)
+    argv = [arg.replace('$DAEDALUS_SHA', SHA)
             for arg in shlex.split(step['run'])[2:]]
     deadline = re.search(r'deadline=.*\+ (\d+) \* (\d+)',
                          (workflows / 'release.yml').read_text())
     assert deadline, 'missing publishing deadline'
     minutes, seconds = map(int, deadline.groups())
-    with patch.dict(os.environ, REPO='o/r'), \
+    with patch.dict(os.environ, DAEDALUS_REPO='o/r'), \
             patch.object(dispatch, 'wait') as selected:
         assert dispatch.main(argv) == 0
     assert selected.call_args.kwargs['timeout'] > minutes * seconds
@@ -261,7 +262,7 @@ def test_wait_green_response_must_arrive_before_deadline(tmp):
         def read(_argv, elapsed=elapsed):
             clock[0] = elapsed
             return json.dumps({'workflow_runs': [_row()]})
-        with (patch.dict(os.environ, REPO='o/r'),
+        with (patch.dict(os.environ, DAEDALUS_REPO='o/r'),
               patch.object(dispatch.time, 'monotonic', lambda: clock[0]),
               contextlib.redirect_stdout(out),
               contextlib.redirect_stderr(err)):
@@ -368,15 +369,35 @@ def test_workflow_orders_release_and_protects_secret(tmp):
     for step in runs:
         if step['run'].split(script)[1].split()[0] in (
                 'wait-gates', 'tag', 'wait-release'):
-            assert step['env']['SHA'] == '${{ steps.bump.outputs.sha }}'
+            assert step['env']['DAEDALUS_SHA'] == (
+                '${{ steps.bump.outputs.sha }}')
     for step in runs:
         assert '${{' not in step['run'], step
-        if 'VERSION' in step['run']:
-            assert step['env']['VERSION'] == '${{ inputs.version }}', step
+        if 'DAEDALUS_VERSION' in step['run']:
+            assert step['env']['DAEDALUS_VERSION'] == (
+                '${{ inputs.version }}'), step
         if 'bump' in step['run'] or ' tag ' in step['run']:
-            assert step['env']['MASTER_PUSH_DEPLOY_KEY'] == (
+            assert step['env']['DAEDALUS_MASTER_PUSH_DEPLOY_KEY'] == (
                 '${{ secrets.MASTER_PUSH_DEPLOY_KEY }}'), step
     assert int(job['timeout-minutes']) >= 120
+
+
+def test_prefixed_credentials_and_wait_repository_precede_legacy(tmp):
+    del tmp
+    dispatch = _util.load(ROOT / SCRIPT, 'scripts.ci.release_dispatch')
+    for primary in ('new', '', None):
+        values = {'REPO': 'o/r', 'MASTER_PUSH_DEPLOY_KEY': 'fixture-key'}
+        env = {k: 'ignored' if primary else v for k, v in values.items()}
+        if primary is not None:
+            env.update(('DAEDALUS_' + k, v if primary else '')
+                       for k, v in values.items())
+        with (patch.dict(os.environ, env, clear=True),
+              patch.object(dispatch.ratchet_push, 'prepare_ssh') as prepare,
+              patch.object(dispatch, 'wait') as wait):
+            assert dispatch._credentials() == 'o/r'
+            assert dispatch.main(['wait-gates', SHA]) == 0
+        assert prepare.call_args.args == ('fixture-key',)
+        assert wait.call_args.args[1:3] == ('o/r', SHA)
 
 
 if __name__ == '__main__':

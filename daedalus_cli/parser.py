@@ -20,7 +20,8 @@ def build_parser():
     p = argparse.ArgumentParser(
         prog='daedalus',
         description='Daedalus bridge CLI',
-        epilog='Env: DAEDALUS_TOKEN (bridge token), ID (tab id, optional), '
+        epilog='Env: DAEDALUS_TOKEN (bridge token), '
+               'DAEDALUS_ID (tab id, optional), '
                'DAEDALUS_URL (default http://127.0.0.1:8081)',
     )
     p.add_argument('--version', action='version',
@@ -39,7 +40,7 @@ def build_parser():
     s.add_argument('--no-result', action='store_true',
                    help="Don't wait for result")
     s.add_argument('-b', '--broadcast', action='store_true',
-                   help='Send with no tab (ignore ID): runs in the '
+                   help='Send with no tab (ignore DAEDALUS_ID): runs in the '
                         "browser's active tab")
     s.add_argument('-t', '--timeout', type=positive_timeout, default=15,
                    help='Result timeout seconds (default 15)')
@@ -51,7 +52,7 @@ def build_parser():
     s.add_argument('--no-result', action='store_true',
                    help="Don't wait for result")
     s.add_argument('-b', '--broadcast', action='store_true',
-                   help='Send with no tab (ignore ID): runs in the '
+                   help='Send with no tab (ignore DAEDALUS_ID): runs in the '
                         "browser's active tab")
     s.add_argument('-t', '--timeout', type=positive_timeout, default=15,
                    help='Result timeout seconds (default 15)')
@@ -72,7 +73,7 @@ def build_parser():
     # reload
     s = sub.add_parser('reload', help='Reload tab page')
     s.add_argument('-b', '--broadcast', action='store_true',
-                   help='Send with no tab (ignore ID): runs in the '
+                   help='Send with no tab (ignore DAEDALUS_ID): runs in the '
                         "browser's active tab")
 
     # title
@@ -248,7 +249,7 @@ def build_parser():
                    help='Chrome tab ID (default: active)')
     s.add_argument('--max', type=capture_limit, default=1000,
                    help=f'Max requests to buffer, 1-{NET_CAPTURE_MAX} '
-                        '(default: 1000)')
+                   '(default: 1000)')
 
     # net-capture-stop (extension)
     s = sub.add_parser('net-capture-stop',

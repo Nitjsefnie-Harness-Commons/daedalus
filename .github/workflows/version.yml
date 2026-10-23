@@ -75,7 +75,7 @@ jobs:
       - name: The version this tree claims is not already published
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
+          DAEDALUS_REPO: ${{ github.repository }}
         # `--print` runs the ordinary cross-site consistency check first and
         # sends its report to stderr, so a tree whose six sites disagree
         # fails here rather than handing one of them to the query below.
@@ -88,7 +88,8 @@ jobs:
           version="$(python3 scripts/check_versions.py --print)"
           echo "tree claims version $version"
           if gh api -H "Cache-Control: no-cache" \
-               "repos/$REPO/releases/tags/v$version" >/dev/null 2>&1; then
+               "repos/$DAEDALUS_REPO/releases/tags/v$version" >/dev/null \
+                 2>&1; then
             echo "v$version is already published, and this tree is not that" >&2
             echo "release. Bump every site in one pass before pushing again:" >&2
             echo "  python3 scripts/check_versions.py --set <released>.1" >&2

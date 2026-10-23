@@ -107,7 +107,16 @@ The dashboard subscribes to `/stream?tab=dashboard`, and that stream is a **fan-
 <mcp>
 An MCP server runs in-process alongside `server.py` on `127.0.0.1:8086` (streamable-HTTP transport), fronted by the reverse proxy at `<your-bridge>/mcp`. `daedalus_mcp/server.py` composes the listener; `daedalus_mcp/auth.py` supplies its authentication middleware, `daedalus_mcp/request_guard.py` decides pre-body refusals, `daedalus_mcp/transport.py` owns bridge HTTP sessions, and the seven `daedalus_mcp/tools_*.py` modules define and register the tool groups.
 
-Before dispatch it requires `Authorization: Bearer <bridge-token>` to exactly match the token resolved through the CLI's existing configuration path (`TOKEN`, otherwise `DAEDALUS_TOKEN`, including the optional `_settings` provider); no configured token fails closed with `401`. It rejects repeated `Authorization`, `Mcp-Session-Id`, `Host`, and `Origin` headers, and repeated `job` arguments for `segment_job` / `segment_status`, without selecting one value. Credentials are decided before the body is read, so an unauthenticated request is never materialized or parsed; a declared body over `DAEDALUS_MCP_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes) is refused with 413 before reading, and an undeclared one is bounded after.
+Before dispatch it requires `Authorization: Bearer <bridge-token>` to exactly
+match the token resolved through the CLI's existing configuration path
+(`DAEDALUS_TOKEN_OVERRIDE`, otherwise `DAEDALUS_TOKEN`, including the optional
+`_settings` provider); no configured token fails closed with `401`. It rejects
+repeated `Authorization`, `Mcp-Session-Id`, `Host`, and `Origin` headers, and
+repeated `job` arguments for `segment_job` / `segment_status`, without
+selecting one value. Credentials are decided before the body is read, so an
+unauthenticated request is never materialized or parsed; a declared body over
+`DAEDALUS_MCP_MAX_BODY_SIZE` (default `64 * 1024 * 1024` bytes) is refused with
+413 before reading, and an undeclared one is bounded after.
 
 `DAEDALUS_MCP_PORT` (default 8086, range 0-65535) and `DAEDALUS_MCP_MAX_BODY_SIZE` are parsed with the same bounded reader the bridge uses, so an invalid value stops startup with a message naming the setting rather than an import-time traceback. Public-hostname allowlist via `DAEDALUS_MCP_ALLOWED_HOSTS` — DNS rebinding protection is enabled explicitly, so that list is the whole allowlist and the transport's own localhost default does not apply.
 
@@ -126,5 +135,10 @@ Every tool that sends a command takes `wait`, defaulting to `true`; the six that
 
 `net_capture`'s `max_requests` is an integer from 1 to 20000 (`daedalus_mcp/tools_network.py`'s `NET_CAPTURE_MAX`, the same ceiling the CLI's `--max` and the extension both enforce); the buffer lives in the service worker and grows to hold headers and bodies, so the bound is a memory budget rather than a preference.
 
-Manual verification helper: `TOKEN=<tok> python3 scripts/mcp_probe.py list|call <tool> [json-args]`.
+Manual verification helper:
+
+```bash
+DAEDALUS_TOKEN=<tok> python3 scripts/mcp_probe.py \
+  list|call <tool> [json-args]
+```
 </mcp>

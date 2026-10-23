@@ -15,7 +15,8 @@ tracked file a workflow step runs, and it reads Python only: a step running a
 set in silence, which `tests/test_ci_tool_declarations.py` refuses. This way
 the walk reads this file, sees that it runs no suite, and says so.
 
-The main-push environment supplies MASTER_PUSH_DEPLOY_KEY. A deploy key is
+The main-push environment supplies DAEDALUS_MASTER_PUSH_DEPLOY_KEY.
+A deploy key is
 required: a ruleset may list this job among its required contexts, and a commit
 pushed here has no green checks yet, so the built-in token is refused.
 GitHub Actions cannot be a bypass actor; a deploy key can. It is scoped to
@@ -89,10 +90,11 @@ def main(argv=None):
               file=sys.stderr)
         return 2
     path, message = argv
-    key = os.environ.get('MASTER_PUSH_DEPLOY_KEY')
-    repository = os.environ.get('REPO')
+    key = (os.environ.get('DAEDALUS_MASTER_PUSH_DEPLOY_KEY')
+           or os.environ.get('MASTER_PUSH_DEPLOY_KEY'))
+    repository = os.environ.get('DAEDALUS_REPO') or os.environ.get('REPO')
     if not key:
-        print('MASTER_PUSH_DEPLOY_KEY is not set; '
+        print('DAEDALUS_MASTER_PUSH_DEPLOY_KEY is not set; '
               'ratchet change is not pushed',
               file=sys.stderr)
         return 2

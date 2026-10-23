@@ -447,7 +447,7 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
     ):
         context = {
             'steps': {'ratchet': {'outputs': {'changed': changed}}},
-            'env': {'MASTER_PUSH_DEPLOY_KEY': secret},
+            'env': {'DAEDALUS_MASTER_PUSH_DEPLOY_KEY': secret},
             'status': status,
         }
         assert evaluate_if(commit['if'], context) is expected, context

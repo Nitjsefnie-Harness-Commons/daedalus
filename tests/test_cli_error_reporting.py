@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""The CLI's failure paths: one line, on one stream, never a traceback.
-
-Same fixture style as the other tests/test_cli_*.py suites: the CLI is always
-run as a subprocess, the way a shell would run it, and the
-proxy that fronts the bridge is a stub from tests/_frontend.py.
-"""
+"""The CLI's failure paths: one line, on one stream, never a traceback."""
 import contextlib
 import http.server
 import io
@@ -135,7 +130,7 @@ def test_cdp_sends_a_chrome_tab_zero_instead_of_dropping_it(tmp):
     Chrome tab ids are positive, so this pins the guard's shape rather
     than a reachable browser state.
     """
-    bridge_env = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+    bridge_env = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         proc = subprocess.Popen(
@@ -224,7 +219,8 @@ def test_connection_failure_is_a_clean_error(tmp):
 
 
 def test_missing_token_is_an_error(tmp):
-    # No TOKEN and no DAEDALUS_TOKEN: required() must refuse before any HTTP.
+    # No DAEDALUS_TOKEN_OVERRIDE and no DAEDALUS_TOKEN: required() must refuse
+    # before any HTTP.
     r = run_cli(['tabs'], cli_env(DAEDALUS_URL='http://127.0.0.1:1'))
     assert r.returncode != 0, (r.returncode, r.stdout)
     assert 'DAEDALUS_TOKEN is not set' in r.stderr, r.stderr

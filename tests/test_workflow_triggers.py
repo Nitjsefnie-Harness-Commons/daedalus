@@ -479,10 +479,7 @@ def _without_call_spacing(expression):
 
 
 def test_scorecard_publishes_only_the_upstream_default_branch(tmp):
-    """One score, from one ref, published only where it means something.
-    A structural pin, not an evaluation: the expression reader refuses
-    `format(...)` outright, and each limb of any other shape fails rather
-    than passing unread."""
+    """One score, from one ref, published only where it means something."""
     del tmp
     scorecard = (ROOT / '.github' / 'workflows' / 'scorecard.yml').read_text(
         encoding='utf-8')
@@ -584,7 +581,8 @@ def test_comment_share_push_runs_only_for_a_changed_measured_head(tmp):
                 '"diff --quiet -- .github/comment-share.json") '
                 'return "$DIFF_CODE";; *) return 99;; esac; }\n'
                 'python3() { printf "%s\\n" python3 "$@" '
-                '"$MASTER_PUSH_DEPLOY_KEY" "$REPO" >> "$CALLS"; }\n')
+                '"$DAEDALUS_MASTER_PUSH_DEPLOY_KEY" '
+                '"$DAEDALUS_REPO" >> "$CALLS"; }\n')
             done = subprocess.run(
                 [_util.workflow_bash(), '-e', '-c', stub + step['run']],
                 cwd=tmp, capture_output=True, text=True, timeout=30,

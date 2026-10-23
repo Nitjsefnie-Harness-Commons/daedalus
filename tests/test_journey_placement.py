@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Where a journey's own work RUNS, as distinct from which thread the
-count reads it off. `test_journey_threads.py` owns the classifier; this
-file owns the other half of the property that rests on it — that every
-journey performs its own work on the main thread, which is read by
-position and first, and that the one thing a journey must not count is
-loaded on a worker of its own so a signature can name it."""
+"""Where a journey's own work RUNS, as distinct from which thread the"""
 import contextlib
 import contextvars
 import sys
@@ -47,7 +42,8 @@ def test_rendering_of_runs_a_journey_on_the_main_thread(tmp):
         # green; `env` carries the planted journey's own token, so a bridge
         # spawned under another credential is refused here too.
         assert await_mcp is True, await_mcp
-        assert env == {'DAEDALUS_TOKEN': 'planted', 'TOKEN': ''}, env
+        assert env == {'DAEDALUS_TOKEN': 'planted',
+                       'DAEDALUS_TOKEN_OVERRIDE': ''}, env
         yield 'http://127.0.0.1:1', None
 
     with _journey_contract.planting(

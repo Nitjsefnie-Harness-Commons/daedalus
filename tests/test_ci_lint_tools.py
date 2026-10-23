@@ -1,49 +1,6 @@
 #!/usr/bin/env python3
-"""The binaries a suite skips on must be installed in every job that runs it.
-
-A suite that shells out to a real binary SKIPS when the binary is absent,
-and a skip is a pass to every runner and every aggregate. So a job without
-the binary is green having verified nothing, silently, on every leg — the
-shape issue 1353 was for actionlint and shellcheck.
-
-Which jobs reach a suite is derived from what the jobs' steps are given;
-which tools the suites can skip on is derived from the suites' own source.
-Nothing in either direction is maintained by hand except the residue one
-control names, and that is a claim about the complement rather than
-another list to keep in step. The job derivation is shared with the
-control already on that set, through `tests/_suite_jobs.py`, and the
-mechanisms a skipped tool can be answered by are read through
-`tests/_lint_tool_mechanisms.py`.
-
-THREE mechanisms answer a tool a suite skips on: the shared installer
-installs one, a setup step declares another, and a claim about the runner
-image excuses a third. This file is the installer's half — the installer
-step, the tools it declares, the lint-tool install, and the build it pins
-— and `tests/test_ci_tool_declarations.py` is the other two, because a
-control filed under a name that does not match its subject is one a reader
-will not look for. The split is of subject and not of mechanism: the three
-tables and the recognisers that read what a job runs are in the helper both
-files read, so nothing about which mechanism answers a tool is written
-twice, and the closure control there holds all three to the derived set, so
-the next tool a suite skips on reaches one of them rather than a fourth
-hand-written exemption — which is what `node` was, and the reason the
-`node` entry cannot come back.
-
-Every control here is a guard: a green run proves the tree still matches
-it and nothing more. The proof that it bites is a planted defect in a real
-target — the installer step removed from a real suite job, a skip arm added
-to a real suite for a binary nothing installs, and a third suite runner
-planted in a workflow the door walk then has to classify. Every workflow
-is read now: `_door_jobs` globs `*.yml` and `*.yaml`, so no workflow is
-one this file does not look at, and the bound on what the walk can see is
-stated in `tests/_suite_jobs.py` where it lives.
-
-The installer's REFUSALS are driven in `tests/test_ci_lint_tool_refusals.py`,
-through the stand-ins `tests/_lint_tool_refusals.py` holds at the boundaries
-those paths cross. What stays here is the other question this file asks: that
-every job which reaches the suites installs what those suites may skip on, and
-that the transfer boundary the download crosses still refuses what it is
-written to refuse.
+"""
+The binaries a suite skips on must be installed in every job that runs it.
 """
 import hashlib
 import os
@@ -338,8 +295,9 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     del tmp
     installer = _util.load(INSTALLER_SOURCE, 'lint_installer_pins')
     job = _tests_yml()
-    pinned = re.findall(r'^\s*ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
-                        job, re.MULTILINE)
+    pinned = re.findall(
+        r'^\s*DAEDALUS_ACTIONLINT_VERSION:\s*(.*?)\s*(?:#.*)?$',
+        job, re.MULTILINE)
     assert len(pinned) == 1, pinned
     assert pinned[0].strip('\'"') == installer.ACTIONLINT_VERSION, (
         'the actionlint job pins '
@@ -349,7 +307,8 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
         'nothing')
     # The URL is a SUBSTRING of the job's, not the other way round, so this
     # is one arm and not a disjunction: the job spells the release base and
-    # appends `/v${ACTIONLINT_VERSION}/...`, so its own line contains the
+    # appends `/v${DAEDALUS_ACTIONLINT_VERSION}/...`, so its own line contains
+    # the
     # installer's RELEASE. An `or <org> in job` beside it would be
     # satisfied by that same occurrence whichever way this points.
     #

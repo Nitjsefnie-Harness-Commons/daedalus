@@ -32,10 +32,12 @@ def _git(*argv):
 
 
 def _credentials():
-    key = os.environ.get('MASTER_PUSH_DEPLOY_KEY')
-    repository = os.environ.get('REPO')
+    key = (os.environ.get('DAEDALUS_MASTER_PUSH_DEPLOY_KEY')
+           or os.environ.get('MASTER_PUSH_DEPLOY_KEY'))
+    repository = os.environ.get('DAEDALUS_REPO') or os.environ.get('REPO')
     if not key or not repository:
-        raise ValueError('MASTER_PUSH_DEPLOY_KEY and REPO must be set')
+        raise ValueError('DAEDALUS_MASTER_PUSH_DEPLOY_KEY and '
+                         'DAEDALUS_REPO must be set')
     ratchet_push.prepare_ssh(key)
     return repository
 
@@ -190,9 +192,10 @@ def main(argv=None, read=_read):
         elif args.command == 'tag':
             tag(args.version, args.sha)
         else:
-            repository = os.environ.get('REPO')
+            repository = (os.environ.get('DAEDALUS_REPO')
+                          or os.environ.get('REPO'))
             if not repository:
-                raise ValueError('REPO must be set')
+                raise ValueError('DAEDALUS_REPO must be set')
             wait(read, repository, args.sha,
                  release=args.command == 'wait-release', timeout=args.timeout,
                  grace=args.grace, interval=args.interval)

@@ -1,12 +1,4 @@
-#!/usr/bin/env python3
-"""The change classifier: which shape a tests.yml run gets.
-
-scripts/ci/classify_changes.py decides whether a run changed only
-documentation — the same set version.yml ignores — and so pays
-for one suite leg and no coverage instead of the full matrix. These tests pin
-the pattern matcher, the event-to-API mapping, the over-run fallbacks and the
-two contracts that keep the module's constants honest against the workflows.
-"""
+"""The change classifier: which shape a tests.yml run gets."""
 import contextlib
 import io
 import json
@@ -58,7 +50,6 @@ def test_exact_patterns_match_only_the_root_file(tmp):
 
 
 def test_unimplemented_metacharacters_fail_closed_at_any_position(tmp):
-    # `docs?`/`docs[ab]` skip the `/**` strip, hit the literal branch (#290).
     del tmp
     mod = _classifier()
     cases = [('docs/*', 'docs/a.md'),
@@ -179,8 +170,6 @@ def test_unusable_events_never_call_the_api(tmp):
     docs_only, matrix, workflows, _reason = mod.classify(
         _event(name='workflow_dispatch'), run)
     assert (docs_only, matrix, workflows) == (False, mod.FULL_MATRIX, True)
-    # A non-numeric PR number must not reach the API either: 'abc' is not
-    # digits, and '²' isdigit() but is not an ASCII digit string.
     for bad_number in ('abc', '²', ''):
         docs_only, matrix, workflows, _reason = mod.classify(
             _event(pull_request=bad_number), run)
@@ -252,21 +241,20 @@ def test_write_outputs_without_a_file_writes_nothing(tmp):
 def test_event_from_environment_maps_the_documented_variables(tmp):
     del tmp
     mod = _classifier()
-    event = mod.event_from_environment({
-        'GITHUB_EVENT_NAME': 'pull_request',
-        'GITHUB_REPOSITORY': 'octo/daedalus',
-        'GITHUB_SHA': 'a' * 40,
-        'PR_NUMBER': '248',
-        'BEFORE_SHA': 'b' * 40,
-    })
-    assert event == {
-        'name': 'pull_request',
-        'repository': 'octo/daedalus',
-        'sha': 'a' * 40,
-        'pull_request': '248',
-        'before': 'b' * 40,
-    }, event
-    assert mod.event_from_environment({})['name'] == ''
+    for primary in ('new', '', None):
+        env = {'GITHUB_EVENT_NAME': 'pull_request',
+               'GITHUB_REPOSITORY': 'octo/daedalus', 'GITHUB_SHA': 'a' * 40,
+               'PR_NUMBER': 'wrong' if primary else '248',
+               'BEFORE_SHA': 'wrong' if primary else 'b' * 40}
+        if primary is not None:
+            env.update(DAEDALUS_PR_NUMBER='248' if primary else '',
+                       DAEDALUS_BEFORE_SHA='b' * 40 if primary else '')
+        assert mod.event_from_environment(env) == {
+            'name': 'pull_request', 'repository': 'octo/daedalus',
+            'sha': 'a' * 40, 'pull_request': '248', 'before': 'b' * 40}
+    assert mod.event_from_environment({}) == {
+        'name': '', 'repository': None, 'sha': None,
+        'pull_request': None, 'before': None}
 
 
 def test_documentation_patterns_match_the_workflow_path_filters(tmp):
@@ -293,7 +281,6 @@ _MEASUREMENT_JOB, _ = _matrix_job_running(
             ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
             ('windows-latest', '2', '3'), ('windows-latest', '3', '3'))]},
     'coverage_suites.py')
-# Every gate must be named by the aggregate.
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
                   'actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage', 'journey-budget')
@@ -326,11 +313,9 @@ def test_changes_job_exposes_every_classifier_output(tmp):
 
 
 def test_output_jobs_reference_existing_step_ids(tmp):
-    """Every job that declares `outputs:` has each one read from a real step.
-
-    A matrix job must declare `outputs:` for actionlint to type
-    `needs.<job>.outputs.matrix`; the load-bearing half is the per-job
-    `referenced <= declared` check, which is what this test exists for."""
+    """
+    Every job that declares `outputs:` has each one read from a real step.
+    """
     del tmp
     workflow = _tests_yml()
     output_jobs = _job_names_with_outputs(workflow)
@@ -462,8 +447,6 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
     del tmp
     workflow = _tests_yml()
     assert 'changes' in _job_needs(workflow, 'coverage')
-    # Without this needs the needs.changes context is empty at runtime
-    # and fromJSON(null) fails matrix evaluation on the runner.
     assert 'changes' in _job_needs(workflow, 'suites')
     coverage = _job_section(workflow, 'coverage')
     assert any(line.startswith('    if:') for line in coverage), (
@@ -478,13 +461,7 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
 
 
 def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
-    """The workflow no longer declares the suites matrix literally.
-
-    Retargeted when the classifier was wired in: the os/python lists moved
-    to FULL_MATRIX in scripts/ci/classify_changes.py, which the changes job
-    renders into the suites matrix at runtime. The classifier's constant
-    keeps its shape pinned here instead.
-    """
+    """The workflow no longer declares the suites matrix literally."""
     del tmp
     mod = _classifier()
     section = '\n'.join(_job_section(_tests_yml(), 'suites'))
@@ -498,11 +475,7 @@ def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
 
 
 def test_main_records_the_fallback_outputs_and_returns_zero(tmp):
-    """main never returns nonzero, even on the fallback branch.
-
-    A workflow_dispatch event reads no paths, so this exercises main end
-    to end — environment in, outputs file out — without spawning `gh`.
-    """
+    """main never returns nonzero, even on the fallback branch."""
     mod = _classifier()
     out = Path(tmp) / 'github_output'
     saved = dict(os.environ)
