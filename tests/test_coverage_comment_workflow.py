@@ -10,7 +10,8 @@ from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
 from _wfjobs import workflow_files  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
-from _ghexpr import evaluate, evaluate_if, sole_context_path  # noqa: E402
+from _ghexpr import (  # noqa: E402
+    evaluate, evaluate_if, sole_context_path, _unwrap)
 from _workflows import _workflow_triggers  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
@@ -42,9 +43,8 @@ def test_workflow_run_downloads_select_the_triggering_run(_tmp):
     for step in downloads:
         inputs = step.get('with', {})
         for key in ('run-id', 'github-token'):
-            match = re.fullmatch(r'\$\{\{((?:(?!\$\{\{|\}\}).)+)\}\}',
-                                 inputs.get(key, '').strip(), re.DOTALL)
-            assert match and match[1].strip(), (key, step)
+            assert inputs.get(key, '').strip().startswith('${{'), (key, step)
+            assert _unwrap(inputs[key]), (key, step)
         assert sole_context_path(inputs['run-id']) == (
             'github', 'event', 'workflow_run', 'id'), step
 
