@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
-"""Contracts for the journey-cost ratchet's GATES: what each recorded
-comparison refuses on, which way a recorded number may move, and what a run
-that compared nothing reports.
-
-Its other half of a module that held the policy, the gates and the command
-line together, for the reason the sibling file gives. Nothing here asserts a
-wall-clock margin or a timing bound, because a count is a number this
-repository must not write down: the runner it was measured on is not the
-runner the next run lands on."""
+"""Contracts for journey comparisons, refusals, reporting and CI setup."""
 import io
 import contextlib
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _journey_contract  # noqa: E402
+from _wfgraph import _tests_yml  # noqa: E402
+from _yamlsteps import complete_job_mapping  # noqa: E402
 from _journey_contract import (  # noqa: E402
     ARTIFACT,
     IDENTITY,
@@ -46,13 +42,8 @@ RECORDED = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
 
 
 def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
-    """A moved toolchain is not a moved count, and never a silent pass.
-
-    Callgrind's count is deterministic only for a fixed binary, so a
-    runner image that ships a different CPython patch build moves every
-    number with no change to this repository. Refusing that as a
-    regression would be a false red with nothing to fix; passing it
-    without saying so would be a green that measured nothing.
+    """Counts are comparable only for a fixed binary; a changed toolchain
+    must report that it compared nothing rather than claim a regression.
     """
     policy = _journey_contract.policy()
     artifact = Path(tmp) / 'journey-budget.json'
@@ -104,14 +95,8 @@ def test_an_identical_toolchain_still_refuses_a_count_over_budget(tmp):
 
 
 def test_only_the_main_tighten_may_write_the_artefact(tmp):
-    """A re-baseline is a reviewed commit; a tighten DOWN is CI's to make.
-
-    The maintainer's ruling: "autocommit tighten only, where a PR can
-    increase its own cap if necessary". So exactly one job may write the
-    file, on a push to main, and only after the check step concluded
-    success — the run that found a journey over budget is the run that must
-    write nothing. Every other mention of the file is a `paths-ignore`
-    entry, which is a workflow choosing not to run at all.
+    """Only main's successful check may auto-tighten; re-baselines are reviewed.
+    Other jobs may name the artefact only as a paths-ignore entry.
     """
     del tmp
     artefact = '.github/journey-budget.json'
@@ -492,13 +477,7 @@ def test_a_shape_failure_refuses_a_tighten_as_firmly_as_a_check(tmp):
 
 
 def _decoder_says(source):
-    """What the decoder itself says about this file, read the same way.
-
-    The command prints the exception's text, so the expectation is computed
-    from the same decode rather than spelled out beside it: a literal here
-    could drift from the one the command prints and the control would then
-    pass against a refusal that changed.
-    """
+    """The decoder's own error is the command's promised refusal."""
     try:
         json.loads(source.read_bytes().decode('utf-8'))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
@@ -507,14 +486,8 @@ def _decoder_says(source):
 
 
 def test_an_input_the_run_cannot_read_is_refused_in_its_own_words(tmp):
-    """Every failure with no verdict of its own is one sentence and exit 1.
-
-    A budget that is not there and a measurement file the decoder rejects
-    are the two the job meets in practice — a step that points at an upload
-    which never arrived, and a truncated one. Neither may reach the reader as
-    a traceback or as a bare status: the message has to carry the cause, and
-    the cause is the whole of what a red step can tell the person who has to
-    fix it.
+    """Missing budgets and unreadable measurements must report their cause
+    with exit 1, without a traceback or a write to the artefact.
     """
     policy = _journey_contract.policy()
     absent = Path(tmp) / 'no-such-budget.json'
@@ -584,18 +557,8 @@ def test_a_recorded_exclusion_survives_a_render_and_reload(tmp):
 
 
 def test_a_journey_that_renders_differently_is_not_compared(tmp):
-    """A recorded count describes the journey that rendered when it was
-    recorded, so a different rendering refuses rather than reading as a
-    regression or a saving.
-
-    Two ways to differ: one journey's sha moved, and one journey's sha is
-    not in the measurement at all. Both are a difference from the recorded
-    one, and the never-recorded case is that gate's own test below.
-
-    The ROUNDS disagreeing is a third case and it is a different one, so it
-    is not here: it is `test_rounds_that_disagree`, which asserts on
-    `sha_diff` directly, because a measurement whose rounds disagree is not
-    a measurement to compare counts from at all.
+    """Changed and missing journey shas report without comparing counts.
+    Disagreement between rounds is checked separately by test_rounds_that_disagree.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -641,6 +604,44 @@ def test_nothing_recorded_is_a_refusal_rather_than_a_pass(tmp):
         assert subject in said, (field, said)
         assert f'{subject} not recorded' in said, (field, said)
     del names
+
+
+def test_valgrind_install_restores_and_replenishes_debs_and_refuses_missing(tmp):
+    job = complete_job_mapping(_tests_yml(), 'journey-budget')
+    assert job is not None, 'the journey-budget job is not in tests.yml'
+    script = next(step['run'] for step in job['steps'] if step.get('name')
+                  == 'Install valgrind, which supplies the instruction counter')
+    stub = ('sudo() { "$@"; }\n'
+            'apt-get() { printf "%s\\n" "$*" >> "$APT_LOG"; }\n')
+    for state in ('warm', 'cold', 'missing'):
+        root = Path(tmp) / state
+        cache, archives = root / 'vg-debs', root / 'archives'
+        archives.mkdir(parents=True)
+        if state != 'cold':
+            cache.mkdir()
+            (cache / 'cached.deb').write_bytes(b'cached')
+        (archives / 'candidate.deb').write_bytes(b'candidate')
+        manifest = 'candidate.deb\n'
+        if state == 'missing':
+            manifest += 'absent.deb\n'
+        (root / 'vg-manifest.txt').write_text(manifest, encoding='utf-8')
+        log = root / 'apt.log'
+        done = subprocess.run(
+            [_util.workflow_bash(), '-e', '-c', stub + script.replace(
+                '/var/cache/apt/archives/', f'{archives.as_posix()}/')],
+            cwd=root, capture_output=True, text=True, timeout=10,
+            env=_util.child_coverage('scrub', dict(
+                os.environ, RUNNER_TEMP=str(root), APT_LOG=str(log))))
+        assert log.read_text(encoding='utf-8').splitlines() == [
+            '-o Acquire::http::Timeout=30 -o Acquire::Retries=5 '
+            'install -y --no-install-recommends valgrind']
+        assert (cache / 'candidate.deb').read_bytes() == b'candidate'
+        if state != 'cold':
+            assert (archives / 'cached.deb').read_bytes() == b'cached'
+        if state == 'missing':
+            assert done.returncode != 0 and 'absent.deb' in done.stderr, done
+        else:
+            assert done.returncode == 0, done.stderr
 
 
 def main():
