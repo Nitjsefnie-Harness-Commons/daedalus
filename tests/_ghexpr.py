@@ -60,12 +60,7 @@ def evaluate_if(expression, context):
 
 
 def sole_context_path(expression):
-    """Return the dotted path when the whole expression is one lookup.
-
-    Parenthesising and respacing a reference does not change the value it
-    names, so both spellings resolve to the same path.  Anything the
-    admitted grammar does not reduce to a single lookup returns None.
-    """
+    """Return one dotted lookup, allowing parentheses and whitespace."""
     tokens = _tokenize(_unwrap(expression))
     start, end = 0, len(tokens) - 1
     while (end - start >= 2 and tokens[start].kind == '('
@@ -104,15 +99,20 @@ def _unwrap(expression):
     """Remove one complete Actions expression wrapper, if present."""
     source = expression.strip()
     starts = source.startswith('${{')
-    ends = source.endswith('}}')
-    if starts != ends:
+    if starts != source.endswith('}}'):
         raise ExpressionError('incomplete expression wrapper')
     if starts:
         source = source[3:-2].strip()
     if not source:
         raise ExpressionError('empty expression')
-    if '${{' in source or '}}' in source:
-        raise ExpressionError('nested expression wrapper')
+    index = 0
+    while index < len(source):
+        if source[index] == "'":
+            _, index = _string_token(source, index)
+        elif source.startswith(('${{', '}}'), index):
+            raise ExpressionError('nested expression wrapper')
+        else:
+            index += 1
     return source
 
 
