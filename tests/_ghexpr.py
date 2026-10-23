@@ -69,13 +69,10 @@ def sole_context_path(expression):
         end -= 1
     if start >= end or (end - start) % 2 == 0:
         return None
-    path = []
     for offset, index in enumerate(range(start, end)):
         if tokens[index].kind != ('IDENT' if offset % 2 == 0 else '.'):
             return None
-        if offset % 2 == 0:
-            path.append(tokens[index].value)
-    return tuple(path)
+    return tuple(token.value for token in tokens[start:end:2])
 
 
 def _evaluate(expression, context):
@@ -98,17 +95,15 @@ def _evaluate(expression, context):
 def _unwrap(expression):
     """Remove one complete Actions expression wrapper, if present."""
     source = expression.strip()
-    starts = source.startswith('${{')
-    if starts != source.endswith('}}'):
+    if source.startswith('${{') != source.endswith('}}'):
         raise ExpressionError('incomplete expression wrapper')
-    if starts:
-        source = source[3:-2].strip()
+    source = source[3:-2].strip() if source.startswith('${{') else source
     if not source:
         raise ExpressionError('empty expression')
     index = 0
     while index < len(source):
         if source[index] == "'":
-            _, index = _string_token(source, index)
+            _, index = _quoted_token(source, index)
         elif source.startswith(('${{', '}}'), index):
             raise ExpressionError('nested expression wrapper')
         else:
@@ -185,7 +180,15 @@ def _tokenize(source):
 
 
 def _string_token(source, start):
-    """Read an Actions single-quoted string and its following index."""
+    """Read an evaluator literal, refusing embedded line breaks."""
+    value, index = _quoted_token(source, start)
+    if '\r' in value or '\n' in value:
+        raise ExpressionError('newline in string literal')
+    return value, index
+
+
+def _quoted_token(source, start):
+    """Scan quoted content and its end, including embedded line breaks."""
     index = start + 1
     chars = []
     while index < len(source):
@@ -196,8 +199,6 @@ def _string_token(source, start):
                 index += 2
                 continue
             return ''.join(chars), index + 1
-        if char in '\r\n':
-            raise ExpressionError('newline in string literal')
         chars.append(char)
         index += 1
     raise ExpressionError('unterminated string literal')
