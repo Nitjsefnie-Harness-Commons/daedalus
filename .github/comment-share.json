@@ -76,8 +76,8 @@
     52821
   ],
   ".github/workflows/version.yml": [
-    2093,
-    3143
+    2091,
+    3141
   ],
   "daedalus_bridge/__init__.py": [
     67,
@@ -312,8 +312,8 @@
     2954
   ],
   "extension/background.js": [
-    2154,
-    5313
+    2138,
+    5299
   ],
   "extension/content.js": [
     4489,
@@ -528,8 +528,8 @@
     2407
   ],
   "scripts/version_regions.py": [
-    2917,
-    10447
+    2817,
+    10296
   ],
   "server.py": [
     5152,
@@ -1644,8 +1644,8 @@
     3518
   ],
   "tests/test_version_empty_values.py": [
-    1132,
-    4900
+    1076,
+    4858
   ],
   "tests/test_version_set_atomic.py": [
     855,
@@ -1656,8 +1656,8 @@
     21131
   ],
   "tests/test_worker_module_boundary.py": [
-    3372,
-    19974
+    3259,
+    20152
   ],
   "tests/test_worker_netcapture.py": [
     2950,
