@@ -1356,10 +1356,43 @@ jobs:
       # is why the counter is found by measurement below rather than named
       # here: a runner where the install silently failed must still report
       # what it found, not what this step intended.
+      # Candidate version bumps rotate the resolved-set key automatically.
+      # Apt's hash check ignores stale fallback debs; the candidate governs.
+      - name: Settle apt and name the valgrind package set
+        id: vgset
+        run: |
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::Retries=5
+          uris=$(apt-get --print-uris -y --no-install-recommends install valgrind)
+          printf '%s\n' "$uris" | awk '/^\047/ {print $2}' | sort > "${RUNNER_TEMP}/vg-manifest.txt"
+          echo "key=vg-debs-$(sha256sum "${RUNNER_TEMP}/vg-manifest.txt" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the valgrind packages
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vg-debs
+          key: ${{ steps.vgset.outputs.key }}
+          restore-keys: vg-debs-
+
       - name: Install valgrind, which supplies the instruction counter
         run: |
-          sudo apt-get update
-          sudo apt-get install -y valgrind
+          mkdir -p "${RUNNER_TEMP}/vg-debs"
+          shopt -s nullglob
+          debs=("${RUNNER_TEMP}"/vg-debs/*.deb)
+          if ((${#debs[@]})); then
+            sudo cp "${debs[@]}" /var/cache/apt/archives/
+          fi
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=5 install -y --no-install-recommends valgrind
+          while IFS= read -r name; do
+            sudo cp -n "/var/cache/apt/archives/$name" "${RUNNER_TEMP}/vg-debs/"
+          done < "${RUNNER_TEMP}/vg-manifest.txt"
+
+      - name: Save the valgrind packages
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        if: ${{ !cancelled() && github.event_name == 'push'
+                && github.ref == 'refs/heads/main' }}
+        with:
+          path: ${{ runner.temp }}/vg-debs
+          key: ${{ steps.vgset.outputs.key }}
 
       # A valgrind client request is `asm volatile` inside a GNU statement
       # expression, so pure Python cannot issue one and the counted boundary

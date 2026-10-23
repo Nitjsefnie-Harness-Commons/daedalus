@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(
     1, str(Path(__file__).resolve().parents[1] / 'scripts' / 'ci'))
 import _util  # noqa: E402
-from _pip_cache import _CACHE_JOBS  # noqa: E402
+from _workflow_cache_boundary import _CACHE_WRITING_JOBS  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 V610 = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
@@ -542,21 +542,16 @@ def test_main_reports_every_refusal_and_exits_nonzero(tmp):
     assert calls == [], calls
 
 
-def test_the_real_tree_carries_both_pins_for_every_pip_cache_job(tmp):
-    """The real tree's scan covers exactly the pip-cache job table: two
-    pins (restore + save) per job in `_CACHE_JOBS`.
-
-    Value-free tree<->test consistency (fleet-rules, "Merging and CI"):
-    a seventh cache job lands in tests.yml and this reds until the table
-    learns it, so no pip-cache invariant silently skips a job. No pin
-    value, revision or comment shape is asserted here — the online CI
-    check and zizmor hold those.
+def test_the_real_tree_carries_both_pins_for_every_cache_writing_job(tmp):
+    """Every inventoried writer has restore and save pins; online CI and
+    zizmor check their revisions and annotations.
     """
     del tmp
     mod = _verifier()
     pins, refusals = mod.scan(ROOT)
     assert refusals == [], refusals
-    assert len(pins) == 2 * len(_CACHE_JOBS), (len(pins), len(_CACHE_JOBS))
+    assert len(pins) == 2 * len(_CACHE_WRITING_JOBS), (
+        len(pins), len(_CACHE_WRITING_JOBS))
 
 
 def main():

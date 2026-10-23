@@ -13,7 +13,7 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 
 _CACHE_WRITING_JOBS = frozenset((
-    'suites', 'coverage-matrix', 'coverage',
+    'suites', 'coverage-matrix', 'coverage', 'journey-budget',
     'pycodestyle', 'pylint', 'pyright',
 ))
 
