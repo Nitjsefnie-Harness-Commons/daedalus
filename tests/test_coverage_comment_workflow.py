@@ -29,22 +29,24 @@ from _yamlread import (  # noqa: E402
 )
 
 
-def test_workflow_run_downloads_select_the_triggering_run(tmp):
-    del tmp
+def test_workflow_run_downloads_select_the_triggering_run(_tmp):
     downloads = []
     for path in workflow_files():
         workflow = workflow_mapping(path.read_text(encoding='utf-8'))
-        if 'workflow_run' not in workflow.get('on', {}):
-            continue
-        for name, job in workflow.get('jobs', {}).items():
-            for step in job.get('steps', []):
-                if step.get('uses', '').casefold().startswith(
-                        'actions/download-artifact'):
-                    downloads.append((path.name, name, step))
-                    assert sole_context_path(
-                        step.get('with', {}).get('run-id', '')) == (
-                        'github', 'event', 'workflow_run', 'id'), downloads[-1]
+        if 'workflow_run' in workflow.get('on', {}):
+            downloads.extend(step for job in workflow.get('jobs', {}).values()
+                             for step in job.get('steps', [])
+                             if step.get('uses', '').casefold().startswith(
+                                 'actions/download-artifact'))
     assert downloads, 'no artifact download found in workflow_run workflows'
+    for step in downloads:
+        inputs = step.get('with', {})
+        for key in ('run-id', 'github-token'):
+            match = re.fullmatch(r'\$\{\{((?:(?!\$\{\{|\}\}).)+)\}\}',
+                                 inputs.get(key, '').strip(), re.DOTALL)
+            assert match and match[1].strip(), (key, step)
+        assert sole_context_path(inputs['run-id']) == (
+            'github', 'event', 'workflow_run', 'id'), step
 
 
 def _step_outputs(path):

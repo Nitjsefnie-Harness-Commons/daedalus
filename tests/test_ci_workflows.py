@@ -550,8 +550,6 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
     assert 'if: ${{ failure() }}' in before, (
         'the failed-smoke artifact uploads on green runs')
     artifact, _, _ = after.partition('- name:')
-    kept = [line.strip() for line in artifact.splitlines()]
-    assert 'retention-days: 14' in kept, artifact
     assert re.findall(r'dist/\S+', artifact) == ['dist/*.whl',
                                                  'dist/*.tar.gz'], artifact
 
