@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Executable contracts for JavaScript coverage capture and publication."""
 import ast
-import itertools
 import json
 import os
 import re
@@ -28,10 +27,12 @@ _STEP_CAPTURE_LINE = f'          {_CAPTURE_KEY}: "{_CAPTURE_VALUE}"\n'
 _STEP_START = re.compile(r'^      - ', re.MULTILINE)
 _CONSUMER_ID = re.compile(
     r'^        id: (?:measure|ratchet)[ \t]*$', re.MULTILINE)
-_SUPPORTED_MATRIX = {
-    'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
-    'python': ['3.13'],
-}
+_SUPPORTED_MATRIX = {'include': [
+    {'os': os, 'python': '3.13', 'shard': shard, 'shards': shards}
+    for os, shard, shards in (
+        ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
+        ('windows-latest', '2', '3'), ('windows-latest', '3', '3'),
+        ('macos-latest', '1', '2'), ('macos-latest', '2', '2'))]}
 _STATUS_NAMES = ('success', 'failure', 'cancelled')
 _PYTHON_CAPTURE_CONDITION = (
     "${{ matrix.os == 'ubuntu-latest' "
@@ -41,10 +42,9 @@ _FAILURE_CAPTURE_CONDITION = (
     "|| (failure() && matrix.os == 'windows-latest') }}")
 _FAILURE_ONLY_CAPTURE_CONDITION = (
     "${{ failure() && matrix.os == 'ubuntu-latest' }}")
-_TWO_PYTHON_MATRIX = {
-    'os': _SUPPORTED_MATRIX['os'],
-    'python': ['3.12', '3.13'],
-}
+_TWO_PYTHON_MATRIX = {'include': [
+    dict(row, python=version) for row in _SUPPORTED_MATRIX['include']
+    for version in ('3.12', '3.13')]}
 _PTH_CREATION_COMMAND = (
     'python -c "from pathlib import Path; import sysconfig; Path( '
     "sysconfig.get_paths()['purelib'], 'coverage-subprocess.pth').write_text( "
@@ -97,11 +97,8 @@ def _with_capture_condition(workflow, condition):
 
 def _matrix_cases(expression, matrix=None):
     matrix = _SUPPORTED_MATRIX if matrix is None else matrix
-    axes = tuple(matrix)
     cases = []
-    for values in itertools.product(
-            *(matrix[axis] for axis in axes)):
-        row = dict(zip(axes, values))
+    for row in matrix['include']:
         for status_name in _STATUS_NAMES:
             context = {
                 'matrix': row,
@@ -376,17 +373,13 @@ def _assert_coverage_artifact_flow(workflow, tmp):
                if 'coverage_suites.py' in step.get('run', '')]
     assert len(measure) == 1, measure
     assert measure[0]['run'] == (
-        'python scripts/ci/coverage_suites.py --require-all')
+        'python scripts/ci/coverage_suites.py --require-all '
+        '--shard ${{ matrix.shard }}/${{ matrix.shards }}')
 
     uploads = [step for step in matrix_job['steps']
                if step.get('uses', '').startswith('actions/upload-artifact@')]
     assert len(uploads) == 2, uploads
-    # Which upload is which is read from the step CONDITIONS — the
-    # workflow's behaviour — never from the action's contract inputs
-    # (name, path, include-hidden-files, if-no-files-found are the
-    # workflow's business: fleet-rules, "Merging and CI" with:-inputs
-    # ruling). The matrix each upload runs on is exactly what this flow
-    # exists to pin, so the conditions both select and assert it.
+    # Conditions select which legs upload JavaScript measurements.
     javascript = [step for step in uploads
                   if _matrix_rows(step.get('if') or '') == {'ubuntu-latest'}]
     assert len(javascript) == 1, uploads
@@ -412,13 +405,13 @@ def _assert_coverage_artifact_flow(workflow, tmp):
     assert 'path: coverage-data' in body, body
     assert 'merge-multiple: false' in body, body
     assert 'python scripts/ci/coverage_combine.py coverage-data/' in body, body
-    assert ('coverage-data/coverage-data-ubuntu-latest/.node-v8-coverage'
-            in body), body
+    assert ('coverage-data/coverage-data-ubuntu-latest-shard*/'
+            '.node-v8-coverage' in body), body
     assert 'coverage_suites.py' not in body, body
 
 
 def test_coverage_combines_measurements_from_every_supported_os(tmp):
-    """The final gates must consume one artifact from each OS leg."""
+    """The final gates must consume the artifacts from every shard."""
     _assert_coverage_artifact_flow(_workflow(), tmp)
 
 

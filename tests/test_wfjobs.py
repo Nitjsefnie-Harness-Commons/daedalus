@@ -454,8 +454,12 @@ def test_a_bare_empty_outputs_is_refused_as_not_a_mapping(tmp):
 def test_a_bare_empty_strategy_elsewhere_still_finds_the_matrix_job(tmp):
     """A job whose strategy, steps or run is null runs nothing."""
     real = _tests_yml()
-    matrix = {'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
-              'python': ['3.13']}
+    matrix = {'include': [
+        {'os': os, 'python': '3.13', 'shard': shard, 'shards': shards}
+        for os, shard, shards in (
+            ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
+            ('windows-latest', '2', '3'), ('windows-latest', '3', '3'),
+            ('macos-latest', '1', '2'), ('macos-latest', '2', '2'))]}
     name, _job = _matrix_job_running(real, matrix, 'coverage_suites.py')
     header = '    name: Aggregate workflow checks\n'
     install = '      - name: Install the coverage toolchain and the project\n'

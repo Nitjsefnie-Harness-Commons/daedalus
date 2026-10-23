@@ -287,12 +287,14 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
 _MEASUREMENT_JOB, _ = _matrix_job_running(
     _tests_yml(),
-    {'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
-     'python': ['3.13']},
+    {'include': [
+        {'os': os, 'python': '3.13', 'shard': shard, 'shards': shards}
+        for os, shard, shards in (
+            ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
+            ('windows-latest', '2', '3'), ('windows-latest', '3', '3'),
+            ('macos-latest', '1', '2'), ('macos-latest', '2', '2'))]},
     'coverage_suites.py')
-# `journey-budget` is a gate like every other job here: it names no
-# `needs:` of its own, so a gate the aggregate did not name would report a
-# verdict nothing waits on.
+# Every gate must be named by the aggregate.
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
                   'actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage', 'journey-budget')
