@@ -1387,8 +1387,9 @@ jobs:
           done < "${RUNNER_TEMP}/vg-manifest.txt"
 
       - name: Save the valgrind packages
+        # Save before measurement can fail; failed installs must not cache fallback sets.
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        if: ${{ !cancelled() && github.event_name == 'push'
+        if: ${{ success() && github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
         with:
           path: ${{ runner.temp }}/vg-debs
