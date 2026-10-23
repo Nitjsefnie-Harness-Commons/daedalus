@@ -18,7 +18,7 @@ A MEASUREMENT OF FEWER THAN TWO ROUNDS RECORDS NOTHING, and the refusal is
 `check`'s: the `Follow the journeys that got cheaper` step runs
 `check --tighten` on every push to `main`, and a draw it cannot confirm ends
 there. That is why the automatic tighten never fires on `main` — CI measures
-with `DAEDALUS_JOURNEY_ROUNDS: "1"`, a count of one, so a recorded count is
+with `DAEDALUS_JOURNEY_ROUNDS: "1"`, so a recorded count is
 lowered by `rebaseline --measurements <counts>` or not at all. `rebaseline` is
 the manual path and consults no round count of its own: a person runs it
 deliberately, it overwrites the whole document from their own measurement, and
