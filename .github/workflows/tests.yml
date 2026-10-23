@@ -789,12 +789,9 @@ jobs:
       - pyright
       - eslint
       - actionlint
-    # Coverage measures ubuntu and windows only: every line macOS executes is
-    # also executed on ubuntu (the shipped source splits only win32-vs-POSIX;
-    # combining the per-OS coverage artifacts with and without the macOS leg
-    # yields identical covered-line sets), and dropping the leg takes the
-    # hosted macOS queue off the coverage gate's critical path (#1705). The
-    # suites job still owns the full Python-version test matrix.
+    # Coverage measures ubuntu and windows only: the source splits only on
+    # win32-vs-POSIX (#1705); the suites job still owns the Python-version
+    # test matrix.
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true' }}
     strategy:
