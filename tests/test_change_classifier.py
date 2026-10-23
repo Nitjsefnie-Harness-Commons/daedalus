@@ -292,7 +292,7 @@ _MEASUREMENT_JOB, _ = _matrix_job_running(
         for os, shard, shards in (
             ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
             ('windows-latest', '2', '3'), ('windows-latest', '3', '3'),
-            ('macos-latest', '1', '2'), ('macos-latest', '2', '2'))]},
+            ('macos-latest', '1', '1'))]},
     'coverage_suites.py')
 # Every gate must be named by the aggregate.
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',

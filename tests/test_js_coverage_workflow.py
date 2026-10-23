@@ -32,7 +32,7 @@ _SUPPORTED_MATRIX = {'include': [
     for os, shard, shards in (
         ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
         ('windows-latest', '2', '3'), ('windows-latest', '3', '3'),
-        ('macos-latest', '1', '2'), ('macos-latest', '2', '2'))]}
+        ('macos-latest', '1', '1'))]}
 _STATUS_NAMES = ('success', 'failure', 'cancelled')
 _PYTHON_CAPTURE_CONDITION = (
     "${{ matrix.os == 'ubuntu-latest' "
