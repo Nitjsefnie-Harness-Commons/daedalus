@@ -111,6 +111,8 @@ def _drive_push(work, refuse, change=True, arguments=None, environment=None):
                  DAEDALUS_REPO='o/r',
                  DAEDALUS_MASTER_PUSH_DEPLOY_KEY='not-a-real-key',
                  GITHUB_STEP_SUMMARY=str(summary))
+    child.pop('MASTER_PUSH_DEPLOY_KEY', None)
+    child.pop('REPO', None)
     for name, value in (environment or {}).items():
         if value is None:
             child.pop(name, None)
@@ -212,6 +214,7 @@ def test_a_commit_with_nothing_to_commit_aborts(tmp):
 
 def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
     """Missing inputs fail before git; the secret is named for repair."""
+    from unittest.mock import patch
     base = Path(tmp) / 'refusals'
     work, bare = _push_repo(base)
     message = 'ci: tighten the journey budget'
@@ -236,9 +239,11 @@ def test_a_refusal_names_what_was_missing_and_runs_no_git(tmp):
              'the repository is not set; there is nowhere to push'),
             (['ratcheted.json', message], {'DAEDALUS_REPO': ''},
              'the repository is not set; there is nowhere to push')):
-        outcome, _summary = _drive_push(
-            work, refuse=False, change=False, arguments=arguments,
-            environment=environment)
+        with patch.dict(os.environ, REPO='ambient/repo',
+                        MASTER_PUSH_DEPLOY_KEY='ambient-fixture-key'):
+            outcome, _summary = _drive_push(
+                work, refuse=False, change=False, arguments=arguments,
+                environment=environment)
         said = f'{outcome.stdout}{outcome.stderr}'
         assert outcome.returncode == 2, (arguments, environment, said)
         assert wanted in outcome.stderr, (
