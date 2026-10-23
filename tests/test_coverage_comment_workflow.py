@@ -10,8 +10,7 @@ from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
 from _wfjobs import workflow_files  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
-from _ghexpr import (  # noqa: E402
-    evaluate, evaluate_if, sole_context_path, _unwrap)
+from _ghexpr import evaluate, evaluate_if, sole_context_path, _unwrap  # noqa
 from _workflows import _workflow_triggers  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
