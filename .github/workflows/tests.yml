@@ -789,9 +789,8 @@ jobs:
       - pyright
       - eslint
       - actionlint
-    # Coverage measures ubuntu and windows only: the source splits only on
-    # win32-vs-POSIX (#1705); the suites job still owns the Python-version
-    # test matrix.
+    # Ubuntu and windows only: macOS runs no covered line ubuntu misses
+    # (win32-vs-POSIX), and its queue must not gate the combine (#1705).
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true' }}
     strategy:
@@ -965,7 +964,7 @@ jobs:
     # a skipped required check reports success rather than going missing.
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true' }}
-    # The matrix above measures one interpreter on ubuntu and windows. This
+    # The matrix measures one interpreter on ubuntu and windows. This
     # job owns the single combined gate: a Python line is covered when any OS
     # executed it, while JavaScript remains the Ubuntu measurement because
     # V8 records embed runner-specific file URLs.
