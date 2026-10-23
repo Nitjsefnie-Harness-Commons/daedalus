@@ -29,7 +29,7 @@ record = (root / 'coverage-invocations'
 record.write_text(json.dumps({
     'argv': sys.argv[1:],
     'coverage_process_start': os.environ.get('COVERAGE_PROCESS_START'),
-    'pid': os.getpid(),
+    'process': [os.getpid(), vars(sys).setdefault('_first_suite', str(suite))],
     'stdin_byte': stdin_byte.decode('ascii', errors='replace'),
 }), encoding='utf-8')
 runpy.run_path(sys.argv[-1], run_name='__main__')

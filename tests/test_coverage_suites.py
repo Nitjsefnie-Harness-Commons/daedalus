@@ -213,7 +213,7 @@ def test_every_suite_is_measured_in_its_own_process(tmp):
             Path(tmp) / str(number), suites, args=args)
         assert result.returncode == 0, (args, result.stdout, result.stderr)
         assert len(invocations) == len(expected), invocations
-        assert len({item['pid'] for item in invocations}) == len(expected)
+        assert len({tuple(x['process']) for x in invocations}) == len(expected)
         assert {Path(x['argv'][-1]).name for x in invocations} == expected
 
 
