@@ -10,7 +10,7 @@ from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
 from _wfjobs import workflow_files  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
-from _ghexpr import evaluate, evaluate_if  # noqa: E402
+from _ghexpr import evaluate, evaluate_if, sole_context_path  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
@@ -41,8 +41,9 @@ def test_workflow_run_downloads_select_the_triggering_run(tmp):
                 if step.get('uses', '').casefold().startswith(
                         'actions/download-artifact'):
                     downloads.append((path.name, name, step))
-                    assert step.get('with', {}).get('run-id') == (
-                        '${{ github.event.workflow_run.id }}'), downloads[-1]
+                    assert sole_context_path(
+                        step.get('with', {}).get('run-id', '')) == (
+                        'github', 'event', 'workflow_run', 'id'), downloads[-1]
     assert downloads, 'no artifact download found in workflow_run workflows'
 
 
