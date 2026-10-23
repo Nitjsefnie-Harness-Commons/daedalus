@@ -219,15 +219,16 @@ def test_every_suite_is_measured_in_its_own_process(tmp):
 
 def test_require_all_applies_only_to_the_shard(tmp):
     cases = (((), 0, 3), (('--require-all',), 1, 3),
-             (('--shard', '1/2'), 0, 2),
+             (('--shard', '1/2'), 0, 2), (('--shard', '0/2'), 2, 0),
              (('--require-all', '--shard', '1/2'), 1, 2),
+             (('--shard', '1/2', '--require-all'), 1, 2),
              (('--shard', '2/2', '--require-all'), 0, 1))
     for argv, expected, total in cases:
         outcome = _launch.run_main(
             tmp, suites=('test_a.py', 'test_b.py', 'test_c.py'), argv=argv,
             scripts={'test_a': {'result': (1, '')}})
         assert outcome.status == expected, (argv, outcome)
-        if expected:
+        if expected == 1:
             message = (f'1 of the {total} suites failed — refusing '
                        'partial coverage')
             assert message in outcome.stderr, outcome
