@@ -1040,9 +1040,10 @@ them.
     supported only through a sibling `.tmp` write plus same-directory atomic
     rename. Readers ignore `.tmp` names and leave malformed visible final files
     untouched, so an in-progress older writer is never unlinked.
-  - A delivered legacy frame's `_did` is `legacy-<dev>-<ino>-<gen>`: the two
-    components `command_queue._identity` treats as identifying the object, plus
-    the generation its name has reached (from 0). Change time is deliberately
+  - A delivered legacy frame's `_did` is `legacy-<dev>-<ino>-<gen>`:
+    `legacy_ids.stamp` takes the device and inode from the first two components
+    of `command_queue._identity`'s result, plus the generation its name has
+    reached (from 0). Change time is deliberately
     excluded: the key must be stable across every read of one file, and on a
     filesystem keeping no access time POSIX lets `st_ctime` report it, so
     reading a candidate moves `st_ctime_ns`, a redelivery arrives under an id
