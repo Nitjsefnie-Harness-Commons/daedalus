@@ -440,8 +440,8 @@
     15222
   ],
   "scripts/ci/journey_budget.py": [
-    7904,
-    15285
+    7894,
+    15275
   ],
   "scripts/ci/journey_child_env.py": [
     2986,
@@ -524,8 +524,8 @@
     7267
   ],
   "scripts/mcp_probe.py": [
-    663,
-    2407
+    589,
+    2376
   ],
   "scripts/version_regions.py": [
     2817,
@@ -548,8 +548,8 @@
     4641
   ],
   "tests/_bridge.py": [
-    7904,
-    13238
+    7304,
+    12656
   ],
   "tests/_case_fold.py": [
     1796,
@@ -624,8 +624,8 @@
     18026
   ],
   "tests/_coverage_comment_workflow.py": [
-    1089,
-    4046
+    676,
+    3714
   ],
   "tests/_coverage_guard.py": [
     5728,
@@ -792,8 +792,8 @@
     1978
   ],
   "tests/_mcp_load.py": [
-    3084,
-    9957
+    2979,
+    9871
   ],
   "tests/_mcp_poll_outcome.py": [
     236,
@@ -888,8 +888,8 @@
     431
   ],
   "tests/_segments.py": [
-    1307,
-    2403
+    986,
+    2100
   ],
   "tests/_service_loader.py": [
     329,
@@ -924,8 +924,8 @@
     737
   ],
   "tests/_util.py": [
-    10272,
-    20527
+    10060,
+    20341
   ],
   "tests/_version_contract.py": [
     1654,
@@ -1012,20 +1012,12 @@
     14674
   ],
   "tests/test_bridge_results_slots.py": [
-    2433,
-    13567
-  ],
-  "tests/test_bridge_results_stripes.py": [
-    2220,
-    14050
+    2223,
+    13375
   ],
   "tests/test_bridge_startup.py": [
     4295,
     19653
-  ],
-  "tests/test_bridge_streams.py": [
-    3425,
-    22290
   ],
   "tests/test_bridge_streams_legacy.py": [
     3478,
@@ -1052,8 +1044,8 @@
     2662
   ],
   "tests/test_ci_lint_tools.py": [
-    10870,
-    23282
+    8663,
+    21084
   ],
   "tests/test_ci_pip_cache.py": [
     790,
@@ -1128,20 +1120,16 @@
     3267
   ],
   "tests/test_cli_error_reporting.py": [
-    1884,
-    7043
+    1737,
+    6914
   ],
   "tests/test_cli_eval_commands.py": [
-    1628,
-    8220
+    1355,
+    8010
   ],
   "tests/test_cli_eval_handlers.py": [
     5752,
     17877
-  ],
-  "tests/test_cli_helpers.py": [
-    934,
-    2750
   ],
   "tests/test_cli_hotfixes.py": [
     1490,
@@ -1172,8 +1160,8 @@
     3669
   ],
   "tests/test_cli_waits.py": [
-    5503,
-    18812
+    5309,
+    18681
   ],
   "tests/test_command_admission.py": [
     488,
@@ -1196,8 +1184,8 @@
     5270
   ],
   "tests/test_coverage_comment_boundary.py": [
-    3605,
-    19404
+    3385,
+    19276
   ],
   "tests/test_coverage_suites_launch.py": [
     3315,
@@ -1272,8 +1260,8 @@
     4511
   ],
   "tests/test_delivery_stripes.py": [
-    3875,
-    13032
+    3552,
+    12764
   ],
   "tests/test_diff_coverage_javascript.py": [
     3672,
@@ -1388,12 +1376,12 @@
     21254
   ],
   "tests/test_journey_payloads.py": [
-    9104,
-    18516
+    7930,
+    17360
   ],
   "tests/test_journey_placement.py": [
-    2044,
-    4721
+    1745,
+    4440
   ],
   "tests/test_journey_real_profile.py": [
     3234,
@@ -1459,17 +1447,13 @@
     426,
     1971
   ],
-  "tests/test_mcp_probe.py": [
-    1674,
-    8138
-  ],
   "tests/test_mcp_server_load.py": [
     1843,
     10882
   ],
   "tests/test_mcp_server_serve.py": [
-    2760,
-    17079
+    2708,
+    17249
   ],
   "tests/test_mcp_transport.py": [
     1191,
@@ -1499,13 +1483,9 @@
     2863,
     12039
   ],
-  "tests/test_ratchet_push.py": [
-    3994,
-    13126
-  ],
   "tests/test_real_browser_eval.py": [
-    4187,
-    11394
+    3871,
+    11222
   ],
   "tests/test_real_browser_harness.py": [
     3090,
