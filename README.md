@@ -134,7 +134,8 @@ operator capability available through the authenticated control surfaces.
 
 For component responsibilities, repository layout, data directories, eval
 routing, and storage behavior, see the
-[`<architecture>` section of `AGENTS.md`](AGENTS.md).
+[`<architecture>` section of `AGENTS.md`](AGENTS.md) and the skill's "Bridge
+internals reference" for storage detail.
 
 ## Security
 
@@ -209,7 +210,9 @@ artifact.
 
 ## Where to go next
 
-- Server endpoints and payloads are documented only in the
-  [`<endpoints>` section of `AGENTS.md`](AGENTS.md).
+- Server endpoints and payloads are summarized in the
+  [`<endpoints>` section of `AGENTS.md`](AGENTS.md); the full contracts are in the
+  skill's "Bridge internals reference"
+  (`.claude/skills/changing-daedalus/SKILL.md`).
 - Contributor setup, tests, house style, issues, and pull requests are
   documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
