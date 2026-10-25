@@ -169,7 +169,7 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.15"
 
       # The suite step below globs every suite, and those suites skip on
       # node. A release job that runs them inherits node from the hosted

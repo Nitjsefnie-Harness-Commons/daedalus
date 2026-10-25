@@ -25,15 +25,15 @@ DOCUMENTATION_PATTERNS = ('**/*.md', 'LICENSE', '.gitignore')
 WORKFLOW_PATTERNS = ('.github/workflows/**', '.github/dependabot.yml',
                      'scripts/ci/cache_action_releases.py')
 
-# Every stable minor requires-python admits. 3.14 was accepted by the
-# metadata and executed nowhere, so the oldest and the newest supported
-# interpreter were both claims rather than results.
+# Every stable minor requires-python admits. The oldest and the newest
+# supported interpreter are both executed by this matrix, so neither is
+# a claim rather than a result.
 FULL_MATRIX = {
     'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
-    'python': ['3.11', '3.12', '3.13', '3.14'],
+    'python': ['3.14', '3.15'],
 }
 
-DOCUMENTATION_MATRIX = {'os': ['ubuntu-latest'], 'python': ['3.13']}
+DOCUMENTATION_MATRIX = {'os': ['ubuntu-latest'], 'python': ['3.15']}
 
 _HEX40 = frozenset('0123456789abcdef')
 

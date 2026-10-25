@@ -36,11 +36,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Set up Python 3.13
+      - name: Set up Python 3.15
         # actions/setup-python v7.0.0
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: '3.13'
+          python-version: '3.15'
 
       - name: Claim the release version on current main
         id: bump
