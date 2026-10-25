@@ -19,6 +19,7 @@ NEAR MISS the walk must leave alone — the same shape with the separating
 decision taken the other way, so a rule that over-reaches loses as
 visibly as one that under-reaches; an arm with no near miss says so.
 """
+import ast
 import sys
 from pathlib import Path
 
@@ -473,8 +474,14 @@ def test_every_claimed_block_field_is_read_as_a_block(_tmp):
     silences.
     """
     del _tmp
+    claimed = claimed_block_fields()
+    # A derivation that collapses to nothing would pass the loop below
+    # without proving a field; these pairs are stable across interpreters.
+    assert claimed, 'no block fields derived'
+    assert (ast.Module, 'body') in claimed, claimed
+    assert (ast.While, 'orelse') in claimed, claimed
     quiet = []
-    for cls, field in claimed_block_fields():
+    for cls, field in claimed:
         root, call = block_probe(cls, field)
         if call not in _mcp_dead_code.dead_nodes(root):
             quiet.append(f'{cls.__name__}.{field}: live read leaves it '
