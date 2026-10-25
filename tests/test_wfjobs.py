@@ -16,7 +16,8 @@ import yaml  # noqa: E402
 from _wffixtures import (  # noqa: E402
     BLOCK_NEEDS, BLOCK_OUTPUTS, _real, _refuses, _replaced)
 from _wfgraph import (  # noqa: E402
-    _job_needs, _job_output_mapping, _matrix_job_running, _tests_yml)
+    _job_needs, _job_output_mapping, _matrix_job_running, _python_matrix,
+    _tests_yml)
 from _wfjobs import (  # noqa: E402
     jobs_mapping, load, run_path_candidates, unresolved_run_paths,
     workflow_files)
@@ -454,11 +455,7 @@ def test_a_bare_empty_outputs_is_refused_as_not_a_mapping(tmp):
 def test_a_bare_empty_strategy_elsewhere_still_finds_the_matrix_job(tmp):
     """A job whose strategy, steps or run is null runs nothing."""
     real = _tests_yml()
-    matrix = {'include': [
-        {'os': os, 'python': '3.13', 'shard': shard, 'shards': shards}
-        for os, shard, shards in (
-            ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
-            ('windows-latest', '2', '3'), ('windows-latest', '3', '3'))]}
+    matrix = _python_matrix(real)
     name, _job = _matrix_job_running(real, matrix, 'coverage_suites.py')
     header = '    name: Aggregate workflow checks\n'
     install = '      - name: Install the coverage toolchain and the project\n'

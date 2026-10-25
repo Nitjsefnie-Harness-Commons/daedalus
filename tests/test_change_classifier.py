@@ -19,7 +19,7 @@ from _wfgraph import (  # noqa: E402
     _actionlint_runs,
     _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
     _job_names_with_outputs, _job_step_ids, _matrix_job_running,
-    _tests_yml)
+    _python_matrix, _tests_yml)
 
 
 def _classifier():
@@ -111,7 +111,6 @@ def test_documentation_paths_classify_to_the_reduced_matrix(tmp):
     assert docs_only is True, reason
     assert workflows is False
     assert matrix == mod.DOCUMENTATION_MATRIX, matrix
-    assert matrix == {'os': ['ubuntu-latest'], 'python': ['3.13']}, matrix
 
     _calls, run = _recording_run('README.md\nserver.py\ndocs/guide.md\n')
     docs_only, matrix, workflows, reason = mod.classify(_event(), run)
@@ -274,13 +273,7 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
 
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
 _MEASUREMENT_JOB, _ = _matrix_job_running(
-    _tests_yml(),
-    {'include': [
-        {'os': os, 'python': '3.13', 'shard': shard, 'shards': shards}
-        for os, shard, shards in (
-            ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
-            ('windows-latest', '2', '3'), ('windows-latest', '3', '3'))]},
-    'coverage_suites.py')
+    _tests_yml(), _python_matrix(_tests_yml()), 'coverage_suites.py')
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
                   'actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage', 'journey-budget', 'size-baseline')
@@ -461,15 +454,18 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
 
 
 def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
-    """The workflow no longer declares the suites matrix literally."""
+    """The workflow no longer declares the suites matrix literally.
+
+    The matrix's size is FULL_MATRIX's own declaration, never a pin of
+    it: an interpreter change edits the declaration alone.
+    """
     del tmp
     mod = _classifier()
     section = '\n'.join(_job_section(_tests_yml(), 'suites'))
     assert not re.search(r'^\s+(?:os|python): \[', section, re.MULTILINE), (
         section)
-    assert len(mod.FULL_MATRIX['os']) == 3, mod.FULL_MATRIX
-    assert len(mod.FULL_MATRIX['python']) == 4, mod.FULL_MATRIX
     for axis, values in mod.FULL_MATRIX.items():
+        assert values, (axis, values)
         for value in values:
             assert isinstance(value, str) and value, (axis, value)
 

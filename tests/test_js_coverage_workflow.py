@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ghexpr import ExpressionError, evaluate_if  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wfgraph import _job_names, _matrix_job_running  # noqa: E402
+from _wfgraph import (  # noqa: E402
+    _job_names, _matrix_job_running, _python_matrix)
 from _yamlread import job_mapping, step_mapping_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 from _workflowrun import run_step  # noqa: E402
@@ -27,23 +28,12 @@ _STEP_CAPTURE_LINE = f'          {_CAPTURE_KEY}: "{_CAPTURE_VALUE}"\n'
 _STEP_START = re.compile(r'^      - ', re.MULTILINE)
 _CONSUMER_ID = re.compile(
     r'^        id: (?:measure|ratchet)[ \t]*$', re.MULTILINE)
-_SUPPORTED_MATRIX = {'include': [
-    {'os': os, 'python': '3.13', 'shard': shard, 'shards': shards}
-    for os, shard, shards in (
-        ('ubuntu-latest', '1', '1'), ('windows-latest', '1', '3'),
-        ('windows-latest', '2', '3'), ('windows-latest', '3', '3'))]}
 _STATUS_NAMES = ('success', 'failure', 'cancelled')
-_PYTHON_CAPTURE_CONDITION = (
-    "${{ matrix.os == 'ubuntu-latest' "
-    "&& matrix.python == '3.13' }}")
 _FAILURE_CAPTURE_CONDITION = (
     "${{ (success() && matrix.os == 'ubuntu-latest') "
     "|| (failure() && matrix.os == 'windows-latest') }}")
 _FAILURE_ONLY_CAPTURE_CONDITION = (
     "${{ failure() && matrix.os == 'ubuntu-latest' }}")
-_TWO_PYTHON_MATRIX = {'include': [
-    dict(row, python=version) for row in _SUPPORTED_MATRIX['include']
-    for version in ('3.12', '3.13')]}
 _PTH_CREATION_COMMAND = (
     'python -c "from pathlib import Path; import sysconfig; Path( '
     "sysconfig.get_paths()['purelib'], 'coverage-subprocess.pth').write_text( "
@@ -53,6 +43,23 @@ _PTH_CREATION_COMMAND = (
 def _workflow():
     return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
+
+
+def _python_row_condition(python):
+    """The capture condition that names one interpreter row."""
+    # Concatenated, not an f-string: `}}` inside one renders a single `}`.
+    return ("${{ matrix.os == 'ubuntu-latest' "
+            "&& matrix.python == '" + python + "' }}")
+
+
+_SUPPORTED_MATRIX = _python_matrix(_workflow())
+_PYTHON_CAPTURE_CONDITION = _python_row_condition(
+    _SUPPORTED_MATRIX['include'][0]['python'])
+# Synthetic, not the declared selection: the refusal it drives needs a
+# second interpreter row, whatever the workflow currently declares.
+_TWO_PYTHON_MATRIX = {'include': [
+    dict(row, python=version) for row in _SUPPORTED_MATRIX['include']
+    for version in ('3.12', '3.13')]}
 
 
 def _matrix_job(workflow):
@@ -455,7 +462,8 @@ def test_capture_condition_requires_successful_ubuntu_rows(tmp):
 def test_capture_condition_requires_every_python_row(tmp):
     """Every declared Python row must capture on successful Ubuntu."""
     error = _capture_rejection(
-        _PYTHON_CAPTURE_CONDITION, tmp, _TWO_PYTHON_MATRIX)
+        _python_row_condition(_TWO_PYTHON_MATRIX['include'][-1]['python']),
+        tmp, _TWO_PYTHON_MATRIX)
     assert '3.12' in str(error), error
 
 
