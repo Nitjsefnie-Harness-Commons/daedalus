@@ -14,6 +14,7 @@ import os
 import signal
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -261,6 +262,25 @@ def test_the_two_launchers_refuse_a_bound_identically(tmp):
         from_coverage = _refusal(coverage, value, expected)
         assert from_runner == from_coverage, (value, from_runner,
                                               from_coverage)
+
+
+def test_worker_count_ignores_an_unreadable_or_unlimited_limit(_tmp):
+    """No readable limit, and no limit, bind no worker."""
+    del _tmp
+    infinity = 2 ** 64 - 1
+    uncapped = min(3, SUITE_BOUND.os.cpu_count() or 1)
+
+    def refuse(_which):
+        raise OSError('unreadable')
+
+    for stub in (types.SimpleNamespace(
+                     RLIM_INFINITY=infinity, RLIMIT_NOFILE=None,
+                     getrlimit=lambda _which: (infinity, infinity)),
+                 types.SimpleNamespace(RLIM_INFINITY=infinity,
+                                       RLIMIT_NOFILE=None,
+                                       getrlimit=refuse)):
+        with swapped(SUITE_BOUND, resource=stub):
+            assert SUITE_BOUND.worker_count(3) == uncapped, stub
 
 
 def test_every_wait_this_module_makes_is_bounded(_tmp):
