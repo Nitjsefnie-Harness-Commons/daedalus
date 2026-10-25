@@ -71,7 +71,8 @@ def exempt_paths(base_rev, head_rev, root, family, head_entries, candidates):
             return set()
         thresholds = importlib.import_module(
             'scripts.ci.thresholds' if __package__ else 'thresholds')
-        base = thresholds.normalise(thresholds._decode(proc.stdout))
+        base = thresholds.normalise(
+            thresholds._drop_retired(thresholds._decode(proc.stdout)))
     except (OSError, subprocess.SubprocessError, ValueError):
         return set()
     removed = set(base.get(family, {})) - set(head_entries)
