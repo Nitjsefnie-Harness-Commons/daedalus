@@ -199,7 +199,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-          pip install -r requirements-test.txt
+          pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           pip install ".[mcp]"
 
       - name: pylint
@@ -288,7 +288,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-          pip install -r requirements-test.txt
+          pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           pip install ".[mcp]"
 
       - name: pyright
@@ -674,7 +674,7 @@ jobs:
       - name: Install the test dependencies and project
         run: |
           python -m pip install --upgrade pip . ".[mcp]"
-          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           python -m pip install -r requirements-dev.txt
 
       # The suites drive real binaries, and a suite that finds one missing
@@ -882,7 +882,7 @@ jobs:
       - name: Install the coverage toolchain and the project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           python -m pip install . ".[mcp]"
           python -m pip install -r requirements-dev.txt
 
@@ -1030,7 +1030,7 @@ jobs:
 
       - name: Install the coverage toolchain and the project
         run: |
-          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           # The mcp extra too: without it the MCP suite skips itself entirely
           # and daedalus_mcp/server.py contributes a zero to a number that is supposed
           # to describe the code this repository ships.
@@ -1256,7 +1256,7 @@ jobs:
           name: coverage-xml
 
       - name: Install the pinned statement analyzer
-        run: python3 -m pip install --requirement requirements-test.txt
+        run: "python3 -m pip install --requirement requirements-test.txt --only-binary=:all: --no-binary=PyYAML"
 
       - name: Measure the coverage of this change
         # HEAD is the merge tree checked out above and HEAD^1 is, by
@@ -1343,7 +1343,7 @@ jobs:
       - name: Install the test dependencies and project
         run: |
           python -m pip install --upgrade pip . ".[mcp]"
-          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           python -m pip install -r requirements-dev.txt
 
       # perf is NOT installable here and must not be asked for again.

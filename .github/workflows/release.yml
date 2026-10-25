@@ -194,7 +194,7 @@ jobs:
         # environment the lint jobs installed.
         run: |
           python -m pip install -r requirements-release.txt . ".[mcp]"
-          python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           python -m pip install -r requirements-dev.txt
 
       # A mistagged release publishes a wheel whose version contradicts the
