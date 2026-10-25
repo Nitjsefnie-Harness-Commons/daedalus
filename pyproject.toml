@@ -10,7 +10,7 @@ name = "daedalus-cli"
 dynamic = ["version"]
 description = "Command-line client for a Daedalus browser bridge"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = "MIT"
 authors = [{ name = "Nitjsefnie" }]
 keywords = ["browser", "automation", "chrome-extension", "mcp", "agents"]

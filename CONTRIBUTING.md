@@ -85,7 +85,7 @@ impossible.
 
 ## Getting it running
 
-Requires **Python 3.11+**. The bridge and CLI need nothing else.
+Requires **Python 3.14+**. The bridge and CLI need nothing else.
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
@@ -135,7 +135,7 @@ The rest of the gate runs on GitHub:
 
 | Workflow | What it does |
 | --- | --- |
-| `tests` | The suites across 3 OSes x 4 Pythons, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage ratchet per language. |
+| `tests` | The suites across 3 OSes x 2 Pythons, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage ratchet per language. |
 | `lint` / `types` / `eslint` | pycodestyle and pylint, pyright, and eslint over the shipped JavaScript. |
 | `codeql` | Security analysis for Python and JavaScript. Findings land in the Security tab, and no CodeQL check is required, so a new query cannot block an unrelated push. Also weekly, because a new query only ever sees code that changed after it shipped. |
 | `actionlint` | `actionlint` + `zizmor` over the workflows themselves. A broken workflow does not go red, it silently stops running. |
