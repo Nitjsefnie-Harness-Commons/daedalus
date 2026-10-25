@@ -122,7 +122,8 @@ def _python_matrix(workflow):
     found = []
     for name in _job_names(workflow):
         job = complete_job_mapping(workflow, name)
-        strategy = job.get('strategy')
+        strategy = (job.get('strategy')
+                    if isinstance(job, dict) else None)
         matrix = None
         if isinstance(strategy, dict):
             matrix = strategy.get('matrix')
