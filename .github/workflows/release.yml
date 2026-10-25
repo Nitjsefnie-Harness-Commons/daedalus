@@ -178,7 +178,7 @@ jobs:
       # place a silently-skipped suite belongs. Above the suite step, not
       # beside it: the control reads ORDER, and a declaration after the
       # suites have already run declares nothing.
-      # actions/setup-node v7.0.0
+      # actions/setup-node v7.1.0
       - uses: >-
           actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
