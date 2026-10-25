@@ -112,6 +112,29 @@ def _matrix_job_running(workflow, matrix, command):
     return matches[0]
 
 
+def _python_matrix(workflow):
+    """The one literal job matrix that declares a python version.
+
+    The coverage shards are found by the interpreter dimension their
+    matrix declares, never a copied version literal, so an interpreter
+    bump edits the workflow alone.
+    """
+    found = []
+    for name in _job_names(workflow):
+        job = complete_job_mapping(workflow, name)
+        strategy = job.get('strategy')
+        matrix = None
+        if isinstance(strategy, dict):
+            matrix = strategy.get('matrix')
+        if (isinstance(matrix, dict)
+                and isinstance(matrix.get('include'), list)
+                and any(isinstance(row, dict) and 'python' in row
+                        for row in matrix['include'])):
+            found.append((name, matrix))
+    assert len(found) == 1, [name for name, _matrix in found]
+    return found[0][1]
+
+
 def _line_indent(line):
     """Return a source line's space indentation."""
     return len(line) - len(line.lstrip(' '))
