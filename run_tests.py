@@ -22,7 +22,8 @@ if str(ROOT) not in sys.path:
 
 from scripts.ci.suite_bound import (  # noqa: E402
     CLEANUP_TIMEOUT_S,
-    discard_outputs, kill_process_tree, suite_timeout, timeout_record)
+    discard_outputs, kill_process_tree, suite_timeout, timeout_record,
+    worker_count)
 # Re-exported, not used here: `tests/test_suite_runner.py` drives
 # `_run_suite` with the bound the runner itself resolves, and that is this
 # name. A second copy of the number here is what this change removes.
@@ -127,7 +128,7 @@ def main() -> int:
     results = {}
     summaries = tempfile.mkdtemp(prefix="daedalus-summaries-")
     try:
-        workers = min(len(suites), os.cpu_count() or 1)
+        workers = worker_count(len(suites))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(_run_suite, suite, summaries, timeout): suite

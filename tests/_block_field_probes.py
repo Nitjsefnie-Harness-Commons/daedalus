@@ -3,7 +3,7 @@ templates, field-drop patch.
 """
 import ast
 import contextlib
-import warnings
+import re
 
 _BLOCK_FIELD_NAMES = ('body', 'orelse', 'finalbody')
 
@@ -55,9 +55,11 @@ _TEMPLATES = {
 
 def claimed_block_fields():
     """Every (carrier, field) pair the grammar declares a statement
-    list: the field is one of the three grammar names and a bare
-    instance's value for it is a list, which keeps the
-    single-expression `body` fields out.
+    list: the field is one of the three grammar names and the class's
+    own declaration marks it `stmt*`, which keeps the
+    single-expression `body` fields out. The declaration is read off
+    the class, never a constructed instance: node constructors came to
+    require their fields, so a bare `cls()` is not derivable everywhere.
     """
     claimed = []
     for cls in {value for value in vars(ast).values()
@@ -65,10 +67,8 @@ def claimed_block_fields():
         for field in cls._fields:
             if field not in _BLOCK_FIELD_NAMES:
                 continue
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore', DeprecationWarning)
-                if isinstance(getattr(cls(), field, None), list):
-                    claimed.append((cls, field))
+            if re.search(rf'stmt\* {re.escape(field)}\b', cls.__doc__ or ''):
+                claimed.append((cls, field))
     return sorted(claimed, key=lambda pair: (pair[0].__name__, pair[1]))
 
 
