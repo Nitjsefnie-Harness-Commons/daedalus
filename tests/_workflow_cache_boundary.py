@@ -21,6 +21,7 @@ _REVIEWED_NONCACHE_ACTIONS = frozenset((
     'actions/checkout',
     'actions/upload-artifact',
     'actions/download-artifact',
+    'nitjsefnie-actions/size-ratchet',
 ))
 
 _DECISIVE_CONTROLS = {

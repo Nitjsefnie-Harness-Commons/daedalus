@@ -33,7 +33,12 @@ LINT_TOOLS_ENV = 'DAEDALUS_LINT_TOOLS'
 # through one of these at all. What each entry owes is that its list stays
 # true — the suites it names are the suites it runs — and nothing about
 # installing tools, because nothing new can arrive through it.
-SUITE_DOORS: dict[tuple[str, str], str] = {}
+SUITE_DOORS: dict[tuple[str, str], str] = {
+    ('tests.yml', 'size-baseline'):
+        'runs no suite: the only tests/ reference in its steps is the '
+        "size-ratchet overrides input 'tests/: 700', a ceiling override, "
+        'so the fixed list it names is empty',
+}
 
 
 def test_every_spelling_of_an_absence_guard_is_read_as_one_operation(tmp):

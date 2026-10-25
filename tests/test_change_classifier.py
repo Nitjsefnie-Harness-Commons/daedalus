@@ -283,7 +283,7 @@ _MEASUREMENT_JOB, _ = _matrix_job_running(
     'coverage_suites.py')
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
                   'actionlint', 'suites', 'wheel', 'coverage-matrix',
-                  'coverage', 'journey-budget')
+                  'coverage', 'journey-budget', 'size-baseline')
 CONDITION_CONTEXTS = (
     ({'success': True, 'failure': False, 'cancelled': False}, True),
     ({'success': False, 'failure': False, 'cancelled': False}, True),
