@@ -55,11 +55,8 @@ _TEMPLATES = {
 
 def claimed_block_fields():
     """Every (carrier, field) pair the grammar declares a statement
-    list: the field is one of the three grammar names and the class's
-    own declaration marks it `stmt*`, which keeps the
-    single-expression `body` fields out. The declaration is read off
-    the class, never a constructed instance: node constructors came to
-    require their fields, so a bare `cls()` is not derivable everywhere.
+    list: read off the class's `stmt*` declaration, never a constructed
+    node.
     """
     claimed = []
     for cls in {value for value in vars(ast).values()

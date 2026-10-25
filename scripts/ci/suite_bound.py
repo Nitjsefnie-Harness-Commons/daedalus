@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 """One per-suite wall-clock bound, and the bounded teardown that enforces it.
 
-`run_tests.py` and `scripts/ci/coverage_suites.py` both launch every
-suite in `tests/`, so both are ended by a wedge in any one of them, and
-both take away what their suites wrote -- which a suite killed at its
-bound can still be holding open on Windows. The bound, the launch that
-enforces it and the removal of what a suite left live here rather than in
-either launcher because a number two files each hold is two premises:
-widening one leaves the other bounding the value before, and neither
-file says so.
+`run_tests.py` and `scripts/ci/coverage_suites.py` both launch every suite
+in `tests/`, so both are ended by a wedge in any one of them, and both take
+away what their suites wrote -- which a suite killed at its bound can still
+be holding open on Windows. The bound, the launch that enforces it and the
+removal of what a suite left live here rather than in either launcher
+because a number two files each hold is two premises: widening one leaves
+the other bounding the value before, and neither file says so.
 
 The bound is a parameter of the launch, never a value captured when this
-module was written, so a control that shrinks the constant at runtime
-sees the launcher obey the smaller value.
+module was written, so a control that shrinks the constant at runtime sees
+the launcher obey the smaller value.
 
 The direct child is not what a wedge leaves behind: a suite is a
 `coverage run` with the suite under it, plus whatever the suite itself
 started, so the kill here is of the child's whole TREE. `start_new_session`
-is what makes that reachable on POSIX, and it is a no-op on Windows, where
-the launch puts the tree in a process group of its own and the kill is a
-`CTRL_BREAK_EVENT` to that group, then `taskkill` by pid with the tree
-flag for whatever did not answer.
+makes that reachable on POSIX and is a no-op on Windows, where the launch
+puts the tree in a process group of its own and the kill is a
+`CTRL_BREAK_EVENT` to that group, then `taskkill` by pid with the tree flag
+for whatever did not answer.
 
 `tests/_processtree.py` is the same shape for the suites' own children. It
 is followed here rather than imported: a shipped launcher must not depend
@@ -37,7 +36,6 @@ import time
 try:
     import resource
 except ImportError:
-    # No descriptor limits to read where the module has no `resource`.
     resource = None
 
 DEFAULT_SUITE_TIMEOUT_S = 900
@@ -47,9 +45,8 @@ TIMEOUT_ENV = 'DAEDALUS_SUITE_TIMEOUT'
 # back through the error path that was supposed to report it.
 CLEANUP_TIMEOUT_S = 10
 GRACE_POLL_S = 0.05
-# stdio, the output file, the null stdin and the spawn error pipe, with one
-# descriptor of slack: what a launcher needs to start one more suite on top
-# of the one descriptor each active suite holds for its timed wait.
+# stdio, the spawn's transient descriptors and one of slack, beside the
+# one descriptor each active suite holds for its timed wait.
 WORKER_DESCRIPTOR_RESERVE = 8
 
 
@@ -81,11 +78,9 @@ def suite_timeout():
 def worker_count(suite_count):
     """How many suites a launcher runs at once, and still starts the rest.
 
-    One suite per CPU, bounded by the descriptor budget where there is
-    one: every suite kept active holds one descriptor for the length of
-    its timed wait (a pidfd on Linux), so under a low `RLIMIT_NOFILE`
-    the last launches would fail before the CPU bound ever bound. No
-    limit to read, or an unlimited one, leaves the count to the CPUs.
+    One per CPU, capped by the descriptor budget: each active suite
+    holds one wait descriptor (a pidfd on Linux), so a low
+    `RLIMIT_NOFILE` fails launches before CPUs bind.
     """
     workers = min(suite_count, os.cpu_count() or 1)
     if resource is None:
@@ -102,8 +97,8 @@ def worker_count(suite_count):
 def timeout_record(name, bound, returncode, cleanup=''):
     """The line a launcher appends for the suite it stopped at `bound`.
 
-    It names the suite, because a group of output is the only place a
-    reader learns which of the concurrent children is the one that wedged.
+    It names the suite: a group of output is the only place a reader
+    learns which concurrent child wedged.
     """
     record = (f'SUITE TIMED OUT after {bound} s (returncode {returncode!r})'
               f' in {name}')
@@ -115,13 +110,12 @@ def timeout_record(name, bound, returncode, cleanup=''):
 def kill_process_tree(process):
     """Ask `process`'s whole tree to stop, then insist, and name the outcome.
 
-    Two phases, because neither order alone is right. A SIGKILL first is
-    one signal shorter, and it takes away what `pyproject.toml`'s
-    `sigterm = true` exists for: a suite that terminates still writes
-    what it measured. A SIGTERM first with nothing after it leaves a
-    suite that ignores the request running for ever, which is the hang
-    this bound exists to end. So the request goes first, a bounded grace
-    follows, and the escalation goes out whatever happened in between.
+    Two phases, because neither order alone is right: a SIGKILL first is
+    one signal shorter and takes away what `pyproject.toml`'s
+    `sigterm = true` exists for (a terminated suite still writes what it
+    measured); a SIGTERM with nothing after it leaves a suite that ignores
+    the request running for ever. Request first, bounded grace, then the
+    escalation whatever happened in between.
 
     Never raises. Every outcome is a string rather than a discard: a
     caller that drops it has thrown away the only evidence of what
@@ -188,10 +182,8 @@ def _signal_group(group, sig):
 def _still_running(process, seconds):
     """Whether the suite is still running, against a deadline.
 
-    The direct child and not the group: the child stays in its own group
-    as a zombie until the caller reaps it, so the group never empties
-    inside this window and asking about the group would answer "still
-    running" every time.
+    The direct child, not the group: the child is a zombie in its own
+    group until reaped, so the group never empties inside this window.
     """
     deadline = time.monotonic() + seconds
     while process.poll() is None:
@@ -219,11 +211,11 @@ def _ask_and_insist_windows(process):
     """Ask the tree to stop as Windows can, then insist, and name both.
 
     The request is `CTRL_BREAK_EVENT`, aimed at the pid that leads the
-    tree's group -- the launch set `creationflags=CREATE_NEW_PROCESS_GROUP`
-    to make it reachable. The escalation is `taskkill /F /T`, keyed on the
-    same pid, and it goes out whatever the request did: the two phases are
-    addressed differently on this platform, so a request that failed does
-    not cancel the escalation the way a failed group lookup does on POSIX.
+    tree's group (the launch set `creationflags=CREATE_NEW_PROCESS_GROUP`
+    to make it reachable). The escalation is `taskkill /F /T`, keyed on
+    the same pid, out whatever the request did: the phases are addressed
+    differently here, so a request that failed does not cancel the
+    escalation the way a failed group lookup does on POSIX.
 
     The record is the POSIX record's analogue, clause for clause: a suite
     that ended inside the grace window is one that took the request, and
@@ -267,13 +259,12 @@ def _taskkill(process, stopped):
     """The escalation, and the honest reading of the exit code it returned.
 
     `/F` is a forced termination, and it goes out whatever the request
-    did. What its exit code then says depends on what the suite did with
-    the request: after an answered one the pid the escalation is keyed on
-    is usually gone already, so a nonzero code there says the tree ended
-    at the request rather than that it may still be running. A nonzero
-    code beside a suite that ignored the request is the other reading,
-    and the record keeps the two apart so a stopped tree is never
-    reported as a live one.
+    did. What the exit code then says depends on what the suite did:
+    after an answered one the pid is usually gone already, so a nonzero
+    code there says the tree ended at the request rather than that it
+    may still be running. A nonzero code beside a suite that ignored the
+    request is the other reading, and the record keeps the two apart so
+    a stopped tree is never reported as a live one.
 
     Returns None when taskkill reported the terminations went out, and
     the outcome string otherwise -- the shape `_signal_group` answers in
@@ -344,10 +335,9 @@ def launch_suite(argv, *, cwd, output_path, env=None, timeout):
     The suite is not named here: the record is the caller's, so a caller
     cannot name it twice and get the two out of step.
 
-    Returns `(returncode, cleanup)`. `cleanup` is empty exactly when the
-    suite finished inside the bound, so a caller can tell a wedge from a
-    suite that failed on its own by the value alone, and the string names
-    what the kill did when there was one.
+    Returns `(returncode, cleanup)`; `cleanup` is empty exactly when the
+    suite finished inside the bound, and names what the kill did when
+    there was one.
     """
     process = None
     try:

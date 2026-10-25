@@ -466,8 +466,8 @@ def test_every_claimed_block_field_is_read_as_a_block(_tmp):
     ways. The claimed set is DERIVED from the ast declaration, never
     from `_blocks`, which would shrink silently when the walk narrows;
     `body`, `orelse` and `finalbody` are the only field names the
-    grammar gives statement lists, and the `stmt*` declaration check
-    drops the single-expression `body` of Expression, Lambda and IfExp.
+    grammar gives statement lists, and the `stmt*` check drops the
+    single-expression `body` of Expression, Lambda and IfExp.
     The live read marks the probe dead; the field dropped, it is
     reachable again. Failures are COLLECTED: one field's mutant names
     silences.
