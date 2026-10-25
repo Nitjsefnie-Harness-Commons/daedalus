@@ -4,7 +4,7 @@ name: audit
 # to its full transitive tree and checks every resolved version against the
 # PyPI advisory database.
 #
-# FIVE SURFACES, and none of them is the wheel. The published CLI declares
+# FOUR SURFACES, and none of them is the wheel. The published CLI declares
 # `dependencies = []` — stdlib only, deliberately — so `pip-audit .` over this
 # project collects zero packages and would be a gate that can never fire.
 # What this repository actually depends on is:
@@ -20,14 +20,12 @@ name: audit
 # it.
 #
 # TWO MANIFESTS ARE DELIBERATELY ABSENT: requirements-zizmor.txt and
-# requirements-test.txt are hash-pinned, and pip's hash checking is a
-# property of the whole resolution rather than of one file — it turns itself
-# on when any requirement carries a hash — so a hashed manifest cannot share
-# this one invocation with the unpinned ones: it would drag every other
-# surface into hash mode and fail on hashes they do not carry.
-# requirements-zizmor.txt is installed by its own step in tests.yml, which
-# touches no other manifest; requirements-test.txt's installs name the
-# binary-only policy beside it.
+# requirements-test.txt are hash-pinned, and pip's hash checking is
+# resolution-wide — it turns on when any requirement carries one — so
+# a hashed manifest cannot share this invocation: it would drag every
+# surface into hash mode and fail on hashes they do not carry. zizmor's
+# is installed by a tests.yml step; requirements-test.txt's installs
+# name the binary-only policy.
 #
 # THE EXTRAS ARE DERIVED, NOT LISTED. The audit reads every extra out of
 # pyproject.toml rather than naming `mcp`, so adding a second extra cannot

@@ -43,9 +43,8 @@ def _job_section(workflow, job):
 def _job_needs(workflow, job):
     """The job names listed under `needs:` on the named job.
 
-    A bare scalar, a block sequence and a flow sequence all name the same
-    dependencies, so all three decode to the same list; a shape that is not
-    a name or a list of names is refused rather than read.
+    A bare scalar, block sequence and flow sequence all decode to the same
+    list; a shape that is neither a name nor a list of names is refused.
     """
     source = _field_source(workflow, job, 'needs')
     if source is None:
@@ -113,11 +112,8 @@ def _matrix_job_running(workflow, matrix, command):
 
 
 def _python_matrix(workflow):
-    """The one literal job matrix that declares a python version.
-
-    The coverage shards are found by the interpreter dimension their
-    matrix declares, never a copied version literal, so an interpreter
-    bump edits the workflow alone.
+    """The one literal job matrix that declares a python version; found
+    by that dimension, so an interpreter bump edits the workflow alone.
     """
     found = []
     for name in _job_names(workflow):
@@ -150,9 +146,8 @@ def _job_field_end(section, index, raw_value):
     """Where one job field's lines stop, past any collection it opens.
 
     A flow collection holds its own lines open, so a continuation at the
-    field's own indentation still belongs to the field.  Only the
-    collection the field opened counts: past its close a bracket is content,
-    so the depth stops accumulating where `_flow_extent` stops it.
+    field's own indentation still belongs to the field; past its close
+    a bracket is content, so the depth stops where `_flow_extent` does.
     """
     value = _strip_inline_comment(raw_value.strip(' '))
     depth = flow_depth(value) if value[:1] in ('[', '{') else 0
@@ -218,9 +213,9 @@ def _job_names_with_outputs(workflow):
 def _job_output_step_ids(workflow, job):
     """Return step IDs referenced by a job's output expressions.
 
-    The reference is parsed rather than pattern-matched, so parentheses and
-    spacing do not change which step an output names; anything that is not
-    one complete `steps.<id>.outputs.<name>` lookup is refused.
+    The reference is parsed, not pattern-matched, so parentheses and
+    spacing change nothing; anything that is not one complete
+    `steps.<id>.outputs.<name>` lookup is refused.
     """
     outputs = _job_output_mapping(workflow, job)
     if outputs is None:
