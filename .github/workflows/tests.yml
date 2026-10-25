@@ -1522,7 +1522,7 @@ jobs:
     # through the same records push the other ratchets use. A manual
     # dispatch has neither a pull request base nor a default-branch push,
     # and the action fails closed on that event, so the job steps out of
-    # workflow_dispatch's path rather than reding every dispatch.
+    # workflow_dispatch's path rather than failing every dispatch.
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
