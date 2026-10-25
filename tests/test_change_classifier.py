@@ -208,11 +208,6 @@ def test_write_outputs_appends_the_three_output_lines(tmp):
     assert lines == ['docs_only=true', rendered, 'workflows=true',
                      'docs_only=false', rendered, 'workflows=false'], lines
     assert text.count('\n') == 6 and text.endswith('\n'), repr(text)
-
-
-def test_write_outputs_without_a_file_writes_nothing(tmp):
-    del tmp
-    mod = _classifier()
     mod.write_outputs(None, True, mod.DOCUMENTATION_MATRIX, True)
     mod.write_outputs('', True, mod.DOCUMENTATION_MATRIX, True)
 
@@ -240,15 +235,15 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
     """The set version.yml ignores is the set we classify."""
     del tmp
     mod = _classifier()
-    for name in ('version.yml',):
-        text = (ROOT / '.github' / 'workflows' / name).read_text(
-            encoding='utf-8')
-        triggers = _workflow_triggers(text, name)
-        for event in ('push', 'pull_request'):
-            filters = _workflow_path_filters(triggers[event], name)
-            assert filters == {
-                'paths-ignore': list(mod.DOCUMENTATION_PATTERNS)}, (
-                name, event, filters)
+    name = 'version.yml'
+    text = (ROOT / '.github' / 'workflows' / name).read_text(
+        encoding='utf-8')
+    triggers = _workflow_triggers(text, name)
+    for event in ('push', 'pull_request'):
+        filters = _workflow_path_filters(triggers[event], name)
+        assert filters == {
+            'paths-ignore': list(mod.DOCUMENTATION_PATTERNS)}, (
+            name, event, filters)
 
 
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
@@ -420,7 +415,10 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
 
     The suites job declares no literal axis list anywhere in its section,
     and FULL_MATRIX's members are nonempty strings: the matrix's size is
-    the classifier's own declaration, never a pin of it.
+    the classifier's own declaration, never a pin of it. The coverage
+    rows declare the classifier's newest interpreter -- the two sides of
+    the interpreter decision move together, one bump or both, and a
+    one-sided bump reds here. Values are pinned, never their size.
     """
     del tmp
     mod = _classifier()
@@ -444,6 +442,10 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
         assert values, (axis, values)
         for value in values:
             assert isinstance(value, str) and value, (axis, value)
+    declared = {row['python']
+                for row in _python_matrix(workflow)['include']}
+    assert declared == {max(mod.FULL_MATRIX['python'])}, (
+        sorted(declared), sorted(mod.FULL_MATRIX['python']))
 
 
 def test_main_records_the_fallback_outputs_and_returns_zero(tmp):

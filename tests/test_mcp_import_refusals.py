@@ -475,8 +475,6 @@ def test_every_claimed_block_field_is_read_as_a_block(_tmp):
     """
     del _tmp
     claimed = claimed_block_fields()
-    # A derivation that collapses to nothing would pass the loop below
-    # without proving a field; these pairs are stable across interpreters.
     assert claimed, 'no block fields derived'
     assert (ast.Module, 'body') in claimed, claimed
     assert (ast.While, 'orelse') in claimed, claimed
