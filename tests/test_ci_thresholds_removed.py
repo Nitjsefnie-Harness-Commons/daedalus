@@ -207,6 +207,29 @@ def test_exemptions_fail_closed_on_unreadable_base_document(tmp):
                                         {}, ['backend/kept.py']) == set()
 
 
+def test_exemptions_survive_a_base_member_this_loader_retired(tmp):
+    """The base read carries the retired-member tolerance load_base gives.
+
+    exempt_paths reads the base revision's document, which a family
+    retirement leaves carrying members the current loader refuses;
+    swallowing that refusal returns an empty exemption set and silently
+    fails the declared removal on the adoption range.
+    """
+    base = _document()
+    base['retired_baseline'] = {'backend/kept.py': 9}
+    base['long_line_baseline'] = {'backend/kept.py': 9}
+    head = copy.deepcopy(base)
+    del head['long_line_baseline']['backend/kept.py']
+    repo, rev = _history(tmp, 'retired-base', [
+        'fix: remove\n\nThresholds-Removed: '
+        'long_line_baseline.backend/kept.py=bug'], base, head)
+    removed = _util.load(GUARD.with_name('thresholds_removed.py'),
+                         'retired_base')
+    assert removed.exempt_paths(
+        rev, 'HEAD', repo, 'long_line_baseline',
+        head['long_line_baseline'], ['backend/kept.py']) == {'backend/kept.py'}
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='thremoved_')
 

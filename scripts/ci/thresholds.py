@@ -200,14 +200,29 @@ def _positive_int(value, name):
     return int(count)
 
 
-def load(path=THRESHOLDS):
-    """Read and validate a thresholds document."""
-    target = Path(path)
+def _read(path):
+    """The document's bytes, an unreadable file refused by name."""
     try:
-        raw = target.read_bytes()
+        return Path(path).read_bytes()
     except OSError as error:
         raise ValueError(f'cannot read thresholds: {error}') from None
-    return normalise(_decode(raw))
+
+
+def _drop_retired(data):
+    """The members this loader does not define, dropped in place.
+
+    A historical document was written by its own revision's loader, so a
+    member it still carries that this loader has retired names a family
+    the current loader no longer reads, not a typo in the document.
+    """
+    for member in [key for key in data if key not in _TOP_LEVEL_FIELDS]:
+        del data[member]
+    return data
+
+
+def load(path=THRESHOLDS):
+    """Read and validate a thresholds document."""
+    return normalise(_decode(_read(path)))
 
 
 def load_base(path):
@@ -218,15 +233,7 @@ def load_base(path):
     document still carrying a baseline family this loader retired loads,
     and the current document keeps the strict reading in `load`.
     """
-    target = Path(path)
-    try:
-        raw = target.read_bytes()
-    except OSError as error:
-        raise ValueError(f'cannot read thresholds: {error}') from None
-    data = _decode(raw)
-    for member in [key for key in data if key not in _TOP_LEVEL_FIELDS]:
-        del data[member]
-    return normalise(data)
+    return normalise(_drop_retired(_decode(_read(path))))
 
 
 def coverage(data, language):
