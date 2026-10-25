@@ -57,11 +57,10 @@ _CARRIED_FIELDS = {
 }
 
 # The forms a later grammar adds, and the value-bearing fields each one
-# carries. PEP 750's template strings are a 3.14 addition, so a literal
-# naming them raises at import on 3.11-3.13 and takes every suite with it.
-# Read each as its registration contract states: absent,
-# the form is not registered, and that is correct rather than merely
-# quiet -- an older parser can neither produce the node nor parse the
+# carries. PEP 750's template strings are a 3.14 addition, so the names
+# are read with getattr and a default: where the parser lacks the form,
+# the registration is absent -- correct, not merely quiet, since a parser
+# without the grammar can neither produce the node nor parse the
 # `t"..."` that makes one. Only the value-bearing fields are named,
 # because `_field_parts` hands back whatever is not None and `str` and
 # `conversion` are a str and an int, which the walk would refuse.
