@@ -119,16 +119,32 @@ def test_documentation_paths_classify_to_the_reduced_matrix(tmp):
     assert matrix == mod.FULL_MATRIX, matrix
 
 
-def test_empty_and_missing_path_lists_run_the_full_matrix(tmp):
+def test_every_unusable_path_list_runs_the_full_matrix(tmp):
+    """Empty, capped, unreadable and raising path reads run everything."""
     del tmp
     mod = _classifier()
     assert mod.documentation_only(()) is False
     assert mod.documentation_only(None) is False
-    _calls, run = _recording_run('\n')
-    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
-    assert docs_only is False, reason
-    assert workflows is True
-    assert matrix == mod.FULL_MATRIX, matrix
+
+    def raising_run(argv):
+        raise RuntimeError(f'api down for {argv}')
+
+    for label, event, run, said in (
+            ('empty', _event(), _recording_run('\n')[1], None),
+            ('300 paths', _event(name='push', pull_request=None),
+             _recording_run(
+                 ''.join(f'docs/file{index}.md\n'
+                         for index in range(300)))[1], None),
+            ('3000 paths', _event(),
+             _recording_run(
+                 ''.join(f'docs/file{index}.md\n'
+                         for index in range(3000)))[1], None),
+            ('raising read', _event(), raising_run, 'could not read')):
+        docs_only, matrix, workflows, reason = mod.classify(event, run)
+        assert (docs_only, workflows) == (False, True), (label, reason)
+        assert matrix == mod.FULL_MATRIX, (label, matrix)
+        if said:
+            assert said in reason, (label, reason)
 
 
 def test_a_pull_request_reads_its_file_list(tmp):
@@ -180,40 +196,6 @@ def test_unusable_events_never_call_the_api(tmp):
     assert calls == [], calls
 
 
-def test_a_failed_read_falls_back_to_the_full_matrix(tmp):
-    del tmp
-    mod = _classifier()
-
-    def run(argv):
-        raise RuntimeError(f'api down for {argv}')
-
-    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
-    assert docs_only is False, reason
-    assert workflows is True
-    assert matrix == mod.FULL_MATRIX, matrix
-    assert 'could not read' in reason, reason
-
-
-def test_a_capped_push_file_list_falls_back_to_the_full_matrix(tmp):
-    """300 paths can be a truncated compare page, so they prove nothing."""
-    del tmp
-    mod = _classifier()
-    stdout = ''.join(f'docs/file{index}.md\n' for index in range(300))
-    _calls, run = _recording_run(stdout)
-    docs_only, matrix, workflows, reason = mod.classify(
-        _event(name='push', pull_request=None), run)
-    assert docs_only is False, reason
-    assert workflows is True
-    assert matrix == mod.FULL_MATRIX, matrix
-
-    stdout = ''.join(f'docs/file{index}.md\n' for index in range(3000))
-    _calls, run = _recording_run(stdout)
-    docs_only, matrix, workflows, reason = mod.classify(_event(), run)
-    assert docs_only is False, reason
-    assert workflows is True
-    assert matrix == mod.FULL_MATRIX, matrix
-
-
 def test_write_outputs_appends_the_three_output_lines(tmp):
     mod = _classifier()
     out = Path(tmp) / 'github_output'
@@ -225,8 +207,6 @@ def test_write_outputs_appends_the_three_output_lines(tmp):
     rendered = f'matrix={json.dumps(matrix)}'
     assert lines == ['docs_only=true', rendered, 'workflows=true',
                      'docs_only=false', rendered, 'workflows=false'], lines
-    assert json.loads(lines[1][len('matrix='):]) == matrix
-    assert '\n' not in json.dumps(matrix)
     assert text.count('\n') == 6 and text.endswith('\n'), repr(text)
 
 
@@ -436,8 +416,14 @@ def test_actionlint_survives_a_replacement_push_and_keeps_pr_behavior(tmp):
 
 
 def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
-    """coverage skips on docs_only; suites runs the classifier's matrix."""
+    """coverage skips on docs_only; suites runs the classifier's matrix.
+
+    The suites job declares no literal axis list anywhere in its section,
+    and FULL_MATRIX's members are nonempty strings: the matrix's size is
+    the classifier's own declaration, never a pin of it.
+    """
     del tmp
+    mod = _classifier()
     workflow = _tests_yml()
     assert 'changes' in _job_needs(workflow, 'coverage')
     assert 'changes' in _job_needs(workflow, 'suites')
@@ -446,24 +432,14 @@ def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
         'coverage has no job-level if')
     assert any('needs.changes.outputs.docs_only' in line
                for line in coverage), coverage
-    matrix_lines = [line.strip() for line in _job_section(workflow, 'suites')
+    suites = '\n'.join(_job_section(workflow, 'suites'))
+    matrix_lines = [line.strip() for line in suites.splitlines()
                     if line.strip().startswith('matrix:')]
     assert matrix_lines == [
         'matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}'], (
         matrix_lines)
-
-
-def test_suites_matrix_is_the_classifier_output_not_a_literal(tmp):
-    """The workflow no longer declares the suites matrix literally.
-
-    The matrix's size is FULL_MATRIX's own declaration, never a pin of
-    it: an interpreter change edits the declaration alone.
-    """
-    del tmp
-    mod = _classifier()
-    section = '\n'.join(_job_section(_tests_yml(), 'suites'))
-    assert not re.search(r'^\s+(?:os|python): \[', section, re.MULTILINE), (
-        section)
+    assert not re.search(r'^\s+(?:os|python): \[', suites, re.MULTILINE), (
+        suites)
     for axis, values in mod.FULL_MATRIX.items():
         assert values, (axis, values)
         for value in values:
