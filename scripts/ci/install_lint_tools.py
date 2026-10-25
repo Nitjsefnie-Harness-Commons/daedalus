@@ -241,7 +241,7 @@ def shellcheck_pin():
         raise SystemExit(
             f'{REQUIREMENTS.name} pins {SHELLCHECK_PACKAGE} {len(found)} '
             f'times, at {sorted(found)}; one file must name one version')
-    return found[0].split(';')[0].strip()[len(wanted):]
+    return found[0].split(';')[0].strip().rstrip('\\').strip()[len(wanted):]
 
 
 def install_shellcheck():

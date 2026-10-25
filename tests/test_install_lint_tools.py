@@ -49,7 +49,8 @@ _ACTIONLINT = 'actionlint'
 # EXTENSION is added by the platform, never written here.
 ACTIONLINT_BINARY = 'actionlint'
 # A real wheel's name, so a version refusal can tell it from another.
-_SHELLCHECK_PINS = [line.split(';')[0].strip() for line in
+_SHELLCHECK_PINS = [line.split(';')[0].strip().rstrip('\\').strip()
+                    for line in
                     (ROOT / 'requirements-test.txt').read_text(
                         encoding='utf-8').splitlines()
                     if line.split(';')[0].strip().startswith(
