@@ -3,11 +3,10 @@
 
 `scripts/ci/suite_bound.py` is the subject here. Most of the controls
 drive the real launchers over real planted suites rather than importing
-its functions: a guard written against a fixture shows what the guard
-thinks, and only a launcher that really ran says whether the bound held.
-
-The teardown's arms are the exception: no launcher ever takes them, so they
-are reached through stand-ins that record what the subject signalled or ran.
+its functions: a fixture-guard shows what the guard thinks; only a
+launcher that really ran says whether the bound held.
+The teardown's arms are the exception: no launcher ever takes them, so
+they are reached through stand-ins recording what the subject did.
 """
 import ast
 import os
@@ -49,7 +48,7 @@ _FAST_SUITE = "print('measured output arrived', flush=True)\n"
 # measured; CTRL_BREAK on Windows, where only a HANDLED request keeps
 # anything, and where the pending SIGBREAK is read only when the main
 # thread reaches the bytecode loop -- a blocking sleep would outlast the
-# grace unread, so the wedge cycles on a short sleep instead. The marker
+# grace unread, so the wedge cycles on a short sleep instead; the marker
 # below is the only evidence either way.
 _STOPPABLE_SUITE = """import os, signal, sys, time
 from pathlib import Path
@@ -85,18 +84,17 @@ _WEDGE_BOUND_S = max(1, round(SUITE_BOUND.DEFAULT_SUITE_TIMEOUT_S * 0.002))
 # cannot drift into one another, and INDEPENDENT of it: the bound under
 # test cannot also be what ends the control that proves it, or a launcher
 # that never ends its wedged suite reproduces the hang and reports nothing.
-# It also has to outlast the launcher's SIGTERM grace window, which is
-# spent before the escalation can reach a suite that ignores the request.
+# It also has to outlast the launcher's SIGTERM grace window, spent before
+# the escalation can reach a suite that ignores the request.
 _WEDGE_OUTER_S = _WEDGE_BOUND_S * 20 + SUITE_BOUND.CLEANUP_TIMEOUT_S * 2
-# Reaping a killed tree is itself bounded, by a deadline read off the
-# clock rather than asserted as a margin.
+# Reaping a killed tree is itself bounded, by a clock deadline, not a margin.
 _WEDGE_SETTLE_S = 10
 
 # The reader's whole accept/reject surface. `float(raw)` plus a `<= 0`
 # test admits `inf`, and a bound of infinity never expires, so the setting
-# meant to bound each suite reinstates the unbounded wait. A reader that
-# MOVED is a reader that can arrive half converted, so both launchers are
-# asked the same question and must answer it the same way.
+# meant to bound each suite reinstates the unbounded wait; a reader that
+# MOVED can arrive half converted, so both launchers are asked the same
+# question and must answer it the same way.
 UNUSABLE_BOUNDS = (
     ('inf', 'finite positive'),
     ('-inf', 'finite positive'),
@@ -113,10 +111,9 @@ UNUSABLE_BOUNDS = (
 def _assert_one_record(text, bound, name):
     """The one timeout record in `text`, whole, naming `name` at `bound`.
 
-    Matched whole, because a prefix stops before the suite name and the
-    launcher prints that name in the group header anyway -- so a prefix
-    pin is satisfied by a sibling occurrence and says nothing about the
-    record. The name has to be where the record puts it.
+    Matched whole: a prefix stops before the suite name, which the
+    launcher prints in the group header anyway, so a prefix pin is
+    satisfied by a sibling occurrence.
     """
     found = records(text)
     assert len(found) == 1, (
@@ -144,10 +141,10 @@ def test_a_fast_suite_is_measured_and_not_reported_as_timed_out(tmp):
 def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
     """Which contract the launcher gives on THIS platform, asserted as such.
 
-    Both routes ask before they escalate, and the planted suite installs
-    the handler each platform asks with, so the record has to say the
-    request was made and taken. The forced-only clause is refused: no
-    record this route can produce may say the tree died unasked again.
+    Both routes ask before they escalate and the planted suite installs
+    the handler each asks with, so the record must say the request was
+    made and taken; no record this route can produce may say the tree
+    died unasked again.
     """
     marker = Path(tmp) / 'tree' / 'tests' / 'stopped.pid'
     try:
@@ -164,12 +161,10 @@ def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
         f'nothing; the record says returncode {record["returncode"]}')
     assert 'suite was asked to stop and flushed' in group, group
     assert int(record['returncode']) == 0, record
-    # The cleanup has to say the suite TOOK THE REQUEST. Asserting the
-    # route alone is satisfied by the record a suite that ignored the
-    # request and was killed also produces, so a grace that asked the
-    # wrong subject, or a group that was never signalled at all, would
-    # both pass it. The two records differ here and nowhere a looser pin
-    # can see.
+    # The cleanup has to say the suite TOOK THE REQUEST: the route alone
+    # is also produced by a suite that ignored the request and was
+    # killed, so a grace that asked the wrong subject, or a group never
+    # signalled at all, would both pass it; here the records differ.
     assert REQUESTED_THEN_GRACED in record['cleanup'], record
     assert FORCED_WITHOUT_GRACE not in record['cleanup'], record
 
@@ -177,10 +172,9 @@ def test_a_wedged_suite_states_the_kill_its_platform_took(tmp):
 def test_a_wedge_under_require_all_prints_the_timeout_and_nothing_else(tmp):
     """The timeout is the diagnosis, and it is the one this run gets.
 
-    The `--require-all` refusals share this stderr with it, so which of
-    them a wedge suppresses is a precedence the launcher chose and nothing
-    else holds: without this control the order could be flipped back with
-    the suite still green.
+    The `--require-all` refusals share this stderr, so which of them a
+    wedge suppresses is a precedence the launcher chose: without this
+    control the order could flip back with the suite still green.
     """
     recorded = Path(tmp) / 'tree' / 'tests' / 'suite.pid'
     try:
@@ -205,15 +199,12 @@ def test_the_coverage_launcher_binds_the_module_the_workflow_path_finds(tmp):
 
     A workflow step runs the launcher by path, so `sys.path[0]` is
     `scripts/ci` and the repository root is on no path at all: the
-    package spelling cannot resolve and the flat one is the only spelling
-    there is. Every other control here puts its synthetic tree on
-    `PYTHONPATH` too, and that changes NOTHING about the spelling -- the
-    launcher is run by path either way, so it takes the same branch.
-    What `PYTHONPATH` does decide is whether the fixture's
-    `sitecustomize` -- which carries the shrunk constant -- is found at
-    all. This control turns it off, so the launcher's own import is what
-    is under test rather than anything the fixture put there, and its
-    passing IS the evidence that the branch CI runs works.
+    package spelling cannot resolve and the flat one is the only one;
+    a tree on `PYTHONPATH` is still run by path. What `PYTHONPATH`
+    decides is whether the fixture's `sitecustomize` -- which carries
+    the shrunk constant -- is found, and this control turns it off: the
+    launcher's own import is under test, and its passing IS the
+    evidence the branch CI runs works.
     """
     recorded = Path(tmp) / 'tree' / 'tests' / 'suite.pid'
     try:
@@ -267,18 +258,17 @@ def test_the_two_launchers_refuse_a_bound_identically(tmp):
 def test_worker_count_ignores_an_unreadable_or_unlimited_limit(_tmp):
     """No readable limit, and no limit, bind no worker."""
     del _tmp
-    infinity = 2 ** 64 - 1
     uncapped = min(3, SUITE_BOUND.os.cpu_count() or 1)
 
     def refuse(_which):
         raise OSError('unreadable')
 
     for stub in (types.SimpleNamespace(
-                     RLIM_INFINITY=infinity, RLIMIT_NOFILE=None,
-                     getrlimit=lambda _which: (infinity, infinity)),
-                 types.SimpleNamespace(RLIM_INFINITY=infinity,
-                                       RLIMIT_NOFILE=None,
-                                       getrlimit=refuse)):
+            RLIM_INFINITY=2 ** 64 - 1, RLIMIT_NOFILE=None,
+            getrlimit=lambda _which: (2 ** 64 - 1,) * 2),
+            types.SimpleNamespace(RLIM_INFINITY=2 ** 64 - 1,
+                                  RLIMIT_NOFILE=None,
+                                  getrlimit=refuse)):
         with swapped(SUITE_BOUND, resource=stub):
             assert SUITE_BOUND.worker_count(3) == uncapped, stub
 
@@ -286,16 +276,14 @@ def test_worker_count_ignores_an_unreadable_or_unlimited_limit(_tmp):
 def test_every_wait_this_module_makes_is_bounded(_tmp):
     """A bounded cleanup path is the only one that can be trusted to end.
 
-    Read from the source rather than from a run, and this is one of the two
-    properties a source read is sound for: the bound is unobservable at
-    runtime, because a process the kill has already reached always reaps.
-
-    Two shapes of unbounded wait are read, because the module uses two.
-    A `.wait(`/`.communicate()` with no `timeout=` keyword, and a
-    `time.sleep()` inside a `while` loop that never compares the clock
-    again -- which is what a grace window spelled as a poll looks like with
-    its deadline check deleted, and no member-call spelling would see it.
-    Deleting either bound turns this red.
+    Read from the source rather than a run -- one of the two properties a
+    source read is sound for: the bound is unobservable at runtime, since
+    a process the kill has reached always reaps. Two shapes of unbounded
+    wait are read, because the module uses two: a `.wait(`/`
+    .communicate()` with no `timeout=`, and a `time.sleep()` inside a
+    `while` loop that never compares the clock again -- a grace window
+    spelled as a poll with its deadline check deleted, which no
+    member-call spelling would see; deleting either bound reds this.
     """
     unbounded = []
     for function in ast.walk(ast.parse(
@@ -357,17 +345,14 @@ def _reads_the_clock(node):
 def test_the_per_suite_bound_is_defined_exactly_once_in_the_tree(_tmp):
     """A second copy of the number is a premise that can drift from the first.
 
-    A source-level check, and this is the one property it is sound for: it
-    reads the tree, not a run, so it can say a definition is duplicated. It
-    says nothing about behaviour, and nothing here asks it to -- the two
-    controls above ask that by running the launchers.
-
+    A source-level check, sound exactly where a run is not: it reads the
+    tree and can say a definition is duplicated, and nothing here asks it
+    about behaviour -- the two controls above run the launchers for that.
     The walk is every tracked Python file OUTSIDE `tests/`, not only the
-    two launchers. A copy planted in `daedalus_bridge/`, `daedalus_cli/`
+    two launchers: a copy planted in `daedalus_bridge/`, `daedalus_cli/`
     or `daedalus_mcp/` is a second premise exactly as much as one in
-    `scripts/`, and this branch's own argument is that the number is the
-    product's one. `tests/` is excluded because these controls
-    legitimately name the constant and the setting.
+    `scripts/`. `tests/` is excluded because these controls legitimately
+    name the constant and the setting.
     """
     definitions, readers = [], []
     for path in iter_tree_files(ROOT):
@@ -403,9 +388,9 @@ def test_the_teardown_waits_read_the_one_cleanup_bound(_tmp):
     is never aliased, by attribute or by getattr. A runtime limb holds
     the loaded module's value against a fresh load of the definition,
     so any value divergence reds whatever its ast shape. The pin's
-    limit is the call's own spelling: a direct
-    `getattr(proc, 'wait')(...)` stays outside the walk -- the value
-    limb pins the bound's source, not every call spelling.
+    limit is the call's spelling: a direct `getattr(proc, 'wait')(...)`
+    stays outside the walk -- the value limb pins the bound's source,
+    not every call spelling.
     """
     tree = ast.parse(
         (ROOT / 'tests' / '_util.py').read_text(encoding='utf-8'))
@@ -525,7 +510,7 @@ def test_a_suite_that_ignored_the_request_reports_the_escalation_it_lost(tmp):
     assert [sig for _group, sig in signals.sent] == [
         signal.SIGTERM, signal.SIGKILL], signals.sent
     # Evidence the window was entered at all, which is the subject's own
-    # loop and not elapsed time: `Clock` advances only when it sleeps.
+    # loop, not elapsed time: `Clock` advances only when it sleeps.
     assert clock.slept >= SUITE_BOUND.CLEANUP_TIMEOUT_S, clock.slept
     assert record == (f'process group {GROUP} was already gone after '
                       f'{SUITE_BOUND.CLEANUP_TIMEOUT_S} s of grace'), record
@@ -546,10 +531,10 @@ def test_the_windows_route_asks_then_insists_by_taskkill(tmp):
     """The dispatch and both commands it sends, not the platform's answer.
 
     This runs on every cell, so what it proves is that a Windows platform
-    sends the request to the pid that leads the tree's group, spends the
-    grace, and only then sends the tree kill's own argv with exactly this
-    bound. Only a `windows-latest` cell proves that a real CTRL_BREAK and
-    a real `taskkill` end a real tree.
+    sends the request to the pid leading the tree's group, spends the
+    grace, and only then sends the tree kill's own argv with this bound;
+    only a `windows-latest` cell proves a real CTRL_BREAK and a real
+    `taskkill` end a real tree.
     """
     del tmp
     child = Child()
