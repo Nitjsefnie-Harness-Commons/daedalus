@@ -55,7 +55,6 @@ def _config(include=('tests',), exclude=()):
 
 def _thresholds_document(baseline=None):
     data = _thresholds().load(THRESHOLDS_SOURCE)
-    data['module_size_baseline'] = {}
     data['long_line_baseline'] = {}
     data['type_error_baseline'] = {} if baseline is None else dict(baseline)
     return data

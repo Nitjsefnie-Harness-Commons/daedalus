@@ -140,8 +140,7 @@ def test_delete_and_looser_readd_is_a_raise_against_base(tmp):
 
 
 def test_map_gates_exempt_only_declared_actual_removals(tmp):
-    cases = (('size_baseline', 'module_size_baseline', 'tracked_sizes', 600),
-             ('line_lengths', 'long_line_baseline', 'tracked_long_lines', 2),
+    cases = (('line_lengths', 'long_line_baseline', 'tracked_long_lines', 2),
              ('type_error_baseline', 'type_error_baseline', 'analyse', 2),
              ('js_module_coverage', 'js_coverage_baseline',
               'tracked_uncovered_counts', 2))
@@ -182,7 +181,7 @@ def test_map_gates_exempt_only_declared_actual_removals(tmp):
 
 
 def test_exemptions_fail_closed_on_unreadable_base_document(tmp):
-    family = 'module_size_baseline'
+    family = 'long_line_baseline'
     repo, rev = _history(tmp, 'bad-base', [
         f'fix: remove\n\nThresholds-Removed: {family}=bug'])
     removed = _util.load(GUARD.with_name('thresholds_removed.py'), 'bad_base')

@@ -1,9 +1,9 @@
 """The open pull requests whose head is one commit SHA.
 
 Its own module rather than another query in `gh_client.py`, which measured
-490 lines at the commit this branch starts from against the 500-line
-production ceiling the size policy enforces: ten lines of headroom, and the
-query and its two filters are more than ten lines. The whole of a subject
+490 lines at the commit this branch starts from against the size-ratchet
+action's 500-line ceiling: ten lines of headroom, and the query and its
+two filters are more than ten lines. The whole of a subject
 lives here, and `gh_client` stays the transport it already is for every
 watcher in this directory. That ceiling is why reading a refusal is
 `gh_rate_limit`'s subject and not this one's (issue 1338): one reader for

@@ -8,8 +8,8 @@ them. From `_dashsection._ELEMENTS` those are `PARKED`, `SELECTORS`,
 of which it writes `PARKED`, `SELECTORS` and `PUMP`; from
 `_dashnode.DOM` they are `CLICKS`, `ERRORS`, `STORAGE`, `MODULES`,
 `phase`, `jsonResponse` and `unmodelled`, all read. The split is the
-size ceiling's own remedy -- a file over the 700-line test ceiling is
-relocated, never given an entry -- and it puts each half's code with
+size-ratchet action's own remedy -- a file over the 700-line test ceiling
+is relocated, never given an entry -- and it puts each half's code with
 the half that owns it.
 
 Every response member and every plan a scenario reads is answered by

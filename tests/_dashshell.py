@@ -15,7 +15,7 @@ printed:
 `SHELL` is `_dashdom.DOM` followed by the transport, driver and report
 half below. The two halves share one module scope in the child, so this
 half reads `PARKED`, `OBSERVERS`, `STORAGE` and `CLICKS` from the DOM
-half. The split is the size baseline's own remedy: a file over the
+half. The split is the size-ratchet's remedy: a file over the
 700-line test ceiling is relocated, never given an entry.
 
 Nothing here decides how the dashboard should behave; it only makes a

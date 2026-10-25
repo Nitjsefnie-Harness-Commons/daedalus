@@ -25,9 +25,8 @@ precedent is #1223, where a hold read a settled green matrix with the gating
 workflow silently absent.
 
 It is a module of its own for a third reason: the callers sit near the
-500-line production ceiling the size policy enforces, and an expectation
-that lives inside a caller is an expectation the other caller can drift
-from.
+size-ratchet action's 500-line ceiling, and an expectation that lives
+inside a caller is an expectation the other caller can drift from.
 
 A run satisfies a requirement by its `name`, exactly. `Tests` and `test` are
 different workflows, and treating either as the gate would reinstate the

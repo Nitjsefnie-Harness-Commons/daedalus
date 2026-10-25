@@ -563,7 +563,6 @@ def test_javascript_gate_reads_floor_from_thresholds_file(tmp):
             'python': {'measured': 94.4, 'floor': 92.9},
             'javascript': {'measured': 50.0, 'floor': 48.5},
         },
-        'module_size_baseline': {},
         'long_line_baseline': {},
         'type_error_baseline': {},
         'js_coverage_baseline': {},

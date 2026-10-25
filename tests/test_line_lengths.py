@@ -223,7 +223,7 @@ def test_main_tighten_noop_then_changes_only_selected_member(tmp):
         'tests/steady.py': 2,
     }
     assert after['coverage'] == data['coverage']
-    assert after['module_size_baseline'] == data['module_size_baseline']
+    assert after['tests_line_baseline'] == data['tests_line_baseline']
 
 
 def test_every_tracked_module_satisfies_the_line_policy(tmp):
@@ -357,11 +357,9 @@ def test_real_cli_reports_threshold_load_failure_without_traceback(tmp):
 def test_workflow_tightens_long_lines_before_the_document_check(tmp):
     del tmp
     workflow = WORKFLOW_SOURCE.read_text(encoding='utf-8')
-    size = workflow.index('python scripts/ci/size_baseline.py --tighten')
     lines = workflow.index('python scripts/ci/line_lengths.py --tighten')
     check = workflow.index('python scripts/ci/thresholds.py --check')
-    assert size < lines < check
-    assert 'no module shrank.' not in workflow
+    assert lines < check
 
 
 def main():

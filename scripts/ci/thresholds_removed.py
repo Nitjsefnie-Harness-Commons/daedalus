@@ -8,8 +8,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 BASELINE_FAMILIES = frozenset({
-    'module_size_baseline', 'long_line_baseline', 'type_error_baseline',
-    'js_coverage_baseline',
+    'long_line_baseline', 'type_error_baseline', 'js_coverage_baseline',
 })
 
 

@@ -8,8 +8,8 @@ matrix is never dispatched, so the tool exited 0 on two unrelated green
 runs and every seat on this fleet read that as a green read.
 
 The controls live here rather than in test_ci_wait.py because that suite
-is within forty lines of its 700-line ceiling, and scripts/ci/
-size_baseline.py's own remedy for a file over it is to relocate the code
+is within forty lines of its 700-line ceiling, and the size-ratchet
+action's remedy for a file over a ceiling is to relocate the code
 into a new module. The verdict cases that already existed stay there: this
 is the state they had to be able to reach. The head-pull-request controls
 were relocated out of this file by the same remedy when it reached the

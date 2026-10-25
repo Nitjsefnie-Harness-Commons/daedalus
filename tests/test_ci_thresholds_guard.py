@@ -17,8 +17,8 @@ from _repo import ROOT  # noqa: E402
 sys.path.insert(0, str(ROOT / 'scripts/ci'))
 
 GUARD = ROOT / 'scripts/ci/thresholds_guard.py'
-FAMILIES = ('module_size_baseline', 'long_line_baseline',
-            'type_error_baseline', 'js_coverage_baseline')
+FAMILIES = ('long_line_baseline', 'type_error_baseline',
+            'js_coverage_baseline')
 
 
 def _history(tmp, name, subjects, base=None, head=None):
@@ -221,6 +221,22 @@ def test_unreadable_base_and_head_are_refusals(tmp):
         '--base', str(repo / 'missing'), '--head', str(valid),
         '--base-rev', rev])
     assert status == 1 and 'cannot read thresholds' in err, err
+
+
+def test_a_base_member_this_loader_has_retired_still_judges(tmp):
+    """The base reading drops what the current loader no longer defines.
+
+    The base document was written by the base revision's own loader, so a
+    document still carrying a retired baseline family must judge rather
+    than refusing the range; the head document keeps the strict reading.
+    """
+    base = _document()
+    base['retired_baseline'] = {'backend/kept.py': 9}
+    head = copy.deepcopy(base)
+    del head['retired_baseline']
+    repo, rev = _history(tmp, 'retired', [], base, head)
+    status, _out, err = _judge(repo, rev, base, head)
+    assert status == 0, err
 
 
 def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
