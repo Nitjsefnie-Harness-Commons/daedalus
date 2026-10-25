@@ -68,8 +68,9 @@ twelve CI legs then failed on a suite that loads `server.py` by path.
 - **Import-based enumeration cannot see a suite that scans rather than
   imports**, so it never proposes one and the gap is invisible.
   `tests/test_release_scan.py` reads every tracked file and refuses a
-  non-allowlisted host or a machine-specific path; `tests/test_file_sizes.py`
-  reads the tree the same way. Add every scanner
+  non-allowlisted host or a machine-specific path;
+  `tests/test_line_lengths.py` reads every tracked Python file the same
+  way. Add every scanner
   to the list whenever a change adds or edits a **string** in a tracked file -
   a different trigger from changing an import surface. A fake hostname inside a
   new test has failed all twelve legs at once while every suite that imports
@@ -174,16 +175,15 @@ The scanner's own patterns are the specification; do not reproduce them
 anywhere else in the tree, because a rule that quotes them trips them. It also refuses an empty tracked-file enumeration, because
 a scan that came back empty is broken rather than clean.
 
-**`.github/ci-thresholds.json`'s `module_size_baseline` is never hand-edited
-to make room, and a recorded number is never raised.** Growth is not the way
-out; shrinking is recorded with
-`python3 scripts/ci/size_baseline.py --tighten`. If a change would push a
-listed file past its number, relocate the code into a new module. A stale
-entry is the one hand edit that is correct:
-`python3 scripts/ci/size_baseline.py --tighten` drops an entry whose file is
-back under its ceiling, but an entry naming a file that is gone is deleted by
-hand. `tests/test_file_sizes.py` gates the measurement, refusal and tightening
-behavior.
+**File sizes are the size-ratchet action's records, never this
+repository's.** `.github/size-baseline.json` records every file over its
+ceiling (500 lines, 700 under `tests/`); a recorded number is never raised
+by hand and no entry is ever added by hand. If a change would push a file
+past its record, relocate the code into a new module, or shrink the file.
+The gate is the `size-baseline` job: a check on every pull request against
+the base revision's records and a tighten on every main push, whose changed
+records reach main through `scripts/ci/ratchet_push.py` like the other
+ratchets'. The tighten runs there; no local command writes these records.
 
 **The same file's `long_line_baseline` holds the 79-column policy on the same
 terms.** It records how many over-limit lines each tracked Python file still

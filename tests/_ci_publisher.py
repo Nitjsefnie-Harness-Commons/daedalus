@@ -20,7 +20,6 @@ from _yamlsteps import complete_job_mapping
 from _workflowrun import run_step
 
 RATCHET_PATH = ROOT / 'scripts' / 'ci' / 'ratchet.py'
-SIZE_PATH = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
 LINES_PATH = ROOT / 'scripts' / 'ci' / 'line_lengths.py'
 JS_MODULE_PATH = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
 JS_COVERAGE_PATH = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
@@ -43,7 +42,7 @@ def seed_publisher_tree(repo, data):
     document = json.dumps(data) if isinstance(data, dict) else data
     (repo / '.github' / 'ci-thresholds.json').write_text(
         document, encoding='utf-8')
-    for path in (RATCHET_PATH, SIZE_PATH, LINES_PATH, JS_MODULE_PATH,
+    for path in (RATCHET_PATH, LINES_PATH, JS_MODULE_PATH,
                  JS_COVERAGE_PATH, JS_LINES_PATH, TESTS_LINES_PATH,
                  ROOT / 'scripts/ci/thresholds_removed.py',
                  ROOT / 'scripts' / 'ci' / 'thresholds.py'):

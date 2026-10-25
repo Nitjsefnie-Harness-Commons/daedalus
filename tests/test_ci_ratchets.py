@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable contracts for coverage and module-size ratchets."""
+"""Executable contracts for the coverage ratchets and their publisher."""
 import contextlib, io
 import json
 import os
@@ -48,10 +48,6 @@ def _ratchet_document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
             'javascript': {
                 'measured': javascript[0], 'floor': javascript[1]},
         },
-        'module_size_baseline': {
-            'tests/test_mcp_server.py': 1706,
-            'tests/test_cli.py': 1238,
-        },
         'long_line_baseline': {},
         'type_error_baseline': {},
         'js_coverage_baseline': {},
@@ -84,7 +80,6 @@ PROMOTED_MODULES = (
     'scripts.ci.ratchet',
     'scripts.ci.ratchet_push',
     'scripts.ci.release_dispatch',
-    'scripts.ci.size_baseline',
     'scripts.ci.thresholds',
     'scripts.ci.thresholds_guard',
     'scripts.ci.tests_lines',
@@ -170,7 +165,6 @@ def test_public_update_uses_recorded_measurement_high_water(tmp):
         'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
     assert raised['coverage']['javascript'] == {
         'measured': 35.5, 'floor': 34.0}
-    assert raised['module_size_baseline'] == data['module_size_baseline']
     assert ratchet.update(raised, Decimal('81.6'), 'python') is None
     assert ratchet.update(raised, Decimal('81.7'), 'python') is None
 
@@ -187,10 +181,7 @@ def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
         'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
     assert data['coverage']['javascript'] == {
         'measured': Decimal('37.1'), 'floor': Decimal('35.6')}
-    assert data['module_size_baseline'] == {
-        'tests/test_cli.py': 1238,
-        'tests/test_mcp_server.py': 1706,
-    }
+    assert data['tests_line_baseline'] == 1706
 
 
 def test_cli_rejects_the_retired_workflow_option(tmp):
@@ -307,19 +298,16 @@ def test_publisher_python_carries_posix_and_windows_paths_without_embedding(
     assert native.stdout == 'shim works\n'
 
 
-def test_real_publisher_step_size_only_preserves_calibrations(tmp):
-    for name, measured, member in (
-            ('publisher-size', '80.0', 'module_size_baseline'),
-            ('publisher-combined', '81.6', 'module_size_baseline'),
-            ('publisher-tests-lines', '80.0', 'tests_line_baseline'),
-            ('publisher-tests-seed', '80.0', 'tests_line_baseline')):
+def test_real_publisher_step_member_only_preserves_calibrations(tmp):
+    for name, measured, recorded in (
+            ('publisher-combined', '81.6', 1707),
+            ('publisher-tests-lines', '80.0', 1707),
+            ('publisher-tests-seed', '80.0', None)):
         data = _ratchet_document()
-        if member == 'module_size_baseline':
-            data[member]['tests/test_mcp_server.py'] = 1707
+        if recorded is None:
+            del data['tests_line_baseline']
         else:
-            data[member] = 1707
-            if name == 'publisher-tests-seed':
-                del data[member]
+            data['tests_line_baseline'] = recorded
         repo, path, before, output, summary, done = _run_publisher_case(
             tmp, name, data, measured, '35.5')
         assert done.returncode == 0, (done.stdout, done.stderr)
@@ -334,13 +322,7 @@ def test_real_publisher_step_size_only_preserves_calibrations(tmp):
                 == data['coverage']['javascript']
         else:
             assert after['coverage'] == data['coverage']
-        if member == 'module_size_baseline':
-            assert after[member]['tests/test_mcp_server.py'] == 1706
-            assert after[member]['tests/test_cli.py'] == 1238
-        else:
-            assert after['tests_line_baseline'] == 1706
-            assert after['module_size_baseline'] \
-                == data['module_size_baseline']
+        assert after['tests_line_baseline'] == 1706
         assert path.read_bytes() != before
         assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
             '.github/ci-thresholds.json']
@@ -388,7 +370,7 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
     assert path.read_bytes() == before
     assert _git(repo, 'diff', '--name-only').stdout == ''
-    assert ('no raise; no module shrank, no file lost an over-limit '
+    assert ('no raise; no file lost an over-limit '
             'line, no module lost an uncovered JavaScript line and '
             'the suite tree lost no line.'
             ) in noop_summary.read_text(encoding='utf-8')

@@ -10,7 +10,6 @@
       "floor": 89.6
     }
   },
-  "module_size_baseline": {},
   "long_line_baseline": {
     "scripts/check_versions.py": 9,
     "tests/test_bridge_startup.py": 2,
@@ -47,7 +46,6 @@
     "tests/test_dashboard_behaviour.py": 12,
     "tests/test_delivery_stripe_acceptance.py": 1,
     "tests/test_exclusive_bind.py": 6,
-    "tests/test_file_sizes.py": 6,
     "tests/test_gitignore_generator.py": 1,
     "tests/test_http_transport.py": 1,
     "tests/test_js_coverage.py": 4,

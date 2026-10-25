@@ -17,8 +17,7 @@ _ONE_DECIMAL = Decimal('0.1')
 _SCHEMA_VERSION = 1
 _COVERAGE_LANGUAGES = ('python', 'javascript')
 _BASELINE_FIELDS = (
-    'module_size_baseline', 'long_line_baseline', 'type_error_baseline',
-    'js_coverage_baseline')
+    'long_line_baseline', 'type_error_baseline', 'js_coverage_baseline')
 # One tree-wide count rather than a mapping: the subject is the whole
 # directory, so a per-file row would have nothing to key on.
 _SCALAR_FIELDS = ('tests_line_baseline',)
@@ -211,16 +210,31 @@ def load(path=THRESHOLDS):
     return normalise(_decode(raw))
 
 
+def load_base(path):
+    """Read a base-revision document for the direction comparison.
+
+    The base document was written by the base revision's own loader, so a
+    member this loader does not define is dropped before validation: a
+    document still carrying a baseline family this loader retired loads,
+    and the current document keeps the strict reading in `load`.
+    """
+    target = Path(path)
+    try:
+        raw = target.read_bytes()
+    except OSError as error:
+        raise ValueError(f'cannot read thresholds: {error}') from None
+    data = _decode(raw)
+    for member in [key for key in data if key not in _TOP_LEVEL_FIELDS]:
+        del data[member]
+    return normalise(data)
+
+
 def coverage(data, language):
     if language not in _COVERAGE_LANGUAGES:
         raise ValueError(f'unknown coverage language: {language}')
     normalised = normalise(data)
     record = normalised['coverage'][language]
     return record['measured'], record['floor']
-
-
-def module_size_baseline(data):
-    return dict(normalise(data).get('module_size_baseline', {}))
 
 
 def long_line_baseline(data):

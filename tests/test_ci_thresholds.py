@@ -26,8 +26,8 @@ DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
 # The budget fixtures' children run outside the coverage paths.
 _CHILD_ENV = _util.child_coverage('scrub')
 # One list names both the document key and the reader call that must agree.
-_BASELINE_ACCESSORS = ('module_size_baseline', 'long_line_baseline',
-                       'type_error_baseline', 'js_coverage_baseline')
+_BASELINE_ACCESSORS = ('long_line_baseline', 'type_error_baseline',
+                       'js_coverage_baseline')
 
 
 def _thresholds():
@@ -176,14 +176,13 @@ def test_duplicate_keys_are_rejected_before_mapping_construction(tmp):
     path.write_text(
         '{"schema_version":1,"schema_version":1,'
         '"coverage":{"python":{"measured":80.0,"floor":78.5},'
-        '"javascript":{"measured":81.0,"floor":79.5}},'
-        '"module_size_baseline":{}}', encoding='utf-8')
+        '"javascript":{"measured":81.0,"floor":79.5}}}', encoding='utf-8')
     _assert_refused(path, 'duplicate JSON key: schema_version')
     path.write_text(
         '{"schema_version":1,"coverage":{"python":'
         '{"measured":80.0,"measured":81.0,"floor":79.5},'
-        '"javascript":{"measured":81.0,"floor":79.5}},'
-        '"module_size_baseline":{}}', encoding='utf-8')
+        '"javascript":{"measured":81.0,"floor":79.5}}}',
+        encoding='utf-8')
     _assert_refused(path, 'duplicate JSON key: measured')
 
 
@@ -199,8 +198,8 @@ def test_coverage_numbers_are_finite_bounded_and_one_decimal(tmp):
         path.write_text(
             '{"schema_version":1,"coverage":{"python":'
             f'{{"measured":{literal},"floor":78.5}},'
-            '"javascript":{"measured":81.0,"floor":79.5}},'
-            '"module_size_baseline":{}}', encoding='utf-8')
+            '"javascript":{"measured":81.0,"floor":79.5}}}',
+            encoding='utf-8')
         _assert_refused(path, 'non-finite JSON number')
 
 
@@ -210,6 +209,26 @@ def test_invalid_utf8_and_malformed_json_are_refused(tmp):
     _assert_load_refused(path, 'invalid thresholds JSON:')
     path.write_bytes(b'{')
     _assert_load_refused(path, 'invalid thresholds JSON:')
+
+
+def test_load_base_drops_members_this_loader_does_not_define(tmp):
+    """A base document was written by the base revision's own loader.
+
+    The direction guard reads the base document with this loader, so the
+    base reading must accept a document still carrying a member this
+    loader has retired; the current document keeps the strict reading.
+    """
+    path = Path(tmp) / 'base.json'
+    base = _valid()
+    base['retired_baseline'] = {'tests/gone.py': 10}
+    _write_json(path, base)
+    without = Path(tmp) / 'without.json'
+    _write_json(without, {key: value for key, value in base.items()
+                          if key != 'retired_baseline'})
+    loaded = _thresholds().load_base(path)
+    assert 'retired_baseline' not in loaded
+    assert loaded == _thresholds().load(without)
+    _assert_load_refused(path, 'unknown field: retired_baseline')
 
 
 def test_in_memory_coverage_rejects_nonfinite_and_nonobject_values(tmp):
@@ -257,7 +276,7 @@ def test_baseline_paths_and_counts_are_safe_and_positive(tmp):
                    'tests/CON.py', 'tests/trailing. ', 'tests/a\x01.py',
                    'tests/\ud800.py', 'tests/' + 'x' * 241 + '.py'):
         candidate = _valid()
-        candidate['module_size_baseline'] = {unsafe: 1}
+        candidate['long_line_baseline'] = {unsafe: 1}
         _write_json(path, candidate)
         _assert_refused(path, 'unsafe module path')
     for member in _BASELINE_ACCESSORS:

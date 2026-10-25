@@ -112,7 +112,8 @@ def _parser():
 def main(argv=None):
     args = _parser().parse_args(argv)
     try:
-        base, head = thresholds.load(args.base), thresholds.load(args.head)
+        base, head = (
+            thresholds.load_base(args.base), thresholds.load(args.head))
         feature = _has_feature_commits(args.base_rev, args.head_rev)
         declarations = thresholds_removed.declared(
             args.base_rev, args.head_rev, Path(__file__).resolve().parents[2])

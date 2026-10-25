@@ -2,7 +2,7 @@
 """Execute CI invariants that GitHub otherwise fails silently.
 
 They parse workflow configuration and evaluate job conditions."""
-# The line count is scripts/ci/size_baseline.py's to read; assertion bodies
+# The line count is the size-ratchet action's to read; assertion bodies
 # live in the test helper modules beside this one.
 import fnmatch
 import os

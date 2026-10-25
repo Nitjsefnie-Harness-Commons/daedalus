@@ -3,9 +3,9 @@
 `_dashshell.SHELL` is this string followed by the transport, driver and
 report half, and the two halves share one module scope in the child, so
 the transport half reads `PARKED`, `OBSERVERS`, `STORAGE` and `CLICKS`
-from here. The split is the size baseline's own remedy -- a file over the
-700-line test ceiling is relocated, never given an entry -- and it puts
-each half's code with the half that owns it.
+from here. The split is the size-ratchet action's own remedy -- a file over
+the 700-line test ceiling is relocated, never given an entry -- and it
+puts each half's code with the half that owns it.
 
 Nothing here decides how the dashboard should behave. A surface that is
 not modelled fails by name rather than answering, because `app.js`
