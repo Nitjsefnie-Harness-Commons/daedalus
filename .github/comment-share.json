@@ -1,7 +1,7 @@
 {
   ".claude/skills/changing-daedalus/ci_gate.py": [
-    7899,
-    9877
+    7888,
+    9866
   ],
   ".claude/skills/changing-daedalus/ci_wait.py": [
     10152,
@@ -12,8 +12,8 @@
     13805
   ],
   ".claude/skills/changing-daedalus/gh_head_prs.py": [
-    1567,
-    2207
+    1556,
+    2196
   ],
   ".claude/skills/changing-daedalus/gh_rate_limit.py": [
     6040,
@@ -495,10 +495,6 @@
     2033,
     4068
   ],
-  "scripts/ci/size_baseline.py": [
-    669,
-    3836
-  ],
   "scripts/ci/suite_bound.py": [
     6451,
     11341
@@ -680,8 +676,8 @@
     4804
   ],
   "tests/_dashshell.py": [
-    1995,
-    10680
+    1992,
+    10677
   ],
   "tests/_deadline_reach.py": [
     347,
@@ -1060,8 +1056,8 @@
     20513
   ],
   "tests/test_ci_wait_gate.py": [
-    9769,
-    23720
+    9766,
+    23717
   ],
   "tests/test_ci_wait_published.py": [
     10965,
