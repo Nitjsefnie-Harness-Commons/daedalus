@@ -16,12 +16,14 @@ on:
     # request open is not a tree anyone is reviewing.
     branches: [main]
     # Ratchet commits change only this data; audit still gates those pushes.
-    # The journey budget's counts and comment-share records join them: a
-    # tighten commit changes one JSON file, and its ratchet already ran.
+    # The journey budget's counts, comment-share records and the size
+    # records join them: a tighten commit changes one JSON file, and its
+    # ratchet already ran.
     paths-ignore:
       - '.github/ci-thresholds.json'
       - '.github/journey-budget.json'
       - '.github/comment-share.json'
+      - '.github/size-baseline.json'
     # release.yml needs a run on the tagged SHA; audit remains unfiltered.
     #
     # Documentation-only runs are narrowed inside the workflow instead, by
@@ -1151,13 +1153,12 @@ jobs:
           python scripts/ci/ratchet.py --language javascript \
             --measured "$javascript_measured" \
             --thresholds .github/ci-thresholds.json
-          # The size, long-line and per-module coverage baselines ratchet
-          # the other way: each follows a file down when it shrinks, so the
+          # The long-line and per-module coverage baselines ratchet the
+          # other way: each follows a file down when it shrinks, so the
           # lines cannot come back for free. The suite-tree budget is one
           # tree-wide count with the same rule. Growth is never written
-          # here — that stays a decision a reviewer sees.
-          python scripts/ci/size_baseline.py --tighten \
-            --thresholds .github/ci-thresholds.json
+          # here — that stays a decision a reviewer sees. File sizes are
+          # the size-ratchet action's records, in a job of their own.
           python scripts/ci/line_lengths.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/js_module_coverage.py --tighten \
@@ -1175,7 +1176,7 @@ jobs:
             # space between them, which is how this line lost one once.
             printf '%s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
-              "${javascript_measured}% justified no raise; no module shrank, no file lost an over-limit line, no module lost an uncovered JavaScript line and the suite tree lost no line." \
+              "${javascript_measured}% justified no raise; no file lost an over-limit line, no module lost an uncovered JavaScript line and the suite tree lost no line." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {
@@ -1514,6 +1515,61 @@ jobs:
           python3 scripts/ci/ratchet_push.py .github/journey-budget.json \
             'ci: tighten the journey budget'
 
+  size-baseline:
+    # File sizes are the size-ratchet action's records, never this
+    # repository's: the check judges every pull request against the base
+    # revision's records, and a main push tightens them, landing a change
+    # through the same records push the other ratchets use. A manual
+    # dispatch has neither a pull request base nor a default-branch push,
+    # and the action fails closed on that event, so the job steps out of
+    # workflow_dispatch's path rather than reding every dispatch.
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The branch policy refuses other refs; an empty name binds no
+    # environment, so pull requests can still run these checks.
+    environment: ${{ github.event_name == 'push'
+      && github.ref == 'refs/heads/main' && 'main-push' || '' }}
+    steps:
+      # actions/checkout v7.0.1
+      - uses: >-
+          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # The pull request's head tree, and full history so the base
+          # revision's records are readable without a token.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Nitjsefnie-Actions/size-ratchet@67bb01e536611398a3b5cedd3f3cf95fd6e5693e # v1.0.1
+        with:
+          overrides: 'tests/: 700'
+          exclude: 'examples/'
+      - name: Guard the measured records
+        id: records
+        if: github.event_name == 'push'
+        env:
+          DAEDALUS_EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$DAEDALUS_EXPECTED_SHA"
+          if git diff --quiet -- .github/size-baseline.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [ "$status" -ne 1 ]; then
+              exit "$status"
+            fi
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit the tighten
+        if: success() && steps.records.outputs.changed == 'true'
+        env:
+          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
+            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
+          DAEDALUS_REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/ci/ratchet_push.py .github/size-baseline.json \
+            'ci: tighten the size-baseline records'
+
   aggregate:
     name: Aggregate workflow checks
     if: ${{ always() }}
@@ -1529,6 +1585,7 @@ jobs:
       - coverage-matrix
       - coverage
       - journey-budget
+      - size-baseline
     runs-on: ubuntu-latest
     # Two numbers, and the gap between them is the reason for both. The
     # poll bound (DAEDALUS_SECRETS_POLL_BOUND_S below) IS the gitleaks job's
