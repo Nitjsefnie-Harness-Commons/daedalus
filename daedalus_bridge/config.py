@@ -40,10 +40,10 @@ MAX_DELIVERY_RESULTS = env_int(
     'DAEDALUS_MAX_DELIVERY_RESULTS', 1024, 0)
 
 # How deeply a JSON request body may nest containers. Without this the depth
-# actually enforced was whatever the running interpreter's recursion limit
-# happened to be, so one body got two answers: refused as too deeply nested on
-# 3.11 through 3.13, parsed on 3.14. The bound is checked against the raw bytes
-# before json.loads is asked to build anything, so the answer is this
+# actually enforced is whatever the running interpreter's recursion limit
+# happens to be, and that differs across interpreters, so the same body can
+# get two answers on two interpreters. The bound is checked against the raw
+# bytes before json.loads is asked to build anything, so the answer is this
 # repository's and the same everywhere. The ceiling is far below any
 # interpreter's recursion limit; nothing this bridge accepts nests near it.
 MAX_JSON_DEPTH = env_int('DAEDALUS_MAX_JSON_DEPTH', 100, 1, 500)
