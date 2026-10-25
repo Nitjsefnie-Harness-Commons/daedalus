@@ -297,7 +297,7 @@ jobs:
           steps.artifact.outputs.present == 'true'
           && steps.pr.outputs.stale != 'true'
           && steps.pr.outputs.present != 'false'
-        # actions/download-artifact v8.0.1
+        # actions/download-artifact v8.0.2
         uses: >-
           actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
