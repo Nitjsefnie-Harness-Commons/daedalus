@@ -9,7 +9,8 @@ from pathlib import Path
 if __package__:
     # pylint: disable-next=relative-beyond-top-level
     from .suite_bound import (
-        discard_outputs, launch_suite, suite_timeout, timeout_record)
+        discard_outputs, launch_suite, suite_timeout, timeout_record,
+        worker_count)
 else:
     # A workflow step runs this file by path, so `sys.path[0]` is
     # `scripts/ci` and the repository root is on no path at all. Which
@@ -20,7 +21,8 @@ else:
     # names — two module objects, two copies of the bound, which is the
     # drift this import exists to prevent.
     from suite_bound import (
-        discard_outputs, launch_suite, suite_timeout, timeout_record)
+        discard_outputs, launch_suite, suite_timeout, timeout_record,
+        worker_count)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -97,7 +99,7 @@ def main(argv=None):
     # not take the `TIMED OUT:` report below with it.
     outputs = tempfile.mkdtemp(prefix="daedalus-outputs-")
     try:
-        workers = min(len(suites), os.cpu_count() or 1)
+        workers = worker_count(len(suites))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(_run_suite, suite, outputs, bound): suite

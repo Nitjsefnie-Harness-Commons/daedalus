@@ -34,6 +34,12 @@ import subprocess
 import sys
 import time
 
+try:
+    import resource
+except ImportError:
+    # No descriptor limits to read where the module has no `resource`.
+    resource = None
+
 DEFAULT_SUITE_TIMEOUT_S = 900
 TIMEOUT_ENV = 'DAEDALUS_SUITE_TIMEOUT'
 # One number for every bounded step of a teardown, because the steps share
@@ -41,6 +47,10 @@ TIMEOUT_ENV = 'DAEDALUS_SUITE_TIMEOUT'
 # back through the error path that was supposed to report it.
 CLEANUP_TIMEOUT_S = 10
 GRACE_POLL_S = 0.05
+# stdio, the output file, the null stdin and the spawn error pipe, with one
+# descriptor of slack: what a launcher needs to start one more suite on top
+# of the one descriptor each active suite holds for its timed wait.
+WORKER_DESCRIPTOR_RESERVE = 8
 
 
 def suite_timeout():
@@ -66,6 +76,27 @@ def suite_timeout():
             f'{TIMEOUT_ENV}: must be a finite positive number; '
             f'got {raw!r}')
     return timeout
+
+
+def worker_count(suite_count):
+    """How many suites a launcher runs at once, and still starts the rest.
+
+    One suite per CPU, bounded by the descriptor budget where there is
+    one: every suite kept active holds one descriptor for the length of
+    its timed wait (a pidfd on Linux), so under a low `RLIMIT_NOFILE`
+    the last launches would fail before the CPU bound ever bound. No
+    limit to read, or an unlimited one, leaves the count to the CPUs.
+    """
+    workers = min(suite_count, os.cpu_count() or 1)
+    if resource is None:
+        return workers
+    try:
+        soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    except (OSError, ValueError):
+        return workers
+    if soft == resource.RLIM_INFINITY:
+        return workers
+    return min(workers, max(1, soft - WORKER_DESCRIPTOR_RESERVE))
 
 
 def timeout_record(name, bound, returncode, cleanup=''):
