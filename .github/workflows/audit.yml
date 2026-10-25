@@ -12,20 +12,22 @@ name: audit
 #   * the `mcp` extra in pyproject.toml, which the MCP server imports at
 #     runtime and is the only third-party code that executes in production;
 #   * requirements-dev.txt, the lint and type pins;
-#   * requirements-test.txt, the coverage pin;
 #   * requirements-release.txt, the release path's build and metadata tools;
 #   * requirements-pip-audit.txt, this gate's own tool.
 #
-# The last four never ship, but they run in CI holding the repository token,
+# The last three never ship, but they run in CI holding the repository token,
 # so a compromised one is a supply-chain problem even though no user installs
 # it.
 #
-# ONE MANIFEST IS DELIBERATELY ABSENT. requirements-zizmor.txt is
-# hash-pinned, and pip's hash checking is a property of the whole resolution
-# rather than of one file, so a hashed manifest cannot share this one
-# invocation with the unpinned four: it would drag every other surface into
-# hash mode and fail on hashes they do not carry. It is installed by its own
-# step in tests.yml, which touches no other manifest.
+# TWO MANIFESTS ARE DELIBERATELY ABSENT: requirements-zizmor.txt and
+# requirements-test.txt are hash-pinned, and pip's hash checking is a
+# property of the whole resolution rather than of one file — it turns itself
+# on when any requirement carries a hash — so a hashed manifest cannot share
+# this one invocation with the unpinned ones: it would drag every other
+# surface into hash mode and fail on hashes they do not carry.
+# requirements-zizmor.txt is installed by its own step in tests.yml, which
+# touches no other manifest; requirements-test.txt's installs name the
+# binary-only policy beside it.
 #
 # THE EXTRAS ARE DERIVED, NOT LISTED. The audit reads every extra out of
 # pyproject.toml rather than naming `mcp`, so adding a second extra cannot
@@ -90,7 +92,7 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.15"
           cache: pip
 
       - name: Install pip-audit
@@ -168,7 +170,6 @@ jobs:
                  --progress-spinner off \
                  --requirement extras-requirements.txt \
                  --requirement requirements-dev.txt \
-                 --requirement requirements-test.txt \
                  --requirement requirements-release.txt \
                  --requirement requirements-pip-audit.txt \
                  > audit.out 2>&1; then
