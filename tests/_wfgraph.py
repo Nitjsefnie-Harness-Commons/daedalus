@@ -112,9 +112,7 @@ def _matrix_job_running(workflow, matrix, command):
 
 
 def _python_matrix(workflow):
-    """The one literal job matrix that declares a python version; found
-    by that dimension, so an interpreter bump edits the workflow alone.
-    """
+    """The one literal job matrix that declares a python version."""
     found = []
     for name in _job_names(workflow):
         job = complete_job_mapping(workflow, name)
