@@ -25,9 +25,8 @@ from _journey_contract import (  # noqa: E402
 # the installed extension, and `front_end_symbol()` derives the init symbol
 # from the file that extension actually is. A literal in the tree is a
 # second copy of a contract with an owner, and a rename moves both copies
-# in one commit and leaves the suite agreeing with itself. The measurements
-# that decided WHICH symbols the table holds are in the module docstring and
-# in `tests/_journey_profile_fixture.py`.
+# in one commit and leaves the suite agreeing with itself. The deciding
+# measurements: the module docstring, the profile fixture.
 FRONT_END_EXTENSION = 'pydantic_core._pydantic_core'
 # What a thread that imports ANY module carries, and what the front end's
 # import has to be told apart from. A signature of these would call every
@@ -69,7 +68,8 @@ def front_end_symbol():
         f'{FRONT_END_EXTENSION} resolves to no file, so the front end\'s '
         f'signature cannot be checked against anything')
     leaf = spec.origin.replace('\\', '/').rsplit('/', 1)[-1]
-    return 'PyInit_' + leaf.split('.')[0]
+    prefix = 'PyModExport_' if sys.version_info >= (3, 15) else 'PyInit_'
+    return prefix + leaf.split('.')[0]
 
 
 def test_the_reader_collects_the_names_a_thread_declared(tmp):
@@ -270,7 +270,7 @@ def test_the_installed_extensions_init_symbol_is_the_one_that_was_measured(
     """
     del tmp
     classifier = _journey_contract.threads()
-    measured = ('PyInit__pydantic_core',)
+    measured = (front_end_symbol(),)
     assert classifier.SIGNATURES[classifier.IMPORT] == list(measured), (
         classifier.SIGNATURES[classifier.IMPORT])
     assert front_end_symbol() in measured, (

@@ -26,34 +26,22 @@ threads, and anything else the journey itself started.
 WHAT A SYMBOL CANNOT DO, measured on the real profiles in
 `tests/_journey_profile_fixture.py` (CPython 3.13.14, valgrind 3.24.0,
 `--separate-threads=yes --trace-children=yes`, three runs — `bridge-only`,
-`command-round-trip` and `mcp-exec`). Every per-thread figure quoted in this
-module comes out of one invocation, the same argv
-`journey_counters._callgrind` runs:
-
-    valgrind --tool=callgrind --trace-children=yes --separate-threads=yes \
-        --callgrind-out-file=<workdir>/callgrind.<journey>.%p \
-        python3 tests/_journeys.py --journey <journey> --root <root>
-
-That argv is unchanged by the counted boundary, and the shape of it is the
-point: `--instr-atstart` stays on and no toggle is added, so the bridge the
-harness spawns is instrumented from birth and counted exactly as before. The
-harness's own bootstrap LEAVES the measurement through a client request
-instead — `tests/_journeys.py` zeroes the counters at the first statement of
-`main()`, after its import closure has run and before anything is spawned —
-so the interpreter's startup and the compile of that closure are outside
-every total this module reads, which is the whole property: a count that
-moved with the byte size of a file its own harness compiles was never a
-count of the journey. `journey_child_env` says what refuses a run that has
-no helper to call.
+`command-round-trip` and `mcp-exec`), every per-thread figure quoted in
+this module coming out of one invocation of the argv
+`journey_counters._callgrind` runs, with the counted boundary zeroing the
+counters at the harness's first statement of `main()` — after its import
+closure has run and before anything is spawned, which is why interpreter
+startup and that closure's compile are outside every total this module
+reads. `journey_child_env` says what refuses a run with no helper to call.
 
 Each out file's `summary:` line is that thread's total,
 `read(<workdir>, 'callgrind.<journey>')` returns them all and `role_of` names
 each one, so a per-thread number here is reproducible rather than cited:
 
-  - The seven `TaskObj_*`/`FutureObj_*` symbols an earlier reading took as
-    exclusive to an event loop appear on NO background thread of any run.
-    `FutureObj_finalize` is not an `fn=` declaration anywhere in the three
-    profiles at all, so the set could never have fired.
+  - The seven `TaskObj_*`/`FutureObj_*` symbols once read as exclusive to
+    an event loop appear on NO background thread of any run;
+    `FutureObj_finalize` is no `fn=` declaration in the three profiles, so
+    the set could never have fired.
 
   - The front end's symbol is not exclusive to the bridge. `mcp-exec`'s own
     harness process runs its OWN MCP client, and that thread carries
@@ -61,11 +49,11 @@ each one, so a per-thread number here is reproducible rather than cited:
     `ossl_init_thread` and `pyo3::pyclass::create_type_object::
     create_type_object` as `fn=` declarations — every symbol the import
     signature could be built from, on the journey's OWN thread, at
-    3,820,164,240 instructions. A signature naming the front end's import is
-    a signature naming "a thread that imported the MCP stack", and in
-    `mcp-exec` that is the journey's own work. Excluding it drops the journey
-    with no refusal: issue 1466's own shape, reached through the door built
-    to close it.
+    3,820,164,240 instructions. A signature naming the front end's import
+    is a signature naming "a thread that imported the MCP stack", and in
+    `mcp-exec` that is the journey's own work: excluding it drops the
+    journey with no refusal, issue 1466's own shape reached through the
+    door built to close it.
 
   - A symbol's `fn=`/`cfn=` split is not a property of the thread.
     `PyInit__pydantic_core` is `fn=` on the bridge's front-end thread in the
@@ -76,24 +64,21 @@ each one, so a per-thread number here is reproducible rather than cited:
 So the reader takes BOTH declarations — each says the thread entered the
 symbol, and which one callgrind picks is a cost-attribution detail — and the
 one signature that survives names the FRONT END rather than the loop. The
-front end's own modules are pure Python and have no `PyInit_<name>` of their
-own, but `mcp==2.2.0` pulls pydantic v2, whose compiled core is a C
-extension whose leaf name is `_pydantic_core`, so CPython's init macro names
-it `PyInit__pydantic_core` — two underscores.
-`tests/test_journey_threads.py` derives the expected spelling from the
-installed `.so` rather than holding a copy of it, because a comment is not a
-control and a copy in the test would have been agreed with.
+front end's own modules are pure Python with no `PyInit_<name>` of their
+own, but `mcp==2.2.0` pulls pydantic v2, whose compiled core — a C extension
+leaf-named `_pydantic_core` — two underscores. `tests/test_journey_threads.py`
+derives it from the installed `.so` and the interpreter, not a copy.
 
 The narrower of the two directions is the safe one. A signature of the import
 MACHINERY instead — `import_find_and_load` and `_PyImport_RunModInitFunc`,
 which any importing thread carries — claims every request thread that
-imported anything. A thread that missed a signature is a thread that is
-COUNTED, which is a number that moved rather than a number that lost work.
+imported anything. A thread that missed a signature is COUNTED: a number
+that moved rather than a number that lost work.
 
 A slot is not a thread either: callgrind reuses one when a thread exits, so
 one file can hold several short-lived threads — a probe with four equal
-threads and one long one produced five files for six threads. The files still
-partition the process's cost, so the total is unchanged.
+threads and one long one produced five files for six threads. The files
+still partition the process's cost; the total is unchanged.
 
 A role is read from what the thread EXECUTED, never from its instruction
 total: a total is a cost proxy for identity, and the two populations a band
@@ -154,6 +139,7 @@ the gate exists to exclude is the worst failure this harness has, and it is
 invisible in the number it produces.
 """
 import re
+import sys
 
 SUMMARY = re.compile(r'^summary:\s+(\d+)\s*$', re.M)
 PID = re.compile(r'^pid:\s+(\d+)\s*$', re.M)
@@ -206,9 +192,13 @@ MAIN = 'main'
 ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 
 # What the FRONT END's import leaves on the thread that ran it — a role read
-# inside the background set, so it decides which background thread is the
-# one-off bootstrap and which is the bridge serving.
-MODULE_INIT_SIGNATURE = ('PyInit__pydantic_core',)
+# inside the background set: it decides bootstrap from bridge. The entry
+# point is the toolchain's: 3.15 enters at the slot-array `PyModExport_<leaf>`
+# -- measured, no PyInit executes there.
+if sys.version_info >= (3, 15):
+    MODULE_INIT_SIGNATURE = ('PyModExport__pydantic_core',)
+else:
+    MODULE_INIT_SIGNATURE = ('PyInit__pydantic_core',)
 
 # The table that puts a thread in a role, by role, so the artefact records
 # the one a recorded count was classified under and a run that read a profile
