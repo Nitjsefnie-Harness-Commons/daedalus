@@ -21,11 +21,9 @@ from _journey_contract import (  # noqa: E402
     _util,
 )
 
-# The symbol the front end's import is told by, named here so the controls
-# can say what they are looking for. `test_journey_threads.py` pins its
-# spelling against the installed extension; this file is about the PROFILE,
-# and a copy of the constant here is only ever compared with what a real
-# callgrind run declared.
+# The symbol the front end's import is told by. `test_journey_threads.py`
+# pins its spelling against the extension; this file is about the PROFILE:
+# a copy here is only compared with what a real run declared.
 FRONT_END = 'PyInit__pydantic_core'
 
 # A journey no exclusion list names, so its count is the whole tree and the
@@ -37,6 +35,8 @@ UNEXCLUDED = 'no-journey-excludes-this'
 def _read(journey):
     """`(classifier, rows)` for one preserved run, refusing an unread one."""
     classifier = _journey_contract.threads()
+    # 3.13 records: their own signature.
+    setattr(classifier, 'MODULE_INIT_SIGNATURE', (FRONT_END,))
     rows, unread = classifier.read(
         _journey_profile_fixture.profiles_for(journey),
         _journey_profile_fixture.PREFIX)
