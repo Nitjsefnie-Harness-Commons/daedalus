@@ -285,68 +285,68 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
     can tell a 404 the index will not repeat out of a 502 beside it, and only
     a run can tell which of the block's two tests was read first.
 
-    What it PRINTS is asserted too, because the harness collects it: how many
-    times the tool ran and what the block exited with are two of the facts a
-    reader of this log actually gets, and the others are what tell a genuine
-    finding from an index error, a retried transport failure from a backoff
-    the block never took, and a refusal from a clean run. Every one of the
-    block's five outcomes is named by exactly the arm that owns it and by no
-    other — including the retry, which is announced per attempt and shows the
-    tail of what the tool wrote each time.
+    What it PRINTS is asserted too: the runs taken, the block's exit, the
+    per-attempt retry announcements, and the bounded excerpt each attempt
+    shows. Every one of the block's five outcomes is named by exactly the
+    arm that owns it and by no other.
     """
-    body = _audit_step('Audit dependencies')
-    announcements = _audit_announcements(body)
-    refusals = [text for kind, text in announcements if kind == 'refusal']
-    announcing = [text for kind, text in announcements if kind == 'retry']
-    assert len(set(refusals)) == len(refusals), (
-        f'two outcomes refuse in the same words: {refusals}')
-    assert len(announcing) == 1, (
-        f'the block announces a retry in {len(announcing)} ways, so "the '
-        f'retry arm announced itself" names no single line: {announcing}')
-    marker = announcing[0]
-    assert '$attempt' in marker, (
-        f'the retry announcement names no attempt: {marker!r}. Interpolated '
-        f'per attempt it is what tells one attempt from another, and a fixed '
-        f'string prints identically every time, so counting it proves only '
-        f'that the line is there')
-    assert marker not in refusals, (
-        f'the retry announcement is also a refusal text, so no output of the '
-        f'block tells the two apart: {marker!r}')
-    for label, output, runs, code in AUDIT_RETRY_FIXTURES:
-        outcome = audit_step_outcome(
-            body, output, cwd=tmp, env=_util.child_coverage('scrub'),
-            code=code)
-        assert (outcome['runs'], outcome['code']) == (runs, code), (
-            f'{label}: {outcome}')
-        assert output.strip() in outcome['out'], (
-            f'{label}: the block ended without printing what the tool wrote: '
-            f'{outcome}')
-        printed = [text for text in refusals if text in outcome['out']]
-        assert len(printed) == (0 if not code else 1), (
-            f'{label}: printed {printed}, and each outcome names itself once')
-        expected = list(range(1, runs + 1)) if runs > 1 else []
-        announced = [attempt for attempt in range(1, runs + 1)
-                     if marker.replace('$attempt', str(attempt))
-                     in outcome['out']]
-        assert announced == expected, (
-            f'{label}: {runs} attempts, and the retry arm has to announce '
-            f'every one of them and no other arm announces anything; it '
-            f'announced {announced} of {expected}: {outcome}')
-        if runs > 1:
-            lines = output.strip().splitlines()
-            shown = outcome['out'].count
-            assert all(shown(line) >= runs for line in lines[-5:]), (
-                f'{label}: each attempt showed the reader the tail of what '
-                f'the tool wrote, so those lines appear once per attempt, '
-                f'not only in the report the last one ends with: {outcome}')
-            assert all(shown(line) <= 1 for line in lines[:-5]), (
-                f'{label}: the excerpt is bounded, so the lines above it '
-                f'reach the log only in the final report: {outcome}')
-        waits = outcome['sleeps']
-        assert len(waits) >= runs - 1, (
-            f'{label}: {runs} attempts, so every retry between them has to '
-            f'wait, and these are the waits it took: {outcome}')
-        assert all(0 < first < second
-                   for first, second in zip(waits, waits[1:])), (
-            f'{label}: each attempt must wait longer than the one before it, '
-            f'and these are the waits it took: {waits}')
+    # Both pip-audit blocks carry the same five-outcome retry: the shared
+    # four-surface invocation and the dedicated hash-pinned one, each
+    # driven through the same executed fixtures -- a copy of a retried
+    # block is retried machinery nobody has pinned.
+    blocks = [_audit_step('Audit dependencies'),
+              _audit_step('Audit the hash-pinned test toolchain')]
+    for body in blocks:
+        announcements = _audit_announcements(body)
+        refusals = [t for kind, t in announcements if kind == 'refusal']
+        announcing = [t for kind, t in announcements if kind == 'retry']
+        assert len(set(refusals)) == len(refusals), (
+            f'two outcomes refuse in the same words: {refusals}')
+        assert len(announcing) == 1, (
+            f'the block announces a retry in {len(announcing)} ways; the '
+            f'retry arm must name the one line: {announcing}')
+        marker = announcing[0]
+        assert '$attempt' in marker, (
+            f'the retry announcement names no attempt: {marker!r}; a '
+            f'fixed string prints identically every attempt')
+        assert marker not in refusals, (
+            f'the retry announcement is also a refusal: {marker!r}')
+        for label, output, runs, code in AUDIT_RETRY_FIXTURES:
+            outcome = audit_step_outcome(
+                body, output, cwd=tmp, env=_util.child_coverage('scrub'),
+                code=code)
+            assert (outcome['runs'], outcome['code']) == (runs, code), (
+                f'{label}: {outcome}')
+            assert output.strip() in outcome['out'], (
+                f'{label}: the block ended without printing what the '
+                f'tool wrote: {outcome}')
+            printed = [t for t in refusals if t in outcome['out']]
+            assert len(printed) == (0 if not code else 1), (
+                f'{label}: printed {printed}; each outcome names itself '
+                f'once')
+            expected = list(range(1, runs + 1)) if runs > 1 else []
+            announced = [attempt for attempt in range(1, runs + 1)
+                         if marker.replace('$attempt', str(attempt))
+                         in outcome['out']]
+            assert announced == expected, (
+                f'{label}: {runs} attempts; the retry arm announces '
+                f'every one and no other arm announces anything: '
+                f'{announced} of {expected}: {outcome}')
+            if runs > 1:
+                shown = outcome['out'].count
+                tail_lines = output.strip().splitlines()
+                assert all(shown(line) >= runs
+                           for line in tail_lines[-5:]), (
+                    f'{label}: each attempt showed the reader the tail '
+                    f'of what the tool wrote: {outcome}')
+                assert all(shown(line) <= 1
+                           for line in tail_lines[:-5]), (
+                    f'{label}: the excerpt is bounded: {outcome}')
+            waits = outcome['sleeps']
+            assert len(waits) >= runs - 1, (
+                f'{label}: {runs} attempts, so every retry between them '
+                f'has to wait: {outcome}')
+            assert all(0 < first < second
+                       for first, second in zip(waits, waits[1:])), (
+                f'{label}: each attempt must wait longer than the one '
+                f'before it: {waits}')
