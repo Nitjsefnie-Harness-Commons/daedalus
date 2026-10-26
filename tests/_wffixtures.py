@@ -241,10 +241,10 @@ def assert_the_audit_covers_every_dependency_surface():
         in_dedicated = f'--requirement {name}' in dedicated
         if name == 'requirements-zizmor.txt':  # the documented exception
             assert not in_shared and not in_dedicated, (name,)
+        elif hashed:
+            assert in_dedicated and not in_shared, (name, in_shared)
         else:
-            assert (in_dedicated, not in_shared) if hashed \
-                else (in_shared, not in_dedicated), (
-                name, hashed, in_shared, in_dedicated)
+            assert in_shared and not in_dedicated, (name, in_dedicated)
     # The extras are read out of pyproject.toml rather than listed, so a
     # second extra cannot escape the audit by nobody remembering it here.
     assert "['optional-dependencies'].values()" in workflow, workflow
