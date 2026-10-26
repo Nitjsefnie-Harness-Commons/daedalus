@@ -205,8 +205,6 @@ jobs:
           cat audit.out >&2
           exit 1
 
-  # tests.yml and codeql.yml skip ratchet-records-only pushes; this
-  # unfiltered workflow validates the thresholds document.
       - name: Audit the hash-pinned test toolchain
         # requirements-test.txt is hash-pinned, so pip-audit resolves
         # it in hash mode — which is exactly why it cannot join the
