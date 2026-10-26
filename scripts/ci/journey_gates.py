@@ -169,20 +169,18 @@ def _recorded_gates(report):
 
     Four, on the same terms: a different toolchain, a different set of
     excluded threads, a different table of signatures the roles were read
-    by, and a different journey rendering are four different quantities, and
+    by, and a different journey rendering are four different quantities —
     a count measured against any of them says nothing about the code. A
-    gate whose value has never been recorded is the same refusal — there is
-    nothing to have differed from, and falling through to comparing would
-    compare a count against a question that was never asked.
+    gate whose value has never been recorded is the same refusal: there
+    is nothing to have differed from, and comparing would compare a count
+    against a question that was never asked.
     """
     def _recorded(field):
         """The recorded map, or None when it is absent or holds nothing.
 
         A field that is PRESENT AND EMPTY is the never-recorded state, and
         it must read as that rather than as a value that changed: `{}` and
-        `null` say the same thing about what has been measured, and a gate
-        that treated the first as a change would report a difference from
-        nothing.
+        `null` say the same thing about what has been measured.
         """
         def read(document):
             value = document.get(field)
@@ -202,7 +200,8 @@ def _recorded_gates(report):
          'differs': exclusion_diff},
         {'subject': 'thread signatures', 'remedy': SIGNATURES_REMEDY,
          'recorded': _recorded('thread_signatures'),
-         'measured': lambda measured: journey_threads.SIGNATURES,
+         'measured': lambda measured: journey_threads.signatures_for(
+             (measured.get('toolchain') or {}).get('python')),
          'differs': map_diff},
         {'subject': 'journey shas', 'remedy': SHA_REMEDY,
          'recorded': _recorded('shas'),

@@ -33,11 +33,11 @@ PER_RUN = ('did', '_did', 'deliveryId', 'resultGeneration', 'roundtrip_ms',
            'age')
 
 
-# A recorded identity: any toolchain the schema accepts, used where the
-# test is about something else and needs a toolchain that MATCHES.
-IDENTITY = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
-            'valgrind_version': 'valgrind-3.24.0',
-            'runner_image': 'ubuntu24 20260801.1.0'}
+# Any toolchain the schema accepts, used where a test needs one that
+# MATCHES; its python decides the signature gate's derivation.
+IDENTITY = {'python': '3.15.1 (main, Oct 21 2026, 14:53:25) [GCC 13.3.0]',
+            'valgrind_version': 'valgrind-3.22.0',
+            'runner_image': 'ubuntu24 20261023.334.3'}
 
 
 def policy():
@@ -216,7 +216,8 @@ def recorded_document(**over):
         excluded_threads={name: list(policy.excluded_for(name))
                           for name in journeys().NAMES},
         thread_signatures={
-            role: list(names) for role, names in policy.SIGNATURES.items()},
+            role: list(names) for role, names in
+            policy.signatures_for(IDENTITY['python']).items()},
         shas={name: seen[0]
               for name, seen in fixture_shas().items()})
     document.update(over)
@@ -226,11 +227,11 @@ def recorded_document(**over):
 def recorded_maps():
     """The three maps a measurement carries so a comparison can happen.
 
-    The fourth gate is the SIGNATURES, and the measured side of that one is
-    the classifier's own table rather than anything a report carries, so it
-    is not here. A check refuses on any recorded value being un-recorded, so a
-    test that means to exercise the BUDGET rather than the refusal has to
-    hand the gate a measurement that says the other three.
+    The fourth gate is the SIGNATURES, derived from the measurement's
+    own toolchain rather than carried here. A check refuses on any
+    recorded value being un-recorded, so a test that means to exercise
+    the BUDGET rather than the refusal has to hand the gate a
+    measurement that says the other three.
     """
     policy = threads()
     return {'shas': fixture_shas(),

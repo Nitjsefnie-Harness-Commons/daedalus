@@ -34,59 +34,20 @@ closure has run and before anything is spawned, which is why interpreter
 startup and that closure's compile are outside every total this module
 reads. `journey_child_env` says what refuses a run with no helper to call.
 
-Each out file's `summary:` line is that thread's total,
-`read(<workdir>, 'callgrind.<journey>')` returns them all and `role_of` names
-each one, so a per-thread number here is reproducible rather than cited:
-
-  - The seven `TaskObj_*`/`FutureObj_*` symbols once read as exclusive to
-    an event loop appear on NO background thread of any run;
-    `FutureObj_finalize` is no `fn=` declaration in the three profiles, so
-    the set could never have fired.
-
-  - The front end's symbol is not exclusive to the bridge. `mcp-exec`'s own
-    harness process runs its OWN MCP client, and that thread carries
-    `PyInit__pydantic_core`, `PyInit__cffi_backend`, `PyInit__rust`,
-    `ossl_init_thread` and `pyo3::pyclass::create_type_object::
-    create_type_object` as `fn=` declarations — every symbol the import
-    signature could be built from, on the journey's OWN thread, at
-    3,820,164,240 instructions. A signature naming the front end's import
-    is a signature naming "a thread that imported the MCP stack", and in
-    `mcp-exec` that is the journey's own work: excluding it drops the
-    journey with no refusal, issue 1466's own shape reached through the
-    door built to close it.
-
-  - A symbol's `fn=`/`cfn=` split is not a property of the thread.
-    `PyInit__pydantic_core` is `fn=` on the bridge's front-end thread in the
-    `bridge-only` run and `cfn=` on that same thread in `command-round-trip`.
-    Reading `fn=` alone decides the import role by coin flip, and the earlier
-    claim that both families appear as `fn=` is what hid it.
-
-So the reader takes BOTH declarations — each says the thread entered the
-symbol, and which one callgrind picks is a cost-attribution detail — and the
-one signature that survives names the FRONT END rather than the loop. The
-front end's own modules are pure Python with no `PyInit_<name>` of their
-own, but `mcp==2.2.0` pulls pydantic v2, whose compiled core — a C extension
-leaf-named `_pydantic_core` — two underscores. `tests/test_journey_threads.py`
-derives it from the installed `.so` and the interpreter, not a copy.
-
-The narrower of the two directions is the safe one. A signature of the import
-MACHINERY instead — `import_find_and_load` and `_PyImport_RunModInitFunc`,
-which any importing thread carries — claims every request thread that
-imported anything. A thread that missed a signature is COUNTED: a number
-that moved rather than a number that lost work.
-
-A slot is not a thread either: callgrind reuses one when a thread exits, so
-one file can hold several short-lived threads — a probe with four equal
-threads and one long one produced five files for six threads. The files
-still partition the process's cost; the total is unchanged.
-
-A role is read from what the thread EXECUTED, never from its instruction
-total: a total is a cost proxy for identity, and the two populations a band
-has to tell apart overlap in cost — `command-round-trip`'s own per-connection
-request thread measured 3,548,079 Ir, 2.82x under the serve floor, so the day
-that work grows past it the thread reads as the background it excludes and
-the journey's own work silently leaves the count (issue 1466). No threshold
-fixes that, because the overlap is in the populations.
+WHAT THE MEASUREMENTS DECIDED, and where each fact now lives: the front
+end's import names the FRONT END rather than the loop because the loop's
+candidates appear on no background thread while `mcp-exec`'s own harness
+client carries every symbol the import could be named from — pinned on the
+preserved profiles by `tests/test_journey_real_profile.py`; both `fn=` and
+`cfn=` declarations are read because the same thread of the same bridge
+declares the import one way in one run and the other way in the next; the
+slots-not-threads and no-threshold findings are stated by
+`tests/test_journey_placement.py` and the fixture descriptor. The reader
+takes BOTH declarations — each says the thread entered the symbol — and
+the one signature that survives names the front end: `mcp==2.2.0` pulls
+pydantic v2, whose compiled core is leaf-named `_pydantic_core` — two
+underscores. `tests/test_journey_threads.py` derives it from the installed
+`.so` and the interpreter, not a copy.
 
 A slot's whole cost is still assigned from one role, so a role says what the
 slot spent its life on, not which of the threads that shared it was which.
@@ -191,14 +152,28 @@ REQUEST = 'request'
 MAIN = 'main'
 ROLES = (IMPORT, SERVE, REQUEST, MAIN)
 
+
 # What the FRONT END's import leaves on the thread that ran it — a role read
-# inside the background set: it decides bootstrap from bridge. The entry
-# point is the toolchain's: 3.15 enters at the slot-array `PyModExport_<leaf>`
-# -- measured, no PyInit executes there.
-if sys.version_info >= (3, 15):
-    MODULE_INIT_SIGNATURE = ('PyModExport__pydantic_core',)
-else:
-    MODULE_INIT_SIGNATURE = ('PyInit__pydantic_core',)
+# inside the background set: it decides bootstrap from bridge.
+def signatures_for(python=None):
+    """The table a toolchain's python classifies a profile by.
+
+    `python` is a recorded toolchain string (`3.15.1 (main, ...)`); its
+    first two components pick the entry point. 3.15 enters an extension at
+    the slot-array `PyModExport_<leaf>` and never executes the
+    `PyInit_<leaf>` it still exports -- measured under callgrind, which is
+    why the gate reads this for the MEASUREMENT's toolchain rather than
+    for the interpreter that happens to run the check.
+    """
+    version = (python or sys.version.split()[0]).split()[0]
+    prefix = ('PyModExport_' if [int(part) for part in
+                                 version.split('.')[:2]] >= [3, 15]
+              else 'PyInit_')
+    return {IMPORT: [prefix + '_pydantic_core']}
+
+
+MODULE_INIT_SIGNATURE = tuple(signatures_for()[IMPORT])
+SIGNATURES = signatures_for()
 
 # The table that puts a thread in a role, by role, so the artefact records
 # the one a recorded count was classified under and a run that read a profile
