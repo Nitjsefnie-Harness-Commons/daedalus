@@ -540,23 +540,22 @@ def test_every_journey_drops_the_front_ends_bootstrap_import(tmp):
 
 
 def test_the_artefact_records_the_signatures_that_decide_a_role(tmp):
-    """The committed `thread_signatures` IS the live table, by VALUE.
+    """The committed `thread_signatures` is the table the RECORDED
+    toolchain classifies by, by value.
 
-    The ROLES a journey leaves out are recorded and checked by NAME
-    elsewhere; the table that PUTS a thread in one of them was recorded and
-    never read back, so a run could classify a profile under one set of
-    symbols and compare the count against totals taken under another. The
-    literal asserted here stays derived from the installed extension.
+    The derivation is asked for the RECORDED python, not the running one:
+    on another matrix leg the two spellings differ and the comparison is
+    the check's toolchain-moved path, not this refusal.
     """
     del tmp
     threads = _journey_contract.threads()
     assert set(threads.SIGNATURES) == {threads.IMPORT}, threads.SIGNATURES
-    recorded = _journey_contract.artifact().load()['thread_signatures']
-    assert recorded == dict(threads.SIGNATURES), (
-        f'thread_signatures is recorded as {recorded} and the table puts a '
-        f'thread in a role by {dict(threads.SIGNATURES)}, so this artefact '
-        'counts a different quantity from the table a run classified the '
-        'profile under')
+    assert threads.SIGNATURES == threads.signatures_for(), (
+        'the live table is not this interpreter\'s own derivation')
+    document = _journey_contract.artifact().load()
+    recorded = document['thread_signatures']
+    expected = threads.signatures_for(document['toolchain']['python'])
+    assert recorded == expected, (recorded, expected)
 
 
 def test_the_artefact_is_the_table_it_was_recorded_under(tmp):

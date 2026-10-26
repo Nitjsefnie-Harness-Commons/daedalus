@@ -33,9 +33,9 @@ from _journey_contract import (  # noqa: E402
 # One RECORDED toolchain: the three strings a baseline is stamped with, so
 # these tests compare a count against an identity rather than against
 # whatever the runner happens to be today.
-RECORDED = {'python': '3.13.15 (main, Aug  6 2026, 02:15:18) [GCC 13.3.0]',
-            'valgrind_version': 'valgrind-3.24.0',
-            'runner_image': 'ubuntu24 20260801.1.0'}
+RECORDED = {'python': '3.15.1 (main, Oct 21 2026, 14:53:25) [GCC 13.3.0]',
+            'valgrind_version': 'valgrind-3.22.0',
+            'runner_image': 'ubuntu24 20261023.334.3'}
 
 
 # ─── a recorded gate that moved is not a regression ──────────────────────────
@@ -60,15 +60,15 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
     said = spoken.getvalue()
     assert 'toolchain changed, re-baseline' in said, said
     assert 'no count was compared' in said, said
-    assert 'valgrind-3.24.0' in said and 'valgrind-3.25.0' in said, said
-    # The table the summary carries, which is what says no count was
-    # compared: the journey's own recorded and measured numbers, neither
-    # of which was compared against the other.
+    assert RECORDED['valgrind_version'] in said and 'valgrind-3.25.0' in said, said
+    # The table the summary carries: the journey's own recorded and
+    # measured numbers, neither compared against the other.
     report_module = _util.load(ROOT / 'scripts' / 'ci' / 'journey_report.py',
                                'journey_report_contract')
     summary = report_module.toolchain_lines(
         policy.load(artifact), json.loads(measurements.read_text()),
-        {'valgrind_version': ('valgrind-3.24.0', 'valgrind-3.25.0')},
+        {'valgrind_version': (RECORDED['valgrind_version'],
+                              'valgrind-3.25.0')},
         policy.TOOLCHAIN_REMEDY)
     joined = '\n'.join(summary)
     assert '**toolchain changed, re-baseline.**' in joined, joined
@@ -204,8 +204,8 @@ def test_a_gate_that_moved_says_so_in_the_summary_of_a_plain_check(tmp):
     # reason's escape so a field name or a toolchain identity carrying a pipe
     # cannot spend the row, and a code span is the one context where a
     # renderer does not consume the doubled backslash the escape relies on.
-    assert ('| valgrind_version | valgrind-3.24.0 | valgrind-3.25.0 |'
-            in said), (
+    assert (f'| valgrind_version | {RECORDED["valgrind_version"]} | '
+            f'valgrind-3.25.0 |' in said), (
         'the summary must carry BOTH values of the field that moved, or a '
         f'reader is told to re-baseline without being told what moved: {said}')
     assert policy.TOOLCHAIN_REMEDY in said, said
