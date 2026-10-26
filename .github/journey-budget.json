@@ -24,7 +24,7 @@
     "segment-relay": ["front-end-import"]
   },
   "thread_signatures": {
-    "front-end-import": ["PyInit__pydantic_core"]
+    "front-end-import": ["PyModExport__pydantic_core"]
   },
   "shas": {
     "cdp-result": "a309c336573b87df188e73f8d3597e38b98a4720e9dba5f35d8f169ab8a01850",
