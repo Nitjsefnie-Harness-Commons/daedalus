@@ -11,18 +11,17 @@ necessary" — so what this removes is the transcription, not the decision.
 One command reads the `measure --out` files it is given and writes the
 artefact from them, so what lands is the runs' own measurements rather
 than a reader's copy of a table. Several files are one recording: the
-recorded count is the median of the files' own medians, every file must
-agree on what was rendered and on what it ran on, and a `--draws` pool
-re-binds a journey to the span of its own draws.
+recorded count is the median of the files' medians, every file must agree
+on the rendering and on what it ran on, and a `--draws` pool re-binds a
+journey to the span of its own draws.
 """
 import json
 import sys
 from pathlib import Path
 
-# The counter, artefact and thread modules sit beside this one and are
-# imported by their own names, which is what a run from the repository
-# root, a run from anywhere else and `python3 -m scripts.ci.journey_budget`
-# all do. A relative import would only work for the last of the three.
+# The sibling modules import by their own names, which a run from the
+# root, from anywhere else and `python3 -m scripts.ci.journey_budget`
+# all require; a relative import would only work for the last.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journey_artifact  # noqa: E402  pylint: disable=wrong-import-position
 import journey_counters  # noqa: E402  pylint: disable=wrong-import-position
@@ -118,10 +117,11 @@ def document_from(reports, recorded, restore=(), drop=(), draws=()):
                 # `None` rather than absent: every schema field is spelled
                 # here so a document that omitted one would be refused, and
                 # a null band table is what drops the field from the
-                # rendered document on the next re-baseline. The signatures
-                # replace it as the table a count is classified under.
+                # rendered document on the next re-baseline. The
+                # signatures are what the MEASUREMENT classified by.
                 'thread_bands': None,
-                'thread_signatures': dict(journey_threads.SIGNATURES),
+                'thread_signatures': journey_threads.signatures_for(
+                    toolchain.get('python')),
                 'shas': shas, 'journeys': journeys}
     # The field list is the SCHEMA'S, not a literal beside it: a document
     # that omitted a field would be one the next run refuses, with a

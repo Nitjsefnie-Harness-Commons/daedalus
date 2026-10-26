@@ -173,7 +173,6 @@ def signatures_for(python=None):
 
 
 MODULE_INIT_SIGNATURE = tuple(signatures_for()[IMPORT])
-SIGNATURES = signatures_for()
 
 # The table that puts a thread in a role, by role, so the artefact records
 # the one a recorded count was classified under and a run that read a profile

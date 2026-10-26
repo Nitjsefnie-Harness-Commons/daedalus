@@ -126,14 +126,12 @@ def test_a_re_baseline_writes_what_the_next_run_accepts(tmp):
     assert written['toolchain'] == report['toolchain'], written['toolchain']
     assert written['shas'] == {name: seen[0] for name, seen
                                in report['shas'].items()}, written['shas']
-    # The signatures come from the classifier and not from the report, so a
-    # re-baseline records the table the NEXT run will classify by; the band
-    # table it replaced is dropped rather than carried forward as a field
-    # nothing reads.
+    # The signatures are what the MEASUREMENT classified by, from its own
+    # toolchain -- never this process's, and never "the next run's": a
+    # run on another interpreter still records what it classified by.
     threads = _journey_contract.threads()
-    assert written['thread_signatures'] == {
-        role: list(names) for role, names in threads.SIGNATURES.items()}, \
-        written['thread_signatures']
+    assert written['thread_signatures'] == threads.signatures_for(
+        report['toolchain']['python']), written['thread_signatures']
     assert written.get('thread_bands') is None, written.get('thread_bands')
     assert policy.render(written) == artifact.read_bytes(), (
         'the artefact on disk is not what render() writes for it, so the '
