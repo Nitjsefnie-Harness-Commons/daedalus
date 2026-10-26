@@ -416,8 +416,8 @@
     7206
   ],
   "scripts/ci/classify_changes.py": [
-    2102,
-    5566
+    2084,
+    5609
   ],
   "scripts/ci/coverage_combine.py": [
     746,
@@ -456,12 +456,12 @@
     7537
   ],
   "scripts/ci/journey_gates.py": [
-    5397,
-    9979
+    5308,
+    9941
   ],
   "scripts/ci/journey_rebaseline.py": [
-    7669,
-    13306
+    7586,
+    13246
   ],
   "scripts/ci/journey_recording.py": [
     3543,
@@ -480,8 +480,8 @@
     4328
   ],
   "scripts/ci/journey_threads.py": [
-    17960,
-    21033
+    15736,
+    19033
   ],
   "scripts/ci/js_module_coverage.py": [
     1138,
@@ -536,8 +536,8 @@
     20010
   ],
   "tests/_block_field_probes.py": [
-    562,
-    3462
+    503,
+    3332
   ],
   "tests/_boundary.py": [
     1928,
@@ -616,8 +616,8 @@
     512
   ],
   "tests/_coverage_bindings.py": [
-    10715,
-    18026
+    10666,
+    17977
   ],
   "tests/_coverage_comment_workflow.py": [
     676,
@@ -724,8 +724,8 @@
     680
   ],
   "tests/_journey_contract.py": [
-    10027,
-    20666
+    9984,
+    20673
   ],
   "tests/_journey_profile_fixture.py": [
     1719,
@@ -940,12 +940,12 @@
     2284
   ],
   "tests/_wffixtures.py": [
-    4836,
-    12831
+    4652,
+    12519
   ],
   "tests/_wfgraph.py": [
-    1518,
-    7063
+    1449,
+    7434
   ],
   "tests/_wfjobs.py": [
     1540,
@@ -1364,7 +1364,7 @@
     25105
   ],
   "tests/test_journey_budget_gates.py": [
-    5349,
+    5304,
     24315
   ],
   "tests/test_journey_counters.py": [
@@ -1380,8 +1380,8 @@
     4440
   ],
   "tests/test_journey_real_profile.py": [
-    3234,
-    6157
+    3175,
+    6154
   ],
   "tests/test_journey_rebaseline.py": [
     2972,
@@ -1396,12 +1396,12 @@
     12671
   ],
   "tests/test_journey_threads.py": [
-    9167,
-    21713
+    9020,
+    21617
   ],
   "tests/test_journey_tighten.py": [
-    2770,
-    15812
+    2750,
+    15785
   ],
   "tests/test_js_lines.py": [
     1915,
@@ -1428,8 +1428,8 @@
     6367
   ],
   "tests/test_mcp_import_refusals.py": [
-    5838,
-    19214
+    5832,
+    19353
   ],
   "tests/test_mcp_live_tools.py": [
     4303,
@@ -1588,8 +1588,8 @@
     10336
   ],
   "tests/test_suite_bound.py": [
-    7361,
-    22670
+    6768,
+    22531
   ],
   "tests/test_suite_bound_survivor.py": [
     4736,
