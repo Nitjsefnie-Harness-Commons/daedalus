@@ -122,8 +122,16 @@ pyright
 npx --no-install eslint $(git ls-files '*.js' ':!:examples/*')
 ```
 
-`pip install -r requirements-dev.txt -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML`
-gets the pinned toolchain. Formatting opinions are switched off on purpose
+The pinned toolchain installs in two commands — the test manifest is
+hash-pinned, and pip refuses an unhashed pin beside hashed ones in one
+resolution:
+
+```bash
+pip install -r requirements-dev.txt --only-binary=:all: --no-binary=PyYAML
+pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
+```
+
+Formatting opinions are switched off on purpose
 (`max-line-length = 10000`), so treat anything the linters *do* flag as a real
 finding; the 79-column limit is gated by `python3 tests/test_line_lengths.py`
 instead.
