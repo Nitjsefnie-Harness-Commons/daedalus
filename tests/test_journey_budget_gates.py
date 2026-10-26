@@ -60,7 +60,8 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
     said = spoken.getvalue()
     assert 'toolchain changed, re-baseline' in said, said
     assert 'no count was compared' in said, said
-    assert RECORDED['valgrind_version'] in said and 'valgrind-3.25.0' in said, said
+    assert (RECORDED['valgrind_version'] in said
+            and 'valgrind-3.25.0' in said), said
     # The table the summary carries: the journey's own recorded and
     # measured numbers, neither compared against the other.
     report_module = _util.load(ROOT / 'scripts' / 'ci' / 'journey_report.py',
@@ -68,8 +69,7 @@ def test_a_toolchain_change_is_not_a_regression_and_says_the_words(tmp):
     summary = report_module.toolchain_lines(
         policy.load(artifact), json.loads(measurements.read_text()),
         {'valgrind_version': (RECORDED['valgrind_version'],
-                              'valgrind-3.25.0')},
-        policy.TOOLCHAIN_REMEDY)
+         'valgrind-3.25.0')}, policy.TOOLCHAIN_REMEDY)
     joined = '\n'.join(summary)
     assert '**toolchain changed, re-baseline.**' in joined, joined
     assert 'No count was compared.' in joined, joined

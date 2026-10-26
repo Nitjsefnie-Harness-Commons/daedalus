@@ -26,6 +26,7 @@ from _journey_contract import (  # noqa: E402
     journeys,
     line_endings,
     measured_report,
+    IDENTITY,
     recorded_document,
     recorded_maps,
 )
@@ -249,19 +250,17 @@ def test_the_artefact_carries_the_toolchain_a_count_depends_on(tmp):
 def test_the_signatures_a_count_was_classified_under_are_recorded(tmp):
     """`excluded_threads` records the roles; the symbols that put a thread
     IN a role are recorded beside them, so reading a profile by different
-    symbols is a change the gate can see.
-
-    This is the bands gate's own argument with its subject replaced. The
-    `Ir` thresholds stopped deciding a role when identity replaced size, so
-    the field that records them was replaced rather than left comparing a
-    table nothing reads.
+    symbols is a change the gate can see. This is the bands gate's own
+    argument with its subject replaced. The record is pinned to the
+    derivation for the RECORDED toolchain's python: on a leg whose
+    interpreter spells the other prefix, the check takes the
+    toolchain-moved path instead.
     """
     policy = _journey_contract.policy()
     threads = _journey_contract.threads()
     document = recorded_document()
-    assert document['thread_signatures'] == {
-        role: list(names) for role, names in threads.SIGNATURES.items()}, \
-        document['thread_signatures']
+    assert document['thread_signatures'] == threads.signatures_for(
+        document['toolchain']['python']), document['thread_signatures']
     # The recorded artefact carries a symbol the CODE no longer matches on,
     # which is what changing the table looks like from the gate's side: the
     # measurement is the module's own table, so the artefact is the only
@@ -279,7 +278,8 @@ def test_the_signatures_a_count_was_classified_under_are_recorded(tmp):
     said = spoken.getvalue()
     assert 'thread signatures changed' in said, said
     assert (f"{threads.IMPORT}: recorded ['some_other_symbol'], measured "
-            f"{threads.SIGNATURES[threads.IMPORT]}") in said, said
+            f"{threads.signatures_for(IDENTITY['python'])[threads.IMPORT]}"
+            in said), said
 
 
 def test_every_shape_the_schema_refuses_is_still_refused(tmp):
