@@ -452,7 +452,8 @@ def fixture_report():
                                  for name in names},
             'thread_signatures': {
                 role: list(names)
-                for role, names in threads().SIGNATURES.items()},
+                for role, names in threads().signatures_for(
+                    IDENTITY['python']).items()},
             'shas': shas,
             'counters': {'valgrind-callgrind': {
                 'available': True, 'startup_only': 0,
