@@ -19,13 +19,16 @@ name: audit
 # so a compromised one is a supply-chain problem even though no user installs
 # it.
 #
-# TWO MANIFESTS ARE DELIBERATELY ABSENT: requirements-zizmor.txt and
-# requirements-test.txt are hash-pinned, and pip's hash checking is
-# resolution-wide — it turns on when any requirement carries one — so
-# a hashed manifest cannot share this invocation: it would drag every
-# surface into hash mode and fail on hashes they do not carry. zizmor's
-# is installed by a tests.yml step; requirements-test.txt's installs
-# name the binary-only policy.
+# requirements-zizmor.txt is hash-pinned and DELIBERATELY ABSENT here:
+# pip's hash checking is resolution-wide — it turns on when any
+# requirement carries a hash — so a hashed manifest cannot share this
+# invocation with the unpinned ones; it would drag every surface into
+# hash mode and fail on hashes they do not carry. zizmor's manifest is
+# installed by its own tests.yml step. requirements-test.txt is also
+# hash-pinned, but it RUNS in CI holding the repository token, so it
+# is audited in its own dedicated invocation below instead of being
+# left out.
+
 #
 # THE EXTRAS ARE DERIVED, NOT LISTED. The audit reads every extra out of
 # pyproject.toml rather than naming `mcp`, so adding a second extra cannot
@@ -128,9 +131,9 @@ jobs:
           fi
 
       - name: Audit dependencies
-        # All five surfaces in one invocation so a package constrained by
-        # more than one of them is resolved once, consistently — the same way
-        # an install would see it.
+        # The four unpinned surfaces in one invocation so a package
+        # constrained by more than one of them is resolved once,
+        # consistently — the same way an install would see it.
         #
         # No --ignore-vuln entries at present. Each one added here must carry
         # a comment naming the advisory, why it is not fixable, and what would
@@ -200,6 +203,52 @@ jobs:
 
           echo "pip-audit could not reach PyPI after 3 attempts:" >&2
           cat audit.out >&2
+          exit 1
+
+  # tests.yml and codeql.yml skip ratchet-records-only pushes; this
+  # unfiltered workflow validates the thresholds document.
+      - name: Audit the hash-pinned test toolchain
+        # requirements-test.txt is hash-pinned, so pip-audit resolves
+        # it in hash mode — which is exactly why it cannot join the
+        # shared invocation above: every unpinned surface there would
+        # fail on hashes it does not carry. A dedicated run resolves the
+        # three hashed pins against their own hashes and audits them
+        # alone, with the same five-outcome retry for the same reasons.
+        run: |
+          for attempt in 1 2 3; do
+            if pip-audit \
+                 --progress-spinner off \
+                 --requirement requirements-test.txt \
+                 > audit-test.out 2>&1; then
+              cat audit-test.out
+              exit 0
+            fi
+
+            # The 429 exception is scoped to the SAME LINE the 4xx test
+            # matched: a whole-file search reads a 429 somewhere else in the
+            # output — an advisory version, an unrelated service line — as this
+            # one being retryable, and retries the 4xx three times instead.
+            if grep -E '4[0-9][0-9] Client Error' audit-test.out |
+               grep -qv '429'; then
+              echo "pip-audit got a 4xx from the index it will not repeat:" >&2
+              cat audit-test.out >&2
+              exit 1
+            fi
+
+            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit-test.out; then
+              echo "attempt $attempt: index failure talking to PyPI, retrying"
+              tail -n 5 audit-test.out
+              sleep $(( attempt * 15 ))
+              continue
+            fi
+
+            echo "pip-audit reported findings:" >&2
+            cat audit-test.out >&2
+            exit 1
+          done
+
+          echo "pip-audit could not reach PyPI after 3 attempts:" >&2
+          cat audit-test.out >&2
           exit 1
 
   # tests.yml and codeql.yml skip ratchet-records-only pushes; this

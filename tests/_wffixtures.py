@@ -218,16 +218,12 @@ def audit_step_outcome(body, output, cwd, env, code=1):
 
 
 def assert_the_audit_covers_every_dependency_surface():
-    """pip-audit is handed every unpinned requirements file and every extra.
-
-    The published wheel declares no dependencies, so `pip-audit .` over this
-    project collects zero packages — an audit that can never fire. A surface
-    added to the tree without being added to the invocation would leave the
-    gate green while going unchecked, so the one class allowed to be absent
-    is pinned here too: a HASH-PINNED manifest cannot share one resolution
-    with the unpinned ones, and a manifest that claims to be hash-pinned
-    without a hash is the opposite defect, so exactly one of the two holds.
-    """
+    """pip-audit reaches every requirements file and every extra: an
+    unpinned manifest via the shared invocation, a hash-pinned one via the
+    dedicated invocation (hash mode is resolution-wide and would fail every
+    unpinned surface beside it), and zizmor's manifest — the documented
+    exception its gate hash-verifies — via neither. Neither-both is this
+    refusal."""
     workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
         encoding='utf-8')
     listed = subprocess.run(
@@ -236,15 +232,19 @@ def assert_the_audit_covers_every_dependency_surface():
     requirement_files = [
         os.fsdecode(path) for path in listed.stdout.split(b'\0') if path]
     assert requirement_files, 'no requirements file is tracked'
+    dedicated_at = workflow.index('      - name: Audit the hash-pinned')
+    shared, dedicated = workflow[:dedicated_at], workflow[dedicated_at:]
     for name in requirement_files:
         hashed = '--hash=sha256:' in (ROOT / name).read_text(
             encoding='utf-8')
-        named = f'--requirement {name}' in workflow
-        assert named != hashed, (
-            f'{name}: hash-pinned={hashed}, audited={named}. A hash-pinned '
-            f'manifest cannot share the audit\'s one resolution and is '
-            f'excluded; every other manifest is named --requirement there.')
-
+        in_shared = f'--requirement {name}' in shared
+        in_dedicated = f'--requirement {name}' in dedicated
+        if name == 'requirements-zizmor.txt':  # the documented exception
+            assert not in_shared and not in_dedicated, (name,)
+        else:
+            assert (in_dedicated, not in_shared) if hashed \
+                else (in_shared, not in_dedicated), (
+                name, hashed, in_shared, in_dedicated)
     # The extras are read out of pyproject.toml rather than listed, so a
     # second extra cannot escape the audit by nobody remembering it here.
     assert "['optional-dependencies'].values()" in workflow, workflow
