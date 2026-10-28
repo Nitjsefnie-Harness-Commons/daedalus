@@ -2,7 +2,7 @@
 # Pinned exactly, like every other dependency here: pip's build isolation
 # resolves this line, so a floor means the wheel is built by whatever shipped
 # most recently rather than by the version anyone tested.
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
