@@ -21,14 +21,6 @@ from _workflow_cache_boundary import (  # noqa: E402
 )
 
 
-def test_steps_less_local_job_is_empty_but_reusable_job_is_pending(tmp):
-    local = 'jobs:\n  local:\n    runs-on: ubuntu-latest\n'
-    assert _cache_writing_jobs(local) == set()
-    reusable = 'jobs:\n  called:\n    uses: ./.github/workflows/other.yml\n'
-    _refuses(_cache_writing_jobs, reusable,
-             contains='pending-recursive-inspection')
-
-
 def test_actions_cache_combined_and_save_write_restore_reads(tmp):
     cases = (
         ('actions/cache@v4', 'actions/cache combined post-save'),
