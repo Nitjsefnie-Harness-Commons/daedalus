@@ -180,10 +180,12 @@ repository's.** `.github/size-baseline.json` records every file over its
 ceiling (500 lines, 700 under `tests/`); a recorded number is never raised
 by hand and no entry is ever added by hand. If a change would push a file
 past its record, relocate the code into a new module, or shrink the file.
-The gate is the `size-baseline` job: a check on every pull request against
-the base revision's records and a tighten on every main push, whose changed
-records reach main through `scripts/ci/ratchet_push.py` like the other
-ratchets'. The tighten runs there; no local command writes these records.
+The gate is `.github/workflows/size-baseline.yml`, which `tests.yml`'s
+`size-baseline` job calls: a check on every pull request against the base
+revision's records and a tighten on every main push. The action commits
+changed records with the deploy key in the file's own default-branch push
+run, since a called run reads that environment secret as empty. The tighten
+runs there; no local command writes these records.
 
 **The same file's `long_line_baseline` holds the 79-column policy on the same
 terms.** It records how many over-limit lines each tracked Python file still
