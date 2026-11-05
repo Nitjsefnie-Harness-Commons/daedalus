@@ -200,7 +200,7 @@ def evaluate(needs, repository, run_id, branch, read):
                  and job.get('steps') == []
                  and isinstance(job.get('name'), str)
                  and any(job['name'] == key
-                         or job['name'].startswith(key + ' (')
+                         or job['name'].startswith((key + ' (', key + ' / '))
                          for key in cancelled)]
     if unstarted:
         return CANCEL_UNSTARTED, (
