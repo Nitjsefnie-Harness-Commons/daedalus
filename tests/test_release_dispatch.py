@@ -198,7 +198,8 @@ def _wait(tmp, mode, pages, *args):
 
 def test_wait_gates_pending_then_green_with_exact_exclusions(tmp):
     excluded = [_row('release', conclusion='failure'),
-                _row('pr gate', conclusion='failure')]
+                _row('pr gate', conclusion='failure'),
+                _row('pin test screen', conclusion='failure')]
     comment = _row('comment gate', conclusion='failure')
     comment['event'] = 'issue_comment'
     excluded.append(comment)

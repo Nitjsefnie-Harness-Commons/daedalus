@@ -101,8 +101,8 @@ jobs:
           DAEDALUS_REPO: ${{ github.repository }}
           DAEDALUS_SHA: ${{ github.sha }}
         # Wait for every workflow run on this tagged commit except release
-        # itself, pr gate (anchored on the base tip, not this commit), and
-        # issue_comment events. The tests matrix is among these gates: a
+        # itself, pr gate and pin test screen (both anchored on the base tip,
+        # not this commit), and issue_comment events. The tests matrix is among these gates: a
         # cell queued for a macOS runner holds this job until it concludes.
         # ZERO runs is a failure after the registration grace, never a pass.
         # Release dispatch waits for this same set to go green before tagging,
@@ -117,6 +117,7 @@ jobs:
                       --jq '.workflow_runs[]
                             | select(.name != "release")
                             | select(.name != "pr gate")
+                            | select(.name != "pin test screen")
                             | select(.event != "issue_comment")
                             | "\(.name)\t\(.status)\t\(.conclusion)"')"
             total=$(printf '%s\n' "$runs" | awk 'NF { n++ } END { print n + 0 }')
