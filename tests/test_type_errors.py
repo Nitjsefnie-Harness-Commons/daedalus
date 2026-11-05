@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The changing-daedalus skill keeps the test-tree type-error ratchet's rule."""
+"""The changing-daedalus skill keeps the test-tree type-error ratchet rule."""
 import sys
 from pathlib import Path
 
