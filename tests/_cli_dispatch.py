@@ -25,7 +25,6 @@ import os
 import socket
 import sys
 import time
-import types
 
 import _cli_parse
 
@@ -306,21 +305,6 @@ def wired(module, recorded):
                 delattr(target, name)
             else:
                 setattr(target, name, original)
-
-
-def drive(call, answers, plan=None, **options):
-    """Run `call` against the fakes, the way `run_cli` dispatches a handler.
-
-    The harness's own controls use this with a small local callable instead
-    of a handler: the callable reads `api` and the rest off the namespace it
-    is handed, which is how a handler reads them off its own module.
-    """
-    recorded = RecordingExtCmd(answers, plan=plan, **options)
-    space = types.SimpleNamespace()
-    with wired(space, recorded):
-        call(space)
-    recorded.assert_plan_consumed()
-    return recorded
 
 
 def _dispatch(argv, answers, module, plan, **options):
