@@ -1,7 +1,7 @@
 {
   ".claude/skills/changing-daedalus/ci_gate.py": [
-    7888,
-    9866
+    7827,
+    9805
   ],
   ".claude/skills/changing-daedalus/ci_wait.py": [
     10152,
@@ -56,8 +56,8 @@
     1933
   ],
   ".github/workflows/pr-gate.yml": [
-    728,
-    1384
+    427,
+    1095
   ],
   ".github/workflows/release.yml": [
     5063,
@@ -1032,8 +1032,8 @@
     16778
   ],
   "tests/test_ci_workflows.py": [
-    4799,
-    22739
+    4783,
+    22692
   ],
   "tests/test_claim_workflow.py": [
     708,
