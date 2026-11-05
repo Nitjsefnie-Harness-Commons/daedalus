@@ -96,17 +96,17 @@ while True:
 '''
 
 # The spawn-shim child: the poller with `subprocess.Popen` replaced by
-# a subclass that records the child's pid the moment the real spawn
-# returns, then holds until a gate file appears - the mid-spawn window.
-SHIM_POLLER = '''import os, subprocess, sys, time
+# a subclass that atomically publishes the child's pid the moment the real
+# spawn returns, then holds until a gate file appears - the mid-spawn window.
+SHIM_POLLER = '''import os, pathlib, subprocess, sys, time
 sys.path.insert(0, {skill!r})
 _real_popen = subprocess.Popen
 
 class HeldPopen(_real_popen):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        with open({pidfile!r}, 'w', encoding='utf-8') as handle:
-            handle.write(str(self.pid))
+        pathlib.Path({pidfile!r} + '.new').write_text(str(self.pid))
+        os.replace({pidfile!r} + '.new', {pidfile!r})
         while not os.path.exists({gate!r}):
             time.sleep(0.02)
 
