@@ -91,6 +91,7 @@
 !/.github/workflows/comment-share.yml
 !/.github/workflows/coverage-comment.yml
 !/.github/workflows/gate-freshness.yml
+!/.github/workflows/pin-guard.yml
 !/.github/workflows/pr-gate.yml
 !/.github/workflows/release-dispatch.yml
 !/.github/workflows/release.yml
