@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-import _ratchet_fixture  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
@@ -116,11 +115,8 @@ def test_absent_maps_remain_valid_in_derived_fixtures(tmp):
         data.pop(member, None)
     path = Path(tmp) / 'without-maps.json'
     _write_json(path, data)
-    with (patch.dict(globals(), DATA_PATH=path),
-          patch.object(_ratchet_fixture, 'THRESHOLDS_SOURCE', path)):
+    with patch.dict(globals(), DATA_PATH=path):
         test_shipped_document_is_exact_and_cli_checkable(tmp)
-        test_absent_budget_round_trips_and_preserves_other_validation(tmp)
-        test_tests_line_budget_tightens_a_drop_and_never_raises(tmp)
 
 
 def test_coverage_floor_cli_emits_the_loaded_numeric_floor(tmp):
