@@ -110,8 +110,8 @@ def test_bump_current_main_all_sites_and_output(tmp):
     assert sha == _out(bare, 'rev-parse', 'main')
     _ok(_drive(work, 'bump', VERSION, '--successor'))
     assert _out(work, 'log', '-2', '--format=%s').splitlines() == [
-        'chore(release): stop main claiming the version release 0.28.0 '
-        'published',
+        ('chore(release): stop main claiming the version release 0.28.0 '
+         'published'),
         'chore(release): claim 0.28.0 across every version site']
 
 
