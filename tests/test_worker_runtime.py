@@ -570,7 +570,7 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
 
 
 def test_tracked_tree_preflight_names_untracked_imported_module(tmp):
-    """An imported worker omitted from Git fails before the export runs."""
+    """An imported worker omitted from Git fails the tracked preflight."""
     root = Path(tmp)
     source_root = root / 'source'
     worker_root = source_root / 'extension' / 'worker'
