@@ -1605,6 +1605,9 @@ jobs:
           # is reusable by every later step in the job.
           persist-credentials: false
 
+      - name: Check the suite tree stays within its line budget
+        run: python3 scripts/ci/tests_lines.py --thresholds .github/ci-thresholds.json
+
       - name: Check no tracked file carries a merge-conflict marker
         # A conflict marker is text that looks like prose in a Markdown file,
         # so only a mechanical check can see it. git grep reads the tracked
@@ -1614,14 +1617,11 @@ jobs:
         # `<<<<<<< ` and `>>>>>>> ` carry the label after seven characters, and
         # the separator is exactly seven `=`; diff3's extra `||||||| base` line
         # changes nothing, because the other three are still written.
-        # In this job rather than a new one: a new job would be a new required
-        # status context, which means editing the ruleset, and `Aggregate
-        # workflow checks` already reports on every pull request regardless of
-        # the docs-only classifier (`if: always()`) — doc-only commits are
-        # exactly where a Markdown marker lands.
-        # Immediately before the verdict step: fail fast — the secrets verdict
-        # the next step renders can wait out a 10-minute poll bound, and a
-        # marker commit should not spend it.
+        # In this job, not a new one: a new job is a new required status
+        # context (a ruleset edit), and `Aggregate workflow checks` reports on
+        # every pull request whatever the docs-only classifier says
+        # (`if: always()`) — doc-only commits are where a marker lands. Ahead
+        # of the verdict step so a marker never waits out its poll bound.
         # Explicit `shell: bash`: the explicit form adds --noprofile --norc,
         # and pipefail is its only operative delta — the body already guards
         # `git grep` with `|| found=$?`, so no pipe here can turn "no match"
