@@ -90,7 +90,6 @@ omit = [
     "run_tests.py",
     "scripts/ci/suite_bound.py",
     "scripts/ci/type_error_baseline.py",
-    "scripts/ci/tests_lines.py",
 ]
 
 [tool.coverage.paths]

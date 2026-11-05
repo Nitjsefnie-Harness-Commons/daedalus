@@ -1143,16 +1143,14 @@ jobs:
             --thresholds .github/ci-thresholds.json
           # The long-line and per-module coverage baselines ratchet the
           # other way: each follows a file down when it shrinks, so the
-          # lines cannot come back for free. The suite-tree budget is one
-          # tree-wide count with the same rule. Growth is never written
-          # here — that stays a decision a reviewer sees. File sizes are
-          # the size-ratchet action's records, in a workflow of their own.
+          # lines cannot come back for free. Growth is never written
+          # here — that stays a decision a reviewer sees. File sizes and
+          # the suite tree's line budget are the size-ratchet action's
+          # records, in a workflow of their own.
           python scripts/ci/line_lengths.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/js_module_coverage.py --tighten \
             "$NODE_V8_COVERAGE" \
-            --thresholds .github/ci-thresholds.json
-          python scripts/ci/tests_lines.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/thresholds.py --check \
             --thresholds .github/ci-thresholds.json
@@ -1164,7 +1162,7 @@ jobs:
             # space between them, which is how this line lost one once.
             printf '%s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
-              "${javascript_measured}% justified no raise; no file lost an over-limit line, no module lost an uncovered JavaScript line and the suite tree lost no line." \
+              "${javascript_measured}% justified no raise; no file lost an over-limit line and no module lost an uncovered JavaScript line." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {
@@ -1556,9 +1554,6 @@ jobs:
           # Nothing here pushes, and a token left in .git/config
           # is reusable by every later step in the job.
           persist-credentials: false
-
-      - name: Check the suite tree stays within its line budget
-        run: python3 scripts/ci/tests_lines.py --thresholds .github/ci-thresholds.json
 
       - name: Check no tracked file carries a merge-conflict marker
         # A conflict marker is text that looks like prose in a Markdown file,

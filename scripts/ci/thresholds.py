@@ -18,11 +18,7 @@ _SCHEMA_VERSION = 1
 _COVERAGE_LANGUAGES = ('python', 'javascript')
 _BASELINE_FIELDS = (
     'long_line_baseline', 'type_error_baseline', 'js_coverage_baseline')
-# One tree-wide count rather than a mapping: the subject is the whole
-# directory, so a per-file row would have nothing to key on.
-_SCALAR_FIELDS = ('tests_line_baseline',)
-_TOP_LEVEL_FIELDS = (
-    'schema_version', 'coverage', *_BASELINE_FIELDS, *_SCALAR_FIELDS)
+_TOP_LEVEL_FIELDS = ('schema_version', 'coverage', *_BASELINE_FIELDS)
 _COVERAGE_FIELDS = ('measured', 'floor')
 _FIELD_LABELS = {
     'thresholds': 'field: {field}',
@@ -144,7 +140,7 @@ def _module_path(value):
 def normalise(data):
     """Validate recorded values and preserve absent budgets."""
     _required_fields(data, _TOP_LEVEL_FIELDS, 'thresholds',
-                     optional=(*_BASELINE_FIELDS, *_SCALAR_FIELDS))
+                     optional=_BASELINE_FIELDS)
     schema = _number(data['schema_version'], 'schema_version')
     if schema != _SCHEMA_VERSION or schema != schema.to_integral_value():
         raise ValueError(
@@ -176,10 +172,6 @@ def normalise(data):
     for member in _BASELINE_FIELDS:
         if member in data:
             normalised[member] = _baseline(data[member], member)
-    for member in _SCALAR_FIELDS:
-        if member not in data:
-            continue
-        normalised[member] = _positive_int(data[member], member)
     return normalised
 
 
@@ -254,12 +246,6 @@ def type_error_baseline(data):
 
 def js_coverage_baseline(data):
     return dict(normalise(data).get('js_coverage_baseline', {}))
-
-
-def tests_line_baseline(data):
-    """Return None when no budget is recorded."""
-    return normalise(data).get(
-        'tests_line_baseline')
 
 
 def _json_ready(value):

@@ -82,8 +82,6 @@ def _assert_document_contract(path):
         baseline = getattr(thresholds, member)(data)
         assert baseline == data.get(member, {}), member
         assert all(count > 0 for count in baseline.values()), member
-    assert thresholds.tests_line_baseline(data) == data.get(
-        'tests_line_baseline')
     try:
         thresholds.coverage(data, 'ruby')
     except ValueError as error:
