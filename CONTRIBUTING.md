@@ -293,6 +293,13 @@ Small and single-purpose beats large and comprehensive. One logical change per
 commit, with a message that says what changed and why the previous behaviour
 was wrong.
 
+The subject follows Conventional Commits: `type(scope)!: subject`, the scope
+and `!` optional, the type one of `build`, `chore`, `ci`, `docs`, `feat`,
+`fix`, `perf`, `refactor`, `revert`, `style`, `test`. The type and the `!` must
+fit the change, and a breaking change carries the `!`. A message an
+automation writes (a bot commit, Dependabot's prefix, the release dispatch)
+follows it too.
+
 Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. The gate checks the body when the
 pull request is opened, edited, or reopened, and the moment a draft is marked
