@@ -157,8 +157,7 @@ def test_no_exempted_tool_has_a_setup_action_somewhere_in_the_tree(tmp):
     declared by `actions/setup-node`, which the `eslint` job has used since
     before this branch existed, so the exemption stays refused no matter
     what the four suite jobs do — including if all four steps are reverted
-    together. `git` stays exempt on the same evidence: no action in this
-    repository names it.
+    together.
 
     The prose reason each entry carries is now documentation of a fact
     something checks, rather than the thing making it legal.
