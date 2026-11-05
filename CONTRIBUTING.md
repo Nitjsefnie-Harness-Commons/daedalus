@@ -293,8 +293,8 @@ Small and single-purpose beats large and comprehensive. One logical change per
 commit, with a message that says what changed and why the previous behaviour
 was wrong.
 
-The subject follows Conventional Commits: `type(scope)!: subject`, the scope
-and `!` optional, the type one of `build`, `chore`, `ci`, `docs`, `feat`,
+A commit message follows Conventional Commits: `type(scope)!: subject`, the
+scope and `!` optional, the type one of `build`, `chore`, `ci`, `docs`, `feat`,
 `fix`, `perf`, `refactor`, `revert`, `style`, `test`. The type and the `!` must
 fit the change, and a breaking change carries the `!`. A message an
 automation writes (a bot commit, Dependabot's prefix, the release dispatch)
