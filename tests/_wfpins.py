@@ -326,8 +326,7 @@ def assert_ci_tool_pins_live_in_a_watched_manifest():
              ('requirements-release.txt',)),
             ('release.yml', 'publish',
              'Install the build backend and test dependencies',
-             ('requirements-release.txt', 'requirements-test.txt',
-              'requirements-dev.txt'))):
+             ('requirements-release.txt', 'requirements-test.txt'))):
         workflow = (ROOT / '.github' / 'workflows' / file).read_text(
             encoding='utf-8')
         installs = _pip_installs(step_scalar(workflow, job, step, 'run'))
