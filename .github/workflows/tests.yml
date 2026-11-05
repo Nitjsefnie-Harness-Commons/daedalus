@@ -665,12 +665,7 @@ jobs:
             pip-${{ runner.os }}-${{ matrix.python }}-
 
       # Without the MCP extra that suite skips; test_diff_coverage imports the
-      # statement analyzer pinned in requirements-test.txt. requirements-dev.txt
-      # is here for test_type_errors, which drives the real pyright binary. A
-      # job that runs every suite needs the toolchain those suites invoke, and
-      # a needs: relation sequences jobs without sharing an environment between
-      # them, so this file has to be installed here too, not only by the lint
-      # jobs.
+      # statement analyzer pinned in requirements-test.txt.
       - name: Install the test dependencies and project
         run: |
           python -m pip install --upgrade pip . ".[mcp]"
@@ -874,11 +869,6 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-${{ matrix.python }}-
 
-      # Each shard needs the toolchain its suites
-      # invoke: test_type_errors drives the real pyright binary. A needs:
-      # relation sequences jobs without sharing an environment between them,
-      # so the lint jobs installing this file do not put pyright here.
-      # Same file, same pinned version, as those jobs install.
       - name: Install the coverage toolchain and the project
         run: |
           python -m pip install --upgrade pip
@@ -980,10 +970,10 @@ jobs:
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      # Absolute, because the runner's own tests copy run_tests.py into a temp
-      # tree and run it with that tree as the working directory. A relative
-      # data file follows the child's cwd, so its measurements were written
-      # inside the tree and deleted with it.
+      # Absolute, because suites run measured children with a temporary tree
+      # as the working directory. A relative data file follows the child's
+      # cwd, so its measurements were written inside the tree and deleted
+      # with it.
       COVERAGE_FILE: "${{ github.workspace }}/.coverage"
       # Node children inherit NODE_V8_COVERAGE from this job environment,
       # so V8 writes here directly; no harness plumbing is needed.

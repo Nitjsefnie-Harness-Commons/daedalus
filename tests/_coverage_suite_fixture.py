@@ -1,4 +1,4 @@
-"""Fabricate isolated repositories for the two suite launchers' controls.
+"""Fabricate isolated repositories for the coverage launcher's controls.
 
 The runners themselves and the helpers a control needs to read what a
 launcher did are both here rather than in either suite: `tests/` forbids a
@@ -136,11 +136,6 @@ def coverage_tree(
     # declaration for the `unlaunchable` and `cpu_count` sites, which this
     # branch did not write; the lines they drive stay measured by the
     # children that have no sitecustomize.
-    #
-    # Two launches rather than one launch with a chosen mode, because the
-    # guard reads the mode as a LITERAL at the `env=` keyword: a name bound
-    # once to a `child_coverage(mode, ...)` is `invalid`, and the keep site
-    # this module is allowlisted for stops existing.
     if (root / 'sitecustomize.py').exists():
         result = subprocess.run(
             [sys.executable, 'scripts/ci/coverage_suites.py', *args],

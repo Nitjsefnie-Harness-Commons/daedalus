@@ -44,9 +44,7 @@ they agree on a file that denies nothing. The rule is pinned instead as a
 literal by `tests/test_gitignore_generator.py`'s
 `test_the_derivation_always_carries_the_deny_rule`, which shares no state
 with the text it checks. Removing `*` from `HEAD` and regenerating turns
-that one red AND this suite's `test_a_missing_deny_rule_is_red`, whose
-anchor assertion fires because the text it edits is gone — the substantive
-red is the generator suite's.
+that one red.
 
 Both sides are enumerated by the SAME call. The tracked set is
 `git ls-files`, which reads the INDEX, and that is exactly the call

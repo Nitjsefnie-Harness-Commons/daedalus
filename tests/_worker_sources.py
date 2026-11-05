@@ -297,7 +297,6 @@ def event_target_stub():
     opt-in: a harness that never fires an event must not have a listener
     run behind its back. A contained exception is not reported, so a
     harness that needs to see one wraps its own listener.
-    `tests/test_worker_sources.py` holds the controls.
     """
     return r"""
 function eventTarget(retained = [], dispatches = false) {

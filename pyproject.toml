@@ -89,10 +89,9 @@ omit = [
 ]
 
 [tool.coverage.paths]
-# The runner's own tests copy run_tests.py into a temp tree and run it where
-# it stands, so its lines are recorded under that path. Combining maps them
-# back onto the source; without this the file every one of those tests drives
-# reports 0%, and the total understates by about two points.
+# Suites copy shipped files into a temp `tree` and run them where they stand,
+# so their lines are recorded under that path. Combining maps them back onto
+# the source; without this every file those suites drive reports 0%.
 repo = [".", "*/tree", "*/daedalus/daedalus"]
 
 [tool.coverage.report]
