@@ -6,10 +6,7 @@ the package, the coverage XML and the patch a patch-coverage run reads.
 The two bodies were byte-identical, so the layout a run is handed was
 spelled twice and a fix to one spelling reached one suite.
 
-The name is `_written_file` because `_write` is declared at module scope by
-`test_gitignore_control.py` and `test_type_errors.py`, and the retired
-reserved-name guard read that owner set as a set, so a shared module could
-not publish the bare name. What it returns is the file it wrote.
+The name says what it returns: the file it wrote.
 """
 from pathlib import Path
 
