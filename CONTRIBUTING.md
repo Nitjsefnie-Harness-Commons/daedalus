@@ -301,21 +301,17 @@ automation writes (a bot commit, Dependabot's prefix, the release dispatch)
 follows it too.
 
 Claim the issue before you start, then name it in the pull request's
-**Related Issues and Pull Requests** section. The gate checks the body when the
-pull request is opened, edited, or reopened, and the moment a draft is marked
-ready for review, and posts one comment naming every failing condition,
-updating that same comment after later edits. A draft is never checked: closing
-one cancels the CI it is already running, and the reopen that follows strands
-that CI again waiting for approval, so a draft that cannot merge is not worth
-closing. The gate closes a mergeable pull request only when the body's layout
-or section content fails the template or the Related section names no issue.
-Fix the claim or body on that same pull request; once every condition passes,
-the gate reopens it automatically if it closed it, so there is no need to open a
-second one. The reopen is authored by the workflow's own token as
-`github-actions[bot]`, so GitHub creates the CI runs a `reopened` event
-triggers with no jobs and holds them for approval instead of running or
-refusing them: a reopen does not bring the cancelled CI back, nothing runs
-until you push again once it has reopened, and an empty commit is enough.
+**Related Issues and Pull Requests** section. The gate runs when the pull
+request is opened, edited, reopened, pushed to, or marked ready for review. It
+skips drafts and bot-authored pull requests, and a skipped job reports success,
+so a draft is checked when it is marked ready. It checks the body against the
+template, that a claimed issue is assigned to you, and that every commit
+message follows Conventional Commits. When any of that fails it posts one
+comment naming every failing condition and fails its own check; it never closes
+or reopens the pull request. Fix the body, the claim or the commit message on
+that same pull request: each edit or push re-runs the gate, and the comment is
+updated once every condition passes. The failed check blocks the merge only
+while it is a required check.
 
 The workflow calls the
 [`Nitjsefnie-Actions/pr-gate`](https://github.com/Nitjsefnie-Actions/pr-gate)
