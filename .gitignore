@@ -96,6 +96,7 @@
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
 !/.github/workflows/secrets.yml
+!/.github/workflows/size-baseline.yml
 !/.github/workflows/tests.yml
 !/.github/workflows/version.yml
 
