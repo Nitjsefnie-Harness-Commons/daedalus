@@ -202,8 +202,8 @@ remedy for a refusal is to fix the type error in the named test module, and
 the fall is recorded with
 `python3 scripts/ci/type_error_baseline.py --tighten`, which also drops an
 entry whose file has no type error left. An entry naming a file that is gone
-is removed by hand. `tests/test_type_errors.py` gates the policy and reads
-this paragraph the same way.
+is removed by hand. `tests/test_type_errors.py` reads this paragraph for
+these terms.
 
 **`.github/ci-thresholds.json`'s `tests_line_baseline` holds the test tree's
 own size.** It sums text lines of every tracked file under `tests/` as one
