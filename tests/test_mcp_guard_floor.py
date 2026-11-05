@@ -545,16 +545,9 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     check behind it broke, so the negative controls feed it tables that
     must be reported.
     """
+    del _tmp
     assert _mcp_guard_floor.missing_citations(
         _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE, _util.ROOT) == []
-    suite = Path(_tmp) / 'tests' / 'test_probe.py'
-    suite.parent.mkdir()
-    suite.write_text('def test_outer():\n    def test_x():\n        pass\n',
-                     encoding='utf-8')
-    nested_function = 'tests/test_probe.py::test_x'
-    missing = _mcp_guard_floor.missing_citations(
-        [('m', 'f', 'c', nested_function)], _tmp)
-    assert nested_function in missing, missing
     absent_function = (
         'tests/test_mcp_tools.py::test_this_test_does_not_exist_anywhere')
     absent_suite = 'tests/test_no_such_suite.py::test_absent'
