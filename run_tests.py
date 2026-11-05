@@ -13,11 +13,10 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     # Loading this file by path does not put its directory on the path, and
     # the shared bound is imported by PACKAGE name. The repository root goes
-    # on, not `scripts/ci`:
-    # importing a sibling by bare name out of that directory is the
-    # spelling `scripts/ci/coverage_suites.py` uses only for a step that
-    # runs the file by path, because it loads one file under one name and
-    # a package import here is what keeps it to one.
+    # on, not `scripts/ci`: importing a sibling by bare name out of that
+    # directory is the spelling `scripts/ci/coverage_suites.py` uses only for
+    # a step that runs the file by path, because it loads one file under one
+    # name and a package import here is what keeps it to one.
     sys.path.insert(0, str(ROOT))
 
 from scripts.ci.suite_bound import (  # noqa: E402

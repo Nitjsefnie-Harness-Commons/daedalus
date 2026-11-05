@@ -11,8 +11,8 @@ of the property rather than the property: a third runner, a `.yaml`
 workflow, a `uses:` step, a shell loop over `tests/*.py` and `unittest
 discover -s tests` are all routes the basenames cannot see, so
 `_suite_step` reads the step's resolved inputs and follows the tracked file
-a step runs, which is where the mechanism is
-written down whatever the runner is called.
+a step runs, which is where the mechanism is written down whatever the
+runner is called.
 
 Two bounds, and they are bounds on the WALK rather than on this control's
 reach. A step that merely NAMES a runner reaches the tree here even where

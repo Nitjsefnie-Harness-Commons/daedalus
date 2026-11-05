@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """The changing-daedalus skill keeps the plant helper's save/restore rule.
 
-A path-scoped VCS restore is a statement about the whole path, so it also
-sets that path to a committed state, and the uncommitted work it carried is
-gone with nothing in the output to say so. The skill's mutation paragraphs
-name the helper that avoids it; these pin that each decision stays there.
+A path-scoped VCS restore also resets the path to a committed state, losing
+its uncommitted work with nothing in the output to say so; these pin that
+the skill's mutation paragraphs keep naming the helper that avoids it.
 """
 import sys
 from pathlib import Path
