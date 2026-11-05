@@ -94,7 +94,8 @@ def test_bump_current_main_all_sites_and_output(tmp):
     _git(work, 'reset', '--hard', stale)
     (work / 'untracked').write_text('never stage me\n')
     output = work.parent / 'output'
-    result = _drive(work, 'bump', VERSION)
+    result = _drive(work, 'bump', VERSION,
+                    env={'GITHUB_OUTPUT': str(output)})
     _ok(result)
     sha = result.stdout.strip()
     assert sha == _out(bare, 'rev-parse', 'main'), result.stdout
