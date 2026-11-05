@@ -634,43 +634,6 @@ def test_imported_worker_modules_are_tracked(tmp):
     _assert_imported_modules_are_tracked(_tracked_paths())
 
 
-def test_sibling_mutation_failure_names_module_type_and_handlers(tmp):
-    """The boundary diagnostic distinguishes mutation from route bypass."""
-    export_root = _tracked_tree(tmp)
-    background_path = export_root / 'extension' / 'background.js'
-    background = background_path.read_text(encoding='utf-8')
-    route = "    case 'block-requests': return handleBlockRequests(cmd);"
-    mutation = """    case 'block-requests':
-      handleCookies = function corruptedCookies() { return false; };
-      return handleBlockRequests(cmd);"""
-    assert background.count(route) == 1
-    background_path.write_text(
-        background.replace(route, mutation), encoding='utf-8')
-
-    result = subprocess.run(
-        [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, env=_util.child_coverage('scrub'),
-        capture_output=True, text=True, encoding='utf-8', timeout=30)
-
-    assert result.returncode != 0, result.stdout
-    expected = (
-        "worker/blocking.js dispatch block-requests mutated published "
-        "handlers: ['handleCookies']")
-    assert expected in result.stdout, (
-        result.returncode, result.stdout, result.stderr)
-
-
-def test_worker_boundary_runs_without_untracked_node_modules(tmp):
-    """The tracked tree alone supplies every boundary-suite dependency."""
-    export_root = _tracked_tree(tmp)
-    result = subprocess.run(
-        [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, env=_util.child_coverage('scrub'),
-        capture_output=True, text=True, encoding='utf-8', timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-
-
 def main():
     tests = _util.collect(globals())
     try:

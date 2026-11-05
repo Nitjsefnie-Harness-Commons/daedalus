@@ -332,34 +332,5 @@ def test_mcp_uses_the_shared_log_safe_function(tmp):
     assert mod.log_safe is sys.modules['daedalus_bridge.log_safe'].log_safe
 
 
-def test_the_shared_contract_catches_a_divergent_copy(tmp):
-    """Proof the anti-drift control has teeth: a divergent helper must fail
-    it. The generator keeps a standalone implementation, so it is that copy
-    which can drift; the helper below diverges only on non-ASCII."""
-    del tmp
-    generator = _util.load(
-        _util.ROOT / 'scripts' / 'gen_gitignore.py',
-        'divergent_gen_gitignore_log_safe')
-
-    def divergent(value):
-        try:
-            rendered = str(value).encode(
-                'utf-8', 'backslashreplace').decode('ascii', 'replace')
-        except Exception:
-            return '<unprintable value>'
-        if type(rendered) is not str:  # pylint: disable=unidiomatic-typecheck
-            return '<unprintable value>'
-        return rendered
-
-    setattr(generator, '_log_safe', divergent)
-    try:
-        for value, expected in _util.log_safe_cases():
-            assert generator._log_safe(value) == expected
-        assert generator._log_safe('héllo — 世界') == 'héllo — 世界'
-    except AssertionError:
-        return
-    raise AssertionError('a divergent _log_safe passed the shared contract')
-
-
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))

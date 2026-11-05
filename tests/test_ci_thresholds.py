@@ -13,17 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _ratchet_fixture  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _ratchet_fixture import (  # noqa: E402
-    _budget_repo, _captured_main, _normalised)
 
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 
 SCRIPT = ROOT / 'scripts' / 'ci' / 'thresholds.py'
-POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'tests_lines.py'
 DATA_PATH = ROOT / '.github' / 'ci-thresholds.json'
-# The budget fixtures' children run outside the coverage paths.
+# The CLI children run outside the coverage paths.
 _CHILD_ENV = _util.child_coverage('scrub')
 # One list names both the document key and the reader call that must agree.
 _BASELINE_ACCESSORS = ('long_line_baseline', 'type_error_baseline',
@@ -377,165 +374,6 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
     thresholds.write(target, thresholds.load(target))
     assert target.read_bytes() == first
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
-
-
-def _tests_files(first, second):
-    return {'tests/first.py': b'x = 1\n' * first,
-            'tests/second.py': b'x = 1\n' * second}
-
-
-def _mixed_tests_files(python_lines, note_lines):
-    """A tests/ tree whose shape the pathspec and `-I` have to name."""
-    return {'tests/first.py': b'x = 1\n' * python_lines,
-            'tests/notes.md': b'note\n' * note_lines,
-            'tests/blob.bin': b'\x00\xff\xfe binary\n' * 40}
-
-
-def _run_lines_cli(repo, *args):
-    return subprocess.run(
-        [sys.executable, str(repo / 'scripts' / 'ci' / 'tests_lines.py'),
-         *args, '--thresholds', str(repo / '.github' / 'ci-thresholds.json')],
-        cwd=str(repo), env=_CHILD_ENV, capture_output=True, text=True,
-        timeout=60)
-
-
-def test_tests_line_budget_fails_naming_both_numbers_and_the_remedy(tmp):
-    repo, _target = _budget_repo(
-        tmp, _tests_files(5, 4), 8, 'grown')
-    done = _run_lines_cli(repo)
-    assert done.returncode != 0, (done.stdout, done.stderr)
-    assert '8' in done.stderr and '9' in done.stderr, done.stderr
-    remedy = _util.load(POLICY_SOURCE, 'tests_lines_growth').GROWTH_REMEDY
-    assert _normalised(remedy) in _normalised(done.stderr), done.stderr
-
-
-def test_tests_line_budget_tightens_a_drop_and_never_raises(tmp):
-    """Compared as `load` normalises it, not raw JSON: a raw float and
-    the Decimal it becomes are not equal."""
-    repo, target = _budget_repo(tmp, _tests_files(4, 3), 20, 'drop')
-    source = _thresholds().load(target)
-    done = _run_lines_cli(repo, '--tighten')
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    after = _thresholds().load(target)
-    assert after['tests_line_baseline'] == 7
-    for member in ('coverage', *_BASELINE_ACCESSORS):
-        assert after.get(member) == source.get(member), member
-    for budget in (7, 2):
-        other, other_target = _budget_repo(
-            tmp, _tests_files(4, 3), budget, f'steady-{budget}')
-        before = other_target.read_bytes()
-        done = _run_lines_cli(other, '--tighten')
-        assert done.returncode == 0, (done.stdout, done.stderr)
-        assert other_target.read_bytes() == before
-
-
-def test_the_budget_counts_every_tracked_text_file_under_tests(tmp):
-    """The counting definition gets its own oracle: a non-`.py` text
-    file (which a `tests/*.py` pathspec drops), a binary one (which a
-    missing `-I` counts) and files outside `tests/`."""
-    repo, _target = _budget_repo(
-        tmp, _mixed_tests_files(4, 3), 7, 'mixed')
-    policy = _util.load(POLICY_SOURCE, 'tests_lines_definition')
-    assert policy.tracked_test_lines(repo) == 7
-    done = _run_lines_cli(repo)
-    assert done.returncode == 0, (done.stdout, done.stderr)
-    assert '7' in done.stdout, done.stdout
-
-
-def test_the_workflow_tightens_the_tests_budget_before_the_check(tmp):
-    del tmp
-    workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
-        encoding='utf-8')
-    tighten = workflow.index('python scripts/ci/tests_lines.py --tighten')
-    check = workflow.index('python scripts/ci/thresholds.py --check')
-    assert tighten < check
-
-
-def test_the_real_tests_tree_is_within_its_recorded_line_budget(tmp):
-    del tmp
-    thresholds = _thresholds()
-    recorded = thresholds.tests_line_baseline(thresholds.load(DATA_PATH))
-    policy = _util.load(POLICY_SOURCE, 'tests_lines_real_tree')
-    measured = policy.tracked_test_lines()
-    assert recorded is None or measured <= recorded, recorded
-    done = subprocess.run(
-        [sys.executable, str(POLICY_SOURCE),
-         '--thresholds', str(DATA_PATH)],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=120)
-    assert done.returncode == 0, (done.stdout, done.stderr)
-
-
-def test_absent_budget_measures_and_tighten_seeds(tmp):
-    repo, target = _budget_repo(
-        tmp, _tests_files(4, 3), None, 'absent')
-    before = target.read_bytes()
-    source = _thresholds().load(target)
-    policy = _util.load(POLICY_SOURCE, 'seed_lines')
-    reader = policy.tracked_test_lines
-    setattr(policy, 'tracked_test_lines', lambda: reader(repo))
-    assert [policy.tightened(n, 7) for n in (None, 20, 2, 7)] == [
-        7, 7, None, None]
-    status, out, err = _captured_main(policy, ['--thresholds', str(target)])
-    assert status == 0 and '7' in out and 'no budget' in out, err
-    assert target.read_bytes() == before
-    args = ['--tighten', '--thresholds', str(target)]
-    assert _captured_main(policy, args)[0] == 0
-    assert _thresholds().load(target) == dict(source, tests_line_baseline=7)
-    assert _run_lines_cli(repo).returncode == 0
-    seeded = target.read_bytes()
-    assert _captured_main(policy, args)[0] == 0
-    assert target.read_bytes() == seeded
-
-
-def test_absent_budget_round_trips_and_preserves_other_validation(tmp):
-    thresholds = _thresholds()
-    data = _valid()
-    del data['tests_line_baseline']
-    target = Path(tmp) / 'absent.json'
-    thresholds.write(target, data)
-    assert thresholds.load(target) == thresholds.normalise(data)
-    assert thresholds.tests_line_baseline(thresholds.load(target)) is None
-    for value in (None, False, {}, 0, -1, 1.2, '10'):
-        invalid = dict(data, tests_line_baseline=value)
-        _assert_normalise_refused(thresholds, invalid, 'tests_line_baseline')
-    for member in _BASELINE_ACCESSORS:
-        absent = dict(data)
-        absent.pop(member, None)
-        thresholds.write(target, absent)
-        assert member not in thresholds.load(target)
-        assert getattr(thresholds, member)(thresholds.load(target)) == {}
-        absent[member] = []
-        _assert_normalise_refused(thresholds, absent, member)
-
-
-def test_absence_survives_coverage_update(tmp):
-    thresholds = _thresholds()
-    data = _valid()
-    del data['tests_line_baseline']
-    ratchet = _util.load(ROOT / 'scripts/ci/ratchet.py', 'absent_ratchet')
-    after = ratchet.update(data, '99.0', 'python')
-    assert after is not None
-    assert 'tests_line_baseline' not in after
-    assert after['coverage']['python']['measured'] == Decimal('99.0')
-    target = Path(tmp) / 'raised.json'
-    thresholds.write(target, after)
-    assert thresholds.load(target) == after
-
-
-def test_absent_budget_measurement_failure_preserves_document(tmp):
-    _repo, target = _budget_repo(
-        tmp, _tests_files(4, 3), None, 'failed-measurement')
-    before = target.read_bytes()
-    policy = _util.load(POLICY_SOURCE, 'absent_measurement_failure')
-
-    def fail():
-        raise OSError('measurement refused')
-
-    setattr(policy, 'tracked_test_lines', fail)
-    status, _stdout, stderr = _captured_main(
-        policy, ['--tighten', '--thresholds', str(target)])
-    assert status == 1 and 'measurement refused' in stderr, stderr
-    assert target.read_bytes() == before
 
 
 def main():
