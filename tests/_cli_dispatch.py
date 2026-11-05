@@ -82,18 +82,13 @@ def _no_socket():
 
     The seal is process-wide and it is restored unconditionally, so a
     handler that raises leaves the next test in this process free to connect.
-    `test_the_socket_seal_is_lifted_when_the_block_ends` is what holds that
-    to the class rather than to this comment.
 
     The `del` below is the arm every CPython 3.13 run takes: `connect` is
     inherited from `_socket.socket` and is NOT in `socket.socket.__dict__`,
     so this module's own assignment is the only thing to take away. The
     `else` is reachable only where something patched the attribute before the
     seal — a nested `wired`, or another suite's monkeypatch — and it puts
-    that value back.
-    `test_the_seal_restores_a_connect_the_class_already_carried` arms that
-    arm, and is what holds it to the class rather than to this comment.
-    `del` is guarded because an `AttributeError` raised
+    that value back. `del` is guarded because an `AttributeError` raised
     inside a `finally` replaces whatever was unwinding, and a teardown that
     hides the failure it was cleaning up after is the defect this harness
     exists to catch.

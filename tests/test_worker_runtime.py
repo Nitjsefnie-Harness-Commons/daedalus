@@ -48,12 +48,9 @@ def _assert_imported_modules_are_tracked(tracked):
 
 
 def _tracked_tree(tmp):
-    """Export under `tree`, mapped to source like test_suite_runner's own
-    export -- but that export always runs real modules unmodified, and this one
-    does not: test_sibling_mutation_failure_names_module_type_and_handlers
-    corrupts a copy first, safe today only because the corruption is
-    JavaScript. A caller that corrupted a Python file here would have its run
-    alias onto the real module's coverage, silently."""
+    """Export the tracked files under `tree`, mapped to source. A caller
+    that corrupted a Python file here would have its run alias onto the real
+    module's coverage, silently."""
     tracked = _tracked_paths()
     _assert_imported_modules_are_tracked(tracked)
     export_root = Path(tmp) / 'tree'

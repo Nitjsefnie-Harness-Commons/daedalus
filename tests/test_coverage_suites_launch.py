@@ -65,11 +65,10 @@ def test_the_output_safety_net_asks_and_survives_a_refusal(tmp):
 def test_the_runner_removes_its_outputs_through_the_bounded_removal(tmp):
     """This launcher's own `finally` is the bounded removal, not a bare one.
 
-    Both new controls in `test_run_tests.py` drive the runner, so nothing
-    else watches what this launcher does with its output directory -- and a
-    bare `shutil.rmtree` there raises out of `main()` and takes the
-    `TIMED OUT:` report below it with it, which is issue #1485 on the
-    second of the two launchers.
+    Nothing else watches what this launcher does with its output
+    directory -- and a bare `shutil.rmtree` there raises out of `main()`
+    and takes the `TIMED OUT:` report below it with it, which is issue
+    #1485 on the second of the two launchers.
 
     The two halves are asserted apart, because either alone is satisfied
     by the other: the stand-in's own log says the bounded function was

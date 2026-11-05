@@ -187,11 +187,7 @@ jobs:
 
       - name: Install the build backend and test dependencies
         # The MCP suite skips without its extra, and test_diff_coverage needs
-        # the statement analyzer pinned by requirements-test.txt. The suite
-        # step below globs every suite, and test_type_errors drives the real
-        # pyright binary, so this file is needed here too: a job runs the
-        # suites itself, and a needs: relation would not hand it the
-        # environment the lint jobs installed.
+        # the statement analyzer pinned by requirements-test.txt.
         run: |
           python -m pip install -r requirements-release.txt . ".[mcp]"
           python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
