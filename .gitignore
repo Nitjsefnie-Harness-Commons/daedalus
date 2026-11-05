@@ -266,7 +266,6 @@
 !/scripts/ci/ratchet_push.py
 !/scripts/ci/release_dispatch.py
 !/scripts/ci/suite_bound.py
-!/scripts/ci/tests_lines.py
 !/scripts/ci/threshold_base.py
 !/scripts/ci/thresholds.py
 !/scripts/ci/thresholds_guard.py

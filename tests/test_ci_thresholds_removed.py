@@ -13,15 +13,14 @@ import _util  # noqa: E402
 from _wffixtures import _value_error  # noqa: E402
 from test_ci_thresholds_guard import (  # noqa: E402
     FAMILIES, GUARD, _captured_main, _document, _git, _history, _judge,
-    _raised)
+    _removed)
 
 
 def test_removals_require_exact_reason_and_preserve_siblings(tmp):
-    for index, entry in enumerate(('tests_line_baseline', *FAMILIES)):
+    for index, entry in enumerate(FAMILIES):
         for kind in ('', 'bug', 'definition'):
             base = _document()
-            if entry in FAMILIES:
-                base[entry] = {'backend/kept.py': 9, 'backend/second.py': 8}
+            base[entry] = {'backend/kept.py': 9, 'backend/second.py': 8}
             head = copy.deepcopy(base)
             del head[entry]
             trailer = f'\n\nThresholds-Removed: {entry}={kind}' if kind else ''
@@ -31,13 +30,13 @@ def test_removals_require_exact_reason_and_preserve_siblings(tmp):
             assert status == (0 if kind else 1), err
             if not kind:
                 assert 'removed without a reason' in err, err
-            if entry in FAMILIES and kind:
+            if kind:
                 head[entry] = {'backend/second.py': 8}
                 assert _judge(repo, rev, base, head)[0] == 0
 
 
 def test_trailer_grammar_invalidates_one_line_only(tmp):
-    entry = 'tests_line_baseline'
+    entry = 'long_line_baseline'
     cases = (
         ('{entry}=bug', True), ('{entry}=definition', True),
         ('{entry}.path=bug', False), ('{entry}=breach', False),
@@ -49,7 +48,7 @@ def test_trailer_grammar_invalidates_one_line_only(tmp):
         ('invalid\nThresholds-Removed: {entry}=definition', True),
     )
     for index, (value, allowed) in enumerate(cases):
-        base, head = _raised()
+        base, head = _removed()
         del head[entry]
         repo, rev = _history(tmp, str(index), [
             'fix: remove\n\nThresholds-Removed:\t'
@@ -60,7 +59,7 @@ def test_trailer_grammar_invalidates_one_line_only(tmp):
     prefixes = (' thresholds-removed:', 'Thresholds-Removed :',
                 ' Thresholds-Removed:')
     for index, prefix in enumerate(prefixes):
-        base, head = _raised()
+        base, head = _removed()
         del head[entry]
         repo, rev = _history(tmp, f'prefix-{index}', [
             f'fix: remove\n\n{prefix} {entry}=bug'], base, head)
@@ -84,7 +83,7 @@ def test_path_tokens_expand_only_their_own_family(tmp):
         assert removed.exempt_paths('HEAD', 'HEAD', repo, family,
                                     {}, candidates) == set()
         assert declarations.paths(family, candidates) == {'backend/kept.py'}
-        assert declarations.paths('tests_line_baseline', candidates) == set()
+        assert declarations.paths('retired_baseline', candidates) == set()
         assert removed.exempt_paths(rev, 'HEAD', repo, family,
                                     base[family], candidates) == set()
         head[family] = {}
@@ -118,12 +117,11 @@ def test_gone_subject_needs_no_declaration_but_read_failure_does(tmp):
 
 
 def test_delete_and_looser_readd_is_a_raise_against_base(tmp):
-    for index, family in enumerate(('tests_line_baseline', *FAMILIES)):
-        base, head = _raised()
-        if family in FAMILIES:
-            base[family] = {'backend/kept.py': 9}
-            head = copy.deepcopy(base)
-            head[family]['backend/kept.py'] = 10
+    for index, family in enumerate(FAMILIES):
+        base = _document()
+        base[family] = {'backend/kept.py': 9}
+        head = copy.deepcopy(base)
+        head[family]['backend/kept.py'] = 10
         repo, rev = _history(tmp, str(index), [], base)
         target = repo / '.github/ci-thresholds.json'
         intermediate = copy.deepcopy(base)

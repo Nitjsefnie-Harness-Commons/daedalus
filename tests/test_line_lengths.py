@@ -223,7 +223,6 @@ def test_main_tighten_noop_then_changes_only_selected_member(tmp):
         'tests/steady.py': 2,
     }
     assert after['coverage'] == data['coverage']
-    assert after['tests_line_baseline'] == data['tests_line_baseline']
 
 
 def test_every_tracked_module_satisfies_the_line_policy(tmp):

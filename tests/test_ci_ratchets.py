@@ -51,7 +51,6 @@ def _ratchet_document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
         'long_line_baseline': {},
         'type_error_baseline': {},
         'js_coverage_baseline': {},
-        'tests_line_baseline': 1706,
     }
 
 
@@ -82,7 +81,6 @@ PROMOTED_MODULES = (
     'scripts.ci.release_dispatch',
     'scripts.ci.thresholds',
     'scripts.ci.thresholds_guard',
-    'scripts.ci.tests_lines',
     'scripts.ci.type_error_baseline',
     'scripts.ci.workflow_yaml',
 )
@@ -181,7 +179,6 @@ def test_cli_updates_only_selected_language_and_rereads_latest_data(tmp):
         'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
     assert data['coverage']['javascript'] == {
         'measured': Decimal('37.1'), 'floor': Decimal('35.6')}
-    assert data['tests_line_baseline'] == 1706
 
 
 def test_cli_rejects_the_retired_workflow_option(tmp):
@@ -299,33 +296,19 @@ def test_publisher_python_carries_posix_and_windows_paths_without_embedding(
 
 
 def test_real_publisher_step_member_only_preserves_calibrations(tmp):
-    for name, measured, recorded in (
-            ('publisher-combined', '81.6', 1707),
-            ('publisher-tests-lines', '80.0', 1707),
-            ('publisher-tests-seed', '80.0', None)):
-        data = _ratchet_document()
-        if recorded is None:
-            del data['tests_line_baseline']
-        else:
-            data['tests_line_baseline'] = recorded
-        repo, path, before, output, summary, done = _run_publisher_case(
-            tmp, name, data, measured, '35.5')
-        assert done.returncode == 0, (done.stdout, done.stderr)
-        assert 'changed=true' in output.read_text(encoding='utf-8')
-        assert '### Recorded by this run' in summary.read_text(
-            encoding='utf-8')
-        after = _thresholds().load(path)
-        if measured == '81.6':
-            assert after['coverage']['python'] == {
-                'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
-            assert after['coverage']['javascript'] \
-                == data['coverage']['javascript']
-        else:
-            assert after['coverage'] == data['coverage']
-        assert after['tests_line_baseline'] == 1706
-        assert path.read_bytes() != before
-        assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
-            '.github/ci-thresholds.json']
+    data = _ratchet_document()
+    repo, path, before, output, summary, done = _run_publisher_case(
+        tmp, 'publisher-combined', data, '81.6', '35.5')
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert 'changed=true' in output.read_text(encoding='utf-8')
+    assert '### Recorded by this run' in summary.read_text(encoding='utf-8')
+    after = _thresholds().load(path)
+    assert after['coverage']['python'] == {
+        'measured': Decimal('81.6'), 'floor': Decimal('80.1')}
+    assert after['coverage']['javascript'] == data['coverage']['javascript']
+    assert path.read_bytes() != before
+    assert _git(repo, 'diff', '--name-only').stdout.splitlines() == [
+        '.github/ci-thresholds.json']
 
 
 def test_real_publisher_step_rejects_malformed_data_without_publishing(tmp):
@@ -371,8 +354,7 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     assert path.read_bytes() == before
     assert _git(repo, 'diff', '--name-only').stdout == ''
     assert ('no raise; no file lost an over-limit '
-            'line, no module lost an uncovered JavaScript line and '
-            'the suite tree lost no line.'
+            'line and no module lost an uncovered JavaScript line.'
             ) in noop_summary.read_text(encoding='utf-8')
 
 

@@ -207,20 +207,22 @@ entry whose file has no type error left. An entry naming a file that is gone
 is removed by hand. `tests/test_type_errors.py` reads this paragraph for
 these terms.
 
-**`.github/ci-thresholds.json`'s `tests_line_baseline` holds the test tree's
-own size.** It sums text lines of every tracked file under `tests/` as one
-budget. A recorded budget may rise only when the judged range contains a
-commit whose subject starts with `feat:` or `feat(scope):`. Non-feature
-changes pay for growth by trimming their own tests: drop redundant cases,
-merge parametrisations, or delete repeated assertions. A feature must still
-record a sufficient budget; its subject does not waive the line gate.
+**The test tree's own size is the size-ratchet action's tree budget.**
+`size-baseline.yml` lists `tests/` under `tree-budgets`, so the action sums
+the text lines of every tracked file under `tests/` and records that total
+under `.github/size-baseline.json`'s `trees` key, tightening it on every main
+push. The `trees` budget is the one record a pull request may raise, and
+only when the judged range contains a commit whose subject starts with
+`feat:` or `feat(scope):`. Non-feature changes pay for growth by trimming
+their own tests: drop redundant cases, merge parametrisations, or delete
+repeated assertions. A feature must still record a sufficient budget; its
+subject does not waive the line gate.
 
 **Remove a recorded threshold only when the measurement is defective or
 its definition changed.** Declare the reason in the judged range with
-`Thresholds-Removed: <entry>=<bug|definition>`; the scalar's entry is exactly
-`tests_line_baseline`, and path entries use `family.path` or a bare baseline
-family declaring its entries. A path whose file is no longer tracked needs
-no declaration. A breach is never a removal reason. The audit workflow's
+`Thresholds-Removed: <entry>=<bug|definition>`; entries use `family.path` or
+a bare baseline family declaring its entries. A path whose file is no longer
+tracked needs no declaration. A breach is never a removal reason. The audit workflow's
 direction guard compares the documents at the judged base and head: the
 merge base with the event's fixed base SHA on a PR, the event's before SHA
 on a push (`HEAD^` when that SHA is unusable). Every consumer uses that
@@ -231,13 +233,6 @@ judged base, intersected with their own complaints. CI exports that base as
 `DAEDALUS_THRESHOLDS_BASE_REV`; a local check may set the same variable.
 Unreadable or absent history grants no exemption. Map writers only lower or
 drop existing rows; they never seed a removed entry or add a new one.
-
-**An absent budget stays absent until measured.** The check still measures
-and reports, with no budget to compare and no write. Main's publisher runs
-`python3 scripts/ci/tests_lines.py --tighten`, which seeds an absent scalar
-at that run's measured total, lowers an existing one when tests shrink,
-and never raises it. Coverage updates preserve scalar absence. PR checks
-run on the MERGE ref, so the merged test tree must fit the recorded budget.
 
 **The same file's `js_coverage_baseline` holds the per-module JavaScript
 coverage policy on the same terms.** It records how many uncovered
