@@ -47,21 +47,6 @@ def _assert_imported_modules_are_tracked(tracked):
         f'run git add -f {names}, then python3 scripts/gen_gitignore.py')
 
 
-def _tracked_tree(tmp):
-    """Export the tracked files under `tree`, mapped to source. A caller
-    that corrupted a Python file here would have its run alias onto the real
-    module's coverage, silently."""
-    tracked = _tracked_paths()
-    _assert_imported_modules_are_tracked(tracked)
-    export_root = Path(tmp) / 'tree'
-    export_root.mkdir()
-    for relative in tracked:
-        destination = export_root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, destination)
-    return export_root
-
-
 def _assert_binding_read_failure(tmp, thrown):
     root = Path(tmp)
     background = root / 'background.js'
@@ -601,14 +586,12 @@ def test_tracked_tree_preflight_names_untracked_imported_module(tmp):
         ['git', '-C', str(source_root), 'add', '-f',
          'extension/background.js'], check=True)
 
-    export_parent = root / 'export'
-    export_parent.mkdir()
     original_root = globals()['ROOT']
     failure = None
     globals()['ROOT'] = source_root
     try:
         try:
-            _tracked_tree(export_parent)
+            _assert_imported_modules_are_tracked(_tracked_paths())
         except AssertionError as error:
             failure = str(error)
         else:
