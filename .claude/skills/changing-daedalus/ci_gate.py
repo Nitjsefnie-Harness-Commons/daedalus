@@ -77,8 +77,8 @@ PUBLISHED_CHECKS = frozenset({'gate freshness'})
 # reason its comment gives, and a control holds the two equal.
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 # What a run's name can be when no conclusion of it is about the commit
-# under test. An admission gate runs on `pull_request_target`, so its run
-# is anchored on the BASE sha, so no conclusion of it is about this head.
+# under test. An admission gate judges the pull request's body, claim and
+# commit metadata, not the code at that head, so no conclusion of it is.
 NOT_ABOUT_THE_HEAD = frozenset({'pr gate'})
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
