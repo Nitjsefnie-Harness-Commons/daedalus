@@ -1146,7 +1146,7 @@ jobs:
           # lines cannot come back for free. The suite-tree budget is one
           # tree-wide count with the same rule. Growth is never written
           # here — that stays a decision a reviewer sees. File sizes are
-          # the size-ratchet action's records, in a job of their own.
+          # the size-ratchet action's records, in a workflow of their own.
           python scripts/ci/line_lengths.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/js_module_coverage.py --tighten \
@@ -1504,59 +1504,11 @@ jobs:
             'ci: tighten the journey budget'
 
   size-baseline:
-    # File sizes are the size-ratchet action's records, never this
-    # repository's: the check judges every pull request against the base
-    # revision's records, and a main push tightens them, landing a change
-    # through the same records push the other ratchets use. A manual
-    # dispatch has neither a pull request base nor a default-branch push,
-    # and the action fails closed on that event, so the job steps out of
-    # workflow_dispatch's path rather than failing every dispatch.
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # The branch policy refuses other refs; an empty name binds no
-    # environment, so pull requests can still run these checks.
-    environment: ${{ github.event_name == 'push'
-      && github.ref == 'refs/heads/main' && 'main-push' || '' }}
-    steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          # The pull request's head tree, and full history so the base
-          # revision's records are readable without a token.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: Nitjsefnie-Actions/size-ratchet@0c9790acfe6bec19f1310a6e17428332185ea3ec # v1.1.0
-        with:
-          overrides: 'tests/: 700'
-          exclude: 'examples/'
-      - name: Guard the measured records
-        id: records
-        if: github.event_name == 'push'
-        env:
-          DAEDALUS_EXPECTED_SHA: ${{ github.sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$DAEDALUS_EXPECTED_SHA"
-          if git diff --quiet -- .github/size-baseline.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            status=$?
-            if [ "$status" -ne 1 ]; then
-              exit "$status"
-            fi
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Commit the tighten
-        if: success() && steps.records.outputs.changed == 'true'
-        env:
-          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
-            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          DAEDALUS_REPO: ${{ github.repository }}
-        run: |
-          python3 scripts/ci/ratchet_push.py .github/size-baseline.json \
-            'ci: tighten the size-baseline records'
+    # The size-ratchet action's install block, called. A called run reads
+    # an environment secret as empty, so the file's own default-branch
+    # push run is the one that commits tightened records. zizmor's `$/`
+    # form is refused by the pinned actionlint, which accepts only `./`.
+    uses: ./.github/workflows/size-baseline.yml  # zizmor: ignore[self-repository]
 
   aggregate:
     name: Aggregate workflow checks
