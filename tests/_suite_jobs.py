@@ -82,7 +82,7 @@ def _job_steps(workflow, job):
     """Every complete step mapping in one workflow job."""
     mapping = complete_job_mapping(workflow, job)
     assert mapping is not None, f'the workflow has no {job} job'
-    return mapping['steps']
+    return mapping.get('steps') or []
 
 
 def _ordered_job_runs(workflow, job):
