@@ -94,8 +94,7 @@ def test_bump_current_main_all_sites_and_output(tmp):
     _git(work, 'reset', '--hard', stale)
     (work / 'untracked').write_text('never stage me\n')
     output = work.parent / 'output'
-    result = _drive(work, 'bump', VERSION,
-                    env={'GITHUB_OUTPUT': str(output)})
+    result = _drive(work, 'bump', VERSION)
     _ok(result)
     sha = result.stdout.strip()
     assert sha == _out(bare, 'rev-parse', 'main'), result.stdout
@@ -103,14 +102,15 @@ def test_bump_current_main_all_sites_and_output(tmp):
     assert output.read_text() == f'sha={sha}\n'
     assert 'untracked' not in _out(
         work, 'ls-tree', '-r', '--name-only', 'HEAD')
-    checked = subprocess.run(
-        [sys.executable, 'scripts/check_versions.py', '--print'], cwd=work,
-        capture_output=True, text=True, check=True,
-        env=_util.child_coverage('keep', cwd=work))
+    checked = _run_checker(work, '--print')
+    _ok(checked)
     assert checked.stdout.strip() == VERSION, checked.stdout
     assert _drive(work, 'bump', VERSION).returncode != 0
     assert sha == _out(bare, 'rev-parse', 'main')
     _ok(_drive(work, 'bump', VERSION, '--successor'))
+    assert _out(work, 'log', '-2', '--format=%s').splitlines() == [
+        'chore(release): stop main claiming the version release 0.28.0 '
+        'published', 'chore(release): claim 0.28.0 across every version site']
 
 
 def test_bump_refuses_version_without_room_for_successor(tmp):
