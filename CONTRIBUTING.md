@@ -306,14 +306,14 @@ request is opened, edited, reopened, pushed to, or marked ready for review. It
 skips drafts and bot-authored pull requests; a skipped job reports success, so
 neither blocks a merge, and a draft is checked when marked ready. It checks
 the body against the template, that a claimed issue is assigned to you, that
-every commit subject follows Conventional Commits, and that each commit's
-author and committer is you, `web-flow` or a user with push access, or has a
-`Co-Authored-By:` trailer resolving to you. On a failure it posts one comment
-naming every failing condition and fails its own check; it never closes or
-reopens the pull request. Fix the body, the claim or the commit subject on that
-same pull request: each edit or push re-runs the gate and updates the comment
-once every condition passes, but assigning the issue does not, so edit or push
-afterwards. The failed check blocks the merge only while it is a required check.
+every non-merge commit subject follows Conventional Commits, and that each
+commit is attributed to you; [the action's README](https://github.com/Nitjsefnie-Actions/pr-gate#readme)
+has the exact rules. On a failure it posts one comment naming every failing
+condition and fails its own check; it never closes or reopens the pull
+request. Fix the body, the claim or the commits on that same pull request: each
+edit or push re-runs the gate and updates the comment once every condition
+passes, but assigning the issue does not, so edit or push afterwards. The
+failed check blocks the merge only while it is required.
 
 The workflow calls the
 [`Nitjsefnie-Actions/pr-gate`](https://github.com/Nitjsefnie-Actions/pr-gate)
