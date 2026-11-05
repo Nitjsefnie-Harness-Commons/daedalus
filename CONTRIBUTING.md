@@ -303,15 +303,17 @@ follows it too.
 Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. The gate runs when the pull
 request is opened, edited, reopened, pushed to, or marked ready for review. It
-skips drafts and bot-authored pull requests, and a skipped job reports success,
-so a draft is checked when it is marked ready. It checks the body against the
-template, that a claimed issue is assigned to you, and that every commit
-message follows Conventional Commits. When any of that fails it posts one
-comment naming every failing condition and fails its own check; it never closes
-or reopens the pull request. Fix the body, the claim or the commit message on
-that same pull request: each edit or push re-runs the gate, and the comment is
-updated once every condition passes. The failed check blocks the merge only
-while it is a required check.
+skips drafts and bot-authored pull requests; a skipped job reports success, so
+neither blocks a merge, and a draft is checked when marked ready. It checks
+the body against the template, that a claimed issue is assigned to you, that
+every commit subject follows Conventional Commits, and that each commit's
+author and committer is you, `web-flow` or a user with push access, or has a
+`Co-Authored-By:` trailer resolving to you. On a failure it posts one comment
+naming every failing condition and fails its own check; it never closes or
+reopens the pull request. Fix the body, the claim or the commit subject on that
+same pull request: each edit or push re-runs the gate and updates the comment
+once every condition passes, but assigning the issue does not, so edit or push
+afterwards. The failed check blocks the merge only while it is a required check.
 
 The workflow calls the
 [`Nitjsefnie-Actions/pr-gate`](https://github.com/Nitjsefnie-Actions/pr-gate)
