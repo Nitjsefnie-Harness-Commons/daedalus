@@ -343,8 +343,7 @@ def test_exec_renders_timing_only_for_a_result_that_carries_it(tmp):
         assert '_timing' not in timed, timed
         view = timed['timing']
         assert view['offset']['samples'] == samples, timed
-        # The read is 8 s in ns: in us, the result was read 7.994 s after it
-        # was stored.
+        # 8 s in ns: read 7.994 s after the result was stored.
         assert view['legs'][-1]['ms'] == 7994.0, view
         assert view['total_ms'] == 8000.0, view
     assert reads == ['wall', 'window'] * 2, reads
