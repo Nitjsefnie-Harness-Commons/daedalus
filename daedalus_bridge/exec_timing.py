@@ -1,4 +1,4 @@
-"""Server-side _timing stamps, on under DAEDALUS_DEBUG_TIMING=1."""
+"""Bridge _timing stamps, on with DAEDALUS_DEBUG_TIMING=1."""
 import time
 
 from daedalus_bridge.env_config import debug_timing
