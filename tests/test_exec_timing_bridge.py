@@ -110,8 +110,8 @@ def test_c_flag_off_reads_no_clock_and_bytes_equal_the_base(tmp):
         assert out['clock_calls'] == 0, (flag, out)
         for name, (ident, tab, field, slot_field) in cases.items():
             got, did = out[name], out[name]['did']
-            body = '"id": "%s", "code": "1"%s' % (ident, field)
-            queued = '{%s, "_did": "%s"}' % (body, did)
+            body = f'"id": "{ident}", "code": "1"{field}'
+            queued = f'{{{body}, "_did": "{did}"}}'
             assert got['file'] == queued, (flag, got['file'])
             assert got['frame'] == (
                 f'event: command\ndata: {queued}\n\n'), (flag, got['frame'])
@@ -137,12 +137,12 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             did = json.loads(raw)['did']
             queued = Path(docroot) / 'commands' / TOK / f'{did}.json'
             stored = queued.read_bytes()
-            again = put_command(base, body)[1] if flag == '1' else None
+            again = put_command(base, body)[1]
         if flag == '1':
             command = json.loads(raw)['command']
             assert list(command['_timing']) == ['srv_enqueue_us'], raw
             assert json.loads(stored) == command, (stored, raw)
-            retry = json.loads(again)
+            retry = json.loads(bytes(again))
             assert retry['duplicate'] is True, again
             assert retry['command'] == command, (again, stored)
             continue
