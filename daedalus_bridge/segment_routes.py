@@ -23,8 +23,7 @@ from daedalus_bridge import segment_store
 
 SEGMENT_DECIMAL_MAX_DIGITS = 20
 
-# Parameters a POST may carry in a header instead of the query, so every
-# upload of a job shares one URL and a browser reuses one preflight.
+# Parameters a POST may send as headers, so a job's uploads share one URL.
 SEGMENT_PARAM_HEADERS = (('job', 'X-Daedalus-Segment-Job'),
                          ('seg', 'X-Daedalus-Segment-Seg'),
                          ('total', 'X-Daedalus-Segment-Total'))
@@ -49,10 +48,9 @@ class Admission(NamedTuple):
 def header_params(headers, params):
     """`params` with job, seg and total taken from their headers.
 
-    A header value is percent-encoded UTF-8, since a header cannot carry
-    a non-ASCII job name. A carrier counts as present by name, blank or
-    not; a repeated header, or one beside its query twin, is refused before
-    any value is read. Returns the merged params, or a refusal.
+    Values are percent-encoded UTF-8. A header is present by name, blank
+    or not; a repeat, or a header beside its query twin, is refused before
+    any value is used. Returns the merged params, or a refusal.
     """
     names = [name.lower() for name in headers.keys()]
     merged = dict(params)

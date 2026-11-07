@@ -164,10 +164,7 @@ def test_concurrency_defaults_when_unsubstituted_and_reads_a_value(tmp):
 
 
 def test_every_upload_of_a_job_shares_one_url_and_carries_its_headers(tmp):
-    """A fixed target is what lets a browser reuse one preflight answer.
-
-    The job is percent-encoded in its header, which cannot carry non-ASCII.
-    """
+    """One URL per job lets a browser reuse a preflight; the job is encoded."""
     del tmp
     job = 'relay-caf\u00e9'
     outcome = _run(

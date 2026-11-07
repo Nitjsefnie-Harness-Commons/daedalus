@@ -279,9 +279,9 @@ class Handler(RequestMixin):
         if (parsed.path == '/segment'
                 and ('octet-stream' in content_type
                      or 'application/json' not in content_type)):
-            # Everything this route authorizes on rides in the query string,
-            # so the answer never depends on a byte of the body. Deciding
-            # first is what keeps a refusal cheap: reading the body and then
+            # Everything this route authorizes on rides in the query string
+            # and headers, so the answer never depends on a byte of the body.
+            # Deciding first keeps a refusal cheap: reading the body and then
             # answering 403 charged the process for a request it was always
             # going to reject.
             params = self._parse_query(parsed.query)
