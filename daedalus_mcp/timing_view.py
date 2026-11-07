@@ -59,6 +59,10 @@ class Window:
         high = min(sample[2] for sample in self._samples)
         if low <= high:
             return low, high, len(self._samples), True
+        # No offset satisfies every sample: a clock stepped, so the rest are
+        # stale and the window restarts from this one.
+        self._samples.clear()
+        self._samples.append((now, lo, hi))
         return lo, hi, 1, False
 
 
