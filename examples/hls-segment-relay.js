@@ -71,10 +71,10 @@ const CONCURRENCY = '__CONC__'.startsWith('__') ? 3 : parseInt('__CONC__', 10);
 
 // Playlist and segment reads go through the background GM bridge, which is not
 // subject to page CORS. The status GET and segment POST are plain page-side
-// fetches, so a cross-origin deployment must answer their preflights. The
-// bridge adds no CORS headers; see the reverse-proxy paragraph of "Security"
-// in README.md: answer /segment preflights with Access-Control-Max-Age and
-// list X-Daedalus-Segment-Sig, -Job, -Seg and -Total in
+// fetches, so a cross-origin deployment must allow both and their preflights.
+// The bridge adds no CORS headers; the reverse-proxy paragraph of "Security"
+// in README.md has /segment preflights send Access-Control-Max-Age and list
+// Content-Type and X-Daedalus-Segment-Sig, -Job, -Seg, -Total in
 // Access-Control-Allow-Headers. Without that policy, route both bridge
 // requests through the GM bridge instead.
 function gmGet(url, responseType) {

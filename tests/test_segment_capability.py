@@ -318,8 +318,7 @@ def post_raw(base, query, headers, body=b'bytes'):
 def test_a_segment_upload_takes_its_parameters_from_headers(tmp):
     """The fixed `/segment` target is what lets a browser reuse a preflight.
 
-    Header values are percent-encoded UTF-8, because a header cannot carry
-    a non-ASCII job name and the job name is unrestricted past its bytes.
+    Values are percent-encoded UTF-8: a header cannot carry a non-ASCII job.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for job in (seg_job(), seg_job() + '-caf\u00e9'):
