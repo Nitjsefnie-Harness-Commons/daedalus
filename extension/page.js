@@ -137,7 +137,9 @@
 
     const post = (fields) => {
       let ms;
-      try { ms = +(performance.now() - t0).toFixed(1); } catch (_) {}
+      try {
+        if (t0 !== undefined) ms = +(performance.now() - t0).toFixed(1);
+      } catch (_) {}
       const message = { direction: 'daedalus-eval-result', id, relayId, ...fields, ms };
       if (timing) stamp('pg_done');
       window.postMessage(timing ? { ...message, timing } : message, '*');
