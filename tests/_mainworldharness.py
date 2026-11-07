@@ -358,10 +358,10 @@ async function run() {
     };
   }
 
-  if (mode === 'eval-plain') {
+  if (mode === 'eval-plain' || mode === 'eval-throws') {
     context.command = {
-      id: '_eval', type: 'eval', code: '2 + 2', chromeTab: 7,
-      _did: 'did-eval-plain',
+      id: '_eval', type: 'eval', chromeTab: 7, _did: 'did-' + mode,
+      code: mode === 'eval-plain' ? '2 + 2' : 'missing_name',
     };
     deliver();
     await waitForResult(() => postedResults.length >= 1);
