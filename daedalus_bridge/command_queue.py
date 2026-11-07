@@ -322,7 +322,8 @@ def event(token):
 
 
 def _live_duplicate(qdir, cmd, command_ttl):
-    """Return the delivery id of a live queued copy of `cmd`, or None.
+    """Return the delivery id and document of a live queued copy of `cmd`,
+    or None.
 
     A live candidate is a complete, non-hidden `.json` entry young enough to
     be delivered — `remove_expired`'s boundary — read through the drain's own
@@ -352,7 +353,7 @@ def _live_duplicate(qdir, cmd, command_ttl):
         if isinstance(parsed, dict) and {
                 k: v for k, v in parsed.items()
                 if k not in _VOLATILE_KEYS} == cmd:
-            return name[:-len('.json')]
+            return name[:-len('.json')], parsed
     return None
 
 
@@ -373,7 +374,9 @@ def enqueue(cmd_dir, token, tab, cmd, *, command_ttl):
         qdir.mkdir(parents=True, exist_ok=True)
         live = _live_duplicate(qdir, cmd, command_ttl)
         if live is not None:
-            seq, duplicate = live, True
+            (seq, document), duplicate = live, True
+            if '_timing' in document:
+                cmd['_timing'] = document['_timing']
         else:
             exec_timing.begin(cmd)
             seq = next_seq(cmd_dir)
