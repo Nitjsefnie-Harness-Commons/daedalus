@@ -359,7 +359,11 @@ async function run() {
       _did: 'did-relay',
     }, flag);
     await waitFor(() => resultPosts.length === 1, 'relayed eval result');
-    return { reads: clockReads, bodies: resultBodies };
+    return {
+      reads: clockReads,
+      bodies: resultBodies,
+      messages: windowMessages.map((message) => Object.keys(message)),
+    };
   }
 
   if (mode === 'poisoned') {

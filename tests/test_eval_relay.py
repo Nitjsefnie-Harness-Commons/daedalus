@@ -447,6 +447,8 @@ _BASE_BODIES = {
     'relay': _BASE.replace('bound', 'eval') % (
         'null', '"result":4,"world":"page:relay.test","exec_ms":0', 'relay'),
 }
+_RELAY_FIELDS = [['direction', 'id', 'relayId', 'code'],
+                 ['direction', 'id', 'relayId', 'r', 'ms']]
 _PROBE_CALL = {'target': {'tabId': 7}, 'world': 'MAIN',
                'func': '_canUseMainWorldEval'}
 
@@ -473,6 +475,8 @@ def test_with_the_flag_off_an_eval_takes_no_stamp_and_posts_base_bytes(tmp):
         off = _timed(world, '0')
         assert off['reads'] == {'worker': 0, 'page': 0, 'date': 1}, off
         assert off['bodies'] == [body], off
+        # The page relay's two window messages keep today's fields.
+        assert off.get('messages', _RELAY_FIELDS) == _RELAY_FIELDS, off
         on = _timed(world, '1')['reads']
         assert on['worker'] > 0, (world, on)
         assert on['page'] > 0 or world == 'eval-probe-hang', (world, on)
