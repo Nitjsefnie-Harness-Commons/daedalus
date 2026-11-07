@@ -7,6 +7,7 @@ import threading
 import time
 
 from daedalus_bridge import atomic_file
+from daedalus_bridge import exec_timing
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge.queue_order import next_seq  # re-exported
 from daedalus_bridge import path_safety
@@ -21,6 +22,10 @@ _cmd_events_lock = threading.Lock()
 # The one name of the dashboard target, so "is this the dashboard" is a
 # single criterion rather than a spelling repeated at each site.
 DASHBOARD_TAB = 'dashboard'
+# Keys a live copy may carry that its retry cannot: the delivery id, and the
+# stamp object only while stamping is on (so a flag-off body keeps its own).
+_VOLATILE_KEYS = (
+    ('_did', '_timing') if exec_timing.ENABLED else ('_did',))
 
 # Set by the stream service, which owns the refusal registry, so the TTL
 # sweep can retire a name whose occupant it unlinked. None when nothing
@@ -345,7 +350,8 @@ def _live_duplicate(qdir, cmd, command_ttl):
                     ValueError):
                 continue
         if isinstance(parsed, dict) and {
-                k: v for k, v in parsed.items() if k != '_did'} == cmd:
+                k: v for k, v in parsed.items()
+                if k not in _VOLATILE_KEYS} == cmd:
             return name[:-len('.json')]
     return None
 
@@ -369,6 +375,7 @@ def enqueue(cmd_dir, token, tab, cmd, *, command_ttl):
         if live is not None:
             seq, duplicate = live, True
         else:
+            exec_timing.begin(cmd)
             seq = next_seq(cmd_dir)
             _publish(qdir, seq, {**cmd, '_did': seq})
             duplicate = False
