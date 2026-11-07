@@ -152,6 +152,7 @@
 !/daedalus_mcp/auth.py
 !/daedalus_mcp/request_guard.py
 !/daedalus_mcp/server.py
+!/daedalus_mcp/timing_view.py
 !/daedalus_mcp/tools_cookies.py
 !/daedalus_mcp/tools_css.py
 !/daedalus_mcp/tools_eval.py
@@ -522,6 +523,7 @@
 !/tests/test_examples_parse.py
 !/tests/test_exclusive_bind.py
 !/tests/test_exec_timing_bridge.py
+!/tests/test_exec_timing_view.py
 !/tests/test_extension_boundary.py
 !/tests/test_extension_manifest.py
 !/tests/test_extension_policy.py
