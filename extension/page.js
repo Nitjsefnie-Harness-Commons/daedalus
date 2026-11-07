@@ -132,10 +132,13 @@
       try { timing[name] = performance.timeOrigin + performance.now(); } catch (_) {}
     };
     if (timing) stamp('pg_recv');
-    const t0 = performance.now();
+    let t0;
+    try { t0 = performance.now(); } catch (_) {}
 
     const post = (fields) => {
-      const message = { direction: 'daedalus-eval-result', id, relayId, ...fields, ms: +(performance.now() - t0).toFixed(1) };
+      let ms;
+      try { ms = +(performance.now() - t0).toFixed(1); } catch (_) {}
+      const message = { direction: 'daedalus-eval-result', id, relayId, ...fields, ms };
       if (timing) stamp('pg_done');
       window.postMessage(timing ? { ...message, timing } : message, '*');
     };
