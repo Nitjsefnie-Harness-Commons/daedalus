@@ -19,6 +19,7 @@ from _realbrowser import (BrowserEnvironmentSkipped,  # noqa: E402
 from _repo import EXTENSION_ROOT  # noqa: E402
 sys.path.insert(0, str(_util.ROOT))
 import daedalus_cli.output as CLI_OUTPUT  # noqa: E402
+from daedalus_mcp import timing_view  # noqa: E402
 
 
 def test_hostile_page_eval_matrix_has_descriptive_channels_only(tmp):
@@ -317,6 +318,39 @@ def test_cdp_eval_throw_is_terminal(tmp):
                 assert 'callable failed' in (actual.get('error') or ''), actual
                 assert actual.get('world') == 'cdp', actual
                 assert side_effects == 1, side_effects
+
+
+def test_a_timed_eval_carries_every_page_main_leg_and_untimed_none(tmp):
+    """With `DAEDALUS_DEBUG_TIMING=1` a real page-main eval's result comes
+    back with every stamp its path takes, rendering a breakdown that
+    reached every leg; with `0` it carries no `_timing` at all."""
+    token = 'timingtok'
+    chain = ['srv_enqueue_us', 'srv_write_us', 'sw_recv', 'sw_probe_call',
+             'pg_probe', 'sw_probe_done', 'sw_eval_call', 'pg_eval_start',
+             'pg_eval_end', 'sw_eval_done', 'sw_post', 'srv_result_us',
+             'mcp_read_us']
+    actual = {}
+    for flag in ('1', '0'):
+        case_tmp = Path(tmp) / flag
+        case_tmp.mkdir()
+        with _util.bridge(case_tmp, env={
+                'DAEDALUS_TOKEN_OVERRIDE': '', 'DAEDALUS_TOKEN': token,
+                'DAEDALUS_MCP_PORT': '0', 'DAEDALUS_DEBUG_TIMING': flag
+        }) as (bridge_url, _docroot), eval_page_server() as pages:
+            with real_extension_page(
+                    case_tmp, bridge_url, token,
+                    pages + '/plain.html') as (_node, _page, tab_id):
+                actual[flag] = real_eval(
+                    bridge_url, token, tab_id, 'timed', '2 + 2')
+    assert actual['0'].get('result') == 4, actual
+    assert '_timing' not in actual['0'], actual
+    timed = actual['1']
+    assert (timed.get('result'), timed.get('world')) == (4, 'page-main'), (
+        timed)
+    view = timing_view.render(timed['_timing'], time.time_ns() // 1000)
+    assert [leg['leg'] for leg in view['legs']] == [
+        f'{a} -> {b}' for a, b in zip(chain, chain[1:])], view
+    assert (view['world'], view['unreached']) == ('page-main', []), view
 
 
 def main():
