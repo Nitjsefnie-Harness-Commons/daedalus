@@ -560,6 +560,47 @@ def test_a_page_that_breaks_its_own_clock_loses_only_its_stamps(tmp):
         if not name.startswith('pg_')], on
 
 
+# The probe and the eval as the page runs them, loaded from evaluate.js so
+# their own lines are the ones measured: untimed, then timed.
+_PAGE_SIDE = r"""
+const fs = require('fs');
+const vm = require('vm');
+const file = require('path').resolve('extension/worker/evaluate.js');
+const out = {};
+for (const page of ['plain', 'csp', 'poison']) {
+  const context = { performance: { timeOrigin: 1600000000000.25, now() {
+    if (page === 'poison') throw new Error('page killed performance.now');
+    return 0.5;
+  } } };
+  vm.runInNewContext(fs.readFileSync(file, 'utf8'), context,
+    { filename: file });
+  if (page === 'csp') context.Function = () => { throw new EvalError(); };
+  out[page] = [context._canUseMainWorldEval(),
+    context._canUseMainWorldEval(true),
+    context._executeMainWorldEval('1+1'),
+    context._executeMainWorldEval('1+1', true)];
+}
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_the_page_side_probe_and_eval_stamp_only_when_timed(tmp):
+    """Untimed, the probe answers a bare boolean and the eval envelope has no
+    stamp; timed, both add the page's clock, which a throwing clock leaves
+    out without changing the answer.
+    """
+    del tmp
+    result = run_node_argv(require_node(), ['-e', _PAGE_SIDE], ROOT)
+    assert result.returncode == 0, result
+    stamp, error = 1600000000000.75, {'e': 'page killed performance.now'}
+    evaluated = {'r': 2, 'ms': 0}
+    timed = {**evaluated, 'pg_eval_start': stamp, 'pg_eval_end': stamp}
+    assert json.loads(result.stdout) == {
+        'plain': [True, {'ok': True, 'pg_probe': stamp}, evaluated, timed],
+        'csp': [False, {'ok': False, 'pg_probe': stamp}, evaluated, timed],
+        'poison': [True, {'ok': True}, error, error]}, result.stdout
+
+
 # page.js alone under a page clock that works or throws, answering one
 # relayed eval: the messages it posts back and what its listener threw.
 _PAGE_ONLY = r"""
