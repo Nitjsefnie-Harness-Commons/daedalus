@@ -14,6 +14,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _cdpharness import run_cdp_handle_lifecycle  # noqa: E402
+from _noderun import run_node_argv  # noqa: E402
+from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import require_node  # noqa: E402
 from _relayharness import (run_eval_after_cdp_fails_mid_flight,  # noqa: E402
                            run_eval_relay_marker, run_eval_relay_overlap,
                            run_eval_same_tab_preemption, run_gm_abort,
@@ -525,6 +528,70 @@ def test_a_page_that_breaks_its_own_clock_loses_only_its_stamps(tmp):
     assert list(_posted_timing(on)) == ['srv_enqueue_us', 'srv_write_us'] + [
         name for name in _STAMPS['eval-plain'] + ['sw_post']
         if not name.startswith('pg_')], on
+
+
+# page.js alone under a page clock that works or throws, answering one
+# relayed eval: the messages it posts back and what its listener threw.
+_PAGE_ONLY = r"""
+const fs = require('fs');
+const vm = require('vm');
+const [pagePath, poison, timed] = process.argv.slice(1);
+const listeners = [];
+const posted = [];
+const win = {
+  addEventListener(type, listener) {
+    if (type === 'message') listeners.push(listener);
+  },
+  postMessage(message) { posted.push(message); },
+};
+const context = vm.createContext({
+  window: win, document: {}, URL, setTimeout,
+  performance: {
+    timeOrigin: 1600000000000.25,
+    now() {
+      if (poison === '1') throw new Error('page killed performance.now');
+      return 0.5;
+    },
+  },
+});
+vm.runInContext(fs.readFileSync(pagePath, 'utf8'), context,
+  { filename: pagePath });
+const data = { direction: 'daedalus-eval', id: 'c1', relayId: 'r1',
+  code: '1+1' };
+if (timed === '1') data.timing = { cs_recv: 1 };
+const errors = [];
+for (const listener of listeners) {
+  try { listener({ source: win, data }); } catch (error) {
+    errors.push(String(error));
+  }
+}
+process.stdout.write(JSON.stringify({ errors, posted }));
+"""
+
+
+def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
+    """A page that replaced `performance.now` with a thrower used to get no
+    answer at all: the relay listener read it outside any try, so the
+    relayed eval waited out the relay TTL. The answer now arrives without
+    its `ms`, and a timed relay keeps the stamps it already carried.
+    """
+    del tmp
+
+    def answer(poison, timed):
+        result = run_node_argv(
+            require_node(), ['-e', _PAGE_ONLY,
+                             str(EXTENSION_ROOT / 'page.js'), poison, timed],
+            ROOT)
+        assert result.returncode == 0, result
+        return json.loads(result.stdout)
+
+    base = {'direction': 'daedalus-eval-result', 'id': 'c1',
+            'relayId': 'r1', 'r': 2}
+    for poison, timed, posted in (
+            ('0', '0', {**base, 'ms': 0}), ('1', '0', base),
+            ('1', '1', {**base, 'timing': {'cs_recv': 1}})):
+        got = answer(poison, timed)
+        assert got == {'errors': [], 'posted': [posted]}, (poison, got)
 
 
 def main():
