@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Bridge-side exec timing stamps: `_timing` rides an eval command only while
 `DAEDALUS_DEBUG_TIMING=1`, and only the bridge writes it: a client's own
-`_timing` (in a PUT body, a legacy drop or a result) is dropped. Any other
-flag value reads no clock and leaves the bytes of every command, frame,
-result and PUT answer (a coalesced retry's included) without `_timing`
-untouched.
+`_timing` in a PUT body or a legacy drop is dropped. With the flag on, a
+posted result's `_timing` is kept and stamped (the extension's echo cannot be
+told from a forged one). Any other flag value reads no clock, drops a
+`_timing` a queue file or result still carries, and leaves the bytes of every
+command, frame, result and PUT answer (a coalesced retry's included) without
+`_timing` untouched.
 
 The in-process probes run in a child so the flag, read once at import, is
 whatever the arm sets; `exec_timing._clock` is counted there, which is what
@@ -77,6 +79,17 @@ stream_service.drain_legacy_file(
     frame_writer=lambda data: stream_service.write_frame(frames, data))
 out['legacy'] = json.loads(frames.getvalue().split(b'data: ')[1])
 out['poll'] = stream_service.poll_legacy(cmd_dir, 'tok')
+# A queue file a flag-on process left behind, drained by this one.
+left = cmd_dir / 'tok_q'
+left.mkdir(exist_ok=True)
+(left / '0000000000001_00000000000000000099.json').write_text(json.dumps(
+    {'id': 'q', 'code': '1', '_did': 'q1', '_timing': {'srv_enqueue_us': 7}}),
+    encoding='utf-8')
+frames = io.BytesIO()
+stream_service.drain_queue(
+    left, None, None, command_ttl=90,
+    frame_writer=lambda data: stream_service.write_frame(frames, data))
+out['leftover'] = frames.getvalue().decode()
 out['clock_calls'] = len(calls)
 out['clock_is_time_ns'] = clock_is_time_ns
 print(json.dumps(out))
@@ -123,6 +136,9 @@ def test_b_flag_on_stamps_each_stage_of_an_eval_only(tmp):
             ['srv_enqueue_us'], ['srv_enqueue_us', 'srv_write_us'],
             ['srv_enqueue_us', 'srv_write_us', 'srv_result_us']], out[name]
     _assert_legacy_drops_client_timing(out)
+    leftover = json.loads(out['leftover'].split('data: ')[1])['_timing']
+    assert list(leftover) == ['srv_enqueue_us', 'srv_write_us'], out
+    assert leftover['srv_enqueue_us'] == 7, out
 
 
 def _assert_typed_untimed(out):
@@ -142,6 +158,8 @@ def test_c_flag_off_reads_no_clock_and_bytes_equal_the_base(tmp):
     for flag in (None, '0', 'true'):
         out = _probe(tmp, flag)
         assert out['clock_calls'] == 0, (flag, out)
+        assert out['leftover'] == ('event: command\ndata: {"id": "q", '
+                                   '"code": "1", "_did": "q1"}\n\n'), out
         _assert_legacy_drops_client_timing(out)
         _assert_typed_untimed(out)
         for name, (ident, tab) in cases.items():
