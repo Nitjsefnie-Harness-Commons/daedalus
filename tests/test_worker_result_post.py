@@ -104,7 +104,8 @@ function settle() {
 }
 
 async function run() {
-  vm.runInContext("importScripts('worker/config.js');", context,
+  vm.runInContext(
+    "importScripts('worker/exec_timing.js', 'worker/config.js');", context,
     { filename: 'extension/background.js (harness)' });
   await settle();
   await vm.runInContext('loadConfig()', context);
