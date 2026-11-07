@@ -36,7 +36,7 @@ Delivery is the MV3 Chrome extension only (no userscript).
 <endpoints>
 Use these when writing server changes or constructing raw HTTP requests; the per-route edge cases (path rules, `_did` handling, stream spelling rules) are in the skill's "Bridge internals reference". Field names are exact.
 
-- Repeated authority carriers are rejected before any value is selected, equal or blank repeats included: `token` in a query or JSON body, `Authorization`, `X-Daedalus-Segment-Sig` (400 `duplicate segment capability header`), `job` / `sig` on segment-capability routes.
+- Repeated authority carriers are rejected before any value is selected, equal or blank repeats included: `token` in a query or JSON body, `Authorization`, `X-Daedalus-Segment-Sig` (400 `duplicate segment capability header`), `job` / `sig` on segment-capability routes; on `POST /segment`, a repeated `X-Daedalus-Segment-Job` / `-Seg` / `-Total` header (400 `duplicate X-Daedalus-Segment-<Job|Seg|Total> header`) or one beside its query twin (400 `conflicting job|seg|total`), headers matched case-insensitively.
 - Authenticated `GET`s: `Authorization: Bearer <token>`, then `?token=`. Body verbs (`POST`, `PUT`, `DELETE`) settle the bearer before reading the body; a body `token` counts only for a declared body within `DAEDALUS_MAX_UNAUTHENTICATED_BODY` (default `64 * 1024` bytes), and a larger body with no header gets 401 unread (`POST /segment` authorizes on the query string and headers and never reaches this gate). Two carriers must name the same token, else 400 `conflicting token`.
 - `POST /segment` and `GET /segment-status` take their job capability, never the bridge token, from `X-Daedalus-Segment-Sig`, then `sig` in the query, by the same rules (`/segment-job` takes the bridge token). Every in-repo client sends header forms, so no reusable credential lands in a request target.
 
@@ -56,7 +56,7 @@ Routes:
 - `GET /screenshot?token=X[&id=Y]`: latest screenshot; `&path=P`: exactly the upload `path` P (or legacy `<token>/<id>/<file>`). Ids are reused, so CLI and MCP clients download by `path`.
 - `GET /dashboard[/<asset>]`: the dashboard from `dashboard/` in the repo; paths with `..` rejected; every response refuses framing (`Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`).
 - `POST /segment-job` `{token, job}` → `{ok, sig}`: mint or re-fetch an HLS job's capability (idempotent for the owner; 409 for another owner or a reserved name; 500 for an unreadable record, never re-minted). `GET /segment-job?token=X&job=Y` looks up **without minting** (404 none, 409 another owner); status queries use it. The page never holds the bridge token: the extension mints via `GM.segmentJob` only for an allowlisted origin (`allow-segment-origin` / `revoke-segment-origin` / `list-segment-origins` over `daedalus-segment-origins`) and hands the page only the sig.
-- `POST /segment?job=X&seg=N&total=T`: raw HLS segment to `$DAEDALUS_DIR/segments/{job}/{seg:06d}.ts`, refused before its body is buffered. `GET /segment-status?job=X`: `{done[], count}`.
+- `POST /segment?job=X&seg=N&total=T`: raw HLS segment to `$DAEDALUS_DIR/segments/{job}/{seg:06d}.ts`, refused before its body is buffered. Job, seg and total may instead ride in `X-Daedalus-Segment-Job` / `-Seg` / `-Total` (percent-encoded UTF-8) at `/segment`, with the same validation. `GET /segment-status?job=X`: `{done[], count}`.
 
 Limits (default):
 - `DAEDALUS_MAX_BODY_SIZE` (`64 * 1024 * 1024` bytes) on every `POST`/`PUT`/`DELETE` body: no `Content-Length` 411, invalid or negative 400, over 413.

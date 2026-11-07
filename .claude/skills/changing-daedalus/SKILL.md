@@ -785,7 +785,10 @@ Repeated authority carriers are rejected before any value is selected, equal or
 blank repeats included: `token` in a query or JSON body, a repeated
 `Authorization` header, a repeated `X-Daedalus-Segment-Sig` (400
 `duplicate segment capability header`), and `job` / `sig` on segment-capability
-routes.
+routes. On `POST /segment`, a repeated `X-Daedalus-Segment-Job`, `-Seg` or
+`-Total` header (400 `duplicate X-Daedalus-Segment-<Job|Seg|Total> header`), or
+one beside its query twin (400 `conflicting job|seg|total`), is refused the same
+way; header names match case-insensitively.
 
 Authenticated `GET` routes resolve `Authorization: Bearer <token>` first, then
 `?token=`; a header and query token in one request must name the same one, else
@@ -950,7 +953,9 @@ and never reaches this gate.
   `POST /segment-job` travels in `X-Daedalus-Segment-Sig` (or `&sig=S`), never
   the bridge token. Capability, parameter shapes and index bound are all
   settled before the body arrives, so a refused request is answered without
-  buffering its segment.
+  buffering its segment. Job, seg and total may instead travel in
+  `X-Daedalus-Segment-Job`, `-Seg` and `-Total` (percent-encoded UTF-8) at
+  `/segment`, with the same validation.
 - `GET /segment-status?job=X`: received segments `{done[], count}`; capability
   in `X-Daedalus-Segment-Sig` or `&sig=S`.
 
