@@ -5,6 +5,7 @@ the result carries `_timing`, reading no clock otherwise.
 """
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -187,7 +188,8 @@ _RESULT = {'token': 'tok', 'id': 'c', 'tabId': '7', 'result': '4',
 def test_exec_renders_timing_only_for_a_result_that_carries_it(tmp):
     """Issue Expected 3 at the MCP: an untimed result's `exec` output is
     the base bytes and no clock is read; a timed one gets `timing` in place
-    of `_timing`, read once."""
+    of `_timing`, read once. The flag is set against each, so a decision
+    read from the environment fails either way."""
     del tmp
     reads = []
     clock = time.time_ns
@@ -196,17 +198,18 @@ def test_exec_renders_timing_only_for_a_result_that_carries_it(tmp):
         reads.append(1)
         return clock()
 
-    def run(body):
+    def run(body, flag):
         tools = tools_eval.register(_Server(), _Bridge(body))
-        with mock.patch.object(time, 'time_ns', counted):
+        with mock.patch.object(time, 'time_ns', counted), mock.patch.dict(
+                os.environ, {'DAEDALUS_DEBUG_TIMING': flag}):
             return asyncio.run(tools['exec']('c', '2 + 2', '7'))
 
-    assert json.dumps(run(_RESULT)) == (
+    assert json.dumps(run(_RESULT, '1')) == (
         '{"id": "c", "tabId": "7", "error": null, "ts": 1, "world": '
         '"page-main", "exec_ms": 0, "resultGeneration": "g", "deliveryId": '
         '"d1", "roundtrip_ms": 9, "value": 4}'), reads
     assert not reads
-    timed = run({**_RESULT, '_timing': {'srv_enqueue_us': 1}})
+    timed = run({**_RESULT, '_timing': {'srv_enqueue_us': 1}}, '0')
     assert len(reads) == 1, reads
     assert '_timing' not in timed, timed
     assert timed['timing']['legs'][0]['leg'] == (
