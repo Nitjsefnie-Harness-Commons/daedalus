@@ -65,7 +65,7 @@ print(json.dumps(out))
 '''
 
 
-def _probe(tmp, flag):
+def _run(tmp, script, flag):
     env = {name: value for name, value in os.environ.items()
            if not name.startswith('DAEDALUS_')}
     env.update({'DAEDALUS_DIR': str(Path(tmp) / 'root'),
@@ -73,10 +73,14 @@ def _probe(tmp, flag):
     if flag is not None:
         env['DAEDALUS_DEBUG_TIMING'] = flag
     proc = subprocess.run(
-        [sys.executable, '-c', _PROBE], cwd=_util.ROOT, env=env,
+        [sys.executable, '-c', script], cwd=_util.ROOT, env=env,
         capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
-    return json.loads(proc.stdout.splitlines()[-1])
+    return proc.stdout.splitlines()[-1]
+
+
+def _probe(tmp, flag):
+    return json.loads(_run(tmp, _PROBE, flag))
 
 
 def test_a_flag_off_takes_no_stamp_and_adds_no_key(tmp):
@@ -141,24 +145,20 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             '"command": %s}' % (did, command)).encode(), (flag, raw)
 
 
-def test_e_a_retry_with_a_new_stamp_still_coalesces(tmp):
+def test_e_a_retry_coalesces_as_the_flag_leaves_it(tmp):
     script = (
         'import os\nfrom pathlib import Path\n'
         'from daedalus_bridge import command_queue\n'
-        'd = Path(os.environ["DAEDALUS_DIR"])\n'
-        'a = command_queue.enqueue(d, "tok", "t", {"id": "e", "code": "1"},'
-        ' command_ttl=90)\n'
-        'b = command_queue.enqueue(d, "tok", "t", {"id": "e", "code": "1"},'
-        ' command_ttl=90)\n'
-        'print(a[1], b[1], a[0] == b[0])\n')
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    env.update({'DAEDALUS_DIR': str(Path(tmp) / 'root'),
-                'DAEDALUS_DEBUG_TIMING': '1', 'PYTHONDONTWRITEBYTECODE': '1'})
-    proc = subprocess.run(
-        [sys.executable, '-c', script], cwd=_util.ROOT, env=env,
-        capture_output=True, text=True, timeout=60)
-    assert proc.stdout == 'False True True\n', (proc.stdout, proc.stderr)
+        'def put(extra):\n'
+        '    return command_queue.enqueue(\n'
+        '        Path(os.environ["DAEDALUS_DIR"]), "tok", "t",\n'
+        '        {"id": "e", "code": "1", **extra}, command_ttl=90)\n'
+        'first = put(EXTRA)\n'
+        'print(first[1], put(EXTRA)[1])\n')
+    assert _run(tmp, script.replace('EXTRA', '{}'), '1') == 'False True'
+    # Flag off, a body carrying its own _timing is an ordinary field.
+    assert _run(tmp, script.replace('EXTRA', '{"_timing": {}}'),
+                None) == 'False True'
 
 
 def main():
