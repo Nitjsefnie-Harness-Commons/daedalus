@@ -67,6 +67,8 @@ def run(cmd, tab, posted_timing=None):
 out = {'eval': run({'id': 'e', 'code': '1'}, 'a')}
 out['typed'] = run({'id': 't', 'type': 'ping'}, 'b')
 out['typed_client'] = run({'id': 'u', 'type': 'ping', '_timing': {}}, 'u')
+out['typed_code'] = run({'id': 'h', 'type': 'store-hotfix', 'fixId': 'f',
+                         'code': 'x=1'}, 'h')
 out['client'] = run({'id': 'c', 'code': '1', '_timing': {}}, 'c')
 out['populated'] = run({'id': 'p', 'code': '1', '_timing': {
     'srv_enqueue_us': 5, 'x': 1}}, 'p', posted_timing={'sw_post': 1.5})
@@ -142,7 +144,7 @@ def test_b_flag_on_stamps_each_stage_of_an_eval_only(tmp):
 
 
 def _assert_typed_untimed(out):
-    for name in ('typed', 'typed_client'):
+    for name in ('typed', 'typed_client', 'typed_code'):
         for stage in ('file', 'frame', 'slot'):
             assert '_timing' not in out[name][stage], (stage, out[name])
 
