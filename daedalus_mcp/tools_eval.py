@@ -9,6 +9,8 @@ from daedalus_mcp import timing_view
 
 
 def register(mcp, bridge):
+    window = timing_view.Window()
+
     @overload
     def _flatten_eval(body: dict) -> dict:
         ...
@@ -63,7 +65,7 @@ def register(mcp, bridge):
             expect_delivery=sent.get('did')))
         if '_timing' in body:
             body['timing'] = timing_view.render(
-                body.pop('_timing'), time.time_ns() // 1000)
+                body.pop('_timing'), time.time_ns() // 1000, window)
         return body
 
     @mcp.tool()
