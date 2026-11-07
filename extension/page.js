@@ -127,10 +127,23 @@
     const key = '__daedalus_' + relayId;
     const hasAwait = code.includes('await');
     const hasReturn = /\breturn\b/.test(code);
+    // Exec-timing stamps, only when the content script asked; best effort.
+    const timing = e.data.timing ? { ...e.data.timing } : null;
+    const stamp = (name) => {
+      try { timing[name] = performance.timeOrigin + performance.now(); } catch (_) {}
+    };
+    if (timing) stamp('pg_recv');
     const t0 = performance.now();
 
-    const postR = (r) => window.postMessage({ direction: 'daedalus-eval-result', id, relayId, r, ms: +(performance.now() - t0).toFixed(1) }, '*');
-    const postE = (err) => window.postMessage({ direction: 'daedalus-eval-result', id, relayId, e: (err && (err.message || String(err))), ms: +(performance.now() - t0).toFixed(1) }, '*');
+    // Literals, not assignments: a page setter on Object.prototype would
+    // swallow an assigned field.
+    const post = (fields) => {
+      const message = { direction: 'daedalus-eval-result', id, relayId, ...fields, ms: +(performance.now() - t0).toFixed(1) };
+      if (timing) stamp('pg_done');
+      window.postMessage(timing ? { ...message, timing } : message, '*');
+    };
+    const postR = (r) => post({ r });
+    const postE = (err) => post({ e: (err && (err.message || String(err))) });
 
     const runCspFallback = () => {
       const wrapped = _wrap(code, key, hasAwait, hasReturn);

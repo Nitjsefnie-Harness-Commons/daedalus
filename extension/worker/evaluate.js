@@ -1,7 +1,7 @@
 /* exported _takeEvalRelay, _canUseMainWorldEval, _raceMainWorldEval */
 /* exported _executeMainWorldEval, handleEval */
 /* global cdpClaimAttachment, _releaseCdpObjects */
-/* global _cdpError, _cdpSettle, postResult */
+/* global _cdpError, _cdpSettle, postResult, _stamp, _copyStamps */
 
 // ─── Eval: route to content script ───
 
@@ -50,6 +50,8 @@ function _takeEvalRelay(relayId, tabId) {
 // it.
 // Returns true after CDP dispatch, false only before submitted source runs.
 async function _evalViaCdp(cmd, chromeTabId) {
+  const timing = cmd._execution.timing;
+  _stamp(timing, 'sw_cdp_attach');
   // Joining a capture's or a kept session's attachment is the claim's job;
   // this call gives back only the share it took, so neither is ended here.
   const claim = cdpClaimAttachment(chromeTabId);
@@ -58,6 +60,7 @@ async function _evalViaCdp(cmd, chromeTabId) {
   } catch (_) {
     return false;
   }
+  _stamp(timing, 'sw_cdp_ready');
   try {
     let expression = cmd.code;
     try {
@@ -113,6 +116,7 @@ async function _evalViaCdp(cmd, chromeTabId) {
     } catch (error) {
       err = 'CDP eval failed: ' + (error.message || String(error));
     }
+    _stamp(timing, 'sw_cdp_eval_done');
     try {
       await postResult(
         cmd._execution, val, err, String(chromeTabId), { world: 'cdp' });
@@ -123,16 +127,23 @@ async function _evalViaCdp(cmd, chromeTabId) {
   }
 }
 
-function _canUseMainWorldEval() {
+function _canUseMainWorldEval(timed) {
+  let ok = true;
   try {
     // Constant source only: this probes page CSP before submitted source runs.
     // The page owns `Function` and can influence the answer, which may change
     // the selected channel but conveys no value-integrity property.
     new Function('return undefined');
-    return true;
   } catch (_) {
-    return false;
+    ok = false;
   }
+  if (!timed) return ok;
+  // A page stamp is best effort: the page owns its clock and may break it.
+  const answer = { ok };
+  try {
+    answer.pg_probe = performance.timeOrigin + performance.now();
+  } catch (_) {}
+  return answer;
 }
 
 // `executeScript` has no abort, so a MAIN-world injection whose submitted
@@ -161,10 +172,22 @@ function _raceMainWorldEval(work, what) {
     .finally(() => clearTimeout(timerId));
 }
 
-function _executeMainWorldEval(code) {
+function _executeMainWorldEval(code, timed) {
+  const now = () => {
+    try { return performance.timeOrigin + performance.now(); } catch (_) {}
+  };
+  const evalStart = timed && now();
+  const stamped = (envelope) => {
+    if (timed) {
+      const evalEnd = now();
+      if (evalStart !== undefined) envelope.pg_eval_start = evalStart;
+      if (evalEnd !== undefined) envelope.pg_eval_end = evalEnd;
+    }
+    return envelope;
+  };
   try {
     const started = performance.now();
-    const complete = (value) => ({
+    const complete = (value) => stamped({
       ...value,
       ms: +(performance.now() - started).toFixed(1),
     });
@@ -194,7 +217,7 @@ function _executeMainWorldEval(code) {
     }
     return complete({ r: eval(code) });
   } catch (error) {
-    return { e: error && (error.message || String(error)) };
+    return stamped({ e: error && (error.message || String(error)) });
   }
 }
 
@@ -219,29 +242,40 @@ async function handleEval(cmd) {
   // serves no later command. A probe that fails or does not answer within
   // the bound leaves the MAIN-world path unavailable, which is the outcome
   // a `false` probe already has, so the CDP fallback is taken.
+  const timing = cmd._execution.timing;
   let useMainWorld = false;
+  _stamp(timing, 'sw_probe_call');
   try {
     const probe = await _raceMainWorldEval(chrome.scripting.executeScript({
       target: { tabId: chromeTabId },
       world: 'MAIN',
       func: _canUseMainWorldEval,
+      ...(timing ? { args: [true] } : {}),
     }), 'MAIN-world probe');
-    useMainWorld = probe[0]?.result === true;
-  } catch (_) {}
+    _stamp(timing, 'sw_probe_done');
+    const answer = probe[0]?.result;
+    useMainWorld = timing ? answer?.ok === true : answer === true;
+    _copyStamps(timing, answer, ['pg_probe']);
+  } catch (_) {
+    _stamp(timing, 'sw_probe_failed');
+  }
 
   if (useMainWorld) {
     let results;
     const failMainWorld = async (detail) => postResult(
       cmd._execution, null, 'MAIN-world eval failed: ' + detail,
       String(chromeTabId), { world: 'page-main' });
+    _stamp(timing, 'sw_eval_call');
     try {
       results = await _raceMainWorldEval(chrome.scripting.executeScript({
         target: { tabId: chromeTabId },
         world: 'MAIN',
         func: _executeMainWorldEval,
-        args: [cmd.code],
+        args: timing ? [cmd.code, true] : [cmd.code],
       }), 'MAIN-world eval');
+      _stamp(timing, 'sw_eval_done');
     } catch (error) {
+      _stamp(timing, 'sw_eval_failed');
       await failMainWorld(error.message || String(error));
       return;
     }
@@ -278,6 +312,7 @@ async function handleEval(cmd) {
     const isEnvelope = typeof res === 'object';
     const val = isEnvelope ? res.r : res;
     const err = isEnvelope ? res.e || null : null;
+    _copyStamps(timing, res, ['pg_eval_start', 'pg_eval_end']);
     const extra = { world: 'page-main' };
     if (isEnvelope && typeof res.ms === 'number') extra.exec_ms = res.ms;
     await postResult(
@@ -298,6 +333,7 @@ async function handleEval(cmd) {
       String(chromeTabId));
     return;
   }
+  _stamp(timing, 'sw_relay_send');
   try {
     await chrome.tabs.sendMessage(chromeTabId, {
       type: 'eval',
@@ -305,6 +341,7 @@ async function handleEval(cmd) {
       relayId,
       code: cmd.code,
       tabId: String(chromeTabId),
+      ...(timing ? { timing: true } : {}),
     });
   } catch (error) {
     _removeEvalRelay(relayId);

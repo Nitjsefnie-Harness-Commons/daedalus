@@ -33,6 +33,8 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
                               'cdpForgetAttachment'), ()),
     ('worker/evaluate.js', ('_canUseMainWorldEval', '_executeMainWorldEval',
                             '_raceMainWorldEval', '_takeEvalRelay'), ()),
+    ('worker/exec_timing.js', ('_copyStamps', '_stamp', '_stampReceipt',
+                               '_timingFor'), ()),
     ('worker/gm_storage.js', ('handleGmStorage',), ()),
     ('worker/hotfix_scope.js', ('_parseMatch', '_scopeRefusal'), ()),
     ('worker/hotfixes.js', ('handleHotfixReplay',), ()),
