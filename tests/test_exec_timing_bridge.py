@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Bridge-side exec timing stamps: `_timing` rides an eval command only while
-`DAEDALUS_DEBUG_TIMING=1`; any other value reads no clock and leaves the
-command, frame, result and PUT-answer bytes (a coalesced retry's included)
+`DAEDALUS_DEBUG_TIMING=1`, and only the bridge writes it: a client's own
+`_timing` (in a PUT body, a legacy drop or a result) is dropped. Any other
+flag value reads no clock and leaves the bytes of every command, frame,
+result and PUT answer (a coalesced retry's included) without `_timing`
 untouched.
 
 The in-process probes run in a child so the flag, read once at import, is
@@ -34,14 +36,14 @@ cmd_dir, res_dir = root / 'commands', root / 'results'
 calls = []
 clock_is_time_ns = exec_timing._clock is time.time_ns
 exec_timing._clock = lambda: calls.append(1) or len(calls) * 1_000_000_999
-seqs = iter(['0000000000001_%020d' % n for n in range(1, 9)])
+seqs = iter(['0000000000001_%020d' % n for n in range(1, 13)])
 command_queue.next_seq = lambda _dir: next(seqs)
 result_routes.uuid = types.SimpleNamespace(
     uuid4=lambda: types.SimpleNamespace(hex='g' * 32))
 result_routes.time = types.SimpleNamespace(time=lambda: 1.0)
 
 
-def run(cmd, tab):
+def run(cmd, tab, posted_timing=None):
     did, _ = command_queue.enqueue(
         cmd_dir, 'tok', tab, cmd, command_ttl=90)
     queued = next(Path(cmd_dir / ('tok_' + tab)).glob('*.json'))
@@ -52,8 +54,8 @@ def run(cmd, tab):
         frame_writer=lambda data: stream_service.write_frame(frames, data))
     posted = {'id': cmd['id'], 'tabId': tab, '_did': did, 'ok': True}
     framed = json.loads(frames.getvalue().split(b'data: ')[1])
-    if '_timing' in framed:
-        posted['_timing'] = framed['_timing']
+    if '_timing' in framed or posted_timing is not None:
+        posted['_timing'] = framed.get('_timing', posted_timing)
     result_routes.accept_result(res_dir, cmd_dir, 'tok', posted, 8)
     slot = (res_dir / ('tok_' + tab + '.json')).read_text(encoding='utf-8')
     return {'did': did, 'file': on_disk, 'frame': frames.getvalue().decode(),
@@ -62,7 +64,19 @@ def run(cmd, tab):
 
 out = {'eval': run({'id': 'e', 'code': '1'}, 'a')}
 out['typed'] = run({'id': 't', 'type': 'ping'}, 'b')
+out['typed_client'] = run({'id': 'u', 'type': 'ping', '_timing': {}}, 'u')
 out['client'] = run({'id': 'c', 'code': '1', '_timing': {}}, 'c')
+out['populated'] = run({'id': 'p', 'code': '1', '_timing': {
+    'srv_enqueue_us': 5, 'x': 1}}, 'p', posted_timing={'sw_post': 1.5})
+legacy = json.dumps({'id': 'l', 'code': '1', '_timing': {'x': 1}})
+for name in ('tok_z.json', 'tok.json'):
+    (cmd_dir / name).write_text(legacy, encoding='utf-8')
+frames = io.BytesIO()
+stream_service.drain_legacy_file(
+    cmd_dir / 'tok_z.json', 'z', command_ttl=90,
+    frame_writer=lambda data: stream_service.write_frame(frames, data))
+out['legacy'] = json.loads(frames.getvalue().split(b'data: ')[1])
+out['poll'] = stream_service.poll_legacy(cmd_dir, 'tok')
 out['clock_calls'] = len(calls)
 out['clock_is_time_ns'] = clock_is_time_ns
 print(json.dumps(out))
@@ -100,29 +114,48 @@ def test_b_flag_on_stamps_each_stage_of_an_eval_only(tmp):
                       'srv_write_us': 2000001}, framed
     assert stored == {'srv_enqueue_us': 1000000, 'srv_write_us': 2000001,
                       'srv_result_us': 3000002}, stored
-    for stage in ('file', 'frame', 'slot'):
-        assert '_timing' not in out['typed'][stage], (stage, out['typed'])
+    _assert_typed_untimed(out)
+    # A client's own `_timing` is replaced by the bridge's at every stage.
+    for name in ('client', 'populated'):
+        stages = [json.loads(out[name][stage].split('data: ')[-1])
+                  for stage in ('file', 'frame', 'slot')]
+        assert [list(got['_timing']) for got in stages] == [
+            ['srv_enqueue_us'], ['srv_enqueue_us', 'srv_write_us'],
+            ['srv_enqueue_us', 'srv_write_us', 'srv_result_us']], out[name]
+    _assert_legacy_drops_client_timing(out)
+
+
+def _assert_typed_untimed(out):
+    for name in ('typed', 'typed_client'):
+        for stage in ('file', 'frame', 'slot'):
+            assert '_timing' not in out[name][stage], (stage, out[name])
+
+
+def _assert_legacy_drops_client_timing(out):
+    assert list(out['legacy']) == ['id', 'code', 'chromeTab', '_did'], out
+    assert out['poll'] == [200, {'id': 'l', 'code': '1'}], out
 
 
 def test_c_flag_off_reads_no_clock_and_bytes_equal_the_base(tmp):
-    cases = {'eval': ('e', 'a', '', ''),
-             'client': ('c', 'c', ', "_timing": {}', ' "_timing": {},')}
+    cases = {'eval': ('e', 'a'), 'client': ('c', 'c'),
+             'populated': ('p', 'p')}
     for flag in (None, '0', 'true'):
         out = _probe(tmp, flag)
         assert out['clock_calls'] == 0, (flag, out)
-        for name, (ident, tab, field, slot_field) in cases.items():
+        _assert_legacy_drops_client_timing(out)
+        _assert_typed_untimed(out)
+        for name, (ident, tab) in cases.items():
             got, did = out[name], out[name]['did']
-            body = f'"id": "{ident}", "code": "1"{field}'
+            body = f'"id": "{ident}", "code": "1"'
             queued = f'{{{body}, "_did": "{did}"}}'
             assert got['file'] == queued, (flag, got['file'])
             assert got['frame'] == (
                 f'event: command\ndata: {queued}\n\n'), (flag, got['frame'])
             assert got['slot'] == (
-                '{"id": "%s", "tabId": "%s", "ok": true,%s '
+                '{"id": "%s", "tabId": "%s", "ok": true, '
                 '"resultGeneration": "%s", "deliveryId": "%s", '
-                '"roundtrip_ms": 999}' % (
-                    ident, tab, slot_field, 'g' * 32, did)), (
-                        flag, got['slot'])
+                '"roundtrip_ms": 999}' % (ident, tab, 'g' * 32, did)), (
+                    flag, got['slot'])
             assert got['cmd'] == '{%s}' % body, (flag, got['cmd'])
 
 
@@ -141,7 +174,10 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             stored = queued.read_bytes()
             again = put_command(base, body)[1]
             keyed = {**body, 'id': 'k', '_timing': {'a': 1, 'b': 2}}
-            keyed_did = json.loads(put_command(base, keyed)[1])['did']
+            keyed_raw = put_command(base, keyed)[1]
+            keyed_did = json.loads(keyed_raw)['did']
+            keyed_stored = (Path(docroot) / 'commands' / TOK
+                            / f'{keyed_did}.json').read_bytes()
             reordered = put_command(
                 base, {**keyed, '_timing': {'b': 2, 'a': 1}})[1]
         if flag == '1':
@@ -151,6 +187,11 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             retry = json.loads(bytes(again))
             assert retry['duplicate'] is True, again
             assert retry['command'] == command, (again, stored)
+            # The client's `_timing` is replaced by the bridge's.
+            keyed_command = json.loads(keyed_raw)['command']
+            assert list(keyed_command['_timing']) == ['srv_enqueue_us'], (
+                keyed_raw)
+            assert json.loads(keyed_stored) == keyed_command, keyed_stored
             continue
         command = '{"id": "e", "code": "1", "_did": "%s"}' % did
         assert stored == command.encode(), (flag, stored)
@@ -161,13 +202,14 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             '{"ok": true, "target": "broadcast", "did": "%s", '
             '"command": %s, "duplicate": true}' % (did, command)).encode(), (
                 flag, again)
-        # Python equality ignores key order, so this retry coalesces; its
-        # answer must still spell its own body, as the base does.
+        # A client's `_timing` is dropped from the file and both answers,
+        # and the respelled retry still coalesces onto the first.
+        keyed_command = '{"id": "k", "code": "1", "_did": "%s"}' % keyed_did
+        assert keyed_stored == keyed_command.encode(), (flag, keyed_stored)
         assert reordered == (
             '{"ok": true, "target": "broadcast", "did": "%s", "command": '
-            '{"id": "k", "code": "1", "_timing": {"b": 2, "a": 1}, '
-            '"_did": "%s"}, "duplicate": true}' % (
-                keyed_did, keyed_did)).encode(), (flag, reordered)
+            '%s, "duplicate": true}' % (
+                keyed_did, keyed_command)).encode(), (flag, reordered)
 
 
 def test_e_a_retry_coalesces_as_the_flag_leaves_it(tmp):
@@ -181,7 +223,7 @@ def test_e_a_retry_coalesces_as_the_flag_leaves_it(tmp):
         'first = put(EXTRA)\n'
         'print(first[1], put(EXTRA)[1])\n')
     assert _run(tmp, script.replace('EXTRA', '{}'), '1') == 'False True'
-    # Flag off, a body carrying its own _timing is an ordinary field.
+    # Flag off, a body's own _timing is dropped, so the retry coalesces.
     assert _run(tmp, script.replace('EXTRA', '{"_timing": {}}'),
                 None) == 'False True'
 
