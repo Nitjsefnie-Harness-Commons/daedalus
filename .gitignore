@@ -215,6 +215,7 @@
 !/extension/worker/config.js
 !/extension/worker/cookies.js
 !/extension/worker/evaluate.js
+!/extension/worker/exec_timing.js
 !/extension/worker/gm_storage.js
 !/extension/worker/hotfix_scope.js
 !/extension/worker/hotfixes.js

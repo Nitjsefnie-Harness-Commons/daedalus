@@ -1,6 +1,6 @@
 /* global _takeEvalRelay, postResult, registerTab, handleHotfixReplay */
 /* global readBoundedBody, gmResponseLimit, bytesToBase64, _recordTiming */
-/* global mintSegmentSig, handleGmStorage */
+/* global mintSegmentSig, handleGmStorage, _stamp, _copyStamps */
 /* exported _withRelayPriority */
 
 // ─── Message handler (from content scripts) ───
@@ -63,6 +63,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab ? String(sender.tab.id) : '';
     const execution = _takeEvalRelay(msg.relayId, tabId);
     if (!execution) return;
+    _stamp(execution.timing, 'sw_relay_result');
+    _copyStamps(execution.timing, msg.timing,
+      ['cs_recv', 'pg_recv', 'pg_done', 'cs_result']);
     const hostname = typeof msg.hostname === 'string' ? msg.hostname : '';
     const extra = { world: `page:${hostname}` };
     if (typeof msg.ms === 'number') extra.exec_ms = msg.ms;
