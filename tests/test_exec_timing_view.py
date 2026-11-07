@@ -41,8 +41,7 @@ def _legs(view):
 
 
 def _exchange(window, out, back, lead=_LEAD):
-    """One exec whose stream delivery takes `out` ms and result post
-    `back` ms, with the browser clock `lead` ms ahead."""
+    """An exec whose delivery takes `out` ms and result post `back`."""
     timing = {'srv_enqueue_us': _T * 1000, 'srv_write_us': _T * 1000,
               'sw_recv': _T + out + lead, 'sw_post': _T + out + 1 + lead,
               'srv_result_us': (_T + out + 1 + back) * 1000}
@@ -56,11 +55,9 @@ def _offset(estimate, uncertainty, consistent=True, samples=1):
 
 
 def test_a_lone_exec_splits_its_round_trip_evenly_across_the_clocks(tmp):
-    """Issue Expected 2 from one exec: a browser clock 5000 ms ahead is
-    bounded by the 4 ms the command and result spent outside the browser
-    (3 out, 1 back), and the midpoint, applied once, splits them evenly:
-    each cross-clock leg reads 2. A server stamp off the millisecond grid
-    keeps its fraction."""
+    """Issue Expected 2, one exec: a 5000 ms browser lead is estimated, and
+    the 4 ms outside the browser (3 out, 1 back) splits evenly, 2 / 2. An
+    off-grid server stamp keeps its fraction."""
     del tmp
     timing = _stamps(
         {'srv_enqueue_us': 0, 'srv_write_us': 1.5, 'srv_result_us': 23},
@@ -89,9 +86,8 @@ def test_a_lone_exec_splits_its_round_trip_evenly_across_the_clocks(tmp):
 
 
 def test_fast_execs_pin_the_offset_so_a_slow_one_shows_its_direction(tmp):
-    """Alone, a 100 ms delivery with a 2 ms post reads 51 / 51. After two
-    fast execs whose bounds intersect at the true offset, the window's
-    intersection is the estimate and the same exec reads 100 / 2."""
+    """Alone, a 100 ms delivery and 2 ms post read 51 / 51; after two fast
+    execs pin the offset, 100 / 2."""
     del tmp
     alone = _legs(_exchange(_window(), 100, 2))
     assert (alone[1][2], alone[3][2]) == (51.0, 51.0), alone
@@ -108,8 +104,8 @@ def test_fast_execs_pin_the_offset_so_a_slow_one_shows_its_direction(tmp):
 
 
 def test_the_window_holds_64_samples_none_older_than_ten_minutes(tmp):
-    """Ageing runs on the window's own clock: a sample exactly 600 s old
-    still counts, one older does not; the 65th sample drops the first."""
+    """A sample 600 s old counts, an older one does not; the 65th drops the
+    first."""
     del tmp
     now = [0.0]
     window = _window(now)
@@ -129,8 +125,8 @@ def test_the_window_holds_64_samples_none_older_than_ten_minutes(tmp):
 
 
 def test_bounds_that_no_longer_intersect_fall_back_to_the_exec_alone(tmp):
-    """A browser clock that stepped 1000 ms leaves no offset every sample
-    allows: the exec's own bounds are used, marked inconsistent."""
+    """A browser clock step empties the intersection: own bounds, marked
+    inconsistent."""
     del tmp
     window = _window()
     _exchange(window, 1, 1)

@@ -1,9 +1,7 @@
 """Render an exec result's `_timing` stamps as legs on the server's clock.
 
-Server stamps are integer us, browser stamps float ms. Each exec bounds the
-browser-minus-server offset by `sw_recv - srv_write` (above) and `sw_post -
-srv_result` (below); a bridge's `Window` intersects its recent bounds, and
-the midpoint, applied once, places a leg that crosses the two clocks.
+Server stamps are integer us, browser stamps float ms; the browser-minus-
+server offset is the midpoint of a bridge's recent bounds, intersected.
 """
 import collections
 import time
@@ -91,8 +89,7 @@ def _on_server(name, value, theta):
 
 
 def render(timing, mcp_read_us, window):
-    """`timing` is the result's `_timing`, `mcp_read_us` the MCP's own
-    server-clock read once the result arrived, `window` its bridge's."""
+    """`mcp_read_us`: the MCP's server-clock read of the result."""
     stamps = {name: value for name, value in (
         timing.items() if isinstance(timing, dict) else ())
         if isinstance(value, (int, float)) and not isinstance(value, bool)}
