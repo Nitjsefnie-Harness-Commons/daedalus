@@ -347,12 +347,17 @@ async function run() {
   }
 
   if (flag) {
-    // Flag off, the page still hands stamps back: they must not be kept.
+    // A run's order text may instead name the `timing` a page hands back
+    // in its result: `{}` withholds it, `{"timing": X}` substitutes X.
+    const forge = Array.isArray(completionOrder) ? null : completionOrder;
     const send = relayChrome.runtime.sendMessage;
-    if (flag === '0') {
-      relayChrome.runtime.sendMessage = (message) => send(
-        message.type === 'result' ? { ...message, timing: { pg_done: 1 } }
-          : message);
+    if (forge) {
+      relayChrome.runtime.sendMessage = (message) => {
+        if (message.type !== 'result') return send(message);
+        const { timing: _withheld, ...rest } = message;
+        return send('timing' in forge
+          ? { ...rest, timing: forge.timing } : rest);
+      };
     }
     deliverFrame(backgroundContext, {
       id: '_eval', type: 'eval', code: '2 + 2', chromeTab: 7,
@@ -643,10 +648,11 @@ def run_eval_with_poisoned_page_globals(cdp_available):
                     '1' if cdp_available else '0')
 
 
-def run_timed_relay(flag):
+def run_timed_relay(flag, forge=None):
     """One page-relay eval, delivered as an SSE frame under clock doubles."""
-    return _observe(_one_result(1), *_BRIDGE, '[]', 'timing-' + flag,
-                    'relay.test', '')
+    return _observe(_one_result(1), *_BRIDGE,
+                    '[]' if forge is None else json.dumps(forge),
+                    'timing-' + flag, 'relay.test', '')
 
 
 def run_main_world_injection_shapes():

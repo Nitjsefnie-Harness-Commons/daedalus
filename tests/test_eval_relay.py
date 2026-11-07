@@ -7,6 +7,7 @@ outcome is terminal whatever it is. These run the shipped scripts in a Node
 VM so the ordering, the handle release and the invocation-id bounds can be
 observed rather than inferred.
 """
+import functools
 import json
 import sys
 from pathlib import Path
@@ -429,6 +430,8 @@ _PROBE = ['sw_recv', 'sw_probe_call', 'sw_tick']
 _STAMPS = {
     'eval-plain': _PROBE + ['sw_probe_done', 'pg_probe', 'sw_eval_call',
                             'sw_eval_done', 'pg_eval_start', 'pg_eval_end'],
+    'eval-throws': _PROBE + ['sw_probe_done', 'pg_probe', 'sw_eval_call',
+                             'sw_eval_done', 'pg_eval_start', 'pg_eval_end'],
     'eval-timeout': _PROBE + ['sw_probe_done', 'pg_probe', 'sw_eval_call',
                               'sw_eval_failed'],
     'eval-probe-hang': _PROBE + ['sw_probe_failed', 'sw_cdp_attach',
@@ -442,6 +445,9 @@ _BASE = ('{"token":"bound-token","tabId":"7","id":"_eval",'
 _BASE_BODIES = {
     'eval-plain': _BASE % (
         'null', '"result":4,"world":"page-main","exec_ms":0', 'eval-plain'),
+    'eval-throws': _BASE % (
+        '"missing_name is not defined"', '"world":"page-main"',
+        'eval-throws'),
     'eval-timeout': _BASE % (
         '"MAIN-world eval failed: MAIN-world eval timed out after 10000 ms"',
         '"result":null,"world":"page-main"', 'eval-timeout'),
@@ -456,9 +462,22 @@ _PROBE_CALL = {'target': {'tabId': 7}, 'world': 'MAIN',
                'func': '_canUseMainWorldEval'}
 
 
+# One child per (world, flag): both timing tests read the same runs. Flag
+# off, the relay's page hands stamps back unasked: they must not be kept.
+@functools.cache
 def _timed(world, flag):
-    return run_timed_relay(flag) if world == 'relay' else run_timed_eval(
-        world, flag)
+    if world == 'relay':
+        return run_timed_relay(
+            flag, {'timing': {'pg_done': 1}} if flag == '0' else None)
+    return run_timed_eval(world, flag)
+
+
+def _expected(names):
+    expected: dict[str, float] = {'srv_enqueue_us': 1, 'srv_write_us': 2}
+    for name in names + ['sw_post']:
+        expected[name] = (1700000000000.75 if name.startswith('sw_')
+                          else 1600000000000.75)
+    return expected
 
 
 def _posted_timing(run):
@@ -505,12 +524,23 @@ def test_with_the_flag_on_each_world_posts_the_legs_it_traversed(tmp):
     del tmp
     for world, names in _STAMPS.items():
         timing = _posted_timing(_timed(world, '1'))
-        expected: dict[str, float] = {'srv_enqueue_us': 1, 'srv_write_us': 2}
-        for name in names + ['sw_post']:
-            expected[name] = (1700000000000.75 if name.startswith('sw_')
-                              else 1600000000000.75)
+        expected = _expected(names)
         assert list(timing) == list(expected), (world, timing)
         assert timing == expected, (world, timing)
+
+
+def test_a_timed_relay_keeps_only_numbers_a_page_hands_back(tmp):
+    """A relayed result whose `timing` the page withheld still posts, and
+    a page-chosen non-number never reaches the posted `_timing`.
+    """
+    del tmp
+    worker = [name for name in _STAMPS['relay'] if name.startswith('sw_')]
+    withheld = _posted_timing(run_timed_relay('1', {}))
+    assert list(withheld) == list(_expected(worker)), withheld
+    assert withheld == _expected(worker), withheld
+    junk = _posted_timing(run_timed_relay('1', {'timing': {
+        'cs_recv': 1, 'pg_recv': 'x', 'pg_done': {}, 'cs_result': None}}))
+    assert junk == {**_expected(worker), 'cs_recv': 1}, junk
 
 
 def test_a_page_that_breaks_its_own_clock_loses_only_its_stamps(tmp):
