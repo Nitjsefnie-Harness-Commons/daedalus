@@ -193,6 +193,10 @@ def test_stamps_a_result_does_not_carry_render_as_unknown(tmp):
 
 # What each producer world posts in the vm harnesses, and how it renders.
 _WORLDS = {
+    'relay-withheld': ('relay', ['cs_recv', 'pg_recv', 'pg_done',
+                                 'cs_result'], [
+        'sw_probe_call', 'sw_probe_failed', 'sw_cdp_attach', 'sw_relay_send',
+        'sw_relay_result']),
     'eval-plain': ('page-main', [], [
         'sw_probe_call', 'pg_probe', 'sw_probe_done', 'sw_eval_call',
         'pg_eval_start', 'pg_eval_end', 'sw_eval_done']),
@@ -216,8 +220,8 @@ def test_every_stamp_a_producer_takes_is_one_the_view_renders(tmp):
     bridge = json.loads(_probe(tmp, '1')['eval']['slot'])['_timing']
     emitted = set(bridge) | {'mcp_read_us'}
     for world, (name, missing, path) in _WORLDS.items():
-        run = (run_timed_relay('1') if world == 'relay'
-               else run_timed_eval(world, '1'))
+        run = (run_timed_relay('1', {} if world == 'relay-withheld' else None)
+               if world.startswith('relay') else run_timed_eval(world, '1'))
         posted = json.loads(run['bodies'][0])['_timing']
         browser = {key: value for key, value in posted.items()
                    if not key.startswith('srv_')}
@@ -307,11 +311,10 @@ def test_exec_renders_timing_only_for_a_result_that_carries_it(tmp):
     flag is set against each arm."""
     del tmp
     reads = []
-    wall = time.time_ns
 
     def counted():
         reads.append('wall')
-        return wall()
+        return 8_000_000_000
 
     def window_clock():
         reads.append('window')
@@ -338,7 +341,12 @@ def test_exec_renders_timing_only_for_a_result_that_carries_it(tmp):
     for samples in (1, 2):
         timed = run({**_RESULT, '_timing': stamps}, '0')
         assert '_timing' not in timed, timed
-        assert timed['timing']['offset']['samples'] == samples, timed
+        view = timed['timing']
+        assert view['offset']['samples'] == samples, timed
+        # The read is 8 s in ns: in us, the result was read 7.994 s after it
+        # was stored.
+        assert view['legs'][-1]['ms'] == 7994.0, view
+        assert view['total_ms'] == 8000.0, view
     assert reads == ['wall', 'window'] * 2, reads
 
 
