@@ -370,6 +370,7 @@ def enqueue(cmd_dir, token, tab, cmd, *, command_ttl):
         raise ValueError(f'unsafe tab component: {tab!r}')
     queue_name, _ = command_target_names(token, tab)
     qdir = path_safety.under(cmd_dir, queue_name, secret=token)
+    exec_timing.drop_client_timing(cmd)
     with command_fs_lock:
         qdir.mkdir(parents=True, exist_ok=True)
         live = _live_duplicate(qdir, cmd, command_ttl)
