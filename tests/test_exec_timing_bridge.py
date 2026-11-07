@@ -38,7 +38,7 @@ cmd_dir, res_dir = root / 'commands', root / 'results'
 calls = []
 clock_is_time_ns = exec_timing._clock is time.time_ns
 exec_timing._clock = lambda: calls.append(1) or len(calls) * 1_000_000_999
-seqs = iter(['0000000000001_%020d' % n for n in range(1, 13)])
+seqs = iter(['0000000000001_%020d' % n for n in range(1, 17)])
 command_queue.next_seq = lambda _dir: next(seqs)
 result_routes.uuid = types.SimpleNamespace(
     uuid4=lambda: types.SimpleNamespace(hex='g' * 32))
@@ -69,6 +69,7 @@ out['typed'] = run({'id': 't', 'type': 'ping'}, 'b')
 out['typed_client'] = run({'id': 'u', 'type': 'ping', '_timing': {}}, 'u')
 out['typed_code'] = run({'id': 'h', 'type': 'store-hotfix', 'fixId': 'f',
                          'code': 'x=1'}, 'h')
+out['blank_type'] = run({'id': 'y', 'type': '', 'code': '1'}, 'y')
 out['client'] = run({'id': 'c', 'code': '1', '_timing': {}}, 'c')
 out['populated'] = run({'id': 'p', 'code': '1', '_timing': {
     'srv_enqueue_us': 5, 'x': 1}}, 'p', posted_timing={'sw_post': 1.5})
@@ -131,7 +132,7 @@ def test_b_flag_on_stamps_each_stage_of_an_eval_only(tmp):
                       'srv_result_us': 3000002}, stored
     _assert_typed_untimed(out)
     # A client's own `_timing` is replaced by the bridge's at every stage.
-    for name in ('client', 'populated'):
+    for name in ('client', 'populated', 'blank_type'):
         stages = [json.loads(out[name][stage].split('data: ')[-1])
                   for stage in ('file', 'frame', 'slot')]
         assert [list(got['_timing']) for got in stages] == [
