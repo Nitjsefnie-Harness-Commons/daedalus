@@ -6,6 +6,7 @@ import threading
 import time
 
 from daedalus_bridge import command_queue
+from daedalus_bridge import exec_timing
 from daedalus_bridge import legacy_ids
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import path_safety
@@ -212,6 +213,7 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                 continue
             if chrome_tab is not None:
                 data['chromeTab'] = chrome_tab
+            exec_timing.stamp(data, 'srv_write_us')
             frame_writer(data)  # BEFORE unlink
             # The claim excludes other consumers until this write and
             # unlink finish; a file that will not unlink is redelivered
