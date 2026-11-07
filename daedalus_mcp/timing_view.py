@@ -62,8 +62,7 @@ def render(timing, mcp_read_us):
     server-clock read once the result arrived."""
     stamps = {name: value for name, value in (
         timing.items() if isinstance(timing, dict) else ())
-        if name in CONSUMED and not isinstance(value, bool)
-        and isinstance(value, (int, float))}
+        if isinstance(value, (int, float)) and not isinstance(value, bool)}
     stamps['mcp_read_us'] = mcp_read_us
     bounds = _bounds(stamps)
     theta = None if bounds is None else sum(bounds) / 2
