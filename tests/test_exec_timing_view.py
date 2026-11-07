@@ -254,7 +254,7 @@ def test_the_page_side_probe_and_eval_stamp_only_when_timed(tmp):
     """
     del tmp
     result = run_node_argv(require_node(), ['-e', _PAGE_SIDE],
-                            _util.ROOT)
+                           _util.ROOT)
     assert result.returncode == 0, result
     stamp, error = 1600000000000.75, {'e': 'page killed performance.now'}
     evaluated = {'r': 2, 'ms': 0}
