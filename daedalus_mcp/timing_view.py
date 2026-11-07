@@ -49,12 +49,15 @@ def _bounds(stamps):
 def _leg(a, b, at):
     clock = ('server' if _server(a) and _server(b) else
              'browser' if not (_server(a) or _server(b)) else 'offset')
-    raw = None if at[a] is None or at[b] is None else at[b] - at[a]
-    shown = None if raw is None else max(raw, 0.0)
-    return {'leg': f'{a} -> {b}', 'clock': clock,
-            'ms': None if raw is None else round(shown, 1),
-            'raw_ms': None if raw is None else round(raw, 1),
-            'clamped': raw is not None and raw < 0}, shown
+    leg = {'leg': f'{a} -> {b}', 'clock': clock, 'ms': None, 'raw_ms': None,
+           'clamped': False}
+    start, end = at[a], at[b]
+    if start is None or end is None:
+        return leg, None
+    raw = end - start
+    shown = max(raw, 0.0)
+    leg.update(ms=round(shown, 1), raw_ms=round(raw, 1), clamped=raw < 0)
+    return leg, shown
 
 
 def render(timing, mcp_read_us):
@@ -64,8 +67,15 @@ def render(timing, mcp_read_us):
         timing.items() if isinstance(timing, dict) else ())
         if isinstance(value, (int, float)) and not isinstance(value, bool)}
     stamps['mcp_read_us'] = mcp_read_us
+    theta = offset = None
     bounds = _bounds(stamps)
-    theta = None if bounds is None else sum(bounds) / 2
+    if bounds is not None:
+        hi, lo = bounds
+        theta = (hi + lo) / 2
+        offset = {'estimate_ms': round(theta, 1),
+                  'uncertainty_ms': round((hi - lo) / 2, 1),
+                  'lo_ms': round(lo, 1), 'hi_ms': round(hi, 1),
+                  'consistent': hi >= lo}
     at = {name: value / 1000 if _server(name) else
           None if theta is None else value - theta
           for name, value in stamps.items()}
@@ -74,11 +84,7 @@ def render(timing, mcp_read_us):
     world = _world(stamps)
     return {
         'world': world,
-        'offset': None if bounds is None else {
-            'estimate_ms': round(theta, 1),
-            'uncertainty_ms': round((bounds[0] - bounds[1]) / 2, 1),
-            'lo_ms': round(bounds[1], 1), 'hi_ms': round(bounds[0], 1),
-            'consistent': bounds[0] >= bounds[1]},
+        'offset': offset,
         'legs': [leg for leg, _ in legs],
         'unreached': [name for name in ORDER
                       if name in REQUIRED[world] and name not in stamps],
