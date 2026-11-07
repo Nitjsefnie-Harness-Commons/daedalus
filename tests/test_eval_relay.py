@@ -502,7 +502,7 @@ def test_with_the_flag_on_each_world_posts_the_legs_it_traversed(tmp):
     del tmp
     for world, names in _STAMPS.items():
         timing = _posted_timing(_timed(world, '1'))
-        expected = {'srv_enqueue_us': 1, 'srv_write_us': 2}
+        expected: dict[str, float] = {'srv_enqueue_us': 1, 'srv_write_us': 2}
         for name in names + ['sw_post']:
             expected[name] = (1700000000000.75 if name.startswith('sw_')
                               else 1600000000000.75)
