@@ -375,7 +375,7 @@ def enqueue(cmd_dir, token, tab, cmd, *, command_ttl):
         live = _live_duplicate(qdir, cmd, command_ttl)
         if live is not None:
             (seq, document), duplicate = live, True
-            if '_timing' in document:
+            if exec_timing.ENABLED and '_timing' in document:
                 cmd['_timing'] = document['_timing']
         else:
             exec_timing.begin(cmd)
