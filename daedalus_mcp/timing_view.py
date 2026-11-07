@@ -1,9 +1,15 @@
 """Render an exec result's `_timing` stamps as legs on the server's clock.
 
-Server stamps are integer us, browser stamps float ms; the browser-minus-
-server offset is bounded by `sw_recv - srv_write` (above) and `sw_post -
-srv_result` (below), and its midpoint converts every browser stamp once.
+Server stamps are integer us, browser stamps float ms. Each exec bounds the
+browser-minus-server offset by `sw_recv - srv_write` (above) and `sw_post -
+srv_result` (below); a bridge's `Window` intersects its recent bounds, and
+the midpoint, applied once, places a leg that crosses the two clocks.
 """
+import collections
+import time
+
+MAX_SAMPLES = 64
+MAX_AGE_S = 600
 
 ORDER = (
     'srv_enqueue_us', 'srv_write_us', 'sw_recv', 'sw_probe_call', 'pg_probe',
@@ -38,31 +44,55 @@ def _world(stamps):
     return None
 
 
+class Window:
+    """One bridge's recent offset bounds, aged on a monotonic clock."""
+
+    def __init__(self, clock=None):
+        self._clock = clock or time.monotonic
+        self._samples = collections.deque(maxlen=MAX_SAMPLES)
+
+    def bounds(self, lo, hi):
+        """Add this exec's bounds; answer `(lo, hi, samples, consistent)`."""
+        now = self._clock()
+        while self._samples and now - self._samples[0][0] > MAX_AGE_S:
+            self._samples.popleft()
+        self._samples.append((now, lo, hi))
+        low = max(sample[1] for sample in self._samples)
+        high = min(sample[2] for sample in self._samples)
+        if low <= high:
+            return low, high, len(self._samples), True
+        return lo, hi, 1, False
+
+
 def _bounds(stamps):
     try:
-        return (stamps['sw_recv'] - stamps['srv_write_us'] / 1000,
-                stamps['sw_post'] - stamps['srv_result_us'] / 1000)
+        return (stamps['sw_post'] - stamps['srv_result_us'] / 1000,
+                stamps['sw_recv'] - stamps['srv_write_us'] / 1000)
     except KeyError:
         return None
 
 
-def _leg(a, b, at):
+def _leg(a, b, stamps, theta):
     clock = ('server' if _server(a) and _server(b) else
              'browser' if not (_server(a) or _server(b)) else 'offset')
     leg = {'leg': f'{a} -> {b}', 'clock': clock, 'ms': None, 'raw_ms': None,
            'clamped': False}
-    start, end = at[a], at[b]
-    if start is None or end is None:
+    if clock == 'offset' and theta is None:
         return leg, None
-    raw = end - start
+    shift = 0 if clock == 'browser' else theta
+    raw = _on_server(b, stamps[b], shift) - _on_server(a, stamps[a], shift)
     shown = max(raw, 0.0)
     leg.update(ms=round(shown, 1), raw_ms=round(raw, 1), clamped=raw < 0)
     return leg, shown
 
 
-def render(timing, mcp_read_us):
-    """`timing` is the result's `_timing`; `mcp_read_us` the MCP's own
-    server-clock read once the result arrived."""
+def _on_server(name, value, theta):
+    return value / 1000 if _server(name) else value - theta
+
+
+def render(timing, mcp_read_us, window):
+    """`timing` is the result's `_timing`, `mcp_read_us` the MCP's own
+    server-clock read once the result arrived, `window` its bridge's."""
     stamps = {name: value for name, value in (
         timing.items() if isinstance(timing, dict) else ())
         if isinstance(value, (int, float)) and not isinstance(value, bool)}
@@ -70,24 +100,21 @@ def render(timing, mcp_read_us):
     theta = offset = None
     bounds = _bounds(stamps)
     if bounds is not None:
-        hi, lo = bounds
+        lo, hi, samples, consistent = window.bounds(*bounds)
         theta = (hi + lo) / 2
         offset = {'estimate_ms': round(theta, 1),
                   'uncertainty_ms': round((hi - lo) / 2, 1),
                   'lo_ms': round(lo, 1), 'hi_ms': round(hi, 1),
-                  'consistent': hi >= lo}
-    at = {name: value / 1000 if _server(name) else
-          None if theta is None else value - theta
-          for name, value in stamps.items()}
+                  'consistent': consistent, 'samples': samples}
     present = [name for name in ORDER if name in stamps]
-    legs = [_leg(a, b, at) for a, b in zip(present, present[1:])]
+    legs = [_leg(a, b, stamps, theta) for a, b in zip(present, present[1:])]
     world = _world(stamps)
     return {
         'world': world,
         'offset': offset,
         'legs': [leg for leg, _ in legs],
-        'unreached': [name for name in ORDER
-                      if name in REQUIRED[world] and name not in stamps],
+        'missing': [name for name in ORDER
+                    if name in REQUIRED[world] and name not in stamps],
         'tick_ms': (round(stamps['sw_tick'] - stamps['sw_recv'], 1)
                     if {'sw_tick', 'sw_recv'} <= stamps.keys() else None),
         'parts_ms': round(sum(ms for _, ms in legs if ms is not None), 1),

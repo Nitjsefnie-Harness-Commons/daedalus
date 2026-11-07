@@ -347,10 +347,11 @@ def test_a_timed_eval_carries_every_page_main_leg_and_untimed_none(tmp):
     timed = actual['1']
     assert (timed.get('result'), timed.get('world')) == (4, 'page-main'), (
         timed)
-    view = timing_view.render(timed['_timing'], time.time_ns() // 1000)
+    view = timing_view.render(timed['_timing'], time.time_ns() // 1000,
+                              timing_view.Window())
     assert [leg['leg'] for leg in view['legs']] == [
         f'{a} -> {b}' for a, b in zip(chain, chain[1:])], view
-    assert (view['world'], view['unreached']) == ('page-main', []), view
+    assert (view['world'], view['missing']) == ('page-main', []), view
 
 
 def main():
