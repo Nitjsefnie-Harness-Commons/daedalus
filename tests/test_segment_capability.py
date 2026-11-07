@@ -325,12 +325,15 @@ def test_a_segment_upload_takes_its_parameters_from_headers(tmp):
         for job in (seg_job(), seg_job() + '-caf\u00e9'):
             _, minted = mint_job(base, TOK, job)
             sig = minted['sig']
-            status, body = post_raw(base, '', [
-                (JOB_HEADER, quote(job, safe='')), (SEG_HEADER, '7'),
-                (TOTAL_HEADER, '9'), (SIG_HEADER, sig)])
-            assert status == 200, (job, status, body)
-            stored = Path(docroot) / 'segments' / job / '000007.ts'
-            assert stored.read_bytes() == b'bytes', job
+            # Lowercase is how an HTTP/2 hop delivers the same names.
+            for spell, index in ((str, '7'), (str.lower, '6')):
+                status, body = post_raw(base, '', [
+                    (spell(JOB_HEADER), quote(job, safe='')),
+                    (spell(SEG_HEADER), index), (spell(TOTAL_HEADER), '9'),
+                    (spell(SIG_HEADER), sig)])
+                assert status == 200, (job, spell, status, body)
+                stored = Path(docroot) / 'segments' / job / f'00000{index}.ts'
+                assert stored.read_bytes() == b'bytes', (job, spell)
             # A header for one parameter leaves the others to the query.
             status, body = post_raw(base, '?seg=8&total=9', [
                 (JOB_HEADER, quote(job, safe='')), (SIG_HEADER, sig)])
@@ -367,8 +370,10 @@ def test_segment_parameter_headers_reject_every_ambiguous_carrier(tmp):
     """
     job = seg_job()
     valid = {'job': job, 'seg': '3', 'total': '5'}
-    twins = (('same', '{v}', '{v}'), ('different', '{v}', 'other'),
-             ('blank second', '{v}', ''), ('blank first', '', '{v}'))
+    twins = (('same', '{v}', '{v}', str), ('different', '{v}', 'other', str),
+             ('blank second', '{v}', '', str),
+             ('blank first', '', '{v}', str),
+             ('lowercase second', '{v}', '{v}', str.lower))
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         _, minted = mint_job(base, TOK, job)
         sig = (SIG_HEADER, minted['sig'])
@@ -376,16 +381,17 @@ def test_segment_parameter_headers_reject_every_ambiguous_carrier(tmp):
         for key, header in CARRIERS:
             others = '&'.join(f'{k}={v}' for k, v in valid.items()
                               if k != key)
-            for shape, first, second in twins:
+            for shape, first, second, spell in twins:
                 first, second = (t.format(v=valid[key])
                                  for t in (first, second))
                 status, body = post_raw(
                     base, '?' + others, [sig, (header, first),
-                                         (header, second)])
+                                         (spell(header), second)])
                 replies.append((key, 'repeat', shape, status, body,
                                 f'duplicate {header} header'))
                 status, body = post_raw(
-                    base, f'?{others}&{key}={second}', [sig, (header, first)])
+                    base, f'?{others}&{key}={second}',
+                    [sig, (spell(header), first)])
                 replies.append((key, 'query twin', shape, status, body,
                                 f'conflicting {key}'))
         assert all(status == 400 and body == {'error': error}
