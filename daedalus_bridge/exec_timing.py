@@ -16,7 +16,7 @@ def drop_client_timing(message):
 
 
 def begin(cmd):
-    if ENABLED and cmd.get('code'):
+    if ENABLED and cmd.get('code') and 'type' not in cmd:
         cmd['_timing'] = {'srv_enqueue_us': _now_us()}
 
 
