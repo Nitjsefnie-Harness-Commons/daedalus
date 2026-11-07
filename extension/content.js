@@ -162,11 +162,9 @@ window.addEventListener('message', (e) => {
 
 // ─── Relay: page eval results → background ───
 
-// Exec-timing stamps, taken only for a command the bridge timed.
+// Exec-timing stamps, added to a relay message that carries `timing`.
 function _stamped(timing, name) {
-  const out = { ...timing };
-  try { out[name] = performance.timeOrigin + performance.now(); } catch (_) {}
-  return out;
+  return { ...timing, [name]: performance.timeOrigin + performance.now() };
 }
 
 window.addEventListener('message', (e) => {
@@ -176,25 +174,23 @@ window.addEventListener('message', (e) => {
   let serialized;
   try { serialized = JSON.stringify(result); } catch { serialized = String(result); }
   try { result = JSON.parse(serialized); } catch { result = serialized; }
-  const relayed = {
+  chrome.runtime.sendMessage({
+    ...(msg.timing ? { timing: _stamped(msg.timing, 'cs_result') } : {}),
     type: 'result', relayId: msg.relayId, result,
     error: msg.e || null, hostname: location.hostname,
     ms: msg.ms,
-  };
-  if (msg.timing) relayed.timing = _stamped(msg.timing, 'cs_result');
-  chrome.runtime.sendMessage(relayed);
+  });
 });
 
 // ─── Receive eval commands from background → forward to page context ───
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'eval') {
-    const relayed = {
+    window.postMessage({
       direction: 'daedalus-eval', id: msg.id,
       relayId: msg.relayId, code: msg.code,
-    };
-    if (msg.timing) relayed.timing = _stamped({}, 'cs_recv');
-    window.postMessage(relayed, '*');
+      ...(msg.timing ? { timing: _stamped({}, 'cs_recv') } : {}),
+    }, '*');
   }
 });
 
