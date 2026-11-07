@@ -609,6 +609,7 @@ const vm = require('vm');
 const [pagePath, poison, timed] = process.argv.slice(1);
 const listeners = [];
 const posted = [];
+let reads = 0;
 const win = {
   addEventListener(type, listener) {
     if (type === 'message') listeners.push(listener);
@@ -620,7 +621,9 @@ const context = vm.createContext({
   performance: {
     timeOrigin: 1600000000000.25,
     now() {
-      if (poison === '1') throw new Error('page killed performance.now');
+      if (poison === '1' || (poison === 't0' && !reads++)) {
+        throw new Error('page killed performance.now');
+      }
       return 0.5;
     },
   },
@@ -644,7 +647,8 @@ def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
     """A page that replaced `performance.now` with a thrower used to get no
     answer at all: the relay listener read it outside any try, so the
     relayed eval waited out the relay TTL. The answer now arrives without
-    its `ms`, and a timed relay keeps the stamps it already carried.
+    its `ms` (also when only the first read throws), and a timed relay keeps
+    the stamps it already carried.
     """
     del tmp
 
@@ -659,7 +663,7 @@ def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
     base = {'direction': 'daedalus-eval-result', 'id': 'c1',
             'relayId': 'r1', 'r': 2}
     for poison, timed, posted in (
-            ('0', '0', {**base, 'ms': 0}), ('1', '0', base),
+            ('0', '0', {**base, 'ms': 0}), ('1', '0', base), ('t0', '0', base),
             ('1', '1', {**base, 'timing': {'cs_recv': 1}})):
         got = answer(poison, timed)
         assert got == {'errors': [], 'posted': [posted]}, (poison, got)
