@@ -126,7 +126,8 @@ def test_the_window_holds_64_samples_none_older_than_ten_minutes(tmp):
 
 def test_bounds_that_no_longer_intersect_fall_back_to_the_exec_alone(tmp):
     """A browser clock step empties the intersection: own bounds, marked
-    inconsistent."""
+    inconsistent, and the window restarts from them, so the next fast exec
+    narrows from post-step samples only."""
     del tmp
     window = _window()
     _exchange(window, 1, 1)
@@ -134,6 +135,8 @@ def test_bounds_that_no_longer_intersect_fall_back_to_the_exec_alone(tmp):
     assert stepped['offset'] == _offset(6000.0, 5.0, False), stepped
     legs = _legs(stepped)
     assert (legs[1][2], legs[3][2]) == (5.0, 5.0), legs
+    after = _exchange(window, 1, 1, lead=6000)
+    assert after['offset'] == _offset(6000.0, 1.0, samples=2), after
 
 
 def test_a_negative_leg_is_clamped_with_its_raw_value_beside_it(tmp):
