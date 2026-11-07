@@ -15,6 +15,12 @@ TOK = 'segtok'
 # ambient one-off override cannot shadow it.
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': ''}
 
+# The headers a segment upload carries its parameters and capability in.
+JOB_HEADER = 'X-Daedalus-Segment-Job'
+SEG_HEADER = 'X-Daedalus-Segment-Seg'
+TOTAL_HEADER = 'X-Daedalus-Segment-Total'
+SIG_HEADER = 'X-Daedalus-Segment-Sig'
+
 # Segment storage lives under the bridge's own data root (<docroot>/segments/)
 # since the capability fix; the pre-auth server wrote to a world-shared
 # /tmp/hls-segments instead. One test pins that nothing lands there any more;

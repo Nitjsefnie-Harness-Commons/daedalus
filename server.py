@@ -293,6 +293,10 @@ class Handler(RequestMixin):
             sig = self._segment_capability(params)
             if sig is None:
                 return self._drain_refused_body(clen)
+            params = segment_routes.header_params(self.headers, params)
+            if isinstance(params, tuple):
+                self.answer(params)
+                return self._drain_refused_body(clen)
             admitted = segment_routes.admit_segment(SEG_DIR, params, sig)
             if not isinstance(admitted, segment_routes.Admission):
                 self.answer(admitted)
