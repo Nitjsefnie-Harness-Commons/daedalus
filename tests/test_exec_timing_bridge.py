@@ -97,7 +97,7 @@ def test_b_flag_on_stamps_each_stage_of_an_eval_only(tmp):
     assert list(framed) == ['srv_enqueue_us', 'srv_write_us'], framed
     assert list(stored) == [
         'srv_enqueue_us', 'srv_write_us', 'srv_result_us'], stored
-    assert all(type(v) is int for v in stored.values()), stored
+    assert all(isinstance(v, int) for v in stored.values()), stored
     for stage in ('file', 'frame', 'slot'):
         assert '_timing' not in out['typed'][stage], (stage, out['typed'])
 
@@ -127,7 +127,7 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             status, raw = put_command(base, body)
             assert status == 200, (flag, status, raw)
             did = json.loads(raw)['did']
-            queued = (Path(docroot) / 'commands' / TOK / f'{did}.json')
+            queued = Path(docroot) / 'commands' / TOK / f'{did}.json'
             stored = queued.read_bytes()
         if flag == '1':
             command = json.loads(raw)['command']
