@@ -194,6 +194,16 @@ bridge intentionally does not supply deployment-specific CORS or public upload
 hosting policy. A dashboard server-URL override aimed at another origin
 therefore needs a CORS-enabled reverse proxy in front of that bridge.
 
+A page uploads each HLS segment with `POST /segment`, carrying the job, segment
+number and total in the `X-Daedalus-Segment-Job`, `X-Daedalus-Segment-Seg` and
+`X-Daedalus-Segment-Total` headers (the job percent-encoded as UTF-8) beside
+the capability in `X-Daedalus-Segment-Sig`, so every upload of a job shares one
+URL. The query form still works; a value sent in both places, or a header sent
+twice, is refused with 400. A CORS-enabled proxy should answer `/segment`
+preflights with `Access-Control-Max-Age` and list all four headers in
+`Access-Control-Allow-Headers`; the browser then reuses one preflight across the
+job's uploads for as long as that age and its own cap allow.
+
 ## Release verification
 
 Published releases include a wheel, source distribution, and `SHA256SUMS`.

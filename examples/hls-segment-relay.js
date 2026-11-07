@@ -22,11 +22,13 @@
 // behalf; this script itself only ever calls the other two:
 //   POST /segment-job                        {token, job} -> {ok, sig}
 //   GET  /segment-status?job=J               -> {done:[1,2,...], count:N}
-//   POST /segment?job=J&seg=N&total=T        raw arraybuffer body
+//   POST /segment                            raw arraybuffer body
 //
 // Both carry the capability in the X-Daedalus-Segment-Sig header rather than
 // in the query: a sig authorizes this job until the job is gone, and a
-// request target is retained by proxy access logs and browser tooling.
+// request target is retained by proxy access logs and browser tooling. The
+// upload sends job (percent-encoded), seg and total as X-Daedalus-Segment-Job,
+// -Seg and -Total, so all of a job's uploads share one URL and preflight.
 //
 // __SIG__ is a capability scoped to this one job, minted by POST /segment-job
 // — deliberately NOT the bridge token. This script runs in the page's MAIN
@@ -34,7 +36,6 @@
 // full browser control. A stolen sig authorizes only this job's status reads
 // and segment writes; the finalized segment set stays within the job record's
 // quotas, and stale temporary writes are cleared before another is admitted.
-// The sig cannot access browser-control or other jobs' routes.
 //
 // Two ways to obtain it. Substitute __SIG__ with the output of
 // `daedalus segment-job <job>` (or the MCP `segment_job` tool), or leave the
@@ -69,12 +70,13 @@ const PLAYLIST = '__PLAYLIST__';
 const CONCURRENCY = '__CONC__'.startsWith('__') ? 3 : parseInt('__CONC__', 10);
 
 // Playlist and segment reads go through the background GM bridge, which is not
-// subject to page CORS. The status GET and segment POST below are plain
-// page-side fetches to the bridge, so a cross-origin deployment must allow both
-// routes and handle their preflights — the capability header makes the status
-// GET preflight too. The bridge adds no CORS headers; see
-// "Deployment" in README.md. Without that policy, route both bridge requests
-// through the GM bridge instead.
+// subject to page CORS. The status GET and segment POST are plain page-side
+// fetches, so a cross-origin deployment must answer their preflights. The
+// bridge adds no CORS headers; see the reverse-proxy paragraph of "Security"
+// in README.md: answer /segment preflights with Access-Control-Max-Age and
+// list X-Daedalus-Segment-Sig, -Job, -Seg and -Total in
+// Access-Control-Allow-Headers. Without that policy, route both bridge
+// requests through the GM bridge instead.
 function gmGet(url, responseType) {
   return new Promise((resolve, reject) => {
     window.GM.xmlhttpRequest({
@@ -153,20 +155,19 @@ async function run() {
       if (window.__relayStop[JOB]) return;
       const seg = queue[idx++];
       // Bounded retry with exponential backoff. A 429 is the origin asking
-      // for less load, so it is honoured the same as any other failure and
-      // the attempt budget still applies -- retrying it indefinitely would
-      // just be ignoring the answer.
+      // for less load, so it spends the same attempt budget as any failure.
       for (let attempt = 1; ; attempt++) {
         if (window.__relayStop[JOB]) return;
         try {
           const bytes = await gmGet(segments[seg - 1], 'arraybuffer');
-          const relay = `${SERVER}/segment?job=${encodeURIComponent(JOB)}`
-            + `&seg=${seg}&total=${TOTAL}`;
-          const resp = await fetch(relay, {
+          const resp = await fetch(`${SERVER}/segment`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/octet-stream',
               'X-Daedalus-Segment-Sig': SIG,
+              'X-Daedalus-Segment-Job': encodeURIComponent(JOB),
+              'X-Daedalus-Segment-Seg': String(seg),
+              'X-Daedalus-Segment-Total': String(TOTAL),
             },
             body: bytes,
           });
