@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""The MCP side of exec timing: `timing_view.render` turns a result's
-`_timing` stamps into legs on one clock, and `exec` renders it only when
-the result carries `_timing`, reading no clock otherwise.
-"""
+"""The MCP side of exec timing: `timing_view.render` and `exec`."""
 import asyncio
 import json
 import os
@@ -25,8 +22,7 @@ _LEAD = 5000  # the browser clock runs this far ahead of the server's
 
 
 def _stamps(server, browser):
-    """Server stamps in integer us and browser stamps in ms, both given as
-    real elapsed ms after `_T`; the browser's carry the clock lead."""
+    """Real elapsed ms after `_T` as each clock stamps them."""
     timing = {name: (_T + ms) * 1000 for name, ms in server.items()}
     timing.update({name: _T + ms + _LEAD for name, ms in browser.items()})
     return timing
@@ -38,9 +34,8 @@ def _legs(view):
 
 
 def test_the_offset_comes_from_the_causality_bounds_and_applies_once(tmp):
-    """Issue Expected 2: a browser clock 5000 ms ahead is estimated from
-    `sw_recv - srv_write` and `sw_post - srv_result`, and every leg that
-    crosses the clocks reads its real elapsed time."""
+    """Issue Expected 2: a browser clock 5000 ms ahead is estimated, and
+    every cross-clock leg reads its real elapsed time."""
     del tmp
     timing = _stamps(
         {'srv_enqueue_us': 0, 'srv_write_us': 1, 'srv_result_us': 24},
@@ -71,9 +66,8 @@ def test_the_offset_comes_from_the_causality_bounds_and_applies_once(tmp):
 
 
 def test_a_negative_leg_is_clamped_with_its_raw_value_beside_it(tmp):
-    """Bounds that cross (`hi < lo`) still render, marked inconsistent; a
-    leg that comes out negative renders 0 with its raw value kept, and the
-    sum of parts then exceeds the total by exactly the clamped amount."""
+    """Crossed bounds render, marked inconsistent; a negative leg renders
+    0 beside its raw value, and the parts exceed the total by as much."""
     del tmp
     timing = _stamps({'srv_enqueue_us': 0, 'srv_write_us': 10,
                       'srv_result_us': 20},
@@ -97,9 +91,7 @@ def test_a_negative_leg_is_clamped_with_its_raw_value_beside_it(tmp):
 
 
 def test_stamps_a_result_does_not_carry_render_as_unknown(tmp):
-    """A posted `_timing` the bridge kept but no producer shaped (a
-    non-number stamp, missing bounds, not an object) renders what it can
-    and never raises: `exec` must still answer its result."""
+    """A `_timing` no producer shaped renders what it can, never raising."""
     del tmp
     for timing in ([], {'srv_enqueue_us': 'x', 'sw_recv': True}):
         view = timing_view.render(timing, 5)
@@ -135,10 +127,9 @@ _WORLDS = {
 
 
 def test_every_stamp_a_producer_takes_is_one_the_view_renders(tmp):
-    """Issue Expected 1, spanning the producers: the bridge's stamps and
-    each world's extension stamps, from the real modules, render as the
-    legs that world traversed in path order, the unreached ones marked, and
-    together they are exactly the stamps the view consumes."""
+    """Issue Expected 1: the real producers' stamps render as each world's
+    legs in path order, unreached ones marked, and are exactly the stamps
+    the view consumes."""
     bridge = json.loads(_probe(tmp, '1')['eval']['slot'])['_timing']
     emitted = set(bridge) | {'mcp_read_us'}
     for world, (name, unreached, path) in _WORLDS.items():
@@ -158,7 +149,7 @@ def test_every_stamp_a_producer_takes_is_one_the_view_renders(tmp):
 
 
 class _Bridge:
-    """The two bridge calls a waited exec makes, answering `body`."""
+    """The bridge calls a waited exec makes."""
 
     def __init__(self, body):
         self.body = body
@@ -186,10 +177,8 @@ _RESULT = {'token': 'tok', 'id': 'c', 'tabId': '7', 'result': '4',
 
 
 def test_exec_renders_timing_only_for_a_result_that_carries_it(tmp):
-    """Issue Expected 3 at the MCP: an untimed result's `exec` output is
-    the base bytes and no clock is read; a timed one gets `timing` in place
-    of `_timing`, read once. The flag is set against each, so a decision
-    read from the environment fails either way."""
+    """Issue Expected 3: untimed, the base bytes and no clock read; timed,
+    `timing` replaces `_timing`. The flag is set against each arm."""
     del tmp
     reads = []
     clock = time.time_ns
