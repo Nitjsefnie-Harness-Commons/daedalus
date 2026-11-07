@@ -11,11 +11,17 @@ def _now_us():
     return _clock() // 1000
 
 
+def drop_client_timing(message):
+    message.pop('_timing', None)
+
+
 def begin(cmd):
     if ENABLED and cmd.get('code'):
         cmd['_timing'] = {'srv_enqueue_us': _now_us()}
 
 
 def stamp(message, name):
-    if ENABLED and isinstance(message.get('_timing'), dict):
+    if not ENABLED:
+        drop_client_timing(message)
+    elif isinstance(message.get('_timing'), dict):
         message['_timing'][name] = _now_us()

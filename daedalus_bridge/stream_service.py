@@ -343,6 +343,7 @@ def poll_legacy(cmd_dir, token):
                 return 200, data
             if isinstance(candidate, dict):
                 data = candidate
+                exec_timing.drop_client_timing(data)
                 try:
                     cmd_file.unlink()
                 except OSError:
@@ -397,6 +398,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
         legacy_ids.stamp(data, path.name, ident)
+        exec_timing.drop_client_timing(data)
         frame_writer(data)  # BEFORE unlink
         # The claim excludes other consumers until this write and unlink
         # finish; a redelivery is deduplicated by the `_did` stamped above.
