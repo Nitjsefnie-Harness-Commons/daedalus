@@ -208,7 +208,6 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             retry = json.loads(bytes(again))
             assert retry['duplicate'] is True, again
             assert retry['command'] == command, (again, stored)
-            # The client's `_timing` is replaced by the bridge's.
             keyed_command = json.loads(keyed_raw)['command']
             assert list(keyed_command['_timing']) == ['srv_enqueue_us'], (
                 keyed_raw)

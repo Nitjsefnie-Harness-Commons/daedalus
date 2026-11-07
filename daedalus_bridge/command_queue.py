@@ -23,7 +23,7 @@ _cmd_events_lock = threading.Lock()
 # single criterion rather than a spelling repeated at each site.
 DASHBOARD_TAB = 'dashboard'
 # Keys a live copy may carry that its retry cannot: the delivery id, and the
-# stamp object only while stamping is on (so a flag-off body keeps its own).
+# bridge's stamp object while stamping is on.
 _VOLATILE_KEYS = (
     ('_did', '_timing') if exec_timing.ENABLED else ('_did',))
 
