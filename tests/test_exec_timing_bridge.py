@@ -16,11 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import BRIDGE_ENV, TOK, put_command  # noqa: E402
 
-SEQ = '0000000000001_00000000000000000001'
 _PROBE = r'''
 import io
 import json
 import os
+import time
 import types
 from pathlib import Path
 
@@ -30,8 +30,8 @@ from daedalus_bridge import stream_service
 root = Path(os.environ['DAEDALUS_DIR'])
 cmd_dir, res_dir = root / 'commands', root / 'results'
 calls = []
-real_clock = exec_timing._clock
-exec_timing._clock = lambda: calls.append(1) or real_clock()
+clock_is_time_ns = exec_timing._clock is time.time_ns
+exec_timing._clock = lambda: calls.append(1) or len(calls) * 1_000_000_999
 seqs = iter(['0000000000001_%020d' % n for n in range(1, 9)])
 command_queue.next_seq = lambda _dir: next(seqs)
 result_routes.uuid = types.SimpleNamespace(
@@ -54,13 +54,15 @@ def run(cmd, tab):
         posted['_timing'] = framed['_timing']
     result_routes.accept_result(res_dir, cmd_dir, 'tok', posted, 8)
     slot = (res_dir / ('tok_' + tab + '.json')).read_text(encoding='utf-8')
-    return {'file': on_disk, 'frame': frames.getvalue().decode(),
+    return {'did': did, 'file': on_disk, 'frame': frames.getvalue().decode(),
             'slot': slot, 'cmd': json.dumps(cmd)}
 
 
 out = {'eval': run({'id': 'e', 'code': '1'}, 'a')}
-out['eval_clock_calls'] = len(calls)
 out['typed'] = run({'id': 't', 'type': 'ping'}, 'b')
+out['client'] = run({'id': 'c', 'code': '1', '_timing': {}}, 'c')
+out['clock_calls'] = len(calls)
+out['clock_is_time_ns'] = clock_is_time_ns
 print(json.dumps(out))
 '''
 
@@ -83,41 +85,43 @@ def _probe(tmp, flag):
     return json.loads(_run(tmp, _PROBE, flag))
 
 
-def test_a_flag_off_takes_no_stamp_and_adds_no_key(tmp):
-    for flag in (None, '0', 'true'):
-        out = _probe(tmp, flag)
-        assert out['eval_clock_calls'] == 0, (flag, out)
-        for stage in ('file', 'frame', 'slot'):
-            assert '_timing' not in out['eval'][stage], (flag, stage, out)
-
-
 def test_b_flag_on_stamps_each_stage_of_an_eval_only(tmp):
     out = _probe(tmp, '1')
-    assert out['eval_clock_calls'] > 0, out
+    assert out['clock_is_time_ns'], out
     queued = json.loads(out['eval']['file'])['_timing']
     framed = json.loads(out['eval']['frame'].split('data: ')[1])['_timing']
     stored = json.loads(out['eval']['slot'])['_timing']
-    assert list(queued) == ['srv_enqueue_us'], queued
-    assert list(framed) == ['srv_enqueue_us', 'srv_write_us'], framed
-    assert list(stored) == [
-        'srv_enqueue_us', 'srv_write_us', 'srv_result_us'], stored
-    assert all(isinstance(v, int) for v in stored.values()), stored
+    # The probe clock returns n * 1_000_000_999 ns on its nth read, so the
+    # exact values pin the microsecond unit and the floor.
+    assert queued == {'srv_enqueue_us': 1000000}, queued
+    assert framed == {'srv_enqueue_us': 1000000,
+                      'srv_write_us': 2000001}, framed
+    assert stored == {'srv_enqueue_us': 1000000, 'srv_write_us': 2000001,
+                      'srv_result_us': 3000002}, stored
     for stage in ('file', 'frame', 'slot'):
         assert '_timing' not in out['typed'][stage], (stage, out['typed'])
 
 
-def test_c_flag_off_bytes_equal_the_base_literals(tmp):
-    base_cmd = '{"id": "e", "code": "1", "_did": "%s"}' % SEQ
+def test_c_flag_off_reads_no_clock_and_bytes_equal_the_base(tmp):
+    cases = {'eval': ('e', 'a', '', ''),
+             'client': ('c', 'c', ', "_timing": {}', ' "_timing": {},')}
     for flag in (None, '0', 'true'):
-        got = _probe(tmp, flag)['eval']
-        assert got['file'] == base_cmd, (flag, got['file'])
-        assert got['frame'] == (
-            f'event: command\ndata: {base_cmd}\n\n'), (flag, got['frame'])
-        assert got['slot'] == (
-            '{"id": "e", "tabId": "a", "ok": true, '
-            '"resultGeneration": "%s", "deliveryId": "%s", '
-            '"roundtrip_ms": 999}' % ('g' * 32, SEQ)), (flag, got['slot'])
-        assert got['cmd'] == '{"id": "e", "code": "1"}', (flag, got['cmd'])
+        out = _probe(tmp, flag)
+        assert out['clock_calls'] == 0, (flag, out)
+        for name, (ident, tab, field, slot_field) in cases.items():
+            got, did = out[name], out[name]['did']
+            body = '"id": "%s", "code": "1"%s' % (ident, field)
+            queued = '{%s, "_did": "%s"}' % (body, did)
+            assert got['file'] == queued, (flag, got['file'])
+            assert got['frame'] == (
+                f'event: command\ndata: {queued}\n\n'), (flag, got['frame'])
+            assert got['slot'] == (
+                '{"id": "%s", "tabId": "%s", "ok": true,%s '
+                '"resultGeneration": "%s", "deliveryId": "%s", '
+                '"roundtrip_ms": 999}' % (
+                    ident, tab, slot_field, 'g' * 32, did)), (
+                        flag, got['slot'])
+            assert got['cmd'] == '{%s}' % body, (flag, got['cmd'])
 
 
 def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
@@ -133,10 +137,14 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             did = json.loads(raw)['did']
             queued = Path(docroot) / 'commands' / TOK / f'{did}.json'
             stored = queued.read_bytes()
+            again = put_command(base, body)[1] if flag == '1' else None
         if flag == '1':
             command = json.loads(raw)['command']
             assert list(command['_timing']) == ['srv_enqueue_us'], raw
             assert json.loads(stored) == command, (stored, raw)
+            retry = json.loads(again)
+            assert retry['duplicate'] is True, again
+            assert retry['command'] == command, (again, stored)
             continue
         command = '{"id": "e", "code": "1", "_did": "%s"}' % did
         assert stored == command.encode(), (flag, stored)
