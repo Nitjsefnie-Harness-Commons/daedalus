@@ -138,7 +138,7 @@ def test_bounds_that_no_longer_intersect_fall_back_to_the_exec_alone(tmp):
     assert (legs[1][2], legs[3][2]) == (5.0, 5.0), legs
     after = _exchange(window, 1, 1, lead=6000)
     assert after['offset'] == _offset(6000.0, 1.0, samples=2), after
-    # Bounds that cross themselves are no sample: the window restarts empty.
+    # Self-crossed bounds are never kept.
     _exchange(window, -10, 0, lead=6000)
     good = _exchange(window, 1, 1, lead=6000)
     assert good['offset'] == _offset(6000.0, 1.0), good
