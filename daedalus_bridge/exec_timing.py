@@ -1,8 +1,8 @@
+"""Server-side _timing stamps, on under DAEDALUS_DEBUG_TIMING=1."""
 import time
 
 from daedalus_bridge.env_config import debug_timing
 
-# Off: no clock read and no key, so the bytes stay as they were.
 ENABLED = debug_timing()
 _clock = time.time_ns
 
