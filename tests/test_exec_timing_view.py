@@ -60,10 +60,10 @@ def test_a_lone_exec_splits_its_round_trip_evenly_across_the_clocks(tmp):
     off-grid server stamp keeps its fraction."""
     del tmp
     timing = _stamps(
-        {'srv_enqueue_us': 0, 'srv_write_us': 1.5, 'srv_result_us': 23},
+        {'srv_enqueue_us': 0, 'srv_write_us': 1.5, 'srv_result_us': 23.5},
         {'sw_recv': 4.5, 'sw_tick': 6, 'sw_probe_call': 5, 'pg_probe': 6.5,
          'sw_probe_done': 7.5, 'sw_eval_call': 8, 'pg_eval_start': 9.5,
-         'pg_eval_end': 20, 'sw_eval_done': 21, 'sw_post': 22})
+         'pg_eval_end': 20, 'sw_eval_done': 21, 'sw_post': 22.5})
     view = timing_view.render(timing, (_T + 24) * 1000, _window())
     assert view['offset'] == _offset(5001.0, 2.0), view
     expected = [('srv_enqueue_us', 'srv_write_us', 'server', 1.5),
@@ -75,9 +75,9 @@ def test_a_lone_exec_splits_its_round_trip_evenly_across_the_clocks(tmp):
                 ('sw_eval_call', 'pg_eval_start', 'browser', 1.5),
                 ('pg_eval_start', 'pg_eval_end', 'browser', 10.5),
                 ('pg_eval_end', 'sw_eval_done', 'browser', 1.0),
-                ('sw_eval_done', 'sw_post', 'browser', 1.0),
+                ('sw_eval_done', 'sw_post', 'browser', 1.5),
                 ('sw_post', 'srv_result_us', 'offset', 2.0),
-                ('srv_result_us', 'mcp_read_us', 'server', 1.0)]
+                ('srv_result_us', 'mcp_read_us', 'server', 0.5)]
     assert _legs(view) == [(f'{a} -> {b}', clock, ms, ms, False)
                            for a, b, clock, ms in expected], view
     assert (view['world'], view['missing'], view['tick_ms']) == (
@@ -110,9 +110,10 @@ def test_the_window_holds_64_samples_none_older_than_ten_minutes(tmp):
     now = [0.0]
     window = _window(now)
     _exchange(window, 1, 1)
+    _exchange(window, 2, 2)
     now[0] = 600.0
     assert _exchange(window, 50, 50)['offset'] == _offset(
-        5000.0, 1.0, samples=2)
+        5000.0, 1.0, samples=3)
     now[0] = 600.5
     assert _exchange(window, 50, 50)['offset'] == _offset(
         5000.0, 50.0, samples=2)
@@ -137,6 +138,10 @@ def test_bounds_that_no_longer_intersect_fall_back_to_the_exec_alone(tmp):
     assert (legs[1][2], legs[3][2]) == (5.0, 5.0), legs
     after = _exchange(window, 1, 1, lead=6000)
     assert after['offset'] == _offset(6000.0, 1.0, samples=2), after
+    # Bounds that cross themselves are no sample: the window restarts empty.
+    _exchange(window, -10, 0, lead=6000)
+    good = _exchange(window, 1, 1, lead=6000)
+    assert good['offset'] == _offset(6000.0, 1.0), good
 
 
 def test_a_negative_leg_is_clamped_with_its_raw_value_beside_it(tmp):

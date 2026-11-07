@@ -768,7 +768,7 @@ the code you change; field names are exact.
     with; `debug_timing`, the sole owner of the `DAEDALUS_DEBUG_TIMING` name,
     snapshotted at import by the segment store and `exec_timing`, true only
     for `1`, reading the environment when called); `exec_timing` (an eval
-    command's `_timing`, `code` and no `type`: opened at enqueue, stamped at the stream write and
+    command's `_timing`, `code` with an absent or empty `type`: opened at enqueue, stamped at the stream write and
     on the posted result, a client's own dropped from a `PUT /command` body
     or legacy file; with the flag off it drops any `_timing` a frame or
     result still carries and reads no clock); `log_safe` (renders untrusted
