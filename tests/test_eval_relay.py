@@ -580,7 +580,8 @@ const context = vm.createContext({
   performance: {
     timeOrigin: 1600000000000.25,
     now() {
-      if (poison === '1' || (poison === 't0' && !reads++)) {
+      if (poison === '1' || (poison === 't0' && !reads++)
+          || (poison === 'later' && reads++)) {
         throw new Error('page killed performance.now');
       }
       return 0.5;
@@ -605,7 +606,8 @@ process.stdout.write(JSON.stringify({ errors, posted }));
 def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
     """A page whose `performance.now` throws still answers a relayed eval
     (unguarded, the eval waited out the relay TTL): without `ms`, also when
-    only the first read throws, and a timed relay keeps its stamps.
+    only the first or only a later read throws, and a timed relay keeps its
+    stamps.
     """
     del tmp
 
@@ -621,6 +623,7 @@ def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
             'relayId': 'r1', 'r': 2}
     for poison, timed, posted in (
             ('0', '0', {**base, 'ms': 0}), ('1', '0', base), ('t0', '0', base),
+            ('later', '0', base),
             ('1', '1', {**base, 'timing': {'cs_recv': 1}})):
         got = answer(poison, timed)
         assert got == {'errors': [], 'posted': [posted]}, (poison, got)

@@ -93,6 +93,9 @@ stream_service.drain_queue(
     left, None, None, command_ttl=90,
     frame_writer=lambda data: stream_service.write_frame(frames, data))
 out['leftover'] = frames.getvalue().decode()
+result_routes.accept_result(res_dir, cmd_dir, 'tok', {
+    'id': 'n', 'tabId': 'n', 'ok': True, '_timing': []}, 8)
+out['listed'] = json.loads((res_dir / 'tok_n.json').read_text('utf-8'))
 out['clock_calls'] = len(calls)
 out['clock_is_time_ns'] = clock_is_time_ns
 print(json.dumps(out))
@@ -139,6 +142,8 @@ def test_b_flag_on_stamps_each_stage_of_an_eval_only(tmp):
             ['srv_enqueue_us'], ['srv_enqueue_us', 'srv_write_us'],
             ['srv_enqueue_us', 'srv_write_us', 'srv_result_us']], out[name]
     _assert_legacy_drops_client_timing(out)
+    # A posted `_timing` that is no object is kept, never stamped.
+    assert out['listed']['_timing'] == [], out['listed']
     leftover = json.loads(out['leftover'].split('data: ')[1])['_timing']
     assert list(leftover) == ['srv_enqueue_us', 'srv_write_us'], out
     assert leftover['srv_enqueue_us'] == 7, out
