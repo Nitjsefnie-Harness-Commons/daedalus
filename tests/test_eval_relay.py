@@ -603,11 +603,9 @@ process.stdout.write(JSON.stringify({ errors, posted }));
 
 
 def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
-    """A page that replaced `performance.now` with a thrower used to get no
-    answer at all: the relay listener read it outside any try, so the
-    relayed eval waited out the relay TTL. The answer now arrives without
-    its `ms` (also when only the first read throws), and a timed relay keeps
-    the stamps it already carried.
+    """A page whose `performance.now` throws still answers a relayed eval
+    (unguarded, the eval waited out the relay TTL): without `ms`, also when
+    only the first read throws, and a timed relay keeps its stamps.
     """
     del tmp
 
