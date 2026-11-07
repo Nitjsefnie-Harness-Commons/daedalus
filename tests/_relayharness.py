@@ -16,8 +16,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
 from _worker_sources import (  # noqa: E402
-    DELAY_STUB, RESPONSE_STUB, STREAM_RESPONSE, event_target_stub,
-    import_scripts_stub)
+    CLOCK_DOUBLES, DELAY_STUB, RESPONSE_STUB, STREAM_RESPONSE,
+    event_target_stub, import_scripts_stub)
 
 _BRIDGE = (
     str(EXTENSION_ROOT / 'background.js'),
@@ -46,6 +46,8 @@ const plan = typeof gatePlanArg === 'string'
   ? JSON.parse(gatePlanArg) : gatePlanArg;
 const cdpEnabled = cdpText === '1' || cdpText === 'midflight';
 const cdpFailsMidFlight = cdpText === 'midflight';
+const flag = mode.startsWith('timing-') ? mode.slice(7) : '';
+const resultBodies = [];
 let cdpSideEffects = 0;
 const completionOrder = JSON.parse(orderText);
 let scriptingCalls = 0;
@@ -58,7 +60,7 @@ const evalResolvers = {};
 let relaySequence = 0;
 let relayDocSequence = 0;
 
-""" + RESPONSE_STUB + r"""
+""" + RESPONSE_STUB + CLOCK_DOUBLES + r"""
 const BRIDGE_URL = 'https://bridge.example.com';
 const streamFetches = [];
 const resultPosts = [];
@@ -181,21 +183,23 @@ const backgroundChrome = {
   },
 };
 
-const backgroundContext = vm.createContext({
+const backgroundContext = vm.createContext(countedPerformance({
   chrome: backgroundChrome,
-  fetch: bridgeFetch,
+  fetch: (url, init) => {
+    if (String(url).endsWith('/result')) resultBodies.push(init.body);
+    return bridgeFetch(url, init);
+  },
   crypto: { randomUUID: () => 'relay-' + (++relaySequence) },
   AbortController,
   TextDecoder,
   URL,
-  performance,
   btoa,
   setTimeout: () => 1,
   clearTimeout() {},
   setInterval: () => 1,
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
-});
+}, flag && workerClock));
 """) + import_scripts_stub('backgroundContext') + (
     r"""
 
@@ -265,7 +269,7 @@ const documentObject = {
   },
 };
 
-const relayContext = vm.createContext({
+const relayContext = vm.createContext(countedPerformance({
   window: windowObject,
   chrome: relayChrome,
   document: documentObject,
@@ -279,7 +283,6 @@ const relayContext = vm.createContext({
   },
   navigator: { clipboard: { writeText: () => Promise.resolve() } },
   location: { hostname: relayHostname },
-  performance,
   evalResolvers,
   Blob,
   URL,
@@ -292,7 +295,7 @@ const relayContext = vm.createContext({
   setInterval: () => 1,
   clearInterval() {},
   console: { log() {}, error() {} },
-});
+}, flag && pageClock));
 """ + DELAY_STUB + r"""
 async function waitFor(predicate, label) {
   for (let attempt = 0; attempt < 1000; attempt++) {
@@ -341,6 +344,22 @@ async function run() {
       };
     }
     return outcomes;
+  }
+
+  if (flag) {
+    // Flag off, the page still hands stamps back: they must not be kept.
+    const send = relayChrome.runtime.sendMessage;
+    if (flag === '0') {
+      relayChrome.runtime.sendMessage = (message) => send(
+        message.type === 'result' ? { ...message, timing: { pg_done: 1 } }
+          : message);
+    }
+    deliverFrame(backgroundContext, {
+      id: '_eval', type: 'eval', code: '2 + 2', chromeTab: 7,
+      _did: 'did-relay',
+    }, flag);
+    await waitFor(() => resultPosts.length === 1, 'relayed eval result');
+    return { reads: clockReads, bodies: resultBodies };
   }
 
   if (mode === 'poisoned') {
@@ -618,6 +637,12 @@ def run_eval_after_cdp_fails_mid_flight():
 def run_eval_with_poisoned_page_globals(cdp_available):
     return _observe(_one_result(1), *_BRIDGE, '[]', 'poisoned', '',
                     '1' if cdp_available else '0')
+
+
+def run_timed_relay(flag):
+    """One page-relay eval, delivered as an SSE frame under clock doubles."""
+    return _observe(_one_result(1), *_BRIDGE, '[]', 'timing-' + flag,
+                    'relay.test', '')
 
 
 def run_main_world_injection_shapes():

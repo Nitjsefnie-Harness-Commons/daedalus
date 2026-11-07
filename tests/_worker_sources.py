@@ -120,6 +120,45 @@ function delay() {
 }
 """
 
+# Clock doubles for the exec-timing controls. Every worker `performance`
+# access, page `timeOrigin` read and worker `Date.now` call is counted, and
+# the fixed fractional values expose a rounded or Date.now-based stamp. A
+# timed run receives its command as an SSE frame, the way the stream does;
+# flag `1` adds the bridge's `_timing`, any flag but `0` is a JSON `_timing`.
+CLOCK_DOUBLES = r"""
+const clockReads = { worker: 0, page: 0, date: 0 };
+const workerClock = { timeOrigin: 1700000000000.25, now: () => 0.5 };
+const pageClock = {
+  poisoned: false,
+  get timeOrigin() { clockReads.page++; return 1600000000000.25; },
+  now() {
+    if (this.poisoned) throw new Error('page killed performance.now');
+    return 0.5;
+  },
+};
+function countedPerformance(sandbox, clock) {
+  return Object.defineProperty(sandbox, 'performance', {
+    get() {
+      if (clock === workerClock) clockReads.worker++;
+      return clock || performance;
+    },
+  });
+}
+function deliverFrame(context, command, flag) {
+  if (flag === '1') {
+    command._timing = { srv_enqueue_us: 1, srv_write_us: 2 };
+  } else if (flag !== '0') {
+    command._timing = JSON.parse(flag);
+  }
+  context.__countDate = () => clockReads.date++;
+  vm.runInContext(
+    'Date.now = () => { __countDate(); return 1700000000000; };', context);
+  Object.assign(clockReads, { worker: 0, page: 0, date: 0 });
+  context.frame = 'event: command\ndata: ' + JSON.stringify(command) + '\n\n';
+  vm.runInContext('parseSSEChunk(frame)', context);
+}
+"""
+
 # A structural clone, so a stored value cannot carry a later mutation on.
 COPY_STUB = r"""
 function copy(value) {
