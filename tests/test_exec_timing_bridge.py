@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Bridge-side exec timing stamps: `_timing` rides an eval command only while
-`DAEDALUS_DEBUG_TIMING=1`, and every other value leaves the bytes untouched.
+`DAEDALUS_DEBUG_TIMING=1`; any other value reads no clock and leaves the
+command, frame, result and PUT-answer bytes (a coalesced retry's included)
+untouched.
 
 The in-process probes run in a child so the flag, read once at import, is
 whatever the arm sets; `exec_timing._clock` is counted there, which is what
@@ -138,6 +140,10 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
             queued = Path(docroot) / 'commands' / TOK / f'{did}.json'
             stored = queued.read_bytes()
             again = put_command(base, body)[1]
+            keyed = {**body, 'id': 'k', '_timing': {'a': 1, 'b': 2}}
+            keyed_did = json.loads(put_command(base, keyed)[1])['did']
+            reordered = put_command(
+                base, {**keyed, '_timing': {'b': 2, 'a': 1}})[1]
         if flag == '1':
             command = json.loads(raw)['command']
             assert list(command['_timing']) == ['srv_enqueue_us'], raw
@@ -151,6 +157,17 @@ def test_d_put_answer_and_queue_file_follow_the_flag(tmp):
         assert raw == (
             '{"ok": true, "target": "broadcast", "did": "%s", '
             '"command": %s}' % (did, command)).encode(), (flag, raw)
+        assert again == (
+            '{"ok": true, "target": "broadcast", "did": "%s", '
+            '"command": %s, "duplicate": true}' % (did, command)).encode(), (
+                flag, again)
+        # Python equality ignores key order, so this retry coalesces; its
+        # answer must still spell its own body, as the base does.
+        assert reordered == (
+            '{"ok": true, "target": "broadcast", "did": "%s", "command": '
+            '{"id": "k", "code": "1", "_timing": {"b": 2, "a": 1}, '
+            '"_did": "%s"}, "duplicate": true}' % (
+                keyed_did, keyed_did)).encode(), (flag, reordered)
 
 
 def test_e_a_retry_coalesces_as_the_flag_leaves_it(tmp):
