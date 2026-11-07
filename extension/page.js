@@ -127,7 +127,6 @@
     const key = '__daedalus_' + relayId;
     const hasAwait = code.includes('await');
     const hasReturn = /\breturn\b/.test(code);
-    // Exec-timing stamps, only when the content script asked; best effort.
     const timing = e.data.timing ? { ...e.data.timing } : null;
     const stamp = (name) => {
       try { timing[name] = performance.timeOrigin + performance.now(); } catch (_) {}
@@ -135,8 +134,6 @@
     if (timing) stamp('pg_recv');
     const t0 = performance.now();
 
-    // Literals, not assignments: a page setter on Object.prototype would
-    // swallow an assigned field.
     const post = (fields) => {
       const message = { direction: 'daedalus-eval-result', id, relayId, ...fields, ms: +(performance.now() - t0).toFixed(1) };
       if (timing) stamp('pg_done');

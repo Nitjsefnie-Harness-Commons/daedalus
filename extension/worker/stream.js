@@ -1,7 +1,7 @@
 /* exported sseAbort, _loadSeenDids, startStream, stopStream */
 /* exported ensureKeepAlive */
-/* global config, bridgeAuth, dispatchCommand, registerAllTabs */
-/* global _stampReceipt */
+/* global config, bridgeAuth, dispatchCommand, registerAllTabs,
+   _stampReceipt */
 
 let sseAbort = null;
 let sseBuf = '';
