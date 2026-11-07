@@ -766,8 +766,13 @@ the code you change; field names are exact.
     same ceiling, since `config` exits without `DAEDALUS_DIR`; the bounded
     `env_int` / `env_positive_float` readers both front ends parse settings
     with; `debug_timing`, the sole owner of the `DAEDALUS_DEBUG_TIMING` name,
-    snapshotted by the segment store, true only for `1`, reading the
-    environment when called); `log_safe` (renders untrusted values);
+    snapshotted at import by the segment store and `exec_timing`, true only
+    for `1`, reading the environment when called); `exec_timing` (an eval
+    command's `_timing`: opened at enqueue, stamped at the stream write and
+    on the posted result, a client's own dropped from a `PUT /command` body
+    or legacy file; with the flag off it drops any `_timing` a frame or
+    result still carries and reads no clock); `log_safe` (renders untrusted
+    values);
     `parent_watch` (exit with the launcher); `mcp_bootstrap` (the optional MCP
     front end); `dashboard_drain` (the dashboard stream's non-destructive
     fan-out drain; its cursor and unlink rule are under "Endpoints" in this section).
