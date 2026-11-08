@@ -57,6 +57,7 @@ function send(message) {
     const listener = chrome.runtime.onMessage.listeners[0];
     assert.equal(listener(message, { tab: { id: 7 } }, (value) => {
       if (message.type === 'fetch') {
+        if (context.work) context.work.push('answer');
         completed.push({ ...value, id: message.fetchId });
         if (mode === 'withdraw:grant' && message.fetchId === '0') {
           queueMicrotask(() => {
@@ -189,11 +190,38 @@ async function priority(kind) {
   }
   await finishAll();
 }
+async function evalPending() {
+  // A relay whose body lands while an eval waits on its injection must not
+  // spend the worker on its encode and answer before that eval posts.
+  const log = [], inject = [];
+  context.encode = vm.runInContext('bytesToBase64', context);
+  vm.runInContext('bytesToBase64 = (b) => { work.push("encode"); '
+    + 'return encode(b); }', context);
+  context.work = log;
+  chrome.scripting.executeScript = (details) => {
+    log.push(details.args && details.args[0] === 'Date.now()'
+      ? 'eval' : 'probe');
+    const step = deferred(); inject.push(step); return step.promise;
+  };
+  relay(); relay(); await delay();
+  const posted = vm.runInContext("dispatchCommand({id: 'e', tabId: '7', "
+    + "chromeTab: 7, code: 'Date.now()'})", context).then(
+    () => log.push('posted'));
+  finish(0); finish(1); await delay();
+  inject[0].resolve([{ result: true }]); await delay();
+  inject[1].resolve([{ result: { r: 1, ms: 0 } }]); await posted;
+  await delay();
+  const first = log.indexOf('probe'), last = log.indexOf('posted');
+  assert.deepEqual(log.slice(first, last + 1),
+    ['probe', 'eval', 'posted'], 'relay work ran inside the eval');
+  await finishAll();
+}
 (async () => {
   await delay();
   if (mode.includes(':')) {
     const [group, kind] = mode.split(':');
-    await (group === 'withdraw' ? withdrawal(kind) : priority(kind));
+    await (group === 'withdraw' ? withdrawal(kind)
+      : group === 'eval' ? evalPending() : priority(kind));
     process.stdout.write('{}'); return;
   }
   const full = ['ceiling', 'error', 'abort'].includes(mode);
@@ -267,7 +295,8 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
             'withdraw:abort', 'withdraw:timeout', 'withdraw:grant',
             'withdraw:pre', 'withdraw:pre-held', 'withdraw:full',
             'priority:first', 'priority:last',
-            'priority:throw', 'priority:reject', 'priority:sync')),
+            'priority:throw', 'priority:reject', 'priority:sync',
+            'eval:pending')),
     ):
         result = run_node_argv(shutil.which('node'), [
             '-e', _RELAY_ADMISSION_HARNESS,
