@@ -108,8 +108,8 @@ async function withdrawal(kind) {
     assert.equal(completed.length, 1, 'pre-aborted request did not answer');
     assert.equal(started.length, count, 'pre-aborted request fetched');
     assert.deepEqual(completed[0], { id: String(count),
-      error: `fetch timeout after ${60000 + count}ms`,
-      timedOut: true, aborted: false, tooLarge: false });
+      error: 'fetch relay queue wait exceeded',
+      timedOut: false, aborted: false, tooLarge: false });
     assert.deepEqual(Array.from(state()), [count, 0, Number(held)]);
     assert.equal(vm.runInContext('_relayHold', context), held);
     if (pending) { command.resolve(); await pending; }
@@ -137,8 +137,8 @@ async function withdrawal(kind) {
       const cancelled = completed.filter((r) => r.id === '8');
       assert.equal(cancelled.length, 1, 'queued cancellation did not answer');
       assert.deepEqual(cancelled[0], { id: '8',
-        error: kind === 'timeout' ? 'fetch timeout after 60008ms'
-          : 'aborted by the caller', timedOut: kind === 'timeout',
+        error: kind === 'timeout' ? 'fetch relay queue wait exceeded'
+          : 'aborted by the caller', timedOut: false,
         aborted: kind !== 'timeout', tooLarge: false });
       assert.equal([...timers].some((t) => t.ms === 60008), false);
       if (kind !== 'grant') {
@@ -149,10 +149,14 @@ async function withdrawal(kind) {
       relay(); finish(1); await delay();
       assert.equal(started.at(-1).id, 10);
       assert.deepEqual(Array.from(state()), [8, 0, 0], 'slot ownership');
+      // An admitted request's expiry is the fetch's timeout, not the queue's.
+      if (kind === 'timeout') [...timers].find((t) => t.ms === 60007).fn();
     }
   }
   await finishAll();
   assert.equal(started.some((r) => r.id === 8), false);
+  const late = completed.find((r) => r.id === '7' && kind === 'timeout');
+  if (late) assert.equal(late.error, 'fetch timeout after 60007ms');
 }
 function commandRun(run) {
   context.commandHandler = run;
@@ -197,12 +201,18 @@ async function evalPending() {
     encode: vm.runInContext('bytesToBase64', context) });
   vm.runInContext('bytesToBase64 = (b) => (sizes.push(b.byteLength), '
     + 'encode(b))', context);
-  chrome.tabs.sendMessage = (tabId, { fetchId, at, data }) => (
-    log.push('slice'), sizes.push(data.length * 3 / 4), new Promise((yes) =>
-      setImmediate(() => yes(fetchId !== '1' || at === 0))));  // 1 refuses
+  // Relay 1's page never takes its second slice, relay 2's refuses it, and
+  // relay 3's caller aborts after its first.
+  chrome.tabs.sendMessage = (tabId, { fetchId, at, data }) => {
+    log.push('slice'); sizes.push(data.length * 3 / 4);
+    if (fetchId === '3') abort(3);
+    const answer = at === 0 || fetchId === '0' || (fetchId === '1' && null);
+    return new Promise((yes) => answer !== null
+      && setImmediate(() => yes(answer)));
+  };
   chrome.scripting.executeScript = ({ args }) => (log.push(args && args[0]
     ? 'eval' : 'probe'), inject[inject.push(deferred()) - 1].promise);
-  relay(); relay(); await delay();
+  relay(); relay(); relay(); relay(); await delay();
   const posted = vm.runInContext("dispatchCommand({id: 'e', tabId: '7', "
     + "chromeTab: 7, code: 'Date.now()'})", context).then(
     () => log.push('posted'));
@@ -211,14 +221,17 @@ async function evalPending() {
   await delay();
   inject[0].resolve([{ result: true }]); await delay();
   inject[1].resolve([{ result: { r: 1, ms: 0 } }]); await posted;
-  for (let t = 0; t < 400 && completed.length < 2; t++) await delay();
+  for (let t = 0; t < 400 && completed.length < 3; t++) await delay();
+  [...timers].find((t) => t.ms === 10000).fn(); await delay();
   assert.ok(Math.max(...sizes) <= 1 << 20, 'one task held ' + sizes);
   assert.ok(log.indexOf('eval') < log.lastIndexOf('slice'),
     'the eval waited behind whole deliveries: ' + log.join(' '));
   // finalUrl and statusText are the response's: '' is resp.url, not msg.url.
   assert.deepEqual(completed.map((r) => [r.id, r.chunked || r.error,
     r.statusText, r.finalUrl]).sort(), [['0', big, 'Fine', ''],
-    ['1', 'aborted by the caller', undefined, undefined]]);
+    ['1', 'page took no relay slice in 10000 ms', undefined, undefined],
+    ['2', 'page refused a relay slice', undefined, undefined],
+    ['3', 'aborted by the caller', undefined, undefined]]);
   await finishAll();
 }
 (async () => {
@@ -337,7 +350,6 @@ const windowObject = {
 const chrome = {
   runtime: {
     lastError: null, onMessage: { addListener: (l) => hooks.push(l) },
-    getManifest() { return { version: '0.0.0' }; },
     connect() { return { disconnect() {}, postMessage() {},
       onDisconnect: { addListener() {} } }; },
     sendMessage(payload, callback) {
@@ -349,7 +361,6 @@ const chrome = {
         try { callback(undefined); }
         finally { chrome.runtime.lastError = null; }
       } else if (mode.startsWith('sliced') && payload.type === 'fetch') {
-        // The worker's slices of a 2.5-slice body, then its final answer.
         const size = 5 << 19;
         for (let at = 0; at < size; at += 1 << 20) {
           const data = Buffer.from(new Uint8Array(Math.min(1 << 20,
@@ -363,13 +374,9 @@ const chrome = {
       } else callback(backgroundAnswer(payload));
     },
   },
-  storage: { local: {
-    get(k, cb) { cb({}); }, set(v, cb) { cb(); }, remove(k, cb) { cb(); },
-  } },
 };
 const context = {
   window: windowObject, chrome,
-  document: { documentElement: {}, addEventListener() {} },
   navigator: { clipboard: { writeText(text) {
     writes.push(text);
     return mode === 'reject' ? Promise.reject(Error('NotAllowedError'))
@@ -495,25 +502,19 @@ function backgroundAnswer() { return {}; }
 loadPage();
 (async () => {
   let settled = 'pending';
-  let reported = null;
   const returned = windowObject.GM.setClipboard('replacement');
   const isPromise = !!(returned && typeof returned.then === 'function');
   if (isPromise) {
     returned.then(() => { settled = 'resolved'; },
-      (error) => {
-        settled = 'rejected'; reported = String(error && error.message);
-      });
+      () => { settled = 'rejected'; });
   }
-  // Let the clipboard promise settle, then deliver whatever the content
-  // script posted back in response to it.
+  // Let the write settle, then deliver what the content script posted back.
   for (let turn = 0; turn < 10; turn++) {
-    await Promise.resolve();
-    flushMessages();
+    await Promise.resolve(); flushMessages();
   }
   await Promise.resolve();
-
   process.stdout.write(JSON.stringify({
-    isPromise, settled, reported, writes,
+    isPromise, settled, writes,
     acknowledged: posted
       .filter((m) => m.direction === 'daedalus-bg-to-page'
         && m.handler === 'setClipboard')
