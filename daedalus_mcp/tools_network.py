@@ -96,7 +96,8 @@ def register(mcp, bridge):
                             wait: bool = True) -> dict:
         """Fetch the background fetch-relay timing ring buffer. `reset=True`
         clears it after. `wait=False` returns the command the bridge
-        enqueued."""
+        enqueued. For a body sent in slices `ms_encode` includes the
+        page's slice acknowledgements."""
         fields: dict = {}
         if reset:
             fields['reset'] = True
