@@ -206,7 +206,7 @@ async function evalPending() {
   chrome.tabs.sendMessage = (tabId, { fetchId, at, data }) => {
     log.push('slice'); sizes.push(data.length * 3 / 4);
     if (fetchId === '3') abort(3);
-    const answer = at === 0 || fetchId === '0' || (fetchId === '1' && null);
+    const answer = at === 0 || {0: true, 1: null, 2: false, 3: true}[fetchId];
     return new Promise((yes) => answer !== null
       && setImmediate(() => yes(answer)));
   };
