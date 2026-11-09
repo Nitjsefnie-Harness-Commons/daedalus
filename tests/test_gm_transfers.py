@@ -199,10 +199,9 @@ async function evalPending() {
   // sent in its own step, and the eval reaches its page before they finish.
   const log = [], inject = [], got = [], big = 4 << 20;
   const body = Uint8Array.from({ length: big }, (_, i) => i % 251);
-  Object.assign(context, { log,
-    encode: vm.runInContext('bytesToBase64', context) });
-  vm.runInContext('bytesToBase64 = (b) => (log.push(b.byteLength), '
-    + 'encode(b))', context);
+  context.log = log;
+  vm.runInContext('const encode = bytesToBase64; bytesToBase64 = (b) => '
+    + '(log.push(b.byteLength), encode(b))', context);
   // Relay 1's page never takes its second slice, relay 2's send rejects, and
   // relay 3's caller aborts after its first.
   chrome.tabs.sendMessage = (tabId, slice, target) => {
@@ -268,16 +267,12 @@ async function evalPending() {
   await delay();
   const queued = started.length;
   if (mode === 'settled') {
-    command.resolve({});
-    await pending;
-    await delay();
+    command.resolve({}); await pending; await delay();
     assert.equal(started.length, 3, 'settlement did not drain the waiter');
   }
   if (n) {
-    if (mode === 'abort') {
-      chrome.runtime.onMessage.listeners[0](
-        { type: 'abortFetch', fetchId: '0' }, {}, () => {});
-    } else finish(0, mode === 'error');
+    if (mode === 'abort') abort(0);
+    else finish(0, mode === 'error');
   }
   await delay();
   const one = started.length;
@@ -286,17 +281,12 @@ async function evalPending() {
   await delay();
   const drained = started.length, pendingAtDrain = !!pending && !settled;
   if (mode === 'overlap') {
-    const next = vm.runInContext(
-      "dispatchCommand({type:'reload',tabId:7})", context);
-    pending = Promise.all([pending, next]);
-    relay();
-    await delay();
+    pending = Promise.all([pending, vm.runInContext(
+      "dispatchCommand({type:'reload',tabId:7})", context)]);
+    relay(); await delay();
     assert.equal(started.length, 5, 'commands rearmed a drained hold');
   }
-  if (pending) {
-    command.resolve({});
-    await pending;
-  }
+  if (pending) { command.resolve({}); await pending; }
   await delay();
   for (let i = n; i < started.length; i++) finish(i);
   await delay();
@@ -353,8 +343,8 @@ const fs = require('fs'), vm = require('vm');
 const listeners = {}, messages = [], posted = [], sent = [], writes = [];
 const hooks = [], acks = [], transfers = [];
 // Letters, with a two-byte UTF-8 character across the 1 MiB slice boundary.
-const sliceBody = () => Buffer.from(Uint8Array.from({ length: 5 << 19 },
-  (_, i) => 97 + i % 26)).fill('é', (1 << 20) - 1, (1 << 20) + 1);
+const sliceBody = () => Buffer.alloc(5 << 19, 'abcdefghijklmnopqrstuvwxyz')
+  .fill('é', (1 << 20) - 1, (1 << 20) + 1);
 const windowObject = {
   addEventListener(type, listener) {
     (listeners[type] ||= []).push(listener);
@@ -441,8 +431,7 @@ loadPage();
 const events = [];
 let loadDetail = null, body = null;
 var handle = windowObject.GM.xmlhttpRequest({
-  url: 'about:blank#slow',
-  timeout: 50,
+  url: 'about:blank#slow', timeout: 50,
   responseType: mode === 'sliced' ? 'arraybuffer' : undefined,
   onabort: () => events.push('abort'),
   onload: (detail) => {
@@ -518,10 +507,8 @@ loadPage();
   let settled = 'pending';
   const returned = windowObject.GM.setClipboard('replacement');
   const isPromise = !!(returned && typeof returned.then === 'function');
-  if (isPromise) {
-    returned.then(() => { settled = 'resolved'; },
-      () => { settled = 'rejected'; });
-  }
+  if (isPromise) returned.then(() => { settled = 'resolved'; },
+    () => { settled = 'rejected'; });
   // Let the write settle, then deliver what the content script posted back.
   for (let turn = 0; turn < 10; turn++) {
     await Promise.resolve(); flushMessages();
@@ -572,8 +559,7 @@ if (mode === 'fire-and-forget') {
   windowObject.GM.notification(
     { title: 'Run finished', text: 'Nothing failed.' });
 } else windowObject.GM.download({
-  url: 'about:blank',
-  name: 'file.bin',
+  url: 'about:blank', name: 'file.bin',
   onload: () => events.push('load'),
   onerror: (detail) => events.push('error:' + (detail && detail.error)),
 });
