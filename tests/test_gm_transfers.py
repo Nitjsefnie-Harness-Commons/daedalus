@@ -222,7 +222,7 @@ async function evalPending() {
   for (let t = 0; t < 400 && completed.length < 2; t++) await delay();
   assert.ok(Math.max(...sizes) <= 1 << 20,
     `one task held ${Math.max(...sizes)} bytes`);
-  assert.ok(log.indexOf('eval') < log.lastIndexOf('answer'),
+  assert.ok(log.indexOf('eval') < log.lastIndexOf('slice'),
     'the eval waited behind whole deliveries: ' + log.join(' '));
   assert.deepEqual(completed.map((r) => [r.id, r.status, r.chunked]),
     [['0', 200, big], ['1', 200, big]]);
