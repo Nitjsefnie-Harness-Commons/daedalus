@@ -94,10 +94,8 @@ def register(mcp, bridge):
     @mcp.tool()
     async def fetch_timings(reset: bool = False,
                             wait: bool = True) -> dict:
-        """Fetch the background fetch-relay timing ring buffer. `reset=True`
-        clears it after. `wait=False` returns the command the bridge
-        enqueued. For a body sent in slices `ms_encode` includes the
-        page's slice acknowledgements."""
+        """Relay timing ring; `reset=True` clears it after, `wait=False`
+        returns the enqueued command. A sliced body's `ms_encode` counts acks."""
         fields: dict = {}
         if reset:
             fields['reset'] = True
