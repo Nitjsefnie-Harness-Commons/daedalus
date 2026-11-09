@@ -51,18 +51,32 @@ function _admitRelay(signal) {
 // behind one slice rather than behind a whole body's encode and delivery.
 const _RELAY_SLICE_BYTES = 3 * 256 * 1024;
 
+// A page that takes no slice within this bound counts as gone, so a frozen
+// tab cannot hold a relay slot, and with it the command hold, for good.
+const _RELAY_SLICE_ACK_MS = 10000;
+
 async function _deliverSlices(sender, fetchId, bytes, entry) {
   const target = sender.documentId
     ? { documentId: sender.documentId } : { frameId: sender.frameId || 0 };
   for (let at = 0; at < bytes.byteLength; at += _RELAY_SLICE_BYTES) {
-    if (entry.cancelled) return false;
     const data = bytesToBase64(bytes.subarray(at, at + _RELAY_SLICE_BYTES));
-    const accepted = await chrome.tabs.sendMessage(sender.tab.id, {
-      type: 'gm-slice', fetchId, at, size: bytes.byteLength, data,
-    }, target).catch(() => false);
-    if (accepted !== true) return false;
+    let timer;
+    const accepted = await Promise.race([
+      chrome.tabs.sendMessage(sender.tab.id, {
+        type: 'gm-slice', fetchId, at, size: bytes.byteLength, data,
+      }, target).catch(() => false),
+      new Promise((done) => {
+        timer = setTimeout(() => done('late'), _RELAY_SLICE_ACK_MS);
+      })]);
+    clearTimeout(timer);
+    if (accepted === 'late') {
+      throw Error(`page took no relay slice in ${_RELAY_SLICE_ACK_MS} ms`);
+    }
+    if (accepted !== true || entry.cancelled) {
+      throw Object.assign(Error('page refused a relay slice'),
+        { name: entry.cancelled ? 'AbortError' : 'Error' });
+    }
   }
-  return true;
 }
 
 async function _withRelayPriority(run) {
@@ -172,11 +186,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let chunked;
         if (fetchId && sender.tab && bodySize > _RELAY_SLICE_BYTES) {
           chunked = bodySize;
-          if (!await _deliverSlices(sender, fetchId, bytes, fetchEntry)) {
-            fetchEntry.cancelled = true;
-            throw Object.assign(Error('page refused a slice'),
-              { name: 'AbortError' });
-          }
+          await _deliverSlices(sender, fetchId, bytes, fetchEntry);
           tEncoded = performance.now();
         } else if (msg.responseType === 'arraybuffer') {
           data = bytesToBase64(bytes);
@@ -217,10 +227,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // says which happened. Reporting a cancellation as a timeout tells
         // the caller the endpoint was slow when the caller stopped it.
         const isCancel = isAbort && fetchEntry.cancelled;
+        // The request's timer also bounds its wait for a slot; expiring there
+        // is not a fetch that timed out, and the answer says which it was.
+        const isQueued = isAbort && !isCancel && !admitted;
         _recordTiming({
           url: msg.url.substring(0, 120),
           method: msg.method || 'GET',
-          error: isCancel ? 'aborted'
+          error: isCancel ? 'aborted' : isQueued ? 'queue-wait'
             : (isAbort ? 'timeout'
               : (isTooLarge ? 'too-large' : (e.message || 'error'))),
           ms_total: +(performance.now() - t0).toFixed(1),
@@ -232,8 +245,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // can only tell them apart if the relay says which happened.
         sendResponse({
           error: isCancel ? 'aborted by the caller'
-            : (isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message),
-          timedOut: isAbort && !isCancel,
+            : isQueued ? 'fetch relay queue wait exceeded'
+              : (isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message),
+          timedOut: isAbort && !isCancel && !isQueued,
           aborted: isCancel,
           tooLarge: isTooLarge,
         });
