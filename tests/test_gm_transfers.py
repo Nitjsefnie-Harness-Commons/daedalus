@@ -11,7 +11,7 @@ from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import (  # noqa: E402
     CONTENT_SCRIPT_PAGE, DELAY_STUB, RELAY_CONTEXT, chrome_stub,
-    event_target_stub, worker_source_paths)
+    event_target_stub)
 
 
 _RELAY_ADMISSION_HARNESS = event_target_stub() + r"""
@@ -57,7 +57,6 @@ function send(message) {
     const listener = chrome.runtime.onMessage.listeners[0];
     assert.equal(listener(message, { tab: { id: 7 } }, (value) => {
       if (message.type === 'fetch') {
-        if (context.work) context.work.push('answer');
         completed.push({ ...value, id: message.fetchId });
         if (mode === 'withdraw:grant' && message.fetchId === '0') {
           queueMicrotask(() => {
@@ -191,41 +190,35 @@ async function priority(kind) {
   await finishAll();
 }
 async function evalPending() {
-  // Two 4 MiB bodies land while an eval waits on its injection. No worker
-  // task may encode or send more than 1 MiB of one, and the eval must reach
-  // its page before those deliveries end: work begun before the command
-  // cannot be deferred, only kept small enough to interleave.
+  // Two 4 MiB bodies land while an eval waits: no task encodes or sends
+  // over 1 MiB of one, and the eval reaches its page before they finish.
   const log = [], inject = [], sizes = [], big = 4 << 20;
-  context.encode = vm.runInContext('bytesToBase64', context);
-  vm.runInContext('bytesToBase64 = (b) => { sizes.push(b.byteLength); '
-    + 'return encode(b); }', context);
-  Object.assign(context, { work: log, sizes });
-  chrome.tabs.sendMessage = (tabId, slice) => {
-    log.push('slice'); sizes.push(slice.data.length * 3 / 4);
-    return new Promise((yes) => setImmediate(() => yes(true)));
-  };
-  chrome.scripting.executeScript = (details) => {
-    log.push(details.args && details.args[0] === 'Date.now()'
-      ? 'eval' : 'probe');
-    const step = deferred(); inject.push(step); return step.promise;
-  };
+  Object.assign(context, { sizes,
+    encode: vm.runInContext('bytesToBase64', context) });
+  vm.runInContext('bytesToBase64 = (b) => (sizes.push(b.byteLength), '
+    + 'encode(b))', context);
+  chrome.tabs.sendMessage = (tabId, { fetchId, at, data }) => (
+    log.push('slice'), sizes.push(data.length * 3 / 4), new Promise((yes) =>
+      setImmediate(() => yes(fetchId !== '1' || at === 0))));  // 1 refuses
+  chrome.scripting.executeScript = ({ args }) => (log.push(args && args[0]
+    ? 'eval' : 'probe'), inject[inject.push(deferred()) - 1].promise);
   relay(); relay(); await delay();
   const posted = vm.runInContext("dispatchCommand({id: 'e', tabId: '7', "
     + "chromeTab: 7, code: 'Date.now()'})", context).then(
     () => log.push('posted'));
-  for (const i of [0, 1]) {
-    started[i].resolve(new Response(new Uint8Array(big)));
-  }
+  started.forEach((r) => r.resolve(
+    new Response(new Uint8Array(big), { statusText: 'Fine' })));
   await delay();
   inject[0].resolve([{ result: true }]); await delay();
   inject[1].resolve([{ result: { r: 1, ms: 0 } }]); await posted;
   for (let t = 0; t < 400 && completed.length < 2; t++) await delay();
-  assert.ok(Math.max(...sizes) <= 1 << 20,
-    `one task held ${Math.max(...sizes)} bytes`);
+  assert.ok(Math.max(...sizes) <= 1 << 20, 'one task held ' + sizes);
   assert.ok(log.indexOf('eval') < log.lastIndexOf('slice'),
     'the eval waited behind whole deliveries: ' + log.join(' '));
-  assert.deepEqual(completed.map((r) => [r.id, r.status, r.chunked]),
-    [['0', 200, big], ['1', 200, big]]);
+  // finalUrl and statusText are the response's: '' is resp.url, not msg.url.
+  assert.deepEqual(completed.map((r) => [r.id, r.chunked || r.error,
+    r.statusText, r.finalUrl]).sort(), [['0', big, 'Fine', ''],
+    ['1', 'aborted by the caller', undefined, undefined]]);
   await finishAll();
 }
 (async () => {
@@ -334,7 +327,7 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
 _PAGE_RELAY_SETUP = CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs'), vm = require('vm');
 const listeners = {}, messages = [], posted = [], sent = [], writes = [];
-const workerListeners = [], acks = [];
+const hooks = [], acks = [];
 const windowObject = {
   addEventListener(type, listener) {
     (listeners[type] ||= []).push(listener);
@@ -343,8 +336,7 @@ const windowObject = {
 };
 const chrome = {
   runtime: {
-    lastError: null,
-    onMessage: { addListener(listener) { workerListeners.push(listener); } },
+    lastError: null, onMessage: { addListener: (l) => hooks.push(l) },
     getManifest() { return { version: '0.0.0' }; },
     connect() { return { disconnect() {}, postMessage() {},
       onDisconnect: { addListener() {} } }; },
@@ -360,16 +352,14 @@ const chrome = {
         // The worker's slices of a 2.5-slice body, then its final answer.
         const size = 5 << 19;
         for (let at = 0; at < size; at += 1 << 20) {
-          const part = new Uint8Array(Math.min(1 << 20, size - at))
-            .map((_, i) => (at + i) % 251);
-          const data = Buffer.from(part).toString('base64');
-          for (const listener of workerListeners) {
-            listener({ type: 'gm-slice', fetchId: payload.fetchId, at, size,
-              data }, {}, (ack) => acks.push(ack));
-          }
+          const data = Buffer.from(new Uint8Array(Math.min(1 << 20,
+            size - at)).map((_, i) => (at + i) % 127)).toString('base64');
+          hooks.forEach((hook) => hook({ type: 'gm-slice', at, size, data,
+            fetchId: payload.fetchId }, {}, (ack) => acks.push(ack)));
           if (mode === 'sliced-abort') { handle.abort(); flushMessages(); }
         }
-        callback({ status: 200, headers: {}, chunked: size });
+        callback({ status: 200, headers: {},
+          chunked: size + (mode === 'sliced-short') });
       } else callback(backgroundAnswer(payload));
     },
   },
@@ -410,6 +400,18 @@ function flushMessages() {
 """
 
 
+def _run_page_harness(harness, *args):
+    """Drive one page-relay harness through content.js and page.js."""
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension page relay'
+    result = run_node_argv(node, [
+        '-e', harness, str(ROOT / 'extension' / 'content.js'),
+        str(ROOT / 'extension' / 'page.js'), *args], ROOT)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
 _FETCH_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
 const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
 function backgroundAnswer() { return JSON.parse(responseText); }
@@ -419,15 +421,15 @@ let loadDetail = null, body = null;
 var handle = windowObject.GM.xmlhttpRequest({
   url: 'about:blank#slow',
   timeout: 50,
-  responseType: mode.startsWith('sliced') ? 'arraybuffer' : undefined,
+  responseType: mode === 'sliced' ? 'arraybuffer' : undefined,
   onabort: () => events.push('abort'),
   onload: (detail) => {
     loadDetail = detail; events.push('load');
-    const bytes = new Uint8Array(detail.response || 0);
-    if (mode.startsWith('sliced')) {
-      body = { length: bytes.length, wrong: bytes.findIndex(
-        (v, i) => v !== i % 251) };
-    }
+    const text = typeof detail.response === 'string';
+    const bytes = text ? Buffer.from(detail.response)
+      : new Uint8Array(detail.response || 0);
+    body = { text, length: bytes.length,
+      wrong: bytes.findIndex((v, i) => v !== i % 127) };
   },
   onerror: (detail) => events.push('error:' + (detail && detail.error)),
   ontimeout: () => events.push('timeout'),
@@ -448,92 +450,43 @@ process.stdout.write(JSON.stringify({
 """
 
 
-def _run_fetch_relay_harness(background_response, mode='answer'):
-    """Drive GM.xmlhttpRequest through content.js and page.js under Node."""
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension fetch relay'
-    result = run_node_argv(
-        node, ['-e', _FETCH_RELAY_HARNESS,
-               str(ROOT / 'extension' / 'content.js'),
-               str(ROOT / 'extension' / 'page.js'),
-               json.dumps(background_response), mode],
-        ROOT)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+# Each worker answer and what the page must see: a timeout is its own
+# event, an undelivered request is an error, finalUrl is the response's URL
+# (the request URL only as a fallback), and a sliced body lands byte for byte,
+# with an abort refusing the slices after it.
+_SLICED = {'text': False, 'length': 5 << 19, 'wrong': -1}
+_PAGE_ANSWERS = (
+    ({'error': 'fetch timeout after 50ms', 'timedOut': True}, 'answer',
+     {'events': ['timeout'], 'relayed': ['timeout']}),
+    ({'error': 'network unreachable'}, 'answer',
+     {'events': ['error:network unreachable'], 'relayed': ['error']}),
+    (None, 'lastError', {'events': [
+        'error:Could not establish connection.'], 'relayed': ['error']}),
+    ({'status': 200, 'statusText': 'OK', 'data': 'body', 'headers': {},
+      'finalUrl': 'https://redirected.example.com/final'}, 'answer',
+     {'events': ['load'], 'finalUrl': 'https://redirected.example.com/final',
+      'statusText': 'OK'}),
+    ({'status': 200, 'data': 'body', 'headers': {}}, 'answer',
+     {'events': ['load'], 'finalUrl': 'about:blank#slow', 'statusText': ''}),
+    (None, 'sliced', {'events': ['load'], 'body': _SLICED,
+                      'acks': [True] * 3}),
+    (None, 'sliced-text', {'events': ['load'], 'acks': [True] * 3,
+                           'body': {**_SLICED, 'text': True}}),
+    (None, 'sliced-short', {
+        'events': ['error:relay body arrived incomplete']}),
+    (None, 'sliced-abort', {'events': ['abort'],
+                            'acks': [True, False, False]}),
+)
 
 
-def test_a_fetch_timeout_reaches_ontimeout_and_not_onerror(tmp):
-    """A timeout is its own event, not an error that happens to say so."""
+def test_each_worker_answer_reaches_the_page_as_its_own_event(tmp):
     del tmp
-    timed_out = _run_fetch_relay_harness(
-        {'error': 'fetch timeout after 50ms', 'timedOut': True})
-    assert timed_out['events'] == ['timeout'], timed_out
-    assert timed_out['relayed'] == ['timeout'], timed_out
-    assert timed_out['requestedTimeout'] == 50, timed_out
-
-    # An ordinary failure still arrives as one.
-    failed = _run_fetch_relay_harness({'error': 'network unreachable'})
-    assert failed['events'] == ['error:network unreachable'], failed
-    assert failed['relayed'] == ['error'], failed
-
-
-def test_a_fetch_the_worker_never_answered_reaches_onerror(tmp):
-    """An undelivered request is an error, not a load with no body."""
-    del tmp
-    undelivered = _run_fetch_relay_harness(None, 'lastError')
-    assert undelivered['events'] == [
-        'error:Could not establish connection.'], undelivered
-    assert undelivered['relayed'] == ['error'], undelivered
-
-
-def test_a_large_body_reaches_the_page_in_slices_intact(tmp):
-    """Slices land at their offsets, and an aborted request refuses more."""
-    del tmp
-    loaded = _run_fetch_relay_harness(None, 'sliced')
-    assert loaded['events'] == ['load'], loaded
-    assert loaded['body'] == {'length': 5 << 19, 'wrong': -1}, loaded
-    assert loaded['acks'] == [True, True, True], loaded
-    aborted = _run_fetch_relay_harness(None, 'sliced-abort')
-    assert aborted['events'] == ['abort'], aborted
-    assert aborted['acks'] == [True, False, False], aborted
-
-
-def test_a_redirected_fetch_reports_where_the_body_came_from(tmp):
-    """finalUrl is the response's URL, not the one the caller asked for."""
-    del tmp
-    loaded = _run_fetch_relay_harness({
-        'status': 200, 'statusText': 'OK', 'data': 'body', 'headers': {},
-        'finalUrl': 'https://redirected.example.com/final'})
-    assert loaded['events'] == ['load'], loaded
-    detail = loaded['loadDetail']
-    assert detail['finalUrl'] == 'https://redirected.example.com/final', detail
-    assert detail['statusText'] == 'OK', detail
-
-    # A background that reports neither still works: the request URL is the
-    # fallback it always was, rather than the answer it used to be.
-    plain = _run_fetch_relay_harness(
-        {'status': 200, 'data': 'body', 'headers': {}})
-    assert plain['loadDetail']['finalUrl'] == 'about:blank#slow', plain
-    assert plain['loadDetail']['statusText'] == '', plain
-
-
-def test_the_background_relays_the_response_url_and_status_text(tmp):
-    """The other half of the same contract, at its source."""
-    del tmp
-    marker = 'sendResponse({ status: resp.status,'
-    matches = [
-        path.read_text(encoding='utf-8')
-        for path in worker_source_paths()
-        if marker in path.read_text(encoding='utf-8')
-    ]
-    assert len(matches) == 1, (
-        'the fetch success response is not uniquely shaped as this test '
-        f'finds it: {len(matches)} matches')
-    _, marker, after = matches[0].partition(marker)
-    response, _, _ = after.partition('}\n')
-    for field in ('statusText: resp.statusText', 'finalUrl: resp.url'):
-        assert field in response, (field, response)
+    for answer, mode, expected in _PAGE_ANSWERS:
+        out = _run_page_harness(
+            _FETCH_RELAY_HARNESS, json.dumps(answer), mode)
+        seen = {**out, **(out['loadDetail'] or {})}
+        assert {key: seen[key] for key in expected} == expected, (mode, out)
+        assert out['requestedTimeout'] == 50, out
 
 
 _CLIPBOARD_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
@@ -570,32 +523,15 @@ loadPage();
 """
 
 
-def _run_clipboard_relay_harness(mode):
-    """Drive GM.setClipboard through content.js and page.js under Node."""
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension clipboard relay'
-    result = run_node_argv(
-        node, ['-e', _CLIPBOARD_RELAY_HARNESS,
-               str(ROOT / 'extension' / 'content.js'),
-               str(ROOT / 'extension' / 'page.js'), mode],
-        ROOT)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
-
-
 def test_a_refused_clipboard_write_reaches_the_caller(tmp):
     """A clipboard write that the browser refuses must not report success."""
     del tmp
-    refused = _run_clipboard_relay_harness('reject')
-    assert refused['writes'] == ['replacement'], refused
-    assert refused['isPromise'] is True, refused
-    assert refused['settled'] == 'rejected', refused
-    assert refused['acknowledged'] == [{'error': 'NotAllowedError'}], refused
-
-    accepted = _run_clipboard_relay_harness('resolve')
-    assert accepted['settled'] == 'resolved', accepted
-    assert accepted['acknowledged'] == [{'error': None}], accepted
+    for mode, settled, error in (('reject', 'rejected', 'NotAllowedError'),
+                                 ('resolve', 'resolved', None)):
+        out = _run_page_harness(_CLIPBOARD_RELAY_HARNESS, mode)
+        assert (out['writes'], out['isPromise'], out['settled'],
+                out['acknowledged']) == (
+            ['replacement'], True, settled, [{'error': error}]), out
 
 
 def test_the_extension_declares_the_permission_its_clipboard_write_needs(tmp):
@@ -639,21 +575,9 @@ process.stdout.write(JSON.stringify(outcome), () => process.exit(0));
 """
 
 
-def _run_download_relay_harness(mode):
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension download boundary'
-    result = run_node_argv(
-        node, ['-e', _DOWNLOAD_RELAY_HARNESS,
-               str(ROOT / 'extension' / 'content.js'),
-               str(ROOT / 'extension' / 'page.js'), mode],
-        ROOT)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
-
-
 def test_a_download_that_never_started_reaches_onerror(tmp):
-    """An absent response is a failure, not a success with nothing in it."""
+    """An absent response is a failure, not a success with nothing in it;
+    GM.openInTab and GM.notification cross the relay with their payload."""
     del tmp
     for mode, expected in (
         ('lastError', 'error:Could not establish connection.'),
@@ -661,14 +585,9 @@ def test_a_download_that_never_started_reaches_onerror(tmp):
         ('error', 'error:Invalid filename'),
         ('ok', 'load'),
     ):
-        actual = _run_download_relay_harness(mode)
+        actual = _run_page_harness(_DOWNLOAD_RELAY_HARNESS, mode)
         assert actual['events'] == [expected], (mode, actual)
-
-
-def test_the_fire_and_forget_page_apis_reach_the_worker_and_are_acked(tmp):
-    """GM.openInTab and GM.notification cross the relay with their payload."""
-    del tmp
-    actual = _run_download_relay_harness('fire-and-forget')
+    actual = _run_page_harness(_DOWNLOAD_RELAY_HARNESS, 'fire-and-forget')
     assert actual == {
         'sent': [
             {'type': 'openTab', 'url': 'about:blank', 'active': False},
