@@ -27,8 +27,7 @@ const _fetchIds = {};
 // the string is.
 const _fetchIdPrefix = Math.random().toString(36).slice(2);
 let _fetchSeq = 0;
-// A large relay body arrives as base64 slices, by fetch id, before its
-// answer; a request this frame no longer holds refuses the next slice.
+// Relay body slices by fetch id; a request no longer held refuses them.
 const _slices = new Map();
 
 function _takeSlice(msg) {
@@ -37,8 +36,6 @@ function _takeSlice(msg) {
     || { bytes: new Uint8Array(msg.size), got: 0 };
   _slices.set(msg.fetchId, body);
   const binary = atob(msg.data);
-  if (msg.size !== body.bytes.length
-      || msg.at + binary.length > msg.size) return false;
   for (let i = 0; i < binary.length; i++) {
     body.bytes[msg.at + i] = binary.charCodeAt(i);
   }
