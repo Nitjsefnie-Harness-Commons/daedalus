@@ -195,9 +195,9 @@ async function priority(kind) {
   await finishAll();
 }
 async function evalPending() {
-  // Four 4 MiB bodies land while an eval waits: every slice is encoded and
-  // sent in its own step, and the eval reaches its page before they finish.
-  const log = [], inject = [], got = [], big = 4 << 20;
+  // Four 4 MiB bodies land while an eval waits: each slice's encode is
+  // followed by its own send, and the eval reaches its page before the end.
+  const log = [], inject = [], got = [], shapes = new Set(), big = 4 << 20;
   const body = Uint8Array.from({ length: big }, (_, i) => i % 251);
   context.log = log;
   vm.runInContext('const encode = bytesToBase64; bytesToBase64 = (b) => '
@@ -206,8 +206,7 @@ async function evalPending() {
   // relay 3's caller aborts after its first.
   chrome.tabs.sendMessage = (tabId, slice, target) => {
     log.push('slice');
-    assert.equal(JSON.stringify([slice.type, target]),
-      '["gm-slice",{"documentId":"d7"}]');
+    shapes.add(JSON.stringify([slice.type, slice.size, target]));
     if (slice.fetchId === '0') got.push([slice.at, slice.data]);
     if (slice.fetchId === '3') abort(3);
     const take = slice.at === 0 || [true, null, false, true][slice.fetchId];
@@ -227,6 +226,8 @@ async function evalPending() {
   for (let t = 0; t < 400 && completed.length < 3; t++) await delay();
   const sizes = log.filter(Number.isInteger);
   assert.ok(Math.max(...sizes) <= 1 << 20, 'one encode held ' + sizes);
+  assert.deepEqual([...shapes], [JSON.stringify(['gm-slice', big,
+    { documentId: 'd7' }])], 'slice shape');
   assert.ok(log.every((e, i) => !sizes.includes(e) || log[i + 1] === 'slice'),
     'encodes ran ahead of their sends: ' + log.join(' '));
   assert.ok(log.indexOf('eval') < log.lastIndexOf('slice'),
@@ -349,9 +350,8 @@ const windowObject = {
   addEventListener(type, listener) {
     (listeners[type] ||= []).push(listener);
   },
-  postMessage(message, origin, moved = []) {
-    posted.push(message); messages.push(message); transfers.push(...moved);
-  },
+  postMessage(message, origin, moved = []) { transfers.push(...moved);
+    posted.push(message); messages.push(message); },
 };
 const chrome = {
   runtime: {
