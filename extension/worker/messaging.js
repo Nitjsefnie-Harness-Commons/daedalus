@@ -46,18 +46,19 @@ function _admitRelay(signal) {
   });
 }
 
-// A body over one slice crosses to its page as base64 slices of whole
-// 3-byte groups, each its own worker and page task, so a command waits
-// behind one slice rather than behind a whole body's encode and delivery.
+// A larger body crosses as base64 slices of whole 3-byte groups, one task
+// each, so a command waits behind one slice, not a whole body.
 const _RELAY_SLICE_BYTES = 3 * 256 * 1024;
 
-// A page that takes no slice within this bound counts as gone, so a frozen
-// tab cannot hold a relay slot, and with it the command hold, for good.
+// A page that takes no slice in this bound counts as gone, so a frozen tab
+// cannot pin a slot and the command hold. It matches the MAIN-world bound;
+// measured page lag peaked near 1.7 s. A page paused in a debugger or busy in
+// one script for longer answers "page took no relay slice in 10000 ms".
 const _RELAY_SLICE_ACK_MS = 10000;
 
 async function _deliverSlices(sender, fetchId, bytes, entry) {
-  const target = sender.documentId
-    ? { documentId: sender.documentId } : { frameId: sender.frameId || 0 };
+  // A content script's sender carries documentId from Chrome 106.
+  const target = { documentId: sender.documentId };
   for (let at = 0; at < bytes.byteLength; at += _RELAY_SLICE_BYTES) {
     const data = bytesToBase64(bytes.subarray(at, at + _RELAY_SLICE_BYTES));
     let timer;
@@ -227,8 +228,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // says which happened. Reporting a cancellation as a timeout tells
         // the caller the endpoint was slow when the caller stopped it.
         const isCancel = isAbort && fetchEntry.cancelled;
-        // The request's timer also bounds its wait for a slot; expiring there
-        // is not a fetch that timed out, and the answer says which it was.
+        // Expiring before admission is a queue wait, not a fetch timeout.
         const isQueued = isAbort && !isCancel && !admitted;
         _recordTiming({
           url: msg.url.substring(0, 120),
