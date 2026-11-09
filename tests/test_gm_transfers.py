@@ -191,13 +191,19 @@ async function priority(kind) {
   await finishAll();
 }
 async function evalPending() {
-  // A relay whose body lands while an eval waits on its injection must not
-  // spend the worker on its encode and answer before that eval posts.
-  const log = [], inject = [];
+  // Two 4 MiB bodies land while an eval waits on its injection. No worker
+  // task may encode or send more than 1 MiB of one, and the eval must reach
+  // its page before those deliveries end: work begun before the command
+  // cannot be deferred, only kept small enough to interleave.
+  const log = [], inject = [], sizes = [], big = 4 << 20;
   context.encode = vm.runInContext('bytesToBase64', context);
-  vm.runInContext('bytesToBase64 = (b) => { work.push("encode"); '
+  vm.runInContext('bytesToBase64 = (b) => { sizes.push(b.byteLength); '
     + 'return encode(b); }', context);
-  context.work = log;
+  Object.assign(context, { work: log, sizes });
+  chrome.tabs.sendMessage = (tabId, slice) => {
+    log.push('slice'); sizes.push(slice.data.length * 3 / 4);
+    return new Promise((yes) => setImmediate(() => yes(true)));
+  };
   chrome.scripting.executeScript = (details) => {
     log.push(details.args && details.args[0] === 'Date.now()'
       ? 'eval' : 'probe');
@@ -207,13 +213,19 @@ async function evalPending() {
   const posted = vm.runInContext("dispatchCommand({id: 'e', tabId: '7', "
     + "chromeTab: 7, code: 'Date.now()'})", context).then(
     () => log.push('posted'));
-  finish(0); finish(1); await delay();
+  for (const i of [0, 1]) {
+    started[i].resolve(new Response(new Uint8Array(big)));
+  }
+  await delay();
   inject[0].resolve([{ result: true }]); await delay();
   inject[1].resolve([{ result: { r: 1, ms: 0 } }]); await posted;
-  await delay();
-  const first = log.indexOf('probe'), last = log.indexOf('posted');
-  assert.deepEqual(log.slice(first, last + 1),
-    ['probe', 'eval', 'posted'], 'relay work ran inside the eval');
+  for (let t = 0; t < 400 && completed.length < 2; t++) await delay();
+  assert.ok(Math.max(...sizes) <= 1 << 20,
+    `one task held ${Math.max(...sizes)} bytes`);
+  assert.ok(log.indexOf('eval') < log.lastIndexOf('answer'),
+    'the eval waited behind whole deliveries: ' + log.join(' '));
+  assert.deepEqual(completed.map((r) => [r.id, r.status, r.chunked]),
+    [['0', 200, big], ['1', 200, big]]);
   await finishAll();
 }
 (async () => {
@@ -322,6 +334,7 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
 _PAGE_RELAY_SETUP = CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs'), vm = require('vm');
 const listeners = {}, messages = [], posted = [], sent = [], writes = [];
+const workerListeners = [], acks = [];
 const windowObject = {
   addEventListener(type, listener) {
     (listeners[type] ||= []).push(listener);
@@ -330,7 +343,8 @@ const windowObject = {
 };
 const chrome = {
   runtime: {
-    lastError: null, onMessage: { addListener() {} },
+    lastError: null,
+    onMessage: { addListener(listener) { workerListeners.push(listener); } },
     getManifest() { return { version: '0.0.0' }; },
     connect() { return { disconnect() {}, postMessage() {},
       onDisconnect: { addListener() {} } }; },
@@ -342,6 +356,20 @@ const chrome = {
           message: 'Could not establish connection.' };
         try { callback(undefined); }
         finally { chrome.runtime.lastError = null; }
+      } else if (mode.startsWith('sliced') && payload.type === 'fetch') {
+        // The worker's slices of a 2.5-slice body, then its final answer.
+        const size = 5 << 19;
+        for (let at = 0; at < size; at += 1 << 20) {
+          const part = new Uint8Array(Math.min(1 << 20, size - at))
+            .map((_, i) => (at + i) % 251);
+          const data = Buffer.from(part).toString('base64');
+          for (const listener of workerListeners) {
+            listener({ type: 'gm-slice', fetchId: payload.fetchId, at, size,
+              data }, {}, (ack) => acks.push(ack));
+          }
+          if (mode === 'sliced-abort') { handle.abort(); flushMessages(); }
+        }
+        callback({ status: 200, headers: {}, chunked: size });
       } else callback(backgroundAnswer(payload));
     },
   },
@@ -359,6 +387,7 @@ const context = {
   } } },
   location: { hostname: 'page.invalid', href: 'about:blank' },
   setTimeout, clearTimeout, setInterval, clearInterval, performance,
+  atob, TextDecoder,
   console: { log() {}, error() {} }, ...contentScriptPage(),
 };
 context.globalThis = context;
@@ -386,11 +415,20 @@ const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
 function backgroundAnswer() { return JSON.parse(responseText); }
 loadPage();
 const events = [];
-let loadDetail = null;
-windowObject.GM.xmlhttpRequest({
+let loadDetail = null, body = null;
+var handle = windowObject.GM.xmlhttpRequest({
   url: 'about:blank#slow',
   timeout: 50,
-  onload: (detail) => { loadDetail = detail; events.push('load'); },
+  responseType: mode.startsWith('sliced') ? 'arraybuffer' : undefined,
+  onabort: () => events.push('abort'),
+  onload: (detail) => {
+    loadDetail = detail; events.push('load');
+    const bytes = new Uint8Array(detail.response || 0);
+    if (mode.startsWith('sliced')) {
+      body = { length: bytes.length, wrong: bytes.findIndex(
+        (v, i) => v !== i % 251) };
+    }
+  },
   onerror: (detail) => events.push('error:' + (detail && detail.error)),
   ontimeout: () => events.push('timeout'),
 });
@@ -405,6 +443,7 @@ process.stdout.write(JSON.stringify({
     .filter((m) => m.direction === 'daedalus-bg-to-page')
     .map((m) => m.event),
   requestedTimeout: (sent.find((m) => m.type === 'fetch') || {}).timeout,
+  body, acks,
 }), () => process.exit(0));
 """
 
@@ -446,6 +485,18 @@ def test_a_fetch_the_worker_never_answered_reaches_onerror(tmp):
     assert undelivered['events'] == [
         'error:Could not establish connection.'], undelivered
     assert undelivered['relayed'] == ['error'], undelivered
+
+
+def test_a_large_body_reaches_the_page_in_slices_intact(tmp):
+    """Slices land at their offsets, and an aborted request refuses more."""
+    del tmp
+    loaded = _run_fetch_relay_harness(None, 'sliced')
+    assert loaded['events'] == ['load'], loaded
+    assert loaded['body'] == {'length': 5 << 19, 'wrong': -1}, loaded
+    assert loaded['acks'] == [True, True, True], loaded
+    aborted = _run_fetch_relay_harness(None, 'sliced-abort')
+    assert aborted['events'] == ['abort'], aborted
+    assert aborted['acks'] == [True, False, False], aborted
 
 
 def test_a_redirected_fetch_reports_where_the_body_came_from(tmp):
