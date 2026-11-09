@@ -46,6 +46,25 @@ function _admitRelay(signal) {
   });
 }
 
+// A body over one slice crosses to its page as base64 slices of whole
+// 3-byte groups, each its own worker and page task, so a command waits
+// behind one slice rather than behind a whole body's encode and delivery.
+const _RELAY_SLICE_BYTES = 3 * 256 * 1024;
+
+async function _deliverSlices(sender, fetchId, bytes, entry) {
+  const target = sender.documentId
+    ? { documentId: sender.documentId } : { frameId: sender.frameId || 0 };
+  for (let at = 0; at < bytes.byteLength; at += _RELAY_SLICE_BYTES) {
+    if (entry.cancelled) return false;
+    const data = bytesToBase64(bytes.subarray(at, at + _RELAY_SLICE_BYTES));
+    const accepted = await chrome.tabs.sendMessage(sender.tab.id, {
+      type: 'gm-slice', fetchId, at, size: bytes.byteLength, data,
+    }, target).catch(() => false);
+    if (accepted !== true) return false;
+  }
+  return true;
+}
+
 async function _withRelayPriority(run) {
   if (_pendingCommands++ === 0) _relayHold = _relayInFlight > 0;
   try {
@@ -150,7 +169,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // The raw byte count, for both response types: a limit is measured in
         // bytes, not characters.
         const bodySize = bytes.byteLength;
-        if (msg.responseType === 'arraybuffer') {
+        let chunked;
+        if (fetchId && sender.tab && bodySize > _RELAY_SLICE_BYTES) {
+          chunked = bodySize;
+          if (!await _deliverSlices(sender, fetchId, bytes, fetchEntry)) {
+            fetchEntry.cancelled = true;
+            throw Object.assign(Error('page refused a slice'),
+              { name: 'AbortError' });
+          }
+          tEncoded = performance.now();
+        } else if (msg.responseType === 'arraybuffer') {
           data = bytesToBase64(bytes);
           tEncoded = performance.now();
         } else {
@@ -179,7 +207,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // from, and reporting the requested URL told a caller a redirect had
         // not happened.
         sendResponse({ status: resp.status, statusText: resp.statusText,
-          finalUrl: resp.url, data, headers });
+          finalUrl: resp.url, data, headers, ...(chunked && { chunked }) });
       } catch (e) {
         clearTimeout(timeoutId);
         if (fetchId) _fetchControllers.delete(fetchId);
