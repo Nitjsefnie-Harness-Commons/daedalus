@@ -55,7 +55,8 @@ const state = () => vm.runInContext(
 function send(message) {
   return new Promise((resolve) => {
     const listener = chrome.runtime.onMessage.listeners[0];
-    assert.equal(listener(message, { tab: { id: 7 } }, (value) => {
+    const sender = { tab: { id: 7 }, documentId: 'd7' };
+    assert.equal(listener(message, sender, (value) => {
       if (message.type === 'fetch') {
         completed.push({ ...value, id: message.fetchId });
         if (mode === 'withdraw:grant' && message.fetchId === '0') {
@@ -194,21 +195,25 @@ async function priority(kind) {
   await finishAll();
 }
 async function evalPending() {
-  // Two 4 MiB bodies land while an eval waits: no task encodes or sends
-  // over 1 MiB of one, and the eval reaches its page before they finish.
-  const log = [], inject = [], sizes = [], big = 4 << 20;
-  Object.assign(context, { sizes,
+  // Four 4 MiB bodies land while an eval waits: every slice is encoded and
+  // sent in its own step, and the eval reaches its page before they finish.
+  const log = [], inject = [], got = [], big = 4 << 20;
+  const body = Uint8Array.from({ length: big }, (_, i) => i % 251);
+  Object.assign(context, { log,
     encode: vm.runInContext('bytesToBase64', context) });
-  vm.runInContext('bytesToBase64 = (b) => (sizes.push(b.byteLength), '
+  vm.runInContext('bytesToBase64 = (b) => (log.push(b.byteLength), '
     + 'encode(b))', context);
-  // Relay 1's page never takes its second slice, relay 2's refuses it, and
+  // Relay 1's page never takes its second slice, relay 2's send rejects, and
   // relay 3's caller aborts after its first.
-  chrome.tabs.sendMessage = (tabId, { fetchId, at, data }) => {
-    log.push('slice'); sizes.push(data.length * 3 / 4);
-    if (fetchId === '3') abort(3);
-    const answer = at === 0 || {0: true, 1: null, 2: false, 3: true}[fetchId];
-    return new Promise((yes) => answer !== null
-      && setImmediate(() => yes(answer)));
+  chrome.tabs.sendMessage = (tabId, slice, target) => {
+    log.push('slice');
+    assert.equal(JSON.stringify([slice.type, target]),
+      '["gm-slice",{"documentId":"d7"}]');
+    if (slice.fetchId === '0') got.push([slice.at, slice.data]);
+    if (slice.fetchId === '3') abort(3);
+    const take = slice.at === 0 || [true, null, false, true][slice.fetchId];
+    return new Promise((yes, no) => (take === false ? no(Error('gone'))
+      : take && setImmediate(() => yes(true))));
   };
   chrome.scripting.executeScript = ({ args }) => (log.push(args && args[0]
     ? 'eval' : 'probe'), inject[inject.push(deferred()) - 1].promise);
@@ -216,19 +221,25 @@ async function evalPending() {
   const posted = vm.runInContext("dispatchCommand({id: 'e', tabId: '7', "
     + "chromeTab: 7, code: 'Date.now()'})", context).then(
     () => log.push('posted'));
-  started.forEach((r) => r.resolve(
-    new Response(new Uint8Array(big), { statusText: 'Fine' })));
+  started.forEach((r) => r.resolve(new Response(body, { statusText: 'Ok' })));
   await delay();
   inject[0].resolve([{ result: true }]); await delay();
   inject[1].resolve([{ result: { r: 1, ms: 0 } }]); await posted;
   for (let t = 0; t < 400 && completed.length < 3; t++) await delay();
-  [...timers].find((t) => t.ms === 10000).fn(); await delay();
-  assert.ok(Math.max(...sizes) <= 1 << 20, 'one task held ' + sizes);
+  const sizes = log.filter(Number.isInteger);
+  assert.ok(Math.max(...sizes) <= 1 << 20, 'one encode held ' + sizes);
+  assert.ok(log.every((e, i) => !sizes.includes(e) || log[i + 1] === 'slice'),
+    'encodes ran ahead of their sends: ' + log.join(' '));
   assert.ok(log.indexOf('eval') < log.lastIndexOf('slice'),
     'the eval waited behind whole deliveries: ' + log.join(' '));
+  const parts = got.map(([at, data]) => [at, Buffer.from(data, 'base64')]);
+  assert.deepEqual(parts.map(([at]) => at), parts.map((_, i) => parts
+    .slice(0, i).reduce((n, [, b]) => n + b.length, 0)), 'slice offsets');
+  assert.ok(Buffer.concat(parts.map(([, b]) => b)).equals(body), 'body');
+  [...timers].find((t) => t.ms === 10000)?.fn(); await delay();
   // finalUrl and statusText are the response's: '' is resp.url, not msg.url.
   assert.deepEqual(completed.map((r) => [r.id, r.chunked || r.error,
-    r.statusText, r.finalUrl]).sort(), [['0', big, 'Fine', ''],
+    r.statusText, r.finalUrl]).sort(), [['0', big, 'Ok', ''],
     ['1', 'page took no relay slice in 10000 ms', undefined, undefined],
     ['2', 'page refused a relay slice', undefined, undefined],
     ['3', 'aborted by the caller', undefined, undefined]]);
@@ -340,12 +351,17 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
 _PAGE_RELAY_SETUP = CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs'), vm = require('vm');
 const listeners = {}, messages = [], posted = [], sent = [], writes = [];
-const hooks = [], acks = [];
+const hooks = [], acks = [], transfers = [];
+// Letters, with a two-byte UTF-8 character across the 1 MiB slice boundary.
+const sliceBody = () => Buffer.from(Uint8Array.from({ length: 5 << 19 },
+  (_, i) => 97 + i % 26)).fill('é', (1 << 20) - 1, (1 << 20) + 1);
 const windowObject = {
   addEventListener(type, listener) {
     (listeners[type] ||= []).push(listener);
   },
-  postMessage(message) { posted.push(message); messages.push(message); },
+  postMessage(message, origin, moved = []) {
+    posted.push(message); messages.push(message); transfers.push(...moved);
+  },
 };
 const chrome = {
   runtime: {
@@ -361,10 +377,9 @@ const chrome = {
         try { callback(undefined); }
         finally { chrome.runtime.lastError = null; }
       } else if (mode.startsWith('sliced') && payload.type === 'fetch') {
-        const size = 5 << 19;
+        const whole = sliceBody(), size = whole.length;
         for (let at = 0; at < size; at += 1 << 20) {
-          const data = Buffer.from(new Uint8Array(Math.min(1 << 20,
-            size - at)).map((_, i) => (at + i) % 127)).toString('base64');
+          const data = whole.subarray(at, at + (1 << 20)).toString('base64');
           hooks.forEach((hook) => hook({ type: 'gm-slice', at, size, data,
             fetchId: payload.fetchId }, {}, (ack) => acks.push(ack)));
           if (mode === 'sliced-abort') { handle.abort(); flushMessages(); }
@@ -433,10 +448,8 @@ var handle = windowObject.GM.xmlhttpRequest({
   onload: (detail) => {
     loadDetail = detail; events.push('load');
     const text = typeof detail.response === 'string';
-    const bytes = text ? Buffer.from(detail.response)
-      : new Uint8Array(detail.response || 0);
-    body = { text, length: bytes.length,
-      wrong: bytes.findIndex((v, i) => v !== i % 127) };
+    body = { text, same: Buffer.from(text ? detail.response
+      : new Uint8Array(detail.response || 0)).equals(sliceBody()) };
   },
   onerror: (detail) => events.push('error:' + (detail && detail.error)),
   ontimeout: () => events.push('timeout'),
@@ -452,7 +465,7 @@ process.stdout.write(JSON.stringify({
     .filter((m) => m.direction === 'daedalus-bg-to-page')
     .map((m) => m.event),
   requestedTimeout: (sent.find((m) => m.type === 'fetch') || {}).timeout,
-  body, acks,
+  body, acks, transferred: transfers.length,
 }), () => process.exit(0));
 """
 
@@ -461,7 +474,7 @@ process.stdout.write(JSON.stringify({
 # event, an undelivered request is an error, finalUrl is the response's URL
 # (the request URL only as a fallback), and a sliced body lands byte for byte,
 # with an abort refusing the slices after it.
-_SLICED = {'text': False, 'length': 5 << 19, 'wrong': -1}
+_SLICED = {'text': False, 'same': True}
 _PAGE_ANSWERS = (
     ({'error': 'fetch timeout after 50ms', 'timedOut': True}, 'answer',
      {'events': ['timeout'], 'relayed': ['timeout']}),
@@ -476,9 +489,10 @@ _PAGE_ANSWERS = (
     ({'status': 200, 'data': 'body', 'headers': {}}, 'answer',
      {'events': ['load'], 'finalUrl': 'about:blank#slow', 'statusText': ''}),
     (None, 'sliced', {'events': ['load'], 'body': _SLICED,
-                      'acks': [True] * 3}),
+                      'acks': [True] * 3, 'transferred': 1}),
     (None, 'sliced-text', {'events': ['load'], 'acks': [True] * 3,
-                           'body': {**_SLICED, 'text': True}}),
+                           'body': {**_SLICED, 'text': True},
+                           'transferred': 0}),
     (None, 'sliced-short', {
         'events': ['error:relay body arrived incomplete']}),
     (None, 'sliced-abort', {'events': ['abort'],
