@@ -95,7 +95,8 @@ def register(mcp, bridge):
     async def fetch_timings(reset: bool = False,
                             wait: bool = True) -> dict:
         """Relay timing ring; `reset=True` clears it after, `wait=False`
-        returns the enqueued command. A sliced body's `ms_encode` counts acks."""
+        returns the enqueued command. A sliced body's `ms_encode`
+        counts acks."""
         fields: dict = {}
         if reset:
             fields['reset'] = True
