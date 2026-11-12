@@ -543,41 +543,35 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
 
 
 def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
-    """The SDK hands a client the text of its own ToolError alone, so a
-    deliberate refusal - a timed-out wait above all - read as a bare
-    `Error executing tool <name>`. A crash's text stays withheld, and so does
-    a subclass of a carried type: JSONDecodeError is a ValueError nobody
-    raised on purpose."""
+    """A refusal reaches the client with its reason, where the SDK alone
+    gave a bare `Error executing tool <name>`; a crash stays withheld, a
+    subclass of a carried type (JSONDecodeError) included."""
     _need_deps()
-    from mcp import Client  # pylint: disable=import-outside-toplevel
+    from mcp import Client
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         mod = _load_mcp(base)
         mod._token.set(TOK)
-        undecodable = json.JSONDecodeError('Expecting value', 'body', 0)
 
-        async def read(calls):
+        async def read(*calls):
             async with Client(mod.mcp) as client:
                 return [await client.call_tool(*call) for call in calls]
 
-        answers = asyncio.run(read([
+        answers = asyncio.run(read(
             ('exec', {'cmd_id': 't1', 'code': 'Date.now()',
                       'tab_id': 'nobody', 'timeout': 0.5}),
             ('exec', {'cmd_id': 't2', 'code': '1', 'timeout': 0}),
             ('segment_status', {'job': 'absent'}),
-            ('segment_status', {'job': '..'}),
-        ]))
-        with mock.patch.object(mod.bridge, 'get', side_effect=undecodable):
-            answers += asyncio.run(read([('result', {})]))
-    assert [(a.is_error, [c.text for c in a.content]) for a in answers] == [
-        (True, ['Error executing tool exec: timed out: no result within '
-                '0.5s']),
-        (True, ['Error executing tool exec: timeout must be a finite '
-                'positive number of seconds; got 0.0']),
-        (True, ['Error executing tool segment_status: segment_status: no '
-                "job named 'absent'"]),
-        (True, ['Error executing tool segment_status']),
-        (True, ['Error executing tool result']),
-    ], answers
+            ('segment_status', {'job': '..'})))
+        with mock.patch.object(mod.bridge, 'get', side_effect=(
+                json.JSONDecodeError('Expecting value', 'body', 0))):
+            answers += asyncio.run(read(('result', {})))
+    expected = [(True, [f'Error executing tool {text}']) for text in (
+        'exec: timed out: no result within 0.5s',
+        'exec: timeout must be a finite positive number of seconds; got 0.0',
+        "segment_status: segment_status: no job named 'absent'",
+        'segment_status', 'result')]
+    assert [(a.is_error, [getattr(c, 'text', c) for c in a.content])
+            for a in answers] == expected, answers
 
 
 if __name__ == '__main__':
