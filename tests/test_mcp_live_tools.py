@@ -566,13 +566,16 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
         closed = httpx.AsyncClient()
         asyncio.run(closed.aclose())
         # httpx's RuntimeError, a ValueError subclass raised in our frame,
-        # then tab-opening waits whose clock leaps past their deadline.
+        # tab-opening waits whose clock leaps past their deadline, then an
+        # extension that refuses the tab.
         for seam, double, *calls in (
                 ('http_client', lambda: closed, ('result', {})),
                 ('auth', partial(b'\xff'.decode, 'ascii'), ('result', {})),
                 ('monotonic', mock.Mock(side_effect=range(0, 2**40, 2**30)),
                  ('open_tab', {'url': 'about:blank'}),
-                 ('open_tabs', {'urls': ['about:blank']}))):
+                 ('open_tabs', {'urls': ['about:blank']})),
+                ('poll_result', mock.AsyncMock(return_value={'error': 'gone'}),
+                 ('open_tab', {'url': 'about:blank'}))):
             with mock.patch.object(mod.bridge, seam, double):
                 answers += asyncio.run(read(*calls))
     unknown = ('timed out: no result within {}s, outcome unknown: the {} '
@@ -582,7 +585,8 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
         'timeout must be a finite positive number of seconds; got 0.0')),
         ('segment_status', "no job named 'absent'"), ('segment_status', None),
         ('result', None), ('result', None),
-        ('open_tab', unknown(10.0, 'tab')), ('open_tabs', unknown(30, 'tabs'))]
+        ('open_tab', unknown(10.0, 'tab')), ('open_tabs', unknown(30, 'tabs')),
+        ('open_tab', 'ext open-tab: gone')]
     for answer, (tool, reason) in zip(answers, expected, strict=True):
         [text] = [getattr(item, 'text', '') for item in answer.content]
         sdk = f'Error executing tool {tool}'
