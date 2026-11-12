@@ -236,9 +236,12 @@ async function evalPending() {
 }
 (async () => {
   await delay();
-  // The delays the worker arms for a fetch the page sent with no timeout.
+  // The delays the worker arms for a fetch the page sent with no timeout,
+  // then for a page that never takes that fetch's first body slice.
   if (mode === 'default') {
     relay(0); await delay();
+    chrome.tabs.sendMessage = () => deferred().promise;
+    started[0].resolve(new Response(new Uint8Array(1 << 20))); await delay();
     return process.stdout.write(JSON.stringify([...timers].map((t) => t.ms)));
   }
   if (mode.includes(':')) {
@@ -353,7 +356,8 @@ const chrome = {
             fetchId: payload.fetchId }, {}, (ack) => acks.push(ack)));
           if (mode === 'sliced-abort') handle.abort();
           // Just inside the re-arm: slice wait or timeout, plus the margin.
-          advance(Math.max(1e4, timeout) + 4999 + (mode === 'sliced-expire'));
+          advance(Math.max(sliceMs, timeout) + 4999
+            + (mode === 'sliced-expire'));
         }
         callback({ status: 200, headers: {},
           chunked: size + (mode === 'sliced-short') });
@@ -400,7 +404,7 @@ def _run_page_harness(harness, *args):
 
 
 _FETCH_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
-const [contentPath, pagePath, responseText, mode, relayMs] =
+const [contentPath, pagePath, responseText, mode, relayMs, sliceMs] =
   process.argv.slice(1);
 function backgroundAnswer() { return JSON.parse(responseText); }
 // A fake clock reading a delay as int32, as browsers do; advance(ms) fires
@@ -499,12 +503,13 @@ _PAGE_ANSWERS = (
 
 def test_each_worker_answer_reaches_the_page_as_its_own_event(tmp):
     del tmp
-    [relay_ms] = json.loads(run_node_argv(shutil.which('node'), [
+    relay_ms, slice_ms = json.loads(run_node_argv(shutil.which('node'), [
         '-e', _RELAY_ADMISSION_HARNESS,
         str(EXTENSION_ROOT / 'background.js'), 'default'], ROOT).stdout)
     for answer, mode, expected in _PAGE_ANSWERS:
         out = _run_page_harness(
-            _FETCH_RELAY_HARNESS, json.dumps(answer), mode, str(relay_ms))
+            _FETCH_RELAY_HARNESS, json.dumps(answer), mode, str(relay_ms),
+            str(slice_ms))
         seen = {**out, **(out['loadDetail'] or {})}
         expected = {'requestedTimeout': 50, 'aborts': [0, 0], **expected}
         assert {key: seen[key] for key in expected} == expected, (mode, out)
