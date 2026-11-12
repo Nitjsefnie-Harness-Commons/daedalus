@@ -111,44 +111,28 @@ def test_do_open_tabs_sends_every_url_in_order_and_waits_thirty(tmp):
         '2 opened, 0 failed\n'), repr(out)
 
 
-def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
+def test_do_open_tabs_reports_each_line_and_sends_each_flag_as_its_field(tmp):
+    """`--background` adds `active: False`, `--pinned` adds `pinned`."""
     del tmp
+    one = ['https://a.example.com/']
     cases = (
-        (['https://a.example.com/', 'https://b.example.com/'],
+        (['https://a.example.com/', 'https://b.example.com/'], [], {},
          {'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}],
           'errors': [{'url': 'https://b.example.com/',
                       'error': 'blocked by policy'}]},
          f'Opened tab 42 {OUT} https://a.example.com/\n'
          'FAILED https://b.example.com/: blocked by policy\n'
          '1 opened, 1 failed\n'),
-        (['https://a.example.com/'], {}, '0 opened, 0 failed\n'),
-        (['https://a.example.com/'], {'errors': [{}]},
+        (one, ['--background'], {'active': False}, {}, '0 opened, 0 failed\n'),
+        (one, ['--pinned'], {'pinned': True}, {'errors': [{}]},
          'FAILED ?: \n0 opened, 1 failed\n'),
     )
-    for urls, result, expected in cases:
+    for urls, flags, extra, result, expected in cases:
         _recorded, out = run_cli(
-            ['open-tabs', *urls], [{'did': 'd1'}, {'result': result}],
+            ['open-tabs', *urls, *flags], [{'did': 'd1'}, {'result': result}],
             module=commands_browser, token=TOK,
-            plan=_tab_plan('open-tabs', {'urls': urls}, 30))
+            plan=_tab_plan('open-tabs', {'urls': urls, **extra}, 30))
         assert _rendered(out) == expected, repr(out)
-
-
-def test_do_open_tabs_sends_each_flag_as_its_own_wire_field_only(tmp):
-    """`--background` adds `active: False`, `--pinned` adds `pinned`."""
-    del tmp
-    for flag, extra in (('--background', {'active': False}),
-                        ('--pinned', {'pinned': True})):
-        fields = {'urls': ['https://a.example.com/'], **extra}
-        _recorded, out = run_cli(
-            ['open-tabs', 'https://a.example.com/', flag],
-            [{'did': 'd1'}, {'result': {'opened': [
-                {'tabId': 42, 'url': 'https://a.example.com/'}]}}],
-            module=commands_browser, token=TOK,
-            plan=_tab_plan('open-tabs', fields, 30))
-
-        assert _rendered(out) == (
-            f'Opened tab 42 {OUT} https://a.example.com/\n'
-            '1 opened, 0 failed\n'), repr(out)
 
 
 # ── do_focus_tab ─────────────────────────────────────────────────────
