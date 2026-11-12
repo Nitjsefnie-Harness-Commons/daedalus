@@ -186,6 +186,21 @@ def do_ext_self_reload(args):
           '— will reconnect SSE automatically')
 
 
+def _open_unconfirmed(cmd_id, cmd_type, timeout, opened, **fields):
+    """`ext_cmd`, except that no result in time is an unknown outcome: the
+    extension may have opened `opened` already."""
+    cmd = {'id': cmd_id, 'type': cmd_type, 'token': token(),
+           'tab': 'extension', **fields}
+    sent = api('PUT', '/command', cmd)
+    res = wait_for_result(cmd_id, 'extension', sent.get('did'), timeout)
+    if res is None:
+        sys.exit(f'Timeout ({timeout}s), outcome unknown: the {opened} may '
+                 'have opened. Run `tabs` to check before retrying.')
+    if res.get('error'):
+        sys.exit(f'Error: {res["error"]}')
+    return res.get('result', {})
+
+
 def do_open_tab(args):
     """Open a new tab via extension."""
     fields = {'url': args.url}
@@ -193,18 +208,9 @@ def do_open_tab(args):
         fields['active'] = False
     if args.pinned:
         fields['pinned'] = True
-    cmd = {'id': '_open_tab', 'type': 'open-tab', 'token': token(),
-           'tab': 'extension', **fields}
-    sent = api('PUT', '/command', cmd)
-    timeout = args.timeout or 10
-    res = wait_for_result('_open_tab', 'extension', sent.get('did'), timeout)
-    if res is None:
-        sys.exit(f'Timeout ({timeout}s), outcome unknown: the tab may have '
-                 'opened. Run `tabs` to check before retrying.')
-    if res.get('error'):
-        sys.exit(f'Error: {res["error"]}')
-    tab_id = res.get('result', {}).get('tabId', '?')
-    print(f'Opened tab {tab_id} {MARK["out"]} {args.url}')
+    result = _open_unconfirmed(
+        '_open_tab', 'open-tab', args.timeout or 10, 'tab', **fields)
+    print(f'Opened tab {result.get("tabId", "?")} {MARK["out"]} {args.url}')
 
 
 def do_open_tabs(args):
@@ -214,7 +220,7 @@ def do_open_tabs(args):
         fields['active'] = False
     if args.pinned:
         fields['pinned'] = True
-    result = ext_cmd('_open_tabs', 'open-tabs', timeout=30, **fields)
+    result = _open_unconfirmed('_open_tabs', 'open-tabs', 30, 'tabs', **fields)
     opened = result.get('opened', [])
     errors = result.get('errors', [])
     for o in opened:
