@@ -477,9 +477,9 @@ Promise.all(settled).then(() => {
 #   the event loop open. It cannot. Every handle one of them could hold it
 #   with is a no-op this harness installs — `setInterval` and `setTimeout`
 #   return 1 without arming anything, above, and the two modules' only
-#   timers are `content.js`'s keep-alive and `page.js`'s CSP poll — and the
-#   harness force-exits on its first write, so even a keeper a future
-#   module added would not hold the child.
+#   timers are `content.js`'s keep-alive and `page.js`'s CSP poll and
+#   request backstop — and the harness force-exits on its first write, so
+#   even a keeper a future module added would not hold the child.
 #
 #   So the real cost is a fixed unit of work, and what a bound on it must
 #   cover is a WEDGED child, never a slow one. The samples are measured
