@@ -590,8 +590,10 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
     for answer, (tool, reason) in zip(answers, expected, strict=True):
         [text] = [getattr(item, 'text', '') for item in answer.content]
         sdk = f'Error executing tool {tool}'
-        assert answer.is_error and (text == sdk if reason is None else (
-            text.startswith(f'{sdk}: ') and text.endswith(reason))), text
+        # segment_status's raise site repeats the tool name: read past it.
+        text = text.replace(f'{sdk}: segment_status: ', f'{sdk}: ')
+        assert answer.is_error and text == (
+            sdk if reason is None else f'{sdk}: {reason}'), text
 
 
 if __name__ == '__main__':
