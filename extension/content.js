@@ -27,8 +27,7 @@ const _fetchIds = {};
 // the string is.
 const _fetchIdPrefix = Math.random().toString(36).slice(2);
 let _fetchSeq = 0;
-// Relay body slices by fetch id, beside the page's request id; a request no
-// longer held refuses them.
+// Relay body slices by fetch id; a request no longer held refuses them.
 const _slices = new Map();
 
 function _takeSlice(msg) {
@@ -40,7 +39,7 @@ function _takeSlice(msg) {
     body.bytes[msg.at + i] = binary.charCodeAt(i);
   }
   body.got += binary.length;
-  // The page cannot see slices; this tells it the request is still alive.
+  // Re-arms the page's backstop.
   window.postMessage({ direction: 'daedalus-bg-to-page', reqId: body.reqId,
     handler: 'xmlhttpRequest', event: 'slice' }, '*');
   return true;
