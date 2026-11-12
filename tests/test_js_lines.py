@@ -312,7 +312,7 @@ def test_shipped_denominators_are_pinned_for_witness_files(tmp):
     del tmp
     pinned = {
         'dashboard/app.js': 116,
-        'extension/page.js': 331,
+        'extension/page.js': 333,
     }
     for relative, expected in sorted(pinned.items()):
         source = (ROOT / relative).read_text(encoding='utf-8')

@@ -405,7 +405,8 @@ def _run_page_harness(harness, *args):
 _FETCH_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
 const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
 function backgroundAnswer() { return JSON.parse(responseText); }
-// A fake clock: advance(ms) fires each timer falling due, in due order.
+// A fake clock reading a delay as int32, as browsers do; advance(ms) fires
+// each timer falling due, in due order.
 const timers = new Map(); let now = 0, timerIds = 0;
 function advance(ms) {
   for (const end = now + ms; ; ) {
@@ -416,10 +417,12 @@ function advance(ms) {
   }
 }
 loadPage({ clearTimeout: (id) => timers.delete(id), setTimeout: (fn, ms) =>
-  (timers.set(++timerIds, { fn, at: now + ms }), timerIds) });
+  (timers.set(++timerIds, { fn, at: now + Math.max(ms | 0, 0) }), timerIds) });
 const events = []; let loadDetail = null, body = null, early;
-// No timeout, and one the relay does not read as one: both its default.
-const timeouts = { 'lost-default': undefined, 'lost-text': '50' };
+// No timeout and one the relay does not read as one (both its default),
+// and the largest delay a timer takes.
+const timeouts = { 'lost-default': undefined, 'lost-text': '50',
+  'lost-max': 2 ** 31 - 1 };
 var handle = windowObject.GM.xmlhttpRequest({
   url: 'about:blank#slow', timeout: mode in timeouts ? timeouts[mode] : 50,
   responseType: mode === 'sliced' ? 'arraybuffer' : undefined,
@@ -436,8 +439,8 @@ var handle = windowObject.GM.xmlhttpRequest({
 flushMessages();
 if (mode.startsWith('lost')) {
   // Unanswered: pending just inside its bound, settled once at it.
-  advance((mode === 'lost' ? 5050 : 65000) - 1); early = events.length;
-  advance(1); handle.abort(); flushMessages();
+  advance(({ lost: 5050, 'lost-max': 2 ** 31 - 1 }[mode] || 65000) - 1);
+  early = events.length; advance(1); handle.abort(); flushMessages();
   held({ status: 200, data: 'late', headers: {} }); flushMessages();
 }
 advance(1e5);
@@ -487,7 +490,8 @@ _PAGE_ANSWERS = (
                             'acks': [True, False, False]}),
     *((None, mode, {'events': ['timeout'], 'early': 0, 'aborts': [1, 1],
                     'requestedTimeout': sent}) for mode, sent in (
-        ('lost', 50), ('lost-default', 0), ('lost-text', '50'))),
+        ('lost', 50), ('lost-default', 0), ('lost-text', '50'),
+        ('lost-max', 2 ** 31 - 1))),
     (None, 'sliced-expire', {'events': ['timeout'], 'aborts': [1, 1],
                              'acks': [True, False, False]}),
 )
