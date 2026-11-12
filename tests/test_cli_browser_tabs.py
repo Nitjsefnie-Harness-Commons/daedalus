@@ -21,14 +21,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
-from _cli_handler_wire import _ext_cmd  # noqa: E402
+from _cli_handler_wire import _api_put, _ext_cmd, _wait_result  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
-from daedalus_cli import commands_browser  # noqa: E402
+from daedalus_cli import commands_browser, invoke  # noqa: E402
 
 run_cli = _cli_dispatch.run_cli
+REAL_EXT_CMD = invoke.ext_cmd
 
 OUT = '→'
 TOK = 'clitok'
@@ -46,53 +47,50 @@ def _rendered(out):
 
 # ── do_open_tab ──────────────────────────────────────────────────────
 
-def test_do_open_tab_sends_active_false_only_with_background(tmp):
-    """`--background` is the field `active: False` — not `background`.
-
-    The wire field is the negation, so a handler that sent `background`
-    would open a foreground tab and still print the line an operator
-    believes they asked for. `pinned` is absent on this arm.
+def test_do_open_tab_sends_each_option_as_its_own_field_and_waits_as_told(
+        tmp):
+    """`--background` is `active: False` (not `background`), `--pinned` is
+    `pinned`; `-t` is the wait, `-t 0` keeps the default 10, and a result
+    with no `tabId` reads `?`. Each arm carries nothing of the others.
     """
     del tmp
-    fields = {'url': 'https://example.com/', 'active': False}
-    recorded, out = run_cli(
-        ['open-tab', 'https://example.com/', '--background'],
-        [{'tabId': 42, 'url': 'https://example.com/'}],
-        module=commands_browser,
-        plan=[_ext_cmd('_open_tab', 'open-tab', fields)], token=TOK)
+    cases = ((['--background'], {'active': False}, 10, 42),
+             (['--pinned'], {'pinned': True}, 10, 42),
+             (['-t', '7'], {}, 7, 42),
+             (['-t', '0'], {}, 10, '?'))
+    for flags, extra, waited, tab in cases:
+        fields = {'url': 'https://example.com/', **extra}
+        recorded, out = run_cli(
+            ['open-tab', 'https://example.com/', *flags],
+            [{} if tab == '?' else {'tabId': tab}],
+            module=commands_browser, token=TOK,
+            plan=[_ext_cmd('_open_tab', 'open-tab', fields, timeout=waited)])
 
-    assert recorded.calls == [('_open_tab', 'open-tab', fields)], \
-        recorded.calls
-    assert _rendered(out) == f'Opened tab 42 {OUT} https://example.com/\n', \
-        repr(out)
+        assert recorded.calls == [('_open_tab', 'open-tab', fields)], \
+            recorded.calls
+        assert recorded.timeouts == [waited], recorded.timeouts
+        assert _rendered(out) == (
+            f'Opened tab {tab} {OUT} https://example.com/\n'), repr(out)
 
 
-def test_do_open_tab_sends_pinned_only_with_the_flag(tmp):
-    """`--pinned` adds `pinned` and nothing else."""
+def test_ext_cmd_calls_an_unanswered_open_tab_unconfirmed(tmp):
+    """The exit says the tab may have opened; other commands stay plain."""
     del tmp
-    fields = {'url': 'https://example.com/', 'pinned': True}
-    recorded, out = run_cli(
-        ['open-tab', 'https://example.com/', '--pinned'],
-        [{'tabId': 42, 'url': 'https://example.com/'}],
-        module=commands_browser,
-        plan=[_ext_cmd('_open_tab', 'open-tab', fields)], token=TOK)
-
-    assert recorded.calls == [('_open_tab', 'open-tab', fields)], \
-        recorded.calls
-    assert _rendered(out) == f'Opened tab 42 {OUT} https://example.com/\n', \
-        repr(out)
-
-
-def test_do_open_tab_prints_a_placeholder_for_a_missing_tab_id(tmp):
-    """A result with no `tabId` reads `?` rather than `None`."""
-    del tmp
-    plan = [_ext_cmd('_open_tab', 'open-tab', {'url': 'https://example.com/'})]
-    _recorded, out = run_cli(
-        ['open-tab', 'https://example.com/'], [{}],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert _rendered(out) == f'Opened tab ? {OUT} https://example.com/\n', \
-        repr(out)
+    unconfirmed = ('Timeout (7s), outcome unknown: the tab may have opened. '
+                   'Run `tabs` to check before retrying.')
+    for cmd_type, expected in (('open-tab', unconfirmed),
+                               ('focus-tab', 'Timeout (7s)')):
+        body = {'id': '_x', 'type': cmd_type, 'token': TOK, 'tab': 'extension'}
+        recorded = _cli_dispatch.RecordingExtCmd(
+            [{'did': 'd1'}, None], token=TOK,
+            plan=[_api_put(body), _wait_result('_x', 'd1', 7)])
+        with _cli_dispatch.wired(invoke, recorded):
+            try:
+                REAL_EXT_CMD('_x', cmd_type, timeout=7)
+            except SystemExit as exit_request:
+                assert exit_request.code == expected, exit_request.code
+            else:
+                raise AssertionError(f'{cmd_type} returned on no result')
 
 
 # ── do_open_tabs ─────────────────────────────────────────────────────
@@ -145,40 +143,24 @@ def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
         assert _rendered(out) == expected, repr(out)
 
 
-def test_do_open_tabs_sends_active_false_only_with_background(tmp):
-    """`--background` is the field `active: False`; `pinned` stays off."""
+def test_do_open_tabs_sends_each_flag_as_its_own_wire_field_only(tmp):
+    """`--background` adds `active: False`, `--pinned` adds `pinned`."""
     del tmp
-    fields = {'urls': ['https://a.example.com/'], 'active': False}
-    recorded, out = run_cli(
-        ['open-tabs', 'https://a.example.com/', '--background'],
-        [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}]}],
-        module=commands_browser,
-        plan=[_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)],
-        token=TOK)
+    for flag, extra in (('--background', {'active': False}),
+                        ('--pinned', {'pinned': True})):
+        fields = {'urls': ['https://a.example.com/'], **extra}
+        recorded, out = run_cli(
+            ['open-tabs', 'https://a.example.com/', flag],
+            [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}]}],
+            module=commands_browser,
+            plan=[_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)],
+            token=TOK)
 
-    assert recorded.calls == [('_open_tabs', 'open-tabs', fields)], \
-        recorded.calls
-    assert _rendered(out) == (
-        f'Opened tab 42 {OUT} https://a.example.com/\n'
-        '1 opened, 0 failed\n'), repr(out)
-
-
-def test_do_open_tabs_sends_pinned_only_with_the_flag(tmp):
-    """`--pinned` adds `pinned` and leaves `active` off."""
-    del tmp
-    fields = {'urls': ['https://a.example.com/'], 'pinned': True}
-    recorded, out = run_cli(
-        ['open-tabs', 'https://a.example.com/', '--pinned'],
-        [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}]}],
-        module=commands_browser,
-        plan=[_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)],
-        token=TOK)
-
-    assert recorded.calls == [('_open_tabs', 'open-tabs', fields)], \
-        recorded.calls
-    assert _rendered(out) == (
-        f'Opened tab 42 {OUT} https://a.example.com/\n'
-        '1 opened, 0 failed\n'), repr(out)
+        assert recorded.calls == [('_open_tabs', 'open-tabs', fields)], \
+            recorded.calls
+        assert _rendered(out) == (
+            f'Opened tab 42 {OUT} https://a.example.com/\n'
+            '1 opened, 0 failed\n'), repr(out)
 
 
 # ── do_focus_tab ─────────────────────────────────────────────────────

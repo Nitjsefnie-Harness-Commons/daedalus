@@ -193,7 +193,8 @@ def do_open_tab(args):
         fields['active'] = False
     if args.pinned:
         fields['pinned'] = True
-    result = ext_cmd('_open_tab', 'open-tab', **fields)
+    result = ext_cmd('_open_tab', 'open-tab', timeout=args.timeout or 10,
+                     **fields)
     print(f'Opened tab {result.get("tabId", "?")} {MARK["out"]} {args.url}')
 
 
