@@ -28,7 +28,7 @@
     if (!cb) return;
 
     if (msg.handler === 'xmlhttpRequest') {
-      if (msg.event === 'slice' && _backstops[msg.reqId]) {
+      if (msg.event === 'slice') {
         _backstops[msg.reqId].arm(RELAY_SLICE_WAIT_MS);
       } else if (msg.event === 'load') {
         _settle(msg.reqId);
