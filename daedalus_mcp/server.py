@@ -14,6 +14,7 @@ import contextlib
 import os, socket, sys, threading, time
 from email.utils import formatdate
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.server.transport_security import TransportSecuritySettings
 
 if __name__ == '__main__' and __package__ in (None, ''):
@@ -66,7 +67,32 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
 
 bridge = BridgeSession(LOCAL_URL, _token)
 
-mcp = MCPServer('daedalus')
+# The tools' deliberate refusals, by exact type: a subclass (JSONDecodeError,
+# RecursionError, httpx's StreamError) is a crash, whose text stays withheld.
+CARRIED_REFUSALS = {
+    ValueError: '', RuntimeError: '', TimeoutError: 'timed out: '}
+
+
+class ReasonCarryingServer(MCPServer):
+    """MCPServer whose tool refusals reach the client with their reason.
+
+    The SDK passes a client the text of its own ToolError and reports any
+    other exception as a bare `Error executing tool <name>`.
+    """
+
+    async def call_tool(self, name, arguments, context=None):
+        try:
+            return await super().call_tool(name, arguments, context)
+        except UnexpectedToolError as crash:
+            refusal = crash.__cause__
+            if type(refusal) not in CARRIED_REFUSALS:
+                raise
+            raise ToolError(
+                f'{crash}: {CARRIED_REFUSALS[type(refusal)]}{refusal}'
+            ) from refusal
+
+
+mcp = ReasonCarryingServer('daedalus')
 tool_module_inventory = []
 
 
