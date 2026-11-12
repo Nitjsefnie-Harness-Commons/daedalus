@@ -596,7 +596,7 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_mcp.transport', 'checked_timeout',
      'not math.isfinite(timeout) or timeout <= 0',
      'tests/test_mcp_live_tools.py::'
-     'test_a_nonpositive_mcp_timeout_admits_no_command'),
+     'test_a_nonpositive_timeout_admits_no_command_on_either_send_path'),
     ('daedalus_mcp.transport', 'ext_cmd', "res.get('error')",
      'tests/test_mcp_transport_guards.py::'
      'test_extension_command_surfaces_result_error'),
