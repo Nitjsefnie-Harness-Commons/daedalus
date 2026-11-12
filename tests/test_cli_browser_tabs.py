@@ -35,9 +35,12 @@ OUT = '→'
 TOK = 'clitok'
 
 
-def _open_tab_body(extra):
-    return {'id': '_open_tab', 'type': 'open-tab', 'token': TOK,
-            'tab': 'extension', 'url': 'https://example.com/', **extra}
+def _tab_plan(command, fields, waited):
+    """The send and the wait of one tab-opening command, answered as `d1`."""
+    cmd_id = '_' + command.replace('-', '_')
+    return [_api_put({'id': cmd_id, 'type': command, 'token': TOK,
+                      'tab': 'extension', **fields}),
+            _wait_result(cmd_id, 'd1', waited)]
 
 
 def _rendered(out):
@@ -62,26 +65,30 @@ def test_do_open_tab_sends_each_option_as_its_own_field_and_waits_as_told(
         _recorded, out = run_cli(
             ['open-tab', 'https://example.com/', *flags],
             [{'did': 'd1'}, {'result': {} if tab == '?' else {'tabId': tab}}],
-            module=commands_browser, token=TOK,
-            plan=[_api_put(_open_tab_body(extra)),
-                  _wait_result('_open_tab', 'd1', waited)])
+            module=commands_browser, token=TOK, plan=_tab_plan(
+                'open-tab', {'url': 'https://example.com/', **extra}, waited))
 
         assert _rendered(out) == (
             f'Opened tab {tab} {OUT} https://example.com/\n'), repr(out)
 
 
-def test_do_open_tab_calls_no_answer_unconfirmed_and_an_error_failed(tmp):
-    """No answer in time is an unknown outcome, not a plain failure."""
+def test_a_tab_opening_command_calls_no_answer_unconfirmed(tmp):
+    """No answer in time is an unknown outcome, not a plain failure; an
+    extension error is a plain one."""
     del tmp
-    for answer, expected in (
-            (None, 'Timeout (7s), outcome unknown: the tab may have opened. '
-                   'Run `tabs` to check before retrying.'),
-            ({'error': 'tabs.create refused'}, 'Error: tabs.create refused')):
+    url = 'https://example.com/'
+    for argv, fields, waited, answer, expected in (
+            (['open-tab', url, '-t', '7'], {'url': url}, 7, None,
+             'Timeout (7s), outcome unknown: the tab may have opened. '
+             'Run `tabs` to check before retrying.'),
+            (['open-tabs', url], {'urls': [url]}, 30, None,
+             'Timeout (30s), outcome unknown: the tabs may have opened. '
+             'Run `tabs` to check before retrying.'),
+            (['open-tab', url, '-t', '7'], {'url': url}, 7,
+             {'error': 'tabs.create refused'}, 'Error: tabs.create refused')):
         code, out = run_cli_exit(
-            ['open-tab', 'https://example.com/', '-t', '7'],
-            [{'did': 'd1'}, answer], module=commands_browser, token=TOK,
-            plan=[_api_put(_open_tab_body({})),
-                  _wait_result('_open_tab', 'd1', 7)])
+            argv, [{'did': 'd1'}, answer], module=commands_browser, token=TOK,
+            plan=_tab_plan(argv[0], fields, waited))
         assert (code, out) == (expected, ''), (code, out)
 
 
@@ -95,17 +102,14 @@ def test_do_open_tabs_sends_every_url_in_order_and_waits_thirty(tmp):
     """
     del tmp
     fields = {'urls': ['https://a.example.com/', 'https://b.example.com/']}
-    plan = [_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)]
-    recorded, out = run_cli(
+    _recorded, out = run_cli(
         ['open-tabs', 'https://a.example.com/', 'https://b.example.com/'],
-        [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'},
-                     {'tabId': 43, 'url': 'https://b.example.com/'}],
-          'errors': []}],
-        module=commands_browser, plan=plan, token=TOK)
+        [{'did': 'd1'}, {'result': {'opened': [
+            {'tabId': 42, 'url': 'https://a.example.com/'},
+            {'tabId': 43, 'url': 'https://b.example.com/'}], 'errors': []}}],
+        module=commands_browser, token=TOK,
+        plan=_tab_plan('open-tabs', fields, 30))
 
-    assert recorded.calls == [('_open_tabs', 'open-tabs', fields)], \
-        recorded.calls
-    assert recorded.timeouts == [30], recorded.timeouts
     assert _rendered(out) == (
         f'Opened tab 42 {OUT} https://a.example.com/\n'
         f'Opened tab 43 {OUT} https://b.example.com/\n'
@@ -127,11 +131,10 @@ def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
          'FAILED ?: \n0 opened, 1 failed\n'),
     )
     for urls, result, expected in cases:
-        plan = [_ext_cmd('_open_tabs', 'open-tabs',
-                         {'urls': urls}, timeout=30)]
         _recorded, out = run_cli(
-            ['open-tabs', *urls], [result],
-            module=commands_browser, plan=plan, token=TOK)
+            ['open-tabs', *urls], [{'did': 'd1'}, {'result': result}],
+            module=commands_browser, token=TOK,
+            plan=_tab_plan('open-tabs', {'urls': urls}, 30))
         assert _rendered(out) == expected, repr(out)
 
 
@@ -141,15 +144,13 @@ def test_do_open_tabs_sends_each_flag_as_its_own_wire_field_only(tmp):
     for flag, extra in (('--background', {'active': False}),
                         ('--pinned', {'pinned': True})):
         fields = {'urls': ['https://a.example.com/'], **extra}
-        recorded, out = run_cli(
+        _recorded, out = run_cli(
             ['open-tabs', 'https://a.example.com/', flag],
-            [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}]}],
-            module=commands_browser,
-            plan=[_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)],
-            token=TOK)
+            [{'did': 'd1'}, {'result': {'opened': [
+                {'tabId': 42, 'url': 'https://a.example.com/'}]}}],
+            module=commands_browser, token=TOK,
+            plan=_tab_plan('open-tabs', fields, 30))
 
-        assert recorded.calls == [('_open_tabs', 'open-tabs', fields)], \
-            recorded.calls
         assert _rendered(out) == (
             f'Opened tab 42 {OUT} https://a.example.com/\n'
             '1 opened, 0 failed\n'), repr(out)
