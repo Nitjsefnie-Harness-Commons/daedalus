@@ -10,7 +10,7 @@
   const _backstops = {};
   // The relay's default fetch timeout and its wait on each body slice.
   const RELAY_TIMEOUT_MS = 60000, RELAY_SLICE_WAIT_MS = 10000;
-  // For the relay's timer starting a hop and a worker wake-up later.
+  // Covers the hop before the relay's timer starts, and a worker wake-up.
   const BACKSTOP_MARGIN_MS = 5000;
   const TIMER_MAX_MS = 2 ** 31 - 1;
   function _settle(reqId) {
@@ -291,18 +291,16 @@
       opts._responseType = opts.responseType;
       _pending[reqId] = opts;
       let aborted = false;
-      // Terminal on this side the moment it runs: the pending entry is
-      // dropped, so a load or error already in flight finds no callback and
-      // is ignored, and the relay cancels the fetch itself so the request
-      // stops rather than merely stopping being listened to.
+      // Terminal at once: an answer in flight finds no callback, and the
+      // relay cancels the fetch rather than merely going unheard.
       const cancel = (callback) => {
         const handlers = _pending[reqId];
         _settle(reqId);
         gmPost('abortRequest', { target: reqId });
         if (handlers[callback]) handlers[callback]({});
       };
-      // Settles a request the relay never answers, as ontimeout, past the
-      // relay's own bound as the worker reads it; each slice re-arms it.
+      // Settles a request the relay never answers, as ontimeout, no earlier
+      // than the relay's own bound as the worker reads it; slices re-arm it.
       const relayMs = typeof opts.timeout === 'number' && opts.timeout > 0
         ? opts.timeout : RELAY_TIMEOUT_MS;
       const backstop = _backstops[reqId] = {

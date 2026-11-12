@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 """Every branch of the five tab handlers in commands_browser.py.
 
-`do_open_tab`, `do_open_tabs`, `do_focus_tab`, `do_ext_navigate` and
-`do_ext_reload` all go through `ext_cmd`, so each test asserts the single
-recorded call — command id, wire type, the fields exactly as the extension
-receives them, and the timeout the handler chose — alongside the exact
-output an operator reads, compared as one string.
+Each test pins the wire, the PUT and wait of `open-tab` and `open-tabs` or
+the one `ext_cmd` call of the other three (command id, wire type, the fields
+as the extension receives them, the timeout chosen), beside the exact output
+an operator reads, compared as one string.
 
-A field a handler sends only under a flag is pinned BOTH ways. The bare
-arm's body is the one that says the flag is opt-in: a handler that always
-sent `active` or `pinned` would satisfy every test here that asks for
-them, and only the bare arm would notice.
-
-The marker glyphs are SPELLED OUT rather than read from
-`daedalus_cli.output`, for the reason the sibling suites give: an expected
-value taken from the module under test pins nothing about it.
+A field sent only under a flag is pinned both ways: only the bare arm sees a
+handler that always sends `active` or `pinned`. The marker glyphs are spelled
+out, not read from `daedalus_cli.output`: an expected value taken from the
+module under test pins nothing about it.
 """
 import sys
 from pathlib import Path

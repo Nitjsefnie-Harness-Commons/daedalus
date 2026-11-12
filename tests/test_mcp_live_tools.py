@@ -544,9 +544,8 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
 
 
 def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
-    """A refusal reaches the client with its reason, where the SDK alone
-    gave a bare `Error executing tool <name>`; a crash stays withheld, a
-    library's error of a carried type or a carried type's subclass included."""
+    """A refusal reaches the client with its reason; a crash, a library's
+    error of a carried type and a subclass of one included, stays bare."""
     _need_deps()
     import httpx
     from mcp import Client

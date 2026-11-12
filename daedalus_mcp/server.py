@@ -67,17 +67,16 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
 
 bridge = BridgeSession(LOCAL_URL, _token)
 
-# The tools' deliberate refusals, by exact type: a subclass (JSONDecodeError,
-# RecursionError, httpx's StreamError) is a crash, whose text stays withheld.
+# The refusal types and the prefix each carries to a client.
 CARRIED_REFUSALS = {
     ValueError: '', RuntimeError: '', TimeoutError: 'timed out: '}
 
 
 def _carried(error):
-    """Whether `error` is a refusal: exactly a carried type, raised in this
-    package. The innermost frame names the raiser, so a library's error of
-    the same type (httpx's RuntimeError on a closed client) stays a crash.
-    """
+    """Whether `error` is a refusal: exactly a carried type (a subclass such
+    as JSONDecodeError is a crash) whose innermost traceback frame is in this
+    package, so a library's error of a carried type (httpx's RuntimeError on
+    a closed client) stays a crash."""
     if type(error) not in CARRIED_REFUSALS:
         return False
     raised = error.__traceback__
@@ -90,8 +89,8 @@ def _carried(error):
 class ReasonCarryingServer(MCPServer):
     """MCPServer whose tool refusals reach the client with their reason.
 
-    The SDK passes a client the text of its own ToolError and reports any
-    other exception as a bare `Error executing tool <name>`.
+    The SDK reports a tool's crash as a bare `Error executing tool <name>`;
+    a refusal is re-raised as the ToolError whose text the SDK passes on.
     """
 
     async def call_tool(self, name, arguments, context=None):
