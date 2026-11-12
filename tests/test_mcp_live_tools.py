@@ -336,30 +336,6 @@ def test_a_nonpositive_timeout_admits_no_command_on_either_send_path(tmp):
             assert queued == [], (target, queued)
 
 
-def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
-    """A non-positive timeout is refused before any command is submitted.
-
-    The deadline is evaluated by poll_result, which runs after the command
-    has been handed to the browser.
-    """
-    _mcp_load._need_deps()
-    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, docroot):
-        mod = _mcp_load._load_mcp(base)
-        mod._token.set(_mcp_load.TOK)
-        for timeout in (0, -1.0, float('nan'), float('inf')):
-            try:
-                asyncio.run(getattr(mod, 'exec')(
-                    cmd_id='_timeout', code='1', timeout=timeout))
-            except ValueError as error:
-                assert 'finite positive' in str(error), (timeout, error)
-            else:
-                raise AssertionError(f'timeout {timeout!r} was accepted')
-        for name in (f'{_mcp_load.TOK}_extension', _mcp_load.TOK):
-            qdir = Path(docroot) / 'commands' / name
-            queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
-            assert queued == [], (name, queued)
-
-
 def test_list_tabs_tool_against_real_bridge(tmp):
     _mcp_load._need_deps()
     with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, _docroot):
