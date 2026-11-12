@@ -186,13 +186,11 @@ def do_ext_self_reload(args):
           '— will reconnect SSE automatically')
 
 
-def _open_unconfirmed(cmd_id, cmd_type, timeout, opened, **fields):
-    """`ext_cmd`, except that no result in time is an unknown outcome: the
-    extension may have opened `opened` already."""
-    cmd = {'id': cmd_id, 'type': cmd_type, 'token': token(),
-           'tab': 'extension', **fields}
+def _open_unconfirmed(cmd, timeout, opened):
+    """`ext_cmd` for the command `cmd`, except that no result in time is an
+    unknown outcome: the extension may have opened `opened` already."""
     sent = api('PUT', '/command', cmd)
-    res = wait_for_result(cmd_id, 'extension', sent.get('did'), timeout)
+    res = wait_for_result(cmd['id'], 'extension', sent.get('did'), timeout)
     if res is None:
         sys.exit(f'Timeout ({timeout}s), outcome unknown: the {opened} may '
                  'have opened. Run `tabs` to check before retrying.')
@@ -209,7 +207,8 @@ def do_open_tab(args):
     if args.pinned:
         fields['pinned'] = True
     result = _open_unconfirmed(
-        '_open_tab', 'open-tab', args.timeout or 10, 'tab', **fields)
+        {'id': '_open_tab', 'type': 'open-tab', 'token': token(),
+         'tab': 'extension', **fields}, args.timeout or 10, 'tab')
     print(f'Opened tab {result.get("tabId", "?")} {MARK["out"]} {args.url}')
 
 
@@ -220,7 +219,9 @@ def do_open_tabs(args):
         fields['active'] = False
     if args.pinned:
         fields['pinned'] = True
-    result = _open_unconfirmed('_open_tabs', 'open-tabs', 30, 'tabs', **fields)
+    result = _open_unconfirmed(
+        {'id': '_open_tabs', 'type': 'open-tabs', 'token': token(),
+         'tab': 'extension', **fields}, 30, 'tabs')
     opened = result.get('opened', [])
     errors = result.get('errors', [])
     for o in opened:
