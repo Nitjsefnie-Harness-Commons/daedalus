@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 import time
+from functools import partial
 from pathlib import Path
 from unittest import mock
 
@@ -545,8 +546,9 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
 def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
     """A refusal reaches the client with its reason, where the SDK alone
     gave a bare `Error executing tool <name>`; a crash stays withheld, a
-    subclass of a carried type (JSONDecodeError) included."""
+    library's error of a carried type or a carried type's subclass included."""
     _need_deps()
+    import httpx
     from mcp import Client
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         mod = _load_mcp(base)
@@ -562,16 +564,21 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
             ('exec', {'cmd_id': 't2', 'code': '1', 'timeout': 0}),
             ('segment_status', {'job': 'absent'}),
             ('segment_status', {'job': '..'})))
-        with mock.patch.object(mod.bridge, 'get', side_effect=(
-                json.JSONDecodeError('Expecting value', 'body', 0))):
-            answers += asyncio.run(read(('result', {})))
-    expected = [(True, [f'Error executing tool {text}']) for text in (
-        'exec: timed out: no result within 0.5s',
-        'exec: timeout must be a finite positive number of seconds; got 0.0',
-        "segment_status: segment_status: no job named 'absent'",
-        'segment_status', 'result')]
-    assert [(a.is_error, [getattr(c, 'text', c) for c in a.content])
-            for a in answers] == expected, answers
+        closed = httpx.AsyncClient()
+        asyncio.run(closed.aclose())
+        # httpx's RuntimeError, then a ValueError subclass raised in our frame.
+        for seam, double in (('http_client', mock.Mock(return_value=closed)),
+                             ('auth', partial(b'\xff'.decode, 'ascii'))):
+            with mock.patch.object(mod.bridge, seam, double):
+                answers += asyncio.run(read(('result', {})))
+    expected = [('exec', 'timed out: no result within 0.5s'), ('exec', (
+        'timeout must be a finite positive number of seconds; got 0.0')),
+        ('segment_status', "no job named 'absent'"), ('segment_status', None),
+        ('result', None), ('result', None)]
+    for answer, (tool, reason) in zip(answers, expected, strict=True):
+        text, sdk = answer.content[0].text, f'Error executing tool {tool}'
+        assert answer.is_error and (text == sdk if reason is None else (
+            text.startswith(f'{sdk}: ') and text.endswith(reason))), text
 
 
 if __name__ == '__main__':
