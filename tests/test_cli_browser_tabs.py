@@ -29,19 +29,20 @@ sys.path.insert(0, str(_util.ROOT))
 from daedalus_cli import commands_browser, invoke  # noqa: E402
 
 run_cli = _cli_dispatch.run_cli
+run_cli_exit = _cli_dispatch.run_cli_exit
 REAL_EXT_CMD = invoke.ext_cmd
 
 OUT = '→'
 TOK = 'clitok'
 
 
-def _rendered(out):
-    """`out` with a fallback marker spelling folded onto the pinned glyph.
+def _open_tab_body(extra):
+    return {'id': '_open_tab', 'type': 'open-tab', 'token': TOK,
+            'tab': 'extension', 'url': 'https://example.com/', **extra}
 
-    Only the two spellings `output._output_markers` documents are folded,
-    so a third one — or a changed fancy glyph — reaches the assertions
-    untouched and every whole-string comparison here fails.
-    """
+
+def _rendered(out):
+    """`out` with the ASCII marker fallback folded onto the glyph."""
     return out.replace('->', OUT)
 
 
@@ -59,38 +60,46 @@ def test_do_open_tab_sends_each_option_as_its_own_field_and_waits_as_told(
              (['-t', '7'], {}, 7, 42),
              (['-t', '0'], {}, 10, '?'))
     for flags, extra, waited, tab in cases:
-        fields = {'url': 'https://example.com/', **extra}
         recorded, out = run_cli(
             ['open-tab', 'https://example.com/', *flags],
-            [{} if tab == '?' else {'tabId': tab}],
+            [{'did': 'd1'}, {'result': {} if tab == '?' else {'tabId': tab}}],
             module=commands_browser, token=TOK,
-            plan=[_ext_cmd('_open_tab', 'open-tab', fields, timeout=waited)])
+            plan=[_api_put(_open_tab_body(extra)),
+                  _wait_result('_open_tab', 'd1', waited)])
 
-        assert recorded.calls == [('_open_tab', 'open-tab', fields)], \
-            recorded.calls
         assert recorded.timeouts == [waited], recorded.timeouts
         assert _rendered(out) == (
             f'Opened tab {tab} {OUT} https://example.com/\n'), repr(out)
 
 
-def test_ext_cmd_calls_an_unanswered_open_tab_unconfirmed(tmp):
-    """The exit says the tab may have opened; other commands stay plain."""
+def test_do_open_tab_calls_an_unanswered_open_tab_unconfirmed(tmp):
+    """No answer in time is an unknown outcome, not a plain failure."""
     del tmp
-    unconfirmed = ('Timeout (7s), outcome unknown: the tab may have opened. '
-                   'Run `tabs` to check before retrying.')
-    for cmd_type, expected in (('open-tab', unconfirmed),
-                               ('focus-tab', 'Timeout (7s)')):
-        body = {'id': '_x', 'type': cmd_type, 'token': TOK, 'tab': 'extension'}
-        recorded = _cli_dispatch.RecordingExtCmd(
-            [{'did': 'd1'}, None], token=TOK,
-            plan=[_api_put(body), _wait_result('_x', 'd1', 7)])
-        with _cli_dispatch.wired(invoke, recorded):
-            try:
-                REAL_EXT_CMD('_x', cmd_type, timeout=7)
-            except SystemExit as exit_request:
-                assert exit_request.code == expected, exit_request.code
-            else:
-                raise AssertionError(f'{cmd_type} returned on no result')
+    code, out = run_cli_exit(
+        ['open-tab', 'https://example.com/', '-t', '7'], [{'did': 'd1'}, None],
+        module=commands_browser, token=TOK,
+        plan=[_api_put(_open_tab_body({})),
+              _wait_result('_open_tab', 'd1', 7)])
+
+    assert code == ('Timeout (7s), outcome unknown: the tab may have opened. '
+                    'Run `tabs` to check before retrying.'), code
+    assert out == '', repr(out)
+
+
+def test_ext_cmd_keeps_the_plain_timeout_for_open_tabs(tmp):
+    """`open-tabs` shares `ext_cmd` and must not get the open-tab message."""
+    del tmp
+    body = {'id': '_x', 'type': 'open-tabs', 'token': TOK, 'tab': 'extension'}
+    recorded = _cli_dispatch.RecordingExtCmd(
+        [{'did': 'd1'}, None], token=TOK,
+        plan=[_api_put(body), _wait_result('_x', 'd1', 7)])
+    with _cli_dispatch.wired(invoke, recorded):
+        try:
+            REAL_EXT_CMD('_x', 'open-tabs', timeout=7)
+        except SystemExit as exit_request:
+            assert exit_request.code == 'Timeout (7s)', exit_request.code
+        else:
+            raise AssertionError('open-tabs returned on no result')
 
 
 # ── do_open_tabs ─────────────────────────────────────────────────────
@@ -165,26 +174,17 @@ def test_do_open_tabs_sends_each_flag_as_its_own_wire_field_only(tmp):
 
 # ── do_focus_tab ─────────────────────────────────────────────────────
 
-def test_do_focus_tab_names_the_tab_and_the_window_it_focused(tmp):
+def test_do_focus_tab_names_the_tab_and_window_or_a_placeholder_for_each(tmp):
     del tmp
-    plan = [_ext_cmd('_focus', 'focus-tab', {'tabId': 0})]
-    recorded, out = run_cli(
-        ['focus-tab', '0'], [{'tabId': 0, 'windowId': 7}],
-        module=commands_browser, plan=plan, token=TOK)
+    for result, expected in (({'tabId': 0, 'windowId': 7},
+                              'Focused tab 0 window=7\n'),
+                             ({}, 'Focused tab ? window=?\n')):
+        recorded, out = run_cli(
+            ['focus-tab', '0'], [result], module=commands_browser, token=TOK,
+            plan=[_ext_cmd('_focus', 'focus-tab', {'tabId': 0})])
 
-    assert recorded.calls == [('_focus', 'focus-tab', {'tabId': 0})], \
-        recorded.calls
-    assert out == 'Focused tab 0 window=7\n', repr(out)
-
-
-def test_do_focus_tab_prints_placeholders_for_both_absent_fields(tmp):
-    del tmp
-    plan = [_ext_cmd('_focus', 'focus-tab', {'tabId': 0})]
-    _recorded, out = run_cli(
-        ['focus-tab', '0'], [{}],
-        module=commands_browser, plan=plan, token=TOK)
-
-    assert out == 'Focused tab ? window=?\n', repr(out)
+        assert recorded.calls == [('_focus', 'focus-tab', {'tabId': 0})]
+        assert out == expected, repr(out)
 
 
 # ── do_ext_navigate ──────────────────────────────────────────────────
