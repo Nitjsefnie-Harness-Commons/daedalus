@@ -7,6 +7,16 @@
 
   const _pending = {};
   let _reqId = 0;
+  // A GM.xmlhttpRequest's own bound, by request id: see GM.xmlhttpRequest.
+  const _backstops = {};
+  // The relay's default fetch timeout and its wait on each body slice.
+  const RELAY_TIMEOUT_MS = 60000, RELAY_SLICE_WAIT_MS = 10000;
+  // Covers the relay's timer starting after the hop and a worker wake-up.
+  const BACKSTOP_MARGIN_MS = 5000;
+  function _clearBackstop(reqId) {
+    clearTimeout(_backstops[reqId] && _backstops[reqId].timer);
+    delete _backstops[reqId];
+  }
 
   // ─── Receive responses from content script ───
 
@@ -17,7 +27,11 @@
     if (!cb) return;
 
     if (msg.handler === 'xmlhttpRequest') {
-      if (msg.event === 'load') {
+      // A body slice the relay is delivering: alive, so not yet out of time.
+      if (msg.event === 'slice' && _backstops[msg.reqId]) {
+        _backstops[msg.reqId].arm(RELAY_SLICE_WAIT_MS);
+      } else if (msg.event === 'load') {
+        _clearBackstop(msg.reqId);
         let response = msg.data;
         if (cb._responseType === 'arraybuffer' && typeof response === 'string') {
           // Fast base64 decode: TextEncoder latin1 roundtrip via atob+string
@@ -36,9 +50,11 @@
         });
         delete _pending[msg.reqId];
       } else if (msg.event === 'error') {
+        _clearBackstop(msg.reqId);
         if (cb.onerror) cb.onerror({ error: msg.error });
         delete _pending[msg.reqId];
       } else if (msg.event === 'timeout') {
+        _clearBackstop(msg.reqId);
         if (cb.ontimeout) cb.ontimeout({});
         delete _pending[msg.reqId];
       }
@@ -278,20 +294,38 @@
       opts._responseType = opts.responseType;
       _pending[reqId] = opts;
       let aborted = false;
+      // Terminal on this side the moment it runs: the pending entry is
+      // dropped, so a load or error already in flight finds no callback and
+      // is ignored, and the relay cancels the fetch itself so the request
+      // stops rather than merely stopping being listened to.
+      const cancel = (callback) => {
+        const handlers = _pending[reqId];
+        delete _pending[reqId];
+        _clearBackstop(reqId);
+        gmPost('abortRequest', { target: reqId });
+        if (handlers[callback]) handlers[callback]({});
+      };
+      // Settles a request the relay never answers, as ontimeout, once the
+      // relay's own bound (read as the worker reads it) has had its margin;
+      // each slice of a body the relay is delivering re-arms it for the
+      // relay's wait on the next.
+      const relayMs = typeof opts.timeout === 'number' && opts.timeout > 0
+        ? opts.timeout : RELAY_TIMEOUT_MS;
+      const backstop = _backstops[reqId] = {
+        arm(atLeastMs) {
+          clearTimeout(backstop.timer);
+          backstop.timer = setTimeout(() => cancel('ontimeout'),
+            Math.max(atLeastMs, relayMs) + BACKSTOP_MARGIN_MS);
+        },
+      };
+      backstop.arm(0);
       return {
-        // Terminal on this side the moment it is called: the pending entry is
-        // dropped, so a load or error already in flight finds no callback and
-        // is ignored, and the relay cancels the fetch itself so the request
-        // stops rather than merely stopping being listened to. Idempotent —
-        // a second call, or one after the request already settled, has
-        // nothing left to cancel and says nothing to the relay.
+        // Idempotent: a second call, or one after the request already
+        // settled, has nothing left to cancel and says nothing to the relay.
         abort: function() {
           if (aborted || !_pending[reqId]) return;
           aborted = true;
-          const handlers = _pending[reqId];
-          delete _pending[reqId];
-          gmPost('abortRequest', { target: reqId });
-          if (handlers.onabort) handlers.onabort({});
+          cancel('onabort');
         },
       };
     },

@@ -291,7 +291,7 @@ const relayContext = vm.createContext(countedPerformance({
   TextEncoder,
   atob,
   btoa,
-  setTimeout: () => 1,
+  setTimeout: () => 1, clearTimeout() {},
   setInterval: () => 1,
   clearInterval() {},
   console: { log() {}, error() {} },
