@@ -562,6 +562,10 @@ UNWITNESSED_GUARDS = {
 # reports as stale.
 STATED_GAPS = {}
 
+CLIENT_READS_THE_REASON = ('tests/test_mcp_live_tools.py::'
+                           'test_a_client_reads_why_a_tool_failed_and_never'
+                           '_a_crash')
+
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own
     # code reaches, compared both ways: an undeclared raise and a stale
@@ -572,6 +576,11 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_mcp.server', 'start_in_thread', "_start_state['started']",
      'tests/test_mcp_server_serve.py::'
      'test_start_in_thread_rejects_a_second_start'),
+    ('daedalus_mcp.server', 'call_tool',
+     'type(refusal) not in CARRIED_REFUSALS', CLIENT_READS_THE_REASON),
+    ('daedalus_mcp.server', 'call_tool',
+     "raise ToolError(f'{crash}: {CARRIED_REFUSALS[type(refusal)]}"
+     "{refusal}') from refusal", CLIENT_READS_THE_REASON),
     ('daedalus_mcp.transport', 'close_current_loop_clients',
      'isinstance(outcome, BaseException)',
      'tests/test_mcp_transport.py::test_closing_reports_the_first_'
