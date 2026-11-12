@@ -528,15 +528,15 @@ def guard_shape_probe(directory, source=GUARD_SHAPES, name='guard_shapes'):
 
 
 UNWITNESSED_GUARDS = {
-    # Per REGISTERED TOOL, keyed by the same (module, function, condition)
-    # triple the scan spells, so an entry cannot exempt a same-named function
-    # in another module. A stale entry - unreachable, or already witnessed by
-    # the tool's own case - is refused. navigate, reload, title and url each
-    # hand _send_eval a constant id and code, so neither guard can fire from
-    # them; ping's and segment_status's branches read a poll body / HTTP
-    # status the refusal driver cannot set, and are pinned by
-    # test_ping_raises_the_bridge_error and the two named
-    # test_segment_status_refuses_* tests.
+    # Per REGISTERED TOOL, keyed by the (module, function, condition) triple
+    # the scan spells, so an entry cannot exempt a same-named function in
+    # another module; a stale entry (unreachable, or witnessed by the tool's
+    # own case) is refused. navigate, reload, title and url hand _send_eval a
+    # constant id and code, so neither guard fires from them. ping's,
+    # segment_status's and the tab openers' branches need a poll body, HTTP
+    # status or expired wait the refusal driver cannot set; they are pinned by
+    # test_ping_raises_the_bridge_error, the test_segment_status_refuses_*
+    # pair and test_a_client_reads_why_a_tool_failed_and_never_a_crash.
     'navigate': {('daedalus_mcp.tools_eval', '_send_eval', 'not cmd_id'),
                  ('daedalus_mcp.tools_eval', '_send_eval', 'not code')},
     'reload': {('daedalus_mcp.tools_eval', '_send_eval', 'not cmd_id'),
@@ -554,6 +554,9 @@ UNWITNESSED_GUARDS = {
         ('daedalus_mcp.tools_media', 'segment_status',
          'found.status_code == 409'),
     },
+    **dict.fromkeys(('open_tab', 'open_tabs'), {(
+        'daedalus_mcp.tools_tabs', '_unconfirmed', 'raise TimeoutError('
+        'UNCONFIRMED.format(unanswered, opened)) from unanswered')}),
 }
 
 # The site keys whose table row cites None, each to the issue that tracks
@@ -562,9 +565,8 @@ UNWITNESSED_GUARDS = {
 # reports as stale.
 STATED_GAPS = {}
 
-CLIENT_READS_THE_REASON = ('tests/test_mcp_live_tools.py::'
-                           'test_a_client_reads_why_a_tool_failed_and_never'
-                           '_a_crash')
+CARRY = ('tests/test_mcp_live_tools.py::test_a_client_reads_why_a_tool_'
+         'failed_and_never_a_crash')
 
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own
@@ -576,18 +578,16 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_mcp.server', 'start_in_thread', "_start_state['started']",
      'tests/test_mcp_server_serve.py::'
      'test_start_in_thread_rejects_a_second_start'),
-    ('daedalus_mcp.server', 'call_tool',
-     'not _carried(refusal)', CLIENT_READS_THE_REASON),
+    ('daedalus_mcp.server', 'call_tool', 'not _carried(refusal)', CARRY),
     ('daedalus_mcp.server', 'call_tool',
      "raise ToolError(f'{crash}: {CARRIED_REFUSALS[type(refusal)]}"
-     "{refusal}') from refusal", CLIENT_READS_THE_REASON),
+     "{refusal}') from refusal", CARRY),
     ('daedalus_mcp.transport', 'close_current_loop_clients',
      'isinstance(outcome, BaseException)',
      'tests/test_mcp_transport.py::test_closing_reports_the_first_'
      'client_close_failure_after_closing_all'),
-    ('daedalus_mcp.transport', 'token', 'not t',
-     'tests/test_mcp_transport_guards.py::test_empty_token_context_is_'
-     'rejected'),
+    ('daedalus_mcp.transport', 'token', 'not t', 'tests/test_mcp_transport_'
+     'guards.py::test_empty_token_context_is_rejected'),
     ('daedalus_mcp.transport', 'poll_result',
      "raise TimeoutError(f'no result within {timeout}s')",
      'tests/test_mcp_transport_guards.py::'
