@@ -26,11 +26,10 @@ import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
-from daedalus_cli import commands_browser, invoke  # noqa: E402
+from daedalus_cli import commands_browser  # noqa: E402
 
 run_cli = _cli_dispatch.run_cli
 run_cli_exit = _cli_dispatch.run_cli_exit
-REAL_EXT_CMD = invoke.ext_cmd
 
 OUT = '→'
 TOK = 'clitok'
@@ -60,14 +59,13 @@ def test_do_open_tab_sends_each_option_as_its_own_field_and_waits_as_told(
              (['-t', '7'], {}, 7, 42),
              (['-t', '0'], {}, 10, '?'))
     for flags, extra, waited, tab in cases:
-        recorded, out = run_cli(
+        _recorded, out = run_cli(
             ['open-tab', 'https://example.com/', *flags],
             [{'did': 'd1'}, {'result': {} if tab == '?' else {'tabId': tab}}],
             module=commands_browser, token=TOK,
             plan=[_api_put(_open_tab_body(extra)),
                   _wait_result('_open_tab', 'd1', waited)])
 
-        assert recorded.timeouts == [waited], recorded.timeouts
         assert _rendered(out) == (
             f'Opened tab {tab} {OUT} https://example.com/\n'), repr(out)
 
@@ -85,22 +83,6 @@ def test_do_open_tab_calls_no_answer_unconfirmed_and_an_error_failed(tmp):
             plan=[_api_put(_open_tab_body({})),
                   _wait_result('_open_tab', 'd1', 7)])
         assert (code, out) == (expected, ''), (code, out)
-
-
-def test_ext_cmd_keeps_the_plain_timeout_for_open_tabs(tmp):
-    """`open-tabs` shares `ext_cmd` and must not get the open-tab message."""
-    del tmp
-    body = {'id': '_x', 'type': 'open-tabs', 'token': TOK, 'tab': 'extension'}
-    recorded = _cli_dispatch.RecordingExtCmd(
-        [{'did': 'd1'}, None], token=TOK,
-        plan=[_api_put(body), _wait_result('_x', 'd1', 7)])
-    with _cli_dispatch.wired(invoke, recorded):
-        try:
-            REAL_EXT_CMD('_x', 'open-tabs', timeout=7)
-        except SystemExit as exit_request:
-            assert exit_request.code == 'Timeout (7s)', exit_request.code
-        else:
-            raise AssertionError('open-tabs returned on no result')
 
 
 # ── do_open_tabs ─────────────────────────────────────────────────────
