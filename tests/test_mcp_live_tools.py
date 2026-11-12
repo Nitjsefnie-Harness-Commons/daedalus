@@ -585,7 +585,8 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
         ('result', None), ('result', None),
         ('open_tab', unknown(10.0, 'tab')), ('open_tabs', unknown(30, 'tabs'))]
     for answer, (tool, reason) in zip(answers, expected, strict=True):
-        text, sdk = answer.content[0].text, f'Error executing tool {tool}'
+        [text] = [getattr(item, 'text', '') for item in answer.content]
+        sdk = f'Error executing tool {tool}'
         assert answer.is_error and (text == sdk if reason is None else (
             text.startswith(f'{sdk}: ') and text.endswith(reason))), text
 
