@@ -14,7 +14,9 @@
   const BACKSTOP_MARGIN_MS = 5000;
   // A timer converts its delay to int32: a longer one fires at once.
   const TIMER_MAX_MS = 2 ** 31 - 1;
-  function _clearBackstop(reqId) {
+  // Before any callback runs, so an abort() from inside one finds nothing.
+  function _settle(reqId) {
+    delete _pending[reqId];
     clearTimeout(_backstops[reqId] && _backstops[reqId].timer);
     delete _backstops[reqId];
   }
@@ -31,7 +33,7 @@
       if (msg.event === 'slice' && _backstops[msg.reqId]) {
         _backstops[msg.reqId].arm(RELAY_SLICE_WAIT_MS);
       } else if (msg.event === 'load') {
-        _clearBackstop(msg.reqId);
+        _settle(msg.reqId);
         let response = msg.data;
         if (cb._responseType === 'arraybuffer' && typeof response === 'string') {
           // Fast base64 decode: TextEncoder latin1 roundtrip via atob+string
@@ -48,15 +50,12 @@
           responseText: typeof response === 'string' ? response : undefined,
           finalUrl: msg.finalUrl || '',
         });
-        delete _pending[msg.reqId];
       } else if (msg.event === 'error') {
-        _clearBackstop(msg.reqId);
+        _settle(msg.reqId);
         if (cb.onerror) cb.onerror({ error: msg.error });
-        delete _pending[msg.reqId];
       } else if (msg.event === 'timeout') {
-        _clearBackstop(msg.reqId);
+        _settle(msg.reqId);
         if (cb.ontimeout) cb.ontimeout({});
-        delete _pending[msg.reqId];
       }
     } else if (msg.handler === 'openInTab') {
       delete _pending[msg.reqId];
@@ -300,8 +299,7 @@
       // stops rather than merely stopping being listened to.
       const cancel = (callback) => {
         const handlers = _pending[reqId];
-        delete _pending[reqId];
-        _clearBackstop(reqId);
+        _settle(reqId);
         gmPost('abortRequest', { target: reqId });
         if (handlers[callback]) handlers[callback]({});
       };

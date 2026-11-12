@@ -426,15 +426,17 @@ const timeouts = { 'lost-default': undefined, 'lost-text': '50',
 var handle = windowObject.GM.xmlhttpRequest({
   url: 'about:blank#slow', timeout: mode in timeouts ? timeouts[mode] : 50,
   responseType: mode === 'sliced' ? 'arraybuffer' : undefined,
+  // Each settling callback calls abort(), which must then do nothing.
   onabort: () => events.push('abort'),
   onload: (detail) => {
-    loadDetail = detail; events.push('load');
+    loadDetail = detail; events.push('load'); handle.abort();
     const text = typeof detail.response === 'string';
     body = { text, same: Buffer.from(text ? detail.response
       : new Uint8Array(detail.response || 0)).equals(sliceBody()) };
   },
-  onerror: (detail) => events.push('error:' + (detail && detail.error)),
-  ontimeout: () => events.push('timeout'),
+  onerror: (detail) => {
+    events.push('error:' + (detail && detail.error)); handle.abort(); },
+  ontimeout: () => (events.push('timeout'), handle.abort()),
 });
 flushMessages();
 if (mode.startsWith('lost')) {
