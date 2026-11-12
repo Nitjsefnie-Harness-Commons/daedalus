@@ -69,24 +69,19 @@ function send(message) {
     }), true);
   });
 }
-function abort(id) {
-  chrome.runtime.onMessage.listeners[0](
-    { type: 'abortFetch', fetchId: String(id) }, {}, () => {});
-}
-function relay() {
+const abort = (id) => chrome.runtime.onMessage.listeners[0](
+  { type: 'abortFetch', fetchId: String(id) }, {}, () => {});
+function relay(timeout = 60000 + answers.length) {
   const id = String(answers.length);
   answers.push(send({ type: 'fetch', fetchId: id,
     url: 'https://example.com/relay', responseType: 'arraybuffer',
-    timeout: 60000 + Number(id), headers: { 'X-Relay-Id': id } }));
+    timeout, headers: { 'X-Relay-Id': id } }));
 }
-function finish(index, fail = false) {
-  if (fail) started[index].reject(Error('relay failed'));
-  else started[index].resolve(new Response('body'));
-}
+const finish = (index, fail = false) => (fail ? started[index].reject(
+  Error('relay failed')) : started[index].resolve(new Response('body')));
 async function finishAll() {
   for (let turn = 0; turn < 12; turn++) {
-    for (let i = 0; i < started.length; i++) finish(i);
-    await delay();
+    for (let i = 0; i < started.length; i++) finish(i); await delay();
   }
   assert.equal(completed.length, answers.length, 'terminal answer count');
   assert.equal(new Set(completed.map((r) => r.id)).size, answers.length);
@@ -241,6 +236,11 @@ async function evalPending() {
 }
 (async () => {
   await delay();
+  // The delays the worker arms for a fetch the page sent with no timeout.
+  if (mode === 'default') {
+    relay(0); await delay();
+    return process.stdout.write(JSON.stringify([...timers].map((t) => t.ms)));
+  }
   if (mode.includes(':')) {
     const [group, kind] = mode.split(':');
     await (group === 'withdraw' ? withdrawal(kind)
@@ -375,10 +375,8 @@ const context = {
 context.globalThis = context;
 function loadPage(extra = {}) {
   Object.assign(context, extra);
-  for (const path of [contentPath, pagePath]) {
-    vm.runInNewContext(fs.readFileSync(path, 'utf8'), context,
-      { filename: path });
-  }
+  for (const path of [contentPath, pagePath]) vm.runInNewContext(
+    fs.readFileSync(path, 'utf8'), context, { filename: path });
 }
 function flushMessages() {
   for (let guard = 0; messages.length && guard++ < 100;) {
@@ -402,7 +400,8 @@ def _run_page_harness(harness, *args):
 
 
 _FETCH_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
-const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
+const [contentPath, pagePath, responseText, mode, relayMs] =
+  process.argv.slice(1);
 function backgroundAnswer() { return JSON.parse(responseText); }
 // A fake clock reading a delay as int32, as browsers do; advance(ms) fires
 // each timer falling due, in due order.
@@ -441,7 +440,8 @@ var handle = windowObject.GM.xmlhttpRequest({
 flushMessages();
 if (mode.startsWith('lost')) {
   // Unanswered: pending just inside its bound, settled once at it.
-  advance(({ lost: 5050, 'lost-max': 2 ** 31 - 1 }[mode] || 65000) - 1);
+  const bound = { lost: 5050, 'lost-max': 2 ** 31 - 1 }[mode];
+  advance((bound || Number(relayMs) + 5000) - 1);
   early = events.length; advance(1); handle.abort(); flushMessages();
   held({ status: 200, data: 'late', headers: {} }); flushMessages();
 }
@@ -499,9 +499,12 @@ _PAGE_ANSWERS = (
 
 def test_each_worker_answer_reaches_the_page_as_its_own_event(tmp):
     del tmp
+    [relay_ms] = json.loads(run_node_argv(shutil.which('node'), [
+        '-e', _RELAY_ADMISSION_HARNESS,
+        str(EXTENSION_ROOT / 'background.js'), 'default'], ROOT).stdout)
     for answer, mode, expected in _PAGE_ANSWERS:
         out = _run_page_harness(
-            _FETCH_RELAY_HARNESS, json.dumps(answer), mode)
+            _FETCH_RELAY_HARNESS, json.dumps(answer), mode, str(relay_ms))
         seen = {**out, **(out['loadDetail'] or {})}
         expected = {'requestedTimeout': 50, **expected}
         assert {key: seen[key] for key in expected} == expected, (mode, out)
@@ -518,9 +521,7 @@ loadPage();
   if (isPromise) returned.then(() => { settled = 'resolved'; },
     () => { settled = 'rejected'; });
   // Let the write settle, then deliver what the content script posted back.
-  for (let turn = 0; turn < 10; turn++) {
-    await Promise.resolve(); flushMessages();
-  }
+  for (let t = 0; t < 10; t++) { await Promise.resolve(); flushMessages(); }
   await Promise.resolve();
   process.stdout.write(JSON.stringify({
     isPromise, settled, writes,
