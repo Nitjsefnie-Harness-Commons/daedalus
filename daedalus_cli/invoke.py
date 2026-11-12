@@ -52,6 +52,9 @@ def ext_cmd(cmd_id, cmd_type, timeout=10, **fields):
     sent = api('PUT', '/command', cmd)
     res = wait_for_result(cmd_id, 'extension', sent.get('did'), timeout)
     if res is None:
+        if cmd_type == 'open-tab':
+            sys.exit(f'Timeout ({timeout}s), outcome unknown: the tab may '
+                     'have opened. Run `tabs` to check before retrying.')
         sys.exit(f'Timeout ({timeout}s)')
     if res.get('error'):
         sys.exit(f'Error: {res["error"]}')
