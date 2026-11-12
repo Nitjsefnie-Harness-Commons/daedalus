@@ -166,8 +166,7 @@ async function priority(kind) {
   const first = deferred(), second = deferred();
   if (kind === 'first' || kind === 'last') {
     const a = commandRun(() => first.promise);
-    const b = commandRun(() => second.promise);
-    relay();
+    const b = commandRun(() => second.promise); relay();
     const early = kind === 'first' ? first : second;
     early.resolve(); await (kind === 'first' ? a : b); await delay();
     assert.equal(started.length, 2, 'one command released another hold');
@@ -353,8 +352,8 @@ const chrome = {
           hooks.forEach((hook) => hook({ type: 'gm-slice', at, size, data,
             fetchId: payload.fetchId }, {}, (ack) => acks.push(ack)));
           if (mode === 'sliced-abort') handle.abort();
-          // Inside the relay's next slice wait (10 s) plus the page's margin.
-          advance(mode === 'sliced-expire' ? 15000 : 14999);
+          // Just inside the re-arm: slice wait or timeout, plus the margin.
+          advance(Math.max(1e4, timeout) + 4999 + (mode === 'sliced-expire'));
         }
         callback({ status: 200, headers: {},
           chunked: size + (mode === 'sliced-short') });
@@ -420,11 +419,12 @@ loadPage({ clearTimeout: (id) => timers.delete(id), setTimeout: (fn, ms) =>
   (timers.set(++timerIds, { fn, at: now + Math.max(ms | 0, 0) }), timerIds) });
 const events = []; let loadDetail = null, body = null, early;
 // No timeout and one the relay does not read as one (both its default),
-// and the largest delay a timer takes.
+// the largest delay a timer takes, and one past the 10 s slice wait.
 const timeouts = { 'lost-default': undefined, 'lost-text': '50',
-  'lost-max': 2 ** 31 - 1 };
+  'lost-max': 2 ** 31 - 1, 'sliced-text': 30000 };
+const timeout = mode in timeouts ? timeouts[mode] : 50;
 var handle = windowObject.GM.xmlhttpRequest({
-  url: 'about:blank#slow', timeout: mode in timeouts ? timeouts[mode] : 50,
+  url: 'about:blank#slow', timeout,
   responseType: mode === 'sliced' ? 'arraybuffer' : undefined,
   // Each settling callback calls abort(), which must then do nothing.
   onabort: () => events.push('abort'),
@@ -449,9 +449,7 @@ advance(1e5);
 
 // The content script arms a keepalive timer that would hold the event loop
 // open forever; exit once the answer has actually been flushed.
-process.stdout.write(JSON.stringify({
-  events,
-  loadDetail,
+process.stdout.write(JSON.stringify({ events, loadDetail,
   relayed: posted.filter((m) => m.direction === 'daedalus-bg-to-page')
     .map((m) => m.event),
   requestedTimeout: (sent.find((m) => m.type === 'fetch') || {}).timeout,
@@ -485,7 +483,7 @@ _PAGE_ANSWERS = (
                       'acks': [True] * 3, 'transferred': 1}),
     (None, 'sliced-text', {'events': ['load'], 'acks': [True] * 3,
                            'body': {**_SLICED, 'text': True},
-                           'transferred': 0}),
+                           'transferred': 0, 'requestedTimeout': 30000}),
     (None, 'sliced-short', {
         'events': ['error:relay body arrived incomplete']}),
     (None, 'sliced-abort', {'events': ['abort'],
@@ -526,9 +524,8 @@ loadPage();
   await Promise.resolve();
   process.stdout.write(JSON.stringify({
     isPromise, settled, writes,
-    acknowledged: posted
-      .filter((m) => m.direction === 'daedalus-bg-to-page'
-        && m.handler === 'setClipboard')
+    acknowledged: posted.filter((m) => m.direction === 'daedalus-bg-to-page'
+      && m.handler === 'setClipboard')
       .map((m) => ({ error: m.error || null })),
   }), () => process.exit(0));
 })();
@@ -596,15 +593,11 @@ def test_a_download_that_never_started_reaches_onerror(tmp):
         assert actual['events'] == [expected], (mode, actual)
     actual = _run_page_harness(_DOWNLOAD_RELAY_HARNESS, 'fire-and-forget')
     assert actual == {
-        'sent': [
-            {'type': 'openTab', 'url': 'about:blank', 'active': False},
-            {'type': 'notification', 'title': 'Run finished',
-             'text': 'Nothing failed.'},
-        ],
-        'acknowledged': [
-            {'handler': 'openInTab', 'error': None},
-            {'handler': 'notification', 'error': None},
-        ],
+        'sent': [{'type': 'openTab', 'url': 'about:blank', 'active': False},
+                 {'type': 'notification', 'title': 'Run finished',
+                  'text': 'Nothing failed.'}],
+        'acknowledged': [{'handler': handler, 'error': None}
+                         for handler in ('openInTab', 'notification')],
     }, actual
 
 
