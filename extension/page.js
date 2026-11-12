@@ -7,11 +7,10 @@
 
   const _pending = {};
   let _reqId = 0;
-  // A GM.xmlhttpRequest's own bound, by request id: see GM.xmlhttpRequest.
   const _backstops = {};
   // The relay's default fetch timeout and its wait on each body slice.
   const RELAY_TIMEOUT_MS = 60000, RELAY_SLICE_WAIT_MS = 10000;
-  // Covers the relay's timer starting after the hop and a worker wake-up.
+  // For the relay's timer starting a hop and a worker wake-up later.
   const BACKSTOP_MARGIN_MS = 5000;
   function _clearBackstop(reqId) {
     clearTimeout(_backstops[reqId] && _backstops[reqId].timer);
@@ -27,7 +26,6 @@
     if (!cb) return;
 
     if (msg.handler === 'xmlhttpRequest') {
-      // A body slice the relay is delivering: alive, so not yet out of time.
       if (msg.event === 'slice' && _backstops[msg.reqId]) {
         _backstops[msg.reqId].arm(RELAY_SLICE_WAIT_MS);
       } else if (msg.event === 'load') {
@@ -305,10 +303,8 @@
         gmPost('abortRequest', { target: reqId });
         if (handlers[callback]) handlers[callback]({});
       };
-      // Settles a request the relay never answers, as ontimeout, once the
-      // relay's own bound (read as the worker reads it) has had its margin;
-      // each slice of a body the relay is delivering re-arms it for the
-      // relay's wait on the next.
+      // Settles a request the relay never answers, as ontimeout, past the
+      // relay's own bound as the worker reads it; each slice re-arms it.
       const relayMs = typeof opts.timeout === 'number' && opts.timeout > 0
         ? opts.timeout : RELAY_TIMEOUT_MS;
       const backstop = _backstops[reqId] = {
@@ -320,8 +316,7 @@
       };
       backstop.arm(0);
       return {
-        // Idempotent: a second call, or one after the request already
-        // settled, has nothing left to cancel and says nothing to the relay.
+        // Idempotent: once settled there is nothing left to cancel.
         abort: function() {
           if (aborted || !_pending[reqId]) return;
           aborted = true;
