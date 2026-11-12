@@ -12,6 +12,8 @@
   const RELAY_TIMEOUT_MS = 60000, RELAY_SLICE_WAIT_MS = 10000;
   // For the relay's timer starting a hop and a worker wake-up later.
   const BACKSTOP_MARGIN_MS = 5000;
+  // A timer converts its delay to int32: a longer one fires at once.
+  const TIMER_MAX_MS = 2 ** 31 - 1;
   function _clearBackstop(reqId) {
     clearTimeout(_backstops[reqId] && _backstops[reqId].timer);
     delete _backstops[reqId];
@@ -311,7 +313,8 @@
         arm(atLeastMs) {
           clearTimeout(backstop.timer);
           backstop.timer = setTimeout(() => cancel('ontimeout'),
-            Math.max(atLeastMs, relayMs) + BACKSTOP_MARGIN_MS);
+            Math.min(Math.max(atLeastMs, relayMs) + BACKSTOP_MARGIN_MS,
+              TIMER_MAX_MS));
         },
       };
       backstop.arm(0);
