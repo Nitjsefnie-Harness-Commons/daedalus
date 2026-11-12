@@ -72,18 +72,19 @@ def test_do_open_tab_sends_each_option_as_its_own_field_and_waits_as_told(
             f'Opened tab {tab} {OUT} https://example.com/\n'), repr(out)
 
 
-def test_do_open_tab_calls_an_unanswered_open_tab_unconfirmed(tmp):
+def test_do_open_tab_calls_no_answer_unconfirmed_and_an_error_failed(tmp):
     """No answer in time is an unknown outcome, not a plain failure."""
     del tmp
-    code, out = run_cli_exit(
-        ['open-tab', 'https://example.com/', '-t', '7'], [{'did': 'd1'}, None],
-        module=commands_browser, token=TOK,
-        plan=[_api_put(_open_tab_body({})),
-              _wait_result('_open_tab', 'd1', 7)])
-
-    assert code == ('Timeout (7s), outcome unknown: the tab may have opened. '
-                    'Run `tabs` to check before retrying.'), code
-    assert out == '', repr(out)
+    for answer, expected in (
+            (None, 'Timeout (7s), outcome unknown: the tab may have opened. '
+                   'Run `tabs` to check before retrying.'),
+            ({'error': 'tabs.create refused'}, 'Error: tabs.create refused')):
+        code, out = run_cli_exit(
+            ['open-tab', 'https://example.com/', '-t', '7'],
+            [{'did': 'd1'}, answer], module=commands_browser, token=TOK,
+            plan=[_api_put(_open_tab_body({})),
+                  _wait_result('_open_tab', 'd1', 7)])
+        assert (code, out) == (expected, ''), (code, out)
 
 
 def test_ext_cmd_keeps_the_plain_timeout_for_open_tabs(tmp):
