@@ -486,7 +486,7 @@ _PAGE_ANSWERS = (
                            'transferred': 0, 'requestedTimeout': 30000}),
     (None, 'sliced-short', {
         'events': ['error:relay body arrived incomplete']}),
-    (None, 'sliced-abort', {'events': ['abort'],
+    (None, 'sliced-abort', {'events': ['abort'], 'aborts': [1, 1],
                             'acks': [True, False, False]}),
     *((None, mode, {'events': ['timeout'], 'early': 0, 'aborts': [1, 1],
                     'requestedTimeout': sent}) for mode, sent in (
@@ -506,7 +506,7 @@ def test_each_worker_answer_reaches_the_page_as_its_own_event(tmp):
         out = _run_page_harness(
             _FETCH_RELAY_HARNESS, json.dumps(answer), mode, str(relay_ms))
         seen = {**out, **(out['loadDetail'] or {})}
-        expected = {'requestedTimeout': 50, **expected}
+        expected = {'requestedTimeout': 50, 'aborts': [0, 0], **expected}
         assert {key: seen[key] for key in expected} == expected, (mode, out)
 
 
