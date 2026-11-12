@@ -566,15 +566,24 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
             ('segment_status', {'job': '..'})))
         closed = httpx.AsyncClient()
         asyncio.run(closed.aclose())
-        # httpx's RuntimeError, then a ValueError subclass raised in our frame.
-        for seam, double in (('http_client', mock.Mock(return_value=closed)),
-                             ('auth', partial(b'\xff'.decode, 'ascii'))):
+        # httpx's RuntimeError, a ValueError subclass raised in our frame,
+        # then tab-opening waits whose clock leaps past their deadline.
+        for seam, double, *calls in (
+                ('http_client', lambda: closed, ('result', {})),
+                ('auth', partial(b'\xff'.decode, 'ascii'), ('result', {})),
+                ('monotonic', mock.Mock(side_effect=range(0, 2**40, 2**30)),
+                 ('open_tab', {'url': 'about:blank'}),
+                 ('open_tabs', {'urls': ['about:blank']}))):
             with mock.patch.object(mod.bridge, seam, double):
-                answers += asyncio.run(read(('result', {})))
+                answers += asyncio.run(read(*calls))
+    unknown = ('timed out: no result within {}s, outcome unknown: the {} '
+               'may have opened. Call `list_tabs` to check before retrying.'
+               ).format
     expected = [('exec', 'timed out: no result within 0.5s'), ('exec', (
         'timeout must be a finite positive number of seconds; got 0.0')),
         ('segment_status', "no job named 'absent'"), ('segment_status', None),
-        ('result', None), ('result', None)]
+        ('result', None), ('result', None),
+        ('open_tab', unknown(10.0, 'tab')), ('open_tabs', unknown(30, 'tabs'))]
     for answer, (tool, reason) in zip(answers, expected, strict=True):
         text, sdk = answer.content[0].text, f'Error executing tool {tool}'
         assert answer.is_error and (text == sdk if reason is None else (

@@ -1,7 +1,19 @@
 """Tabs tools for the Daedalus MCP front end."""
 
+UNCONFIRMED = ('{}, outcome unknown: the {} may have opened. Call `list_tabs` '
+               'to check before retrying.')
+
 
 def register(mcp, bridge):
+    async def _unconfirmed(opened, *args, **kwargs):
+        """`bridge.ext_cmd`, except that no result in time is an unknown
+        outcome: the extension may have opened `opened` already."""
+        try:
+            return await bridge.ext_cmd(*args, **kwargs)
+        except TimeoutError as unanswered:
+            raise TimeoutError(
+                UNCONFIRMED.format(unanswered, opened)) from unanswered
+
     @mcp.tool()
     async def list_tabs() -> list[dict]:
         """List active Daedalus-registered Chrome tabs, each with the age of
@@ -20,8 +32,8 @@ def register(mcp, bridge):
             fields['active'] = False
         if pinned:
             fields['pinned'] = True
-        return await bridge.ext_cmd(
-            '_open_tab', 'open-tab', include_roundtrip=True, wait=wait,
+        return await _unconfirmed(
+            'tab', '_open_tab', 'open-tab', include_roundtrip=True, wait=wait,
             **fields)
 
     @mcp.tool()
@@ -37,9 +49,9 @@ def register(mcp, bridge):
             fields['active'] = False
         if pinned:
             fields['pinned'] = True
-        return await bridge.ext_cmd(
-            '_open_tabs', 'open-tabs', timeout=30, include_roundtrip=True,
-            wait=wait, **fields)
+        return await _unconfirmed(
+            'tabs', '_open_tabs', 'open-tabs', timeout=30,
+            include_roundtrip=True, wait=wait, **fields)
 
     @mcp.tool()
     async def focus_tab(chrome_tab: int,
