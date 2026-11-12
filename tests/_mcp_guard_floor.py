@@ -577,7 +577,7 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'tests/test_mcp_server_serve.py::'
      'test_start_in_thread_rejects_a_second_start'),
     ('daedalus_mcp.server', 'call_tool',
-     'type(refusal) not in CARRIED_REFUSALS', CLIENT_READS_THE_REASON),
+     'not _carried(refusal)', CLIENT_READS_THE_REASON),
     ('daedalus_mcp.server', 'call_tool',
      "raise ToolError(f'{crash}: {CARRIED_REFUSALS[type(refusal)]}"
      "{refusal}') from refusal", CLIENT_READS_THE_REASON),

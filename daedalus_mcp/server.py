@@ -73,6 +73,20 @@ CARRIED_REFUSALS = {
     ValueError: '', RuntimeError: '', TimeoutError: 'timed out: '}
 
 
+def _carried(error):
+    """Whether `error` is a refusal: exactly a carried type, raised in this
+    package. The innermost frame names the raiser, so a library's error of
+    the same type (httpx's RuntimeError on a closed client) stays a crash.
+    """
+    if type(error) not in CARRIED_REFUSALS:
+        return False
+    raised = error.__traceback__
+    while raised.tb_next is not None:
+        raised = raised.tb_next
+    return raised.tb_frame.f_globals.get('__name__', '').startswith(
+        'daedalus_mcp.')
+
+
 class ReasonCarryingServer(MCPServer):
     """MCPServer whose tool refusals reach the client with their reason.
 
@@ -85,7 +99,7 @@ class ReasonCarryingServer(MCPServer):
             return await super().call_tool(name, arguments, context)
         except UnexpectedToolError as crash:
             refusal = crash.__cause__
-            if type(refusal) not in CARRIED_REFUSALS:
+            if not _carried(refusal):
                 raise
             raise ToolError(
                 f'{crash}: {CARRIED_REFUSALS[type(refusal)]}{refusal}'
