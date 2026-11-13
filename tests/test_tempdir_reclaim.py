@@ -122,9 +122,11 @@ def test_every_browser_launch_keeps_chromium_temp_files_in_the_run(tmp):
     root = str(Path(tmp).parent)  # the run's own root, which owns `tmp`
     expected = dict(os.environ, **dict.fromkeys(
         ('TMPDIR', 'TMP', 'TEMP', 'MAC_CHROMIUM_TMPDIR'), root))
-    # Linux Chromium aborts once TMPDIR/org.chromium.Chromium.XXXXXX/
-    # SingletonSocket reaches the 108-byte sun_path.
-    assert len(root + '/org.chromium.Chromium.XXXXXX/SingletonSocket') < 108
+    # Chromium's singleton socket, TMPDIR/org.chromium.Chromium.XXXXXX/
+    # SingletonSocket, must fit sun_path: under 108 bytes on Linux, at most
+    # 253 on macOS (process_singleton_posix.cc); Windows has none.
+    limit = {'linux': 107, 'darwin': 253}.get(sys.platform, float('inf'))
+    assert len(root + '/org.chromium.Chromium.XXXXXX/SingletonSocket') <= limit
     # Never the environment itself in a message: it carries credentials.
     assert len(launched) == 3, len(launched)
     for env in launched:
