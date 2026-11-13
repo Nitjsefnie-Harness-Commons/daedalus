@@ -15,8 +15,7 @@ from _worker_sources import (  # noqa: E402
 
 
 _RELAY_ADMISSION_HARNESS = event_target_stub() + r"""
-const fs = require('fs');
-const vm = require('vm');
+const fs = require('fs'), vm = require('vm');
 const [backgroundPath, mode] = process.argv.slice(1);
 const assert = require('assert/strict');
 const started = [], answers = [], completed = [], timers = new Set();
@@ -70,24 +69,19 @@ function send(message) {
     }), true);
   });
 }
-function abort(id) {
-  chrome.runtime.onMessage.listeners[0](
-    { type: 'abortFetch', fetchId: String(id) }, {}, () => {});
-}
-function relay() {
+const abort = (id) => chrome.runtime.onMessage.listeners[0](
+  { type: 'abortFetch', fetchId: String(id) }, {}, () => {});
+function relay(timeout = 60000 + answers.length) {
   const id = String(answers.length);
   answers.push(send({ type: 'fetch', fetchId: id,
     url: 'https://example.com/relay', responseType: 'arraybuffer',
-    timeout: 60000 + Number(id), headers: { 'X-Relay-Id': id } }));
+    timeout, headers: { 'X-Relay-Id': id } }));
 }
-function finish(index, fail = false) {
-  if (fail) started[index].reject(Error('relay failed'));
-  else started[index].resolve(new Response('body'));
-}
+const finish = (index, fail = false) => (fail ? started[index].reject(
+  Error('relay failed')) : started[index].resolve(new Response('body')));
 async function finishAll() {
   for (let turn = 0; turn < 12; turn++) {
-    for (let i = 0; i < started.length; i++) finish(i);
-    await delay();
+    for (let i = 0; i < started.length; i++) finish(i); await delay();
   }
   assert.equal(completed.length, answers.length, 'terminal answer count');
   assert.equal(new Set(completed.map((r) => r.id)).size, answers.length);
@@ -98,8 +92,7 @@ async function finishAll() {
 async function withdrawal(kind) {
   if (kind === 'pre' || kind === 'pre-held') {
     const held = kind === 'pre-held', count = held ? 8 : 0;
-    for (let i = 0; i < count; i++) relay();
-    await delay();
+    for (let i = 0; i < count; i++) relay(); await delay();
     const pending = held ? commandRun(() => command.promise) : null;
     assert.equal(vm.runInContext('_relayHold', context), held);
     context.AbortController = class extends AbortController {
@@ -115,8 +108,7 @@ async function withdrawal(kind) {
     assert.equal(vm.runInContext('_relayHold', context), held);
     if (pending) { command.resolve(); await pending; }
   } else {
-    for (let i = 0; i < 8; i++) relay();
-    await delay();
+    for (let i = 0; i < 8; i++) relay(); await delay();
     for (let i = 0; i < (kind === 'full' ? 65 : 2); i++) relay();
     await delay();
     if (kind === 'full') {
@@ -169,8 +161,7 @@ async function priority(kind) {
   const first = deferred(), second = deferred();
   if (kind === 'first' || kind === 'last') {
     const a = commandRun(() => first.promise);
-    const b = commandRun(() => second.promise);
-    relay();
+    const b = commandRun(() => second.promise); relay();
     const early = kind === 'first' ? first : second;
     early.resolve(); await (kind === 'first' ? a : b); await delay();
     assert.equal(started.length, 2, 'one command released another hold');
@@ -186,8 +177,7 @@ async function priority(kind) {
     assert.equal(result, kind === 'sync' ? 42 : 'handler failed');
     relay(); await delay();
     assert.equal(started.length, 3, 'handler settlement retained hold');
-    const next = commandRun(() => first.promise);
-    relay(); await delay();
+    const next = commandRun(() => first.promise); relay(); await delay();
     assert.equal(started.length, 3, 'fresh command batch did not hold');
     first.resolve(); await next; await delay();
     assert.equal(started.length, 4, 'fresh batch did not drain');
@@ -220,8 +210,7 @@ async function evalPending() {
     + "chromeTab: 7, code: 'Date.now()'})", context).then(
     () => log.push('posted'));
   started.forEach((r) => r.resolve(new Response(body, { statusText: 'Ok' })));
-  await delay();
-  inject[0].resolve([{ result: true }]); await delay();
+  await delay(); inject[0].resolve([{ result: true }]); await delay();
   inject[1].resolve([{ result: { r: 1, ms: 0 } }]); await posted;
   for (let t = 0; t < 400 && completed.length < 3; t++) await delay();
   const sizes = log.filter(Number.isInteger);
@@ -247,6 +236,14 @@ async function evalPending() {
 }
 (async () => {
   await delay();
+  // The delays the worker arms for a fetch the page sent with no timeout,
+  // then for a page that never takes that fetch's first body slice.
+  if (mode === 'default') {
+    relay(0); await delay();
+    chrome.tabs.sendMessage = () => deferred().promise;
+    started[0].resolve(new Response(new Uint8Array(1 << 20))); await delay();
+    return process.stdout.write(JSON.stringify([...timers].map((t) => t.ms)));
+  }
   if (mode.includes(':')) {
     const [group, kind] = mode.split(':');
     await (group === 'withdraw' ? withdrawal(kind)
@@ -255,31 +252,24 @@ async function evalPending() {
   }
   const full = ['ceiling', 'error', 'abort'].includes(mode);
   const n = full ? 8 : mode === 'idle' ? 0 : 2;
-  for (let i = 0; i < n; i++) relay();
-  await delay();
+  for (let i = 0; i < n; i++) relay(); await delay();
   let settled = false, pending;
   if (!full) {
     pending = mode === 'replay' ? send({ type: 'replayHotfixes' })
       : vm.runInContext("dispatchCommand({type:'reload',tabId:7})", context);
     pending.then(() => { settled = true; });
   }
-  relay();
-  if (mode !== 'settled') relay();
-  await delay();
+  relay(); if (mode !== 'settled') relay(); await delay();
   const queued = started.length;
   if (mode === 'settled') {
     command.resolve({}); await pending; await delay();
     assert.equal(started.length, 3, 'settlement did not drain the waiter');
   }
-  if (n) {
-    if (mode === 'abort') abort(0);
-    else finish(0, mode === 'error');
-  }
-  await delay();
-  const one = started.length;
+  if (n && mode === 'abort') abort(0);
+  else if (n) finish(0, mode === 'error');
+  await delay(); const one = started.length;
   if (mode === 'ceiling') relay();
-  for (let i = 1; i < n; i++) finish(i);
-  await delay();
+  for (let i = 1; i < n; i++) finish(i); await delay();
   const drained = started.length, pendingAtDrain = !!pending && !settled;
   if (mode === 'overlap') {
     pending = Promise.all([pending, vm.runInContext(
@@ -287,13 +277,10 @@ async function evalPending() {
     relay(); await delay();
     assert.equal(started.length, 5, 'commands rearmed a drained hold');
   }
-  if (pending) { command.resolve({}); await pending; }
-  await delay();
-  for (let i = n; i < started.length; i++) finish(i);
-  await delay();
+  if (pending) { command.resolve({}); await pending; } await delay();
+  for (let i = n; i < started.length; i++) finish(i); await delay();
   process.stdout.write(JSON.stringify({ queued, one, drained, pendingAtDrain,
-    startOrder: started.map(({ id }) => id),
-    completed: completed.length,
+    startOrder: started.map(({ id }) => id), completed: completed.length,
     errors: completed.filter((value) => value.error).map((v) => v.error) }));
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
@@ -304,9 +291,8 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
     failures = []
     for mode, queued, one, drained, pending, errors in (
         ('ceiling', 8, 9, 11, False, []),
-        ('command', 2, 2, 4, True, []),
-        ('replay', 2, 2, 4, True, []),
-        ('overlap', 2, 2, 4, True, []),
+        *((mode, 2, 2, 4, True, []) for mode in (
+            'command', 'replay', 'overlap')),
         ('settled', 2, 3, 3, False, []),
         ('idle', 2, 2, 2, True, []),
         ('error', 8, 9, 10, False, ['relay failed']),
@@ -314,9 +300,8 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
         *((mode, 0, 0, 0, False, []) for mode in (
             'withdraw:abort', 'withdraw:timeout', 'withdraw:grant',
             'withdraw:pre', 'withdraw:pre-held', 'withdraw:full',
-            'priority:first', 'priority:last',
-            'priority:throw', 'priority:reject', 'priority:sync',
-            'eval:pending')),
+            'priority:first', 'priority:last', 'priority:throw',
+            'priority:reject', 'priority:sync', 'eval:pending')),
     ):
         result = run_node_argv(shutil.which('node'), [
             '-e', _RELAY_ADMISSION_HARNESS,
@@ -330,10 +315,9 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
             continue
         expected = {
             'queued': queued, 'one': one, 'drained': drained,
-            'pendingAtDrain': pending,
+            'pendingAtDrain': pending, 'errors': errors,
             'completed': drained + (mode == 'overlap'),
             'startOrder': list(range(drained + (mode == 'overlap'))),
-            'errors': errors,
         }
         if actual != expected: failures.append((mode, actual, expected))
     assert not failures, failures
@@ -342,14 +326,12 @@ def test_relay_admission_yields_to_one_command_drain(tmp):
 _PAGE_RELAY_SETUP = CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs'), vm = require('vm');
 const listeners = {}, messages = [], posted = [], sent = [], writes = [];
-const hooks = [], acks = [], transfers = [];
+const hooks = [], acks = [], transfers = []; let held;
 // Letters, with a two-byte UTF-8 character across the 1 MiB slice boundary.
 const sliceBody = () => Buffer.alloc(5 << 19, 'abcdefghijklmnopqrstuvwxyz')
   .fill('é', (1 << 20) - 1, (1 << 20) + 1);
 const windowObject = {
-  addEventListener(type, listener) {
-    (listeners[type] ||= []).push(listener);
-  },
+  addEventListener: (type, l) => (listeners[type] ||= []).push(l),
   postMessage(message, origin, moved = []) { transfers.push(...moved);
     posted.push(message); messages.push(message); },
 };
@@ -360,7 +342,7 @@ const chrome = {
       onDisconnect: { addListener() {} } }; },
     sendMessage(payload, callback) {
       sent.push(payload);
-      if (typeof callback !== 'function') return;
+      if (typeof callback !== 'function') return; held = callback;
       if (mode === 'lastError') {
         chrome.runtime.lastError = {
           message: 'Could not establish connection.' };
@@ -372,11 +354,14 @@ const chrome = {
           const data = whole.subarray(at, at + (1 << 20)).toString('base64');
           hooks.forEach((hook) => hook({ type: 'gm-slice', at, size, data,
             fetchId: payload.fetchId }, {}, (ack) => acks.push(ack)));
-          if (mode === 'sliced-abort') { handle.abort(); flushMessages(); }
+          if (mode === 'sliced-abort') handle.abort();
+          // Just inside the re-arm: slice wait or timeout, plus the margin.
+          advance(Math.max(sliceMs, timeout) + 4999
+            + (mode === 'sliced-expire'));
         }
         callback({ status: 200, headers: {},
           chunked: size + (mode === 'sliced-short') });
-      } else callback(backgroundAnswer(payload));
+      } else if (!mode.startsWith('lost')) callback(backgroundAnswer(payload));
     },
   },
 };
@@ -389,24 +374,18 @@ const context = {
   } } },
   location: { hostname: 'page.invalid', href: 'about:blank' },
   setTimeout, clearTimeout, setInterval, clearInterval, performance,
-  atob, TextDecoder,
-  console: { log() {}, error() {} }, ...contentScriptPage(),
+  atob, TextDecoder, console: { log() {}, error() {} }, ...contentScriptPage(),
 };
 context.globalThis = context;
 function loadPage(extra = {}) {
   Object.assign(context, extra);
-  for (const path of [contentPath, pagePath]) {
-    vm.runInNewContext(fs.readFileSync(path, 'utf8'), context,
-      { filename: path });
-  }
+  for (const path of [contentPath, pagePath]) vm.runInNewContext(
+    fs.readFileSync(path, 'utf8'), context, { filename: path });
 }
 function flushMessages() {
-  let guard = 0;
-  while (messages.length && guard++ < 100) {
+  for (let guard = 0; messages.length && guard++ < 100;) {
     const data = messages.shift();
-    for (const listener of listeners.message || []) {
-      listener({ source: windowObject, data });
-    }
+    for (const l of listeners.message || []) l({ source: windowObject, data });
   }
 }
 """
@@ -425,44 +404,71 @@ def _run_page_harness(harness, *args):
 
 
 _FETCH_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
-const [contentPath, pagePath, responseText, mode] = process.argv.slice(1);
+const [contentPath, pagePath, responseText, mode, relayMs, sliceMs] =
+  process.argv.slice(1);
 function backgroundAnswer() { return JSON.parse(responseText); }
-loadPage();
-const events = [];
-let loadDetail = null, body = null;
+// A fake clock reading a delay as int32, as browsers do; advance(ms) fires
+// each timer falling due, in due order.
+const timers = new Map(); let now = 0, timerIds = 0;
+function advance(ms) {
+  for (const end = now + ms; ; ) {
+    flushMessages();
+    const [id, due] = [...timers].sort((a, b) => a[1].at - b[1].at)[0] || [];
+    if (!due || due.at > end) { now = end; return; }
+    timers.delete(id); now = due.at; due.fn();
+  }
+}
+loadPage({ clearTimeout: (id) => timers.delete(id), setTimeout: (fn, ms) =>
+  (timers.set(++timerIds, { fn, at: now + Math.max(ms | 0, 0) }), timerIds) });
+const events = []; let loadDetail = null, body = null, early;
+// No timeout and one the relay does not read as one (both its default),
+// the largest delay a timer takes, and one past the 10 s slice wait.
+const timeouts = { 'lost-default': undefined, 'lost-text': '50',
+  'lost-max': 2 ** 31 - 1, 'sliced-text': 30000 };
+const timeout = mode in timeouts ? timeouts[mode] : 50;
 var handle = windowObject.GM.xmlhttpRequest({
-  url: 'about:blank#slow', timeout: 50,
+  url: 'about:blank#slow', timeout,
   responseType: mode === 'sliced' ? 'arraybuffer' : undefined,
+  // Each settling callback calls abort(), which must then do nothing.
   onabort: () => events.push('abort'),
   onload: (detail) => {
-    loadDetail = detail; events.push('load');
+    loadDetail = detail; events.push('load'); handle.abort();
     const text = typeof detail.response === 'string';
     body = { text, same: Buffer.from(text ? detail.response
       : new Uint8Array(detail.response || 0)).equals(sliceBody()) };
   },
-  onerror: (detail) => events.push('error:' + (detail && detail.error)),
-  ontimeout: () => events.push('timeout'),
+  onerror: (detail) => {
+    events.push('error:' + (detail && detail.error)); handle.abort(); },
+  ontimeout: () => (events.push('timeout'), handle.abort()),
 });
 flushMessages();
+if (mode.startsWith('lost')) {
+  // Unanswered: pending just inside its bound, settled once at it.
+  const bound = { lost: 5050, 'lost-max': 2 ** 31 - 1 }[mode];
+  advance((bound || Number(relayMs) + 5000) - 1);
+  early = events.length; advance(1); handle.abort(); flushMessages();
+  held({ status: 200, data: 'late', headers: {} }); flushMessages();
+}
+advance(1e5);
 
 // The content script arms a keepalive timer that would hold the event loop
 // open forever; exit once the answer has actually been flushed.
-process.stdout.write(JSON.stringify({
-  events,
-  loadDetail,
-  relayed: posted
-    .filter((m) => m.direction === 'daedalus-bg-to-page')
+process.stdout.write(JSON.stringify({ events, loadDetail,
+  relayed: posted.filter((m) => m.direction === 'daedalus-bg-to-page')
     .map((m) => m.event),
   requestedTimeout: (sent.find((m) => m.type === 'fetch') || {}).timeout,
-  body, acks, transferred: transfers.length,
+  body, acks, transferred: transfers.length, early, aborts: [
+    posted.filter((m) => m.handler === 'abortRequest').length,
+    sent.filter((m) => m.type === 'abortFetch').length],
 }), () => process.exit(0));
 """
 
 
 # Each worker answer and what the page must see: a timeout is its own
 # event, an undelivered request is an error, finalUrl is the response's URL
-# (the request URL only as a fallback), and a sliced body lands byte for byte,
-# with an abort refusing the slices after it.
+# (the request URL only as a fallback), a sliced body lands byte for byte,
+# an abort refuses the slices after it, and a request unanswered past its
+# bound gets one ontimeout, one cancellation and nothing after.
 _SLICED = {'text': False, 'same': True}
 _PAGE_ANSWERS = (
     ({'error': 'fetch timeout after 50ms', 'timedOut': True}, 'answer',
@@ -481,22 +487,32 @@ _PAGE_ANSWERS = (
                       'acks': [True] * 3, 'transferred': 1}),
     (None, 'sliced-text', {'events': ['load'], 'acks': [True] * 3,
                            'body': {**_SLICED, 'text': True},
-                           'transferred': 0}),
+                           'transferred': 0, 'requestedTimeout': 30000}),
     (None, 'sliced-short', {
         'events': ['error:relay body arrived incomplete']}),
-    (None, 'sliced-abort', {'events': ['abort'],
+    (None, 'sliced-abort', {'events': ['abort'], 'aborts': [1, 1],
                             'acks': [True, False, False]}),
+    *((None, mode, {'events': ['timeout'], 'early': 0, 'aborts': [1, 1],
+                    'requestedTimeout': sent}) for mode, sent in (
+        ('lost', 50), ('lost-default', 0), ('lost-text', '50'),
+        ('lost-max', 2 ** 31 - 1))),
+    (None, 'sliced-expire', {'events': ['timeout'], 'aborts': [1, 1],
+                             'acks': [True, False, False]}),
 )
 
 
 def test_each_worker_answer_reaches_the_page_as_its_own_event(tmp):
     del tmp
+    relay_ms, slice_ms = json.loads(run_node_argv(shutil.which('node'), [
+        '-e', _RELAY_ADMISSION_HARNESS,
+        str(EXTENSION_ROOT / 'background.js'), 'default'], ROOT).stdout)
     for answer, mode, expected in _PAGE_ANSWERS:
         out = _run_page_harness(
-            _FETCH_RELAY_HARNESS, json.dumps(answer), mode)
+            _FETCH_RELAY_HARNESS, json.dumps(answer), mode, str(relay_ms),
+            str(slice_ms))
         seen = {**out, **(out['loadDetail'] or {})}
+        expected = {'requestedTimeout': 50, 'aborts': [0, 0], **expected}
         assert {key: seen[key] for key in expected} == expected, (mode, out)
-        assert out['requestedTimeout'] == 50, out
 
 
 _CLIPBOARD_RELAY_HARNESS = _PAGE_RELAY_SETUP + r"""
@@ -510,15 +526,12 @@ loadPage();
   if (isPromise) returned.then(() => { settled = 'resolved'; },
     () => { settled = 'rejected'; });
   // Let the write settle, then deliver what the content script posted back.
-  for (let turn = 0; turn < 10; turn++) {
-    await Promise.resolve(); flushMessages();
-  }
+  for (let t = 0; t < 10; t++) { await Promise.resolve(); flushMessages(); }
   await Promise.resolve();
   process.stdout.write(JSON.stringify({
     isPromise, settled, writes,
-    acknowledged: posted
-      .filter((m) => m.direction === 'daedalus-bg-to-page'
-        && m.handler === 'setClipboard')
+    acknowledged: posted.filter((m) => m.direction === 'daedalus-bg-to-page'
+      && m.handler === 'setClipboard')
       .map((m) => ({ error: m.error || null })),
   }), () => process.exit(0));
 })();
@@ -559,17 +572,14 @@ if (mode === 'fire-and-forget') {
   windowObject.GM.notification(
     { title: 'Run finished', text: 'Nothing failed.' });
 } else windowObject.GM.download({
-  url: 'about:blank', name: 'file.bin',
-  onload: () => events.push('load'),
+  url: 'about:blank', name: 'file.bin', onload: () => events.push('load'),
   onerror: (detail) => events.push('error:' + (detail && detail.error)),
 });
 flushMessages();
 
 const outcome = mode === 'fire-and-forget' ? {
-  sent: sent.filter((message) => message.type === 'openTab'
-    || message.type === 'notification'),
-  acknowledged: posted
-    .filter((m) => m.direction === 'daedalus-bg-to-page')
+  sent: sent.filter((m) => ['openTab', 'notification'].includes(m.type)),
+  acknowledged: posted.filter((m) => m.direction === 'daedalus-bg-to-page')
     .map((m) => ({ handler: m.handler, error: m.error || null })),
 } : { events };
 process.stdout.write(JSON.stringify(outcome), () => process.exit(0));
@@ -583,22 +593,17 @@ def test_a_download_that_never_started_reaches_onerror(tmp):
     for mode, expected in (
         ('lastError', 'error:Could not establish connection.'),
         ('empty', 'error:background started no download'),
-        ('error', 'error:Invalid filename'),
-        ('ok', 'load'),
+        ('error', 'error:Invalid filename'), ('ok', 'load'),
     ):
         actual = _run_page_harness(_DOWNLOAD_RELAY_HARNESS, mode)
         assert actual['events'] == [expected], (mode, actual)
     actual = _run_page_harness(_DOWNLOAD_RELAY_HARNESS, 'fire-and-forget')
     assert actual == {
-        'sent': [
-            {'type': 'openTab', 'url': 'about:blank', 'active': False},
-            {'type': 'notification', 'title': 'Run finished',
-             'text': 'Nothing failed.'},
-        ],
-        'acknowledged': [
-            {'handler': 'openInTab', 'error': None},
-            {'handler': 'notification', 'error': None},
-        ],
+        'sent': [{'type': 'openTab', 'url': 'about:blank', 'active': False},
+                 {'type': 'notification', 'title': 'Run finished',
+                  'text': 'Nothing failed.'}],
+        'acknowledged': [{'handler': handler, 'error': None}
+                         for handler in ('openInTab', 'notification')],
     }, actual
 
 

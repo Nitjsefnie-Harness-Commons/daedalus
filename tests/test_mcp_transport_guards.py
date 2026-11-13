@@ -49,6 +49,17 @@ def _capture(coroutine, transport=None):
         return f'raised {type(failure).__name__}: {failure}'
 
 
+FIRST = {'id': 'command', 'deliveryId': 'wanted',
+         'resultGeneration': 'generation-1', 'result': {'value': 1}}
+DEEP = b'[' * 200000 + b']' * 200000  # past the JSON decoder's recursion
+SECOND = {**FIRST, 'resultGeneration': 'generation-2', 'result': {'value': 2}}
+
+
+def _answer(transport, status, text):
+    return transport.httpx.Response(status, text=text, request=(
+        transport.httpx.Request('GET', 'http://127.0.0.1:18001/result')))
+
+
 def test_explicit_http_client_uses_the_explicit_url(tmp):
     del tmp
     transport = _transport()
@@ -154,12 +165,7 @@ def test_poll_skips_a_different_delivery(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-2',
-        'result': {'value': 2},
-    }
+    wanted = SECOND
     client = ClientProbe((
         {
             'id': 'other',
@@ -182,12 +188,7 @@ def test_poll_skips_a_result_without_generation(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-2',
-        'result': {'value': 2},
-    }
+    wanted = SECOND
     client = ClientProbe((
         {'id': 'command', 'deliveryId': 'wanted'},
         wanted,
@@ -202,35 +203,28 @@ def test_poll_skips_a_result_without_generation(tmp):
     assert result == wanted, (result, wanted)
 
 
-def test_poll_retries_a_failed_conditional_consume(tmp):
+def test_poll_retries_a_failed_or_refused_consume(tmp):
+    """A refused or failed consume is retried on the next peek's result."""
     del tmp
     transport = _transport()
-    session = _session(transport)
-    first = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    second = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-2',
-        'result': {'value': 2},
-    }
-    client = ClientProbe((
-        first,
-        {'consumed': False, 'resultGeneration': 'generation-2'},
-        second,
-        {'consumed': True, 'resultGeneration': 'generation-2'},
-    ))
-    session.http_client = lambda: client
+    for failure in ({'consumed': False, 'resultGeneration': 'generation-2'},
+                    _answer(transport, 500, '{"error": "internal"}'),
+                    transport.httpx.RemoteProtocolError('peer closed'),
+                    _answer(transport, 200, '<html>sign in</html>'),
+                    *(_answer(transport, 200, text)
+                      for text in ('[]', 'null', '"x"', '3'))):
+        session = _session(transport)
+        client = ClientProbe((FIRST, failure, SECOND, {
+            'consumed': True, 'resultGeneration': 'generation-2'}))
+        session.http_client = lambda client=client: client
 
-    result = _capture(session.poll_result(
-        '', 1, interval=0, expect_id='command',
-        expect_delivery='wanted'))
+        result = _capture(session.poll_result(
+            '', 1, interval=0, expect_id='command',
+            expect_delivery='wanted'))
 
-    assert result == second, (result, second)
+        assert result == SECOND, (failure, result)
+        takes = [call[2]['params'].get('consume') for call in client.calls]
+        assert takes == [None, '1', None, '1'], (failure, client.calls)
 
 
 def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
@@ -238,12 +232,7 @@ def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         transport.httpx.TransportError('any transport failure'),
         wanted,
@@ -260,26 +249,60 @@ def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
     assert len(peeks) == 3, client.calls
 
 
-def test_poll_reports_timeout_after_only_transport_failures(tmp):
-    """Retrying a failed peek is bounded by the same deadline."""
+UNKNOWN = ('raised TimeoutError: no result within {}s, outcome unknown: '
+           'a result request failed ({}). The command was sent and may '
+           'have run; check its effect before retrying.').format
+
+
+def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
+    """Past a failed request, a consume included, the deadline cannot say
+    whether the command ran."""
     del tmp
     transport = _transport()
-    session = _session(transport)
-    client = ClientProbe(
-        [transport.httpx.ReadError('connection reset by peer')] * 3)
-    session.http_client = lambda: client
-    # Three admitted peeks, then the clock steps past the deadline.
-    session.monotonic = clock_script(
-        100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.5)
+    for replies, expected in (
+            ([transport.httpx.ReadError('connection reset by peer')] * 3,
+             UNKNOWN(0.001, 'Connection failed: connection reset by peer')),
+            ([_answer(transport, 502, '<html>502 Bad Gateway</html>')] * 3,
+             UNKNOWN(0.001, 'HTTP 502')),
+            ([_answer(transport, 200, '<html>sign in</html>')] * 3,
+             UNKNOWN(0.001, 'Connection failed: Expecting value: line 1 '
+                     'column 1 (char 0)')),
+            ([_answer(transport, 200, DEEP.decode())] * 3,
+             UNKNOWN(0.001, 'Connection failed: the answer nests too deep to '
+                     'decode')),
+            # A consume rides its own 30s, so its timeout is a failure.
+            ([FIRST, transport.httpx.ReadTimeout(''), {'pending': True},
+              {'pending': True}],
+             UNKNOWN(0.001, 'Connection failed: ReadTimeout')),
+            ([_answer(transport, 200, '[]')] * 3,
+             UNKNOWN(0.001, 'Connection failed: the answer is JSON but not '
+                     'an object')),
+            ([FIRST, _answer(transport, 500, '{}')] + [{'pending': True}] * 2,
+             UNKNOWN(0.001, 'HTTP 500')),
+            ([transport.httpx.ReadTimeout('')] + [{'pending': True}] * 2,
+             UNKNOWN(0.001, 'Connection failed: ReadTimeout')),
+            ([{'pending': True}] * 2 + [transport.httpx.ReadError('reset')],
+             UNKNOWN(0.001, 'Connection failed: reset')),
+            # A peek's timeout landing on the deadline is that deadline.
+            *(([{'pending': True}] * 2 + [late('')],
+               'raised TimeoutError: no result within 0.001s')
+              for late in (transport.httpx.ReadTimeout,
+                           transport.httpx.ConnectTimeout,
+                           transport.httpx.PoolTimeout,
+                           transport.httpx.WriteTimeout))):
+        session = _session(transport)
+        client = ClientProbe(replies)
+        session.http_client = lambda client=client: client
+        # The deadline passes as the scripted replies run out.
+        session.monotonic = lambda client=client: (
+            100.5 if not client.replies else 100.0)
 
-    result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command',
-        expect_delivery='wanted'))
+        result = _capture(session.poll_result(
+            '', 0.001, interval=0, expect_id='command',
+            expect_delivery='wanted'))
 
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 3, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+        assert client.replies == [], (expected, client.replies)
+        assert result == expected, (result, expected)
 
 
 def test_poll_deadline_is_not_the_wall_clock(tmp):
@@ -362,12 +385,7 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
@@ -424,12 +442,7 @@ def test_poll_bounds_the_peek_by_the_time_remaining(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
@@ -485,12 +498,7 @@ def test_poll_hands_over_a_success_just_inside_the_deadline(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
@@ -521,12 +529,7 @@ def test_poll_lets_the_consume_ride_the_ordinary_client_timeout(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
@@ -569,26 +572,30 @@ def _shielded_environment():
     return mock.patch.dict('os.environ', {}, clear=False)
 
 
-def test_poll_survives_a_truncated_peek_from_a_real_front_end(tmp):
+def test_poll_survives_a_failed_peek_from_a_real_front_end(tmp):
     """The scripted controls raise ReadError; a real cut-off body is
     httpx's RemoteProtocolError, a TransportError that is no ReadError
-    (issue 699)."""
+    (issue 699). Whole 502 and non-JSON pages fail a peek too."""
     del tmp
     transport = _transport()
-    with _shielded_environment() as environ, truncating_front_end(1) as base:
-        environ.pop('DAEDALUS_LOCAL_URL', None)
-        environ.pop('DAEDALUS_PORT', None)
-        session = _session(transport, url=base)
-        result = _capture(session.poll_result(
-            '', 10, interval=0, expect_id='job4', expect_delivery='d1'),
-            transport)
-        seen = list(TruncatingFrontEndHandler.seen)
-    assert result == TruncatingFrontEndHandler.result, result
-    assert seen == [
-        ('GET', '/result?delivery=d1'),
-        ('GET', '/result?delivery=d1'),
-        ('GET', '/result?delivery=d1&consume=1&expected=g1'),
-    ], seen
+    for status, body in ((200, None), (502, b'<html>502 Bad Gateway</html>'),
+                         (200, b'<html>sign in</html>'), (200, b'[]'),
+                         (200, DEEP)):
+        with _shielded_environment() as environ, truncating_front_end(
+                1, status, body) as base:
+            environ.pop('DAEDALUS_LOCAL_URL', None)
+            environ.pop('DAEDALUS_PORT', None)
+            session = _session(transport, url=base)
+            result = _capture(session.poll_result(
+                '', 10, interval=0, expect_id='job4', expect_delivery='d1'),
+                transport)
+            seen = list(TruncatingFrontEndHandler.seen)
+        assert result == TruncatingFrontEndHandler.result, (status, result)
+        assert seen == [
+            ('GET', '/result?delivery=d1'),
+            ('GET', '/result?delivery=d1'),
+            ('GET', '/result?delivery=d1&consume=1&expected=g1'),
+        ], seen
 
 
 def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
@@ -611,21 +618,18 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
         environ.pop('DAEDALUS_PORT', None)
         session = _session(transport, url=base)
         # Two admitted attempts, then the clock steps past the deadline.
-        session.monotonic = clock_script(
-            100.0, 100.0, 100.0, 100.0, 100.0, 100.5)
+        session.monotonic = clock_script(*[100.0] * 5, 200.0)
         result = _capture(session.poll_result(
-            '', 0.001, interval=0, expect_id='job4', expect_delivery='d1'),
+            '', 30, interval=0, expect_id='job4', expect_delivery='d1'),
             transport)
         raised = _capture(probe(session), transport)
         seen = list(TruncatingFrontEndHandler.seen)
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+    assert result == UNKNOWN(30, 'Connection failed: peer closed connection '
+                             'without sending complete message body '
+                             '(received 5 bytes, expected 40)'), result
     assert raised == 'RemoteProtocolError', raised
-    # A peek whose budget expires can die before it reaches the server,
-    # so the visible count is inexact; that none is a consume is exact.
-    gets = [path for verb, path in seen if verb == 'GET']
-    assert gets[-1] == '/result', seen
-    assert all(path == '/result?delivery=d1' for path in gets[:-1]), seen
+    assert seen == [('GET', '/result?delivery=d1')] * 2 + [
+        ('GET', '/result')], seen
 
 
 def main():

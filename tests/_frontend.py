@@ -91,9 +91,11 @@ class HtmlFrontEndHandler(http.server.BaseHTTPRequestHandler):
     complete HTML response with a success or proxy status — never as the
     JSON the bridge would have written. `declared` overrides the advertised
     Content-Length: a promise the body does not keep, the shape of a front
-    end cut off mid-answer.
+    end cut off mid-answer. Each `interim` status is sent first.
     """
 
+    interim = ()
+    wbufsize = 1 << 16  # one send under 64 KiB: no reset
     status = 200
     body = b'<html><body>sign in to this network</body></html>'
     declared = None
@@ -102,6 +104,10 @@ class HtmlFrontEndHandler(http.server.BaseHTTPRequestHandler):
         declared = self.headers.get('Content-Length')
         if declared:
             self.rfile.read(int(declared))
+        for status in self.interim:
+            self.send_response_only(status)
+            self.send_header('Link', '</app.css>; rel=preload; as=style')
+            self.end_headers()
         self.send_response(self.status)
         self.send_header('Content-Type', 'text/html')
         self.send_header('Content-Length',
@@ -120,7 +126,9 @@ class HtmlFrontEndHandler(http.server.BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def html_front_end(status=200, body=HtmlFrontEndHandler.body, declared=None):
+def html_front_end(status=200, body=HtmlFrontEndHandler.body, declared=None,
+                   interim=()):
+    HtmlFrontEndHandler.interim = interim
     HtmlFrontEndHandler.status = status
     HtmlFrontEndHandler.body = body
     HtmlFrontEndHandler.declared = declared

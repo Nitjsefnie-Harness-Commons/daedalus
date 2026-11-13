@@ -17,7 +17,9 @@ import os
 import sys
 import threading
 import time
+from functools import partial
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_load  # noqa: E402
@@ -335,30 +337,6 @@ def test_a_nonpositive_timeout_admits_no_command_on_either_send_path(tmp):
             assert queued == [], (target, queued)
 
 
-def test_a_nonpositive_mcp_timeout_admits_no_command(tmp):
-    """A non-positive timeout is refused before any command is submitted.
-
-    The deadline is evaluated by poll_result, which runs after the command
-    has been handed to the browser.
-    """
-    _mcp_load._need_deps()
-    with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, docroot):
-        mod = _mcp_load._load_mcp(base)
-        mod._token.set(_mcp_load.TOK)
-        for timeout in (0, -1.0, float('nan'), float('inf')):
-            try:
-                asyncio.run(getattr(mod, 'exec')(
-                    cmd_id='_timeout', code='1', timeout=timeout))
-            except ValueError as error:
-                assert 'finite positive' in str(error), (timeout, error)
-            else:
-                raise AssertionError(f'timeout {timeout!r} was accepted')
-        for name in (f'{_mcp_load.TOK}_extension', _mcp_load.TOK):
-            qdir = Path(docroot) / 'commands' / name
-            queued = sorted(qdir.glob('*.json')) if qdir.is_dir() else []
-            assert queued == [], (name, queued)
-
-
 def test_list_tabs_tool_against_real_bridge(tmp):
     _mcp_load._need_deps()
     with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, _docroot):
@@ -563,6 +541,70 @@ def test_screenshot_returns_the_bytes_its_own_result_named(tmp):
         assert meta == {'path': '_ss/mine.png',
                         'size': len(b'this-invocation')}, meta
         assert image.data == b'this-invocation', image.data
+
+
+def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
+    """A refusal reaches the client with its reason; a crash, a library's
+    error of a carried type and a subclass of one included, stays bare."""
+    _need_deps()
+    import httpx
+    from mcp import Client
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        mod = _load_mcp(base)
+        mod._token.set(TOK)
+
+        async def read(*calls):
+            async with Client(mod.mcp) as client:
+                return [await client.call_tool(*call) for call in calls]
+
+        answers = asyncio.run(read(
+            ('exec', {'cmd_id': 't1', 'code': 'Date.now()',
+                      'tab_id': 'nobody', 'timeout': 0.5}),
+            ('exec', {'cmd_id': 't2', 'code': '1', 'timeout': 0}),
+            ('segment_status', {'job': 'absent'}),
+            ('segment_status', {'job': '..'})))
+        closed = httpx.AsyncClient()
+        asyncio.run(closed.aclose())
+        # httpx's RuntimeError, a ValueError subclass raised in our frame,
+        # tab-opening waits whose clock leaps past their deadline, then an
+        # extension that refuses the tab.
+        for seam, double, *calls in (
+                ('http_client', lambda: closed, ('result', {})),
+                ('auth', partial(b'\xff'.decode, 'ascii'), ('result', {})),
+                ('monotonic', mock.Mock(side_effect=range(0, 2**40, 2**30)),
+                 ('open_tab', {'url': 'about:blank'}),
+                 ('open_tabs', {'urls': ['about:blank']})),
+                ('poll_result', mock.AsyncMock(return_value={'error': 'gone'}),
+                 ('open_tab', {'url': 'about:blank'}))):
+            with mock.patch.object(mod.bridge, seam, double):
+                answers += asyncio.run(read(*calls))
+        # A tab opener whose one result request fails before the deadline:
+        # the wait's unknown outcome, not wrapped in the opener's own clause.
+        with mock.patch.object(mod.bridge, '_result', mock.AsyncMock(
+                side_effect=httpx.ReadError('connection reset'))), \
+                mock.patch.object(mod.bridge, 'monotonic', mock.Mock(
+                    side_effect=[0, 0, 0, 2**40])):
+            answers += asyncio.run(read(('open_tab', {'url': 'about:blank'})))
+    unknown = ('timed out: no result within {}s, outcome unknown: the {} '
+               'may have opened. Call `list_tabs` to check before retrying.'
+               ).format
+    failed = ('timed out: no result within 10.0s, outcome unknown: a '
+              'result request failed (Connection failed: connection reset). '
+              'The command was sent and may have run; check its effect '
+              'before retrying.')
+    expected = [('exec', 'timed out: no result within 0.5s'), ('exec', (
+        'timeout must be a finite positive number of seconds; got 0.0')),
+        ('segment_status', "no job named 'absent'"), ('segment_status', None),
+        ('result', None), ('result', None),
+        ('open_tab', unknown(10.0, 'tab')), ('open_tabs', unknown(30, 'tabs')),
+        ('open_tab', 'ext open-tab: gone'), ('open_tab', failed)]
+    for answer, (tool, reason) in zip(answers, expected, strict=True):
+        [text] = [getattr(item, 'text', '') for item in answer.content]
+        sdk = f'Error executing tool {tool}'
+        # segment_status's raise site repeats the tool name: read past it.
+        text = text.replace(f'{sdk}: segment_status: ', f'{sdk}: ')
+        assert answer.is_error and text == (
+            sdk if reason is None else f'{sdk}: {reason}'), text
 
 
 if __name__ == '__main__':
