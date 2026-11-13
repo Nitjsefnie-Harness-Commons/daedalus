@@ -38,6 +38,14 @@ def _head(number=7, sha=HEAD, owner='octo', ref='feature', base='main'):
             'base': base}
 
 
+def _raised(error, call, *args):
+    try:
+        call(*args)
+    except error as caught:
+        return caught
+    return None
+
+
 def test_the_set_is_exactly_the_documented_patterns(tmp):
     m = _mod()
     assert tuple(m.GATE_PATTERNS) == (
@@ -118,10 +126,12 @@ def _imported_files(rel, base, tracked):
                 node.module.split('.') if node.module else [])
             stems.add('/'.join(parts))
             stems.update('/'.join([*parts, a.name]) for a in node.names)
-        elif isinstance(node, ast.Call) and node.args and ast.unparse(
-                node.func).split('.')[-1] in ('import_module', '__import__'):
-            stems.update(v.replace('.', '/') for c in ast.walk(node.args[0])
-                         if isinstance(v := getattr(c, 'value', 0), str))
+        elif isinstance(node, ast.Call) and ast.unparse(node.func).split(
+                '.')[-1] in ('import_module', '__import__'):
+            names = [v for a in node.args[:1] for c in ast.walk(a)
+                     if isinstance(v := getattr(c, 'value', 0), str)]
+            assert names, f'{rel}:{node.lineno}: unresolvable dynamic import'
+            stems.update(name.replace('.', '/') for name in names)
     return {path for path in tracked for stem in stems
             for tail in ('.py', '/__init__.py')
             if f'/{path}'.endswith(f'/{stem}{tail}')}
@@ -191,6 +201,10 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
         used = _workflow_gate_files(workflows, base, {path, *reached})
         assert used == {path, *(reached if path.endswith('.py') else ())}, used
         assert not any(m.is_gate_defining(p) for p in (*used, extra)), used
+        (base / path).write_text('def f(n):\n    import_module(n)\n', 'utf-8')
+        error = _raised(AssertionError, _workflow_gate_files, workflows,
+                        base, {path})
+        assert (f'{path}:2:' in str(error)) == path.endswith('.py'), error
 
 
 def test_the_merge_base_tells_ancestor_from_not(tmp):
@@ -278,24 +292,17 @@ def test_enumerate_gates_reads_one_understood_path_for_every_pattern(tmp):
 
 def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
     m = _mod()
-    read = _commits_read(m, commits={'eslint.config.js': []})
-    try:
-        m.enumerate_gates(read, 'o/r', G1)
-    except m.QueryError as error:
-        assert 'eslint.config.js' in str(error) and 'no commit' in str(error)
-        return
-    raise AssertionError('an empty gate-path answer was not refused')
+    error = str(_raised(m.QueryError, m.enumerate_gates, _commits_read(
+        m, commits={'eslint.config.js': []}), 'o/r', G1))
+    assert 'eslint.config.js' in error and 'no commit' in error, error
 
 
 def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
     m = _mod()
     for bad in (42, {'error': 'rate limited'}, '"a string"'):
-        try:
-            m.enumerate_gates(_encoded_read(bad), 'o/r', G1)
-        except m.QueryError as error:
-            assert 'list' in str(error), str(error)
-            continue
-        raise AssertionError(f'a non-list payload {bad!r} was not refused')
+        error = _raised(m.QueryError, m.enumerate_gates, _encoded_read(bad),
+                        'o/r', G1)
+        assert 'list' in str(error), (bad, error)
 
 
 def _multi_gate_read(missing_at, asked=None):
@@ -449,17 +456,13 @@ def test_listing_and_write_failures_raise_without_further_writes(tmp):
               (8, 'completed', m.EXTERNAL_ID)],
              'repos/o/r/check-runs/9', ['PATCH', 'PATCH'])):
         recorded = []
-        try:
-            m.publish(_publish_read(checks, recorded, fail=fail,
-                                    error=m.QueryError),
-                      'o/r', HEAD, 'failure', 't', 's', RUN, G1)
-        except m.QueryError:
-            assert [v for v, _, _ in recorded] == expected
-            if fail == 'repos/o/r/check-runs/9':
-                assert [t.rsplit('/', 1)[-1] for _, t, _ in recorded] == [
-                    '100', '9']
-            continue
-        raise AssertionError(f'a failed {fail} did not raise')
+        assert _raised(m.QueryError, m.publish, _publish_read(
+            checks, recorded, fail=fail, error=m.QueryError),
+            'o/r', HEAD, 'failure', 't', 's', RUN, G1), fail
+        assert [v for v, _, _ in recorded] == expected
+        if fail == 'repos/o/r/check-runs/9':
+            assert [t.rsplit('/', 1)[-1] for _, t, _ in recorded] == [
+                '100', '9']
 
 
 def test_listing_parses_paginated_lines_and_keeps_external_ids(tmp):
@@ -477,14 +480,10 @@ def test_a_malformed_listing_refuses_before_any_write(tmp):
                 '{"id": 100, "status": null}', ''):
         for raw in (f'{row}\n', f'{_encode(_check(9))}\n{row}\n'):
             recorded = []
-            try:
-                m.publish(_publish_read([(9, 'completed', None)], recorded,
-                                        listing=raw),
-                          'o/r', HEAD, 'success', 't', 's', RUN, G1)
-            except m.QueryError:
-                assert recorded == []
-                continue
-            raise AssertionError(f'malformed listing accepted: {raw!r}')
+            assert _raised(m.QueryError, m.publish, _publish_read(
+                [(9, 'completed', None)], recorded, listing=raw),
+                'o/r', HEAD, 'success', 't', 's', RUN, G1), raw
+            assert recorded == [], raw
 
 
 def test_older_success_cannot_replace_a_marked_newer_verdict(tmp):
@@ -528,14 +527,10 @@ def test_an_unreadable_ordering_compare_refuses_without_writing(tmp):
     m, writes = _mod(), []
     checks = [_check(100, external_id=m.EXTERNAL_ID,
                      summary=f'main {G2}')]
-    try:
-        m.publish(_publish_read(checks, writes, fail='compare', base=G1,
-                                error=m.QueryError),
-                  'o/r', HEAD, 'success', 't', 's', RUN, G1)
-    except m.QueryError:
-        assert writes == []
-        return
-    raise AssertionError('unreadable ordering compare was accepted')
+    assert _raised(m.QueryError, m.publish, _publish_read(
+        checks, writes, fail='compare', base=G1, error=m.QueryError),
+        'o/r', HEAD, 'success', 't', 's', RUN, G1)
+    assert writes == []
 
 
 def test_overlapping_reads_allow_the_older_snapshot_to_write_last(tmp):
