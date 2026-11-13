@@ -1107,7 +1107,8 @@ them.
   directory is `DAEDALUS_SEGMENT_JOB_RETENTION` old, decided and deleted in
   one hold of its stripe: the record first, revoking the capability, then the
   marker, the temp and the directory; a resume mint touches the record. Names
-  that are symlinks are never followed or removed, and a segment admitted
-  before the removal finds no record and answers `403 bad sig` unwritten.
+  that are symlinks are never followed or removed. A segment write whose
+  record no longer holds the capability it was admitted on (removed, or
+  removed and minted again) answers `403 bad sig` unwritten.
   `DAEDALUS_DEBUG_TIMING=1` prints a per-phase `[SEGMENT-TIMING]` line per
   segment write; inert otherwise.

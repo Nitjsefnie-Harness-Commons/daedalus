@@ -10,6 +10,7 @@ directory under, and it governs the record beside that directory too:
 every `segment_store` call here is given the same root, so one root names
 one tree.
 """
+import hmac
 import pathlib
 import threading
 import time
@@ -43,6 +44,8 @@ class Admission(NamedTuple):
     # the quota check and the record write, and a second lookup is a second
     # chance to name a different stripe.
     lock: threading.Lock
+    # The capability admitted; the write refuses a record no longer holding it.
+    sig: str
 
 
 def header_params(headers, params):
@@ -125,7 +128,14 @@ def admit_segment(seg_dir_root, params, sig):
     # The directory and the stripe are decided once, here, where a refusal is
     # a 400 about the request rather than a storage error raised later under
     # the write lock.
-    return Admission(job, segment_index, quota, seg_dir, seg_dir_root, lock)
+    return Admission(
+        job, segment_index, quota, seg_dir, seg_dir_root, lock, sig)
+
+
+def _holds(record, sig):
+    held = record.get('sig') if record is not None else None
+    return (isinstance(held, str) and held.isascii()
+            and hmac.compare_digest(held, sig))
 
 
 def store_segment(raw, admission):
@@ -137,7 +147,7 @@ def store_segment(raw, admission):
     the one the admission carries, so two segments arriving together cannot
     both spend the same remaining bytes. Two jobs do not share that hold.
     """
-    job, segment_index, quota, seg_dir, seg_dir_root, lock = admission
+    job, segment_index, quota, seg_dir, seg_dir_root, lock, sig = admission
     _, max_count, max_bytes = quota
     marks = segment_store.timing_marks()
     with lock:
@@ -156,8 +166,8 @@ def store_segment(raw, admission):
             except segment_store.SegmentRecordError:
                 record = None
             else:
-                if record is None:
-                    # swept since admission
+                if not _holds(record, sig):
+                    # swept, or swept and re-minted, since admission
                     return 403, {'error': 'bad sig'}
             seg_dir.mkdir(parents=True, exist_ok=True)
             trusted = (record is not None
