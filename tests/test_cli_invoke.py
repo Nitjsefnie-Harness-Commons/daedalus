@@ -68,19 +68,18 @@ def test_prefixed_token_and_tab_precede_legacy_environment(tmp):
     from unittest.mock import patch
     transport = _util.load(_util.ROOT / 'daedalus_cli/transport.py')
     del tmp
-    for primary, legacy, want in (('new', 'old', 'new'),
-                                  (None, 'old', 'old'),
-                                  ('', 'old', 'old'),
-                                  ('new', None, 'new'),
-                                  (None, None, '')):
+    for primary, legacy, want in (
+            ('new', 'old', 'new'), (None, 'old', 'old'), ('', 'old', 'old'),
+            ('new', None, 'new'), (None, None, '')):
         env = {'DAEDALUS_TOKEN': 'durable'}
         for name, value in (('DAEDALUS_TOKEN_OVERRIDE', primary),
                             ('DAEDALUS_ID', primary), ('TOKEN', legacy),
                             ('ID', legacy)):
-            if value is not None: env[name] = value
+            tag = 't-' if 'TOKEN' in name else 'i-'
+            if value is not None: env[name] = value and tag + value
         with patch.dict(os.environ, env, clear=True):
-            assert transport.token() == (want or 'durable')
-            assert transport.tab() == want
+            assert transport.token() == (want and 't-' + want or 'durable')
+            assert transport.tab() == (want and 'i-' + want)
 
 
 if __name__ == '__main__':
