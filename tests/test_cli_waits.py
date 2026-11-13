@@ -466,7 +466,7 @@ _RAISING_OPEN %= {
 
 
 def _check_transport_family(family):
-    """`family` from the open, the body read and an HTTPError's body read.
+    """`family` from _open, the body read and an HTTPError's body read.
 
     The wait pin is causal, not a wall clock: WAIT_TIMEOUT leaves the
     sub-second scheduler stalls that flaked the 0.2s budget no way to

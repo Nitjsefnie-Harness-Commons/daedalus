@@ -252,11 +252,9 @@ _MAX_INTERIM_RESPONSES = 100
 
 
 class _InterimSkippingResponse(http.client.HTTPResponse):
-    """An HTTPResponse that also skips the 1xx other than `100 Continue`.
+    """Skips interim 1xx responses, which http.client does only for 100.
 
-    http.client takes a `103 Early Hints` from a front end for the answer,
-    so the real one that follows was never read. `101 Switching Protocols`
-    stays final: what follows it is not HTTP.
+    `101 Switching Protocols` is never skipped: what follows it is not HTTP.
     """
 
     def begin(self, **kwargs):
@@ -293,13 +291,12 @@ class _HttpsHandler(urllib.request.HTTPSHandler):
 
 @functools.cache
 def _opener():
-    """One opener per process, built on first use: the HTTPS handler builds
-    an SSL context, which costs milliseconds per request if rebuilt."""
+    """Built once, on first use: the HTTPS handler's SSL context is slow."""
     return urllib.request.build_opener(_HttpHandler, _HttpsHandler)
 
 
 def _open(req, timeout):
-    """urlopen() with interim responses skipped, and no global opener."""
+    """urlopen() that skips interim responses and ignores urllib's opener."""
     return _opener().open(req, timeout=timeout)
 
 
