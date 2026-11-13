@@ -247,7 +247,7 @@ def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
         assert status == 1 and 'HEAD^' in err, err
 
 
-def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
+def test_guard_jobs_execute_one_judged_base_and_refuse_missing_history(tmp):
     from _yamlsteps import complete_job_mapping, workflow_mapping
     workflow = (ROOT / '.github/workflows/audit.yml').read_text()
     job = complete_job_mapping(workflow, 'thresholds')
@@ -266,8 +266,11 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
         bound = next(s for s in steps
                      if s.get('name') == 'Resolve threshold base')
         assert bound['env']['DAEDALUS_BASE_SHA'] == binding
+    required = jobs['jobs']['thresholds']
+    assert [s for s in required['steps'] if 'uses' not in s] == [
+        s for s in job['steps'] if 'uses' not in s]
     script = resolver['run'] + '\n. "$GITHUB_ENV"\n' + step['run']
-    assert not any(key in obj for obj in (job, step)
+    assert not any(key in obj for obj in (job, required, *required['steps'])
                    for key in ('if', 'continue-on-error'))
     base, head = _removed()
     repo, rev = _history(tmp, 'workflow', ['fix: record'], base, head)

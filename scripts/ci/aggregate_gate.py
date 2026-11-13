@@ -57,7 +57,8 @@ POLL_INTERVAL_S = 20.0
 # overshoot and reporting.
 MAX_POLL_BOUND_S = 660.0
 STRICT = frozenset(
-    {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'})
+    {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
+     'thresholds'})
 ALLOWED = frozenset({'success', 'skipped'})
 CANCELLED = 'cancelled'
 REPOSITORY = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z')

@@ -251,7 +251,7 @@ _MEASUREMENT_JOB, _ = _matrix_job_running(
     _tests_yml(), _python_matrix(_tests_yml()), 'coverage_suites.py')
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
                   'actionlint', 'suites', 'wheel', 'coverage-matrix',
-                  'coverage', 'journey-budget', 'size-baseline')
+                  'coverage', 'journey-budget', 'size-baseline', 'thresholds')
 CONDITION_CONTEXTS = (
     ({'success': True, 'failure': False, 'cancelled': False}, True),
     ({'success': False, 'failure': False, 'cancelled': False}, True),
@@ -350,10 +350,9 @@ def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
             job, needs, expected)
 
     needs = _job_needs(workflow, 'aggregate')
-    expected = AGGREGATE_DEPS
-    assert set(needs) == set(expected), (needs, expected)
-    assert len(needs) == len(set(needs)) == len(expected), (
-        needs, expected)
+    assert set(needs) == set(AGGREGATE_DEPS), (needs, AGGREGATE_DEPS)
+    assert len(needs) == len(set(needs)) == len(AGGREGATE_DEPS), (
+        needs, AGGREGATE_DEPS)
 
 
 def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
