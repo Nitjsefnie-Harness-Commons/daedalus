@@ -209,8 +209,23 @@ class ConnectionFailed(Exception):
     Every api* function turns this into `sys.exit('Connection failed: ...')`.
     It exists as an exception so the one caller that can do better than
     exit — the result wait, whose command is already queued and running —
-    can catch it on a peek and keep polling.
+    can catch it and keep polling.
     """
+
+
+class ErrorStatus(Exception):
+    """A complete answer with an error status; str() is `HTTP <code>: ...`.
+
+    An exception rather than an exit for the same reason as
+    ConnectionFailed: the result wait outlives it.
+    """
+
+
+def _failure_report(failure):
+    """The words every api* function exits with for a failed request."""
+    if isinstance(failure, ErrorStatus):
+        return str(failure)
+    return f'Connection failed: {failure}'
 
 
 def _json_body(response):
@@ -245,7 +260,7 @@ def _exchange(req, timeout, read):
             detail = _http_error_detail(e)
         except (OSError, http.client.HTTPException) as failure:
             raise ConnectionFailed(failure) from failure
-        sys.exit(f'HTTP {e.code}: {detail}')
+        raise ErrorStatus(f'HTTP {e.code}: {detail}') from e
     except urllib.error.URLError as e:
         raise ConnectionFailed(e.reason) from e
     except (OSError, http.client.HTTPException) as e:
@@ -255,12 +270,12 @@ def _exchange(req, timeout, read):
 def _exchange_or_exit(req, timeout, read):
     try:
         return _exchange(req, timeout, read)
-    except ConnectionFailed as e:
-        sys.exit(f'Connection failed: {e}')
+    except (ConnectionFailed, ErrorStatus) as e:
+        sys.exit(_failure_report(e))
 
 
 def _request(method, path, body=None, timeout=30, headers=None):
-    """api() that raises ConnectionFailed instead of exiting on it."""
+    """api() that raises ConnectionFailed or ErrorStatus, never exiting."""
     url = URL + path
     data = json.dumps(body).encode() if body else None
     # The bridge decides credentials before it reads a body, so the token goes
@@ -279,8 +294,8 @@ def _request(method, path, body=None, timeout=30, headers=None):
 def api(method, path, body=None, timeout=30, headers=None):
     try:
         return _request(method, path, body, timeout, headers)
-    except ConnectionFailed as e:
-        sys.exit(f'Connection failed: {e}')
+    except (ConnectionFailed, ErrorStatus) as e:
+        sys.exit(_failure_report(e))
 
 
 def api_raw(method, path):
@@ -305,6 +320,10 @@ def api_delete(path, body):
 def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     """Return the result for one command delivery, or None on timeout.
 
+    A timeout after any failed result request exits instead, naming the
+    outcome unknown: the command is queued, and a failed consume may have
+    claimed its result, so no later pending answer can say it did not run.
+
     The PUT response's delivery id distinguishes this invocation from a stale
     result with the same command id. Conditional consume names the generation
     just peeked, so a newer result that replaces it remains for its owner.
@@ -327,25 +346,30 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     # backwards under an NTP step; monotonic does not.
     deadline = time.monotonic() + timeout
     wait = 0.02
+    failure = None
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            break
         time.sleep(min(wait, remaining))
         wait = min(wait * 2, interval)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            break
         try:
             res = _request('GET', _query_path('/result', params),
                            timeout=remaining)
-        except ConnectionFailed:
-            # The bridge answers /result at once, so a reset or a cut-off
-            # body here is the proxy's. The command is already queued and
-            # the browser will run it; exiting now reports a failure for
-            # work that goes on to happen, and a retry runs it twice. A
-            # failed peek is treated like a pending slot: the deadline
-            # still says when to stop. The PUT is never retried.
+        except (ConnectionFailed, ErrorStatus) as error:
+            # The bridge answers /result at once, so a reset, a cut-off
+            # body or an error status here is the proxy's. The command is
+            # already queued and the browser will run it; exiting now
+            # reports a failure for work that goes on to happen, and a
+            # retry runs it twice. A failed peek is treated like a pending
+            # slot: the deadline still says when to stop. The PUT is never
+            # retried. A peek bounded by what is left of the wait and
+            # ending past it is the deadline arriving, not a failure.
+            if time.monotonic() < deadline:
+                failure = error
             continue
         if res.get('pending'):
             continue
@@ -360,10 +384,21 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
             continue
         # The consume is what actually claims the result, so it is allowed to
         # finish: giving up here would leave a result nobody takes. It is
-        # still bounded, by the ordinary request timeout.
-        consumed = api('GET', _query_path('/result', {
-            **params, 'consume': '1', 'expected': generation}))
+        # still bounded, by the ordinary request timeout. A failed one is
+        # retried by the next lap's peek, for the same reason as a peek.
+        try:
+            consumed = _request('GET', _query_path('/result', {
+                **params, 'consume': '1', 'expected': generation}))
+        except (ConnectionFailed, ErrorStatus) as error:
+            failure = error
+            continue
         if (consumed.get('consumed') is not True
                 or consumed.get('resultGeneration') != generation):
             continue
         return res
+    if failure is not None:
+        sys.exit(f'Timeout ({timeout}s), outcome unknown: the last result '
+                 f'request failed ({_failure_report(failure)}). The command '
+                 'was sent and may have run; check its effect before '
+                 'retrying.')
+    return None
