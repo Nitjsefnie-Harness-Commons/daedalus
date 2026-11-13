@@ -90,8 +90,8 @@ def _browser_args(browser, loaded, profile):
 
 
 def _start_browser(browser, loaded, profile):
-    # Chromium's own temp dirs go beside the profile, inside the run.
-    scratch = str(Path(profile).parent)
+    # The run's root: Chromium's socket path must fit Linux's 108-byte sun_path
+    scratch = str(Path(profile).parent.parent)
     return subprocess.Popen(
         _browser_args(browser, loaded, profile), cwd=ROOT,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
