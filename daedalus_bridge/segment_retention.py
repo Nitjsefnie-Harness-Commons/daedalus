@@ -75,4 +75,7 @@ def gc_loop(seg_dir_root, retention):
     interval = max(0.05, min(3600.0, retention))
     while True:
         time.sleep(interval)
-        sweep(seg_dir_root, retention)
+        try:
+            sweep(seg_dir_root, retention)
+        except Exception as why:  # one bad sweep must not end the thread
+            print(f'[SEGMENT] SWEEP-FAILED {log_safe(why)}', flush=True)

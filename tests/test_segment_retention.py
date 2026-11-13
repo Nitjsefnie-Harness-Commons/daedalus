@@ -266,35 +266,47 @@ def test_without_a_given_clock_the_sweep_reads_the_wall_clock(tmp):
     assert (tmp / 'new-job').is_dir(), sorted(tmp.iterdir())
 
 
-def _first_gc_iteration(given):
-    """The calls `gc_loop` makes up to its first sweep."""
+class _LoopEnd(BaseException):
+    """Ends `gc_loop` from its sleep, past any handler around the sweep."""
+
+
+def _gc_calls(given, sweeps, failing=0):
+    """`gc_loop`'s calls over `sweeps` sweeps; the first `failing` raise."""
     retention = _retention('segret_gc_loop')
     calls = []
 
     def sleep(seconds):
+        if sum(call[0] == 'sweep' for call in calls) == sweeps:
+            raise _LoopEnd
         calls.append(('sleep', seconds))
 
     def sweep(directory, seconds):
         calls.append(('sweep', directory, seconds))
-        raise RuntimeError('one iteration complete')
+        if sum(call[0] == 'sweep' for call in calls) <= failing:
+            raise RuntimeError('injected sweep failure')
 
     clock = type('Clock', (), {'sleep': staticmethod(sleep)})
     setattr(retention, 'time', clock)
     setattr(retention, 'sweep', sweep)
     try:
         retention.gc_loop(Path('segments'), given)
-    except RuntimeError as error:
-        assert error.args == ('one iteration complete',)
+    except _LoopEnd:
+        pass
     return calls
 
 
 def test_gc_loop_forwards_root_and_retention_after_sleep(_tmp):
-    """At most hourly, at least every 0.05 s, the sweep given both values."""
+    """At least hourly, at most every 0.05 s, the sweep given both values."""
     root = Path('segments')
-    assert _first_gc_iteration(7200) == [
-        ('sleep', 3600.0), ('sweep', root, 7200)]
-    assert _first_gc_iteration(0.01) == [
-        ('sleep', 0.05), ('sweep', root, 0.01)]
+    assert _gc_calls(7200, 1) == [('sleep', 3600.0), ('sweep', root, 7200)]
+    assert _gc_calls(0.01, 1) == [('sleep', 0.05), ('sweep', root, 0.01)]
+
+
+def test_a_failing_sweep_does_not_end_the_gc_loop(_tmp):
+    """The thread outlives one sweep raising: the next sweep still runs."""
+    root = Path('segments')
+    assert _gc_calls(60, 2, failing=1) == [
+        ('sleep', 60.0), ('sweep', root, 60)] * 2
 
 
 _RECORDING_GC_LOOP = """import json, os, sys
