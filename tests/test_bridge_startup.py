@@ -360,6 +360,7 @@ def test_bridge_configuration_is_resolvable_as_a_unit(tmp):
         'DAEDALUS_REQUEST_TIMEOUT', 'DAEDALUS_MAX_REQUEST_WORKERS',
         'DAEDALUS_MAX_SEGMENT_INDEX', 'DAEDALUS_MAX_SEGMENTS_PER_JOB',
         'DAEDALUS_MAX_SEGMENT_JOB_SIZE', 'DAEDALUS_CMD_TTL',
+        'DAEDALUS_SEGMENT_JOB_RETENTION',
     ]
     env = {key: value for key, value in os.environ.items()
            if key not in names}
@@ -387,6 +388,7 @@ print(json.dumps({
     'max_segment_index': config.MAX_SEGMENT_INDEX,
     'max_segments_per_job': config.MAX_SEGMENTS_PER_JOB,
     'max_segment_job_size': config.MAX_SEGMENT_JOB_SIZE,
+    'segment_job_retention': config.SEGMENT_JOB_RETENTION,
     'cmd_ttl': config.CMD_TTL,
 }, sort_keys=True))
 """
@@ -415,6 +417,7 @@ print(json.dumps({
         'max_segment_index': 99999,
         'max_segments_per_job': 10000,
         'max_segment_job_size': 4 * 1024 * 1024 * 1024,
+        'segment_job_retention': 7 * 24 * 3600.0,
         'cmd_ttl': 90.0,
     }
 

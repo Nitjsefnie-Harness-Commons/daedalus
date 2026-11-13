@@ -11,7 +11,7 @@ from daedalus_bridge import data_root_lock
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import mcp_bootstrap
 from daedalus_bridge import result_routes
-from daedalus_bridge import segment_jobs
+from daedalus_bridge import segment_jobs, segment_retention
 from daedalus_bridge import segment_routes
 from daedalus_bridge import static_routes
 from daedalus_bridge import stream_route
@@ -22,8 +22,8 @@ from daedalus_bridge.config import (
     BASE, CMD_DIR, CMD_TTL, DASHBOARD_DIR, MAX_DELIVERY_RESULTS,
     MAX_REQUEST_WORKERS, MAX_SEGMENT_INDEX, MAX_SEGMENT_JOB_SIZE,
     MAX_SEGMENTS_PER_JOB, PORT, REQUEST_TIMEOUT,
-    RES_DIR, SEG_DIR, STREAM_KEEPALIVE, STREAM_MAX_AGE,
-    UPLOAD_DIR,
+    RES_DIR, SEG_DIR, SEGMENT_JOB_RETENTION, STREAM_KEEPALIVE,
+    STREAM_MAX_AGE, UPLOAD_DIR,
 )
 from daedalus_bridge import http_transport
 from daedalus_bridge.http_transport import RequestMixin
@@ -467,7 +467,7 @@ if __name__ == '__main__':
     parent_watch.start()
     for directory in (CMD_DIR, RES_DIR, UPLOAD_DIR, SEG_DIR):
         directory.mkdir(parents=True, exist_ok=True)
-    # The lock precedes the gc thread: a refused process deletes nothing.
+    # The lock precedes the gc threads: a refused process deletes nothing.
     try:
         bridge_lock = data_root_lock.acquire(BASE)
     except data_root_lock.DataRootInUse:
@@ -477,6 +477,10 @@ if __name__ == '__main__':
     threading.Thread(
         target=command_queue.gc_loop, args=(CMD_DIR, CMD_TTL),
         name='command-gc', daemon=True).start()
+    threading.Thread(
+        target=segment_retention.gc_loop,
+        args=(SEG_DIR, SEGMENT_JOB_RETENTION),
+        name='segment-gc', daemon=True).start()
     httpd = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
     bridge_port = httpd.server_address[1]
     mcp_bootstrap.start(bridge_port)

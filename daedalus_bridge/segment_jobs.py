@@ -8,7 +8,9 @@ into a fresh record and are what a legacy record is measured against.
 both live under; `segment_routes`' module docstring carries the one
 statement of what it governs.
 """
+import contextlib
 import json
+import os
 from typing import NamedTuple
 
 from daedalus_bridge import atomic_file
@@ -71,6 +73,8 @@ def mint_job(seg_dir_root, token, body, quotas):
                         record.get('stored_bytes')) != reconciled:
                     segment_store.mark_dirty(seg_dir_root, job)
                     segment_store.write_usage(seg_dir_root, job, *reconciled)
+                with contextlib.suppress(OSError):  # a resume is activity
+                    os.utime(record_path)
                 return 200, {'ok': True, 'sig': sig}
 
             max_index, max_count, max_bytes = quotas
