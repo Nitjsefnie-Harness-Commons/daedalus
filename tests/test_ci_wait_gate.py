@@ -574,21 +574,23 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
     so the gate is still waiting for a run the matching pull requests will
     never produce.
 
-    **The admitted subset is the empty set, and that is the whole policy.**
-    Every option under `pull_request` narrows when the event fires, so every
-    one of them is a way to stop the gate running on a head that needs it:
-    `paths` and `paths-ignore` by file, `branches` and `branches-ignore` by
-    ref, `types` by which activity the event reports. `types:` is not
-    hypothetical - two workflows in this repository already declare that
-    exact form on another trigger. The keys are read with the shared reader,
-    which is the one that
-    knows a deeper `paths-ignore:` belongs to something else, and the
-    comparison is against no key at all rather than a list that would need
-    extending every time GitHub adds a narrowing option.
+    **One option on one workflow is admitted, and that is the whole
+    policy.** Every option under `pull_request` narrows when the event
+    fires, so each can leave a head without the run it needs: `paths` and
+    `paths-ignore` by file, `branches` and `branches-ignore` by ref, `types`
+    by activity (workflows here already declare `types:` on other triggers).
+    The options are compared with an exact admitted mapping, not a
+    refused-key list to extend whenever GitHub adds a narrowing option.
+
+    The exception is `tests`, exactly `branches: [main]`: a `tests` verdict
+    computed against another base is one a retarget would carry into main.
+    With the filter a non-main pull request has no run, so after a retarget
+    its head has no required context until a push or reopen.
     """
     del tmp
     mod = _ci_wait()
-    from _workflows import _entry, _event_option_keys, _workflow_triggers
+    from _workflows import _entry, _workflow_triggers
+    from _yamlsteps import workflow_mapping
     assert mod.REQUIRED_WORKFLOWS, 'the gate names no workflow at all'
     by_name = {}
     for path in sorted((ROOT / '.github' / 'workflows').iterdir()):
@@ -610,12 +612,13 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
                 f'the workflow named {wanted!r} declares '
                 f'{sorted(triggers)} and never runs on a pull request, so a '
                 f'head of a pull request has no run of it to wait for')
-            keys = _event_option_keys(triggers['pull_request'], wanted)
-            assert not keys, (
-                f'the workflow named {wanted!r} narrows its pull_request '
-                f'trigger by {sorted(keys)}, so some head gets no run of the '
-                f'workflow this wait requires and the head is refused for a '
-                f'matrix that was never asked for')
+            options = workflow_mapping(text)['on']['pull_request'] or {}
+            admitted = {'branches': ['main']} if wanted == 'tests' else {}
+            assert options == admitted, (
+                f'the workflow named {wanted!r} declares pull_request options '
+                f'{options!r}, not exactly {admitted!r}: a narrower trigger '
+                f'leaves some head with no run this wait requires, and a '
+                f'tests run on another base is a verdict a retarget carries')
 
 
 def _contract_of(text):

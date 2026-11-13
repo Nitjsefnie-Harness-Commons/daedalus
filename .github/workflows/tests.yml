@@ -16,9 +16,8 @@ on:
     # request open is not a tree anyone is reviewing.
     branches: [main]
     # Ratchet commits change only this data; audit still gates those pushes.
-    # The journey budget's counts, comment-share records and the size
-    # records join them: a tighten commit changes one JSON file, and its
-    # ratchet already ran.
+    # The journey budget's counts, comment-share and size records join them:
+    # a tighten commit changes one JSON file, and its ratchet already ran.
     paths-ignore:
       - '.github/ci-thresholds.json'
       - '.github/journey-budget.json'
@@ -29,10 +28,11 @@ on:
     # Documentation-only runs are narrowed inside the workflow instead, by
     # the classifier's docs_only output: one suite leg runs, coverage skips,
     # and the required checks still report.
-  # `pull_request`, never `pull_request_target`: the journey-budget job
-  # checks out and RUNS the proposed code, and pull_request_target would run
-  # it with a writable token and the base repository's secrets in reach.
+  # `pull_request`, never `pull_request_target`: journey-budget RUNS the
+  # proposed code; the latter runs it with a writable token and base secrets.
+  # BASE FILTER. A non-main base's green would survive a retarget to main.
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # Read-only: without an explicit block a job inherits the
@@ -57,8 +57,8 @@ concurrency:
 
 jobs:
   # Documentation-only runs pay for one suite leg and no coverage. The
-  # triggers stay unfiltered so every required check still reports; this
-  # job reads the changed paths and emits the suites matrix and a
+  # pull_request trigger has no path filter, so required checks still report;
+  # this job reads the changed paths and emits the suites matrix and a
   # docs_only flag instead, and every fallback over-runs.
   changes:
     runs-on: ubuntu-latest
@@ -1472,8 +1472,8 @@ jobs:
     uses: ./.github/workflows/size-baseline.yml  # zizmor: ignore[self-repository]
 
   # audit.yml's threshold direction guard, run here so `Aggregate workflow
-  # checks` requires it on every pull request; audit.yml still runs it on
-  # the threshold-only pushes this workflow ignores. A superseded head's
+  # checks` requires it on each pull request into main; audit.yml still runs
+  # it on the threshold-only pushes this workflow ignores. A superseded head's
   # cancel loses nothing: the guard judges the whole merge-base..head range.
   thresholds:
     runs-on: ubuntu-latest
@@ -1562,7 +1562,7 @@ jobs:
         # changes nothing, because the other three are still written.
         # In this job, not a new one: a new job is a new required status
         # context (a ruleset edit), and `Aggregate workflow checks` reports on
-        # every pull request whatever the docs-only classifier says
+        # each pull request into main whatever the docs-only classifier says
         # (`if: always()`) — doc-only commits are where a marker lands. Ahead
         # of the verdict step so a marker never waits out its poll bound.
         # Explicit `shell: bash`: the explicit form adds --noprofile --norc,
