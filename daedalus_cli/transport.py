@@ -247,19 +247,69 @@ def _json_body(response):
             'the answer nests too deep to decode') from error
 
 
+_MAX_INTERIM_RESPONSES = 100
+
+
+class _InterimSkippingResponse(http.client.HTTPResponse):
+    """An HTTPResponse that also skips the 1xx other than `100 Continue`.
+
+    http.client takes a `103 Early Hints` from a front end for the answer,
+    so the real one that follows was never read. `101 Switching Protocols`
+    stays final: what follows it is not HTTP.
+    """
+
+    def begin(self, **kwargs):
+        super().begin(**kwargs)
+        skipped = 0
+        while (100 <= self.status < 200
+               and self.status != http.HTTPStatus.SWITCHING_PROTOCOLS):
+            if skipped == _MAX_INTERIM_RESPONSES:
+                raise http.client.HTTPException(
+                    f'got more than {_MAX_INTERIM_RESPONSES} '
+                    'interim responses')
+            skipped += 1
+            # begin() returns at once while headers is set
+            self.headers = None  # pyright: ignore[reportAttributeAccessIssue]
+            self.msg = None  # pyright: ignore[reportAttributeAccessIssue]
+            super().begin(**kwargs)
+
+
+def _interim_skipping(connection_class):
+    return type(connection_class.__name__, (connection_class,),
+                {'response_class': _InterimSkippingResponse})
+
+
+class _HttpHandler(urllib.request.HTTPHandler):
+    def do_open(self, http_class, req, **http_conn_args):
+        return super().do_open(
+            _interim_skipping(http_class), req, **http_conn_args)
+
+
+class _HttpsHandler(urllib.request.HTTPSHandler):
+    def do_open(self, http_class, req, **http_conn_args):
+        return super().do_open(
+            _interim_skipping(http_class), req, **http_conn_args)
+
+
+def _open(req, timeout):
+    """urlopen() with interim responses skipped, and no global opener."""
+    opener = urllib.request.build_opener(_HttpHandler, _HttpsHandler)
+    return opener.open(req, timeout=timeout)
+
+
 def _exchange(req, timeout, read):
     """Send one request and return read(response).
 
-    HTTPError and URLError are raised by urlopen itself. A reset, a
+    HTTPError and URLError are raised by _open itself. A reset, a
     timeout or an IncompleteRead raised while the body is being READ —
-    after urlopen returned — must be caught here too: those come from the
+    after _open returned — must be caught here too: those come from the
     proxy in front of the bridge, not from the bridge, and they are the
     same class of failure as a refused connection, no answer arrived.
     HTTPError is a URLError and URLError is an OSError, so the order of
     the clauses is the order of specificity.
     """
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _open(req, timeout) as r:
             return read(r)
     except urllib.error.HTTPError as e:
         try:

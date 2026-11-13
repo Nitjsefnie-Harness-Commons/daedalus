@@ -10,7 +10,7 @@ import urllib.request
 from . import SEGMENT_SIG_HEADER
 from .output import MARK
 from .result_view import relative_upload_path
-from .transport import (URL, _http_error_detail, _query_path, api,
+from .transport import (URL, _http_error_detail, _open, _query_path, api,
                         api_delete, api_raw, token, wait_for_result)
 
 
@@ -27,7 +27,7 @@ def do_segment_status(args):
         _query_path(f'{URL}/segment-job', {'job': args.job}), method='GET',
         headers={'Authorization': f'Bearer {token()}'})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with _open(req, 30) as r:
             sig = json.loads(r.read())['sig']
     except urllib.error.HTTPError as e:
         if e.code == 404:

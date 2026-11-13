@@ -391,8 +391,8 @@ WAIT_TIMEOUT = 30
 WAIT_RESULT = {'id': 'c', 'deliveryId': 'd', 'resultGeneration': 7,
                'result': 'x'}
 
-_RAISING_URLOPEN = """
-import builtins, json, sys, urllib.error, urllib.request
+_RAISING_OPEN = """
+import builtins, json, sys, urllib.error
 from daedalus_cli import transport
 family, where, entry = sys.argv[1:4]
 exc = getattr(builtins, family)
@@ -427,7 +427,7 @@ class Response:
         pass
 
 
-def urlopen(req, timeout=None):
+def open_url(req, timeout=None):
     global peeks, consumes
     attempts.append(req.full_url)
     if 'consume=1' in req.full_url:
@@ -449,7 +449,7 @@ def urlopen(req, timeout=None):
     return Response()
 
 
-urllib.request.urlopen = urlopen
+transport._open = open_url
 if entry == 'wait':
     out = transport.wait_for_result('c', 't', 'd', TIMEOUT, interval=0)
     print('WAIT', json.dumps({'out': out, 'attempts': len(attempts)}))
@@ -458,7 +458,7 @@ else:
 """
 
 # A literal % in the template breaks this interpolation at import time.
-_RAISING_URLOPEN %= {
+_RAISING_OPEN %= {
     'failures': WAIT_FAILURES,
     'timeout': WAIT_TIMEOUT,
     'result': repr(WAIT_RESULT),
@@ -466,7 +466,7 @@ _RAISING_URLOPEN %= {
 
 
 def _check_transport_family(family):
-    """`family` from urlopen, the body read and an HTTPError's body read.
+    """`family` from the open, the body read and an HTTPError's body read.
 
     The wait pin is causal, not a wall clock: WAIT_TIMEOUT leaves the
     sub-second scheduler stalls that flaked the 0.2s budget no way to
@@ -479,13 +479,13 @@ def _check_transport_family(family):
     """
     env = cli_env(DAEDALUS_TOKEN=TOK)
     for where in ('open', 'read', 'error'):
-        r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
+        r = _run([sys.executable, '-c', _RAISING_OPEN, family, where,
                   'api'], env)
         assert r.returncode != 0, (where, r.returncode, r.stdout)
         assert 'Traceback' not in r.stderr, (where, r.stderr)
         assert f'Connection failed: {family} from {where}' in r.stderr, (
             where, r.stderr)
-        r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
+        r = _run([sys.executable, '-c', _RAISING_OPEN, family, where,
                   'wait'], env)
         assert r.returncode == 0, (where, r.returncode, r.stderr)
         assert 'Traceback' not in r.stderr, (where, r.stderr)
