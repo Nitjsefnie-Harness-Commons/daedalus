@@ -670,7 +670,8 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'tests/test_cli_argument_types.py::'
      'test_malformed_params_are_refused_at_parse_time'),
     # The URLError site is met by a refused connect; the HTTPException site by
-    # a cut-off read; the HTTPError-body site by a cut-off error read.
+    # a cut-off read; the HTTPError-body site by a cut-off error read; the
+    # status site by a whole error answer.
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e.reason) from e',
      'tests/test_cli_error_reporting.py::'
@@ -683,6 +684,10 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'raise ConnectionFailed(failure) from failure',
      'tests/test_cli_waits.py::'
      'test_a_truncated_error_answer_is_a_connection_failure'),
+    ('daedalus_cli.transport', '_exchange',
+     "raise ErrorStatus(f'HTTP {e.code}: {detail}') from e",
+     'tests/test_cli_waits.py::'
+     'test_a_complete_error_answer_is_still_reported_by_status'),
     # The html-body site is the api() paths' answer of a captive front end.
     ('daedalus_cli.transport', '_json_body',
      'raise ConnectionFailed(error) from error',

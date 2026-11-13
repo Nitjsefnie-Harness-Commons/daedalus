@@ -112,8 +112,8 @@ _BACKOFF_HARNESS = (
     '                  "result": result}, sort_keys=True))\n')
 
 
-_CUTOFF_HARNESS = (
-    'import json\n'
+_SCRIPTED_HARNESS = (
+    'import json, sys\n'
     'from daedalus_cli import transport\n'
     'class _Clock:\n'
     '    def __init__(self):\n'
@@ -127,16 +127,47 @@ _CUTOFF_HARNESS = (
     '        self.sleeps.append(seconds)\n'
     '        self.now += seconds\n'
     'transport.time = _Clock()\n'
+    'replies, timeout, interval = json.loads(sys.argv[1])\n'
     'calls = []\n'
     'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
     '    calls.append(path)\n'
-    '    raise transport.ConnectionFailed("cut off")\n'
+    '    reply = replies.pop(0) if len(replies) > 1 else replies[0]\n'
+    '    if reply == "slow":  # spends the budget it was handed\n'
+    '        transport.time.now += timeout\n'
+    '        raise transport.ConnectionFailed("timed out")\n'
+    '    if reply == "cut":\n'
+    '        raise transport.ConnectionFailed("cut off")\n'
+    '    if reply == "500":\n'
+    '        raise transport.ErrorStatus("HTTP 500: {\'error\': 1}")\n'
+    '    return reply\n'
     'transport._request = fake_api\n'
-    'result = transport.wait_for_result(\n'
-    '    "c1", "extension", "d1", %s, interval=%s)\n'
-    'print(json.dumps({"sleeps": transport.time.sleeps,\n'
-    '                  "polls": len(calls),\n'
+    'try:\n'
+    '    result = transport.wait_for_result(\n'
+    '        "c1", "extension", "d1", timeout, interval=interval)\n'
+    'except SystemExit as stop:\n'
+    '    result = {"exit": stop.code}\n'
+    'print(json.dumps({"sleeps": transport.time.sleeps, "calls": calls,\n'
     '                  "result": result}, sort_keys=True))\n')
+
+
+def _scripted_wait(replies, timeout=1.0, interval=0.5):
+    """The wait over `_request` answers replayed in order, the last
+    repeating: a body, or "cut" / "500" / "slow" for the failure it
+    raises, "slow" only once the timeout it was handed has passed."""
+    run = subprocess.run(
+        [sys.executable, '-c', _SCRIPTED_HARNESS,
+         json.dumps([replies, timeout, interval])],
+        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
+        text=True, encoding='utf-8', timeout=10)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    return json.loads(run.stdout)
+
+
+def _unknown(timeout, failure):
+    return {'exit': (
+        f'Timeout ({timeout}s), outcome unknown: the last result request '
+        f'failed ({failure}). The command was sent and may have run; check '
+        'its effect before retrying.')}
 
 
 _OVERSHOOT_HARNESS = (
@@ -302,7 +333,8 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
 
 
 def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
-    """Every peek failing still ends in None, on the ramp, exactly.
+    """Every peek failing still ends on the ramp, exactly, as an outcome
+    the wait cannot know: the command was queued before the first peek.
 
     ConnectionFailed from _request is what a proxy cut produces at
     transport level, whatever the HTTP shape of the cut. The virtual
@@ -312,24 +344,56 @@ def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
     the property the CLI-level pins could not have (issue 901).
     """
     del tmp
-    run = subprocess.run(
-        [sys.executable, '-c', _CUTOFF_HARNESS % (1.0, 0.5)],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
-    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-    outcome = json.loads(run.stdout)
+    outcome = _scripted_wait(['cut'])
     sleeps = outcome['sleeps']
-    brief = {'polls': outcome['polls'], 'result': outcome['result'],
+    brief = {'polls': len(outcome['calls']), 'result': outcome['result'],
              'sleeps': sleeps}
-    assert outcome['result'] is None, brief
+    assert outcome['result'] == _unknown(
+        1.0, 'Connection failed: cut off'), brief
     # Five ramp laps fit in 1.0s (0.62 spent); the sixth is cut to the
     # remainder, which spends the budget, so the loop expires before a
     # sixth peek.
-    assert outcome['polls'] == 5, brief
+    assert len(outcome['calls']) == 5, brief
     assert sleeps[:5] == [0.02, 0.04, 0.08, 0.16, 0.32], brief
     assert len(sleeps) == 6, brief
     assert 0.32 < sleeps[-1] < 0.5, brief
     assert abs(sum(sleeps) - 1.0) < 1e-9, brief
+
+
+OWN = {'id': 'c1', 'deliveryId': 'd1', 'resultGeneration': 'g1',
+       'result': 7, 'error': None}
+PEEK = '/result?tab=extension&delivery=d1'
+CONSUME = PEEK + '&consume=1&expected=g1'
+
+
+def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
+    """A consume that fails is not the command failing: it ran, and its
+    result is still claimed by a later poll, on the same generation.
+    When nothing claims it, a later pending slot cannot say the consume
+    did not take it, so the deadline reports the outcome unknown."""
+    del tmp
+    for failure, named in (
+            ('500', "HTTP 500: {'error': 1}"),
+            ('cut', 'Connection failed: cut off')):
+        claimed = {'consumed': True, 'resultGeneration': 'g1'}
+        outcome = _scripted_wait([OWN, failure, OWN, claimed])
+        assert outcome['result'] == OWN, (failure, outcome)
+        assert outcome['calls'] == [PEEK, CONSUME] * 2, (failure, outcome)
+        outcome = _scripted_wait([OWN, failure, {'pending': True}])
+        assert outcome['result'] == _unknown(1.0, named), (failure, outcome)
+        # Five ramp laps, the first one's peek answered and its consume
+        # failed; the four after it found nothing.
+        assert outcome['calls'] == [PEEK, CONSUME] + [PEEK] * 4, (
+            failure, outcome)
+
+
+def test_a_peek_the_deadline_cuts_short_is_a_plain_timeout(tmp):
+    """A peek is bounded by what is left of the wait, so failing once
+    that has passed is the deadline arriving, not a request failing."""
+    del tmp
+    outcome = _scripted_wait(['slow'])
+    assert outcome['result'] is None, outcome
+    assert outcome['calls'] == [PEEK], outcome
 
 
 def test_the_result_wait_reports_none_when_the_sleep_spends_the_budget(tmp):
