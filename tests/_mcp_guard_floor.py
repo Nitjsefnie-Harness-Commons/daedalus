@@ -682,6 +682,8 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_cli.transport', '_exchange',
      "raise ErrorStatus(f'HTTP {e.code}: {detail}') from e",
      WAITS + 'test_a_complete_error_answer_is_still_reported_by_status'),
+    ('daedalus_cli.transport', 'begin', 'skipped == _MAX_INTERIM_RESPONSES',
+     'tests/test_cli_error_reporting.py::test_interim_skipping_is_bounded'),
     ('daedalus_cli.transport', '_result_answer',
      'not isinstance(answer, dict)', 'tests/test_cli_result_wait.py::'
      'test_a_failed_consume_is_retried_and_never_reported_as_failed'),

@@ -109,7 +109,7 @@ def test_interim_responses_before_the_final_one_are_skipped(tmp):
         assert shown in r.stdout, (argv, r.stdout)
 
 
-def test_interim_skipping_has_a_bound_and_leaves_101_and_errors_final(tmp):
+def test_interim_skipping_is_bounded(tmp):
     """Rows: interim statuses, final status and body, what `tabs` reports.
 
     A hundred interim responses are skipped and a hundred and one are not;
