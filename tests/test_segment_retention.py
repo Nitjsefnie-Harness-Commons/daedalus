@@ -224,6 +224,27 @@ def test_a_symlinked_job_name_is_never_followed_or_removed(tmp):
     assert _present(victim) == victim, _present(victim)
 
 
+def test_an_aged_symlinked_record_is_neither_followed_nor_removed(tmp):
+    """The link outlives its idle job, and the file it names is untouched."""
+    tmp = Path(tmp)
+    retention = _retention('segret_symrecord')
+    root = tmp / 'segments'
+    root.mkdir()
+    target = tmp / 'target.json'
+    target.write_text('{"kept": true}', encoding='utf-8')
+    idle = _job(root, 'linked-record', None, None, None)
+    link = root / 'linked-record.json'
+    try:
+        link.symlink_to(target)
+        os.utime(link, (ORIGIN, ORIGIN), follow_symlinks=False)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'no aged symlink on this filesystem: {why}')
+    retention.sweep(root, RETENTION, now=LONG_AGO)
+    assert _present(idle) == [], _present(idle)
+    assert link.is_symlink(), sorted(root.iterdir())
+    assert target.read_text(encoding='utf-8') == '{"kept": true}'
+
+
 def test_a_junction_is_never_followed_or_removed(tmp):
     """On Windows a junction at a job name is a link: kept, never removed."""
     if sys.platform != 'win32':
