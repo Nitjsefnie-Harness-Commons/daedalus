@@ -76,7 +76,7 @@ Caller values used as path components go through `daedalus_bridge/path_safety.py
 - Commands `$DAEDALUS_DIR/commands/`: queues drained FIFO by the SSE loop, `<token>_<tabId>/<seq>.json` (per-tab), `<token>/<seq>.json` (broadcast), `<token>_extension/<seq>.json` (typed), `<token>_dashboard/<ms>_<counter>.json` (dashboard events). `<seq>` is `<ms>_<counter>`, publish-ordered across clock steps and restarts (`queue_order.next_seq`). Legacy single files (`<token>.json`, `<token>_<tabId>.json`) only via a sibling `.tmp` write and same-directory atomic rename; readers ignore `.tmp`. Complete files older than `DAEDALUS_CMD_TTL` (default 90s) are TTL-dropped. Legacy `_did` scheme: skill, "Storage".
 - Results `$DAEDALUS_DIR/results/`: `<token>_<tabId>.json` + `<token>.json` (last-writer-wins compat) and `deliveries/<target>/<deliveryId>.json`.
 - Uploads `$DAEDALUS_DIR/uploads/<token>/<id>/`: screenshots and generic files.
-- Segments `$DAEDALUS_DIR/segments/<job>/` with a `<job>.json` record (owner, capability, quotas, running totals); `.<job>.json.dirty` and `.<job>.json.tmp` are reserved names. The bridge removes a job idle past `DAEDALUS_SEGMENT_JOB_RETENTION`, record first, at most hourly. `DAEDALUS_DEBUG_TIMING=1` prints a `[SEGMENT-TIMING]` line per segment write.
+- Segments `$DAEDALUS_DIR/segments/<job>/` with a `<job>.json` record (owner, capability, quotas, running totals); `.<job>.json.dirty` and `.<job>.json.tmp` are reserved names. The bridge removes a job idle past `DAEDALUS_SEGMENT_JOB_RETENTION`, record first, sweeping every `min(3600, retention)` seconds, so at least hourly. `DAEDALUS_DEBUG_TIMING=1` prints a `[SEGMENT-TIMING]` line per segment write.
 </directories>
 
 <mcp>
