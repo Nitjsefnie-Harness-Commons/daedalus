@@ -6,6 +6,7 @@ import threading
 import time
 
 from daedalus_bridge import command_queue
+from daedalus_bridge import exec_timing
 from daedalus_bridge import legacy_ids
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import path_safety
@@ -212,6 +213,7 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                 continue
             if chrome_tab is not None:
                 data['chromeTab'] = chrome_tab
+            exec_timing.stamp(data, 'srv_write_us')
             frame_writer(data)  # BEFORE unlink
             # The claim excludes other consumers until this write and
             # unlink finish; a file that will not unlink is redelivered
@@ -341,6 +343,7 @@ def poll_legacy(cmd_dir, token):
                 return 200, data
             if isinstance(candidate, dict):
                 data = candidate
+                exec_timing.drop_client_timing(data)
                 try:
                     cmd_file.unlink()
                 except OSError:
@@ -395,6 +398,7 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
         if chrome_tab is not None:
             data['chromeTab'] = chrome_tab
         legacy_ids.stamp(data, path.name, ident)
+        exec_timing.drop_client_timing(data)
         frame_writer(data)  # BEFORE unlink
         # The claim excludes other consumers until this write and unlink
         # finish; a redelivery is deduplicated by the `_did` stamped above.

@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """Drive substituted HLS examples through the shipped MAIN-world evaluator.
 
-The GM stub answers the playlist and parks on a segment. The fetch gate
-records the refused status read without talking to a browser or bridge.
+The GM stub answers the playlist and, unless a scenario supplies segment
+bytes, parks on a segment. The fetch gate records the refused status read
+without talking to a browser or bridge.
 """
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _segments import (  # noqa: E402
+    JOB_HEADER, SEG_HEADER, SIG_HEADER, TOTAL_HEADER)
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_sources import (  # noqa: E402
     RESPONSE_STUB, STREAM_RESPONSE)
 
 EXAMPLE = ROOT / 'examples' / 'hls-segment-relay.js'
-SIG_HEADER = 'X-Daedalus-Segment-Sig'
 PLAYLIST = '#EXTM3U\n' + ''.join(f'seg{i}.ts\n' for i in range(1, 7))
 FIXED = {
     '__SERVER__': 'https://bridge.example.com',
@@ -55,6 +58,8 @@ const context = {
       calls.push(['xhr', opts.responseType]);
       if (opts.responseType === 'text') {
         opts.onload({ status: 200, responseText: plan.playlist });
+      } else if (plan.segmentBytes) {
+        opts.onload({ status: 200, response: new ArrayBuffer(1) });
       }
     },
   } },
@@ -79,7 +84,7 @@ vm.runInNewContext(fs.readFileSync(evaluator, 'utf8'), context,
   const result = await context._executeMainWorldEval(plan.source);
   if (result.e) throw new Error(result.e);
   const returned = result.r === undefined ? '<undefined>' : result.r;
-  for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+  for (let turn = 0; turn < 200; turn++) await Promise.resolve();
   process.stdout.write(JSON.stringify({
     returned, calls,
     gate: {
@@ -102,12 +107,13 @@ def _substitute(**placeholders):
     return source
 
 
-def _run(source):
+def _run(source, status=STATUS, uploads=0):
+    planned = [status] + ['POST /segment'] * uploads
     outcome = run_gate(require_node(), _HARNESS, [], cwd=ROOT, plan={
-        'source': source, 'playlist': PLAYLIST,
-        'planned': [STATUS],
+        'source': source, 'playlist': PLAYLIST, 'segmentBytes': uploads > 0,
+        'planned': planned,
         'hosts': [FIXED['__SERVER__']],
-        'answers': {STATUS: {'status': 500}},
+        'answers': {status: {'status': 500}},
     })
     gate = outcome.pop('gate')
     assert_gate_clean(
@@ -115,7 +121,7 @@ def _run(source):
         records=gate['records'], refused=gate['refused'],
         bad_origins=gate['badOrigins'],
         stream_answered=gate['streamAnswered'],
-        planned=[STATUS], planned_stream=[])
+        planned=planned, planned_stream=[])
     return outcome
 
 
@@ -155,6 +161,22 @@ def test_concurrency_defaults_when_unsubstituted_and_reads_a_value(tmp):
     assert default == 'relay started: job=relay_job-1 concurrency=3', default
     selected = _run(_substitute(__CONC__='4'))['returned']
     assert selected == 'relay started: job=relay_job-1 concurrency=4', selected
+
+
+def test_every_upload_of_a_job_shares_one_url_and_carries_its_headers(tmp):
+    """One URL per job lets a browser reuse a preflight; the job is encoded."""
+    del tmp
+    job = 'relay-caf\u00e9'
+    outcome = _run(
+        _substitute(__JOB__=job, __SIG__='given-sig'),
+        status=f'GET /segment-status?job={quote(job, safe="")}', uploads=6)
+    posts = [c for c in outcome['calls']
+             if c[0] == 'fetch' and '/segment-status?' not in c[1]]
+    assert {c[1] for c in posts} == {FIXED['__SERVER__'] + '/segment'}, posts
+    assert sorted((c[2][SEG_HEADER], c[2][TOTAL_HEADER]) for c in posts) == [
+        (str(i), '6') for i in range(1, 7)], posts
+    assert {(c[2][JOB_HEADER], c[2][SIG_HEADER]) for c in posts} == {
+        (quote(job, safe=''), 'given-sig')}, posts
 
 
 if __name__ == '__main__':

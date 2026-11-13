@@ -2,7 +2,7 @@
 # Pinned exactly, like every other dependency here: pip's build isolation
 # resolves this line, so a floor means the wheel is built by whatever shipped
 # most recently rather than by the version anyone tested.
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -86,13 +86,16 @@ omit = [
     # The floors ask for tests of product and shipped-CI lines, and
     # contributor tooling is neither.
     ".claude/skills/*",
+    # The runner and the test-tree guards are test code; no floor tests tests.
+    "run_tests.py",
+    "scripts/ci/suite_bound.py",
+    "scripts/ci/type_error_baseline.py",
 ]
 
 [tool.coverage.paths]
-# The runner's own tests copy run_tests.py into a temp tree and run it where
-# it stands, so its lines are recorded under that path. Combining maps them
-# back onto the source; without this the file every one of those tests drives
-# reports 0%, and the total understates by about two points.
+# Suites copy shipped files into a temp `tree` and run them where they stand,
+# so their lines are recorded under that path. Combining maps them back onto
+# the source; without this every file those suites drive reports 0%.
 repo = [".", "*/tree", "*/daedalus/daedalus"]
 
 [tool.coverage.report]

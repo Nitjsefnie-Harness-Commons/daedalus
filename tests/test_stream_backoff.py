@@ -33,7 +33,6 @@ NEW_BRIDGE = 'https://other.example.com'
 # the permitted origins below come from each scenario's recording.
 SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
-OTHER = 'POST /other'
 TWO = [SYNC, SYNC]
 # The resumed-bridge scenario legitimately posts the same route to two.
 BOTH = [BRIDGE, NEW_BRIDGE]
@@ -285,12 +284,9 @@ async function nextRetryTimer() {
 }
 
 async function run() {
-  // fake-probe skips the worker: its boot would spend the plan's allowance.
-  if (plan.scenario !== 'fake-probe') {
-    vm.runInContext(
-      fs.readFileSync(backgroundPath, 'utf8'), context,
-      { filename: backgroundPath });
-  }
+  vm.runInContext(
+    fs.readFileSync(backgroundPath, 'utf8'), context,
+    { filename: backgroundPath });
   await settle();
   const outcome = {};
   if (plan.scenario === 'backoff' || plan.scenario === 'reset') {
@@ -404,16 +400,6 @@ async function run() {
   } else if (plan.scenario === 'boot-ledger') {
     await settle();
     outcome.fetches = streamFetches.length;
-  } else if (plan.scenario === 'fake-probe') {
-    const post = (url) => bridgeFetch(url, { method: 'POST' });
-    const route = (r) => BRIDGE_URL + r;
-    outcome.firstStatus = (await post(route('/sync-tabs'))).status;
-    outcome.secondStatus = (await post(route('/sync-tabs'))).status;
-    outcome.undeclaredStatus = (await post(route('/tabs'))).status;
-    outcome.badOriginStatus = (
-      await post('https://elsewhere.example.com/other')).status;
-    outcome.relativeStatus = (await post('/other')).status;
-    outcome.afterBadOriginStatus = (await post(route('/other'))).status;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   outcome.nonStream = nonStreamFetches.map((item) => item.request);

@@ -56,8 +56,9 @@ def bump(version, successor=False):
     released = version
     if successor:
         version += '.1'
-    message = (f'Stop main claiming the version release {released} published'
-               if successor else f'Claim {version} across every version site')
+    message = ('chore(release): stop main claiming the version release '
+               f'{released} published' if successor else
+               f'chore(release): claim {version} across every version site')
     for attempt in range(1, ATTEMPTS + 1):
         _git('fetch', 'origin', 'main')
         _git('reset', '--hard', 'origin/main')
@@ -129,7 +130,8 @@ def wait(read, repository, sha, *, release=False, timeout=2700, grace=300,
         rows = _runs(read, repository, sha)
         rows = ([row for row in rows if row['name'] == 'release'] if release
                 else [row for row in rows
-                      if row['name'] not in ('release', 'pr gate')
+                      if row['name'] not in ('release', 'pr gate',
+                                             'pin test screen')
                       and row['event'] != 'issue_comment'])
         pending = [row for row in rows if row['status'] != 'completed']
         accepted = ('success',) if release else ('success', 'skipped')

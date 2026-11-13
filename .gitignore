@@ -91,11 +91,13 @@
 !/.github/workflows/comment-share.yml
 !/.github/workflows/coverage-comment.yml
 !/.github/workflows/gate-freshness.yml
+!/.github/workflows/pin-guard.yml
 !/.github/workflows/pr-gate.yml
 !/.github/workflows/release-dispatch.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
 !/.github/workflows/secrets.yml
+!/.github/workflows/size-baseline.yml
 !/.github/workflows/tests.yml
 !/.github/workflows/version.yml
 
@@ -109,6 +111,7 @@
 !/daedalus_bridge/data_root_lock.py
 !/daedalus_bridge/delivery_stripes.py
 !/daedalus_bridge/env_config.py
+!/daedalus_bridge/exec_timing.py
 !/daedalus_bridge/http_transport.py
 !/daedalus_bridge/json_body.py
 !/daedalus_bridge/legacy_ids.py
@@ -149,6 +152,7 @@
 !/daedalus_mcp/auth.py
 !/daedalus_mcp/request_guard.py
 !/daedalus_mcp/server.py
+!/daedalus_mcp/timing_view.py
 !/daedalus_mcp/tools_cookies.py
 !/daedalus_mcp/tools_css.py
 !/daedalus_mcp/tools_eval.py
@@ -212,6 +216,7 @@
 !/extension/worker/config.js
 !/extension/worker/cookies.js
 !/extension/worker/evaluate.js
+!/extension/worker/exec_timing.js
 !/extension/worker/gm_storage.js
 !/extension/worker/hotfix_scope.js
 !/extension/worker/hotfixes.js
@@ -264,7 +269,6 @@
 !/scripts/ci/ratchet_push.py
 !/scripts/ci/release_dispatch.py
 !/scripts/ci/suite_bound.py
-!/scripts/ci/tests_lines.py
 !/scripts/ci/threshold_base.py
 !/scripts/ci/thresholds.py
 !/scripts/ci/thresholds_guard.py
@@ -284,7 +288,6 @@
 !/tests/_boundary_env.py
 !/tests/_boundary_scenarios.py
 !/tests/_bridge.py
-!/tests/_bridge_fake_oracle_harness.py
 !/tests/_case_fold.py
 !/tests/_cdpharness.py
 !/tests/_child_boot_env.py
@@ -305,16 +308,10 @@
 !/tests/_command_candidates.py
 !/tests/_command_type_readers.py
 !/tests/_completion.py
-!/tests/_controlled_call.py
-!/tests/_coverage_bindings.py
 !/tests/_coverage_comment_publication.py
 !/tests/_coverage_comment_steps.py
 !/tests/_coverage_comment_workflow.py
-!/tests/_coverage_guard.py
 !/tests/_coverage_launch_stubs.py
-!/tests/_coverage_memo.py
-!/tests/_coverage_scopes.py
-!/tests/_coverage_source_fixtures.py
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
 !/tests/_dashdom.py
@@ -376,11 +373,9 @@
 !/tests/_node_launch_routing.py
 !/tests/_noderun.py
 !/tests/_noglibc.py
-!/tests/_outer_bound.py
 !/tests/_overlap.py
 !/tests/_overlap_clients.py
 !/tests/_pip_cache.py
-!/tests/_plant_fixture.py
 !/tests/_processtree.py
 !/tests/_queueread.py
 !/tests/_ratchet_fixture.py
@@ -388,7 +383,6 @@
 !/tests/_realbrowser_broken_worker.py
 !/tests/_realbrowser_controls.py
 !/tests/_realbrowser_errors.py
-!/tests/_realbrowser_fixture_controls.py
 !/tests/_realbrowser_pages.py
 !/tests/_realbrowser_workers.py
 !/tests/_relayharness.py
@@ -397,7 +391,6 @@
 !/tests/_segment_job_record.py
 !/tests/_segments.py
 !/tests/_service_loader.py
-!/tests/_speedharness.py
 !/tests/_stream_fake.py
 !/tests/_suite_bound_stubs.py
 !/tests/_suite_jobs.py
@@ -436,7 +429,6 @@
 !/tests/test_aggregate_needs.py
 !/tests/test_atomic_file.py
 !/tests/test_bridge_credentials.py
-!/tests/test_bridge_fake_oracle.py
 !/tests/test_bridge_requests.py
 !/tests/test_bridge_results_deliveries.py
 !/tests/test_bridge_results_slots.py
@@ -476,12 +468,10 @@
 !/tests/test_cli_content_commands.py
 !/tests/test_cli_content_css.py
 !/tests/test_cli_content_hotfixes.py
-!/tests/test_cli_dispatch.py
 !/tests/test_cli_duplicate_admission.py
 !/tests/test_cli_error_reporting.py
 !/tests/test_cli_eval_commands.py
 !/tests/test_cli_eval_handlers.py
-!/tests/test_cli_helpers.py
 !/tests/test_cli_hotfixes.py
 !/tests/test_cli_invoke.py
 !/tests/test_cli_media_commands.py
@@ -524,7 +514,6 @@
 !/tests/test_dashboard_tab_events.py
 !/tests/test_debugger_attachment.py
 !/tests/test_debugger_teardown.py
-!/tests/test_delivery_matching.py
 !/tests/test_delivery_stripe_acceptance.py
 !/tests/test_delivery_stripes.py
 !/tests/test_diff_coverage.py
@@ -533,11 +522,12 @@
 !/tests/test_eval_relay.py
 !/tests/test_examples_parse.py
 !/tests/test_exclusive_bind.py
+!/tests/test_exec_timing_bridge.py
+!/tests/test_exec_timing_view.py
 !/tests/test_extension_boundary.py
 !/tests/test_extension_manifest.py
 !/tests/test_extension_policy.py
 !/tests/test_fetch_timings_count.py
-!/tests/test_gate_extensions.py
 !/tests/test_gate_freshness.py
 !/tests/test_gate_freshness_ratchet.py
 !/tests/test_gate_freshness_run.py
@@ -575,7 +565,6 @@
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
 !/tests/test_js_module_coverage.py
-!/tests/test_jsread_mask.py
 !/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py
 !/tests/test_mcp_closure_limits.py
@@ -597,14 +586,11 @@
 !/tests/test_parent_watch.py
 !/tests/test_path_containment.py
 !/tests/test_path_safety.py
-!/tests/test_plant_report.py
 !/tests/test_plant_restore.py
 !/tests/test_pyright_scope.py
 !/tests/test_queued_command.py
 !/tests/test_ratchet_push.py
 !/tests/test_real_browser_eval.py
-!/tests/test_real_browser_harness.py
-!/tests/test_receiver_descent.py
 !/tests/test_relay_example_placeholders.py
 !/tests/test_release_dispatch.py
 !/tests/test_release_scan.py
@@ -612,8 +598,6 @@
 !/tests/test_result_routes.py
 !/tests/test_result_store.py
 !/tests/test_result_stripe.py
-!/tests/test_run_tests.py
-!/tests/test_runner_refuses_unawaited.py
 !/tests/test_screenshot_quality.py
 !/tests/test_secret_scan.py
 !/tests/test_segment_capability.py
@@ -627,21 +611,15 @@
 !/tests/test_segment_store.py
 !/tests/test_segment_write_retry.py
 !/tests/test_speed_gate_jobs.py
-!/tests/test_speedharness.py
 !/tests/test_starvation_bounds.py
 !/tests/test_static_routes.py
 !/tests/test_stream_backoff.py
-!/tests/test_stream_fake_oracle.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_stream_registration.py
 !/tests/test_stream_route.py
 !/tests/test_stream_service.py
 !/tests/test_stream_service_legacy_ids.py
-!/tests/test_suite_bound.py
-!/tests/test_suite_bound_survivor.py
-!/tests/test_suite_runner.py
 !/tests/test_tab_registry.py
-!/tests/test_teardown_retry.py
 !/tests/test_type_errors.py
 !/tests/test_upload_races.py
 !/tests/test_upload_routes.py
@@ -666,7 +644,6 @@
 !/tests/test_worker_route_guard.py
 !/tests/test_worker_runtime.py
 !/tests/test_worker_runtime_candidates.py
-!/tests/test_worker_sources.py
 !/tests/test_worker_tabs_chrome.py
 !/tests/test_worker_tabs_misc.py
 !/tests/test_workflow_cache_boundary.py

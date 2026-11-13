@@ -12,11 +12,13 @@ import http.client
 import json
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import (BRIDGE_ENV, TOK, mint_job, post_segment,  # noqa: E402
-                       seg_job)
+from _segments import (BRIDGE_ENV, JOB_HEADER, SEG_HEADER,  # noqa: E402
+                       SIG_HEADER, TOK, TOTAL_HEADER, mint_job,
+                       post_segment, seg_job)
 
 
 def test_segment_post_and_status_require_capability(tmp):
@@ -290,6 +292,110 @@ def test_a_duplicate_segment_capability_header_is_refused(tmp):
             conn.close()
         assert status == 400 and payload == {
             'error': 'duplicate segment capability header'}, (status, payload)
+
+
+CARRIERS = (('job', JOB_HEADER), ('seg', SEG_HEADER),
+            ('total', TOTAL_HEADER))
+
+
+def post_raw(base, query, headers, body=b'bytes'):
+    """POST /segment with a header list, which may repeat a name."""
+    port = int(base.rsplit(':', 1)[1])
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+    try:
+        conn.putrequest('POST', '/segment' + query)
+        for name, value in headers:
+            conn.putheader(name, value)
+        conn.putheader('Content-Type', 'application/octet-stream')
+        conn.putheader('Content-Length', str(len(body)))
+        conn.endheaders(body)
+        response = conn.getresponse()
+        return response.status, json.loads(response.read())
+    finally:
+        conn.close()
+
+
+def test_a_segment_upload_takes_its_parameters_from_headers(tmp):
+    """The fixed `/segment` target is what lets a browser reuse a preflight.
+
+    Values are percent-encoded UTF-8: a header cannot carry a non-ASCII job.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        for job in (seg_job(), seg_job() + '-caf\u00e9'):
+            _, minted = mint_job(base, TOK, job)
+            sig = minted['sig']
+            # Lowercase is how an HTTP/2 hop delivers the same names.
+            for spell, index in ((str, '7'), (str.lower, '6')):
+                status, body = post_raw(base, '', [
+                    (spell(JOB_HEADER), quote(job, safe='')),
+                    (spell(SEG_HEADER), index), (spell(TOTAL_HEADER), '9'),
+                    (spell(SIG_HEADER), sig)])
+                assert status == 200, (job, spell, status, body)
+                stored = Path(docroot) / 'segments' / job / f'00000{index}.ts'
+                assert stored.read_bytes() == b'bytes', (job, spell)
+            # A header for one parameter leaves the others to the query.
+            status, body = post_raw(base, '?seg=8&total=9', [
+                (JOB_HEADER, quote(job, safe='')), (SIG_HEADER, sig)])
+            assert status == 200, (job, status, body)
+            assert (stored.parent / '000008.ts').is_file(), job
+
+
+def test_header_parameters_meet_the_validation_the_query_has(tmp):
+    """A decoded header value is judged exactly as the query value is."""
+    job = seg_job()
+    valid = {'job': job, 'seg': '1', 'total': '1'}
+    refused = (('job', '%2E%2E', 'invalid param'),
+               ('seg', 'x', 'seg must be a bounded ASCII decimal'),
+               ('total', '%2E%2E', 'invalid param'))
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        _, minted = mint_job(base, TOK, job)
+        replies = []
+        for key, value, error in refused:
+            values = {**valid, key: value}
+            status, body = post_raw(base, '', [
+                (SIG_HEADER, minted['sig']),
+                *[(header, values[name]) for name, header in CARRIERS]])
+            replies.append((key, status, body, error))
+        assert all(status == 400 and body == {'error': error}
+                   for _key, status, body, error in replies), replies
+        assert list((Path(docroot) / 'segments' / job).glob('*.ts')) == []
+
+
+def test_segment_parameter_headers_reject_every_ambiguous_carrier(tmp):
+    """A repeated header, or a header beside its query twin, picks nothing.
+
+    Each parameter is driven alone, with the other two on the query, so
+    removing one parameter's check leaves only that parameter's rows red.
+    """
+    job = seg_job()
+    valid = {'job': job, 'seg': '3', 'total': '5'}
+    twins = (('same', '{v}', '{v}', str), ('different', '{v}', 'other', str),
+             ('blank second', '{v}', '', str),
+             ('blank first', '', '{v}', str),
+             ('lowercase second', '{v}', '{v}', str.lower))
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        _, minted = mint_job(base, TOK, job)
+        sig = (SIG_HEADER, minted['sig'])
+        replies = []
+        for key, header in CARRIERS:
+            others = '&'.join(f'{k}={v}' for k, v in valid.items()
+                              if k != key)
+            for shape, first, second, spell in twins:
+                first, second = (t.format(v=valid[key])
+                                 for t in (first, second))
+                status, body = post_raw(
+                    base, '?' + others, [sig, (header, first),
+                                         (spell(header), second)])
+                replies.append((key, 'repeat', shape, status, body,
+                                f'duplicate {header} header'))
+                status, body = post_raw(
+                    base, f'?{others}&{key}={second}',
+                    [sig, (spell(header), first)])
+                replies.append((key, 'query twin', shape, status, body,
+                                f'conflicting {key}'))
+        assert all(status == 400 and body == {'error': error}
+                   for *_row, status, body, error in replies), replies
+        assert list((Path(docroot) / 'segments' / job).glob('*.ts')) == []
 
 
 def test_a_query_sig_still_authorizes_a_segment_route(tmp):

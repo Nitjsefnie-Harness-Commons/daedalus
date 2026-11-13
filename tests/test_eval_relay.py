@@ -7,24 +7,31 @@ outcome is terminal whatever it is. These run the shipped scripts in a Node
 VM so the ordering, the handle release and the invocation-id bounds can be
 observed rather than inferred.
 """
+import functools
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _cdpharness import run_cdp_handle_lifecycle  # noqa: E402
+from _noderun import run_node_argv  # noqa: E402
+from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import require_node  # noqa: E402
 from _relayharness import (run_eval_after_cdp_fails_mid_flight,  # noqa: E402
                            run_eval_relay_marker, run_eval_relay_overlap,
                            run_eval_same_tab_preemption, run_gm_abort,
                            run_eval_with_poisoned_page_globals,
-                           run_main_world_injection_shapes)
+                           run_main_world_injection_shapes,
+                           run_timed_relay)
 from _mainworldharness import (run_main_world_eval_timeout,  # noqa: E402
                                run_main_world_eval_inside,
                                run_main_world_eval_probe_hang,
                                run_hotfix_replay_timeout,
                                run_hotfix_replay_probe_hang,
                                run_hotfix_replay_cdp_timeout,
-                               run_hotfix_replay_inside)
+                               run_hotfix_replay_inside,
+                               run_timed_eval)
 
 # The chosen MAIN-world settlement ceiling, in ms. Equal to the CDP
 # settlement bound so one caller sees the same limit whichever channel the
@@ -414,6 +421,212 @@ def test_the_eval_and_replay_paths_arm_only_the_named_ceiling(tmp):
         '[Daedalus] hotfix replay failed on tab 7: fix1: '
         + f'MAIN-world hotfix fix timed out after {_SETTLE_MS} ms'), (
             replay_outcome)
+
+
+# The stamps each world's path takes, in the order the run takes them, after
+# the two the bridge wrote. `page-main` and `cdp` have no content-script hop,
+# and the page relay's harness never fires the receipt tick (`sw_tick`).
+_PROBE = ['sw_recv', 'sw_probe_call', 'sw_tick']
+_STAMPS = {
+    'eval-plain': _PROBE + ['sw_probe_done', 'pg_probe', 'sw_eval_call',
+                            'sw_eval_done', 'pg_eval_start', 'pg_eval_end'],
+    'eval-throws': _PROBE + ['sw_probe_done', 'pg_probe', 'sw_eval_call',
+                             'sw_eval_done', 'pg_eval_start', 'pg_eval_end'],
+    'eval-timeout': _PROBE + ['sw_probe_done', 'pg_probe', 'sw_eval_call',
+                              'sw_eval_failed'],
+    'eval-probe-hang': _PROBE + ['sw_probe_failed', 'sw_cdp_attach',
+                                 'sw_cdp_ready', 'sw_cdp_eval_done'],
+    'relay': ['sw_recv', 'sw_probe_call', 'sw_probe_failed', 'sw_cdp_attach',
+              'sw_relay_send', 'sw_relay_result', 'cs_recv', 'pg_recv',
+              'pg_done', 'cs_result'],
+}
+_BASE = ('{"token":"bound-token","tabId":"7","id":"_eval",'
+         '"error":%s,"ts":1700000000000,%s,"_did":"did-%s"}')
+_BASE_BODIES = {
+    'eval-plain': _BASE % (
+        'null', '"result":4,"world":"page-main","exec_ms":0', 'eval-plain'),
+    'eval-throws': _BASE % (
+        '"missing_name is not defined"', '"world":"page-main"',
+        'eval-throws'),
+    'eval-timeout': _BASE % (
+        '"MAIN-world eval failed: MAIN-world eval timed out after 10000 ms"',
+        '"result":null,"world":"page-main"', 'eval-timeout'),
+    'eval-probe-hang': _BASE % (
+        'null', '"result":2,"world":"cdp"', 'eval-probe-hang'),
+    'relay': _BASE.replace('bound', 'eval') % (
+        'null', '"result":4,"world":"page:relay.test","exec_ms":0', 'relay'),
+}
+_RELAY_FIELDS = [['direction', 'id', 'relayId', 'code'],
+                 ['direction', 'id', 'relayId', 'r', 'ms']]
+_PROBE_CALL = {'target': {'tabId': 7}, 'world': 'MAIN',
+               'func': '_canUseMainWorldEval'}
+
+
+# One child per (world, flag): both timing tests read the same runs. Flag
+# off, the relay's page hands stamps back unasked: they must not be kept.
+@functools.cache
+def _timed(world, flag):
+    if world == 'relay':
+        return run_timed_relay(
+            flag, {'timing': {'pg_done': 1}} if flag == '0' else None)
+    return run_timed_eval(world, flag)
+
+
+def _expected(names):
+    expected: dict[str, float] = {'srv_enqueue_us': 1, 'srv_write_us': 2}
+    for name in names + ['sw_post']:
+        expected[name] = (1700000000000.75 if name.startswith('sw_')
+                          else 1600000000000.75)
+    return expected
+
+
+def _posted_timing(run):
+    assert len(run['bodies']) == 1, run
+    return json.loads(run['bodies'][0])['_timing']
+
+
+def test_with_the_flag_off_an_eval_takes_no_stamp_and_posts_base_bytes(tmp):
+    """Issue Expected 3: no `_timing` from the bridge, no clock read and the
+    result POST body is today's string, on every channel, also for a
+    `_timing` that is not an object and for page stamps handed back
+    unasked. The flag-on run of the same path proves the read counters are
+    live; `date` stays the one `ts` read every result already takes.
+    """
+    del tmp
+    for world, body in _BASE_BODIES.items():
+        off = _timed(world, '0')
+        assert off['reads'] == {'worker': 0, 'page': 0, 'date': 1}, off
+        assert off['bodies'] == [body], off
+        # The page relay's two window messages keep today's fields.
+        assert off.get('messages', _RELAY_FIELDS) == _RELAY_FIELDS, off
+        on = _timed(world, '1')['reads']
+        assert on['worker'] > 0, (world, on)
+        assert on['page'] > 0 or world == 'eval-probe-hang', (world, on)
+    for not_an_object in ('[]', '"x"'):
+        off = run_timed_eval('eval-plain', not_an_object)
+        assert off['reads'] == {'worker': 0, 'page': 0, 'date': 1}, off
+        assert off['bodies'] == [_BASE_BODIES['eval-plain']], off
+    for world, code in (('eval-plain', '2 + 2'), ('eval-timeout', None),
+                        ('eval-probe-hang', None)):
+        calls = _timed(world, '0')['injections']
+        assert calls[0] == _PROBE_CALL, calls
+        assert code is None or calls[1:] == [{
+            **_PROBE_CALL, 'func': '_executeMainWorldEval',
+            'args': [code]}], calls
+
+
+def test_with_the_flag_on_each_world_posts_the_legs_it_traversed(tmp):
+    """Issue Expected 1, per world, timeouts included: the bridge's stamps
+    come back untouched, then every leg the path took, in order, each an
+    unrounded `performance.timeOrigin + performance.now()` of its own realm
+    (the doubles' 0.25 + 0.5: a rounded or Date.now stamp differs).
+    """
+    del tmp
+    for world, names in _STAMPS.items():
+        timing = _posted_timing(_timed(world, '1'))
+        expected = _expected(names)
+        assert list(timing) == list(expected), (world, timing)
+        assert timing == expected, (world, timing)
+
+
+def test_a_timed_relay_keeps_only_numbers_a_page_hands_back(tmp):
+    """A relayed result whose `timing` the page withheld still posts, and
+    a page-chosen non-number never reaches the posted `_timing`.
+    """
+    del tmp
+    worker = [name for name in _STAMPS['relay'] if name.startswith('sw_')]
+    withheld = _posted_timing(run_timed_relay('1', {}))
+    assert list(withheld) == list(_expected(worker)), withheld
+    assert withheld == _expected(worker), withheld
+    junk = _posted_timing(run_timed_relay('1', {'timing': {
+        'cs_recv': 1, 'pg_recv': 'x', 'pg_done': {}, 'cs_result': None}}))
+    assert junk == {**_expected(worker), 'cs_recv': 1}, junk
+
+
+def test_a_page_that_breaks_its_own_clock_loses_only_its_stamps(tmp):
+    """`performance.now` throwing in the page leaves the eval's outcome as it
+    is with the flag off, and drops only the page's own stamps.
+    """
+    del tmp
+    off, on = (run_timed_eval('eval-plain', flag, 'poison')
+               for flag in ('0', '1'))
+    outcome = json.loads(off['bodies'][0])
+    timed = json.loads(on['bodies'][0])
+    del timed['_timing']
+    assert timed == outcome, (on, off)
+    assert outcome['error'] == 'page killed performance.now', off
+    assert list(_posted_timing(on)) == ['srv_enqueue_us', 'srv_write_us'] + [
+        name for name in _STAMPS['eval-plain'] + ['sw_post']
+        if not name.startswith('pg_')], on
+
+
+# page.js alone under a page clock that works or throws, answering one
+# relayed eval: the messages it posts back and what its listener threw.
+_PAGE_ONLY = r"""
+const fs = require('fs');
+const vm = require('vm');
+const [pagePath, poison, timed] = process.argv.slice(1);
+const listeners = [];
+const posted = [];
+let reads = 0;
+const win = {
+  addEventListener(type, listener) {
+    if (type === 'message') listeners.push(listener);
+  },
+  postMessage(message) { posted.push(message); },
+};
+const context = vm.createContext({
+  window: win, document: {}, URL, setTimeout,
+  performance: {
+    timeOrigin: 1600000000000.25,
+    now() {
+      if (poison === '1' || (poison === 't0' && !reads++)
+          || (poison === 'later' && reads++)) {
+        throw new Error('page killed performance.now');
+      }
+      return 0.5;
+    },
+  },
+});
+vm.runInContext(fs.readFileSync(pagePath, 'utf8'), context,
+  { filename: pagePath });
+const data = { direction: 'daedalus-eval', id: 'c1', relayId: 'r1',
+  code: '1+1' };
+if (timed === '1') data.timing = { cs_recv: 1 };
+const errors = [];
+for (const listener of listeners) {
+  try { listener({ source: win, data }); } catch (error) {
+    errors.push(String(error));
+  }
+}
+process.stdout.write(JSON.stringify({ errors, posted }));
+"""
+
+
+def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
+    """A page whose `performance.now` throws still answers a relayed eval
+    (unguarded, the eval waited out the relay TTL): without `ms`, also when
+    only the first or only a later read throws, and a timed relay keeps its
+    stamps.
+    """
+    del tmp
+
+    def answer(poison, timed):
+        result = run_node_argv(
+            require_node(), ['-e', _PAGE_ONLY,
+                             str(EXTENSION_ROOT / 'page.js'), poison, timed],
+            ROOT)
+        assert result.returncode == 0, result
+        return json.loads(result.stdout)
+
+    base = {'direction': 'daedalus-eval-result', 'id': 'c1',
+            'relayId': 'r1', 'r': 2}
+    for poison, timed, posted in (
+            ('0', '0', {**base, 'ms': 0}), ('1', '0', base), ('t0', '0', base),
+            ('later', '0', base),
+            ('1', '1', {**base, 'timing': {'cs_recv': 1}})):
+        got = answer(poison, timed)
+        assert got == {'errors': [], 'posted': [posted]}, (poison, got)
 
 
 def main():

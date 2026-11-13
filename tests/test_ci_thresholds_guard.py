@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Judged histories authorize only the scalar's numeric raises."""
+"""Judged histories authorize only declared threshold removals."""
 import copy
 import json
 import shutil
@@ -63,60 +63,21 @@ def _judge(repo, base_rev, base, head, revs=None):
     return _captured_main(guard, args)
 
 
-def _raised():
+DECLARED = ('fix: drop a defective row\n\n'
+            'Thresholds-Removed: long_line_baseline.backend/kept.py=bug')
+
+
+def _removed():
     base = _document()
-    base['tests_line_baseline'] = 10
+    base['long_line_baseline'] = {'backend/kept.py': 9}
     head = copy.deepcopy(base)
-    head['tests_line_baseline'] = 11
+    del head['long_line_baseline']['backend/kept.py']
     return base, head
 
 
-def test_feature_anywhere_in_range_allows_recording_a_raise(tmp):
-    for index, subjects in enumerate((
-            ['feat: new command'], ['feat(ci): new command'],
-            ['feat: new command', 'fix: polish'],
-            ['fix: prepare', 'feat(ci): new command', 'chore: publish'])):
-        base, head = _raised()
-        repo, rev = _history(tmp, str(index), subjects, base, head)
-        status, _out, err = _judge(repo, rev, base, head)
-        assert status == 0, err
-
-    base, head = _raised()
-    repo, _rev_before = _history(tmp, 'insufficient', ['feat: add tests'],
-                                 base, head)
-    ci = repo / 'scripts/ci'
-    ci.mkdir(parents=True)
-    for name in ('tests_lines.py', 'thresholds.py'):
-        shutil.copy2(GUARD.with_name(name), ci / name)
-    (repo / 'tests').mkdir()
-    (repo / 'tests/cost.py').write_text('pass\n' * 12)
-    _git(repo, 'add', 'tests/cost.py')
-    _git(repo, 'commit', '-qm', 'feat: add tests')
-    result = subprocess.run(
-        [sys.executable, str(ci / 'tests_lines.py')], cwd=repo,
-        env=_util.child_coverage('scrub'), capture_output=True,
-        text=True, timeout=60, check=False)
-    assert result.returncode == 1, (result.stdout, result.stderr)
-    assert '12' in result.stderr and '11' in result.stderr, result.stderr
-
-
-def test_nonfeatures_refuse_raise_with_remedy(tmp):
-    for index, subject in enumerate((
-            'fix: trim', 'chore: tidy', 'perf: optimise', 'Feat: change',
-            ' feat: change', 'feature: change', 'feat!: change',
-            'feat(ci)!: change', 'fix: change\n\nfeat: body only',
-            'fix: subject\x0bfeat: embedded',
-            'fix: subject\u2028feat: embedded')):
-        base, head = _raised()
-        repo, rev = _history(tmp, str(index), [subject], base, head)
-        status, _out, err = _judge(repo, rev, base, head)
-        assert status == 1, (subject, err)
-        assert all(word in err for word in ('10', '11', 'feat:', 'trim')), err
-
-
 def test_unproved_ranges_fail_even_when_documents_match(tmp):
-    base, head = _raised()
-    repo, rev = _history(tmp, 'ranges', ['feat: eligible'], base, head)
+    base, head = _removed()
+    repo, rev = _history(tmp, 'ranges', [DECLARED], base, head)
     resolver = _util.load(GUARD.with_name('threshold_base.py'), 'shallow_base')
     runner = SimpleNamespace(main=lambda _: resolver.main())
     assert _judge(repo, rev, base, base)[0] == 0
@@ -141,14 +102,14 @@ def test_unproved_ranges_fail_even_when_documents_match(tmp):
             assert status == 1 and err.strip(), (revs, err)
     status, _out, err = _judge(
         repo, rev, base, head, ['--base-rev', 'HEAD', '--head-rev', 'HEAD'])
-    assert status == 1 and 'feat:' in err, err
+    assert status == 1 and 'Thresholds-Removed' in err, err
 
 
 def test_history_failures_refuse_both_reads(tmp):
-    base, head = _raised()
-    repo, rev = _history(tmp, 'failures', ['feat: eligible'], base, head)
+    base, head = _removed()
+    repo, rev = _history(tmp, 'failures', [DECLARED], base, head)
     real = subprocess.run
-    for kind in ('--format=%s', '--format=%B', '--is-shallow-repository'):
+    for kind in ('--format=%B', '--is-shallow-repository'):
         for failure in (OSError('unreadable history'),
                         subprocess.TimeoutExpired('git', 10), 128):
             def read(argv, kind=kind, failure=failure, **kwargs):
@@ -166,23 +127,18 @@ def test_history_failures_refuse_both_reads(tmp):
             assert status == 1 and 'history' in err, err
 
 
-def test_feature_does_not_waive_validation_removal_or_map_policy(tmp):
-    base, head = _raised()
+def test_feature_does_not_waive_removal_or_map_policy(tmp):
+    base, head = _removed()
     repo, rev = _history(tmp, 'limits', ['feat: eligible'], base, head)
     for language in ('python', 'javascript'):
         lower = copy.deepcopy(base)
         for field in ('measured', 'floor'):
             lower['coverage'][language][field] -= 1
         assert _judge(repo, rev, base, lower)[0] == 1
-    for value in (None, False, 0, -1, 1.5, '12', {}):
-        bad = dict(head, tests_line_baseline=value)
-        status, _out, err = _judge(repo, rev, base, bad)
-        assert status == 1 and 'tests_line_baseline' in err, err
-    removed = dict(head)
-    del removed['tests_line_baseline']
-    assert _judge(repo, rev, base, removed)[0] == 1
+    status, _out, err = _judge(repo, rev, base, head)
+    assert status == 1 and 'long_line_baseline.backend/kept.py' in err, err
     for family in FAMILIES:
-        before, after = copy.deepcopy(base), copy.deepcopy(head)
+        before, after = copy.deepcopy(base), copy.deepcopy(base)
         before[family] = {'backend/kept.py': 9}
         after[family] = {'backend/kept.py': 10}
         status, _out, err = _judge(repo, rev, before, after)
@@ -191,21 +147,9 @@ def test_feature_does_not_waive_validation_removal_or_map_policy(tmp):
         assert _judge(repo, rev, before, after)[0] == 0
 
 
-def test_absent_scalar_seed_and_unchanged_absence_are_valid(tmp):
-    head = _document()
-    base = copy.deepcopy(head)
-    del base['tests_line_baseline']
-    repo, rev = _history(tmp, 'seed', ['fix: record'], base, head)
-    assert _judge(repo, rev, base, head)[0] == 0
-    assert _judge(repo, rev, base, base)[0] == 0
-    assert _judge(repo, rev, head, head)[0] == 0
-    lower = dict(head, tests_line_baseline=1)
-    assert _judge(repo, rev, head, lower)[0] == 0
-
-
 def test_unreadable_base_and_head_are_refusals(tmp):
-    base, head = _raised()
-    repo, rev = _history(tmp, 'documents', ['feat: eligible'], base, head)
+    base, head = _removed()
+    repo, rev = _history(tmp, 'documents', [DECLARED], base, head)
     guard = _util.load(GUARD, 'bad_threshold_documents')
     guard.__file__ = str(repo / 'scripts/ci/thresholds_guard.py')
     valid, bad = repo / 'valid.json', repo / 'bad.json'
@@ -240,8 +184,8 @@ def test_a_base_member_this_loader_has_retired_still_judges(tmp):
 
 
 def test_resolver_pins_the_event_for_moving_target_and_two_consumers(tmp):
-    base, head = _raised()
-    repo, rev = _history(tmp, 'event', ['feat: shared'], base, head)
+    base, head = _removed()
+    repo, rev = _history(tmp, 'event', [DECLARED], base, head)
     head_rev = _rev(repo)
     _git(repo, 'branch', 'shared', 'HEAD^')
     _git(repo, 'branch', 'judged-head')
@@ -325,7 +269,7 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     script = resolver['run'] + '\n. "$GITHUB_ENV"\n' + step['run']
     assert not any(key in obj for obj in (job, step)
                    for key in ('if', 'continue-on-error'))
-    base, head = _raised()
+    base, head = _removed()
     repo, rev = _history(tmp, 'workflow', ['fix: record'], base, head)
     ci = repo / 'scripts/ci'
     ci.mkdir(parents=True)
@@ -336,11 +280,11 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
     _git(repo, 'branch', 'judged-head')
     _git(repo, 'branch', 'target', rev)
     _git(repo, 'checkout', '-q', 'target')
-    target_doc = dict(base, tests_line_baseline=20)
+    target_doc = dict(base, long_line_baseline={'backend/kept.py': 8})
     path = repo / '.github/ci-thresholds.json'
     path.write_text(json.dumps(target_doc, default=float))
     _git(repo, 'add', '.github/ci-thresholds.json')
-    _git(repo, 'commit', '-qm', 'feat: target-side feature')
+    _git(repo, 'commit', '-qm', DECLARED)
     _git(repo, 'checkout', '-q', 'judged-head')
     _git(repo, 'config', f'url.{repo.as_posix()}.insteadOf',
          'https://github.com/unused/repo.git')
@@ -365,7 +309,7 @@ def test_audit_executes_one_judged_base_and_refuses_missing_history(tmp):
             event, before, result.stdout, result.stderr)
         if event == 'pull_request' or before == rev:
             assert rev in result.stdout, (result.stdout, result.stderr)
-            assert 'feat:' in result.stderr, result.stderr
+            assert 'Thresholds-Removed' in result.stderr, result.stderr
     for target in ('missing-target', 'unrelated'):
         env.update(DAEDALUS_EVENT='pull_request', DAEDALUS_BASE_SHA=target)
         result = subprocess.run([_util.workflow_bash(), '-e', '-c', script],

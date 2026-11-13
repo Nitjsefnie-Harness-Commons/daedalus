@@ -343,7 +343,7 @@ def test_the_numeric_bound_spellings_are_acceptances(tmp):
 
 
 def _planted(tmp):
-    """Copy the real workflow, minus the aggregate job's bound, into `tmp`.
+    """Copy tests.yml, minus the aggregate's bound, and its callee into `tmp`.
 
     The bound is READ from the real workflow rather than written here: two
     branches have now moved that literal, and a copy of it turns each move
@@ -360,6 +360,8 @@ def _planted(tmp):
     (root / 'tests.yml').write_text(
         head + '  aggregate:\n' + section.replace(bound, '\n', 1),
         encoding='utf-8')
+    called = _REAL.with_name('size-baseline.yml')
+    (root / called.name).write_bytes(called.read_bytes())
     return root
 
 

@@ -14,6 +14,7 @@ import contextlib
 import os, socket, sys, threading, time
 from email.utils import formatdate
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.server.transport_security import TransportSecuritySettings
 
 if __name__ == '__main__' and __package__ in (None, ''):
@@ -66,7 +67,45 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
 
 bridge = BridgeSession(LOCAL_URL, _token)
 
-mcp = MCPServer('daedalus')
+# The refusal types and the prefix each carries to a client.
+CARRIED_REFUSALS = {
+    ValueError: '', RuntimeError: '', TimeoutError: 'timed out: '}
+
+
+def _carried(error):
+    """Whether `error` is a refusal: exactly a carried type (a subclass such
+    as JSONDecodeError is a crash) whose innermost traceback frame is in this
+    package, so a library's error of a carried type (httpx's RuntimeError on
+    a closed client) stays a crash."""
+    if type(error) not in CARRIED_REFUSALS:
+        return False
+    raised = error.__traceback__
+    while raised.tb_next is not None:
+        raised = raised.tb_next
+    return raised.tb_frame.f_globals.get('__name__', '').startswith(
+        'daedalus_mcp.')
+
+
+class ReasonCarryingServer(MCPServer):
+    """MCPServer whose tool refusals reach the client with their reason.
+
+    The SDK reports a tool's crash as a bare `Error executing tool <name>`;
+    a refusal is re-raised as the ToolError whose text the SDK passes on.
+    """
+
+    async def call_tool(self, name, arguments, context=None):
+        try:
+            return await super().call_tool(name, arguments, context)
+        except UnexpectedToolError as crash:
+            refusal = crash.__cause__
+            if not _carried(refusal):
+                raise
+            raise ToolError(
+                f'{crash}: {CARRIED_REFUSALS[type(refusal)]}{refusal}'
+            ) from refusal
+
+
+mcp = ReasonCarryingServer('daedalus')
 tool_module_inventory = []
 
 

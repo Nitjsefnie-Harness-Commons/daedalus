@@ -14,6 +14,7 @@ import pathlib
 import threading
 import time
 from typing import NamedTuple
+from urllib.parse import unquote
 
 from daedalus_bridge import atomic_file
 from daedalus_bridge.log_safe import log_safe
@@ -21,6 +22,11 @@ from daedalus_bridge import path_safety
 from daedalus_bridge import segment_store
 
 SEGMENT_DECIMAL_MAX_DIGITS = 20
+
+# Parameters a POST may send as headers, so a job's uploads share one URL.
+SEGMENT_PARAM_HEADERS = (('job', 'X-Daedalus-Segment-Job'),
+                         ('seg', 'X-Daedalus-Segment-Seg'),
+                         ('total', 'X-Daedalus-Segment-Total'))
 
 
 class Admission(NamedTuple):
@@ -37,6 +43,26 @@ class Admission(NamedTuple):
     # the quota check and the record write, and a second lookup is a second
     # chance to name a different stripe.
     lock: threading.Lock
+
+
+def header_params(headers, params):
+    """`params` with job, seg and total taken from their headers.
+
+    Values are percent-encoded UTF-8. A header is present by name, blank
+    or not; a repeat, or a header beside its query twin, is refused before
+    any value is used. Returns the merged params, or a refusal.
+    """
+    names = [name.lower() for name in headers.keys()]
+    merged = dict(params)
+    for key, header in SEGMENT_PARAM_HEADERS:
+        count = names.count(header.lower())
+        if count > 1:
+            return 400, {'error': f'duplicate {header} header'}
+        if count and key in params:
+            return 400, {'error': f'conflicting {key}'}
+        if count:
+            merged[key] = [unquote(headers[header])]
+    return merged
 
 
 def admit_segment(seg_dir_root, params, sig):

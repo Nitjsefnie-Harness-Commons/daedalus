@@ -30,6 +30,7 @@ const DEFAULT_SERVER = '';
 
 importScripts(
   'worker/util.js',
+  'worker/exec_timing.js',
   'worker/config.js',
   'worker/registry.js',
   'worker/capture.js',

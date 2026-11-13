@@ -25,7 +25,6 @@ import os
 import socket
 import sys
 import time
-import types
 
 import _cli_parse
 
@@ -83,18 +82,13 @@ def _no_socket():
 
     The seal is process-wide and it is restored unconditionally, so a
     handler that raises leaves the next test in this process free to connect.
-    `test_the_socket_seal_is_lifted_when_the_block_ends` is what holds that
-    to the class rather than to this comment.
 
     The `del` below is the arm every CPython 3.13 run takes: `connect` is
     inherited from `_socket.socket` and is NOT in `socket.socket.__dict__`,
     so this module's own assignment is the only thing to take away. The
     `else` is reachable only where something patched the attribute before the
     seal — a nested `wired`, or another suite's monkeypatch — and it puts
-    that value back.
-    `test_the_seal_restores_a_connect_the_class_already_carried` arms that
-    arm, and is what holds it to the class rather than to this comment.
-    `del` is guarded because an `AttributeError` raised
+    that value back. `del` is guarded because an `AttributeError` raised
     inside a `finally` replaces whatever was unwinding, and a teardown that
     hides the failure it was cleaning up after is the defect this harness
     exists to catch.
@@ -306,21 +300,6 @@ def wired(module, recorded):
                 delattr(target, name)
             else:
                 setattr(target, name, original)
-
-
-def drive(call, answers, plan=None, **options):
-    """Run `call` against the fakes, the way `run_cli` dispatches a handler.
-
-    The harness's own controls use this with a small local callable instead
-    of a handler: the callable reads `api` and the rest off the namespace it
-    is handed, which is how a handler reads them off its own module.
-    """
-    recorded = RecordingExtCmd(answers, plan=plan, **options)
-    space = types.SimpleNamespace()
-    with wired(space, recorded):
-        call(space)
-    recorded.assert_plan_consumed()
-    return recorded
 
 
 def _dispatch(argv, answers, module, plan, **options):

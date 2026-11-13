@@ -88,10 +88,7 @@ INSTALLER_SOURCE = ROOT / INSTALLER_PATH
 # themselves; that is what stopped the `node` entry this branch removed
 # from coming straight back, since restoring it with its own reason text
 # satisfied every other control then in the tree.
-SHIPPED_BY_THE_IMAGE = {
-    'git': 'every job here checks out through actions/checkout, which '
-           'runs git, and the hosted images ship it',
-}
+SHIPPED_BY_THE_IMAGE = {}
 # Tools a suite skips on that no job installs through
 # `scripts/ci/install_lint_tools.py`, and the setup action a job has to
 # carry to DECLARE it. A third mechanism beside the installer's TOOLS and

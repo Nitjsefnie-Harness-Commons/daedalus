@@ -528,15 +528,15 @@ def guard_shape_probe(directory, source=GUARD_SHAPES, name='guard_shapes'):
 
 
 UNWITNESSED_GUARDS = {
-    # Per REGISTERED TOOL, keyed by the same (module, function, condition)
-    # triple the scan spells, so an entry cannot exempt a same-named function
-    # in another module. A stale entry - unreachable, or already witnessed by
-    # the tool's own case - is refused. navigate, reload, title and url each
-    # hand _send_eval a constant id and code, so neither guard can fire from
-    # them; ping's and segment_status's branches read a poll body / HTTP
-    # status the refusal driver cannot set, and are pinned by
-    # test_ping_raises_the_bridge_error and the two named
-    # test_segment_status_refuses_* tests.
+    # Per REGISTERED TOOL, keyed by the (module, function, condition) triple
+    # the scan spells, so an entry cannot exempt a same-named function in
+    # another module; a stale entry (unreachable, or witnessed by the tool's
+    # own case) is refused. navigate, reload, title and url hand _send_eval a
+    # constant id and code, so neither guard fires from them. ping's,
+    # segment_status's and the tab openers' branches need a poll body, HTTP
+    # status or expired wait the refusal driver cannot set; they are pinned by
+    # test_ping_raises_the_bridge_error, the test_segment_status_refuses_*
+    # pair and test_a_client_reads_why_a_tool_failed_and_never_a_crash.
     'navigate': {('daedalus_mcp.tools_eval', '_send_eval', 'not cmd_id'),
                  ('daedalus_mcp.tools_eval', '_send_eval', 'not code')},
     'reload': {('daedalus_mcp.tools_eval', '_send_eval', 'not cmd_id'),
@@ -554,6 +554,11 @@ UNWITNESSED_GUARDS = {
         ('daedalus_mcp.tools_media', 'segment_status',
          'found.status_code == 409'),
     },
+    **dict.fromkeys(('open_tab', 'open_tabs'), {
+        ('daedalus_mcp.tools_tabs', '_unconfirmed', 'raise TimeoutError('
+         'UNCONFIRMED.format(unanswered, opened)) from unanswered'),
+        ('daedalus_mcp.tools_tabs', '_unconfirmed',
+         'unanswered.__cause__ is not None')}),
 }
 
 # The site keys whose table row cites None, each to the issue that tracks
@@ -561,6 +566,14 @@ UNWITNESSED_GUARDS = {
 # no entry here reports, and an entry whose row cites a test or is gone
 # reports as stale.
 STATED_GAPS = {}
+
+CARRY = ('tests/test_mcp_live_tools.py::test_a_client_reads_why_a_tool_'
+         'failed_and_never_a_crash')
+POLL, WAITS, ARGS, LOAD, LIFE, FETCH, SHOT = (
+    f'tests/test_{suite}.py::' for suite in (
+        'mcp_transport_guards', 'cli_waits', 'cli_argument_types',
+        'mcp_server_load', 'stream_lifecycle', 'fetch_timings_count',
+        'screenshot_quality'))
 
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own
@@ -572,108 +585,111 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_mcp.server', 'start_in_thread', "_start_state['started']",
      'tests/test_mcp_server_serve.py::'
      'test_start_in_thread_rejects_a_second_start'),
+    ('daedalus_mcp.server', 'call_tool', 'not _carried(refusal)', CARRY),
+    ('daedalus_mcp.server', 'call_tool',
+     "raise ToolError(f'{crash}: {CARRIED_REFUSALS[type(refusal)]}"
+     "{refusal}') from refusal", CARRY),
     ('daedalus_mcp.transport', 'close_current_loop_clients',
      'isinstance(outcome, BaseException)',
      'tests/test_mcp_transport.py::test_closing_reports_the_first_'
      'client_close_failure_after_closing_all'),
-    ('daedalus_mcp.transport', 'token', 'not t',
-     'tests/test_mcp_transport_guards.py::test_empty_token_context_is_'
-     'rejected'),
+    ('daedalus_mcp.transport', 'token', 'not t', 'tests/test_mcp_transport_'
+     'guards.py::test_empty_token_context_is_rejected'),
     ('daedalus_mcp.transport', 'poll_result',
      "raise TimeoutError(f'no result within {timeout}s')",
-     'tests/test_mcp_transport_guards.py::'
-     'test_poll_reports_timeout_when_no_attempt_is_admitted'),
+     POLL + 'test_poll_reports_timeout_when_no_attempt_is_admitted'),
+    ('daedalus_mcp.transport', 'poll_result', 'failure is not None',
+     POLL + 'test_poll_reports_an_unknown_outcome_after_a_failed_request'),
+    ('daedalus_mcp.transport', '_result', 'not isinstance(answer, dict)',
+     POLL + 'test_poll_retries_a_failed_or_refused_consume'),
+    ('daedalus_mcp.transport', '_result',
+     "raise ValueError('the answer nests too deep to decode') from error",
+     POLL + 'test_poll_survives_a_failed_peek_from_a_real_front_end'),
     # covers 0, -1, nan and inf alone
     ('daedalus_mcp.transport', 'checked_timeout',
      'not math.isfinite(timeout) or timeout <= 0',
      'tests/test_mcp_live_tools.py::'
-     'test_a_nonpositive_mcp_timeout_admits_no_command'),
+     'test_a_nonpositive_timeout_admits_no_command_on_either_send_path'),
     ('daedalus_mcp.transport', 'ext_cmd', "res.get('error')",
-     'tests/test_mcp_transport_guards.py::'
-     'test_extension_command_surfaces_result_error'),
+     POLL + 'test_extension_command_surfaces_result_error'),
     ('daedalus_bridge.env_config', 'env_int',
      "raise SystemExit(f'{name} must be {requirement}; got {raw!r}') "
      'from None',
-     'tests/test_mcp_server_load.py::'
-     'test_mcp_and_bridge_config_use_one_env_parser'),
+     LOAD + 'test_mcp_and_bridge_config_use_one_env_parser'),
     ('daedalus_bridge.env_config', 'env_int',
      'value < minimum or (maximum is not None and value > maximum)',
-     'tests/test_mcp_server_load.py::'
-     'test_mcp_and_bridge_config_use_one_env_parser'),
+     LOAD + 'test_mcp_and_bridge_config_use_one_env_parser'),
     ('daedalus_bridge.env_config', 'env_positive_float',
      "raise SystemExit(f'{name} must be a finite positive number; "
      'got {raw!r}\') from None',
-     'tests/test_stream_lifecycle.py::'
-     'test_numeric_environment_settings_fail_cleanly_at_startup'),
+     LIFE + 'test_numeric_environment_settings_fail_cleanly_at_startup'),
     ('daedalus_bridge.env_config', 'env_positive_float',
      'not math.isfinite(value) or value <= 0',
-     'tests/test_stream_lifecycle.py::'
-     'test_numeric_environment_settings_fail_cleanly_at_startup'),
+     LIFE + 'test_numeric_environment_settings_fail_cleanly_at_startup'),
     ('daedalus_cli.transport', 'required', 'not v',
      'tests/test_cli_error_reporting.py::test_missing_token_is_an_error'),
     ('daedalus_cli.transport', 'capture_limit',
      "raise argparse.ArgumentTypeError(f'--max must be an integer from 1 "
      'to {NET_CAPTURE_MAX}; got {value!r}\') from None',
-     'tests/test_cli_argument_types.py::'
-     'test_net_capture_still_refuses_a_non_integer_max'),
+     ARGS + 'test_net_capture_still_refuses_a_non_integer_max'),
     ('daedalus_cli.transport', 'capture_limit',
      'limit < 1 or limit > NET_CAPTURE_MAX',
-     'tests/test_cli_argument_types.py::'
-     'test_net_capture_refuses_a_max_outside_one_to_the_ceiling'),
+     ARGS + 'test_net_capture_refuses_a_max_outside_one_to_the_ceiling'),
     ('daedalus_cli.transport', 'positive_timeout',
      "raise argparse.ArgumentTypeError(f'timeout must be a whole number of "
      "seconds; got {value!r}') from None",
-     'tests/test_cli_argument_types.py::'
-     'test_a_non_integer_timeout_is_refused'),
+     ARGS + 'test_a_non_integer_timeout_is_refused'),
     ('daedalus_cli.transport', 'positive_timeout', 'seconds < 0',
      'tests/test_cli_result_wait.py::'
      'test_a_negative_timeout_is_refused_before_the_command_is_sent'),
     ('daedalus_cli.transport', 'positive_count',
      "raise argparse.ArgumentTypeError(f'count must be a whole number; "
      "got {value!r}') from None",
-     'tests/test_fetch_timings_count.py::'
-     'test_fetch_timings_still_refuses_a_non_integer_count'),
+     FETCH + 'test_fetch_timings_still_refuses_a_non_integer_count'),
     ('daedalus_cli.transport', 'positive_count', 'count < 1',
-     'tests/test_fetch_timings_count.py::'
-     'test_fetch_timings_refuses_a_count_below_one'),
+     FETCH + 'test_fetch_timings_refuses_a_count_below_one'),
     ('daedalus_cli.transport', 'quality_limit',
      "raise argparse.ArgumentTypeError(f'quality must be a whole number; "
      "got {value!r}') from None",
-     'tests/test_screenshot_quality.py::'
-     'test_screenshot_still_refuses_a_non_integer_quality'),
+     SHOT + 'test_screenshot_still_refuses_a_non_integer_quality'),
     ('daedalus_cli.transport', 'quality_limit',
      'quality < 1 or quality > 100',
-     'tests/test_screenshot_quality.py::'
-     'test_screenshot_refuses_a_quality_outside_one_to_hundred'),
+     SHOT + 'test_screenshot_refuses_a_quality_outside_one_to_hundred'),
     ('daedalus_cli.transport', 'chrome_tab_id',
      "raise argparse.ArgumentTypeError(f'{value!r} is not an integer') "
      'from None',
-     'tests/test_cli_argument_types.py::'
-     'test_a_malformed_chrome_tab_id_is_refused_at_parse_time'),
+     ARGS + 'test_a_malformed_chrome_tab_id_is_refused_at_parse_time'),
     ('daedalus_cli.transport', 'expiration_timestamp',
      "raise argparse.ArgumentTypeError(f'{value!r} is not a number') "
      'from None',
-     'tests/test_cli_argument_types.py::'
-     'test_a_malformed_expires_is_refused_at_parse_time'),
+     ARGS + 'test_a_malformed_expires_is_refused_at_parse_time'),
     ('daedalus_cli.transport', 'json_params',
      'raise argparse.ArgumentTypeError('
      "f'{value!r} is not valid JSON: {error}') from None",
-     'tests/test_cli_argument_types.py::'
-     'test_malformed_params_are_refused_at_parse_time'),
-    # The URLError site is met by a refused connect; the HTTPException site by
-    # a cut-off read; the HTTPError-body site by a cut-off error read.
+     ARGS + 'test_malformed_params_are_refused_at_parse_time'),
+    # In order: a refused connect, cut-off read, cut-off error read, a 502.
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e.reason) from e',
      'tests/test_cli_error_reporting.py::'
      'test_connection_failure_is_a_clean_error'),
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e) from e',
-     'tests/test_cli_waits.py::'
-     'test_a_truncated_answer_is_a_connection_failure_not_a_traceback'),
+     WAITS
+     + 'test_a_truncated_answer_is_a_connection_failure_not_a_traceback'),
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(failure) from failure',
-     'tests/test_cli_waits.py::'
-     'test_a_truncated_error_answer_is_a_connection_failure'),
+     WAITS + 'test_a_truncated_error_answer_is_a_connection_failure'),
+    ('daedalus_cli.transport', '_exchange',
+     "raise ErrorStatus(f'HTTP {e.code}: {detail}') from e",
+     WAITS + 'test_a_complete_error_answer_is_still_reported_by_status'),
+    ('daedalus_cli.transport', 'begin', 'skipped == _MAX_INTERIM_RESPONSES',
+     'tests/test_cli_error_reporting.py::test_interim_skipping_is_bounded'),
+    ('daedalus_cli.transport', '_result_answer',
+     'not isinstance(answer, dict)', 'tests/test_cli_result_wait.py::'
+     'test_a_failed_consume_is_retried_and_never_reported_as_failed'),
+    ('daedalus_cli.transport', '_json_body',
+     "raise ConnectionFailed('the answer nests too deep to decode') from "
+     'error', WAITS + 'test_the_result_wait_outlives_a_failed_peek'),
     # The html-body site is the api() paths' answer of a captive front end.
     ('daedalus_cli.transport', '_json_body',
      'raise ConnectionFailed(error) from error',

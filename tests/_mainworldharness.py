@@ -25,8 +25,8 @@ from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    DELAY_STUB, RESPONSE_STUB, event_target_stub, import_scripts_stub,
-    resolve_target_stub)
+    CLOCK_DOUBLES, DELAY_STUB, RESPONSE_STUB, event_target_stub,
+    import_scripts_stub, resolve_target_stub)
 
 
 _MAINWORLD_HARNESS = (
@@ -35,8 +35,10 @@ _MAINWORLD_HARNESS = (
 const fs = require('fs');
 const vm = require('vm');
 
-const [backgroundPath, mode] = process.argv.slice(1);
+const [backgroundPath, mode, flag = '', page = ''] = process.argv.slice(1);
 const postedResults = [];
+const postedBodies = [];
+const injections = [];
 const evalResolvers = {};
 const bgConsole = [];
 const messageListeners = [];
@@ -87,7 +89,7 @@ function nextDeadline() {
   return at;
 }
 
-""" + RESPONSE_STUB + r"""
+""" + RESPONSE_STUB + CLOCK_DOUBLES + r"""
 const chrome = {
   storage: {
     local: {
@@ -141,6 +143,7 @@ let liveDocument = 'doc-7';
 // compile under a different CSP — so a world it does not model is refused
 // rather than silently run in the wrong one.
 chrome.scripting.executeScript = async (injection) => {
+  injections.push({ ...injection, func: injection.func.name });
   if (injection.world !== 'MAIN') {
     throw new Error('unmodelled injection world ' + injection.world);
   }
@@ -188,7 +191,7 @@ chrome.debugger.sendCommand = async (target, method) => {
   return {};
 };
 
-const context = vm.createContext({
+const context = vm.createContext(countedPerformance({
   chrome,
   fetch: async (target, init = {}) => {
     const url = String(target);
@@ -199,6 +202,7 @@ const context = vm.createContext({
     }
     if (url.endsWith('/result') && init.method === 'POST') {
       postedResults.push(JSON.parse(init.body));
+      postedBodies.push(init.body);
       return response(200, { ok: true });
     }
     return response(200, { ok: true });
@@ -207,7 +211,6 @@ const context = vm.createContext({
   AbortController,
   TextDecoder,
   URL,
-  performance,
   btoa,
   setTimeout: fakeSetTimeout,
   clearTimeout: fakeClearTimeout,
@@ -218,13 +221,13 @@ const context = vm.createContext({
     warn: (...a) => bgConsole.push({ level: 'warn', text: a.join(' ') }),
     error: (...a) => bgConsole.push({ level: 'error', text: a.join(' ') }),
   },
-});
+}, flag && workerClock));
 """ + import_scripts_stub('context') + r"""
-const pageContext = vm.createContext({
-  performance,
+pageClock.poisoned = page === 'poison';
+const pageContext = vm.createContext(countedPerformance({
   evalResolvers,
   console: { log() {}, warn() {}, error() {} },
-});
+}, flag && pageClock));
 """ + DELAY_STUB + r"""
 // Attempt-bounded and returns a verdict instead of throwing: a control that
 // asserts a bound is absent must report the absence, not hang the child.
@@ -281,6 +284,15 @@ function postedSummary(items) {
   }));
 }
 
+// A timed run (flag `0` or `1`) arrives as an SSE frame, and its zero-delay
+// receipt timer fires before the mode steps the clock any further.
+function deliver() {
+  if (!flag) return vm.runInContext('dispatchCommand(command)', context);
+  deliverFrame(context, context.command, flag);
+  advanceClock(clock.now);
+  return undefined;
+}
+
 async function run() {
   vm.runInContext(
     fs.readFileSync(backgroundPath, 'utf8'), context,
@@ -295,7 +307,7 @@ async function run() {
       chromeTab: 7,
       _did: 'did-eval-timeout',
     };
-    vm.runInContext('dispatchCommand(command)', context);
+    deliver();
     // The probe is bounded too, so the injection's own bound is identified
     // by the submitted source having run, not by being the first arming.
     await waitForResult(() => Boolean(evalResolvers.started));
@@ -324,8 +336,7 @@ async function run() {
       chromeTab: 7,
       _did: 'did-eval-inside',
     };
-    const execution = vm.runInContext(
-      'dispatchCommand(command)', context);
+    const execution = deliver();
     // Wait for the submitted promise to exist, so the clock step lands on
     // the injection's bound and the probe's bound is already cleared.
     await waitForResult(
@@ -347,6 +358,16 @@ async function run() {
     };
   }
 
+  if (mode === 'eval-plain' || mode === 'eval-throws') {
+    context.command = {
+      id: '_eval', type: 'eval', chromeTab: 7, _did: 'did-' + mode,
+      code: mode === 'eval-plain' ? '2 + 2' : 'missing_name',
+    };
+    deliver();
+    await waitForResult(() => postedResults.length >= 1);
+    return {};
+  }
+
   if (mode === 'eval-probe-hang') {
     context.command = {
       id: '_eval',
@@ -355,7 +376,7 @@ async function run() {
       chromeTab: 7,
       _did: 'did-eval-probe-hang',
     };
-    vm.runInContext('dispatchCommand(command)', context);
+    deliver();
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     const postedBeforeClock = postedResults.length;
@@ -485,6 +506,9 @@ async function run() {
 }
 
 run().then((result) => {
+  if (flag) {
+    result.timing = { reads: clockReads, injections, bodies: postedBodies };
+  }
   process.stdout.write(JSON.stringify(result));
 }).catch((error) => {
   process.stderr.write((error.stack || String(error)) + '\n');
@@ -493,7 +517,7 @@ run().then((result) => {
 """)
 
 
-def _run_bound_child(mode):
+def _run_bound_child(mode, *timing):
     """Run one MAIN-world bound control and parse its one JSON answer.
 
     The mode still bounds itself by attempt count; the wall bound is the
@@ -505,10 +529,16 @@ def _run_bound_child(mode):
     assert node, 'node is required to execute the MAIN-world bound harness'
     result = run_node_argv(
         node, ['-e', _MAINWORLD_HARNESS,
-               str(EXTENSION_ROOT / 'background.js'), mode], ROOT)
+               str(EXTENSION_ROOT / 'background.js'), mode, *timing],
+        ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
+
+
+def run_timed_eval(mode, flag, page=''):
+    """One eval mode, delivered as an SSE frame under clock doubles."""
+    return _run_bound_child(mode, flag, page)['timing']
 
 
 def run_main_world_eval_timeout():

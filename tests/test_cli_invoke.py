@@ -3,10 +3,12 @@
 
 The version banner, --help, the URL the environment hands the command,
 and the import that must succeed without an ambient _settings module.
-The CLI is always run as a subprocess, the way a shell would run it, so
-what is checked is the configuration an operator's environment actually
-produces.
+The CLI is run as a subprocess, the way a shell would run it, so what is
+checked is the configuration an operator's environment actually produces;
+only the token and tab precedence is read in-process off the transport
+module.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +62,25 @@ def test_imports_cleanly_without_settings_module(tmp):
         _util.skip('an ambient _settings module is installed here')
     assert r.returncode == 0, (r.returncode, r.stderr)
     assert 'clean-import-ok' in r.stdout
+
+
+def test_prefixed_token_and_tab_precede_legacy_environment(tmp):
+    from unittest.mock import patch
+    transport = _util.load(_util.ROOT / 'daedalus_cli/transport.py')
+    del tmp
+    for primary, legacy, want in (('new', 'old', 'new'),
+                                  (None, 'old', 'old'),
+                                  ('', 'old', 'old'),
+                                  ('new', None, 'new'),
+                                  (None, None, '')):
+        env = {'DAEDALUS_TOKEN': 'durable'}
+        for name, value in (('DAEDALUS_TOKEN_OVERRIDE', primary),
+                            ('DAEDALUS_ID', primary), ('TOKEN', legacy),
+                            ('ID', legacy)):
+            if value is not None: env[name] = value
+        with patch.dict(os.environ, env, clear=True):
+            assert transport.token() == (want or 'durable')
+            assert transport.tab() == want
 
 
 if __name__ == '__main__':

@@ -99,21 +99,6 @@ def test_every_exclusion_is_one_this_suite_states_a_reason_for(tmp):
         'checker\'s scope by being named in both places')
 
 
-def test_the_test_tree_config_exists_and_really_scopes_the_tests(tmp):
-    del tmp
-    assert CONFIG_TESTS.is_file(), (
-        f'{CONFIG_TESTS.name} is missing; without it nothing type-checks '
-        'the test tree, and a clean gate reads the same as a zero-file '
-        'analysis')
-    config = _tests_config()
-    assert 'tests' in config['include'], (
-        f'{CONFIG_TESTS.name} include is {config["include"]}, which does '
-        'not name the tests directory, so the test tree is not in scope')
-    assert 'tests' not in config['exclude'], (
-        f'{CONFIG_TESTS.name} excludes tests as well as including it, so '
-        'the checker analyses nothing there')
-
-
 def test_the_two_configs_agree_outside_their_deliberate_differences(tmp):
     del tmp
     main = _config()

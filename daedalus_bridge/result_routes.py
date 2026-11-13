@@ -14,6 +14,7 @@ import time
 import uuid
 
 from daedalus_bridge import command_queue
+from daedalus_bridge import exec_timing
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge import path_safety
 from daedalus_bridge import result_store
@@ -26,6 +27,7 @@ COMPAT_CONSUME_RETRY_ATTEMPTS = 8
 
 def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
     """Store one posted result and publish its dashboard event."""
+    exec_timing.stamp(body, 'srv_result_us')
     tab_id = body.get('tabId', '')
     if tab_id and path_safety.unsafe_component(tab_id):
         return 400, {'error': 'invalid path component'}

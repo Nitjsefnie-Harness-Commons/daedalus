@@ -1,6 +1,7 @@
 /* exported sseAbort, _loadSeenDids, startStream, stopStream */
 /* exported ensureKeepAlive */
-/* global config, bridgeAuth, dispatchCommand, registerAllTabs */
+/* global config, bridgeAuth, dispatchCommand, registerAllTabs,
+   _stampReceipt */
 
 let sseAbort = null;
 let sseBuf = '';
@@ -96,6 +97,7 @@ function parseSSEChunk(text) {
       if (sseEventType === 'command') {
         try {
           const cmd = JSON.parse(sseData);
+          _stampReceipt(cmd);
           if (cmd._did && _isDuplicateDelivery(cmd._did)) {
             console.log('[Daedalus] Dedup skip did=' + cmd._did);
           } else {

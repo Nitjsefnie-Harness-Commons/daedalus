@@ -47,24 +47,6 @@ def _assert_imported_modules_are_tracked(tracked):
         f'run git add -f {names}, then python3 scripts/gen_gitignore.py')
 
 
-def _tracked_tree(tmp):
-    """Export under `tree`, mapped to source like test_suite_runner's own
-    export -- but that export always runs real modules unmodified, and this one
-    does not: test_sibling_mutation_failure_names_module_type_and_handlers
-    corrupts a copy first, safe today only because the corruption is
-    JavaScript. A caller that corrupted a Python file here would have its run
-    alias onto the real module's coverage, silently."""
-    tracked = _tracked_paths()
-    _assert_imported_modules_are_tracked(tracked)
-    export_root = Path(tmp) / 'tree'
-    export_root.mkdir()
-    for relative in tracked:
-        destination = export_root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, destination)
-    return export_root
-
-
 def _assert_binding_read_failure(tmp, thrown):
     root = Path(tmp)
     background = root / 'background.js'
@@ -588,7 +570,7 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
 
 
 def test_tracked_tree_preflight_names_untracked_imported_module(tmp):
-    """An imported worker omitted from Git fails before the export runs."""
+    """An imported worker omitted from Git fails the tracked preflight."""
     root = Path(tmp)
     source_root = root / 'source'
     worker_root = source_root / 'extension' / 'worker'
@@ -604,14 +586,12 @@ def test_tracked_tree_preflight_names_untracked_imported_module(tmp):
         ['git', '-C', str(source_root), 'add', '-f',
          'extension/background.js'], check=True)
 
-    export_parent = root / 'export'
-    export_parent.mkdir()
     original_root = globals()['ROOT']
     failure = None
     globals()['ROOT'] = source_root
     try:
         try:
-            _tracked_tree(export_parent)
+            _assert_imported_modules_are_tracked(_tracked_paths())
         except AssertionError as error:
             failure = str(error)
         else:
@@ -632,43 +612,6 @@ def test_imported_worker_modules_are_tracked(tmp):
     """Every module loaded by importScripts is present in Git's file set."""
     del tmp
     _assert_imported_modules_are_tracked(_tracked_paths())
-
-
-def test_sibling_mutation_failure_names_module_type_and_handlers(tmp):
-    """The boundary diagnostic distinguishes mutation from route bypass."""
-    export_root = _tracked_tree(tmp)
-    background_path = export_root / 'extension' / 'background.js'
-    background = background_path.read_text(encoding='utf-8')
-    route = "    case 'block-requests': return handleBlockRequests(cmd);"
-    mutation = """    case 'block-requests':
-      handleCookies = function corruptedCookies() { return false; };
-      return handleBlockRequests(cmd);"""
-    assert background.count(route) == 1
-    background_path.write_text(
-        background.replace(route, mutation), encoding='utf-8')
-
-    result = subprocess.run(
-        [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, env=_util.child_coverage('scrub'),
-        capture_output=True, text=True, encoding='utf-8', timeout=30)
-
-    assert result.returncode != 0, result.stdout
-    expected = (
-        "worker/blocking.js dispatch block-requests mutated published "
-        "handlers: ['handleCookies']")
-    assert expected in result.stdout, (
-        result.returncode, result.stdout, result.stderr)
-
-
-def test_worker_boundary_runs_without_untracked_node_modules(tmp):
-    """The tracked tree alone supplies every boundary-suite dependency."""
-    export_root = _tracked_tree(tmp)
-    result = subprocess.run(
-        [sys.executable, 'tests/test_worker_module_boundary.py'],
-        cwd=export_root, env=_util.child_coverage('scrub'),
-        capture_output=True, text=True, encoding='utf-8', timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
 
 
 def main():

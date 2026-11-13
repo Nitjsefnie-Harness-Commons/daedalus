@@ -11,7 +11,7 @@ meets. So all three live here, and a suite that drives the CLI reads this
 copy rather than carrying its own. The two environments built elsewhere
 are named where they are built — tests/_overlap_clients.py and
 tests/test_cli_result_wait.py — because each strips a different set than
-this one. tests/test_cli_helpers.py pins what `cli_env` strips and sets.
+this one.
 """
 import os
 import subprocess

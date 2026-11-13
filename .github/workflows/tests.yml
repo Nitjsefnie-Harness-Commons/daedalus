@@ -665,17 +665,11 @@ jobs:
             pip-${{ runner.os }}-${{ matrix.python }}-
 
       # Without the MCP extra that suite skips; test_diff_coverage imports the
-      # statement analyzer pinned in requirements-test.txt. requirements-dev.txt
-      # is here for test_type_errors, which drives the real pyright binary. A
-      # job that runs every suite needs the toolchain those suites invoke, and
-      # a needs: relation sequences jobs without sharing an environment between
-      # them, so this file has to be installed here too, not only by the lint
-      # jobs.
+      # statement analyzer pinned in requirements-test.txt.
       - name: Install the test dependencies and project
         run: |
           python -m pip install --upgrade pip . ".[mcp]"
           python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
-          python -m pip install -r requirements-dev.txt
 
       # The suites drive real binaries, and a suite that finds one missing
       # SKIPS — on every leg, silently, so a job can be green having verified
@@ -874,17 +868,11 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-${{ matrix.python }}-
 
-      # Each shard needs the toolchain its suites
-      # invoke: test_type_errors drives the real pyright binary. A needs:
-      # relation sequences jobs without sharing an environment between them,
-      # so the lint jobs installing this file do not put pyright here.
-      # Same file, same pinned version, as those jobs install.
       - name: Install the coverage toolchain and the project
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
           python -m pip install . ".[mcp]"
-          python -m pip install -r requirements-dev.txt
 
       # The suites drive real binaries, and a suite that finds one missing
       # SKIPS — on every leg, silently, so this job can publish a coverage
@@ -980,10 +968,10 @@ jobs:
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      # Absolute, because the runner's own tests copy run_tests.py into a temp
-      # tree and run it with that tree as the working directory. A relative
-      # data file follows the child's cwd, so its measurements were written
-      # inside the tree and deleted with it.
+      # Absolute, because suites run measured children with a temporary tree
+      # as the working directory. A relative data file follows the child's
+      # cwd, so its measurements were written inside the tree and deleted
+      # with it.
       COVERAGE_FILE: "${{ github.workspace }}/.coverage"
       # Node children inherit NODE_V8_COVERAGE from this job environment,
       # so V8 writes here directly; no harness plumbing is needed.
@@ -1155,16 +1143,14 @@ jobs:
             --thresholds .github/ci-thresholds.json
           # The long-line and per-module coverage baselines ratchet the
           # other way: each follows a file down when it shrinks, so the
-          # lines cannot come back for free. The suite-tree budget is one
-          # tree-wide count with the same rule. Growth is never written
-          # here — that stays a decision a reviewer sees. File sizes are
-          # the size-ratchet action's records, in a job of their own.
+          # lines cannot come back for free. Growth is never written
+          # here — that stays a decision a reviewer sees. File sizes and
+          # the suite tree's line budget are the size-ratchet action's
+          # records, in a workflow of their own.
           python scripts/ci/line_lengths.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/js_module_coverage.py --tighten \
             "$NODE_V8_COVERAGE" \
-            --thresholds .github/ci-thresholds.json
-          python scripts/ci/tests_lines.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/thresholds.py --check \
             --thresholds .github/ci-thresholds.json
@@ -1176,7 +1162,7 @@ jobs:
             # space between them, which is how this line lost one once.
             printf '%s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
-              "${javascript_measured}% justified no raise; no file lost an over-limit line, no module lost an uncovered JavaScript line and the suite tree lost no line." \
+              "${javascript_measured}% justified no raise; no file lost an over-limit line and no module lost an uncovered JavaScript line." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {
@@ -1516,59 +1502,11 @@ jobs:
             'ci: tighten the journey budget'
 
   size-baseline:
-    # File sizes are the size-ratchet action's records, never this
-    # repository's: the check judges every pull request against the base
-    # revision's records, and a main push tightens them, landing a change
-    # through the same records push the other ratchets use. A manual
-    # dispatch has neither a pull request base nor a default-branch push,
-    # and the action fails closed on that event, so the job steps out of
-    # workflow_dispatch's path rather than failing every dispatch.
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # The branch policy refuses other refs; an empty name binds no
-    # environment, so pull requests can still run these checks.
-    environment: ${{ github.event_name == 'push'
-      && github.ref == 'refs/heads/main' && 'main-push' || '' }}
-    steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          # The pull request's head tree, and full history so the base
-          # revision's records are readable without a token.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: Nitjsefnie-Actions/size-ratchet@0c9790acfe6bec19f1310a6e17428332185ea3ec # v1.1.0
-        with:
-          overrides: 'tests/: 700'
-          exclude: 'examples/'
-      - name: Guard the measured records
-        id: records
-        if: github.event_name == 'push'
-        env:
-          DAEDALUS_EXPECTED_SHA: ${{ github.sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$DAEDALUS_EXPECTED_SHA"
-          if git diff --quiet -- .github/size-baseline.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            status=$?
-            if [ "$status" -ne 1 ]; then
-              exit "$status"
-            fi
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Commit the tighten
-        if: success() && steps.records.outputs.changed == 'true'
-        env:
-          DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
-            ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
-          DAEDALUS_REPO: ${{ github.repository }}
-        run: |
-          python3 scripts/ci/ratchet_push.py .github/size-baseline.json \
-            'ci: tighten the size-baseline records'
+    # The size-ratchet action's install block, called. A called run reads
+    # an environment secret as empty, so the file's own default-branch
+    # push run is the one that commits tightened records. zizmor's `$/`
+    # form is refused by the pinned actionlint, which accepts only `./`.
+    uses: ./.github/workflows/size-baseline.yml  # zizmor: ignore[self-repository]
 
   aggregate:
     name: Aggregate workflow checks
@@ -1626,14 +1564,11 @@ jobs:
         # `<<<<<<< ` and `>>>>>>> ` carry the label after seven characters, and
         # the separator is exactly seven `=`; diff3's extra `||||||| base` line
         # changes nothing, because the other three are still written.
-        # In this job rather than a new one: a new job would be a new required
-        # status context, which means editing the ruleset, and `Aggregate
-        # workflow checks` already reports on every pull request regardless of
-        # the docs-only classifier (`if: always()`) — doc-only commits are
-        # exactly where a Markdown marker lands.
-        # Immediately before the verdict step: fail fast — the secrets verdict
-        # the next step renders can wait out a 10-minute poll bound, and a
-        # marker commit should not spend it.
+        # In this job, not a new one: a new job is a new required status
+        # context (a ruleset edit), and `Aggregate workflow checks` reports on
+        # every pull request whatever the docs-only classifier says
+        # (`if: always()`) — doc-only commits are where a marker lands. Ahead
+        # of the verdict step so a marker never waits out its poll bound.
         # Explicit `shell: bash`: the explicit form adds --noprofile --norc,
         # and pipefail is its only operative delta — the body already guards
         # `git grep` with `|| found=$?`, so no pipe here can turn "no match"

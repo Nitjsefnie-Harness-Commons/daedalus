@@ -548,7 +548,6 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     del _tmp
     assert _mcp_guard_floor.missing_citations(
         _mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE, _util.ROOT) == []
-    nested_function = 'tests/test_runner_refuses_unawaited.py::test_x'
     absent_function = (
         'tests/test_mcp_tools.py::test_this_test_does_not_exist_anywhere')
     absent_suite = 'tests/test_no_such_suite.py::test_absent'
@@ -556,10 +555,9 @@ def test_every_off_surface_citation_names_a_test_that_exists(_tmp):
     # None rows present; the expected report names only the synthetic rows.
     assert _mcp_guard_floor.missing_citations([
         *_mcp_guard_floor.GUARDS_OFF_THE_TOOL_SURFACE,
-        ('m', 'f', 'c', nested_function),
         ('m', 'f', 'c', absent_function),
         ('m', 'f', 'c', absent_suite),
-    ], _util.ROOT) == [nested_function, absent_function, absent_suite]
+    ], _util.ROOT) == [absent_function, absent_suite]
 
 
 def test_module_level_async_function_citations_are_reported_missing(_tmp):

@@ -27,6 +27,23 @@ const _fetchIds = {};
 // the string is.
 const _fetchIdPrefix = Math.random().toString(36).slice(2);
 let _fetchSeq = 0;
+// Relay body slices by fetch id; a request no longer held refuses them.
+const _slices = new Map();
+
+function _takeSlice(msg) {
+  const body = _slices.get(msg.fetchId);
+  if (!body) return false;
+  body.bytes ||= new Uint8Array(msg.size);
+  const binary = atob(msg.data);
+  for (let i = 0; i < binary.length; i++) {
+    body.bytes[msg.at + i] = binary.charCodeAt(i);
+  }
+  body.got += binary.length;
+  // Re-arms the page's backstop.
+  window.postMessage({ direction: 'daedalus-bg-to-page', reqId: body.reqId,
+    handler: 'xmlhttpRequest', event: 'slice' }, '*');
+  return true;
+}
 
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data || e.data.direction !== 'daedalus-page-to-bg') return;
@@ -70,6 +87,7 @@ window.addEventListener('message', (e) => {
     const fetchId = _fetchIds[msg.target];
     if (fetchId) {
       delete _fetchIds[msg.target];
+      _slices.delete(fetchId);
       chrome.runtime.sendMessage({ type: 'abortFetch', fetchId });
     }
     return;
@@ -78,6 +96,7 @@ window.addEventListener('message', (e) => {
   if (msg.handler === 'xmlhttpRequest') {
     const fetchId = `${_fetchIdPrefix}-${++_fetchSeq}`;
     _fetchIds[reqId] = fetchId;
+    _slices.set(fetchId, { reqId, got: 0 });
     chrome.runtime.sendMessage({
       type: 'fetch',
       fetchId,
@@ -91,7 +110,18 @@ window.addEventListener('message', (e) => {
       maxResponseBytes: msg.maxResponseBytes,
     }, (resp) => {
       delete _fetchIds[reqId];
+      const sliced = _slices.get(fetchId);
+      _slices.delete(fetchId);
       const err = chrome.runtime.lastError && chrome.runtime.lastError.message;
+      if (!err && resp && resp.chunked) {
+        if (!sliced || sliced.got !== resp.chunked) {
+          resp = { error: 'relay body arrived incomplete' };
+        } else if (msg.responseType === 'arraybuffer') {
+          resp.data = sliced.bytes.buffer;
+        } else {
+          resp.data = new TextDecoder().decode(sliced.bytes);
+        }
+      }
       if (err || !resp) {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'error',
           error: err || 'no response from background (service worker dead?)' }, '*');
@@ -106,7 +136,8 @@ window.addEventListener('message', (e) => {
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'load',
           status: resp.status, statusText: resp.statusText || '',
           data: resp.data, headers: resp.headers,
-          finalUrl: resp.finalUrl || msg.url }, '*');
+          finalUrl: resp.finalUrl || msg.url }, '*',
+        resp.data instanceof ArrayBuffer ? [resp.data] : []);
       }
     });
   } else if (msg.handler === 'openInTab') {
@@ -162,6 +193,11 @@ window.addEventListener('message', (e) => {
 
 // ─── Relay: page eval results → background ───
 
+// Exec-timing stamps, added to a relay message that carries `timing`.
+function _stamped(timing, name) {
+  return { ...timing, [name]: performance.timeOrigin + performance.now() };
+}
+
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data || e.data.direction !== 'daedalus-eval-result') return;
   const msg = e.data;
@@ -170,6 +206,7 @@ window.addEventListener('message', (e) => {
   try { serialized = JSON.stringify(result); } catch { serialized = String(result); }
   try { result = JSON.parse(serialized); } catch { result = serialized; }
   chrome.runtime.sendMessage({
+    ...(msg.timing ? { timing: _stamped(msg.timing, 'cs_result') } : {}),
     type: 'result', relayId: msg.relayId, result,
     error: msg.e || null, hostname: location.hostname,
     ms: msg.ms,
@@ -178,11 +215,14 @@ window.addEventListener('message', (e) => {
 
 // ─── Receive eval commands from background → forward to page context ───
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === 'eval') {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'gm-slice') {
+    sendResponse(_takeSlice(msg));
+  } else if (msg.type === 'eval') {
     window.postMessage({
       direction: 'daedalus-eval', id: msg.id,
       relayId: msg.relayId, code: msg.code,
+      ...(msg.timing ? { timing: _stamped({}, 'cs_recv') } : {}),
     }, '*');
   }
 });

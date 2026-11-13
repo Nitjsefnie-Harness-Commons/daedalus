@@ -11,24 +11,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
-    # Loading this file by path, as `tests/test_suite_runner.py` does, does
-    # not put its directory on the path, and the shared bound is imported
-    # by PACKAGE name. The repository root goes on, not `scripts/ci`:
-    # importing a sibling by bare name out of that directory is the
-    # spelling `scripts/ci/coverage_suites.py` uses only for a step that
-    # runs the file by path, because it loads one file under one name and
-    # a package import here is what keeps it to one.
+    # Loading this file by path does not put its directory on the path, and
+    # the shared bound is imported by PACKAGE name. The repository root goes
+    # on, not `scripts/ci`: importing a sibling by bare name out of that
+    # directory is the spelling `scripts/ci/coverage_suites.py` uses only for
+    # a step that runs the file by path, because it loads one file under one
+    # name and a package import here is what keeps it to one.
     sys.path.insert(0, str(ROOT))
 
 from scripts.ci.suite_bound import (  # noqa: E402
     CLEANUP_TIMEOUT_S,
     discard_outputs, kill_process_tree, suite_timeout, timeout_record,
     worker_count)
-# Re-exported, not used here: `tests/test_suite_runner.py` drives
-# `_run_suite` with the bound the runner itself resolves, and that is this
-# name. A second copy of the number here is what this change removes.
-# pylint: disable-next=unused-import
-from scripts.ci.suite_bound import DEFAULT_SUITE_TIMEOUT_S  # noqa: E402,F401
 
 _SPAWN_LOCK = threading.Lock()
 

@@ -101,8 +101,8 @@ jobs:
           DAEDALUS_REPO: ${{ github.repository }}
           DAEDALUS_SHA: ${{ github.sha }}
         # Wait for every workflow run on this tagged commit except release
-        # itself, pr gate (anchored on the base tip, not this commit), and
-        # issue_comment events. The tests matrix is among these gates: a
+        # itself, pr gate and pin test screen (both anchored on the base tip,
+        # not this commit), and issue_comment events. The tests matrix is among these gates: a
         # cell queued for a macOS runner holds this job until it concludes.
         # ZERO runs is a failure after the registration grace, never a pass.
         # Release dispatch waits for this same set to go green before tagging,
@@ -117,6 +117,7 @@ jobs:
                       --jq '.workflow_runs[]
                             | select(.name != "release")
                             | select(.name != "pr gate")
+                            | select(.name != "pin test screen")
                             | select(.event != "issue_comment")
                             | "\(.name)\t\(.status)\t\(.conclusion)"')"
             total=$(printf '%s\n' "$runs" | awk 'NF { n++ } END { print n + 0 }')
@@ -187,15 +188,10 @@ jobs:
 
       - name: Install the build backend and test dependencies
         # The MCP suite skips without its extra, and test_diff_coverage needs
-        # the statement analyzer pinned by requirements-test.txt. The suite
-        # step below globs every suite, and test_type_errors drives the real
-        # pyright binary, so this file is needed here too: a job runs the
-        # suites itself, and a needs: relation would not hand it the
-        # environment the lint jobs installed.
+        # the statement analyzer pinned by requirements-test.txt.
         run: |
           python -m pip install -r requirements-release.txt . ".[mcp]"
           python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
-          python -m pip install -r requirements-dev.txt
 
       # A mistagged release publishes a wheel whose version contradicts the
       # tag, and the checksums then make the wrong pairing authoritative.

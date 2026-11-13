@@ -180,10 +180,12 @@ repository's.** `.github/size-baseline.json` records every file over its
 ceiling (500 lines, 700 under `tests/`); a recorded number is never raised
 by hand and no entry is ever added by hand. If a change would push a file
 past its record, relocate the code into a new module, or shrink the file.
-The gate is the `size-baseline` job: a check on every pull request against
-the base revision's records and a tighten on every main push, whose changed
-records reach main through `scripts/ci/ratchet_push.py` like the other
-ratchets'. The tighten runs there; no local command writes these records.
+The gate is `.github/workflows/size-baseline.yml`, which `tests.yml`'s
+`size-baseline` job calls: a check on every pull request against the base
+revision's records and a tighten on every main push. The action commits
+changed records with the deploy key in the file's own default-branch push
+run, since a called run reads that environment secret as empty. The tighten
+runs there; no local command writes these records.
 
 **The same file's `long_line_baseline` holds the 79-column policy on the same
 terms.** It records how many over-limit lines each tracked Python file still
@@ -202,23 +204,25 @@ remedy for a refusal is to fix the type error in the named test module, and
 the fall is recorded with
 `python3 scripts/ci/type_error_baseline.py --tighten`, which also drops an
 entry whose file has no type error left. An entry naming a file that is gone
-is removed by hand. `tests/test_type_errors.py` gates the policy and reads
-this paragraph the same way.
+is removed by hand. `tests/test_type_errors.py` reads this paragraph for
+these terms.
 
-**`.github/ci-thresholds.json`'s `tests_line_baseline` holds the test tree's
-own size.** It sums text lines of every tracked file under `tests/` as one
-budget. A recorded budget may rise only when the judged range contains a
-commit whose subject starts with `feat:` or `feat(scope):`. Non-feature
-changes pay for growth by trimming their own tests: drop redundant cases,
-merge parametrisations, or delete repeated assertions. A feature must still
-record a sufficient budget; its subject does not waive the line gate.
+**The test tree's own size is the size-ratchet action's tree budget.**
+`size-baseline.yml` lists `tests/` under `tree-budgets`, so the action sums
+the text lines of every tracked file under `tests/` and records that total
+under `.github/size-baseline.json`'s `trees` key, tightening it on every main
+push. The `trees` budget is the one record a pull request may raise, and
+only when the judged range contains a commit whose subject starts with
+`feat:` or `feat(scope):`. Non-feature changes pay for growth by trimming
+their own tests: drop redundant cases, merge parametrisations, or delete
+repeated assertions. A feature must still record a sufficient budget; its
+subject does not waive the line gate.
 
 **Remove a recorded threshold only when the measurement is defective or
 its definition changed.** Declare the reason in the judged range with
-`Thresholds-Removed: <entry>=<bug|definition>`; the scalar's entry is exactly
-`tests_line_baseline`, and path entries use `family.path` or a bare baseline
-family declaring its entries. A path whose file is no longer tracked needs
-no declaration. A breach is never a removal reason. The audit workflow's
+`Thresholds-Removed: <entry>=<bug|definition>`; entries use `family.path` or
+a bare baseline family declaring its entries. A path whose file is no longer
+tracked needs no declaration. A breach is never a removal reason. The audit workflow's
 direction guard compares the documents at the judged base and head: the
 merge base with the event's fixed base SHA on a PR, the event's before SHA
 on a push (`HEAD^` when that SHA is unusable). Every consumer uses that
@@ -229,13 +233,6 @@ judged base, intersected with their own complaints. CI exports that base as
 `DAEDALUS_THRESHOLDS_BASE_REV`; a local check may set the same variable.
 Unreadable or absent history grants no exemption. Map writers only lower or
 drop existing rows; they never seed a removed entry or add a new one.
-
-**An absent budget stays absent until measured.** The check still measures
-and reports, with no budget to compare and no write. Main's publisher runs
-`python3 scripts/ci/tests_lines.py --tighten`, which seeds an absent scalar
-at that run's measured total, lowers an existing one when tests shrink,
-and never raises it. Coverage updates preserve scalar absence. PR checks
-run on the MERGE ref, so the merged test tree must fit the recorded budget.
 
 **The same file's `js_coverage_baseline` holds the per-module JavaScript
 coverage policy on the same terms.** It records how many uncovered
@@ -769,8 +766,13 @@ the code you change; field names are exact.
     same ceiling, since `config` exits without `DAEDALUS_DIR`; the bounded
     `env_int` / `env_positive_float` readers both front ends parse settings
     with; `debug_timing`, the sole owner of the `DAEDALUS_DEBUG_TIMING` name,
-    snapshotted by the segment store, true only for `1`, reading the
-    environment when called); `log_safe` (renders untrusted values);
+    snapshotted at import by the segment store and `exec_timing`, true only
+    for `1`, reading the environment when called); `exec_timing` (an eval
+    command's `_timing`, `code` with an absent or empty `type`: opened at enqueue, stamped at the stream write and
+    on the posted result, a client's own dropped from a `PUT /command` body
+    or legacy file; with the flag off it drops any `_timing` a frame or
+    result still carries and reads no clock); `log_safe` (renders untrusted
+    values);
     `parent_watch` (exit with the launcher); `mcp_bootstrap` (the optional MCP
     front end); `dashboard_drain` (the dashboard stream's non-destructive
     fan-out drain; its cursor and unlink rule are under "Endpoints" in this section).
@@ -788,7 +790,10 @@ Repeated authority carriers are rejected before any value is selected, equal or
 blank repeats included: `token` in a query or JSON body, a repeated
 `Authorization` header, a repeated `X-Daedalus-Segment-Sig` (400
 `duplicate segment capability header`), and `job` / `sig` on segment-capability
-routes.
+routes. On `POST /segment`, a repeated `X-Daedalus-Segment-Job`, `-Seg` or
+`-Total` header (400 `duplicate X-Daedalus-Segment-<Job|Seg|Total> header`), or
+one beside its query twin (400 `conflicting job|seg|total`), is refused the same
+way; header names match case-insensitively.
 
 Authenticated `GET` routes resolve `Authorization: Bearer <token>` first, then
 `?token=`; a header and query token in one request must name the same one, else
@@ -953,7 +958,9 @@ and never reaches this gate.
   `POST /segment-job` travels in `X-Daedalus-Segment-Sig` (or `&sig=S`), never
   the bridge token. Capability, parameter shapes and index bound are all
   settled before the body arrives, so a refused request is answered without
-  buffering its segment.
+  buffering its segment. Job, seg and total may instead travel in
+  `X-Daedalus-Segment-Job`, `-Seg` and `-Total` (percent-encoded UTF-8) at
+  `/segment`, with the same validation.
 - `GET /segment-status?job=X`: received segments `{done[], count}`; capability
   in `X-Daedalus-Segment-Sig` or `&sig=S`.
 

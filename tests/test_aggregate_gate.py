@@ -130,6 +130,7 @@ def test_only_observed_unstarted_cancelled_dependencies_are_diagnosed(tmp):
         ('suites', [matrix, 'suites (macos-latest, 3.12)'],
          'cancelled', [], [matrix, 'suites (macos-latest, 3.12)'], None, []),
         ('suites', ['suites'], 'cancelled', [], ['suites'], None, []),
+        ('suites', ['suites / a'], 'cancelled', [], ['suites / a'], None, []),
         ('coverage', ['coverage'], 'cancelled', [], ['coverage'], None, []),
         ('suites', ['suites-extra (macos-latest, 3.11)'],
          'cancelled', [], [], None, []),
