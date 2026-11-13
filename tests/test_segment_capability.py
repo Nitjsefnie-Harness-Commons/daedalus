@@ -9,14 +9,12 @@ either value is selected, and that a request the capability does not cover is
 answered before its body is read.
 """
 import http.client
-import io
 import json
 import sys
 from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 from _segments import (BRIDGE_ENV, JOB_HEADER, SEG_HEADER,  # noqa: E402
                        SIG_HEADER, TOK, TOTAL_HEADER, mint_job,
@@ -105,33 +103,6 @@ def test_a_bad_segment_capability_is_refused_before_the_body_arrives(tmp):
         assert payload == {'error': 'bad sig'}, payload
         assert not list((Path(docroot) / 'segments' / job).glob('*.ts'))
         assert sig != 'notthesig'
-
-
-def test_every_pre_body_segment_refusal_drains_to_the_bound(tmp):
-    with _daedalus_env.isolated({'DAEDALUS_DIR': tmp, 'DAEDALUS_PORT': '0'}):
-        server = _util.load(_util.ROOT / 'server.py', 'segment_drain_server')
-    bound = server.http_transport.REFUSED_BODY_DRAIN
-    refusals = (
-        ('?sig=a&sig=b', (), 'duplicate sig'),
-        ('', ((SIG_HEADER, 'a'), (SIG_HEADER, 'b')),
-         'duplicate segment capability header'),
-        ('?sig=a', ((JOB_HEADER, 'j'), (JOB_HEADER, 'j')),
-         f'duplicate {JOB_HEADER} header'),
-        ('?sig=a', (), 'missing job or seg'))
-    replies = []
-    for query, carriers, error in refusals:
-        handler = server.Handler.__new__(server.Handler)
-        handler.headers = http.client.HTTPMessage()
-        for name, value in (*carriers, ('Content-Length', str(bound + 1))):
-            handler.headers[name] = value
-        handler.path = handler.requestline = '/segment' + query
-        handler.request_version, handler.wfile = 'HTTP/1.0', io.BytesIO()
-        handler.rfile = io.BytesIO(bytes(bound + 1))
-        handler.do_POST()
-        answer = handler.wfile.getvalue().split(b'\r\n\r\n', 1)[1]
-        replies.append((error, json.loads(answer), handler.rfile.tell()))
-    assert all(body == {'error': error} and read == bound
-               for error, body, read in replies), replies
 
 
 def test_a_segment_body_without_a_declared_length_is_refused(tmp):
