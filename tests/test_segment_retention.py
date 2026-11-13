@@ -325,7 +325,7 @@ def _gc_calls(given, sweeps, failing=0):
     try:
         retention.gc_loop(Path('segments'), given)
     except _LoopEnd:
-        pass
+        pass  # the stand-in sleep ends the otherwise endless loop
     return calls
 
 
