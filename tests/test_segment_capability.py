@@ -9,41 +9,62 @@ either value is selected, and that a request the capability does not cover is
 answered before its body is read.
 """
 import http.client
+import io
 import json
 import sys
 from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 from _segments import (BRIDGE_ENV, JOB_HEADER, SEG_HEADER,  # noqa: E402
                        SIG_HEADER, TOK, TOTAL_HEADER, mint_job,
                        post_segment, seg_job)
 
 
+def minted_sig(base, job):
+    status, body = mint_job(base, TOK, job)
+    assert status == 200, (status, body)
+    return body['sig']
+
+
+def post_raw(base, query, headers, body=b'bytes',
+             declared: int | bool = True):
+    """POST /segment with a header list, which may repeat a name."""
+    port = int(base.rsplit(':', 1)[1])
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
+    try:
+        conn.putrequest('POST', '/segment' + query)
+        for name, value in headers:
+            conn.putheader(name, value)
+        conn.putheader('Content-Type', 'application/octet-stream')
+        if declared is not False:
+            conn.putheader('Content-Length', str(
+                len(body) if declared is True else declared))
+        conn.endheaders(body)
+        response = conn.getresponse()
+        return response.status, json.loads(response.read())
+    finally:
+        conn.close()
+
+
 def test_segment_post_and_status_require_capability(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
-        _, minted = mint_job(base, TOK, job)
-        sig = minted['sig']
+        sig = minted_sig(base, job)
         seg_dir = Path(docroot) / 'segments' / job
-
-        def post_seg(query):
-            return _util.request(
-                base + '/segment?' + query, 'POST', body=b'\x47',
-                headers={'Content-Type': 'application/octet-stream'})
-
         # No sig and wrong sig: 403, and no file written.
-        status, _ = post_seg(f'job={job}&seg=1&total=2')
+        status, _ = post_raw(base, f'?job={job}&seg=1&total=2', [])
         assert status == 403, status
-        status, _ = post_seg(f'job={job}&seg=1&total=2&sig=wrong')
+        status, _ = post_raw(base, f'?job={job}&seg=1&total=2&sig=wrong', [])
         assert status == 403, status
         # A sig minted for another job opens nothing here.
-        _, other = mint_job(base, TOK, seg_job())
-        status, _ = post_seg(f'job={job}&seg=1&total=2&sig={other["sig"]}')
+        other = minted_sig(base, seg_job())
+        status, _ = post_raw(base, f'?job={job}&seg=1&total=2&sig={other}', [])
         assert status == 403, status
         # The bridge token is not a capability either.
-        status, _ = post_seg(f'job={job}&seg=1&total=2&sig={TOK}')
+        status, _ = post_raw(base, f'?job={job}&seg=1&total=2&sig={TOK}', [])
         assert status == 403, status
         assert list(seg_dir.rglob('*')) == [], list(seg_dir.iterdir())
 
@@ -74,29 +95,43 @@ def test_a_bad_segment_capability_is_refused_before_the_body_arrives(tmp):
     env = {**BRIDGE_ENV, 'DAEDALUS_REQUEST_TIMEOUT': '5'}
     with _util.bridge(tmp, env=env) as (base, docroot):
         job = seg_job()
-        _, minted = mint_job(base, TOK, job)
-        declared = 8 * 1024 * 1024
-        port = int(base.rsplit(':', 1)[1])
-        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
-        try:
-            conn.putrequest(
-                'POST', f'/segment?job={job}&seg=0&total=1&sig=notthesig')
-            conn.putheader('Content-Type', 'application/octet-stream')
-            conn.putheader('Content-Length', str(declared))
-            conn.endheaders()
-            # Exactly the bound the refusal drains, so the server reaches its
-            # close without waiting on bytes this test deliberately withholds.
-            conn.send(b'\x47' * 65536)
-            response = conn.getresponse()
-            status, payload = response.status, response.read()
-        finally:
-            conn.close()
+        sig = minted_sig(base, job)
+        # Exactly the bound the refusal drains, so the server closes without
+        # waiting on bytes this test withholds.
+        status, payload = post_raw(
+            base, f'?job={job}&seg=0&total=1&sig=notthesig', [],
+            b'\x47' * 65536, declared=8 * 1024 * 1024)
         assert status == 403, (status, payload)
-        assert json.loads(payload) == {'error': 'bad sig'}, payload
-        seg_dir = Path(docroot) / 'segments' / job
-        stored = sorted(seg_dir.glob('*.ts')) if seg_dir.is_dir() else []
-        assert not stored, stored
-        assert minted['sig'] != 'notthesig'
+        assert payload == {'error': 'bad sig'}, payload
+        assert not list((Path(docroot) / 'segments' / job).glob('*.ts'))
+        assert sig != 'notthesig'
+
+
+def test_every_pre_body_segment_refusal_drains_to_the_bound(tmp):
+    with _daedalus_env.isolated({'DAEDALUS_DIR': tmp, 'DAEDALUS_PORT': '0'}):
+        server = _util.load(_util.ROOT / 'server.py', 'segment_drain_server')
+    bound = server.http_transport.REFUSED_BODY_DRAIN
+    refusals = (
+        ('?sig=a&sig=b', (), 'duplicate sig'),
+        ('', ((SIG_HEADER, 'a'), (SIG_HEADER, 'b')),
+         'duplicate segment capability header'),
+        ('?sig=a', ((JOB_HEADER, 'j'), (JOB_HEADER, 'j')),
+         f'duplicate {JOB_HEADER} header'),
+        ('?sig=a', (), 'missing job or seg'))
+    replies = []
+    for query, carriers, error in refusals:
+        handler = server.Handler.__new__(server.Handler)
+        handler.headers = http.client.HTTPMessage()
+        for name, value in (*carriers, ('Content-Length', str(bound + 1))):
+            handler.headers[name] = value
+        handler.path = handler.requestline = '/segment' + query
+        handler.request_version, handler.wfile = 'HTTP/1.0', io.BytesIO()
+        handler.rfile = io.BytesIO(bytes(bound + 1))
+        handler.do_POST()
+        answer = handler.wfile.getvalue().split(b'\r\n\r\n', 1)[1]
+        replies.append((error, json.loads(answer), handler.rfile.tell()))
+    assert all(body == {'error': error} and read == bound
+               for error, body, read in replies), replies
 
 
 def test_a_segment_body_without_a_declared_length_is_refused(tmp):
@@ -109,24 +144,11 @@ def test_a_segment_body_without_a_declared_length_is_refused(tmp):
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
-        _, minted = mint_job(base, TOK, job)
-        sig = minted['sig']
-        port = int(base.rsplit(':', 1)[1])
-        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
-        try:
-            conn.putrequest(
-                'POST', f'/segment?job={job}&seg=0&total=1&sig={sig}')
-            conn.putheader('Content-Type', 'application/octet-stream')
-            conn.endheaders()
-            conn.send(b'\x47' * 188)
-            response = conn.getresponse()
-            status, payload = response.status, response.read()
-        finally:
-            conn.close()
+        status, payload = post_raw(
+            base, f'?job={job}&seg=0&total=1&sig={minted_sig(base, job)}',
+            [], b'\x47' * 188, declared=False)
         assert status == 411, (status, payload)
-        seg_dir = Path(docroot) / 'segments' / job
-        stored = sorted(seg_dir.glob('*.ts')) if seg_dir.is_dir() else []
-        assert not stored, stored
+        assert not list((Path(docroot) / 'segments' / job).glob('*.ts'))
 
 
 def test_segment_authority_carriers_reject_every_duplicate_shape(tmp):
@@ -134,11 +156,8 @@ def test_segment_authority_carriers_reject_every_duplicate_shape(tmp):
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = 'duplicate-scope'
         other_job = 'duplicate-other-scope'
-        status, minted = mint_job(base, TOK, job)
-        assert status == 200, (status, minted)
-        status, _other = mint_job(base, TOK, other_job)
-        assert status == 200, status
-        sig = minted['sig']
+        sig = minted_sig(base, job)
+        minted_sig(base, other_job)
         duplicate_values = (
             ('sig', sig, 'wrong'),
             ('sig', 'wrong', sig),
@@ -218,9 +237,7 @@ def test_segment_routes_accept_a_capability_header(tmp):
     """
     job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        status, body = mint_job(base, TOK, job)
-        assert status == 200, (status, body)
-        sig = body['sig']
+        sig = minted_sig(base, job)
         status, raw = _util.request(
             base + f'/segment?job={job}&seg=1&total=1', 'POST', body=b'bytes',
             headers={'Content-Type': 'application/octet-stream',
@@ -240,8 +257,7 @@ def test_a_wrong_segment_capability_header_is_refused(tmp):
     """The header is checked, not trusted, on both segment routes."""
     job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = mint_job(base, TOK, job)
-        assert status == 200, (status, body)
+        minted_sig(base, job)
         status, raw = _util.request(
             base + f'/segment?job={job}&seg=1&total=1', 'POST', body=b'bytes',
             headers={'Content-Type': 'application/octet-stream',
@@ -258,9 +274,7 @@ def test_a_segment_header_and_query_sig_must_agree(tmp):
     """Two different capabilities in one request is an ambiguous carrier."""
     job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = mint_job(base, TOK, job)
-        assert status == 200, (status, body)
-        sig = body['sig']
+        sig = minted_sig(base, job)
         status, payload = _util.get_json(
             base + f'/segment-status?job={job}&sig=other',
             headers={'X-Daedalus-Segment-Sig': sig})
@@ -278,9 +292,7 @@ def test_a_duplicate_segment_capability_header_is_refused(tmp):
     """Two capability headers are refused before either is selected."""
     job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = mint_job(base, TOK, job)
-        assert status == 200, (status, body)
-        sig = body['sig']
+        sig = minted_sig(base, job)
         conn, response = _util.header_stream(
             base, f'/segment-status?job={job}',
             (('X-Daedalus-Segment-Sig', sig),
@@ -298,23 +310,6 @@ CARRIERS = (('job', JOB_HEADER), ('seg', SEG_HEADER),
             ('total', TOTAL_HEADER))
 
 
-def post_raw(base, query, headers, body=b'bytes'):
-    """POST /segment with a header list, which may repeat a name."""
-    port = int(base.rsplit(':', 1)[1])
-    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
-    try:
-        conn.putrequest('POST', '/segment' + query)
-        for name, value in headers:
-            conn.putheader(name, value)
-        conn.putheader('Content-Type', 'application/octet-stream')
-        conn.putheader('Content-Length', str(len(body)))
-        conn.endheaders(body)
-        response = conn.getresponse()
-        return response.status, json.loads(response.read())
-    finally:
-        conn.close()
-
-
 def test_a_segment_upload_takes_its_parameters_from_headers(tmp):
     """The fixed `/segment` target is what lets a browser reuse a preflight.
 
@@ -322,8 +317,7 @@ def test_a_segment_upload_takes_its_parameters_from_headers(tmp):
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for job in (seg_job(), seg_job() + '-caf\u00e9'):
-            _, minted = mint_job(base, TOK, job)
-            sig = minted['sig']
+            sig = minted_sig(base, job)
             # Lowercase is how an HTTP/2 hop delivers the same names.
             for spell, index in ((str, '7'), (str.lower, '6')):
                 status, body = post_raw(base, '', [
@@ -348,12 +342,12 @@ def test_header_parameters_meet_the_validation_the_query_has(tmp):
                ('seg', 'x', 'seg must be a bounded ASCII decimal'),
                ('total', '%2E%2E', 'invalid param'))
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        _, minted = mint_job(base, TOK, job)
+        sig = minted_sig(base, job)
         replies = []
         for key, value, error in refused:
             values = {**valid, key: value}
             status, body = post_raw(base, '', [
-                (SIG_HEADER, minted['sig']),
+                (SIG_HEADER, sig),
                 *[(header, values[name]) for name, header in CARRIERS]])
             replies.append((key, status, body, error))
         assert all(status == 400 and body == {'error': error}
@@ -374,8 +368,7 @@ def test_segment_parameter_headers_reject_every_ambiguous_carrier(tmp):
              ('blank first', '', '{v}', str),
              ('lowercase second', '{v}', '{v}', str.lower))
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
-        _, minted = mint_job(base, TOK, job)
-        sig = (SIG_HEADER, minted['sig'])
+        sig = (SIG_HEADER, minted_sig(base, job))
         replies = []
         for key, header in CARRIERS:
             others = '&'.join(f'{k}={v}' for k, v in valid.items()
@@ -402,9 +395,7 @@ def test_a_query_sig_still_authorizes_a_segment_route(tmp):
     """The older carrier keeps working; every deployed relay script uses it."""
     job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        status, body = mint_job(base, TOK, job)
-        assert status == 200, (status, body)
-        sig = body['sig']
+        sig = minted_sig(base, job)
         status, raw = post_segment(base, job, sig, 1)
         assert status == 200, (status, raw)
         status, payload = _util.get_json(
