@@ -125,6 +125,22 @@ def test_the_age_is_read_again_under_the_jobs_own_lock(tmp):
     assert _present(paths) == paths, _present(paths)
 
 
+def test_only_safe_job_names_are_ever_candidates(tmp):
+    """A stray `.json`, a reserved name and an unsafe name are never jobs."""
+    tmp = Path(tmp)
+    retention = _retention('segret_names')
+    live = _job(tmp, 'live-job', *(LONG_AGO,) * 4)
+    (tmp / '.json').write_text('{}', encoding='utf-8')
+    foreign = [tmp / '.json', tmp / '.x.json.dirty', tmp / ('\u20ac' * 80)]
+    for path in foreign[1:]:
+        path.mkdir()
+    for path in foreign + [tmp]:
+        os.utime(path, (ORIGIN, ORIGIN))
+    retention.sweep(tmp, RETENTION, now=LONG_AGO)
+    assert _present(live) == live, _present(live)
+    assert _present(foreign) == foreign, _present(foreign)
+
+
 def test_a_half_removed_job_is_collected_from_either_half(tmp):
     """A directory without its record, and a record without its directory."""
     tmp = Path(tmp)
