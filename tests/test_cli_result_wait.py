@@ -76,6 +76,9 @@ PEEK = '/result?tab=extension&delivery=d1'
 CONSUME = PEEK + '&consume=1&expected=g1'
 
 
+NOT_OBJECT = 'Connection failed: the answer is JSON but not an object'
+
+
 def _unknown(timeout, failure):
     return {'exit': (
         f'Timeout ({timeout}s), outcome unknown: the last result request '
@@ -256,7 +259,8 @@ def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
     del tmp
     for failure, named in (
             ('500', "HTTP 500: {'error': 1}"),
-            ('cut', 'Connection failed: cut off')):
+            ('cut', 'Connection failed: cut off'),
+            *((value, NOT_OBJECT) for value in ([], None, 'x', 3))):
         claimed = {'consumed': True, 'resultGeneration': 'g1'}
         outcome = _scripted_wait([OWN, failure, OWN, claimed])
         assert outcome['result'] == OWN, (failure, outcome)

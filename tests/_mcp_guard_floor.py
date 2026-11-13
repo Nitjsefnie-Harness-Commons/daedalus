@@ -571,6 +571,7 @@ CARRY = ('tests/test_mcp_live_tools.py::test_a_client_reads_why_a_tool_'
          'failed_and_never_a_crash')
 POLL = 'tests/test_mcp_transport_guards.py::'
 WAITS = 'tests/test_cli_waits.py::'
+ARGS = 'tests/test_cli_argument_types.py::'
 
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own
@@ -597,6 +598,8 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      POLL + 'test_poll_reports_timeout_when_no_attempt_is_admitted'),
     ('daedalus_mcp.transport', 'poll_result', 'failure is not None',
      POLL + 'test_poll_reports_an_unknown_outcome_after_a_failed_request'),
+    ('daedalus_mcp.transport', '_result', 'not isinstance(answer, dict)',
+     POLL + 'test_poll_retries_a_failed_or_refused_consume'),
     # covers 0, -1, nan and inf alone
     ('daedalus_mcp.transport', 'checked_timeout',
      'not math.isfinite(timeout) or timeout <= 0',
@@ -627,17 +630,14 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_cli.transport', 'capture_limit',
      "raise argparse.ArgumentTypeError(f'--max must be an integer from 1 "
      'to {NET_CAPTURE_MAX}; got {value!r}\') from None',
-     'tests/test_cli_argument_types.py::'
-     'test_net_capture_still_refuses_a_non_integer_max'),
+     ARGS + 'test_net_capture_still_refuses_a_non_integer_max'),
     ('daedalus_cli.transport', 'capture_limit',
      'limit < 1 or limit > NET_CAPTURE_MAX',
-     'tests/test_cli_argument_types.py::'
-     'test_net_capture_refuses_a_max_outside_one_to_the_ceiling'),
+     ARGS + 'test_net_capture_refuses_a_max_outside_one_to_the_ceiling'),
     ('daedalus_cli.transport', 'positive_timeout',
      "raise argparse.ArgumentTypeError(f'timeout must be a whole number of "
      "seconds; got {value!r}') from None",
-     'tests/test_cli_argument_types.py::'
-     'test_a_non_integer_timeout_is_refused'),
+     ARGS + 'test_a_non_integer_timeout_is_refused'),
     ('daedalus_cli.transport', 'positive_timeout', 'seconds < 0',
      'tests/test_cli_result_wait.py::'
      'test_a_negative_timeout_is_refused_before_the_command_is_sent'),
@@ -661,18 +661,15 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_cli.transport', 'chrome_tab_id',
      "raise argparse.ArgumentTypeError(f'{value!r} is not an integer') "
      'from None',
-     'tests/test_cli_argument_types.py::'
-     'test_a_malformed_chrome_tab_id_is_refused_at_parse_time'),
+     ARGS + 'test_a_malformed_chrome_tab_id_is_refused_at_parse_time'),
     ('daedalus_cli.transport', 'expiration_timestamp',
      "raise argparse.ArgumentTypeError(f'{value!r} is not a number') "
      'from None',
-     'tests/test_cli_argument_types.py::'
-     'test_a_malformed_expires_is_refused_at_parse_time'),
+     ARGS + 'test_a_malformed_expires_is_refused_at_parse_time'),
     ('daedalus_cli.transport', 'json_params',
      'raise argparse.ArgumentTypeError('
      "f'{value!r} is not valid JSON: {error}') from None",
-     'tests/test_cli_argument_types.py::'
-     'test_malformed_params_are_refused_at_parse_time'),
+     ARGS + 'test_malformed_params_are_refused_at_parse_time'),
     # Met by a refused connect (URLError), a cut-off read (HTTPException), a
     # cut-off error read (HTTPError body) and a whole error answer (status).
     ('daedalus_cli.transport', '_exchange',
@@ -689,6 +686,9 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
     ('daedalus_cli.transport', '_exchange',
      "raise ErrorStatus(f'HTTP {e.code}: {detail}') from e",
      WAITS + 'test_a_complete_error_answer_is_still_reported_by_status'),
+    ('daedalus_cli.transport', '_result_answer',
+     'not isinstance(answer, dict)', 'tests/test_cli_result_wait.py::'
+     'test_a_failed_consume_is_retried_and_never_reported_as_failed'),
     # The html-body site is the api() paths' answer of a captive front end.
     ('daedalus_cli.transport', '_json_body',
      'raise ConnectionFailed(error) from error',
