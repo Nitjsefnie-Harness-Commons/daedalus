@@ -331,6 +331,14 @@ def test_a_pr_gate_run_is_judged_like_any_other_run(tmp):
                                _green('tests') + [red])
         assert code == 1, (named, text)
         assert text.endswith(f'  pr gate: failure {red["html_url"]}\n'), text
+    newer = dict(red, id=10, conclusion='success',
+                 run_started_at='2026-09-20T10:10:00Z')
+    code, text = _run_main(mod, _Clock(), ['a' * 40],
+                           _green('tests') + [red, newer])
+    assert code == 0, text
+    assert ('all 2 run(s) on aaaaaaaaaaaa acceptable (1 superseded run(s) '
+            f'ignored)\n  pr gate (run 9): failure {red["html_url"]}\n'
+            in text), text
 
 
 def test_every_spelling_of_this_repository_is_still_the_default(tmp):
