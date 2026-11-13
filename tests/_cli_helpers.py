@@ -8,10 +8,9 @@ rather than a per-suite one: a suite that spawns the CLI with the runner's own
 `DAEDALUS_*` inherited, or that answers the command out of a different queue
 than the one the subcommand wrote to, is testing a bridge the operator never
 meets. So all three live here, and a suite that drives the CLI reads this
-copy rather than carrying its own. The two environments built elsewhere
-are named where they are built — tests/_overlap_clients.py and
-tests/test_cli_result_wait.py — because each strips a different set than
-this one.
+copy rather than carrying its own. The one environment built elsewhere
+is named where it is built — tests/_overlap_clients.py — because it strips
+a different set than this one.
 """
 import os
 import subprocess
@@ -39,6 +38,8 @@ def cli_env(**overrides):
     for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
         env.pop(k, None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
+    # A refused port: a request escaping a stub must not reach a real bridge.
+    env['DAEDALUS_URL'] = f'http://127.0.0.1:{_util.free_port()}'
     env.update(overrides)
     return env
 
