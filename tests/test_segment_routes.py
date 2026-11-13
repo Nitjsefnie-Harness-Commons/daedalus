@@ -332,6 +332,22 @@ def test_a_write_still_lands_when_the_record_cannot_be_read(_tmp):
             403, {'error': 'bad sig'})
 
 
+def test_a_segment_whose_job_was_removed_since_admission_writes_nothing(_tmp):
+    """A record gone by the write is admission's refusal, and no orphan."""
+    routes = _routes('fixture_segment_routes_removed_job')
+    jobs = _jobs('fixture_segment_jobs_removed_job')
+    job = 'removed-since-admission-job'
+    sig = _mint(jobs, 'removedtok', job)
+    admitted = routes.admit_segment(
+        SEG_DIR, {'job': [job], 'seg': ['0']}, sig)
+    assert isinstance(admitted, routes.Admission), admitted
+    (SEG_DIR / f'{job}.json').unlink()
+    (SEG_DIR / job).rmdir()
+    assert routes.store_segment(b'abcd', admitted) == (
+        403, {'error': 'bad sig'})
+    assert sorted(p.name for p in SEG_DIR.iterdir() if job in p.name) == []
+
+
 def test_a_write_that_cannot_scan_the_directory_is_answered(_tmp):
     """A record without totals makes the write recount; a refused scan is a
     500 rather than an exception that would drop the connection."""

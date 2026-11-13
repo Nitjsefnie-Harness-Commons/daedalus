@@ -147,7 +147,6 @@ def store_segment(raw, admission):
         tmp = seg_dir / f'.{filename}.tmp'
         final = seg_dir / filename
         try:
-            seg_dir.mkdir(parents=True, exist_ok=True)
             # The totals are read here rather than carried from admission,
             # and this is the difference between them and the quota: a
             # quota is fixed at mint, while these change with every write,
@@ -156,6 +155,11 @@ def store_segment(raw, admission):
                 record = segment_store.load_record(seg_dir_root, job)
             except segment_store.SegmentRecordError:
                 record = None
+            else:
+                if record is None:
+                    # swept since admission
+                    return 403, {'error': 'bad sig'}
+            seg_dir.mkdir(parents=True, exist_ok=True)
             trusted = (record is not None
                        and not segment_store.needs_recount(seg_dir_root, job))
             usage = segment_store.usage(record) if trusted else None
