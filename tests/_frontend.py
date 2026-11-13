@@ -95,7 +95,7 @@ class HtmlFrontEndHandler(http.server.BaseHTTPRequestHandler):
     """
 
     interim = ()
-    wbufsize = 1 << 16  # one send: no reset mid-answer
+    wbufsize = 1 << 16  # one send under 64 KiB: no reset
     status = 200
     body = b'<html><body>sign in to this network</body></html>'
     declared = None
