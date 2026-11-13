@@ -17,7 +17,7 @@ def _candidates(seg_dir_root):
             elif (entry.is_file(follow_symlinks=False)
                   and entry.name.endswith('.json')):
                 names.add(entry.name.removesuffix('.json'))
-    # '' (from a stray `.json`) would make the root itself the job directory.
+    # '' (a stray `.json`) would name the root itself.
     return sorted(name for name in names
                   if name and not segment_store.unsafe_job_name(name)
                   and not segment_store.reserved_bookkeeping_name(name))
@@ -32,7 +32,6 @@ def _mtime(path, kind):
 
 
 def _expire(root, job, retention, now):
-    """Remove `job` once its record, marker and directory are all idle."""
     # Joined unresolved: the store's own path helpers follow symlinks.
     record = root / f'{job}.json'
     marker = root / f'.{job}.json.dirty'
@@ -41,7 +40,7 @@ def _expire(root, job, retention, now):
     with segment_store.seg_lock_for(job):
         files = {path: _mtime(path, stat.S_ISREG)
                  for path in (record, marker, temp)}
-        dir_mtime = (None if job_dir.is_junction()  # a link, as a symlink is
+        dir_mtime = (None if job_dir.is_junction()
                      else _mtime(job_dir, stat.S_ISDIR))
         stamps = [stamp for stamp in (files[record], files[marker], dir_mtime)
                   if stamp is not None]
@@ -78,5 +77,5 @@ def gc_loop(seg_dir_root, retention):
         time.sleep(interval)
         try:
             sweep(seg_dir_root, retention)
-        except Exception as why:  # one bad sweep must not end the thread
+        except Exception as why:  # the thread outlives a bad sweep
             print(f'[SEGMENT] SWEEP-FAILED {log_safe(why)}', flush=True)
