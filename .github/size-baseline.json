@@ -1,10 +1,10 @@
 {
   "trees": {
-    "tests/": 128771
+    "tests/": 128768
   },
   "schema_version": 1,
   "baseline": {
     ".github/workflows/coverage-comment.yml": 515,
-    ".github/workflows/tests.yml": 1620
+    ".github/workflows/tests.yml": 1616
   }
 }
