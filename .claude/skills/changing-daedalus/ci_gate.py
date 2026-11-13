@@ -30,15 +30,13 @@ inside a caller is an expectation the other caller can drift from.
 A run satisfies a requirement by its `name`, exactly. `Tests` and `test` are
 different workflows, and treating either as the gate would reinstate the
 false green this exists to remove. A conclusion is irrelevant to the
-predicate: the caller judges conclusions by rules of its own, and a
-required workflow that is present and red is a failure, not an absence.
-The gate question is asked of the set below; the wait judges the
-conclusion question over that same set, where a watcher's hold once judged
-it over the raw runs - deliberately not shared, and the reason the filter
-is applied here. No run in that set is exempt from the conclusion
-question: a `pr gate` run carries the pull request's head SHA, so
-`--required 'pr gate'` is answered by its newest run existing AND by that
-run's conclusion, judged like every other run's.
+predicate, and a required workflow that is present and red is a failure,
+not an absence. The gate question is asked of the set below; the wait
+judges conclusions, against `ACCEPTABLE`, over that same set, where a
+watcher's hold once judged them over the raw runs - the reason the filter
+is applied here. No run in that set is exempt: a `pr gate` run carries the
+pull request's head SHA, so `--required 'pr gate'` is answered by its
+newest run existing AND by that run's conclusion.
 
 A PUBLISHED CHECK-RUN is the verdict; a workflow run is its container.
 The `gate freshness` job reports its verdict through its exit code. A push
