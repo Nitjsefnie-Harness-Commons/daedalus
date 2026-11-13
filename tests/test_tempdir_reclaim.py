@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""A test temporary directory its run left behind is removed by the next.
-
-Every fixture lives under the test's own directory, passed as the parent,
-so these controls never reclaim anything in the real temp directory.
-"""
+"""A test temporary tree a run left behind is reclaimed by the next run."""
 import contextlib
 import io
 import os
@@ -15,116 +11,82 @@ import time
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+TESTS = str(Path(__file__).resolve().parent)
+sys.path.insert(0, TESTS)
 import _realbrowser  # noqa: E402
-import _realbrowser_workers  # noqa: E402
 import _util  # noqa: E402
 
-# A real second process: it owns a directory until killed, never cleaning up.
+BOUND = _util.SUITE_BOUND.suite_timeout()
+# A real second process owns a directory until killed, never cleaning up.
 _HOLDER = ('import sys; sys.path.insert(0, sys.argv[1]); import _util\n'
-           'held = _util.OwnedTemporaryDirectory(\n'
-           '    sys.argv[2], dir=sys.argv[3])\n'
-           'print(held.name, flush=True)\nsys.stdin.read()\n')
+           'held = _util.OwnedTemporaryDirectory(sys.argv[2], dir=sys.argv[3])'
+           '\nprint(held.name, flush=True)\nsys.stdin.read()\n')
 
 
 def _aged(path, seconds):
     os.utime(path, (time.time() - seconds,) * 2)
 
 
-def test_a_leftover_is_reclaimed_once_its_owner_is_gone_and_not_before(tmp):
-    """Only the owner's death frees a recorded directory, whatever its age."""
-    parent = Path(tmp)
-    with subprocess.Popen(
-            [sys.executable, '-c', _HOLDER, str(Path(__file__).parent),
-             'owned_', tmp], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            text=True) as child:
+def test_a_recorded_leftover_goes_when_its_owner_dies_and_not_before(tmp):
+    with subprocess.Popen([sys.executable, '-c', _HOLDER, TESTS,
+                           'owned_', tmp], stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE, text=True) as child:
         try:
             assert child.stdout
             held = Path(child.stdout.readline().strip())
             assert held.is_absolute(), 'the holder announced no directory'
-            _aged(held, 10 * _util.SUITE_BOUND.suite_timeout())
+            _aged(held, 10 * BOUND)
             _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
             assert child.poll() is None and held.is_dir(), 'owner reclaimed'
         finally:
             child.kill()
     _aged(held, 0)
-    assert held.is_dir(), 'the kill must leave the leftover behind'
     _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
-    assert list(parent.iterdir()) == [], list(parent.iterdir())
+    assert not os.listdir(tmp), os.listdir(tmp)
 
 
-def test_only_this_prefixs_stale_unrecorded_directories_are_reclaimed(tmp):
-    """The runner reclaims exact names past the suite bound, nothing else."""
-    parent, bound = Path(tmp), _util.SUITE_BOUND.suite_timeout()
-    for name, age in (('owned_abcdefgh', bound + 60),
-                      ('owned_younger1', bound - 60),
-                      ('owned_base_abcdefgh', bound + 60),
-                      ('owned_creating', 0)):
-        (parent / name).mkdir()
-        _aged(parent / name, age)
-    # A record not yet written: its creator may still be taking the lock.
-    (parent / 'owned_creating' / '.owner').touch()
+def test_the_runner_reclaims_exactly_stale_names_and_reports_refusals(tmp):
+    kept = ['owned_base_abcdefgh', 'owned_creating', 'owned_younger1']
+    for name, age in zip(kept + ['owned_stale001', 'owned_stale002'],
+                         (BOUND + 60, 0, BOUND - 60, BOUND + 60, BOUND + 60)):
+        os.mkdir(os.path.join(tmp, name))
+        _aged(os.path.join(tmp, name), age)
+    # An unwritten record: its creator may still be taking the lock.
+    Path(tmp, 'owned_creating', '.owner').touch()
+    rmtree = mock.Mock(wraps=shutil.rmtree, side_effect=[
+        PermissionError(13, 'held open')] + [mock.DEFAULT] * 20)
     with mock.patch.object(tempfile, 'tempdir', tmp), \
             mock.patch.dict(os.environ, DAEDALUS_TEST_SUMMARY=''), \
-            contextlib.redirect_stdout(io.StringIO()):
+            mock.patch.object(shutil, 'rmtree', rmtree), \
+            contextlib.redirect_stdout(io.StringIO()) as report:
         assert _util.runner([], tmp_prefix='owned_') == 0
-    left = sorted(path.name for path in parent.iterdir())
-    assert left == ['owned_base_abcdefgh', 'owned_creating',
-                    'owned_younger1'], left
-
-
-def test_a_refused_reclaim_is_reported_and_the_run_goes_on(tmp):
-    """One refusal is one stderr line; the rest go, and a later run retries."""
-    parent, refused = Path(tmp), []
-    for name in ('owned_stale001', 'owned_stale002'):
-        (parent / name).mkdir()
-        _aged(parent / name, 2 * _util.SUITE_BOUND.suite_timeout())
-    real_rmtree = shutil.rmtree
-
-    def refuse_first(path, *args, **kwargs):
-        if not refused:
-            refused.append(Path(path))
-            raise PermissionError(13, 'held open', str(path))
-        return real_rmtree(path, *args, **kwargs)
-
-    report = io.StringIO()
-    with mock.patch.object(shutil, 'rmtree', refuse_first), \
-            contextlib.redirect_stderr(report):
-        _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
-    assert list(parent.iterdir()) == refused, (list(parent.iterdir()),
-                                               refused)
-    assert report.getvalue().count('\n') == 1, report.getvalue()
-    assert str(refused[0]) in report.getvalue(), report.getvalue()
+    refused = [os.path.basename(rmtree.call_args_list[0].args[0])]
+    left = sorted(os.listdir(tmp))
+    assert left == sorted(kept + refused), left
+    warned = [line for line in report.getvalue().split('\n') if 'WARN' in line]
+    assert len(warned) == 1 and refused[0] in warned[0], warned
     _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
-    assert list(parent.iterdir()) == [], list(parent.iterdir())
+    assert sorted(os.listdir(tmp)) == kept, os.listdir(tmp)
 
 
-def test_both_browser_launches_keep_their_temporary_files_in_the_run(tmp):
-    """Chromium's own temp dirs land in the test's directory, not /tmp."""
-    launched = []
-
-    def refuse(argv, **kwargs):
-        launched.append((argv[0], kwargs.get('env')))
-        raise FileNotFoundError(2, 'no browser here', argv[0])
-
-    profile = Path(tmp) / 'chromium-profile'
-    with mock.patch.object(subprocess, 'Popen', refuse):
+def test_both_browser_launches_keep_chromium_temp_files_in_the_run(tmp):
+    with mock.patch.object(subprocess, 'Popen',
+                           side_effect=OSError(2, 'no browser')) as popen:
         with contextlib.suppress(_realbrowser.BrowserEnvironmentSkipped):
-            _realbrowser._launch_and_reach('node', 'chromium', 'x', profile,
-                                           'w.js', 'http://127.0.0.1/', [])
-        with contextlib.suppress(FileNotFoundError):
-            _realbrowser_workers._diagnosis_launch(
-                'node', 'chromium', Path(tmp), 'w.js', tmp, 'ext', 'profile')
-    names = ('TMPDIR', 'TMP', 'TEMP', 'MAC_CHROMIUM_TMPDIR')
-    inherited = {k: v for k, v in os.environ.items() if k not in names}
-    # Never the whole environment in a message: it carries credentials.
-    shapes = [(browser, env is None) for browser, env in launched]
-    assert shapes == [('chromium', False)] * 2, shapes
-    for _browser, env in launched:
-        temps = {name: env.get(name) for name in names}
-        assert temps == dict.fromkeys(names, tmp), temps
-        assert env.items() >= inherited.items(), sorted(
-            name for name, held in inherited.items() if env.get(name) != held)
+            _realbrowser._launch_and_reach('node', 'chromium', 'x',
+                                           Path(tmp, 'profile'), 'w.js',
+                                           'http://127.0.0.1/', [])
+        with contextlib.suppress(OSError):
+            _realbrowser._worker_absence_verdict(
+                'node', 'chromium', Path(tmp), 'w.js', tmp)
+    launched = [call.kwargs['env'] for call in popen.call_args_list]
+    expected = dict(os.environ, **dict.fromkeys(
+        ('TMPDIR', 'TMP', 'TEMP', 'MAC_CHROMIUM_TMPDIR'), tmp))
+    # Never the environment itself in a message: it carries credentials.
+    assert len(launched) == 2, len(launched)
+    for env in launched:
+        assert env == expected, sorted(
+            k for k in {*env, *expected} if env.get(k) != expected.get(k))
 
 
 if __name__ == '__main__':

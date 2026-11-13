@@ -1,32 +1,24 @@
-"""Teardown of a temporary tree a still-held file blocks (issue 313).
+"""Bounded retry for a teardown a still-held file blocks (issue 313).
 
-`settle` retries: Windows holds a per-test directory past the last test from
-outside this process, where no in-process fix reaches. Exhaustion is reported
-rather than raised so a suite whose tests passed still passes, and only
-PermissionError is retried -- any other exception reaches the caller
-unchanged. A tree no teardown finished, from a killed run or a refusal that
-outlasted the retries, is reclaimed by the next `OwnedTemporaryDirectory`
-made under the same prefix.
+Windows holds a per-test directory past the last test from outside this
+process, where no in-process fix reaches. Exhaustion is reported rather than
+raised so a suite whose tests passed still passes, and only PermissionError
+is retried -- any other exception reaches the caller unchanged.
 """
-import importlib.util
+import importlib
 import os
 import re
+import runpy
 import shutil
-import sys
 import tempfile
 import time
 import weakref
-from pathlib import Path
 
 ATTEMPTS = 8
 BACKOFF_START = 0.05
 BACKOFF_CAP = 2.0
-_BOUND = importlib.util.spec_from_file_location(
-    'teardown_suite_bound',
-    Path(__file__).resolve().parents[1] / 'scripts' / 'ci' / 'suite_bound.py')
-assert _BOUND and _BOUND.loader
-SUITE_BOUND = importlib.util.module_from_spec(_BOUND)
-_BOUND.loader.exec_module(SUITE_BOUND)
+_BOUND = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'ci')
+_SUITE_TIMEOUT = runpy.run_path(_BOUND + '/suite_bound.py')['suite_timeout']
 
 
 def settle(cleanup, *, sleep=time.sleep):
@@ -51,7 +43,6 @@ def settle(cleanup, *, sleep=time.sleep):
 
 
 def _lock(descriptor):
-    """Take an owner record's lock without waiting; False if it is held."""
     try:
         if os.name == 'nt':
             msvcrt = importlib.import_module('msvcrt')
@@ -59,65 +50,43 @@ def _lock(descriptor):
         else:
             fcntl = importlib.import_module('fcntl')
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
     except OSError:
         return False
-    return True
-
-
-def _owner_gone(directory):
-    record = os.path.join(directory, '.owner')
-    try:
-        if os.path.getsize(record):
-            descriptor = os.open(record, os.O_RDWR)
-            try:
-                return _lock(descriptor)
-            finally:
-                os.close(descriptor)
-    except FileNotFoundError:
-        pass
-    # No written record: older than records, or its creator is still taking
-    # the lock. No suite outlives run_tests.py's bound.
-    age = time.time() - os.stat(directory).st_mtime
-    return age > SUITE_BOUND.suite_timeout()
 
 
 def reclaim_tempdirs(prefix, parent):
-    """Remove `prefix` + `tempfile`'s 8-character suffix dirs nobody owns."""
+    """Remove `prefix` + 8-character `tempfile` suffix dirs whose `.owner`
+    lock is free; with no record written yet, only past the suite bound."""
     name = re.compile(re.escape(prefix) + '[a-z0-9_]{8}')
     for entry in os.scandir(parent):
-        try:
-            stale = (name.fullmatch(entry.name)
-                     and entry.is_dir(follow_symlinks=False)
-                     and _owner_gone(entry.path))
-        except OSError:
+        if not (name.fullmatch(entry.name) and entry.is_dir()):
             continue
-        if stale:
-            try:
+        record = entry.path + '/.owner'
+        try:
+            if os.path.isfile(record) and os.path.getsize(record):
+                descriptor = os.open(record, os.O_RDWR)
+                stale = _lock(descriptor)
+                os.close(descriptor)
+            else:
+                stale = time.time() - entry.stat().st_mtime > _SUITE_TIMEOUT()
+            if stale:
                 shutil.rmtree(entry.path)
-            except OSError as refusal:
-                print(f'  WARN  {entry.path} not reclaimed, a later run '
-                      f'retries: {refusal!r}', file=sys.stderr)
+        except OSError as refusal:
+            print(f'  WARN  {entry.path} not reclaimed, a later run retries: '
+                  f'{refusal!r}')
 
 
 class OwnedTemporaryDirectory(tempfile.TemporaryDirectory):
-    """A `TemporaryDirectory` the next run removes if this one cannot.
-
-    Creating one first reclaims what dead runs left under its prefix. Its
-    `.owner` record is locked until `cleanup`, and the OS drops the lock
-    when the process dies, which is how another process tells a leftover
-    from a live directory on every OS. The record's descriptor is not
-    inherited (PEP 446), and it closes before removal, which Windows needs.
-    """
+    """A `TemporaryDirectory` the next one under its prefix reclaims."""
 
     def __init__(self, prefix, **kwargs):
         reclaim_tempdirs(prefix, kwargs.get('dir') or tempfile.gettempdir())
         super().__init__(prefix=prefix, **kwargs)
-        record = os.open(os.path.join(self.name, '.owner'),
-                         os.O_CREAT | os.O_RDWR)
-        # Empty, so no reclaimer tries it: the lock cannot be contended.
-        _lock(record)
+        record = os.open(self.name + '/.owner', os.O_CREAT | os.O_RDWR)
+        _lock(record)  # written only once held, so no reclaimer contends
         os.write(record, str(os.getpid()).encode())
-        # Created after the base finalizer, so it runs first at exit.
+        # Runs before the base finalizer: Windows keeps an open file.
         self._release = weakref.finalize(self, os.close, record)
 
     def cleanup(self):
