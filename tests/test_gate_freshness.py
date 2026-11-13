@@ -40,12 +40,13 @@ def _head(number=7, sha=HEAD, owner='octo', ref='feature', base='main'):
 def test_the_set_is_exactly_the_documented_patterns(tmp):
     m = _mod()
     assert tuple(m.GATE_PATTERNS) == (
-        '.github/workflows/**', '.github/ci-thresholds.json',
-        '.github/journey-budget.json',
-        'scripts/ci/**', 'scripts/check_versions.py',
-        '.gitleaks.toml', 'pyrightconfig.json', 'pyrightconfig.tests.json',
-        '.pylintrc', 'setup.cfg', 'eslint.config.js', 'pyproject.toml',
-        'run_tests.py', 'requirements-dev.txt', 'requirements-test.txt',
+        '.github/workflows/**', '.github/ci-thresholds.json', '.gitleaks.toml',
+        '.github/journey-budget.json', 'scripts/ci/**', '.pylintrc',
+        'scripts/check_versions.py', 'scripts/version_regions.py', 'setup.cfg',
+        'scripts/version_html_context.py', 'pyrightconfig.json',
+        'run_tests.py', 'pyrightconfig.tests.json', 'eslint.config.js',
+        'pyproject.toml', '.claude/skills/changing-daedalus/ci_gate.py',
+        'requirements-dev.txt', 'requirements-test.txt',
         'requirements-release.txt', 'requirements-pip-audit.txt',
         'requirements-zizmor.txt')
     for path in m.GATE_PATTERNS:
@@ -96,29 +97,47 @@ def _normalise(candidate, base, tracked):
     return None
 
 
+# Each script loads as `_gate_N`, its directory first on sys.path: imports at
+# module level are followed, ones in a function or a __main__ block are not.
+_LOADED_FILES = '''import importlib.util as u, sys
+for index, path in enumerate(sys.argv[1:]):
+    sys.path.insert(0, path.rsplit('/', 1)[0])
+    spec = u.spec_from_file_location(f'_gate_{index}', path)
+    spec.loader.exec_module(u.module_from_spec(spec))
+print('\\n'.join(getattr(m, '__file__', None) or '' for m in
+                 list(sys.modules.values())))'''
+
+
 def _workflow_gate_files(directory, base=ROOT, tracked=None):
     if tracked is None:
         tracked = _git_tracked(base)
     found = set()
     for path in sorted(directory.glob('*.yml')):
         text = path.read_text(encoding='utf-8')
-        for first, second in _EXECUTED.findall(text):
+        for first, second in (*_EXECUTED.findall(text),
+                              *_FLAG_VALUE.findall(text)):
             resolved = _normalise(first or second, base, tracked)
             if resolved:
                 found.add(resolved)
-        for first, second in _FLAG_VALUE.findall(text):
-            resolved = _normalise(first or second, base, tracked)
-            if resolved:
-                found.add(resolved)
-    return found
+    scripts = [f'{base.as_posix()}/{p}' for p in sorted(found)
+               if p.endswith('.py')]
+    loaded = subprocess.run(  # scrub: enumeration only, base may be unmapped
+        [sys.executable, '-I', '-B', '-c', _LOADED_FILES, *scripts],
+        cwd=str(base), env=_util.child_coverage('scrub'),
+        capture_output=True, text=True, check=False)
+    assert loaded.returncode == 0, loaded.stderr
+    root = base.resolve()
+    return found | {Path(f).resolve().relative_to(root).as_posix()
+                    for f in loaded.stdout.splitlines()
+                    if Path(f).resolve().is_relative_to(root)} & tracked
 
 
 def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
     m = _mod()
     used = _workflow_gate_files(ROOT / '.github' / 'workflows')
-    assert used, 'the workflows name no gate file'
-    for path in sorted(used):
-        assert m.is_gate_defining(path), path
+    assert '.claude/skills/changing-daedalus/ci_gate.py' in used, used
+    missing = sorted(p for p in used if not m.is_gate_defining(p))
+    assert not missing, missing
 
 
 def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
@@ -156,8 +175,6 @@ def test_a_generated_untracked_requirements_file_is_not_required(tmp):
         base / '.github' / 'workflows', base=base, tracked=set())
     assert 'extras-requirements.txt' not in used, used
     assert not m.is_gate_defining('extras-requirements.txt')
-    real = _workflow_gate_files(ROOT / '.github' / 'workflows')
-    assert 'extras-requirements.txt' not in real, real
 
 
 def test_the_merge_base_tells_ancestor_from_not(tmp):
@@ -232,30 +249,16 @@ def _commits_read(m, commits=None, raise_for=None, live_shaped=False,
     return read
 
 
-def test_enumerate_gates_reads_one_commit_for_every_pattern(tmp):
+def test_enumerate_gates_reads_one_understood_path_for_every_pattern(tmp):
     m = _mod()
-    for live_shaped in (False, True):
+    for live_shaped in (False, True):  # live: a glob path finds no commit
         asked = []
         gates = m.enumerate_gates(
             _commits_read(m, asked=asked, live_shaped=live_shaped), 'o/r', G1)
-        assert len(gates) == len(m.GATE_PATTERNS)
-        assert len(asked) == len(m.GATE_PATTERNS)
-
-
-def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
-    m, asked = _mod(), []
-    m.enumerate_gates(_commits_read(m, asked=asked), 'o/r', G1)
-    assert asked, 'no gate path was looked up'
-    for request in asked:
-        assert '*' not in request, request
-    assert '.github/workflows' in asked, asked
-    assert 'scripts/ci' in asked, asked
-    for exact in ('.pylintrc', 'setup.cfg', 'run_tests.py',
-                  'requirements-dev.txt', 'requirements-test.txt',
-                  'pyrightconfig.json', 'pyrightconfig.tests.json',
-                  'eslint.config.js', 'pyproject.toml', '.gitleaks.toml',
-                  'scripts/check_versions.py'):
-        assert exact in asked, exact
+        assert len(gates) == len(asked) == len(m.GATE_PATTERNS), asked
+    assert '.github/workflows' in asked and 'scripts/ci' in asked, asked
+    for pattern in m.GATE_PATTERNS:
+        assert pattern.endswith('/**') or pattern in asked, pattern
 
 
 def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
@@ -293,23 +296,20 @@ def _multi_gate_read(missing_at, asked=None):
     return read
 
 
-def test_a_fresh_head_is_green_and_names_no_missing_gate(tmp):
-    m = _mod()
-    gates = [('a', G1), ('b', G2)]
-    verdict = m.head_verdict(_multi_gate_read(None), 'o/r', _head(), gates)
-    assert (verdict.conclusion, verdict.kind) == ('success', 'fresh')
-    assert not verdict.paths
-
-
-def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
+def test_a_head_is_red_and_names_the_gate_exactly_when_it_misses_one(tmp):
     m = _mod()
     for gates, missing, absent in (
             ([('path-a', G1), ('path-b', G2), ('c', 'd' * 40)], G2, 'path-a'),
-            ([('older', G1), ('newer', G2)], G1, 'newer')):
+            ([('older', G1), ('newer', G2)], G1, 'newer'),
+            ([('a', G1), ('b', G2)], None, None)):
         asked = []
         verdict = m.head_verdict(
             _multi_gate_read(missing, asked), 'o/r', _head(), gates)
         assert asked == [gate for _, gate in gates], asked
+        if missing is None:
+            assert (verdict.conclusion, verdict.kind, verdict.paths) == (
+                'success', 'fresh', [])
+            continue
         assert (verdict.conclusion, verdict.kind) == ('failure', 'stale')
         assert missing[:12] in verdict.summary
         assert gates[0 if missing == G1 else 1][0] in verdict.summary
