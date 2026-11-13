@@ -36,9 +36,9 @@ class _Scratch:
 
     A file another process still holds is not deletable on Windows, so a
     `TemporaryDirectory.__exit__` removal could replace the caller's
-    classified error with a bare errno. None is entered: the removal
-    happens here, its outcome is appended to `outcomes`, and the
-    caller's exception keeps travelling.
+    classified error with a bare errno. So the directory is never used
+    as a context manager: the removal happens here, its outcome is
+    appended to `outcomes`, and the caller's exception keeps travelling.
     """
 
     def __init__(self, prefix, outcomes):
