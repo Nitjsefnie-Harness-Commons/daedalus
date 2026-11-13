@@ -424,8 +424,7 @@ def test_the_pull_request_target_route_refuses_a_missing_event(tmp):
                   {'pull_request': {'number': 7}}):
         code, err = _run_main_event(tmp, m, read, event,
                                     event_name='pull_request_target')
-        assert code == 1, (event, code)
-        assert 'pull_request' in err, err
+        assert code == 1 and 'pull_request' in err, (event, code, err)
 
 
 def _run_main_event(tmp, m, reader, event, event_name='push'):
@@ -544,9 +543,7 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
     read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published)
     code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
                                [('.pylintrc', G1)], RUN, G1, dry_run=True)
-    assert code == 0
-    assert len(verdicts) == 1
-    assert verdicts[0].conclusion == 'success'
+    assert code == 0 and [v.conclusion for v in verdicts] == ['success']
     assert published == [], 'a dry run wrote a check run'
 
 
@@ -578,8 +575,6 @@ def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
         assert code == 0 and verdicts, 'duplicate-id overrun must publish'
         assert [v for _, v in published] == ['PATCH'] * len(old_ids)
         assert len(calls) == estimate + len(old_ids) - 5
-        if len(old_ids) == 8:
-            assert len(calls) > estimate, 'duplicate overrun not reached'
 
 
 def test_every_read_carries_the_no_cache_header(tmp):
@@ -602,7 +597,6 @@ def test_every_read_carries_the_no_cache_header(tmp):
     joined_all = ' '.join(' '.join(a) for a in reads)
     assert 'state=open' in joined_all, 'the open-PR listing was never read'
     assert f'commits?sha={G1}' in joined_all
-    assert reads, 'no reads were issued'
     for argv in reads:
         joined = ' '.join(argv)
         assert 'Cache-Control: no-cache' in joined, joined
@@ -670,7 +664,6 @@ def test_workflow_timeout_leaves_slack_above_the_call_estimate(tmp):
     needed_minutes = (m.DEFAULT_CALL_BUDGET
                       * m.ASSUMED_SECONDS_PER_CALL / 60)
     assert (needed_minutes, timeout) == (30, 35)
-    assert needed_minutes < timeout
 
 
 def main():
