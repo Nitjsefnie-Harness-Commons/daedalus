@@ -139,7 +139,7 @@ def _imported_files(rel, base, tracked):
                 '.')[-1] in ('import_module', '__import__'):
             names = _module_names(*node.args[:1])
             assert names, f'{rel}:{node.lineno}: unresolvable dynamic import'
-            stems.update(name.replace('.', '/') for name in names)
+            stems.update(n.lstrip('.').replace('.', '/') for n in names)
     return {path for path in tracked for stem in stems
             for tail in ('.py', '/__init__.py')
             if f'/{path}'.endswith(f'/{stem}{tail}')}
@@ -197,7 +197,8 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
         (base / extra).write_text('mcp\n', encoding='utf-8')
         (base / path).write_text(  # imports no module-level load runs
             'def probe():\n    import _fn\n    from _pkg import name\n'
-            "    importlib.import_module('_pkg.dot')\n    __import__('_imp')\n"
+            "    importlib.import_module('.._pkg.dot', __package__)\n"
+            "    __import__('_imp')\n"
             "if __name__ == '__main__':\n    from . import _rel\n",
             encoding='utf-8')
         workflows = base / '.github' / 'workflows'
