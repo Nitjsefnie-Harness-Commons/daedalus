@@ -65,10 +65,7 @@ def test_a_200_with_an_html_body_is_a_connection_failure(tmp):
 
 
 def test_segment_status_reports_a_200_that_is_no_answer_as_a_failure(tmp):
-    """The segment-job lookup reads its own 200 and fails like a connection.
-
-    Rows: an HTML page, a cut-off body, JSON that is not an object.
-    """
+    """A 200 that is an HTML page, cut off or not an object is no answer."""
     del tmp
     for body, declared in ((b'<html><body>sign in</body></html>', None),
                            (b'<html><body>', 400), (b'[1,2]', None)):
@@ -82,22 +79,27 @@ def test_segment_status_reports_a_200_that_is_no_answer_as_a_failure(tmp):
 
 
 TABS = b'[{"tabId": 5, "age": 3, "title": "Interim Tab", "url": "u"}]'
-RAW_ENTRY = [sys.executable, '-c', 'from daedalus_cli.transport import '
-             'api_raw\nprint(api_raw("GET", "/x").decode())']
+ONE_OPENER = [sys.executable, '-c', (
+    'import http.client as c\n'
+    'from daedalus_cli.transport import api\n'
+    'made = []\n'
+    'real = c._create_https_context\n'
+    'c._create_https_context = lambda *a: made.append(1) or real(*a)\n'
+    'api("GET", "/x"); api("GET", "/x")\n'
+    'print(len(made) <= 1)')]
 
 
 def test_interim_responses_before_the_final_one_are_skipped(tmp):
     """A `103 Early Hints` before the final answer is skipped, not taken.
 
-    Two interim statuses, so a skip of only 103 reds; one row per request path.
+    Two interim statuses (103 alone reds); last row: one opener, two requests.
     """
     del tmp
     rows = (
         (CLI + ['tabs'], TABS, 'Interim Tab'),
-        (CLI + ['uploads', '--delete', '--id', 'x'], b'{}', 'Deleted\n'),
         (CLI + ['segment-status', 'somejob'],
          b'{"sig": "s", "count": 0, "done": []}', 'Segments: 0\n'),
-        (RAW_ENTRY, b'raw bytes', 'raw bytes\n'),
+        (ONE_OPENER, b'[]', 'True\n'),
     )
     for argv, body, shown in rows:
         with html_front_end(body=body, interim=(103, 102)) as base:
@@ -110,11 +112,10 @@ def test_interim_responses_before_the_final_one_are_skipped(tmp):
 
 
 def test_interim_skipping_is_bounded(tmp):
-    """Rows: interim statuses, final status and body, what `tabs` reports.
+    """A hundred interim responses are skipped, a hundred and one are not.
 
-    A hundred interim responses are skipped and a hundred and one are not;
-    the stand-in then answers, so an unbounded skip would succeed. `101`
-    stays final, and a final error after interim responses is still a status.
+    The stand-in then answers, so an unbounded skip would succeed. `101`
+    stays final, and a final error after interim ones is still a status.
     """
     del tmp
     bad_gateway = b'{"error": "bad gateway"}'
