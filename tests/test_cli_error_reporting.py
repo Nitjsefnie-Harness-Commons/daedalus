@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """The CLI's failure paths: one line, on one stream, never a traceback."""
 import contextlib
-import http.server
 import io
 import subprocess
 import sys
-import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -66,41 +64,72 @@ def test_a_200_with_an_html_body_is_a_connection_failure(tmp):
             assert r.stdout == '', (command, r.stdout)
 
 
-def test_segment_status_reports_an_html_body_as_a_connection_failure(tmp):
-    """The segment-job lookup reads its own 200; it fails like a connection."""
+def test_segment_status_reports_a_200_that_is_no_answer_as_a_failure(tmp):
+    """The segment-job lookup reads its own 200 and fails like a connection.
+
+    Rows: an HTML page, a cut-off body, JSON that is not an object.
+    """
     del tmp
-    with html_front_end() as base:
-        r = run_cli(['segment-status', 'somejob'],
-                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
-        assert r.returncode != 0, (r.returncode, r.stdout)
-        assert 'Connection failed' in r.stderr, r.stderr
-        assert 'Traceback' not in r.stderr, r.stderr
-        assert r.stdout == '', r.stdout
+    for body, declared in ((b'<html><body>sign in</body></html>', None),
+                           (b'<html><body>', 400), (b'[1,2]', None)):
+        with html_front_end(body=body, declared=declared) as base:
+            r = run_cli(['segment-status', 'somejob'],
+                        cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (body, r.returncode, r.stdout)
+        assert 'Connection failed' in r.stderr, (body, r.stderr)
+        assert 'Traceback' not in r.stderr, (body, r.stderr)
+        assert r.stdout == '', (body, r.stdout)
 
 
-def test_segment_status_survives_a_200_cut_off_mid_body(tmp):
-    """A declared length the body does not keep is no answer, not a crash."""
+TABS = b'[{"tabId": 5, "age": 3, "title": "Interim Tab", "url": "u"}]'
+RAW_ENTRY = [sys.executable, '-c', 'from daedalus_cli.transport import '
+             'api_raw\nprint(api_raw("GET", "/x").decode())']
+
+
+def test_interim_responses_before_the_final_one_are_skipped(tmp):
+    """A `103 Early Hints` before the final answer is skipped, not taken.
+
+    Two interim statuses, so a skip of only 103 reds; one row per request path.
+    """
     del tmp
-    with html_front_end(body=b'<html><body>', declared=400) as base:
-        r = run_cli(['segment-status', 'somejob'],
-                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
-        assert r.returncode != 0, (r.returncode, r.stdout)
-        assert 'Connection failed' in r.stderr, r.stderr
-        assert 'Traceback' not in r.stderr, r.stderr
-        assert r.stdout == '', r.stdout
+    rows = (
+        (CLI + ['tabs'], TABS, 'Interim Tab'),
+        (CLI + ['uploads', '--delete', '--id', 'x'], b'{}', 'Deleted\n'),
+        (CLI + ['segment-status', 'somejob'],
+         b'{"sig": "s", "count": 0, "done": []}', 'Segments: 0\n'),
+        (RAW_ENTRY, b'raw bytes', 'raw bytes\n'),
+    )
+    for argv, body, shown in rows:
+        with html_front_end(body=body, interim=(103, 102)) as base:
+            r = subprocess.run(
+                argv, cwd=str(_util.ROOT), capture_output=True, text=True,
+                env=cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK),
+                encoding='utf-8', timeout=60)
+        assert (r.returncode, r.stderr) == (0, ''), (argv, r)
+        assert shown in r.stdout, (argv, r.stdout)
 
 
-def test_segment_status_survives_a_200_whose_json_is_not_an_object(tmp):
-    """`[1,2]` parses as JSON and then is not the object the sig is read
-    from; that is still a front end's answer, not the bridge's."""
+def test_interim_skipping_has_a_bound_and_leaves_101_and_errors_final(tmp):
+    """Rows: interim statuses, final status and body, what `tabs` reports.
+
+    A hundred interim responses are skipped and a hundred and one are not;
+    the stand-in then answers, so an unbounded skip would succeed. `101`
+    stays final, and a final error after interim responses is still a status.
+    """
     del tmp
-    with html_front_end(body=b'[1,2]') as base:
-        r = run_cli(['segment-status', 'somejob'],
-                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
-        assert r.returncode != 0, (r.returncode, r.stdout)
-        assert 'Connection failed' in r.stderr, r.stderr
-        assert 'Traceback' not in r.stderr, r.stderr
-        assert r.stdout == '', r.stdout
+    bad_gateway = b'{"error": "bad gateway"}'
+    rows = (
+        ((102,) * 100, 200, TABS, 0, ''),
+        ((102,) * 101, 200, TABS, 1,
+         'Connection failed: got more than 100 interim responses\n'),
+        ((101,), 200, TABS, 1, 'HTTP 101: \n'),
+        ((103,), 502, bad_gateway, 1, "HTTP 502: {'error': 'bad gateway'}\n"),
+    )
+    for interim, status, body, code, stderr in rows:
+        with html_front_end(status, body, interim=interim) as base:
+            r = run_cli(['tabs'], cli_env(DAEDALUS_URL=base,
+                                          DAEDALUS_TOKEN=TOK))
+        assert (r.returncode, r.stderr) == (code, stderr), (len(interim), r)
 
 
 def test_an_error_result_reports_on_stderr_with_stdout_left_for_data(tmp):
@@ -145,47 +174,7 @@ def test_cdp_sends_a_chrome_tab_zero_instead_of_dropping_it(tmp):
     assert queued.get('tabId') == 0, queued
 
 
-class _RefusingFrontEndHandler(http.server.BaseHTTPRequestHandler):
-    """Answer every request the way a proxy that never reached the bridge does.
-
-    The body is HTML rather than JSON on purpose: that is the shape a front
-    end in front of the bridge produces, and the CLI has to carry its text
-    through rather than reporting a status with nothing after it.
-    """
-
-    BODY = b'<html><body>502 upstream is not answering</body></html>'
-
-    def _refuse(self):
-        declared = self.headers.get('Content-Length')
-        if declared:
-            self.rfile.read(int(declared))
-        self.send_response(502)
-        self.send_header('Content-Type', 'text/html')
-        self.send_header('Content-Length', str(len(self.BODY)))
-        self.end_headers()
-        self.wfile.write(self.BODY)
-
-    do_GET = _refuse
-    do_PUT = _refuse
-    do_POST = _refuse
-    do_DELETE = _refuse
-
-    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
-        del format, args
-
-
-@contextlib.contextmanager
-def _refusing_front_end():
-    server = http.server.ThreadingHTTPServer(
-        ('127.0.0.1', 0), _RefusingFrontEndHandler)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.start()
-    try:
-        yield f'http://127.0.0.1:{server.server_address[1]}'
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=10)
+BAD_GATEWAY_PAGE = b'<html><body>502 upstream is not answering</body></html>'
 
 
 def test_a_non_json_error_body_reaches_the_operator(tmp):
@@ -196,7 +185,7 @@ def test_a_non_json_error_body_reaches_the_operator(tmp):
     so the operator saw "HTTP 502:" and nothing else.
     """
     del tmp
-    with _refusing_front_end() as base:
+    with html_front_end(502, BAD_GATEWAY_PAGE) as base:
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
         commands = (
             ['tabs'],                               # api

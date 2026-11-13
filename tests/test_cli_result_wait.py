@@ -19,11 +19,11 @@ TOK = 'clitok'
 
 
 _SCRIPTED_HARNESS = (
-    'import itertools, json, sys, urllib.error, urllib.request\n'
+    'import itertools, json, sys, urllib.error\n'
     'from daedalus_cli import transport\n'
-    'def _urlopen(req, timeout=None):\n'
+    'def _open(req, timeout=None):\n'
     '    raise opened\n'
-    'urllib.request.urlopen = _urlopen\n'
+    'transport._open = _open\n'
     'class _Clock:\n'
     '    def __init__(self):\n'
     '        self.now = 1000.0\n'
@@ -48,7 +48,7 @@ _SCRIPTED_HARNESS = (
     '        transport.time.now += timeout or 30\n'
     '    if reply in ("slow", "early"):\n'
     '        raise transport.ConnectionFailed(TimeoutError("timed out"))\n'
-    '    if reply in ("connect", "blank"):  # urlopen raises it\n'
+    '    if reply in ("connect", "blank"):  # _open raises it\n'
     '        global opened\n'
     '        opened = urllib.error.URLError(\n'
     '            TimeoutError("timed out") if reply == "connect" else "")\n'
