@@ -50,10 +50,9 @@ def test_the_set_is_exactly_the_documented_patterns(tmp):
         'requirements-dev.txt', 'requirements-test.txt',
         'requirements-release.txt', 'tests/_journeys.py',
         'requirements-pip-audit.txt', 'requirements-zizmor.txt')
-    for path in m.GATE_PATTERNS:
+    for path in (*m.GATE_PATTERNS, 'scripts/ci/deep/x.py',
+                 '.github/workflows/a/b/c.yml'):
         assert m.is_gate_defining(path), path
-    assert m.is_gate_defining('scripts/ci/deep/x.py')
-    assert m.is_gate_defining('.github/workflows/a/b/c.yml')
 
 
 def test_near_miss_spellings_are_not_gate_defining(tmp):
@@ -97,8 +96,9 @@ def _normalise(candidate, base, tracked):
     return None
 
 
-# Each script loads as `_gate_N`, its directory first on sys.path, so this
-# follows the imports a load runs; `_imported_files` reads every other one.
+# Each script loads as `_gate_N`, its directory first on sys.path. Beside the
+# imports that load runs, `_imported_files` reads every import statement and
+# every string in the first argument of an `import_module` or `__import__`.
 _LOADED_FILES = '''import importlib.util as u, sys
 for index, path in enumerate(sys.argv[1:]):
     sys.path.insert(0, path.rsplit('/', 1)[0])
@@ -118,6 +118,10 @@ def _imported_files(rel, base, tracked):
                 node.module.split('.') if node.module else [])
             stems.add('/'.join(parts))
             stems.update('/'.join([*parts, a.name]) for a in node.names)
+        elif isinstance(node, ast.Call) and node.args and ast.unparse(
+                node.func).split('.')[-1] in ('import_module', '__import__'):
+            stems.update(c.value.replace('.', '/') for c in ast.walk(
+                node.args[0]) if isinstance(getattr(c, 'value', 0), str))
     return {path for path in tracked for stem in stems
             for tail in ('.py', '/__init__.py')
             if f'/{path}'.endswith(f'/{stem}{tail}')}
@@ -145,7 +149,7 @@ def _workflow_gate_files(directory, base=ROOT, tracked=None):
     used = found | {Path(f).resolve().relative_to(root).as_posix()
                     for f in loaded.stdout.splitlines()
                     if Path(f).resolve().is_relative_to(root)} & tracked
-    # One hop: the gate reads data from these; what they import is workload.
+    # One hop: what a reached module imports in turn is taken as workload.
     return used.union(*(_imported_files(path, base, tracked)
                         for path in used if path.endswith('.py')))
 
@@ -160,7 +164,9 @@ def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
 
 
 def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
-    m, reached = _mod(), {'tests/_fn_helper.py', 'scripts/main_helper.py'}
+    m, extra = _mod(), 'extras-requirements.txt'
+    reached = {'tests/_fn.py', 'tests/_pkg/__init__.py', 'tests/_dyn.py',
+               'scripts/_rel.py'}
     for spelling, path in (
             ('./scripts/version_gate.sh', 'scripts/version_gate.sh'),
             ('python3 scripts/scan_secrets_extra.py',
@@ -170,20 +176,21 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
             ('python scripts/lint_gate.py', 'scripts/lint_gate.py')):
         base = Path(tmp) / spelling.replace(' ', '_').replace('.', '_')
         (base / 'scripts').mkdir(parents=True)
-        (base / 'extras-requirements.txt').write_text('mcp\n', 'utf-8')
+        (base / extra).write_text('mcp\n', encoding='utf-8')
         (base / path).write_text(  # imports no module-level load runs
-            'def probe():\n    import _fn_helper\n'
-            "if __name__ == '__main__':\n    from . import main_helper\n",
+            'def probe():\n    import _fn\n    from _pkg import name\n'
+            "    importlib.import_module('_dyn')\n"
+            "if __name__ == '__main__':\n    from . import _rel\n",
             encoding='utf-8')
         workflows = base / '.github' / 'workflows'
         workflows.mkdir(parents=True)
         (workflows / 'probe.yml').write_text(
             f'jobs:\n  gate:\n    steps:\n      - run: {spelling}\n'
-            '      - run: pip install --requirement extras-requirements.txt\n',
+            f'      - run: pip install --requirement {extra}\n',
             encoding='utf-8')  # an untracked generated file is never required
         used = _workflow_gate_files(workflows, base, {path, *reached})
         assert used == {path, *(reached if path.endswith('.py') else ())}, used
-        assert not any(m.is_gate_defining(p) for p in used), used
+        assert not any(m.is_gate_defining(p) for p in (*used, extra)), used
 
 
 def test_the_merge_base_tells_ancestor_from_not(tmp):
@@ -275,8 +282,7 @@ def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
     try:
         m.enumerate_gates(read, 'o/r', G1)
     except m.QueryError as error:
-        assert 'eslint.config.js' in str(error), str(error)
-        assert 'no commit' in str(error), str(error)
+        assert 'eslint.config.js' in str(error) and 'no commit' in str(error)
         return
     raise AssertionError('an empty gate-path answer was not refused')
 
