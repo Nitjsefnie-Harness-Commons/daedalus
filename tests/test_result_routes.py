@@ -12,6 +12,7 @@ for the root parameter deliberately pass a different one. Each test uses
 its own token and its own delivery ids, because the accepted-delivery
 record is process-wide.
 """
+import atexit
 import contextlib
 import io
 import json
@@ -25,7 +26,8 @@ import _util  # noqa: E402
 from _dashqueue import _events  # noqa: E402
 
 _OWNED = _util.OwnedTemporaryDirectory('resultroutes_base_',
-                                       ignore_cleanup_errors=True)
+                                       refusal_warns=True)
+atexit.register(_OWNED.cleanup)
 _BASE = _OWNED.name
 os.environ['DAEDALUS_DIR'] = _BASE
 os.environ['DAEDALUS_PORT'] = '0'
