@@ -317,6 +317,14 @@ def api_delete(path, body):
     return _exchange_or_exit(req, 30, _json_body)
 
 
+def _result_answer(path, **timeout):
+    """A /result answer: the bridge's JSON object, else a broken answer."""
+    answer = _request('GET', path, **timeout)
+    if not isinstance(answer, dict):
+        raise ConnectionFailed('the answer is JSON but not an object')
+    return answer
+
+
 def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     """Return the result for one command delivery, or None on timeout.
 
@@ -357,8 +365,8 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
         if remaining <= 0:
             break
         try:
-            res = _request('GET', _query_path('/result', params),
-                           timeout=remaining)
+            res = _result_answer(_query_path('/result', params),
+                                 timeout=remaining)
         except (ConnectionFailed, ErrorStatus) as error:
             # The bridge answers /result at once, so a reset, a cut-off
             # body or an error status here is the proxy's. The command is
@@ -387,7 +395,7 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
         # still bounded, by the ordinary request timeout. A failed one is
         # retried by the next lap's peek, for the same reason as a peek.
         try:
-            consumed = _request('GET', _query_path('/result', {
+            consumed = _result_answer(_query_path('/result', {
                 **params, 'consume': '1', 'expected': generation}))
         except (ConnectionFailed, ErrorStatus) as error:
             failure = error

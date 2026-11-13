@@ -160,11 +160,14 @@ class BridgeSession:
         """The ramp's blocking step, injectable beside the clock."""
         await asyncio.sleep(seconds)
 
-    async def _result(self, params: dict, auth: dict, **timeout) -> Any:
+    async def _result(self, params: dict, auth: dict, **timeout) -> dict:
         r = await self.http_client().get(
             '/result', params=params, headers=auth, **timeout)
         r.raise_for_status()
-        return r.json()
+        answer = r.json()
+        if not isinstance(answer, dict):
+            raise ValueError('the answer is JSON but not an object')
+        return answer
 
     async def poll_result(self, tab: str, timeout: float,
                           interval: float = 0.5,

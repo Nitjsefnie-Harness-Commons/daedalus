@@ -209,7 +209,9 @@ def test_poll_retries_a_failed_or_refused_consume(tmp):
     for failure in ({'consumed': False, 'resultGeneration': 'generation-2'},
                     _answer(transport, 500, '{"error": "internal"}'),
                     transport.httpx.RemoteProtocolError('peer closed'),
-                    _answer(transport, 200, '<html>sign in</html>')):
+                    _answer(transport, 200, '<html>sign in</html>'),
+                    *(_answer(transport, 200, text)
+                      for text in ('[]', 'null', '"x"', '3'))):
         session = _session(transport)
         client = ClientProbe((FIRST, failure, SECOND, {
             'consumed': True, 'resultGeneration': 'generation-2'}))
@@ -264,6 +266,9 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
             ([_answer(transport, 200, '<html>sign in</html>')] * 3,
              UNKNOWN(0.001, 'Connection failed: Expecting value: line 1 '
                      'column 1 (char 0)')),
+            ([_answer(transport, 200, '[]')] * 3,
+             UNKNOWN(0.001, 'Connection failed: the answer is JSON but not '
+                     'an object')),
             ([FIRST, _answer(transport, 500, '{}')] + [{'pending': True}] * 2,
              UNKNOWN(0.001, 'HTTP 500')),
             # A peek's timeout is the deadline it was handed.
@@ -557,7 +562,7 @@ def test_poll_survives_a_failed_peek_from_a_real_front_end(tmp):
     del tmp
     transport = _transport()
     for status, body in ((200, None), (502, b'<html>502 Bad Gateway</html>'),
-                         (200, b'<html>sign in</html>')):
+                         (200, b'<html>sign in</html>'), (200, b'[]')):
         with _shielded_environment() as environ, truncating_front_end(
                 1, status, body) as base:
             environ.pop('DAEDALUS_LOCAL_URL', None)

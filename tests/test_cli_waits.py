@@ -199,7 +199,9 @@ BAD_GATEWAY = b'<html>502 Bad Gateway</html>'
 CUT_OFF = 'Connection failed: IncompleteRead(5 bytes read, 35 more expected)'
 # Each front end's fault, and the report a wait that meets only it ends on.
 FAULTS = ((200, None, CUT_OFF), (502, None, CUT_OFF),
-          (502, BAD_GATEWAY, f'HTTP 502: {BAD_GATEWAY.decode()}'))
+          (502, BAD_GATEWAY, f'HTTP 502: {BAD_GATEWAY.decode()}'),
+          (200, b'[]',
+           'Connection failed: the answer is JSON but not an object'))
 
 
 def test_the_result_wait_outlives_a_failed_peek(tmp):
