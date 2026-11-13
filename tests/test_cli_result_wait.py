@@ -288,7 +288,7 @@ def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
         assert outcome['result'] == _unknown(1.0, named), (failure, outcome)
         assert outcome['calls'] == [PEEK, CONSUME] + [PEEK] * 4, (
             failure, outcome)
-    outcome = _scripted_wait([OWN, 'slow'])  # consume times out past it
+    outcome = _scripted_wait([OWN, 'slow'])  # consume ends past the deadline
     assert outcome['result'] == _unknown(
         1.0, 'Connection failed: timed out'), outcome
 

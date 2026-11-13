@@ -324,7 +324,7 @@ def api_delete(path, body):
 
 
 def _result_answer(path, **timeout):
-    """A /result answer, a JSON object; ConnectionFailed for any other."""
+    """A /result JSON object; ConnectionFailed if a 2xx body is not one."""
     answer = _request('GET', path, **timeout)
     if not isinstance(answer, dict):
         raise ConnectionFailed('the answer is JSON but not an object')
@@ -397,7 +397,7 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
         # The consume is what actually claims the result, so it is allowed to
         # finish: giving up here would leave a result nobody takes. It is
         # still bounded, by the ordinary request timeout. A failed one is not
-        # final: the next lap peeks and consumes again.
+        # final while time is left: the next lap peeks and consumes again.
         try:
             consumed = _result_answer(_query_path('/result', {
                 **params, 'consume': '1', 'expected': generation}))
