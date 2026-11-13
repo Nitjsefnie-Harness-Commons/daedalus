@@ -98,9 +98,7 @@ names every run the filter dropped, with its workflow, its run id, its
 conclusion and its URL, and its count is the number of lines printed.
 The filter is `ci_gate`'s, so a dropped run's name cannot satisfy the
 gate and no reader of it can answer differently (issue #1262). It is not
-applied to a check run: the publisher PATCHes the newest carrier. No run
-is exempt by its name: a `pr gate` run carries the pull request's head
-SHA and is judged like any other.
+applied to a check run: the publisher PATCHes the newest carrier.
 
 This file is near the 500 ceiling, the room made by cutting prose, which
 cannot be repeated. There is NO SEAM in it - one tool, one contract - so

@@ -234,9 +234,7 @@ def test_the_trial_call_reads_the_named_gate_too(tmp):
 def test_an_empty_or_blank_required_value_is_a_rejected_invocation(tmp):
     """Issue #1320: the set an empty value builds holds a name no run can
     ever carry, so every head refused; a value of whitespace builds the
-    same requirement past a guard testing for emptiness alone. Each
-    spelling is its own invocation and its own assertions, so neither can
-    pass on the other's refusal.
+    same requirement past a guard testing for emptiness alone.
 
     Refused the way this tool already refuses a malformed SHA and a
     non-positive bound: named on stderr, exit 3, and nothing at all on
@@ -323,8 +321,7 @@ def test_naming_this_repositories_own_gate_is_unaffected(tmp):
 
 def test_a_pr_gate_run_is_judged_like_any_other_run(tmp):
     """A `pr gate` run carries the pull request's head SHA, so a red one
-    beside a green matrix and check is an offender, required or not; and
-    its newest run decides, as for every workflow."""
+    beside a green matrix and check is an offender, required or not."""
     del tmp
     mod = _ci_wait()
     red = _run(9, 'failure', '2026-09-20T10:09:00Z', name='pr gate',

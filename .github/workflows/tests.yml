@@ -331,8 +331,6 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config is reusable
-          # by every later step in the job.
           persist-credentials: false
 
       # actions/setup-node v7.1.0
