@@ -199,7 +199,7 @@ def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
                    for path in calls if '/compare/' in path)
         assert out.getvalue().splitlines()[-1] == (
             f'gate freshness: written {written}, reran 0, kept 0; '
-            f'evaluated {written}/1 heads; resolved 21/21 gate paths'), (
+            f'evaluated {written}/1 heads; resolved 22/22 gate paths'), (
                 fail, out.getvalue())
 
 

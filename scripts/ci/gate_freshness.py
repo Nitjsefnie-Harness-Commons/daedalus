@@ -34,7 +34,7 @@ GATE_PATTERNS = (
     'scripts/version_html_context.py', 'pyrightconfig.json', 'run_tests.py',
     'pyrightconfig.tests.json', 'eslint.config.js', 'pyproject.toml',
     '.claude/skills/changing-daedalus/ci_gate.py', 'requirements-dev.txt',
-    'requirements-test.txt', 'requirements-release.txt',
+    'requirements-test.txt', 'requirements-release.txt', 'tests/_journeys.py',
     'requirements-pip-audit.txt', 'requirements-zizmor.txt',
 )
 
