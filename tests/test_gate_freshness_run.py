@@ -547,13 +547,13 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 
 
 def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
-    m = _mod()
+    m, published, calls = _mod(), [], []
     for old_ids in (('99',), tuple(str(i) for i in range(99, 107))):
-        published, calls = [], []
+        del published[:], calls[:]
         gates = {m._request_path(p): [G1] for p in m.GATE_PATTERNS}
         base = _flow_read(m, gates, {7: HEAD}, published)
 
-        def read(argv, ids=old_ids, base=base, calls=calls):
+        def read(argv, ids=old_ids, base=base):
             calls.append(argv)
             target = next(t for t in argv if t.startswith('repos/'))
             if target == 'repos/o/r/commits/main':

@@ -120,8 +120,8 @@ def _imported_files(rel, base, tracked):
             stems.update('/'.join([*parts, a.name]) for a in node.names)
         elif isinstance(node, ast.Call) and node.args and ast.unparse(
                 node.func).split('.')[-1] in ('import_module', '__import__'):
-            stems.update(c.value.replace('.', '/') for c in ast.walk(
-                node.args[0]) if isinstance(getattr(c, 'value', 0), str))
+            stems.update(v.replace('.', '/') for c in ast.walk(node.args[0])
+                         if isinstance(v := getattr(c, 'value', 0), str))
     return {path for path in tracked for stem in stems
             for tail in ('.py', '/__init__.py')
             if f'/{path}'.endswith(f'/{stem}{tail}')}
