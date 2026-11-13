@@ -523,8 +523,7 @@ def test_a_healthy_sibling_still_publishes_beside_a_skipped_head(tmp):
 
 
 def test_a_head_is_revalidated_before_the_decision(tmp):
-    m, published = _mod(), []
-    asked = []
+    m, published, asked = _mod(), [], []
     base = _flow_read(m, {'.pylintrc': [G1]}, {}, published,
                       moved_to='d' * 40)
 
@@ -549,14 +548,12 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 
 def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
     m = _mod()
-    published, calls = [], []
     for old_ids in (('99',), tuple(str(i) for i in range(99, 107))):
-        published.clear()
-        calls.clear()
+        published, calls = [], []
         gates = {m._request_path(p): [G1] for p in m.GATE_PATTERNS}
         base = _flow_read(m, gates, {7: HEAD}, published)
 
-        def read(argv, ids=old_ids, base=base):
+        def read(argv, ids=old_ids, base=base, calls=calls):
             calls.append(argv)
             target = next(t for t in argv if t.startswith('repos/'))
             if target == 'repos/o/r/commits/main':
@@ -578,8 +575,7 @@ def test_duplicate_ids_publish_past_the_single_id_call_estimate(tmp):
 
 
 def test_every_read_carries_the_no_cache_header(tmp):
-    m, published = _mod(), []
-    reads = []
+    m, published, reads = _mod(), [], []
 
     def read(argv):
         reads.append(list(argv))
@@ -650,9 +646,8 @@ def test_workflow_is_well_formed(tmp):
     for name, job in load(ROOT / '.github' / 'workflows'
                           / 'gate-freshness.yml').jobs.items():
         assert 'timeout-minutes' in job, name
-    assert 'github.event.pull_request.head' not in text
-    assert 'refs/pull' not in text
-    assert 'thresholds.py --check' not in text
+    for absent in ('github.event.pull_request.head', 'refs/pull',
+                   'thresholds.py --check'): assert absent not in text, absent
 
 
 def test_workflow_timeout_leaves_slack_above_the_call_estimate(tmp):
@@ -661,8 +656,7 @@ def test_workflow_timeout_leaves_slack_above_the_call_estimate(tmp):
     timeout = int(load(ROOT / '.github' / 'workflows'
                        / 'gate-freshness.yml').jobs[
                            'publish-freshness']['timeout-minutes'])
-    needed_minutes = (m.DEFAULT_CALL_BUDGET
-                      * m.ASSUMED_SECONDS_PER_CALL / 60)
+    needed_minutes = m.DEFAULT_CALL_BUDGET * m.ASSUMED_SECONDS_PER_CALL / 60
     assert (needed_minutes, timeout) == (30, 35)
 
 
