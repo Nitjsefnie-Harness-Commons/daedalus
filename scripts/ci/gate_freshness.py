@@ -28,12 +28,12 @@ EXTERNAL_ID = 'daedalus-gate-freshness/v1'
 APP_SLUG = 'github-actions'
 BASE_BRANCH = 'main'
 GATE_PATTERNS = (
-    '.github/workflows/**', '.github/ci-thresholds.json',
-    '.github/journey-budget.json', 'scripts/ci/**',
-    'scripts/check_versions.py', '.gitleaks.toml',
-    'pyrightconfig.json', 'pyrightconfig.tests.json', '.pylintrc',
-    'setup.cfg', 'eslint.config.js', 'pyproject.toml', 'run_tests.py',
-    'requirements-dev.txt',
+    '.github/workflows/**', '.github/ci-thresholds.json', '.gitleaks.toml',
+    '.github/journey-budget.json', 'scripts/ci/**', '.pylintrc',
+    'scripts/check_versions.py', 'scripts/version_regions.py', 'setup.cfg',
+    'scripts/version_html_context.py', 'pyrightconfig.json', 'run_tests.py',
+    'pyrightconfig.tests.json', 'eslint.config.js', 'pyproject.toml',
+    '.claude/skills/changing-daedalus/ci_gate.py', 'requirements-dev.txt',
     'requirements-test.txt', 'requirements-release.txt',
     'requirements-pip-audit.txt', 'requirements-zizmor.txt',
 )

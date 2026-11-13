@@ -199,7 +199,7 @@ def test_moving_main_keeps_gate_queries_and_marker_on_one_snapshot(tmp):
                    for path in calls if '/compare/' in path)
         assert out.getvalue().splitlines()[-1] == (
             f'gate freshness: written {written}, reran 0, kept 0; '
-            f'evaluated {written}/1 heads; resolved 18/18 gate paths'), (
+            f'evaluated {written}/1 heads; resolved 21/21 gate paths'), (
                 fail, out.getvalue())
 
 
@@ -642,18 +642,11 @@ def test_workflow_permissions_include_rerun_authority(tmp):
 
 
 def test_workflow_declares_only_push_and_pull_request_target(tmp):
-    from _workflows import _event_option_keys, _workflow_triggers
-    triggers = _workflow_triggers(_workflow_text(), 'gate-freshness.yml')
-    assert set(triggers) == {'push', 'pull_request_target'}, triggers
     from _yamlsteps import workflow_mapping
-    assert workflow_mapping(_workflow_text())['on'][
-        'pull_request_target'].get('branches') == ['main']
-    assert 'branches' in _event_option_keys(triggers['push'], 'g')
-    assert 'main' in ' '.join(triggers['push'])
-    assert 'types' in _event_option_keys(triggers['pull_request_target'], 'g')
-    types = ' '.join(triggers['pull_request_target'])
-    for kind in ('opened', 'synchronize', 'reopened', 'ready_for_review'):
-        assert kind in types
+    on = workflow_mapping(_workflow_text())['on']
+    assert on == {'push': {'branches': ['main']}, 'pull_request_target': {
+        'branches': ['main'], 'types': [
+            'opened', 'synchronize', 'reopened', 'ready_for_review']}}, on
 
 
 def test_workflow_is_well_formed(tmp):
