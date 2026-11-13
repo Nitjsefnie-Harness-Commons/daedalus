@@ -5,6 +5,7 @@ Jobs are laid out with `segment_store`'s own path helpers, so the sweep must
 remove the names the store writes; mtimes are set with `os.utime`, and the
 clock is handed in except where its default is the subject.
 """
+import importlib
 import json
 import os
 import shutil
@@ -221,6 +222,28 @@ def test_a_symlinked_job_name_is_never_followed_or_removed(tmp):
     assert (root / 'outward').is_symlink() and (root / 'inward').is_symlink()
     assert (outside / 'keep.ts').is_file()
     assert _present(victim) == victim, _present(victim)
+
+
+def test_a_junction_is_never_followed_or_removed(tmp):
+    """On Windows a junction at a job name is a link: kept, never removed."""
+    if sys.platform != 'win32':
+        _util.skip('directory junctions exist only on Windows')
+    retention = _retention('segret_junction')
+    root, outside = Path(tmp) / 'segments', Path(tmp) / 'outside'
+    root.mkdir()
+    outside.mkdir()
+    (outside / 'keep.ts').write_bytes(b'ts')
+    importlib.import_module('_winapi').CreateJunction(
+        str(outside), str(root / 'joined'))
+    record = _job(root, 'joined', directory=None)
+    trees, real = [], shutil.rmtree
+    shutil.rmtree = lambda path, *a, **k: trees.append(path) or real(path)
+    try:
+        retention.sweep(root, RETENTION, now=time.time() + 100 * RETENTION)
+    finally:
+        shutil.rmtree = real
+    assert (trees, _present(record)) == ([], []), (trees, _present(record))
+    assert (root / 'joined').is_junction() and (outside / 'keep.ts').is_file()
 
 
 def test_one_job_that_cannot_be_removed_does_not_stop_the_sweep(tmp):

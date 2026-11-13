@@ -41,7 +41,8 @@ def _expire(root, job, retention, now):
     with segment_store.seg_lock_for(job):
         files = {path: _mtime(path, stat.S_ISREG)
                  for path in (record, marker, temp)}
-        dir_mtime = _mtime(job_dir, stat.S_ISDIR)
+        dir_mtime = (None if job_dir.is_junction()  # a link, as a symlink is
+                     else _mtime(job_dir, stat.S_ISDIR))
         stamps = [stamp for stamp in (files[record], files[marker], dir_mtime)
                   if stamp is not None]
         if not stamps or now - max(stamps) < retention:
