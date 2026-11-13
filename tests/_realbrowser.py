@@ -31,7 +31,7 @@ from _realbrowser_workers import (  # noqa: E402
     WORKER_ABSENCE_DEADLINE, _WORKER_READY_PROBE, _WORKER_STATE_PROBE,
     _absence_guilt, _browser_args, _browser_version, _control_extension,
     _control_worker_answered, _devtools_port, _devtools_targets,
-    _listed_workers, _retire_browser, _worker_absence_verdict,
+    _listed_workers, _retire_browser, _start_browser, _worker_absence_verdict,
     _worker_targets, cdp_call, cdp_eval, ready_worker, worker_state)
 from _node_launch_routing import (  # noqa: E402
     SITE_HANG_MULTIPLE, node_bound_expiry)
@@ -59,7 +59,7 @@ WINDOWS_COMMAND_TOO_LONG = 206
 
 # The two children this module keeps a bound at, and the bound composed for
 # each. The module launches a third — the browser itself, through
-# `subprocess.Popen` in `_launch_and_reach`, with no `timeout=` at its call
+# `_start_browser` in `_launch_and_reach`, with no `timeout=` at its call
 # site. These two are hang detectors, not health margins:
 # `NODE_WEBSOCKET_PROBE` starts Node, reads one global and writes one of two
 # tokens, and the E2BIG diagnostic runs the interpreter on an empty program.
@@ -287,11 +287,8 @@ def _environment_verdicts_closed():
 
 def _launch_and_reach(node, browser, loaded, profile, worker_script,
                       page_url, started, worker_ready_patience=30.0):
-    browser_args = _browser_args(browser, loaded, profile)
     try:
-        process = subprocess.Popen(
-            browser_args, cwd=ROOT, stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        process = _start_browser(browser, loaded, profile)
     except OSError as why:
         _raise_start_failure('Chromium', browser, why)
     started.append(process)

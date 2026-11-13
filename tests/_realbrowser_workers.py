@@ -1,5 +1,6 @@
 """CDP and service-worker machinery for the real-browser fixture."""
 import json
+import os
 import subprocess
 import time
 import urllib.request
@@ -86,6 +87,17 @@ def _browser_args(browser, loaded, profile):
         '--user-data-dir=' + str(profile),
         'about:blank',
     ]
+
+
+def _start_browser(browser, loaded, profile):
+    # Chromium's own temp dirs go beside the profile, inside the run.
+    scratch = str(Path(profile).parent)
+    return subprocess.Popen(
+        _browser_args(browser, loaded, profile), cwd=ROOT,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, env=dict(
+            os.environ, TMPDIR=scratch, TMP=scratch, TEMP=scratch,
+            MAC_CHROMIUM_TMPDIR=scratch))
 
 
 def _retire_browser(process):
@@ -267,10 +279,7 @@ def _diagnosis_launch(node, browser, extension, worker_script, tmp,
     profile = Path(tmp) / profile_directory
     loaded = ','.join(
         str(Path(item).resolve()) for item in (extension, control))
-    process = subprocess.Popen(
-        _browser_args(browser, loaded, profile), cwd=ROOT,
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL)
+    process = _start_browser(browser, loaded, profile)
     control_answered = False
     try:
         deadline = time.time() + WORKER_ABSENCE_DEADLINE
