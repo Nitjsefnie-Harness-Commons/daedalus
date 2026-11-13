@@ -578,15 +578,26 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
                  ('open_tab', {'url': 'about:blank'}))):
             with mock.patch.object(mod.bridge, seam, double):
                 answers += asyncio.run(read(*calls))
+        # A tab opener whose one result request fails before the deadline:
+        # the wait's own unknown outcome, not a second one wrapped round it.
+        with mock.patch.object(mod.bridge, '_result', mock.AsyncMock(
+                side_effect=httpx.ReadError('connection reset'))), \
+                mock.patch.object(mod.bridge, 'monotonic', mock.Mock(
+                    side_effect=[0, 0, 0, 2**40])):
+            answers += asyncio.run(read(('open_tab', {'url': 'about:blank'})))
     unknown = ('timed out: no result within {}s, outcome unknown: the {} '
                'may have opened. Call `list_tabs` to check before retrying.'
                ).format
+    failed = ('timed out: no result within 10.0s, outcome unknown: the last '
+              'result request failed (Connection failed: connection reset). '
+              'The command was sent and may have run; check its effect '
+              'before retrying.')
     expected = [('exec', 'timed out: no result within 0.5s'), ('exec', (
         'timeout must be a finite positive number of seconds; got 0.0')),
         ('segment_status', "no job named 'absent'"), ('segment_status', None),
         ('result', None), ('result', None),
         ('open_tab', unknown(10.0, 'tab')), ('open_tabs', unknown(30, 'tabs')),
-        ('open_tab', 'ext open-tab: gone')]
+        ('open_tab', 'ext open-tab: gone'), ('open_tab', failed)]
     for answer, (tool, reason) in zip(answers, expected, strict=True):
         [text] = [getattr(item, 'text', '') for item in answer.content]
         sdk = f'Error executing tool {tool}'
