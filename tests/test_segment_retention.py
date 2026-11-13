@@ -351,9 +351,11 @@ def test_the_bridge_starts_the_sweep_on_its_segments_root_and_setting(tmp):
     (seam / 'sitecustomize.py').write_text(_RECORDING_GC_LOOP.format(
         root=str(_util.ROOT), record=str(record)), encoding='utf-8')
     env = {'DAEDALUS_SEGMENT_JOB_RETENTION': '7.5', 'PYTHONPATH': str(seam)}
-    with _util.bridge(tmp, env=env) as (_base, docroot):
-        # Unbounded: only a bridge that never starts the thread waits here.
+    child = []
+    with _util.bridge(tmp, env=env, proc_out=child) as (_base, docroot):
+        # Unbounded, ended by the record or by the child exiting first.
         while not record.exists():
+            assert child[0].poll() is None, 'the bridge exited first'
             time.sleep(0.05)
     assert json.loads(record.read_text(encoding='utf-8')) == [
         str(Path(docroot) / 'segments'), 7.5]
