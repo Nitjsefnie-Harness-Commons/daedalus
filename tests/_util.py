@@ -7,7 +7,6 @@ import re
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import traceback
 import typing
@@ -22,7 +21,7 @@ from _completion import run_to_completion
 # promise here, as it is for `_dashnode.DOM`.
 # pylint: disable-next=unused-import
 from _log_safe_cases import log_safe_cases  # noqa: F401
-from _teardown import settle
+from _teardown import OwnedTemporaryDirectory, settle
 
 ROOT = Path(__file__).resolve().parents[1]
 # run_tests.py starts the sorted suites in a process wave, so each process's
@@ -594,7 +593,7 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
     failed, skipped = [], []
     # The acquisition stays outside the try: if it raises, `td` is unbound and
     # the finally would report an UnboundLocalError over the original OSError.
-    td = tempfile.TemporaryDirectory(prefix=tmp_prefix)
+    td = OwnedTemporaryDirectory(tmp_prefix)
     try:
         tmp = os.path.realpath(td.name)
         for t in tests:
