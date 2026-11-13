@@ -348,6 +348,24 @@ def test_a_segment_whose_job_was_removed_since_admission_writes_nothing(_tmp):
     assert sorted(p.name for p in SEG_DIR.iterdir() if job in p.name) == []
 
 
+def test_a_segment_admitted_before_a_re_mint_is_not_stored_in_it(_tmp):
+    """The write needs the admitted capability, not a record by that name."""
+    routes = _routes('fixture_segment_routes_reminted')
+    jobs = _jobs('fixture_segment_jobs_reminted')
+    job = 'reminted-job'
+    admitted = routes.admit_segment(
+        SEG_DIR, {'job': [job], 'seg': ['0']}, _mint(jobs, 'firsttok', job))
+    assert isinstance(admitted, routes.Admission), admitted
+    (SEG_DIR / f'{job}.json').unlink()
+    _mint(jobs, 'secondtok', job)
+    before = (SEG_DIR / f'{job}.json').read_bytes()
+    assert routes.store_segment(b'abcd', admitted) == (
+        403, {'error': 'bad sig'})
+    assert (SEG_DIR / f'{job}.json').read_bytes() == before
+    assert sorted(p.name for p in SEG_DIR.iterdir() if job in p.name) == [
+        job, f'{job}.json'] and not any((SEG_DIR / job).iterdir())
+
+
 def test_a_write_that_cannot_scan_the_directory_is_answered(_tmp):
     """A record without totals makes the write recount; a refused scan is a
     500 rather than an exception that would drop the connection."""
