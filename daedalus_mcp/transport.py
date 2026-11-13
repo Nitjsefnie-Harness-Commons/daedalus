@@ -213,8 +213,6 @@ class BridgeSession:
                 break
             try:
                 data = await self._result(peek, auth, timeout=remaining)
-            except httpx.TimeoutException:
-                continue  # bounded by `remaining`: the deadline
             except (httpx.HTTPError, ValueError) as error:
                 # The bridge answers /result at once, so a failed peek is
                 # the proxy's. The command is already queued and the browser
@@ -222,7 +220,9 @@ class BridgeSession:
                 # goes on to happen. A failed peek is treated like a pending
                 # slot, and the deadline still bounds the wait. The PUT is
                 # never retried.
-                failure = error
+                if not (isinstance(error, httpx.TimeoutException)
+                        and self.monotonic() >= deadline):
+                    failure = error
                 continue
             if data.get('pending'):
                 continue
