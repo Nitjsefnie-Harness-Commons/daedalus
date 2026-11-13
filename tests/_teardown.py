@@ -5,6 +5,7 @@ process, where no in-process fix reaches. Exhaustion is reported rather than
 raised so a suite whose tests passed still passes, and only PermissionError
 is retried -- any other exception reaches the caller unchanged.
 """
+import contextlib
 import importlib
 import os
 import re
@@ -55,12 +56,21 @@ def _lock(descriptor):
         return False
 
 
+def _disown(record):
+    # Emptied first, a cleaning owner's tree reads as unrecorded, which only
+    # the suite bound ends, not as a dead owner's mid-removal.
+    with contextlib.suppress(OSError):
+        os.ftruncate(record, 0)
+    os.close(record)
+
+
 def reclaim_tempdirs(prefix, parent):
     """Remove `prefix` + 8-character `tempfile` suffix dirs whose `.owner`
     lock is free; with no record written yet, only past the suite bound."""
     name = re.compile(re.escape(prefix) + '[a-z0-9_]{8}')
     for entry in os.scandir(parent):
-        if not (name.fullmatch(entry.name) and entry.is_dir()):
+        if not (name.fullmatch(entry.name)
+                and entry.is_dir(follow_symlinks=False)):
             continue
         record = entry.path + '/.owner'
         try:
@@ -72,6 +82,8 @@ def reclaim_tempdirs(prefix, parent):
                 stale = time.time() - entry.stat().st_mtime > _SUITE_TIMEOUT()
             if stale:
                 shutil.rmtree(entry.path)
+        except FileNotFoundError:
+            continue  # another run removed it first
         except OSError as refusal:
             print(f'  WARN  {entry.path} not reclaimed, a later run retries: '
                   f'{refusal!r}')
@@ -84,11 +96,18 @@ class OwnedTemporaryDirectory(tempfile.TemporaryDirectory):
         reclaim_tempdirs(prefix, kwargs.get('dir') or tempfile.gettempdir())
         super().__init__(prefix=prefix, **kwargs)
         record = os.open(self.name + '/.owner', os.O_CREAT | os.O_RDWR)
-        _lock(record)  # written only once held, so no reclaimer contends
-        os.write(record, str(os.getpid()).encode())
+        if _lock(record):  # unlocked, it stays empty: only age can end it
+            os.write(record, str(os.getpid()).encode())
         # Runs before the base finalizer: Windows keeps an open file.
-        self._release = weakref.finalize(self, os.close, record)
+        self._release = weakref.finalize(self, _disown, record)
 
     def cleanup(self):
         self._release()
-        super().cleanup()
+        try:
+            super().cleanup()
+        except OSError:
+            # Left behind after all: written again, the next run takes it.
+            with contextlib.suppress(OSError), open(
+                    self.name + '/.owner', 'w', encoding='utf-8') as record:
+                record.write('left')
+            raise
