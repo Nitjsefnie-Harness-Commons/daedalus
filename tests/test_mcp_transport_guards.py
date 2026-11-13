@@ -233,6 +233,30 @@ def test_poll_retries_a_failed_conditional_consume(tmp):
     assert result == second, (result, second)
 
 
+def test_poll_retries_a_consume_that_fails(tmp):
+    """A failed consume is not the command failing: the next lap peeks
+    the same result again and claims it."""
+    del tmp
+    transport = _transport()
+    wanted = {'id': 'command', 'deliveryId': 'wanted',
+              'resultGeneration': 'generation-1', 'result': {'value': 1}}
+    for failure in (_answer(transport, 500, '{"error": "internal"}'),
+                    transport.httpx.RemoteProtocolError('peer closed'),
+                    _answer(transport, 200, '<html>sign in</html>')):
+        session = _session(transport)
+        client = ClientProbe((wanted, failure, wanted, {
+            'consumed': True, 'resultGeneration': 'generation-1'}))
+        session.http_client = lambda client=client: client
+
+        result = _capture(session.poll_result(
+            '', 1, interval=0, expect_id='command',
+            expect_delivery='wanted'))
+
+        assert result == wanted, (failure, result)
+        takes = [call[2]['params'].get('consume') for call in client.calls]
+        assert takes == [None, '1', None, '1'], (failure, client.calls)
+
+
 def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
     """The clause admits TransportError itself, not members met so far."""
     del tmp
@@ -260,26 +284,50 @@ def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
     assert len(peeks) == 3, client.calls
 
 
-def test_poll_reports_timeout_after_only_transport_failures(tmp):
-    """Retrying a failed peek is bounded by the same deadline."""
+def _answer(transport, status, text):
+    return transport.httpx.Response(status, text=text, request=(
+        transport.httpx.Request('GET', 'http://127.0.0.1:18001/result')))
+
+
+UNKNOWN = ('raised TimeoutError: no result within {}s, outcome unknown: '
+           'the last result request failed ({}). The command was sent and '
+           'may have run; check its effect before retrying.').format
+
+
+def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
+    """Retrying a failed request is bounded by the same deadline, which
+    then cannot say whether the queued command ran: after a failed
+    consume, a pending slot may be the result that consume claimed."""
     del tmp
     transport = _transport()
-    session = _session(transport)
-    client = ClientProbe(
-        [transport.httpx.ReadError('connection reset by peer')] * 3)
-    session.http_client = lambda: client
-    # Three admitted peeks, then the clock steps past the deadline.
-    session.monotonic = clock_script(
-        100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.5)
+    wanted = {'id': 'command', 'deliveryId': 'wanted',
+              'resultGeneration': 'generation-1'}
+    for replies, expected in (
+            ([transport.httpx.ReadError('connection reset by peer')] * 3,
+             UNKNOWN(0.001, 'Connection failed: connection reset by peer')),
+            ([_answer(transport, 502, '<html>502 Bad Gateway</html>')] * 3,
+             UNKNOWN(0.001, 'HTTP 502')),
+            ([_answer(transport, 200, '<html>sign in</html>')] * 3,
+             UNKNOWN(0.001, 'Connection failed: Expecting value: line 1 '
+                     'column 1 (char 0)')),
+            ([wanted, _answer(transport, 500, '{}')] + [{'pending': True}] * 2,
+             UNKNOWN(0.001, 'HTTP 500')),
+            # A peek is bounded by what is left of the wait, so its timeout
+            # is the deadline arriving, not a request that failed.
+            ([transport.httpx.ReadTimeout('')] * 3,
+             'raised TimeoutError: no result within 0.001s')):
+        session = _session(transport)
+        client = ClientProbe(replies)
+        session.http_client = lambda client=client: client
+        # Three admitted laps, then the clock steps past the deadline.
+        session.monotonic = clock_script(*[100.0] * 7, 100.5)
 
-    result = _capture(session.poll_result(
-        '', 0.001, interval=0, expect_id='command',
-        expect_delivery='wanted'))
+        result = _capture(session.poll_result(
+            '', 0.001, interval=0, expect_id='command',
+            expect_delivery='wanted'))
 
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 3, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+        assert client.replies == [], (expected, client.replies)
+        assert result == expected, (result, expected)
 
 
 def test_poll_deadline_is_not_the_wall_clock(tmp):
@@ -569,26 +617,30 @@ def _shielded_environment():
     return mock.patch.dict('os.environ', {}, clear=False)
 
 
-def test_poll_survives_a_truncated_peek_from_a_real_front_end(tmp):
+def test_poll_survives_a_failed_peek_from_a_real_front_end(tmp):
     """The scripted controls raise ReadError; a real cut-off body is
     httpx's RemoteProtocolError, a TransportError that is no ReadError
-    (issue 699)."""
+    (issue 699). A whole 502 page and a 200 page that is not JSON are
+    failed peeks too."""
     del tmp
     transport = _transport()
-    with _shielded_environment() as environ, truncating_front_end(1) as base:
-        environ.pop('DAEDALUS_LOCAL_URL', None)
-        environ.pop('DAEDALUS_PORT', None)
-        session = _session(transport, url=base)
-        result = _capture(session.poll_result(
-            '', 10, interval=0, expect_id='job4', expect_delivery='d1'),
-            transport)
-        seen = list(TruncatingFrontEndHandler.seen)
-    assert result == TruncatingFrontEndHandler.result, result
-    assert seen == [
-        ('GET', '/result?delivery=d1'),
-        ('GET', '/result?delivery=d1'),
-        ('GET', '/result?delivery=d1&consume=1&expected=g1'),
-    ], seen
+    for status, body in ((200, None), (502, b'<html>502 Bad Gateway</html>'),
+                         (200, b'<html>sign in</html>')):
+        with _shielded_environment() as environ, truncating_front_end(
+                1, status, body) as base:
+            environ.pop('DAEDALUS_LOCAL_URL', None)
+            environ.pop('DAEDALUS_PORT', None)
+            session = _session(transport, url=base)
+            result = _capture(session.poll_result(
+                '', 10, interval=0, expect_id='job4', expect_delivery='d1'),
+                transport)
+            seen = list(TruncatingFrontEndHandler.seen)
+        assert result == TruncatingFrontEndHandler.result, (status, result)
+        assert seen == [
+            ('GET', '/result?delivery=d1'),
+            ('GET', '/result?delivery=d1'),
+            ('GET', '/result?delivery=d1&consume=1&expected=g1'),
+        ], seen
 
 
 def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
@@ -610,22 +662,20 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
         environ.pop('DAEDALUS_LOCAL_URL', None)
         environ.pop('DAEDALUS_PORT', None)
         session = _session(transport, url=base)
-        # Two admitted attempts, then the clock steps past the deadline.
-        session.monotonic = clock_script(
-            100.0, 100.0, 100.0, 100.0, 100.0, 100.5)
+        # Two admitted attempts with time to meet the cut, then the clock
+        # steps past the deadline.
+        session.monotonic = clock_script(*[100.0] * 5, 200.0)
         result = _capture(session.poll_result(
-            '', 0.001, interval=0, expect_id='job4', expect_delivery='d1'),
+            '', 30, interval=0, expect_id='job4', expect_delivery='d1'),
             transport)
         raised = _capture(probe(session), transport)
         seen = list(TruncatingFrontEndHandler.seen)
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+    assert result == UNKNOWN(30, 'Connection failed: peer closed connection '
+                             'without sending complete message body '
+                             '(received 5 bytes, expected 40)'), result
     assert raised == 'RemoteProtocolError', raised
-    # A peek whose budget expires can die before it reaches the server,
-    # so the visible count is inexact; that none is a consume is exact.
-    gets = [path for verb, path in seen if verb == 'GET']
-    assert gets[-1] == '/result', seen
-    assert all(path == '/result?delivery=d1' for path in gets[:-1]), seen
+    assert seen == [('GET', '/result?delivery=d1')] * 2 + [
+        ('GET', '/result')], seen
 
 
 def main():

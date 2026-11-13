@@ -554,9 +554,11 @@ UNWITNESSED_GUARDS = {
         ('daedalus_mcp.tools_media', 'segment_status',
          'found.status_code == 409'),
     },
-    **dict.fromkeys(('open_tab', 'open_tabs'), {(
-        'daedalus_mcp.tools_tabs', '_unconfirmed', 'raise TimeoutError('
-        'UNCONFIRMED.format(unanswered, opened)) from unanswered')}),
+    **dict.fromkeys(('open_tab', 'open_tabs'), {
+        ('daedalus_mcp.tools_tabs', '_unconfirmed', 'raise TimeoutError('
+         'UNCONFIRMED.format(unanswered, opened)) from unanswered'),
+        ('daedalus_mcp.tools_tabs', '_unconfirmed',
+         'unanswered.__cause__ is not None')}),
 }
 
 # The site keys whose table row cites None, each to the issue that tracks
@@ -592,6 +594,9 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      "raise TimeoutError(f'no result within {timeout}s')",
      'tests/test_mcp_transport_guards.py::'
      'test_poll_reports_timeout_when_no_attempt_is_admitted'),
+    ('daedalus_mcp.transport', 'poll_result', 'failure is not None',
+     'tests/test_mcp_transport_guards.py::'
+     'test_poll_reports_an_unknown_outcome_after_a_failed_request'),
     # covers 0, -1, nan and inf alone
     ('daedalus_mcp.transport', 'checked_timeout',
      'not math.isfinite(timeout) or timeout <= 0',

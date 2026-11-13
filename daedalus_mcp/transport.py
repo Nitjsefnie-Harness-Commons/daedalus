@@ -160,6 +160,13 @@ class BridgeSession:
         """The ramp's blocking step, injectable beside the clock."""
         await asyncio.sleep(seconds)
 
+    async def _result(self, params: dict, auth: dict, **timeout) -> Any:
+        """One /result request's JSON answer; anything else raises."""
+        r = await self.http_client().get(
+            '/result', params=params, headers=auth, **timeout)
+        r.raise_for_status()
+        return r.json()
+
     async def poll_result(self, tab: str, timeout: float,
                           interval: float = 0.5,
                           expect_id: str | None = None,
@@ -176,7 +183,12 @@ class BridgeSession:
         The wait ramps 20ms -> `interval` instead of sleeping a flat `interval`
         up front: most commands finish in tens of milliseconds, and the fixed
         first sleep was adding half a second of dead time to every single tool
-        call."""
+        call.
+
+        A timeout after any failed result request names the outcome unknown,
+        chained to that failure: the command is queued, and a failed consume
+        may have claimed its result, so no later pending answer can say it
+        did not run."""
         peek = {}
         if tab:
             peek['tab'] = tab
@@ -185,6 +197,7 @@ class BridgeSession:
         auth = self.auth()
         deadline = self.monotonic() + timeout
         wait = 0.02
+        failure = None
         while True:
             remaining = deadline - self.monotonic()
             if remaining <= 0:
@@ -195,19 +208,19 @@ class BridgeSession:
             if remaining <= 0:
                 break
             try:
-                r = await self.http_client().get(
-                    '/result', params=peek, headers=auth,
-                    timeout=remaining)
-            except httpx.TransportError:
-                # The bridge answers /result at once, so a reset or a
-                # cut-off body on the peek is the proxy's. The command is
-                # already queued and the browser will run it; raising here
-                # reports a failure for work that goes on to happen. A
-                # failed peek is treated like a pending slot, and the
-                # deadline still bounds the wait. The PUT is never retried.
+                data = await self._result(peek, auth, timeout=remaining)
+            except httpx.TimeoutException:
+                continue  # bounded by what is left: the deadline, arriving
+            except (httpx.HTTPError, ValueError) as error:
+                # The bridge answers /result at once, so a reset, a cut-off
+                # body, an error status or a page that is not JSON is the
+                # proxy's. The command is already queued and the browser
+                # will run it; raising here reports a failure for work that
+                # goes on to happen. A failed peek is treated like a pending
+                # slot, and the deadline still bounds the wait. The PUT is
+                # never retried.
+                failure = error
                 continue
-            r.raise_for_status()
-            data = r.json()
             if data.get('pending'):
                 continue
             if (expect_id is not None and data.get('id') != expect_id
@@ -220,15 +233,27 @@ class BridgeSession:
             take = {**peek, 'consume': '1', 'expected': generation}
             # The consume is allowed to finish: it is what claims the
             # result, and giving up here leaves one nobody takes. Still
-            # bounded, by the ordinary client timeout.
-            consumed = await self.http_client().get(
-                '/result', params=take, headers=auth)
-            consumed.raise_for_status()
-            receipt = consumed.json()
+            # bounded, by the ordinary client timeout. A failed one is
+            # retried by the next lap's peek, for the same reason as a peek.
+            try:
+                receipt = await self._result(take, auth)
+            except (httpx.HTTPError, ValueError) as error:
+                failure = error
+                continue
             if (receipt.get('consumed') is not True
                     or receipt.get('resultGeneration') != generation):
                 continue
             return data
+        if failure is not None:
+            # httpx's own text for a status carries the URL and a doc link.
+            named = (f'HTTP {failure.response.status_code}'
+                     if isinstance(failure, httpx.HTTPStatusError)
+                     else f'Connection failed: {failure}')
+            raise TimeoutError(
+                f'no result within {timeout}s, outcome unknown: the last '
+                f'result request failed ({named}). The command was sent and '
+                'may have run; check its effect before retrying.'
+            ) from failure
         raise TimeoutError(f'no result within {timeout}s')
 
     @staticmethod
