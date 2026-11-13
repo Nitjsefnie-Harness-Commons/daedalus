@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -41,11 +42,9 @@ def test_help_exits_zero(tmp):
 
 def test_url_default_and_override(tmp):
     code = 'from daedalus_cli.transport import URL; print(URL)'
-    env = cli_env()
-    r = run_python(code, env)
+    r = run_python(code, env := cli_env())
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() != 'http://127.0.0.1:8081', (
-        'cli_env() resolves to the default bridge URL')
+    assert urlsplit(r.stdout.strip()).port != 8081, 'harness default'
     del env['DAEDALUS_URL']
     r = run_python(code, env)
     assert r.returncode == 0, r.stderr
@@ -82,10 +81,10 @@ def test_prefixed_token_and_tab_precede_legacy_environment(tmp):
                             ('DAEDALUS_ID', primary), ('TOKEN', legacy),
                             ('ID', legacy)):
             tag = 't-' if 'TOKEN' in name else 'i-'
-            if value is not None: env[name] = value and tag + value
+            if value is not None: env[name] = tag + value if value else ''
         with patch.dict(os.environ, env, clear=True):
-            assert transport.token() == (want and 't-' + want or 'durable')
-            assert transport.tab() == (want and 'i-' + want)
+            assert transport.token() == ('t-' + want if want else 'durable')
+            assert transport.tab() == ('i-' + want if want else '')
 
 
 if __name__ == '__main__':
