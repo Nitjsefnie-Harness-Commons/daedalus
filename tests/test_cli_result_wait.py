@@ -18,8 +18,8 @@ from _queueread import queued_command  # noqa: E402
 TOK = 'clitok'
 
 
-_WAIT_HARNESS = (
-    'import json\n'
+_SCRIPTED_HARNESS = (
+    'import itertools, json, sys\n'
     'from daedalus_cli import transport\n'
     'class _Clock:\n'
     '    def __init__(self):\n'
@@ -33,105 +33,13 @@ _WAIT_HARNESS = (
     '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
     '        self.now += seconds\n'
-    'cases = (\n'
-    '    ("absent", None, {}),\n'
-    '    ("empty", "", {"deliveryId": ""}),\n'
-    '    ("foreign", "d1", {"deliveryId": "D1"}),\n'
-    ')\n'
-    'outcomes = []\n'
-    'for name, sent_id, delivery_field in cases:\n'
-    '    transport.time = _Clock()\n'
-    '    deadline = transport.time.monotonic() + 0.5\n'
-    '    calls = []\n'
-    '    result_body = {"id": "c1", "result": "STALE",\n'
-    '                   "error": None, "resultGeneration": "g1"}\n'
-    '    result_body.update(delivery_field)\n'
-    '    def fake_api(method, path, body=None, timeout=None,\n'
-    '                 headers=None):\n'
-    '        calls.append(path)\n'
-    '        if "consume=1" in path:\n'
-    '            return {"consumed": True, "resultGeneration": "g1"}\n'
-    '        return result_body\n'
-    '    transport._request = fake_api\n'
-    '    result = transport.wait_for_result(\n'
-    '        "c1", "extension", sent_id, 0.5, interval=0.01)\n'
-    '    outcomes.append({\n'
-    '        "name": name,\n'
-    '        "result": None if result is None else result["result"],\n'
-    '        "peeks": [p for p in calls if "consume=1" not in p],\n'
-    '        "consumes": [p for p in calls if "consume=1" in p],\n'
-    '        "sleeps": transport.time.sleeps,\n'
-    '        "now": transport.time.now,\n'
-    '        "deadline": deadline,\n'
-    '    })\n'
-    'print(json.dumps(outcomes, sort_keys=True))\n')
-
-
-_GENERATION_HARNESS = (
-    'import json\n'
-    'from daedalus_cli import transport\n'
-    'calls = []\n'
-    'result_body = {"id": "c1", "deliveryId": "d1", "result": "R1",\n'
-    '               "error": None, "resultGeneration": "g1"}\n'
-    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
-    '    calls.append(path)\n'
-    '    if "consume=1" in path:\n'
-    '        return {"consumed": True, "resultGeneration": "g2"}\n'
-    '    return result_body\n'
-    'transport._request = fake_api\n'
-    'result = transport.wait_for_result(\n'
-    '    "c1", "extension", "d1", 2.0, interval=0.01)\n'
-    'print(json.dumps({"result": result, "calls": calls},\n'
-    '                 sort_keys=True))\n')
-
-
-_BACKOFF_HARNESS = (
-    'import json\n'
-    'from daedalus_cli import transport\n'
-    'class _Clock:\n'
-    '    def __init__(self):\n'
-    '        self.now = 1000.0\n'
-    '        self.sleeps = []\n'
-    '    def monotonic(self):\n'
-    '        return self.now\n'
-    '    def sleep(self, seconds):\n'
-    '        if seconds < 0:\n'
-    '            raise ValueError("sleep length must be non-negative")\n'
-    '        self.sleeps.append(seconds)\n'
-    '        self.now += seconds\n'
     'transport.time = _Clock()\n'
+    'replies, timeout, interval, delivery = json.loads(sys.argv[1])\n'
+    'script = itertools.cycle(replies)\n'
     'calls = []\n'
     'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
     '    calls.append(path)\n'
-    '    return {"pending": True}\n'
-    'transport._request = fake_api\n'
-    'result = transport.wait_for_result(\n'
-    '    "c1", "extension", "d1", %s, interval=%s)\n'
-    'print(json.dumps({"sleeps": transport.time.sleeps,\n'
-    '                  "polls": len(calls),\n'
-    '                  "result": result}, sort_keys=True))\n')
-
-
-_SCRIPTED_HARNESS = (
-    'import json, sys\n'
-    'from daedalus_cli import transport\n'
-    'class _Clock:\n'
-    '    def __init__(self):\n'
-    '        self.now = 1000.0\n'
-    '        self.sleeps = []\n'
-    '    def monotonic(self):\n'
-    '        return self.now\n'
-    '    def sleep(self, seconds):\n'
-    '        if seconds < 0:\n'
-    '            raise ValueError("sleep length must be non-negative")\n'
-    '        self.sleeps.append(seconds)\n'
-    '        self.now += seconds\n'
-    'transport.time = _Clock()\n'
-    'replies, timeout, interval = json.loads(sys.argv[1])\n'
-    'calls = []\n'
-    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
-    '    calls.append(path)\n'
-    '    reply = replies.pop(0) if len(replies) > 1 else replies[0]\n'
+    '    reply = next(script)\n'
     '    if reply == "slow":  # spends the budget it was handed\n'
     '        transport.time.now += timeout\n'
     '        raise transport.ConnectionFailed("timed out")\n'
@@ -143,24 +51,30 @@ _SCRIPTED_HARNESS = (
     'transport._request = fake_api\n'
     'try:\n'
     '    result = transport.wait_for_result(\n'
-    '        "c1", "extension", "d1", timeout, interval=interval)\n'
+    '        "c1", "extension", delivery, timeout, interval=interval)\n'
     'except SystemExit as stop:\n'
     '    result = {"exit": stop.code}\n'
     'print(json.dumps({"sleeps": transport.time.sleeps, "calls": calls,\n'
-    '                  "result": result}, sort_keys=True))\n')
+    '                  "now": transport.time.now, "result": result}))\n')
 
 
-def _scripted_wait(replies, timeout=1.0, interval=0.5):
-    """The wait over `_request` answers replayed in order, the last
-    repeating: a body, or "cut" / "500" / "slow" for the failure it
-    raises, "slow" only once the timeout it was handed has passed."""
+def _scripted_wait(replies, timeout=1.0, interval=0.5, delivery='d1'):
+    """The wait over `_request` answers replayed in a cycle on a virtual
+    clock from 1000.0: a body, or "cut" / "500" / "slow" for the failure
+    it raises, "slow" only once the timeout it was handed has passed."""
     run = subprocess.run(
         [sys.executable, '-c', _SCRIPTED_HARNESS,
-         json.dumps([replies, timeout, interval])],
+         json.dumps([replies, timeout, interval, delivery])],
         cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
         text=True, encoding='utf-8', timeout=10)
     assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
     return json.loads(run.stdout)
+
+
+OWN = {'id': 'c1', 'deliveryId': 'd1', 'resultGeneration': 'g1',
+       'result': 7, 'error': None}
+PEEK = '/result?tab=extension&delivery=d1'
+CONSUME = PEEK + '&consume=1&expected=g1'
 
 
 def _unknown(timeout, failure):
@@ -237,26 +151,21 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
     intermittency that leg was recorded for.
     """
     del tmp
-    run = subprocess.run(
-        [sys.executable, '-c', _WAIT_HARNESS],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
-    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-    outcomes = json.loads(run.stdout)
-    expected = (
-        ('absent', '/result?tab=extension'),
-        ('empty', '/result?tab=extension'),
-        ('foreign', '/result?tab=extension&delivery=d1'),
-    )
-    assert len(outcomes) == len(expected), outcomes
-    for outcome, (name, selector) in zip(outcomes, expected):
-        assert outcome['name'] == name, outcome
-        assert outcome['result'] is None, outcome
-        assert outcome['consumes'] == [], outcome
+    for name, sent_id, delivery_field, selector in (
+            ('absent', None, {}, '/result?tab=extension'),
+            ('empty', '', {'deliveryId': ''}, '/result?tab=extension'),
+            ('foreign', 'd1', {'deliveryId': 'D1'},
+             '/result?tab=extension&delivery=d1')):
+        stale = {'id': 'c1', 'result': 'STALE', 'error': None,
+                 'resultGeneration': 'g1', **delivery_field}
+        outcome = _scripted_wait([stale], 0.5, 0.01, sent_id)
+        peeks = [p for p in outcome['calls'] if 'consume=1' not in p]
+        assert outcome['result'] is None, (name, outcome['result'])
+        assert len(peeks) == len(outcome['calls']), (name, outcome['calls'])
         sleeps = outcome['sleeps']
         # Bounded failure message: a pathological record can be long.
-        brief = {'name': outcome['name'], 'result': outcome['result'],
-                 'peeks': len(outcome['peeks']), 'sleep_n': len(sleeps),
+        brief = {'name': name, 'result': outcome['result'],
+                 'peeks': len(peeks), 'sleep_n': len(sleeps),
                  'sleep_head': sleeps[:6], 'sleep_tail': sleeps[-2:]}
         # What the loop REQUESTS, which a real clock records nothing of.
         # No exact peek count: how many laps clear a 0.5s budget is a
@@ -272,20 +181,16 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
         # loop neither quit early nor overshot: the last sleep is the
         # exact remainder by construction, so this holds for any number
         # of laps and is not what reds on a wrong ramp.
-        assert len(outcome['peeks']) == len(sleeps) - 1, brief
-        assert outcome['now'] == outcome['deadline'], brief
-        assert set(outcome['peeks']) == {selector}, brief
+        assert len(peeks) == len(sleeps) - 1, brief
+        assert outcome['now'] == 1000.0 + 0.5, brief
+        assert set(peeks) == {selector}, brief
 
 
 def test_result_wait_rejects_receipt_for_different_generation(tmp):
     """Repeated wrong-generation receipts cannot claim the selected body."""
     del tmp
-    run = subprocess.run(
-        [sys.executable, '-c', _GENERATION_HARNESS],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
-    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-    outcome = json.loads(run.stdout)
+    outcome = _scripted_wait([OWN, {
+        'consumed': True, 'resultGeneration': 'g2'}], 2.0, 0.01)
     assert outcome['result'] is None, outcome
     peeks = [path for path in outcome['calls'] if 'consume=1' not in path]
     consumes = [path for path in outcome['calls'] if 'consume=1' in path]
@@ -313,15 +218,10 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
         (3.0, 0.3, [0.02, 0.04, 0.08, 0.16, 0.3]),
     )
     for timeout, interval, ramp in cases:
-        run = subprocess.run(
-            [sys.executable, '-c', _BACKOFF_HARNESS % (timeout, interval)],
-            cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-            text=True, encoding='utf-8', timeout=10)
-        assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-        outcome = json.loads(run.stdout)
+        outcome = _scripted_wait([{'pending': True}], timeout, interval)
         sleeps = outcome['sleeps']
         # Bounded failure message: a pathological record can be long.
-        brief = {'polls': outcome['polls'], 'result': outcome['result'],
+        brief = {'polls': len(outcome['calls']), 'result': outcome['result'],
                  'sleep_n': len(sleeps), 'sleep_head': sleeps[:6]}
         assert outcome['result'] is None, brief
         assert sleeps[:len(ramp)] == ramp, brief
@@ -329,7 +229,7 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
         # The last lap is cut to what is left of the budget, so the
         # requested record alone spends it exactly.
         assert abs(sum(sleeps) - timeout) < 1e-9, brief
-        assert outcome['polls'] == len(sleeps) - 1, brief
+        assert len(outcome['calls']) == len(sleeps) - 1, brief
 
 
 def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
@@ -360,12 +260,6 @@ def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
     assert abs(sum(sleeps) - 1.0) < 1e-9, brief
 
 
-OWN = {'id': 'c1', 'deliveryId': 'd1', 'resultGeneration': 'g1',
-       'result': 7, 'error': None}
-PEEK = '/result?tab=extension&delivery=d1'
-CONSUME = PEEK + '&consume=1&expected=g1'
-
-
 def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
     """A consume that fails is not the command failing: it ran, and its
     result is still claimed by a later poll, on the same generation.
@@ -379,7 +273,7 @@ def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
         outcome = _scripted_wait([OWN, failure, OWN, claimed])
         assert outcome['result'] == OWN, (failure, outcome)
         assert outcome['calls'] == [PEEK, CONSUME] * 2, (failure, outcome)
-        outcome = _scripted_wait([OWN, failure, {'pending': True}])
+        outcome = _scripted_wait([OWN, failure] + [{'pending': True}] * 4)
         assert outcome['result'] == _unknown(1.0, named), (failure, outcome)
         # Five ramp laps, the first one's peek answered and its consume
         # failed; the four after it found nothing.

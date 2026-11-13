@@ -195,32 +195,38 @@ def test_an_extension_command_with_no_result_times_out_exiting_nonzero(tmp):
     assert 'Timeout' in unanswered.stderr, unanswered.stderr
 
 
-def test_the_result_wait_outlives_a_truncated_peek(tmp):
-    """A peek the proxy cuts off is retried until the deadline, once.
+BAD_GATEWAY = b'<html>502 Bad Gateway</html>'
+CUT_OFF = 'Connection failed: IncompleteRead(5 bytes read, 35 more expected)'
+# Each front end's fault, and the report a wait that meets only it ends on.
+FAULTS = ((200, None, CUT_OFF), (502, None, CUT_OFF),
+          (502, BAD_GATEWAY, f'HTTP 502: {BAD_GATEWAY.decode()}'))
 
-    api() caught only HTTPError and URLError, so a response cut off while
-    its body was being read escaped as an IncompleteRead traceback — and
-    the command had already been queued, so the browser ran it while the
-    operator was reading a stack trace (issue 647). The wait now treats a
-    connection failure on the peek like a pending slot: keep polling while
-    the deadline has time left. The PUT is not idempotent and is never
-    retried.
+
+def test_the_result_wait_outlives_a_failed_peek(tmp):
+    """A peek the proxy cuts off (issues 647, 700) or answers with a whole
+    error status is retried until the deadline, once.
+
+    The command is already queued, so the browser runs it whatever the
+    wait reports: exiting on a failed peek told the operator it failed, and
+    a retry ran it twice. The PUT is not idempotent and is never retried.
     """
     del tmp
-    with truncating_front_end(truncate=2) as base:
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
-                      DAEDALUS_ID='tab4')
-        r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
-        seen = list(TruncatingFrontEndHandler.seen)
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    assert 'Traceback' not in r.stderr, r.stderr
-    assert 'Survived' in r.stdout, r.stdout
-    puts = [path for verb, path in seen if verb == 'PUT']
-    assert puts == ['/command'], seen
-    peeks = [path for verb, path in seen
-             if verb == 'GET' and 'consume=1' not in path]
-    # Two cut-off peeks, then the one that was answered.
-    assert peeks == ['/result?tab=tab4&delivery=d1'] * 3, seen
+    for status, body, _ in FAULTS:
+        with truncating_front_end(
+                truncate=2, status=status, body=body) as base:
+            env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                          DAEDALUS_ID='tab4')
+            r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
+            seen = list(TruncatingFrontEndHandler.seen)
+        assert r.returncode == 0, (status, body, r.returncode, r.stderr)
+        assert 'Traceback' not in r.stderr, (status, body, r.stderr)
+        assert 'Survived' in r.stdout, (status, body, r.stdout)
+        puts = [path for verb, path in seen if verb == 'PUT']
+        assert puts == ['/command'], seen
+        peeks = [path for verb, path in seen
+                 if verb == 'GET' and 'consume=1' not in path]
+        # Two failed peeks, then the one that was answered.
+        assert peeks == ['/result?tab=tab4&delivery=d1'] * 3, seen
 
 
 _WAIT_HARNESS = (
@@ -286,26 +292,23 @@ def test_the_result_wait_records_the_ramp_opening_below_the_interval(tmp):
     assert sleeps[0] < interval, r.stdout
 
 
-def _assert_unknown_outcome(r, failure):
-    assert (r.returncode, r.stderr) == (1, (
-        'Timeout (1s), outcome unknown: the last result request failed '
-        f'({failure}). The command was sent and may have run; check its '
-        'effect before retrying.\n')), r
-
-
-def test_the_result_wait_reports_a_timeout_when_every_peek_is_cut_off(tmp):
+def test_the_result_wait_reports_an_unknown_outcome_after_failed_peeks(tmp):
     """Retrying is bounded by the deadline, which then cannot say whether
     the queued command ran."""
     del tmp
-    with truncating_front_end(truncate=None) as base:
-        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
-                      DAEDALUS_ID='tab4')
-        r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
-        seen = list(TruncatingFrontEndHandler.seen)
-    _assert_unknown_outcome(
-        r, 'Connection failed: IncompleteRead(5 bytes read, 35 more expected)')
-    puts = [path for verb, path in seen if verb == 'PUT']
-    assert puts == ['/command'], seen
+    for status, body, failure in FAULTS:
+        with truncating_front_end(
+                truncate=None, status=status, body=body) as base:
+            env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
+                          DAEDALUS_ID='tab4')
+            r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
+            seen = list(TruncatingFrontEndHandler.seen)
+        assert (r.returncode, r.stderr) == (1, (
+            'Timeout (1s), outcome unknown: the last result request failed '
+            f'({failure}). The command was sent and may have run; check its '
+            'effect before retrying.\n')), r
+        puts = [path for verb, path in seen if verb == 'PUT']
+        assert puts == ['/command'], seen
 
 
 def test_a_truncated_answer_is_a_connection_failure_not_a_traceback(tmp):
@@ -339,46 +342,6 @@ def _assert_connection_failed(outcomes, cause):
         assert 'Traceback' not in r.stderr, (name, r.stderr)
         assert 'Connection failed' in r.stderr, (name, r.stderr)
         assert cause in r.stderr, (name, r.stderr)
-
-
-BAD_GATEWAY = b'<html>502 Bad Gateway</html>'
-
-
-def test_the_result_wait_outlives_an_error_peek_cut_off_or_whole(tmp):
-    """A 502, cut off mid-body (issue 700) or whole, is the same failed
-    peek as a 200 cut off: the command is queued, so the wait goes on."""
-    del tmp
-    for body in (None, BAD_GATEWAY):
-        with truncating_front_end(truncate=2, status=502, body=body) as base:
-            env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
-                          DAEDALUS_ID='tab4')
-            r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
-            seen = list(TruncatingFrontEndHandler.seen)
-        assert r.returncode == 0, (body, r.returncode, r.stdout, r.stderr)
-        assert 'Traceback' not in r.stderr, (body, r.stderr)
-        assert 'Survived' in r.stdout, (body, r.stdout)
-        puts = [path for verb, path in seen if verb == 'PUT']
-        assert puts == ['/command'], seen
-        peeks = [path for verb, path in seen
-                 if verb == 'GET' and 'consume=1' not in path]
-        assert peeks == ['/result?tab=tab4&delivery=d1'] * 3, seen
-
-
-def test_the_result_wait_reports_an_unknown_outcome_after_error_peeks(tmp):
-    del tmp
-    for body, failure in (
-            (None, 'Connection failed: IncompleteRead(5 bytes read, 35 more '
-                   'expected)'),
-            (BAD_GATEWAY, f'HTTP 502: {BAD_GATEWAY.decode()}')):
-        with truncating_front_end(
-                truncate=None, status=502, body=body) as base:
-            env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK,
-                          DAEDALUS_ID='tab4')
-            r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
-            seen = list(TruncatingFrontEndHandler.seen)
-        _assert_unknown_outcome(r, failure)
-        puts = [path for verb, path in seen if verb == 'PUT']
-        assert puts == ['/command'], seen
 
 
 def test_a_truncated_error_answer_is_a_connection_failure(tmp):
