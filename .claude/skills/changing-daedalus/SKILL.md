@@ -760,8 +760,8 @@ the code you change; field names are exact.
     names); `segment_retention` (the idle-job sweep the `segment-gc` thread
     runs: one scan of the segments root, each job decided and removed under
     its own stripe; binds no configuration); `delivery_stripes` (the keyed
-    stripe mapping delivery and segment
-    locks both select from); `path_safety` (component and containment checks);
+    stripe mapping delivery and segment locks both select from);
+    `path_safety` (component and containment checks);
     `atomic_file` (atomic replacement); `config` (startup paths, settings);
     `data_root_lock` (the exclusive data-root claim of one bridge process);
     `env_config` (the shared refused-body drain size; `CMD_TTL_DEFAULT`,
@@ -1108,7 +1108,8 @@ them.
   one hold of its stripe: the record first, revoking the capability, then the
   marker, the temp and the directory; a resume mint touches the record. Names
   that are symlinks or junctions are never followed or removed. A segment
-  write whose record no longer holds the capability it was admitted on
-  (removed, or removed and minted again) answers `403 bad sig` unwritten.
+  write answers `403 bad sig`, unwritten, when its record is absent or holds
+  a capability other than the admitted one (swept, or swept and minted
+  again); an unreadable record does not refuse it.
   `DAEDALUS_DEBUG_TIMING=1` prints a per-phase `[SEGMENT-TIMING]` line per
   segment write; inert otherwise.

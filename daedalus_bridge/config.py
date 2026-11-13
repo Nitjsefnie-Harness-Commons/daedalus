@@ -78,8 +78,7 @@ MAX_SEGMENTS_PER_JOB = env_int(
     'DAEDALUS_MAX_SEGMENTS_PER_JOB', 10000, 0)
 MAX_SEGMENT_JOB_SIZE = env_int(
     'DAEDALUS_MAX_SEGMENT_JOB_SIZE', 4 * 1024 * 1024 * 1024, 0)
-# Seconds since a job's last mint or segment write after which the bridge
-# removes it: segment_retention.
+# Idle seconds (no mint or segment write) before a job is removed.
 SEGMENT_JOB_RETENTION = env_positive_float(
     'DAEDALUS_SEGMENT_JOB_RETENTION', 7 * 24 * 3600)
 

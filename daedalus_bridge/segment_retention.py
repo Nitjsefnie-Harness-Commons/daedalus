@@ -56,7 +56,6 @@ def _expire(root, job, retention, now):
 
 
 def sweep(seg_dir_root, retention, now=None):
-    """One scan, then each job under its own lock; a job's OSError skips it."""
     now = time.time() if now is None else now
     try:
         jobs = _candidates(seg_dir_root)

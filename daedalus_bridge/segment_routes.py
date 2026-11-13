@@ -44,7 +44,7 @@ class Admission(NamedTuple):
     # the quota check and the record write, and a second lookup is a second
     # chance to name a different stripe.
     lock: threading.Lock
-    # The capability admitted; the write refuses a record no longer holding it.
+    # The write refuses a record that no longer holds this sig.
     sig: str
 
 

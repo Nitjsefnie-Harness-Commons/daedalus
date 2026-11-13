@@ -632,7 +632,6 @@ def test_the_segments_root_governs_where_a_resume_reconciles(tmp):
 
 
 def test_a_resume_is_activity_the_retention_sweep_counts(tmp):
-    """Resuming an idle job refreshes its record, so the sweep keeps it."""
     root = Path(tmp) / 'resume-touch'
     root.mkdir()
     bridge = _util.ROOT / 'daedalus_bridge'
@@ -652,7 +651,6 @@ def test_a_resume_is_activity_the_retention_sweep_counts(tmp):
 
 
 def test_a_resume_whose_touch_fails_still_resumes(tmp):
-    """A record that cannot be touched still answers its own capability."""
     root = Path(tmp) / 'touch-fails'
     root.mkdir()
     jobs = _util.load(
