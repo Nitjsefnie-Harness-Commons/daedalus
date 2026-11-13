@@ -203,8 +203,7 @@ def test_poll_skips_a_result_without_generation(tmp):
 
 
 def test_poll_retries_a_failed_or_refused_consume(tmp):
-    """A refused consume, or one that fails, is not the command failing:
-    the next lap peeks again and claims the generation it now finds."""
+    """A refused or failed consume is retried on the next peek's result."""
     del tmp
     transport = _transport()
     for failure in ({'consumed': False, 'resultGeneration': 'generation-2'},
@@ -253,9 +252,8 @@ UNKNOWN = ('raised TimeoutError: no result within {}s, outcome unknown: '
 
 
 def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
-    """Retrying a failed request is bounded by the same deadline, which
-    then cannot say whether the queued command ran: after a failed
-    consume, a pending slot may be the result that consume claimed."""
+    """Past a failed request, a consume included, the deadline cannot say
+    whether the command ran."""
     del tmp
     transport = _transport()
     for replies, expected in (
@@ -268,8 +266,7 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
                      'column 1 (char 0)')),
             ([FIRST, _answer(transport, 500, '{}')] + [{'pending': True}] * 2,
              UNKNOWN(0.001, 'HTTP 500')),
-            # A peek is bounded by what is left of the wait, so its timeout
-            # is the deadline arriving, not a request that failed.
+            # A peek's timeout is the deadline it was handed.
             ([transport.httpx.ReadTimeout('')] * 3,
              'raised TimeoutError: no result within 0.001s')):
         session = _session(transport)
@@ -556,8 +553,7 @@ def _shielded_environment():
 def test_poll_survives_a_failed_peek_from_a_real_front_end(tmp):
     """The scripted controls raise ReadError; a real cut-off body is
     httpx's RemoteProtocolError, a TransportError that is no ReadError
-    (issue 699). A whole 502 page and a 200 page that is not JSON are
-    failed peeks too."""
+    (issue 699). Whole 502 and non-JSON pages fail a peek too."""
     del tmp
     transport = _transport()
     for status, body in ((200, None), (502, b'<html>502 Bad Gateway</html>'),
@@ -598,8 +594,7 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
         environ.pop('DAEDALUS_LOCAL_URL', None)
         environ.pop('DAEDALUS_PORT', None)
         session = _session(transport, url=base)
-        # Two admitted attempts with time to meet the cut, then the clock
-        # steps past the deadline.
+        # Two admitted attempts, then the clock steps past the deadline.
         session.monotonic = clock_script(*[100.0] * 5, 200.0)
         result = _capture(session.poll_result(
             '', 30, interval=0, expect_id='job4', expect_delivery='d1'),
