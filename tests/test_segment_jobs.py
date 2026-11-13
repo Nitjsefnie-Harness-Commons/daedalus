@@ -651,6 +651,30 @@ def test_a_resume_is_activity_the_retention_sweep_counts(tmp):
         'idle-job', 'idle-job.json']
 
 
+def test_a_resume_whose_touch_fails_still_resumes(tmp):
+    """A record that cannot be touched still answers its own capability."""
+    root = Path(tmp) / 'touch-fails'
+    root.mkdir()
+    jobs = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'segment_jobs.py', 'segjobs_untouch')
+    quotas, body = jobs.JobQuotas(11, 2, 512), {'job': 'touch-job'}
+    status, first = jobs.mint_job(root, 'touchtok', body, quotas)
+    assert status == 200, first
+    refused, real = [], os.utime
+
+    def utime(path, *args, **kwargs):
+        refused.append(Path(path).name)
+        raise OSError('injected utime failure')
+
+    setattr(os, 'utime', utime)
+    try:
+        answer = jobs.mint_job(root, 'touchtok', body, quotas)
+    finally:
+        setattr(os, 'utime', real)
+    assert (answer, refused) == (
+        (200, {'ok': True, 'sig': first['sig']}), ['touch-job.json'])
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segjobs_')
 
