@@ -388,9 +388,9 @@ python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha> \
 Its exit code is the verdict, so a caller never has to read the loop: 0 every
 run on the SHA concluded and every JUDGED conclusion was `success`, `neutral`
 or `skipped` **and the `tests` matrix has a run on that SHA** **and the
-`gate freshness` check run has concluded acceptably** - a run whose workflow
-is not about this head is never judged, and is named rather than counted on
-the acceptable line; 1 every run concluded and one JUDGED conclusion was
+`gate freshness` check run has concluded acceptably** - no run is exempt by
+its name, `pr gate` included, since it carries the pull request's head
+SHA; 1 every run concluded and one JUDGED conclusion was
 otherwise, or a required published check run did, offenders - runs and
 checks alike - named with URLs; 2 the `--timeout` bound expired first - with
 named runs still open, with no run ever appearing, or with every run
