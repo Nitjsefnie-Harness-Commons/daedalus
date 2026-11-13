@@ -12,23 +12,21 @@ for the root parameter deliberately pass a different one. Each test uses
 its own token and its own delivery ids, because the accepted-delivery
 record is process-wide.
 """
-import atexit
 import contextlib
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
 from _dashqueue import _events  # noqa: E402
 
-_BASE = tempfile.mkdtemp(prefix='resultroutes_base_')
-atexit.register(shutil.rmtree, _BASE, ignore_errors=True)
+_OWNED = _util.OwnedTemporaryDirectory('resultroutes_base_',
+                                       ignore_cleanup_errors=True)
+_BASE = _OWNED.name
 os.environ['DAEDALUS_DIR'] = _BASE
 os.environ['DAEDALUS_PORT'] = '0'
 RES_DIR = Path(_BASE) / 'results'

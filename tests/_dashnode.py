@@ -41,6 +41,7 @@ from pathlib import Path
 from _dashnode_dom import DOM  # noqa: F401 pylint: disable=W0611
 from _jsread import blank_js_comments
 from _repo import ROOT
+from _teardown import OwnedTemporaryDirectory
 from _worker_sources import CONTENT_SCRIPT_PAGE
 
 
@@ -466,17 +467,15 @@ def _dashboard_program_file(program: str, *, module: bool):
     The removal is best-effort and silent: the child's own output is the
     diagnostic, and a removal that failed after a dead child must not replace
     it. This runs on every launch, so a leak is not an acceptable trade for
-    a louder failure either -- `rmtree(ignore_errors=True)` is the shape
-    `tests/_noderun.py` uses for the same reason.
+    a louder failure either: what a failed removal leaves, the next launch
+    reclaims.
     """
-    directory = tempfile.mkdtemp(prefix='daedalus-dashnode-')
-    try:
+    with OwnedTemporaryDirectory('daedalus-dashnode-',
+                                 ignore_cleanup_errors=True) as directory:
         path = Path(directory) / ('program.mjs' if module else 'program.cjs')
         path.write_text(
             'process.argv.splice(1, 1);\n' + program, encoding='utf-8')
         yield path
-    finally:
-        shutil.rmtree(directory, ignore_errors=True)
 
 
 def _run_dashboard_node_once(

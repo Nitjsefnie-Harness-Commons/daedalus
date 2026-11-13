@@ -15,22 +15,20 @@ one configuration names; the controls for the root parameter deliberately
 pass a different one. Each test uses its own job name, because the
 configured directory is process-wide.
 """
-import atexit
 import contextlib
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
 
-_BASE = tempfile.mkdtemp(prefix='segroutes_base_')
-atexit.register(shutil.rmtree, _BASE, ignore_errors=True)
+_OWNED = _util.OwnedTemporaryDirectory('segroutes_base_',
+                                       ignore_cleanup_errors=True)
+_BASE = _OWNED.name
 os.environ['DAEDALUS_DIR'] = _BASE
 os.environ['DAEDALUS_PORT'] = '0'
 # Small enough that a handful of tiny segments reaches every quota edge.

@@ -6,10 +6,8 @@ import each other (pylint R0401).
 """
 import contextlib
 import json
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import _util
@@ -33,24 +31,19 @@ CLEANUP_FRACTION = 0.05
 CLEANUP_DEADLINE_S = round(CHILD_DEADLINE_S * CLEANUP_FRACTION)
 
 
-def _remove_tree(directory):
-    """Delete a scratch tree, letting the caller record a failure."""
-    shutil.rmtree(directory)
-
-
 class _Scratch:
     """A scratch directory whose removal is best-effort AND REPORTED.
 
     A file another process still holds is not deletable on Windows, so a
     `TemporaryDirectory.__exit__` removal could replace the caller's
-    classified error with a bare errno. `mkdtemp` instead: the removal
+    classified error with a bare errno. None is entered: the removal
     happens here, its outcome is appended to `outcomes`, and the
     caller's exception keeps travelling.
     """
 
     def __init__(self, prefix, outcomes):
-        self._path = Path(tempfile.mkdtemp(prefix=prefix))
-        self._name = self._path
+        self._owned = _util.OwnedTemporaryDirectory(prefix)
+        self._path = self._name = Path(self._owned.name)
         self._outcomes = outcomes
 
     def __enter__(self):
@@ -62,7 +55,7 @@ class _Scratch:
         if self._path is None:
             return
         try:
-            _remove_tree(self._path)
+            self._owned.cleanup()
         except OSError as failure:
             self._outcomes.append(
                 f'; the scratch directory {self._path.name} was not fully '
