@@ -569,13 +569,11 @@ STATED_GAPS = {}
 
 CARRY = ('tests/test_mcp_live_tools.py::test_a_client_reads_why_a_tool_'
          'failed_and_never_a_crash')
-POLL = 'tests/test_mcp_transport_guards.py::'
-WAITS = 'tests/test_cli_waits.py::'
-ARGS = 'tests/test_cli_argument_types.py::'
-LOAD = 'tests/test_mcp_server_load.py::'
-LIFE = 'tests/test_stream_lifecycle.py::'
-FETCH = 'tests/test_fetch_timings_count.py::'
-SHOT = 'tests/test_screenshot_quality.py::'
+POLL, WAITS, ARGS, LOAD, LIFE, FETCH, SHOT = (
+    f'tests/test_{suite}.py::' for suite in (
+        'mcp_transport_guards', 'cli_waits', 'cli_argument_types',
+        'mcp_server_load', 'stream_lifecycle', 'fetch_timings_count',
+        'screenshot_quality'))
 
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own

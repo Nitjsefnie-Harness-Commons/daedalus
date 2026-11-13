@@ -225,8 +225,10 @@ def _failure_report(failure):
     """The words every api* function exits with for a failed request."""
     if isinstance(failure, ErrorStatus):
         return str(failure)
-    reason = failure.args[0] if failure.args else failure
-    return f'Connection failed: {str(reason) or type(reason).__name__}'
+    failed = failure.args[0] if failure.args else failure
+    if isinstance(failed, str):  # a wrapper's text: name the wrapper
+        failed = failure.__cause__ or failure
+    return f'Connection failed: {str(failure) or type(failed).__name__}'
 
 
 def _json_body(response):
@@ -381,7 +383,8 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
             # slot: the deadline still says when to stop. The PUT is never
             # retried. A peek's own timeout, the budget left of the wait,
             # is the deadline arriving, not a failure.
-            if not isinstance(error.args[0], TimeoutError):
+            if not (isinstance(error.args[0], TimeoutError)
+                    and time.monotonic() >= deadline):
                 failure = error
             continue
         if res.get('pending'):

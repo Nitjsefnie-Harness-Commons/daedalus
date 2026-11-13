@@ -279,16 +279,23 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
                      'an object')),
             ([FIRST, _answer(transport, 500, '{}')] + [{'pending': True}] * 2,
              UNKNOWN(0.001, 'HTTP 500')),
-            # A peek's timeout is the deadline it was handed.
-            ([transport.httpx.ReadTimeout('')] * 3,
-             'raised TimeoutError: no result within 0.001s'),
-            ([transport.httpx.ConnectTimeout('')] * 3,
-             'raised TimeoutError: no result within 0.001s')):
+            ([transport.httpx.ReadTimeout('')] + [{'pending': True}] * 2,
+             UNKNOWN(0.001, 'Connection failed: ReadTimeout')),
+            ([{'pending': True}] * 2 + [transport.httpx.ReadError('reset')],
+             UNKNOWN(0.001, 'Connection failed: reset')),
+            # A peek's timeout landing on the deadline is that deadline.
+            *(([{'pending': True}] * 2 + [late('')],
+               'raised TimeoutError: no result within 0.001s')
+              for late in (transport.httpx.ReadTimeout,
+                           transport.httpx.ConnectTimeout,
+                           transport.httpx.PoolTimeout,
+                           transport.httpx.WriteTimeout))):
         session = _session(transport)
         client = ClientProbe(replies)
         session.http_client = lambda client=client: client
-        # Three admitted laps, then the clock steps past the deadline.
-        session.monotonic = clock_script(*[100.0] * 7, 100.5)
+        # The deadline passes as the scripted replies run out.
+        session.monotonic = lambda client=client: (
+            100.5 if not client.replies else 100.0)
 
         result = _capture(session.poll_result(
             '', 0.001, interval=0, expect_id='command',

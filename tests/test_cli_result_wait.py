@@ -19,8 +19,11 @@ TOK = 'clitok'
 
 
 _SCRIPTED_HARNESS = (
-    'import itertools, json, sys\n'
+    'import itertools, json, sys, urllib.error, urllib.request\n'
     'from daedalus_cli import transport\n'
+    'def _urlopen(req, timeout=None):\n'
+    '    raise opened\n'
+    'urllib.request.urlopen = _urlopen\n'
     'class _Clock:\n'
     '    def __init__(self):\n'
     '        self.now = 1000.0\n'
@@ -40,10 +43,19 @@ _SCRIPTED_HARNESS = (
     'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
     '    calls.append(path)\n'
     '    reply = next(script)\n'
-    '    if reply in ("slow", "late"):  # spends its budget, the 30s if none\n'
+    '    # spends its timeout; a consume, sent with none, its 30s\n'
+    '    if reply in ("slow", "late", "connect", "reset"):\n'
     '        transport.time.now += timeout or 30\n'
-    '    if reply == "slow":\n'
+    '    if reply in ("slow", "early"):\n'
     '        raise transport.ConnectionFailed(TimeoutError("timed out"))\n'
+    '    if reply in ("connect", "blank"):  # urlopen raises it\n'
+    '        global opened\n'
+    '        opened = urllib.error.URLError(\n'
+    '            TimeoutError("timed out") if reply == "connect" else "")\n'
+    '        return transport._exchange(None, timeout, None)\n'
+    '    if reply == "reset":\n'
+    '        raise transport.ConnectionFailed(\n'
+    '            ConnectionResetError(104, "Connection reset by peer"))\n'
     '    if reply == "late":\n'
     '        raise transport.ErrorStatus("HTTP 502: x")\n'
     '    if reply == "mute":\n'
@@ -266,6 +278,7 @@ def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
             ('500', "HTTP 500: {'error': 1}"),
             ('cut', 'Connection failed: cut off'),
             ('mute', 'Connection failed: OSError'),
+            ('blank', 'Connection failed: URLError'),
             *((value, NOT_OBJECT) for value in ([], None, 'x', 3))):
         claimed = {'consumed': True, 'resultGeneration': 'g1'}
         outcome = _scripted_wait([OWN, failure, OWN, claimed])
@@ -283,11 +296,16 @@ def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
 def test_only_a_peeks_own_timeout_is_exempt_from_the_deadline(tmp):
     """Only a peek's own timeout is the deadline; a late 502 still fails."""
     del tmp
-    outcome = _scripted_wait(['slow'])
-    assert outcome['result'] is None, outcome
-    assert outcome['calls'] == [PEEK], outcome
-    outcome = _scripted_wait(['late'])
-    assert outcome['result'] == _unknown(1.0, 'HTTP 502: x'), outcome
+    for reply, expected in (
+            ('slow', None), ('connect', None),
+            ('late', _unknown(1.0, 'HTTP 502: x')),
+            ('early', _unknown(1.0, 'Connection failed: timed out')),
+            ('reset', _unknown(1.0, 'Connection failed: [Errno 104] '
+                               'Connection reset by peer'))):
+        outcome = _scripted_wait([reply])
+        assert outcome['result'] == expected, (reply, outcome)
+        if expected is None:
+            assert outcome['calls'] == [PEEK], (reply, outcome)
 
 
 def test_the_result_wait_reports_none_when_the_sleep_spends_the_budget(tmp):
