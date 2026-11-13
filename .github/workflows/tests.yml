@@ -37,8 +37,8 @@ on:
 
 # Read-only: without an explicit block a job inherits the
 # repository default, which can be write for the whole token.
-# Every checkout sets persist-credentials: false: a token left in
-# .git/config is reusable by every later step in its job.
+# Every checkout sets persist-credentials: false: nothing here pushes,
+# and a token left in .git/config is reusable by later steps in its job.
 permissions:
   contents: read
 
