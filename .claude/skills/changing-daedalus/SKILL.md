@@ -222,10 +222,13 @@ subject does not waive the line gate.
 its definition changed.** Declare the reason in the judged range with
 `Thresholds-Removed: <entry>=<bug|definition>`; entries use `family.path` or
 a bare baseline family declaring its entries. A path whose file is no longer
-tracked needs no declaration. A breach is never a removal reason. The audit workflow's
-direction guard compares the documents at the judged base and head: the
-merge base with the event's fixed base SHA on a PR, the event's before SHA
-on a push (`HEAD^` when that SHA is unusable). Every consumer uses that
+tracked needs no declaration. A breach is never a removal reason. The
+direction guard runs in `tests.yml`'s `thresholds` job, which `Aggregate
+workflow checks` requires on every pull request, and in `audit.yml` on
+every event, which covers the threshold-only pushes `tests.yml` skips. It
+compares the documents at the judged base and head: the merge base with
+the event's fixed base SHA on a PR, the event's before SHA on a push
+(`HEAD^` when that SHA is unusable). Every consumer uses that
 event snapshot; shallow or unreadable history is a refusal.
 
 Map measurement gates exempt only declared paths actually removed since the

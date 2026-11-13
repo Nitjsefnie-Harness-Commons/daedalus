@@ -19,7 +19,8 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 SOURCE = ROOT / 'scripts' / 'ci' / 'aggregate_gate.py'
 GATE_RUN = 'python3 scripts/ci/aggregate_gate.py'
-STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint')
+STRICT_JOBS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
+               'thresholds')
 SKIPPABLE_JOBS = ('actionlint', 'suites', 'wheel', 'coverage-matrix',
                   'coverage')
 HEAD = 'c2ae15819d9374fda4720e59a46c3a991c0319be'
@@ -201,8 +202,7 @@ def test_missing_context_fails_without_a_query(tmp):
     calls, read = _recorder({}, [])
     verdict, message = _gate().evaluate(_needs(suites='cancelled'),
                                         '', '', '', read)
-    assert verdict == 'query-failed'
-    assert 'query failed' in message, message
+    assert verdict == 'query-failed' and 'query failed' in message, message
     assert calls == []
 
 
@@ -242,9 +242,8 @@ def test_the_queries_target_the_own_run_and_this_workflow(tmp):
 
     calls, read = _recorder(
         MINE, [{'workflow_runs': [MINE]}, {'workflow_runs': [NEWER]}])
-    verdict, _ = mod.evaluate(_needs(suites='cancelled'),
-                              'o/r', '1', 'main', read)
-    assert verdict == 'cancelled-superseded'
+    assert mod.evaluate(_needs(suites='cancelled'), 'o/r', '1', 'main',
+                        read)[0] == 'cancelled-superseded'
     assert len(calls) == 2
 
 
@@ -444,8 +443,7 @@ def test_the_aggregate_job_runs_the_module(tmp):
     job = complete_job_mapping(_tests_yml(), 'aggregate') or {}
     assert job.get('if') == '${{ always() }}', job.get('if')
     assert 'if' not in _gate_step()
-    uses_steps = [step for step in job['steps'] if 'uses' in step]
-    assert len(uses_steps) == 1, job['steps']
+    assert len([s for s in job['steps'] if 'uses' in s]) == 1, job['steps']
     assert job['permissions'] == {'contents': 'read', 'actions': 'read'}
     gate = _gate_step()
     assert gate['env'] == {
