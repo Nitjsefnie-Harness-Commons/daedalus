@@ -14,7 +14,7 @@ measures, and the whole of what is claimed here. That is not a property of
 the comparison; it is a property of WHERE THIS RUNS, and it is the whole
 reason the rule can be this strict:
 
-  * this is a suite, so it runs on every pull request, not after the
+  * this suite runs on every pull request into main, not after the
     merge. A branch that adds a tracked file and does not regenerate is
     RED on its own head and RED on its own merge ref, before it can
     merge at all;

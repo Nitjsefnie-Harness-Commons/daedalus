@@ -60,9 +60,10 @@ invocation it is (issue #1320).
 
 An incomplete set is answered, never waited on forever. A pull request for
 this head reporting itself CONFLICTING or DIRTY refuses at once (4), since
-the run is never going to be dispatched. Otherwise the set is merely not
-built yet, which on a mergeable head is normal for a minute or two: the
-wait allows --grace seconds from the FIRST observation and refuses (4) if
+the run is never going to be dispatched. Otherwise the set is not built
+yet, normal on a mergeable head for a minute or two, or never will be (a
+pull request into a base other than main gets no `tests` run): the wait
+allows --grace seconds from the FIRST observation and refuses (4) if
 the gate has still not appeared, naming the workflow AND the check no run
 carried, the grace, and the runs that do exist. That lookup is a
 disambiguation, not this tool's subject: a failed one is said on stderr and
