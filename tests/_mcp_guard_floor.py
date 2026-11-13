@@ -667,8 +667,7 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'raise argparse.ArgumentTypeError('
      "f'{value!r} is not valid JSON: {error}') from None",
      ARGS + 'test_malformed_params_are_refused_at_parse_time'),
-    # Met by a refused connect (URLError), a cut-off read (HTTPException), a
-    # cut-off error read (HTTPError body) and a whole error answer (status).
+    # In order: a refused connect, cut-off read, cut-off error read, a 502.
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e.reason) from e',
      'tests/test_cli_error_reporting.py::'

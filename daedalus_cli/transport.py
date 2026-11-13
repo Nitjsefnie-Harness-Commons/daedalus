@@ -232,7 +232,7 @@ def _failure_report(failure):
 
 
 def _json_body(response):
-    """Decode a 200's body, refusing a non-JSON one as a broken transport.
+    """Decode a 200's body, refusing one not JSON or too deep as broken.
 
     An HTML page where the bridge's JSON should be is the front end's
     answer, not the bridge's — the same class of failure as a refused
@@ -324,7 +324,7 @@ def api_delete(path, body):
 
 
 def _result_answer(path, **timeout):
-    """A /result answer: the bridge's JSON object, else a broken answer."""
+    """A /result answer, a JSON object; ConnectionFailed for any other."""
     answer = _request('GET', path, **timeout)
     if not isinstance(answer, dict):
         raise ConnectionFailed('the answer is JSON but not an object')
@@ -334,10 +334,10 @@ def _result_answer(path, **timeout):
 def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     """Return the result for one command delivery, or None on timeout.
 
-    A timeout after any failed result request but a peek's own timeout
-    exits instead, naming the outcome unknown: the command is queued, and a
-    failed consume may have claimed its result, so no later pending answer
-    can say it did not run.
+    A timeout after any failed result request, except a peek timeout landing
+    at the deadline, exits instead, naming the outcome unknown: a failed
+    consume may have claimed the result, so no later pending answer can say
+    the command did not run.
 
     The PUT response's delivery id distinguishes this invocation from a stale
     result with the same command id. Conditional consume names the generation
@@ -375,14 +375,10 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
             res = _result_answer(_query_path('/result', params),
                                  timeout=remaining)
         except (ConnectionFailed, ErrorStatus) as error:
-            # The bridge answers /result at once, so a reset, a cut-off
-            # body or an error status here is the proxy's. The command is
-            # already queued and the browser will run it; exiting now
-            # reports a failure for work that goes on to happen, and a
-            # retry runs it twice. A failed peek is treated like a pending
-            # slot: the deadline still says when to stop. The PUT is never
-            # retried. A peek's own timeout, the budget left of the wait,
-            # is the deadline arriving, not a failure.
+            # The bridge answers /result at once, so a failed peek is the
+            # proxy's, and the queued command still runs: wait on as if
+            # pending. A timeout once the deadline has passed is that
+            # deadline, each peek being handed what is left.
             if not (isinstance(error.args[0], TimeoutError)
                     and time.monotonic() >= deadline):
                 failure = error
@@ -400,8 +396,8 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
             continue
         # The consume is what actually claims the result, so it is allowed to
         # finish: giving up here would leave a result nobody takes. It is
-        # still bounded, by the ordinary request timeout. A failed one is
-        # retried by the next lap's peek, for the same reason as a peek.
+        # still bounded, by the ordinary request timeout. A failed one is not
+        # final: the next lap peeks and consumes again.
         try:
             consumed = _result_answer(_query_path('/result', {
                 **params, 'consume': '1', 'expected': generation}))
