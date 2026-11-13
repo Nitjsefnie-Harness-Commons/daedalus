@@ -106,7 +106,7 @@ def _normalise(candidate, base, tracked):
 
 # Each script loads as `_gate_N`, its directory first on sys.path. Beside the
 # imports that load runs, `_imported_files` reads every import statement and
-# every string in the first argument of an `import_module` or `__import__`.
+# the literal names an `import_module` or `__import__` call can be given.
 _LOADED_FILES = '''import importlib.util as u, sys
 for index, path in enumerate(sys.argv[1:]):
     sys.path.insert(0, path.rsplit('/', 1)[0])
@@ -114,6 +114,15 @@ for index, path in enumerate(sys.argv[1:]):
     spec.loader.exec_module(u.module_from_spec(spec))
 print('\\n'.join(getattr(m, '__file__', None) or '' for m in
                  list(sys.modules.values())))'''
+
+
+def _module_names(arg=None):
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return [arg.value]
+    if not isinstance(arg, ast.IfExp):
+        return []
+    body, orelse = _module_names(arg.body), _module_names(arg.orelse)
+    return body + orelse if body and orelse else []
 
 
 def _imported_files(rel, base, tracked):
@@ -128,8 +137,7 @@ def _imported_files(rel, base, tracked):
             stems.update('/'.join([*parts, a.name]) for a in node.names)
         elif isinstance(node, ast.Call) and ast.unparse(node.func).split(
                 '.')[-1] in ('import_module', '__import__'):
-            names = [v for a in node.args[:1] for c in ast.walk(a)
-                     if isinstance(v := getattr(c, 'value', 0), str)]
+            names = _module_names(*node.args[:1])
             assert names, f'{rel}:{node.lineno}: unresolvable dynamic import'
             stems.update(name.replace('.', '/') for name in names)
     return {path for path in tracked for stem in stems
@@ -175,8 +183,8 @@ def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
 
 def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
     m, extra = _mod(), 'extras-requirements.txt'
-    reached = {'tests/_fn.py', 'tests/_pkg/__init__.py', 'tests/_dyn.py',
-               'scripts/_rel.py'}
+    reached = {'tests/_fn.py', 'tests/_pkg/__init__.py', 'tests/_pkg/dot.py',
+               'tests/_imp.py', 'scripts/_rel.py'}
     for spelling, path in (
             ('./scripts/version_gate.sh', 'scripts/version_gate.sh'),
             ('python3 scripts/scan_secrets_extra.py',
@@ -189,7 +197,7 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
         (base / extra).write_text('mcp\n', encoding='utf-8')
         (base / path).write_text(  # imports no module-level load runs
             'def probe():\n    import _fn\n    from _pkg import name\n'
-            "    importlib.import_module('_dyn')\n"
+            "    importlib.import_module('_pkg.dot')\n    __import__('_imp')\n"
             "if __name__ == '__main__':\n    from . import _rel\n",
             encoding='utf-8')
         workflows = base / '.github' / 'workflows'
@@ -201,10 +209,12 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
         used = _workflow_gate_files(workflows, base, {path, *reached})
         assert used == {path, *(reached if path.endswith('.py') else ())}, used
         assert not any(m.is_gate_defining(p) for p in (*used, extra)), used
-        (base / path).write_text('def f(n):\n    import_module(n)\n', 'utf-8')
-        error = _raised(AssertionError, _workflow_gate_files, workflows,
-                        base, {path})
-        assert (f'{path}:2:' in str(error)) == path.endswith('.py'), error
+        for arg in ('n', "f'_x{n}'", "'_x' + n", "'_x' if n else n"):
+            (base / path).write_text(
+                f'def f(n):\n    import_module({arg})\n', 'utf-8')
+            error = _raised(AssertionError, _workflow_gate_files, workflows,
+                            base, {path})
+            assert (f'{path}:2:' in str(error)) == path.endswith('.py'), error
 
 
 def test_the_merge_base_tells_ancestor_from_not(tmp):
@@ -567,13 +577,7 @@ def test_publish_fake_refuses_unmodelled_listing_calls(tmp):
     bad += [['gh', 'api', _CHECK_LIST, '--method', 'GET', *shape]
             for shape in ([], ['--jq', _SELECTOR], ['--paginate'],
                           ['--paginate', '--jq', 'unmodelled projection'])]
-    accepted = []
-    for argv in bad:
-        try:
-            read(argv)
-        except AssertionError:
-            continue
-        accepted.append(argv)
+    accepted = [a for a in bad if not _raised(AssertionError, read, a)]
     assert not accepted, f'unmodelled listing calls accepted: {accepted}'
 
 
