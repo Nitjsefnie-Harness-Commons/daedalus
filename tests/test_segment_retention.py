@@ -2,8 +2,8 @@
 """The sweep that removes segment jobs idle past the retention.
 
 Jobs are laid out with `segment_store`'s own path helpers, so the sweep must
-remove the names the store writes; mtimes are set with `os.utime`, and the
-clock is handed in except where its default is the subject.
+remove the names the store writes; the clock is handed in except where its
+default is the subject.
 """
 import importlib
 import json
@@ -66,7 +66,6 @@ def test_an_idle_job_is_removed_and_a_fresh_one_is_kept(tmp):
 
 
 def test_the_newest_of_record_marker_and_directory_is_the_activity(tmp):
-    """One fresh part keeps an otherwise idle job, whichever part it is."""
     tmp = Path(tmp)
     retention = _retention('segret_newest')
     now = LONG_AGO
@@ -79,7 +78,6 @@ def test_the_newest_of_record_marker_and_directory_is_the_activity(tmp):
 
 
 def test_a_job_exactly_the_retention_old_is_removed(tmp):
-    """`now - activity >= retention` expires; one second younger is kept."""
     tmp = Path(tmp)
     retention = _retention('segret_boundary')
     expired = _job(tmp, 'at-retention')
@@ -127,7 +125,6 @@ def test_the_age_is_read_again_under_the_jobs_own_lock(tmp):
 
 
 def test_only_safe_job_names_are_ever_candidates(tmp):
-    """A stray `.json`, a reserved name and an unsafe name are never jobs."""
     tmp = Path(tmp)
     retention = _retention('segret_names')
     live = _job(tmp, 'live-job', *(LONG_AGO,) * 4)
@@ -157,7 +154,6 @@ class _HeldLock:
 
 
 def test_every_removal_happens_inside_the_deciding_hold(tmp):
-    """Record, marker, temp, then directory, each while the lock is held."""
     tmp = Path(tmp)
     retention = _retention('segret_held')
     store = retention.segment_store
@@ -187,7 +183,6 @@ def test_every_removal_happens_inside_the_deciding_hold(tmp):
 
 
 def test_a_half_removed_job_is_collected_from_either_half(tmp):
-    """A directory without its record, and a record without its directory."""
     tmp = Path(tmp)
     retention = _retention('segret_halves')
     orphans = (_job(tmp, 'directory-only', None, None, None)
@@ -204,7 +199,6 @@ def _symlink_or_skip(link, target):
 
 
 def test_a_symlinked_job_name_is_never_followed_or_removed(tmp):
-    """The idle records beside two links go; the links and targets stay."""
     tmp = Path(tmp)
     retention = _retention('segret_symlink')
     root = tmp / 'segments'
@@ -225,7 +219,6 @@ def test_a_symlinked_job_name_is_never_followed_or_removed(tmp):
 
 
 def test_an_aged_symlinked_record_is_neither_followed_nor_removed(tmp):
-    """The link outlives its idle job, and the file it names is untouched."""
     tmp = Path(tmp)
     retention = _retention('segret_symrecord')
     root = tmp / 'segments'
@@ -268,7 +261,6 @@ def test_a_junction_is_never_followed_or_removed(tmp):
 
 
 def test_one_job_that_cannot_be_removed_does_not_stop_the_sweep(tmp):
-    """The next expired job is still removed after an OSError."""
     tmp = Path(tmp)
     retention = _retention('segret_fault')
     failing = _job(tmp, 'a-cannot-remove')
@@ -293,12 +285,10 @@ def test_one_job_that_cannot_be_removed_does_not_stop_the_sweep(tmp):
 
 
 def test_a_root_that_cannot_be_scanned_is_answered_not_raised(tmp):
-    """The sweep thread survives a segments root it cannot list."""
     _retention('segret_absent').sweep(Path(tmp) / 'absent', RETENTION)
 
 
 def test_without_a_given_clock_the_sweep_reads_the_wall_clock(tmp):
-    """Unset `now` is the time of the sweep: decades old goes, new stays."""
     tmp = Path(tmp)
     retention = _retention('segret_clock')
     ancient = _job(tmp, 'ancient-job')
@@ -347,7 +337,6 @@ def test_gc_loop_forwards_root_and_retention_after_sleep(_tmp):
 
 
 def test_a_failing_sweep_does_not_end_the_gc_loop(_tmp):
-    """The thread outlives one sweep raising: the next sweep still runs."""
     root = Path('segments')
     assert _gc_calls(60, 2, failing=1) == [
         ('sleep', 60.0), ('sweep', root, 60)] * 2
@@ -365,7 +354,6 @@ segment_retention.gc_loop = gc_loop
 
 
 def test_the_bridge_starts_the_sweep_on_its_segments_root_and_setting(tmp):
-    """`server.py` hands the sweep thread its own root and the setting."""
     seam = Path(tmp) / 'seam'
     seam.mkdir()
     record = seam / 'gc-loop-args.json'
