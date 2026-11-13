@@ -16,6 +16,8 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _realbrowser  # noqa: E402
+import _realbrowser_workers  # noqa: E402
 import _util  # noqa: E402
 
 # A real second process: it owns a directory until killed, never cleaning up.
@@ -95,6 +97,34 @@ def test_a_refused_reclaim_is_reported_and_the_run_goes_on(tmp):
     assert str(refused[0]) in report.getvalue(), report.getvalue()
     _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
     assert list(parent.iterdir()) == [], list(parent.iterdir())
+
+
+def test_both_browser_launches_keep_their_temporary_files_in_the_run(tmp):
+    """Chromium's own temp dirs land in the test's directory, not /tmp."""
+    launched = []
+
+    def refuse(argv, **kwargs):
+        launched.append((argv[0], kwargs.get('env')))
+        raise FileNotFoundError(2, 'no browser here', argv[0])
+
+    profile = Path(tmp) / 'chromium-profile'
+    with mock.patch.object(subprocess, 'Popen', refuse):
+        with contextlib.suppress(_realbrowser.BrowserEnvironmentSkipped):
+            _realbrowser._launch_and_reach('node', 'chromium', 'x', profile,
+                                           'w.js', 'http://127.0.0.1/', [])
+        with contextlib.suppress(FileNotFoundError):
+            _realbrowser_workers._diagnosis_launch(
+                'node', 'chromium', Path(tmp), 'w.js', tmp, 'ext', 'profile')
+    names = ('TMPDIR', 'TMP', 'TEMP', 'MAC_CHROMIUM_TMPDIR')
+    inherited = {k: v for k, v in os.environ.items() if k not in names}
+    # Never the whole environment in a message: it carries credentials.
+    shapes = [(browser, env is None) for browser, env in launched]
+    assert shapes == [('chromium', False)] * 2, shapes
+    for _browser, env in launched:
+        temps = {name: env.get(name) for name in names}
+        assert temps == dict.fromkeys(names, tmp), temps
+        assert env.items() >= inherited.items(), sorted(
+            name for name, held in inherited.items() if env.get(name) != held)
 
 
 if __name__ == '__main__':
