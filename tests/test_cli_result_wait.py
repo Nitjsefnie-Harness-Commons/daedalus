@@ -18,9 +18,12 @@ from _queueread import queued_command  # noqa: E402
 TOK = 'clitok'
 
 
-_WAIT_HARNESS = (
-    'import json\n'
+_SCRIPTED_HARNESS = (
+    'import itertools, json, sys, urllib.error\n'
     'from daedalus_cli import transport\n'
+    'def _open(req, timeout=None):\n'
+    '    raise opened\n'
+    'transport._open = _open\n'
     'class _Clock:\n'
     '    def __init__(self):\n'
     '        self.now = 1000.0\n'
@@ -33,110 +36,71 @@ _WAIT_HARNESS = (
     '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
     '        self.now += seconds\n'
-    'cases = (\n'
-    '    ("absent", None, {}),\n'
-    '    ("empty", "", {"deliveryId": ""}),\n'
-    '    ("foreign", "d1", {"deliveryId": "D1"}),\n'
-    ')\n'
-    'outcomes = []\n'
-    'for name, sent_id, delivery_field in cases:\n'
-    '    transport.time = _Clock()\n'
-    '    deadline = transport.time.monotonic() + 0.5\n'
-    '    calls = []\n'
-    '    result_body = {"id": "c1", "result": "STALE",\n'
-    '                   "error": None, "resultGeneration": "g1"}\n'
-    '    result_body.update(delivery_field)\n'
-    '    def fake_api(method, path, body=None, timeout=None,\n'
-    '                 headers=None):\n'
-    '        calls.append(path)\n'
-    '        if "consume=1" in path:\n'
-    '            return {"consumed": True, "resultGeneration": "g1"}\n'
-    '        return result_body\n'
-    '    transport._request = fake_api\n'
+    'transport.time = _Clock()\n'
+    'replies, timeout, interval, delivery = json.loads(sys.argv[1])\n'
+    'script = itertools.cycle(replies)\n'
+    'calls = []\n'
+    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
+    '    calls.append(path)\n'
+    '    reply = next(script)\n'
+    '    # spends its timeout; a consume, sent with none, its 30s\n'
+    '    if reply in ("slow", "late", "connect", "reset"):\n'
+    '        transport.time.now += timeout or 30\n'
+    '    if reply in ("slow", "early"):\n'
+    '        raise transport.ConnectionFailed(TimeoutError("timed out"))\n'
+    '    if reply in ("connect", "blank"):  # _open raises it\n'
+    '        global opened\n'
+    '        opened = urllib.error.URLError(\n'
+    '            TimeoutError("timed out") if reply == "connect" else "")\n'
+    '        return transport._exchange(None, timeout, None)\n'
+    '    if reply == "reset":\n'
+    '        raise transport.ConnectionFailed(\n'
+    '            ConnectionResetError(104, "Connection reset by peer"))\n'
+    '    if reply == "late":\n'
+    '        raise transport.ErrorStatus("HTTP 502: x")\n'
+    '    if reply == "mute":\n'
+    '        raise transport.ConnectionFailed(OSError())\n'
+    '    if reply == "cut":\n'
+    '        raise transport.ConnectionFailed("cut off")\n'
+    '    if reply == "500":\n'
+    '        raise transport.ErrorStatus("HTTP 500: {\'error\': 1}")\n'
+    '    return reply\n'
+    'transport._request = fake_api\n'
+    'try:\n'
     '    result = transport.wait_for_result(\n'
-    '        "c1", "extension", sent_id, 0.5, interval=0.01)\n'
-    '    outcomes.append({\n'
-    '        "name": name,\n'
-    '        "result": None if result is None else result["result"],\n'
-    '        "peeks": [p for p in calls if "consume=1" not in p],\n'
-    '        "consumes": [p for p in calls if "consume=1" in p],\n'
-    '        "sleeps": transport.time.sleeps,\n'
-    '        "now": transport.time.now,\n'
-    '        "deadline": deadline,\n'
-    '    })\n'
-    'print(json.dumps(outcomes, sort_keys=True))\n')
+    '        "c1", "extension", delivery, timeout, interval=interval)\n'
+    'except SystemExit as stop:\n'
+    '    result = {"exit": stop.code}\n'
+    'print(json.dumps({"sleeps": transport.time.sleeps, "calls": calls,\n'
+    '                  "now": transport.time.now, "result": result}))\n')
 
 
-_GENERATION_HARNESS = (
-    'import json\n'
-    'from daedalus_cli import transport\n'
-    'calls = []\n'
-    'result_body = {"id": "c1", "deliveryId": "d1", "result": "R1",\n'
-    '               "error": None, "resultGeneration": "g1"}\n'
-    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
-    '    calls.append(path)\n'
-    '    if "consume=1" in path:\n'
-    '        return {"consumed": True, "resultGeneration": "g2"}\n'
-    '    return result_body\n'
-    'transport._request = fake_api\n'
-    'result = transport.wait_for_result(\n'
-    '    "c1", "extension", "d1", 2.0, interval=0.01)\n'
-    'print(json.dumps({"result": result, "calls": calls},\n'
-    '                 sort_keys=True))\n')
+def _scripted_wait(replies, timeout=1.0, interval=0.5,
+                   delivery: str | None = 'd1'):
+    """The wait over `_request` answers replayed in a cycle."""
+    run = subprocess.run(
+        [sys.executable, '-c', _SCRIPTED_HARNESS,
+         json.dumps([replies, timeout, interval, delivery])],
+        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
+        text=True, encoding='utf-8', timeout=10)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    return json.loads(run.stdout)
 
 
-_BACKOFF_HARNESS = (
-    'import json\n'
-    'from daedalus_cli import transport\n'
-    'class _Clock:\n'
-    '    def __init__(self):\n'
-    '        self.now = 1000.0\n'
-    '        self.sleeps = []\n'
-    '    def monotonic(self):\n'
-    '        return self.now\n'
-    '    def sleep(self, seconds):\n'
-    '        if seconds < 0:\n'
-    '            raise ValueError("sleep length must be non-negative")\n'
-    '        self.sleeps.append(seconds)\n'
-    '        self.now += seconds\n'
-    'transport.time = _Clock()\n'
-    'calls = []\n'
-    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
-    '    calls.append(path)\n'
-    '    return {"pending": True}\n'
-    'transport._request = fake_api\n'
-    'result = transport.wait_for_result(\n'
-    '    "c1", "extension", "d1", %s, interval=%s)\n'
-    'print(json.dumps({"sleeps": transport.time.sleeps,\n'
-    '                  "polls": len(calls),\n'
-    '                  "result": result}, sort_keys=True))\n')
+OWN = {'id': 'c1', 'deliveryId': 'd1', 'resultGeneration': 'g1',
+       'result': 7, 'error': None}
+PEEK = '/result?tab=extension&delivery=d1'
+CONSUME = PEEK + '&consume=1&expected=g1'
 
 
-_CUTOFF_HARNESS = (
-    'import json\n'
-    'from daedalus_cli import transport\n'
-    'class _Clock:\n'
-    '    def __init__(self):\n'
-    '        self.now = 1000.0\n'
-    '        self.sleeps = []\n'
-    '    def monotonic(self):\n'
-    '        return self.now\n'
-    '    def sleep(self, seconds):\n'
-    '        if seconds < 0:\n'
-    '            raise ValueError("sleep length must be non-negative")\n'
-    '        self.sleeps.append(seconds)\n'
-    '        self.now += seconds\n'
-    'transport.time = _Clock()\n'
-    'calls = []\n'
-    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
-    '    calls.append(path)\n'
-    '    raise transport.ConnectionFailed("cut off")\n'
-    'transport._request = fake_api\n'
-    'result = transport.wait_for_result(\n'
-    '    "c1", "extension", "d1", %s, interval=%s)\n'
-    'print(json.dumps({"sleeps": transport.time.sleeps,\n'
-    '                  "polls": len(calls),\n'
-    '                  "result": result}, sort_keys=True))\n')
+NOT_OBJECT = 'Connection failed: the answer is JSON but not an object'
+
+
+def _unknown(timeout, failure):
+    return {'exit': (
+        f'Timeout ({timeout}s), outcome unknown: a result request failed '
+        f'({failure}). The command was sent and may have run; check its '
+        'effect before retrying.')}
 
 
 _OVERSHOOT_HARNESS = (
@@ -197,35 +161,23 @@ def _wait_for(predicate, timeout=15, what='condition'):
 
 
 def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
-    """Uncorrelated delivery IDs keep polling without consuming a result.
-
-    The virtual clock stands in for time.sleep and records each
-    interval the loop REQUESTS. The real-clock form demanded two polls,
-    a wall-clock margin a busy runner could exhaust - the recorded leg
-    reached no poll at all, failing a correct waiter one level below the
-    intermittency that leg was recorded for.
-    """
+    """Uncorrelated delivery IDs keep polling without consuming a result."""
     del tmp
-    run = subprocess.run(
-        [sys.executable, '-c', _WAIT_HARNESS],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
-    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-    outcomes = json.loads(run.stdout)
-    expected = (
-        ('absent', '/result?tab=extension'),
-        ('empty', '/result?tab=extension'),
-        ('foreign', '/result?tab=extension&delivery=d1'),
-    )
-    assert len(outcomes) == len(expected), outcomes
-    for outcome, (name, selector) in zip(outcomes, expected):
-        assert outcome['name'] == name, outcome
-        assert outcome['result'] is None, outcome
-        assert outcome['consumes'] == [], outcome
+    for name, sent_id, delivery_field, selector in (
+            ('absent', None, {}, '/result?tab=extension'),
+            ('empty', '', {'deliveryId': ''}, '/result?tab=extension'),
+            ('foreign', 'd1', {'deliveryId': 'D1'},
+             '/result?tab=extension&delivery=d1')):
+        stale = {'id': 'c1', 'result': 'STALE', 'error': None,
+                 'resultGeneration': 'g1', **delivery_field}
+        outcome = _scripted_wait([stale], 0.5, 0.01, sent_id)
+        peeks = [p for p in outcome['calls'] if 'consume=1' not in p]
+        assert outcome['result'] is None, (name, outcome['result'])
+        assert len(peeks) == len(outcome['calls']), (name, outcome['calls'])
         sleeps = outcome['sleeps']
         # Bounded failure message: a pathological record can be long.
-        brief = {'name': outcome['name'], 'result': outcome['result'],
-                 'peeks': len(outcome['peeks']), 'sleep_n': len(sleeps),
+        brief = {'name': name, 'result': outcome['result'],
+                 'peeks': len(peeks), 'sleep_n': len(sleeps),
                  'sleep_head': sleeps[:6], 'sleep_tail': sleeps[-2:]}
         # What the loop REQUESTS, which a real clock records nothing of.
         # No exact peek count: how many laps clear a 0.5s budget is a
@@ -241,20 +193,16 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
         # loop neither quit early nor overshot: the last sleep is the
         # exact remainder by construction, so this holds for any number
         # of laps and is not what reds on a wrong ramp.
-        assert len(outcome['peeks']) == len(sleeps) - 1, brief
-        assert outcome['now'] == outcome['deadline'], brief
-        assert set(outcome['peeks']) == {selector}, brief
+        assert len(peeks) == len(sleeps) - 1, brief
+        assert outcome['now'] == 1000.0 + 0.5, brief
+        assert set(peeks) == {selector}, brief
 
 
 def test_result_wait_rejects_receipt_for_different_generation(tmp):
     """Repeated wrong-generation receipts cannot claim the selected body."""
     del tmp
-    run = subprocess.run(
-        [sys.executable, '-c', _GENERATION_HARNESS],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
-    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-    outcome = json.loads(run.stdout)
+    outcome = _scripted_wait([OWN, {
+        'consumed': True, 'resultGeneration': 'g2'}], 2.0, 0.01)
     assert outcome['result'] is None, outcome
     peeks = [path for path in outcome['calls'] if 'consume=1' not in path]
     consumes = [path for path in outcome['calls'] if 'consume=1' in path]
@@ -282,15 +230,10 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
         (3.0, 0.3, [0.02, 0.04, 0.08, 0.16, 0.3]),
     )
     for timeout, interval, ramp in cases:
-        run = subprocess.run(
-            [sys.executable, '-c', _BACKOFF_HARNESS % (timeout, interval)],
-            cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-            text=True, encoding='utf-8', timeout=10)
-        assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-        outcome = json.loads(run.stdout)
+        outcome = _scripted_wait([{'pending': True}], timeout, interval)
         sleeps = outcome['sleeps']
         # Bounded failure message: a pathological record can be long.
-        brief = {'polls': outcome['polls'], 'result': outcome['result'],
+        brief = {'polls': len(outcome['calls']), 'result': outcome['result'],
                  'sleep_n': len(sleeps), 'sleep_head': sleeps[:6]}
         assert outcome['result'] is None, brief
         assert sleeps[:len(ramp)] == ramp, brief
@@ -298,11 +241,11 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
         # The last lap is cut to what is left of the budget, so the
         # requested record alone spends it exactly.
         assert abs(sum(sleeps) - timeout) < 1e-9, brief
-        assert outcome['polls'] == len(sleeps) - 1, brief
+        assert len(outcome['calls']) == len(sleeps) - 1, brief
 
 
 def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
-    """Every peek failing still ends in None, on the ramp, exactly.
+    """Every peek failing ends on the ramp, exactly, its outcome unknown.
 
     ConnectionFailed from _request is what a proxy cut produces at
     transport level, whatever the HTTP shape of the cut. The virtual
@@ -312,24 +255,57 @@ def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
     the property the CLI-level pins could not have (issue 901).
     """
     del tmp
-    run = subprocess.run(
-        [sys.executable, '-c', _CUTOFF_HARNESS % (1.0, 0.5)],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
-    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-    outcome = json.loads(run.stdout)
+    outcome = _scripted_wait(['cut'])
     sleeps = outcome['sleeps']
-    brief = {'polls': outcome['polls'], 'result': outcome['result'],
+    brief = {'polls': len(outcome['calls']), 'result': outcome['result'],
              'sleeps': sleeps}
-    assert outcome['result'] is None, brief
+    assert outcome['result'] == _unknown(
+        1.0, 'Connection failed: cut off'), brief
     # Five ramp laps fit in 1.0s (0.62 spent); the sixth is cut to the
     # remainder, which spends the budget, so the loop expires before a
     # sixth peek.
-    assert outcome['polls'] == 5, brief
+    assert len(outcome['calls']) == 5, brief
     assert sleeps[:5] == [0.02, 0.04, 0.08, 0.16, 0.32], brief
     assert len(sleeps) == 6, brief
     assert 0.32 < sleeps[-1] < 0.5, brief
     assert abs(sum(sleeps) - 1.0) < 1e-9, brief
+
+
+def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
+    """A failed consume is retried; never claimed, the outcome is unknown."""
+    del tmp
+    for failure, named in (
+            ('500', "HTTP 500: {'error': 1}"),
+            ('cut', 'Connection failed: cut off'),
+            ('mute', 'Connection failed: OSError'),
+            ('blank', 'Connection failed: URLError'),
+            *((value, NOT_OBJECT) for value in ([], None, 'x', 3))):
+        claimed = {'consumed': True, 'resultGeneration': 'g1'}
+        outcome = _scripted_wait([OWN, failure, OWN, claimed])
+        assert outcome['result'] == OWN, (failure, outcome)
+        assert outcome['calls'] == [PEEK, CONSUME] * 2, (failure, outcome)
+        outcome = _scripted_wait([OWN, failure] + [{'pending': True}] * 4)
+        assert outcome['result'] == _unknown(1.0, named), (failure, outcome)
+        assert outcome['calls'] == [PEEK, CONSUME] + [PEEK] * 4, (
+            failure, outcome)
+    outcome = _scripted_wait([OWN, 'slow'])  # consume ends past the deadline
+    assert outcome['result'] == _unknown(
+        1.0, 'Connection failed: timed out'), outcome
+
+
+def test_only_a_peeks_own_timeout_is_exempt_from_the_deadline(tmp):
+    """Only a peek's own timeout is the deadline; a late 502 still fails."""
+    del tmp
+    for reply, expected in (
+            ('slow', None), ('connect', None),
+            ('late', _unknown(1.0, 'HTTP 502: x')),
+            ('early', _unknown(1.0, 'Connection failed: timed out')),
+            ('reset', _unknown(1.0, 'Connection failed: [Errno 104] '
+                               'Connection reset by peer'))):
+        outcome = _scripted_wait([reply])
+        assert outcome['result'] == expected, (reply, outcome)
+        if expected is None:
+            assert outcome['calls'] == [PEEK], (reply, outcome)
 
 
 def test_the_result_wait_reports_none_when_the_sleep_spends_the_budget(tmp):

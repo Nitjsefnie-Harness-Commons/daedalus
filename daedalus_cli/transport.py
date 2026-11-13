@@ -14,6 +14,7 @@ values from its own store rather than the process environment. Nothing here
 depends on that: with no such module the environment is the only source.
 """
 import argparse
+import functools
 import http.client
 import json
 import os
@@ -209,12 +210,30 @@ class ConnectionFailed(Exception):
     Every api* function turns this into `sys.exit('Connection failed: ...')`.
     It exists as an exception so the one caller that can do better than
     exit — the result wait, whose command is already queued and running —
-    can catch it on a peek and keep polling.
+    can catch it and keep polling.
     """
 
 
+class ErrorStatus(Exception):
+    """A complete answer with an error status; str() is `HTTP <code>: ...`.
+
+    An exception rather than an exit for the same reason as
+    ConnectionFailed: the result wait outlives it.
+    """
+
+
+def _failure_report(failure):
+    """The words every api* function exits with for a failed request."""
+    if isinstance(failure, ErrorStatus):
+        return str(failure)
+    failed = failure.args[0] if failure.args else failure
+    if isinstance(failed, str):  # a wrapper's text: name the wrapper
+        failed = failure.__cause__ or failure
+    return f'Connection failed: {str(failure) or type(failed).__name__}'
+
+
 def _json_body(response):
-    """Decode a 200's body, refusing a non-JSON one as a broken transport.
+    """Decode a 200's body, refusing one not JSON or too deep as broken.
 
     An HTML page where the bridge's JSON should be is the front end's
     answer, not the bridge's — the same class of failure as a refused
@@ -224,28 +243,83 @@ def _json_body(response):
         return json.loads(response.read())
     except ValueError as error:
         raise ConnectionFailed(error) from error
+    except RecursionError as error:
+        raise ConnectionFailed(
+            'the answer nests too deep to decode') from error
+
+
+_MAX_INTERIM_RESPONSES = 100
+
+
+class _InterimSkippingResponse(http.client.HTTPResponse):
+    """Skips interim 1xx responses, which http.client does only for 100.
+
+    `101 Switching Protocols` is never skipped: what follows it is not HTTP.
+    """
+
+    def begin(self, **kwargs):
+        super().begin(**kwargs)
+        skipped = 0
+        while (100 <= self.status < 200
+               and self.status != http.HTTPStatus.SWITCHING_PROTOCOLS):
+            if skipped == _MAX_INTERIM_RESPONSES:
+                raise http.client.HTTPException(
+                    f'got more than {_MAX_INTERIM_RESPONSES} '
+                    'interim responses')
+            skipped += 1
+            # begin() returns at once while headers is set
+            self.headers = None  # pyright: ignore[reportAttributeAccessIssue]
+            super().begin(**kwargs)
+
+
+def _interim_skipping(connection_class):
+    return type(connection_class.__name__, (connection_class,),
+                {'response_class': _InterimSkippingResponse})
+
+
+class _HttpHandler(urllib.request.HTTPHandler):
+    def do_open(self, http_class, req, **http_conn_args):
+        return super().do_open(
+            _interim_skipping(http_class), req, **http_conn_args)
+
+
+class _HttpsHandler(urllib.request.HTTPSHandler):
+    def do_open(self, http_class, req, **http_conn_args):
+        return super().do_open(
+            _interim_skipping(http_class), req, **http_conn_args)
+
+
+@functools.cache
+def _opener():
+    """Built once, on first use: the HTTPS handler's SSL context is slow."""
+    return urllib.request.build_opener(_HttpHandler, _HttpsHandler)
+
+
+def _open(req, timeout):
+    """urlopen() that skips interim responses and ignores urllib's opener."""
+    return _opener().open(req, timeout=timeout)
 
 
 def _exchange(req, timeout, read):
     """Send one request and return read(response).
 
-    HTTPError and URLError are raised by urlopen itself. A reset, a
+    HTTPError and URLError are raised by _open itself. A reset, a
     timeout or an IncompleteRead raised while the body is being READ —
-    after urlopen returned — must be caught here too: those come from the
+    after _open returned — must be caught here too: those come from the
     proxy in front of the bridge, not from the bridge, and they are the
     same class of failure as a refused connection, no answer arrived.
     HTTPError is a URLError and URLError is an OSError, so the order of
     the clauses is the order of specificity.
     """
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _open(req, timeout) as r:
             return read(r)
     except urllib.error.HTTPError as e:
         try:
             detail = _http_error_detail(e)
         except (OSError, http.client.HTTPException) as failure:
             raise ConnectionFailed(failure) from failure
-        sys.exit(f'HTTP {e.code}: {detail}')
+        raise ErrorStatus(f'HTTP {e.code}: {detail}') from e
     except urllib.error.URLError as e:
         raise ConnectionFailed(e.reason) from e
     except (OSError, http.client.HTTPException) as e:
@@ -255,12 +329,12 @@ def _exchange(req, timeout, read):
 def _exchange_or_exit(req, timeout, read):
     try:
         return _exchange(req, timeout, read)
-    except ConnectionFailed as e:
-        sys.exit(f'Connection failed: {e}')
+    except (ConnectionFailed, ErrorStatus) as e:
+        sys.exit(_failure_report(e))
 
 
 def _request(method, path, body=None, timeout=30, headers=None):
-    """api() that raises ConnectionFailed instead of exiting on it."""
+    """api() that raises ConnectionFailed or ErrorStatus, never exiting."""
     url = URL + path
     data = json.dumps(body).encode() if body else None
     # The bridge decides credentials before it reads a body, so the token goes
@@ -279,8 +353,8 @@ def _request(method, path, body=None, timeout=30, headers=None):
 def api(method, path, body=None, timeout=30, headers=None):
     try:
         return _request(method, path, body, timeout, headers)
-    except ConnectionFailed as e:
-        sys.exit(f'Connection failed: {e}')
+    except (ConnectionFailed, ErrorStatus) as e:
+        sys.exit(_failure_report(e))
 
 
 def api_raw(method, path):
@@ -302,8 +376,21 @@ def api_delete(path, body):
     return _exchange_or_exit(req, 30, _json_body)
 
 
+def _result_answer(path, **timeout):
+    """A /result JSON object; ConnectionFailed if a 2xx body is not one."""
+    answer = _request('GET', path, **timeout)
+    if not isinstance(answer, dict):
+        raise ConnectionFailed('the answer is JSON but not an object')
+    return answer
+
+
 def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     """Return the result for one command delivery, or None on timeout.
+
+    A timeout after any failed result request, except a peek timeout landing
+    at the deadline, exits instead, naming the outcome unknown: a failed
+    consume may have claimed the result, so no later pending answer can say
+    the command did not run.
 
     The PUT response's delivery id distinguishes this invocation from a stale
     result with the same command id. Conditional consume names the generation
@@ -327,25 +414,27 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     # backwards under an NTP step; monotonic does not.
     deadline = time.monotonic() + timeout
     wait = 0.02
+    failure = None
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            break
         time.sleep(min(wait, remaining))
         wait = min(wait * 2, interval)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            break
         try:
-            res = _request('GET', _query_path('/result', params),
-                           timeout=remaining)
-        except ConnectionFailed:
-            # The bridge answers /result at once, so a reset or a cut-off
-            # body here is the proxy's. The command is already queued and
-            # the browser will run it; exiting now reports a failure for
-            # work that goes on to happen, and a retry runs it twice. A
-            # failed peek is treated like a pending slot: the deadline
-            # still says when to stop. The PUT is never retried.
+            res = _result_answer(_query_path('/result', params),
+                                 timeout=remaining)
+        except (ConnectionFailed, ErrorStatus) as error:
+            # The bridge answers /result at once, so a failed peek is the
+            # proxy's, and the queued command still runs: wait on as if
+            # pending. A timeout once the deadline has passed is that
+            # deadline, each peek being handed what is left.
+            if not (isinstance(error.args[0], TimeoutError)
+                    and time.monotonic() >= deadline):
+                failure = error
             continue
         if res.get('pending'):
             continue
@@ -360,10 +449,20 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
             continue
         # The consume is what actually claims the result, so it is allowed to
         # finish: giving up here would leave a result nobody takes. It is
-        # still bounded, by the ordinary request timeout.
-        consumed = api('GET', _query_path('/result', {
-            **params, 'consume': '1', 'expected': generation}))
+        # still bounded, by the ordinary request timeout. A failed one is not
+        # final while time is left: the next lap peeks and consumes again.
+        try:
+            consumed = _result_answer(_query_path('/result', {
+                **params, 'consume': '1', 'expected': generation}))
+        except (ConnectionFailed, ErrorStatus) as error:
+            failure = error
+            continue
         if (consumed.get('consumed') is not True
                 or consumed.get('resultGeneration') != generation):
             continue
         return res
+    if failure is not None:
+        sys.exit(f'Timeout ({timeout}s), outcome unknown: a result request '
+                 f'failed ({_failure_report(failure)}). The command was sent '
+                 'and may have run; check its effect before retrying.')
+    return None

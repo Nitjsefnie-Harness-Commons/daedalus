@@ -31,15 +31,17 @@ let _fetchSeq = 0;
 const _slices = new Map();
 
 function _takeSlice(msg) {
-  if (!_slices.has(msg.fetchId)) return false;
-  const body = _slices.get(msg.fetchId)
-    || { bytes: new Uint8Array(msg.size), got: 0 };
-  _slices.set(msg.fetchId, body);
+  const body = _slices.get(msg.fetchId);
+  if (!body) return false;
+  body.bytes ||= new Uint8Array(msg.size);
   const binary = atob(msg.data);
   for (let i = 0; i < binary.length; i++) {
     body.bytes[msg.at + i] = binary.charCodeAt(i);
   }
   body.got += binary.length;
+  // Re-arms the page's backstop.
+  window.postMessage({ direction: 'daedalus-bg-to-page', reqId: body.reqId,
+    handler: 'xmlhttpRequest', event: 'slice' }, '*');
   return true;
 }
 
@@ -94,7 +96,7 @@ window.addEventListener('message', (e) => {
   if (msg.handler === 'xmlhttpRequest') {
     const fetchId = `${_fetchIdPrefix}-${++_fetchSeq}`;
     _fetchIds[reqId] = fetchId;
-    _slices.set(fetchId, null);
+    _slices.set(fetchId, { reqId, got: 0 });
     chrome.runtime.sendMessage({
       type: 'fetch',
       fetchId,

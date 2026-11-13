@@ -696,8 +696,8 @@
     6771
   ],
   "tests/_gm_harness.py": [
-    2575,
-    14898
+    2573,
+    14896
   ],
   "tests/_hotfix_outcome.py": [
     501,
@@ -1076,8 +1076,8 @@
     3267
   ],
   "tests/test_cli_error_reporting.py": [
-    1737,
-    6914
+    1599,
+    6805
   ],
   "tests/test_cli_eval_commands.py": [
     1355,
