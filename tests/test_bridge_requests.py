@@ -7,18 +7,24 @@ is closed instead of given a thread. Each of these is settled by the request
 machinery, so a failure here is a failure on every route at once.
 """
 import http.client
+import io
 import json
 import select
 import socket
 import sys
 import time
-import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 from _bridge import (BRIDGE_ENV, TOK, raw_request, read_answer,  # noqa: E402
                      stalled_request)
+from _segments import JOB_HEADER, SIG_HEADER, mint_job, seg_job  # noqa: E402
+
+
+def answer_json(resp):
+    return json.loads(resp.split(b'\r\n\r\n', 1)[1])
 
 
 def test_unknown_paths_404(tmp):
@@ -65,17 +71,47 @@ def test_a_malformed_absolute_form_target_is_refused_not_dropped(tmp):
                  'Content-Length: 0\r\n\r\n').encode())
             assert resp.startswith(b'HTTP/1.0 400'), (
                 f'{method} did not answer 400: {resp[:80]!r}')
-            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
-                'error': 'invalid request target'
-            }, resp
+            assert answer_json(resp) == {
+                'error': 'invalid request target'}, resp
         health_status, health = _util.get_json(base + '/health')
         assert health_status == 200 and health['ok'] is True, (
             health_status, health)
 
 
+def test_every_pre_body_refusal_drains_to_the_bound(tmp):
+    with _daedalus_env.isolated({'DAEDALUS_DIR': tmp, 'DAEDALUS_PORT': '0'}):
+        server = _util.load(_util.ROOT / 'server.py', 'drain_server')
+    bound = server.http_transport.REFUSED_BODY_DRAIN
+    refusals = (
+        ('POST', 'http://[', (), 'invalid request target'),
+        ('PUT', 'http://[', (), 'invalid request target'),
+        ('PUT', '/nope', (), 'not found'),
+        ('POST', '/segment?sig=a&sig=b', (), 'duplicate sig'),
+        ('POST', '/segment', ((SIG_HEADER, 'a'), (SIG_HEADER, 'b')),
+         'duplicate segment capability header'),
+        ('POST', '/segment?sig=a', ((JOB_HEADER, 'j'), (JOB_HEADER, 'j')),
+         f'duplicate {JOB_HEADER} header'),
+        ('POST', '/segment?sig=a', (), 'missing job or seg'))
+    replies = []
+    for verb, target, carriers, error in refusals:
+        handler = server.Handler.__new__(server.Handler)
+        handler.headers = http.client.HTTPMessage()
+        for name, value in (*carriers, ('Content-Length', str(bound + 1))):
+            handler.headers[name] = value
+        handler.path = handler.requestline = target
+        handler.request_version, handler.wfile = 'HTTP/1.0', io.BytesIO()
+        # One byte past the bound, so a read beyond the drain fails too.
+        handler.rfile = io.BytesIO(bytes(bound + 1))
+        getattr(handler, 'do_' + verb)()
+        replies.append((verb, target, error, handler.rfile.tell(),
+                        answer_json(handler.wfile.getvalue())))
+    assert all(read == bound and body == {'error': error}
+               for _verb, _target, error, read, body in replies), replies
+
+
 def test_request_body_cap_applies_to_every_body_reader(tmp):
     """Oversized POST, DELETE, and PUT bodies are refused before parsing."""
-    segment_job = 'tt-' + uuid.uuid4().hex[:12]
+    segment_job = seg_job()
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_BODY_SIZE': '8'}
     ) as (base, docroot):
@@ -95,12 +131,11 @@ def test_request_body_cap_applies_to_every_body_reader(tmp):
 
 
 def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
-    job = 'tt-' + uuid.uuid4().hex[:12]
+    job = seg_job()
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_BODY_SIZE': '4096'}
     ) as (base, docroot):
-        _, minted = _util.post_json(
-            base + '/segment-job', {'token': TOK, 'job': job})
+        _, minted = mint_job(base, TOK, job)
         over_cap = b'x' * 8192
         resp = raw_request(
             base,
@@ -109,9 +144,7 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
              'Host: x\r\nContent-Type: application/octet-stream\r\n'
              'Content-Length: -1\r\n\r\n').encode() + over_cap)
         assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
-            'error': 'invalid Content-Length'
-        }, resp
+        assert answer_json(resp) == {'error': 'invalid Content-Length'}, resp
         written = list((Path(docroot) / 'segments' / job).rglob('*'))
         assert written == [], (
             f'a negative Content-Length still wrote: {written}')
@@ -124,9 +157,7 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
             b'Content-Length: -1\r\n\r\n'
             b'{"token": "httptok", "id": "x", "result": 1}')
         assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
-            'error': 'invalid Content-Length'
-        }, resp
+        assert answer_json(resp) == {'error': 'invalid Content-Length'}, resp
 
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for method, path in (('POST', '/result'), ('PUT', '/command'),
@@ -138,9 +169,8 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
                  'Content-Length: notanumber\r\n\r\n{}').encode())
             assert resp.startswith(b'HTTP/1.0 400'), (
                 f'{method} {path} did not answer 400: {resp[:80]!r}')
-            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
-                'error': 'invalid Content-Length'
-            }, resp
+            assert answer_json(resp) == {
+                'error': 'invalid Content-Length'}, resp
 
     payload = b'x' * 16384
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
@@ -152,7 +182,7 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
                  f'Content-Length: {declared}\r\n\r\n').encode() + payload)
             assert resp.startswith(b'HTTP/1.0 400'), (
                 declared, reset, resp[:120])
-            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
+            assert answer_json(resp) == {
                 'error': 'invalid Content-Length'}, (declared, reset, resp)
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
@@ -227,9 +257,7 @@ def _segment_post(base, job, declared, sent):
     returns at EOF instead of stalling to the request deadline — the same
     shape the reported sighting drove by raw socket.
     """
-    _, minted = _util.post_json(
-        base + '/segment-job', {'token': TOK, 'job': job})
-    sig = minted['sig']
+    sig = mint_job(base, TOK, job)[1]['sig']
     resp = raw_request(
         base,
         (f'POST /segment?job={job}&seg=0&total=1&sig={sig} HTTP/1.0\r\n'
@@ -245,16 +273,16 @@ def test_a_short_segment_body_is_answered_a_bad_request(tmp):
     declaration is a client error, whatever the route would have done with
     the bytes that did arrive.
     """
-    job = 'tt-' + uuid.uuid4().hex[:12]
+    job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         resp, _sig = _segment_post(base, job, 1000, b'0123456789')
         assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
-        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
+        assert answer_json(resp) == _SHORT_ERROR, resp
 
 
 def test_a_short_segment_body_publishes_nothing(tmp):
     """No segment file and no temp file survive a refused short body."""
-    job = 'tt-' + uuid.uuid4().hex[:12]
+    job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         _segment_post(base, job, 1000, b'0123456789')
         seg_dir = Path(docroot) / 'segments' / job
@@ -264,7 +292,7 @@ def test_a_short_segment_body_publishes_nothing(tmp):
 
 def test_a_short_segment_body_is_not_reported_done(tmp):
     """GET /segment-status reads the directory, and the directory is empty."""
-    job = 'tt-' + uuid.uuid4().hex[:12]
+    job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _resp, sig = _segment_post(base, job, 1000, b'0123456789')
         status, payload = _util.get_json(
@@ -274,7 +302,7 @@ def test_a_short_segment_body_is_not_reported_done(tmp):
 
 def test_a_short_segment_body_leaves_the_job_record_at_zero(tmp):
     """The stored totals a refused short body leaves behind are the mint's."""
-    job = 'tt-' + uuid.uuid4().hex[:12]
+    job = seg_job()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         _segment_post(base, job, 1000, b'0123456789')
         record = json.loads(
@@ -286,12 +314,11 @@ def test_a_short_segment_body_leaves_the_job_record_at_zero(tmp):
 
 def test_a_complete_segment_body_still_stores(tmp):
     for body in (b'ab' * 500, b''):
-        job = 'tt-' + uuid.uuid4().hex[:12]
+        job = seg_job()
         with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
             resp, sig = _segment_post(base, job, len(body), body)
             assert resp.startswith(b'HTTP/1.0 200'), resp[:120]
-            assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {
-                'ok': True}, resp
+            assert answer_json(resp) == {'ok': True}, resp
             stored = Path(docroot) / 'segments' / job / '000000.ts'
             assert stored.read_bytes() == body
             status, payload = _util.get_json(
@@ -314,8 +341,7 @@ def test_a_short_json_body_is_refused_before_parsing(tmp):
                 + str(len(body) + int(complete)).encode() + b'\r\n\r\n'
                 + (body if complete else body[:8]))
             assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
-            assert json.loads(
-                resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
+            assert answer_json(resp) == _SHORT_ERROR, resp
             status, slot = _util.get_json(base + '/result?token=' + TOK)
             assert (status, slot) == (200, {'pending': True}), (status, slot)
 
