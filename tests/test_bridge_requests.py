@@ -88,6 +88,8 @@ def test_every_pre_body_refusal_drains_to_the_bound(tmp):
         ('POST', 'http://[', (), 'invalid request target'),
         ('PUT', 'http://[', (), 'invalid request target'),
         ('PUT', '/nope', (), 'not found'),
+        ('POST', '/result', (('Content-Length', str(64 * 1024 * 1024 + 1)),),
+         'request body too large'),
         ('POST', '/segment?sig=a&sig=b', (), 'duplicate sig'),
         ('POST', '/segment', ((SIG_HEADER, 'a'), (SIG_HEADER, 'b')),
          'duplicate segment capability header'),
@@ -100,7 +102,8 @@ def test_every_pre_body_refusal_drains_to_the_bound(tmp):
         handler = server.Handler.__new__(server.Handler)
         handler.headers = http.client.HTTPMessage()
         for name, value in (*carriers, ('Content-Length', str(bound + 1))):
-            handler.headers[name] = value
+            if not (name == 'Content-Length' and name in handler.headers):
+                handler.headers[name] = value
         handler.path = handler.requestline = target
         handler.request_version, handler.wfile = 'HTTP/1.0', io.BytesIO()
         # One byte past the bound, so a read beyond the drain fails too.
@@ -389,8 +392,7 @@ def test_request_workers_are_capped_rather_than_grown_per_connection(tmp):
     """
     with _util.bridge(
             tmp, env={**BRIDGE_ENV, 'DAEDALUS_MAX_REQUEST_WORKERS': '2',
-                      'DAEDALUS_REQUEST_TIMEOUT': '30'}) as (
-                          base, _docroot):
+                      'DAEDALUS_REQUEST_TIMEOUT': '30'}) as (base, _docroot):
         opened = [stalled_request(base) for _ in range(3)]
         try:
             closed, answered, held = _settled(opened, 10)
@@ -447,8 +449,7 @@ def test_recursive_json_is_refused_on_every_body_verb_before_authentication(
             base + '/result', 'POST', body=at_limit,
             headers={'Content-Type': 'application/json'})
         assert (status, json.loads(raw).get('error')) == (
-            401, 'unauthorized'), (
-            status, raw)
+            401, 'unauthorized'), (status, raw)
 
         past_limit = (b'{"token":"wrongtoken","value":'
                       + b'[' * 4 + b'0' + b']' * 4 + b'}')
