@@ -14,6 +14,7 @@ values from its own store rather than the process environment. Nothing here
 depends on that: with no such module the environment is the only source.
 """
 import argparse
+import functools
 import http.client
 import json
 import os
@@ -270,7 +271,6 @@ class _InterimSkippingResponse(http.client.HTTPResponse):
             skipped += 1
             # begin() returns at once while headers is set
             self.headers = None  # pyright: ignore[reportAttributeAccessIssue]
-            self.msg = None  # pyright: ignore[reportAttributeAccessIssue]
             super().begin(**kwargs)
 
 
@@ -291,10 +291,16 @@ class _HttpsHandler(urllib.request.HTTPSHandler):
             _interim_skipping(http_class), req, **http_conn_args)
 
 
+@functools.cache
+def _opener():
+    """One opener per process, built on first use: the HTTPS handler builds
+    an SSL context, which costs milliseconds per request if rebuilt."""
+    return urllib.request.build_opener(_HttpHandler, _HttpsHandler)
+
+
 def _open(req, timeout):
     """urlopen() with interim responses skipped, and no global opener."""
-    opener = urllib.request.build_opener(_HttpHandler, _HttpsHandler)
-    return opener.open(req, timeout=timeout)
+    return _opener().open(req, timeout=timeout)
 
 
 def _exchange(req, timeout, read):
