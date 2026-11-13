@@ -37,6 +37,8 @@ on:
 
 # Read-only: without an explicit block a job inherits the
 # repository default, which can be write for the whole token.
+# Every checkout sets persist-credentials: false: nothing here pushes,
+# and a token left in .git/config is reusable by later steps in its job.
 permissions:
   contents: read
 
@@ -78,8 +80,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
 
       - name: Classify the changed paths
@@ -105,8 +105,6 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
 
       # actions/setup-python v7.0.0
@@ -163,8 +161,6 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
 
       # actions/setup-python v7.0.0
@@ -173,12 +169,7 @@ jobs:
         with:
           python-version: "3.15"
 
-      # The pip cache is restored on every event and saved only from a push
-      # of main, as in the matrix and coverage jobs — `cache: pip` saves in
-      # a post-job step running after the pull-request checkout, the
-      # poisoning shape those jobs dropped (issues #166, #185). The key
-      # shares the matrix jobs' 3.15 namespace: the cache holds fetched
-      # packages, so what one job warmed any of them reuses.
+      # Restored as in the pycodestyle job, for the same reasons.
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -205,10 +196,7 @@ jobs:
       - name: pylint
         run: git ls-files '*.py' | xargs pylint --rcfile=.pylintrc
 
-      # Only a push of main writes cross-run state, and a cancelled run
-      # never reaches this step; nothing between the install and here runs
-      # pip, so the position after the lint run decides who writes a cache,
-      # never what it holds.
+      # Saved as in the pycodestyle job, for the same reasons.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -244,11 +232,8 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           fetch-depth: 0
           persist-credentials: false
-
 
       # actions/setup-python v7.0.0
       - uses: >-
@@ -264,12 +249,7 @@ jobs:
           DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
-      # The pip cache is restored on every event and saved only from a push
-      # of main, as in the matrix and coverage jobs — `cache: pip` saves in
-      # a post-job step running after the pull-request checkout, the
-      # poisoning shape those jobs dropped (issues #166, #185). The key
-      # shares the matrix jobs' 3.15 namespace: the cache holds fetched
-      # packages, so what one job warmed any of them reuses.
+      # Restored as in the pycodestyle job, for the same reasons.
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -297,10 +277,7 @@ jobs:
       - name: type error ratchet
         run: python3 scripts/ci/type_error_baseline.py
 
-      # Only a push of main writes cross-run state, and a cancelled run
-      # never reaches this step; nothing between the install and here runs
-      # pip, so the position after the lint run decides who writes a cache,
-      # never what it holds.
+      # Saved as in the pycodestyle job, for the same reasons.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -354,8 +331,6 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config is reusable
-          # by every later step in the job.
           persist-credentials: false
 
       # actions/setup-node v7.1.0
@@ -510,8 +485,6 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
 
       # actions/setup-python v7.0.0
@@ -611,15 +584,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
           # A depth-1 checkout resolves neither origin/main nor a local
           # main, so tests that read the MERGE BASE's own definitions
           # refuse there and the property they check is never evaluated.
           # tests/test_workflow_job_timeouts.py pins this.
           fetch-depth: 0
-
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
@@ -727,8 +697,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -827,7 +795,6 @@ jobs:
           # base the retired branch-boundary controls read; see the
           # suites job.
           fetch-depth: 0
-
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
@@ -987,7 +954,6 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-
 
       # No `cache: pip`. It saves in a post-job step, after the job has run
       # untrusted code, so the cache is two explicit steps instead: restore on
@@ -1278,7 +1244,6 @@ jobs:
             pr-number.txt
           if-no-files-found: error
 
-
   # What seven real user journeys cost, counted in instructions rather than
   # in the wall clock a test function happened to take.
   #
@@ -1314,8 +1279,6 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
 
       # actions/setup-python v7.0.0
@@ -1508,6 +1471,40 @@ jobs:
     # form is refused by the pinned actionlint, which accepts only `./`.
     uses: ./.github/workflows/size-baseline.yml  # zizmor: ignore[self-repository]
 
+  # audit.yml's threshold direction guard, run here so `Aggregate workflow
+  # checks` requires it on every pull request; audit.yml still runs it on
+  # the threshold-only pushes this workflow ignores. A superseded head's
+  # cancel loses nothing: the guard judges the whole merge-base..head range.
+  thresholds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate the threshold document
+        run: python3 scripts/ci/thresholds.py --check
+
+      - name: Resolve threshold base
+        env:
+          DAEDALUS_REPO: ${{ github.repository }}
+          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAEDALUS_EVENT: ${{ github.event_name }}
+          DAEDALUS_BEFORE: ${{ github.event.before }}
+        run: python3 scripts/ci/threshold_base.py
+
+      - name: Threshold direction guard
+        run: |
+          base="${DAEDALUS_THRESHOLDS_BASE_REV:?Threshold base missing}"
+          echo "Threshold direction: base=$base head=$(git rev-parse HEAD)"
+          git show "${base}:.github/ci-thresholds.json" > "$RUNNER_TEMP/base-thresholds.json"
+          python3 scripts/ci/thresholds_guard.py \
+            --base "$RUNNER_TEMP/base-thresholds.json" \
+            --head .github/ci-thresholds.json --base-rev "$base" --head-rev HEAD
+
   aggregate:
     name: Aggregate workflow checks
     if: ${{ always() }}
@@ -1524,6 +1521,7 @@ jobs:
       - coverage
       - journey-budget
       - size-baseline
+      - thresholds
     runs-on: ubuntu-latest
     # Two numbers, and the gap between them is the reason for both. The
     # poll bound (DAEDALUS_SECRETS_POLL_BOUND_S below) IS the gitleaks job's
@@ -1551,8 +1549,6 @@ jobs:
       - uses: >-
           actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Nothing here pushes, and a token left in .git/config
-          # is reusable by every later step in the job.
           persist-credentials: false
 
       - name: Check no tracked file carries a merge-conflict marker

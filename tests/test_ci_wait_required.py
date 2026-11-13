@@ -231,51 +231,27 @@ def test_the_trial_call_reads_the_named_gate_too(tmp):
     assert 'state: acceptable' in err.getvalue(), err.getvalue()
 
 
-def test_an_empty_required_value_is_a_rejected_invocation(tmp):
+def test_an_empty_or_blank_required_value_is_a_rejected_invocation(tmp):
     """Issue #1320: the set an empty value builds holds a name no run can
-    ever carry, so every head refused.
+    ever carry, so every head refused; a value of whitespace builds the
+    same requirement past a guard testing for emptiness alone.
 
     Refused the way this tool already refuses a malformed SHA and a
     non-positive bound: named on stderr, exit 3, and nothing at all on
-    stdout - the half a guard written as an ordinary wait would get
-    wrong.
-
-    A conflicting pull request is what makes the unfixed path terminate
-    on this fixture rather than reach for the network: the gate can never
-    be dispatched, so the refusal is immediate instead of a grace away.
+    stdout. A conflicting pull request makes the unfixed path terminate
+    on this fixture rather than reach for the network.
     """
     del tmp
     mod = _ci_wait()
-    err = io.StringIO()
-    code, text = _run_main(mod, _Clock(),
-                           ['3' * 40, '--repo', OTHER_REPO, '--required', ''],
-                           _green('ci'), pulls=[_conflicting(7)], err=err)
-    assert code == 3, (code, text, err.getvalue())
-    assert '--required' in err.getvalue(), err.getvalue()
-    assert text == '', text
-
-
-def test_a_blank_required_value_is_a_rejected_invocation(tmp):
-    """The same mechanism as #1320 under a second spelling. A value of
-    whitespace is accepted by a guard that tests the value for emptiness
-    alone, and it builds the identical requirement - a name no run can
-    carry - so the identical refusal follows, its name slot now holding a
-    space instead of nothing at all. Fixing one spelling of the defect and
-    leaving the other open is not a fix.
-
-    Two controls rather than one, because each names its own spelling and
-    a fixture covering both would pass whenever EITHER is refused, which is
-    exactly the hole a single control leaves.
-    """
-    del tmp
-    mod = _ci_wait()
-    err = io.StringIO()
-    code, text = _run_main(mod, _Clock(),
-                           ['4' * 40, '--repo', OTHER_REPO, '--required', ' '],
-                           _green('ci'), pulls=[_conflicting(7)], err=err)
-    assert code == 3, (code, text, err.getvalue())
-    assert '--required' in err.getvalue(), err.getvalue()
-    assert text == '', text
+    for value in ('', ' '):
+        err = io.StringIO()
+        code, text = _run_main(
+            mod, _Clock(), ['3' * 40, '--repo', OTHER_REPO, '--required',
+                            value],
+            _green('ci'), pulls=[_conflicting(7)], err=err)
+        assert code == 3, (value, code, text, err.getvalue())
+        assert '--required' in err.getvalue(), (value, err.getvalue())
+        assert text == '', (value, text)
 
 
 # ---- the flag may only tighten, where this tool knows the gate (issue #1217)
@@ -343,6 +319,28 @@ def test_naming_this_repositories_own_gate_is_unaffected(tmp):
     assert 'acceptable' in text, text
 
 
+def test_a_pr_gate_run_is_judged_like_any_other_run(tmp):
+    """A `pr gate` run carries the pull request's head SHA, so a red one
+    beside a green matrix and check is an offender, required or not."""
+    del tmp
+    mod = _ci_wait()
+    red = _run(9, 'failure', '2026-09-20T10:09:00Z', name='pr gate',
+               workflow=99, event='pull_request_target')
+    for named in ([], ['--required', 'pr gate']):
+        code, text = _run_main(mod, _Clock(), ['a' * 40] + named,
+                               _green('tests') + [red])
+        assert code == 1, (named, text)
+        assert text.endswith(f'  pr gate: failure {red["html_url"]}\n'), text
+    newer = dict(red, id=10, conclusion='success',
+                 run_started_at='2026-09-20T10:10:00Z')
+    code, text = _run_main(mod, _Clock(), ['a' * 40],
+                           _green('tests') + [red, newer])
+    assert code == 0, text
+    assert ('all 2 run(s) on aaaaaaaaaaaa acceptable (1 superseded run(s) '
+            f'ignored)\n  pr gate (run 9): failure {red["html_url"]}\n'
+            in text), text
+
+
 def test_every_spelling_of_this_repository_is_still_the_default(tmp):
     """The protection is a property of WHICH repository this is, not of
     what the caller typed. Spelling this repository out in full is the
@@ -384,8 +382,7 @@ def test_a_padded_required_name_is_the_name_it_pads(tmp):
     the refusal renders the padding into the name slot, so it reads
     `no  ci  run on <sha>` and names a workflow nobody can supply.
 
-    Exit 0 here and exit 3 for the two blank controls, so the three
-    spellings cannot be mistaken for one another.
+    Exit 0 here and exit 3 for the two blank spellings above.
     """
     del tmp
     mod = _ci_wait()

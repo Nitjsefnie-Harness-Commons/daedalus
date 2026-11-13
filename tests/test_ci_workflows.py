@@ -421,8 +421,8 @@ def test_a_release_waits_for_the_gates_on_its_own_commit(tmp):
     assert marker, 'the release does not wait for anything'
     step, _, _ = after.partition('- uses: actions/checkout')
     assert 'head_sha=$DAEDALUS_SHA' in step, step
-    # Itself excluded, or the wait waits for its own run to finish; and the
-    # gates that report against the base tip are no gates here.
+    # Itself excluded, or the wait waits for its own run to finish; and
+    # `pr gate` and `pin test screen`, which judge a pull request.
     assert 'select(.name != "release")' in step, step
     assert 'select(.name != "pr gate")' in step, step
     assert 'select(.name != "pin test screen")' in step, step

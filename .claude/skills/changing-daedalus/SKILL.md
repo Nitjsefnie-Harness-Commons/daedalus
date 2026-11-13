@@ -212,8 +212,9 @@ these terms.
 the text lines of every tracked file under `tests/` and records that total
 under `.github/size-baseline.json`'s `trees` key, tightening it on every main
 push. The `trees` budget is the one record a pull request may raise, and
-only when the judged range contains a commit whose subject starts with
-`feat:` or `feat(scope):`. Non-feature changes pay for growth by trimming
+only through a feature commit as the action's
+[Tree budgets](https://github.com/Nitjsefnie-Actions/size-ratchet#tree-budgets)
+section defines it. Non-feature changes pay for growth by trimming
 their own tests: drop redundant cases, merge parametrisations, or delete
 repeated assertions. A feature must still record a sufficient budget; its
 subject does not waive the line gate.
@@ -222,10 +223,13 @@ subject does not waive the line gate.
 its definition changed.** Declare the reason in the judged range with
 `Thresholds-Removed: <entry>=<bug|definition>`; entries use `family.path` or
 a bare baseline family declaring its entries. A path whose file is no longer
-tracked needs no declaration. A breach is never a removal reason. The audit workflow's
-direction guard compares the documents at the judged base and head: the
-merge base with the event's fixed base SHA on a PR, the event's before SHA
-on a push (`HEAD^` when that SHA is unusable). Every consumer uses that
+tracked needs no declaration. A breach is never a removal reason. The
+direction guard runs in `tests.yml`'s `thresholds` job, which `Aggregate
+workflow checks` requires on every pull request, and in `audit.yml` on
+every event, which covers the threshold-only pushes `tests.yml` skips. It
+compares the documents at the judged base and head: the merge base with
+the event's fixed base SHA on a PR, the event's before SHA on a push
+(`HEAD^` when that SHA is unusable). Every consumer uses that
 event snapshot; shallow or unreadable history is a refusal.
 
 Map measurement gates exempt only declared paths actually removed since the
@@ -388,9 +392,9 @@ python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha> \
 Its exit code is the verdict, so a caller never has to read the loop: 0 every
 run on the SHA concluded and every JUDGED conclusion was `success`, `neutral`
 or `skipped` **and the `tests` matrix has a run on that SHA** **and the
-`gate freshness` check run has concluded acceptably** - a run whose workflow
-is not about this head is never judged, and is named rather than counted on
-the acceptable line; 1 every run concluded and one JUDGED conclusion was
+`gate freshness` check run has concluded acceptably** - no run is exempt by
+its name, `pr gate` included, since it carries the pull request's head
+SHA; 1 every run concluded and one JUDGED conclusion was
 otherwise, or a required published check run did, offenders - runs and
 checks alike - named with URLs; 2 the `--timeout` bound expired first - with
 named runs still open, with no run ever appearing, or with every run

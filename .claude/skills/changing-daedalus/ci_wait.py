@@ -11,9 +11,7 @@ hand-rolled loops this replaces conflate:
      is `success`, `neutral` or `skipped`, every workflow in
      REQUIRED_WORKFLOWS has at least one run of its own left after the
      newest-run-per-workflow filter, and every check in PUBLISHED_CHECKS
-     has a check run of its own that concluded acceptably. A run of a
-     workflow that is not about this head is never judged, and is named
-     rather than counted on the acceptable line
+     has a check run of its own that concluded acceptably
   1  every run concluded and at least one JUDGED conclusion is none of
      those, or a required published check run concluded otherwise; the
      offenders - runs and checks alike - are named on stdout with their URLs
@@ -95,14 +93,14 @@ re-run then cleared. Issue #1249 is a head on which the older failure
 outvoted the newer green; with no newer sibling a run is judged as it
 stands, so a deliberate cancel and an unretried failure both still fail.
 
-Discarding a failure is what those rules cost, so the acceptable line
-names every run either filter dropped, with its workflow, its run id, its
+Discarding a failure is what that rule costs, so the acceptable line
+names every run the filter dropped, with its workflow, its run id, its
 conclusion and its URL, and its count is the number of lines printed.
-Both filters are `ci_gate`'s, so a dropped run's name cannot satisfy the
-gate and no reader of it can answer differently (issue #1262). Neither is
+The filter is `ci_gate`'s, so a dropped run's name cannot satisfy the
+gate and no reader of it can answer differently (issue #1262). It is not
 applied to a check run: the publisher PATCHes the newest carrier.
 
-This file is AT the 500 ceiling, the room made by cutting prose, which
+This file is near the 500 ceiling, the room made by cutting prose, which
 cannot be repeated. There is NO SEAM in it - one tool, one contract - so
 the next change is a trim, or a relocation to a module this did not.
 
@@ -223,8 +221,7 @@ def verdict(runs, checks=(), *, required=REQUIRED_WORKFLOWS,
     if any(run.get('status') != 'completed' for run in runs):
         return 'waiting', []
     offenders = [run for run in runs
-                 if run.get('name') not in ci_gate.NOT_ABOUT_THE_HEAD
-                 and run.get('conclusion') not in ACCEPTABLE]
+                 if run.get('conclusion') not in ACCEPTABLE]
     if offenders:
         return 'unacceptable', offenders
     offenders = ci_gate.red_published(checks, required=required_checks)
@@ -372,15 +369,9 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
         missing = None
         print_matrix(runs, sha, out)
         if state == 'acceptable':
-            off_head = ci_gate.NOT_ABOUT_THE_HEAD
-            gone = [run for run in runs if run.get('name') in off_head]
-            discarded = [run for run in runs if superseded(run, runs)
-                         or run.get('name') in off_head]
-            stale = len(discarded) - len(gone)
-            buckets = ((stale, 'superseded run(s) ignored'),
-                       (len(gone), 'not about this head'))
-            parts = [f'{n} {label}' for n, label in buckets if n]
-            suffix = f' ({", ".join(parts)})' if parts else ''
+            discarded = [run for run in runs if superseded(run, runs)]
+            suffix = (f' ({len(discarded)} superseded run(s) ignored)'
+                      if discarded else '')
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
                   f' acceptable{suffix}', file=out, flush=True)
             for run in discarded:

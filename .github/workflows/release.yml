@@ -101,9 +101,10 @@ jobs:
           DAEDALUS_REPO: ${{ github.repository }}
           DAEDALUS_SHA: ${{ github.sha }}
         # Wait for every workflow run on this tagged commit except release
-        # itself, pr gate and pin test screen (both anchored on the base tip,
-        # not this commit), and issue_comment events. The tests matrix is among these gates: a
-        # cell queued for a macOS runner holds this job until it concludes.
+        # itself, issue_comment events, and pr gate and pin test screen, whose
+        # pull_request_target runs carry a PR's head SHA and judge that PR.
+        # A tests cell queued for a macOS runner holds this job until it
+        # concludes.
         # ZERO runs is a failure after the registration grace, never a pass.
         # Release dispatch waits for this same set to go green before tagging,
         # so its tag usually finds every gate already concluded here.
