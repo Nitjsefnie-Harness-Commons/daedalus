@@ -569,6 +569,8 @@ STATED_GAPS = {}
 
 CARRY = ('tests/test_mcp_live_tools.py::test_a_client_reads_why_a_tool_'
          'failed_and_never_a_crash')
+POLL = 'tests/test_mcp_transport_guards.py::'
+WAITS = 'tests/test_cli_waits.py::'
 
 GUARDS_OFF_THE_TOOL_SURFACE = {
     # Every raise the scanned modules spell that no registered tool's own
@@ -592,19 +594,16 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'guards.py::test_empty_token_context_is_rejected'),
     ('daedalus_mcp.transport', 'poll_result',
      "raise TimeoutError(f'no result within {timeout}s')",
-     'tests/test_mcp_transport_guards.py::'
-     'test_poll_reports_timeout_when_no_attempt_is_admitted'),
+     POLL + 'test_poll_reports_timeout_when_no_attempt_is_admitted'),
     ('daedalus_mcp.transport', 'poll_result', 'failure is not None',
-     'tests/test_mcp_transport_guards.py::'
-     'test_poll_reports_an_unknown_outcome_after_a_failed_request'),
+     POLL + 'test_poll_reports_an_unknown_outcome_after_a_failed_request'),
     # covers 0, -1, nan and inf alone
     ('daedalus_mcp.transport', 'checked_timeout',
      'not math.isfinite(timeout) or timeout <= 0',
      'tests/test_mcp_live_tools.py::'
      'test_a_nonpositive_timeout_admits_no_command_on_either_send_path'),
     ('daedalus_mcp.transport', 'ext_cmd', "res.get('error')",
-     'tests/test_mcp_transport_guards.py::'
-     'test_extension_command_surfaces_result_error'),
+     POLL + 'test_extension_command_surfaces_result_error'),
     ('daedalus_bridge.env_config', 'env_int',
      "raise SystemExit(f'{name} must be {requirement}; got {raw!r}') "
      'from None',
@@ -674,25 +673,22 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      "f'{value!r} is not valid JSON: {error}') from None",
      'tests/test_cli_argument_types.py::'
      'test_malformed_params_are_refused_at_parse_time'),
-    # The URLError site is met by a refused connect; the HTTPException site by
-    # a cut-off read; the HTTPError-body site by a cut-off error read; the
-    # status site by a whole error answer.
+    # Met by a refused connect (URLError), a cut-off read (HTTPException), a
+    # cut-off error read (HTTPError body) and a whole error answer (status).
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e.reason) from e',
      'tests/test_cli_error_reporting.py::'
      'test_connection_failure_is_a_clean_error'),
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(e) from e',
-     'tests/test_cli_waits.py::'
-     'test_a_truncated_answer_is_a_connection_failure_not_a_traceback'),
+     WAITS
+     + 'test_a_truncated_answer_is_a_connection_failure_not_a_traceback'),
     ('daedalus_cli.transport', '_exchange',
      'raise ConnectionFailed(failure) from failure',
-     'tests/test_cli_waits.py::'
-     'test_a_truncated_error_answer_is_a_connection_failure'),
+     WAITS + 'test_a_truncated_error_answer_is_a_connection_failure'),
     ('daedalus_cli.transport', '_exchange',
      "raise ErrorStatus(f'HTTP {e.code}: {detail}') from e",
-     'tests/test_cli_waits.py::'
-     'test_a_complete_error_answer_is_still_reported_by_status'),
+     WAITS + 'test_a_complete_error_answer_is_still_reported_by_status'),
     # The html-body site is the api() paths' answer of a captive front end.
     ('daedalus_cli.transport', '_json_body',
      'raise ConnectionFailed(error) from error',

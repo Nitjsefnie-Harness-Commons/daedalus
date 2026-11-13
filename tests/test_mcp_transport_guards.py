@@ -49,6 +49,16 @@ def _capture(coroutine, transport=None):
         return f'raised {type(failure).__name__}: {failure}'
 
 
+FIRST = {'id': 'command', 'deliveryId': 'wanted',
+         'resultGeneration': 'generation-1', 'result': {'value': 1}}
+SECOND = {**FIRST, 'resultGeneration': 'generation-2', 'result': {'value': 2}}
+
+
+def _answer(transport, status, text):
+    return transport.httpx.Response(status, text=text, request=(
+        transport.httpx.Request('GET', 'http://127.0.0.1:18001/result')))
+
+
 def test_explicit_http_client_uses_the_explicit_url(tmp):
     del tmp
     transport = _transport()
@@ -154,12 +164,7 @@ def test_poll_skips_a_different_delivery(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-2',
-        'result': {'value': 2},
-    }
+    wanted = SECOND
     client = ClientProbe((
         {
             'id': 'other',
@@ -182,12 +187,7 @@ def test_poll_skips_a_result_without_generation(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-2',
-        'result': {'value': 2},
-    }
+    wanted = SECOND
     client = ClientProbe((
         {'id': 'command', 'deliveryId': 'wanted'},
         wanted,
@@ -202,57 +202,25 @@ def test_poll_skips_a_result_without_generation(tmp):
     assert result == wanted, (result, wanted)
 
 
-def test_poll_retries_a_failed_conditional_consume(tmp):
+def test_poll_retries_a_failed_or_refused_consume(tmp):
+    """A refused consume, or one that fails, is not the command failing:
+    the next lap peeks again and claims the generation it now finds."""
     del tmp
     transport = _transport()
-    session = _session(transport)
-    first = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    second = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-2',
-        'result': {'value': 2},
-    }
-    client = ClientProbe((
-        first,
-        {'consumed': False, 'resultGeneration': 'generation-2'},
-        second,
-        {'consumed': True, 'resultGeneration': 'generation-2'},
-    ))
-    session.http_client = lambda: client
-
-    result = _capture(session.poll_result(
-        '', 1, interval=0, expect_id='command',
-        expect_delivery='wanted'))
-
-    assert result == second, (result, second)
-
-
-def test_poll_retries_a_consume_that_fails(tmp):
-    """A failed consume is not the command failing: the next lap peeks
-    the same result again and claims it."""
-    del tmp
-    transport = _transport()
-    wanted = {'id': 'command', 'deliveryId': 'wanted',
-              'resultGeneration': 'generation-1', 'result': {'value': 1}}
-    for failure in (_answer(transport, 500, '{"error": "internal"}'),
+    for failure in ({'consumed': False, 'resultGeneration': 'generation-2'},
+                    _answer(transport, 500, '{"error": "internal"}'),
                     transport.httpx.RemoteProtocolError('peer closed'),
                     _answer(transport, 200, '<html>sign in</html>')):
         session = _session(transport)
-        client = ClientProbe((wanted, failure, wanted, {
-            'consumed': True, 'resultGeneration': 'generation-1'}))
+        client = ClientProbe((FIRST, failure, SECOND, {
+            'consumed': True, 'resultGeneration': 'generation-2'}))
         session.http_client = lambda client=client: client
 
         result = _capture(session.poll_result(
             '', 1, interval=0, expect_id='command',
             expect_delivery='wanted'))
 
-        assert result == wanted, (failure, result)
+        assert result == SECOND, (failure, result)
         takes = [call[2]['params'].get('consume') for call in client.calls]
         assert takes == [None, '1', None, '1'], (failure, client.calls)
 
@@ -262,12 +230,7 @@ def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         transport.httpx.TransportError('any transport failure'),
         wanted,
@@ -284,11 +247,6 @@ def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
     assert len(peeks) == 3, client.calls
 
 
-def _answer(transport, status, text):
-    return transport.httpx.Response(status, text=text, request=(
-        transport.httpx.Request('GET', 'http://127.0.0.1:18001/result')))
-
-
 UNKNOWN = ('raised TimeoutError: no result within {}s, outcome unknown: '
            'the last result request failed ({}). The command was sent and '
            'may have run; check its effect before retrying.').format
@@ -300,8 +258,6 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
     consume, a pending slot may be the result that consume claimed."""
     del tmp
     transport = _transport()
-    wanted = {'id': 'command', 'deliveryId': 'wanted',
-              'resultGeneration': 'generation-1'}
     for replies, expected in (
             ([transport.httpx.ReadError('connection reset by peer')] * 3,
              UNKNOWN(0.001, 'Connection failed: connection reset by peer')),
@@ -310,7 +266,7 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
             ([_answer(transport, 200, '<html>sign in</html>')] * 3,
              UNKNOWN(0.001, 'Connection failed: Expecting value: line 1 '
                      'column 1 (char 0)')),
-            ([wanted, _answer(transport, 500, '{}')] + [{'pending': True}] * 2,
+            ([FIRST, _answer(transport, 500, '{}')] + [{'pending': True}] * 2,
              UNKNOWN(0.001, 'HTTP 500')),
             # A peek is bounded by what is left of the wait, so its timeout
             # is the deadline arriving, not a request that failed.
@@ -410,12 +366,7 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
@@ -472,12 +423,7 @@ def test_poll_bounds_the_peek_by_the_time_remaining(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
@@ -533,12 +479,7 @@ def test_poll_hands_over_a_success_just_inside_the_deadline(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
@@ -569,12 +510,7 @@ def test_poll_lets_the_consume_ride_the_ordinary_client_timeout(tmp):
     del tmp
     transport = _transport()
     session = _session(transport)
-    wanted = {
-        'id': 'command',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
+    wanted = FIRST
     client = ClientProbe((
         wanted,
         {'consumed': True, 'resultGeneration': 'generation-1'},
