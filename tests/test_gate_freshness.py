@@ -63,11 +63,10 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
         '.github/workflowsfoo/x.yml',  # workflows, not workflows/
         'tests/anything.py',          # a changed test is not a gate change
         'tests/test_gate_freshness.py', 'daedalus_bridge/result_routes.py',
-        'server.py', 'README.md',
         '.github/dependabot.yml',     # proposes updates; decides no verdict
         '.github/ci-thresholds.json.bak', 'pyrightconfig.jsonx',
         'setup.cfg.bak', 'run_tests.pyc', 'scripts/check_version.py',
-        '.gitleaks.toml.bak',
+        '.gitleaks.toml.bak', 'server.py', 'README.md',
     )
     for path in negatives:
         assert not m.is_gate_defining(path), path
@@ -233,7 +232,6 @@ def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
         verdict = m.head_verdict(read, 'o/r', _head(), [('a', G1), ('b', G2)])
         assert (verdict.conclusion, verdict.kind) == ('failure', 'unreadable')
         text = verdict.title + ' ' + verdict.summary
-        assert 'compare' in text
         assert f'compare/{unreadable}...{HEAD}' in text
         assert 'HTTP 404' in text
         assert 'rebase' in text.lower()
@@ -415,8 +413,7 @@ def test_runner_only_checks_report_needs_run_without_writes(tmp):
             checks = [_check(99, status, external), _check(8)]
             result = m.publish(_publish_read(checks, recorded),
                                'o/r', HEAD, 'failure', 't', 's', RUN, G1)
-            assert recorded == [], recorded
-            assert result == ('needs-run', checks[0]), result
+            assert (recorded, result) == ([], ('needs-run', checks[0]))
 
 
 def test_no_carrier_posts_once_with_the_legacy_external_id(tmp):
