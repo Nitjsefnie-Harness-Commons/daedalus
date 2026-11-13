@@ -8,10 +8,6 @@ import _util  # noqa: E402
 from _realbrowser import BrowserEnvironmentSkipped  # noqa: E402
 
 
-class ControlRequirementSkipped(_util.Skipped):
-    """A browser-free control's own requirement is unavailable."""
-
-
 def _guarded(test, allowed, label):
     @functools.wraps(test)
     def run(tmp):
@@ -24,14 +20,6 @@ def _guarded(test, allowed, label):
                 f'{label}: {type(why).__name__}: {why}') from why
 
     return run
-
-
-def run_controls(namespace, tmp_prefix):
-    """Run browser-free controls; only their own requirements may skip."""
-    tests = [_guarded(test, ControlRequirementSkipped,
-                      'a fixture skip escaped a browser-free control')
-             for test in _util.collect(namespace)]
-    return _util.runner(tests, tmp_prefix=tmp_prefix)
 
 
 def run_real_browser_tests(namespace, tmp_prefix, requires):

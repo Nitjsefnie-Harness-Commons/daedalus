@@ -1,6 +1,6 @@
 /* exported config, loadConfig, configured, _executionContext, postResult */
 /* global DEFAULT_SERVER, _loadSeenDids, stopStream, startStream */
-/* global bridgeHeaders */
+/* global bridgeHeaders, _timingFor, _stamp */
 
 let config = { token: '', serverUrl: DEFAULT_SERVER };
 
@@ -82,14 +82,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ─── HTTP helpers ───
 
 function _executionContext(cmd) {
-  return Object.freeze({
+  const execution = {
     id: cmd.id,
     deliveryId: typeof cmd._did === 'string' ? cmd._did : '',
     resultRoute: Object.freeze({
       token: config.token,
       serverUrl: config.serverUrl,
     }),
-  });
+  };
+  const timing = _timingFor(cmd);
+  if (timing) execution.timing = timing;
+  return Object.freeze(execution);
 }
 
 async function postResult(execution, result, error, tabId, extra = {}) {
@@ -104,6 +107,10 @@ async function postResult(execution, result, error, tabId, extra = {}) {
     ...extra,
   };
   if (execution.deliveryId) payload._did = execution.deliveryId;
+  if (execution.timing) {
+    payload._timing = { ...execution.timing };
+    _stamp(payload._timing, 'sw_post');
+  }
   // Retry on transient network failure: the command already ran, so losing the
   // result POST would make the caller time out on work that actually
   // succeeded.

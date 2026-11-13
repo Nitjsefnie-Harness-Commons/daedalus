@@ -1,6 +1,6 @@
 /* global _takeEvalRelay, postResult, registerTab, handleHotfixReplay */
 /* global readBoundedBody, gmResponseLimit, bytesToBase64, _recordTiming */
-/* global mintSegmentSig, handleGmStorage */
+/* global mintSegmentSig, handleGmStorage, _stamp, _copyStamps */
 /* exported _withRelayPriority */
 
 // ─── Message handler (from content scripts) ───
@@ -46,6 +46,40 @@ function _admitRelay(signal) {
   });
 }
 
+// A larger body crosses as base64 slices of whole 3-byte groups, one task
+// each, so a command waits behind one slice, not a whole body.
+const _RELAY_SLICE_BYTES = 3 * 256 * 1024;
+
+// A page that takes no slice in this bound counts as gone, so a frozen tab
+// cannot pin a slot and the command hold. It matches the MAIN-world bound;
+// measured page lag peaked near 1.7 s. A page paused in a debugger or busy in
+// one script for longer answers "page took no relay slice in 10000 ms".
+const _RELAY_SLICE_ACK_MS = 10000;
+
+async function _deliverSlices(sender, fetchId, bytes, entry) {
+  // A content script's sender carries documentId from Chrome 106.
+  const target = { documentId: sender.documentId };
+  for (let at = 0; at < bytes.byteLength; at += _RELAY_SLICE_BYTES) {
+    const data = bytesToBase64(bytes.subarray(at, at + _RELAY_SLICE_BYTES));
+    let timer;
+    const accepted = await Promise.race([
+      chrome.tabs.sendMessage(sender.tab.id, {
+        type: 'gm-slice', fetchId, at, size: bytes.byteLength, data,
+      }, target).catch(() => false),
+      new Promise((done) => {
+        timer = setTimeout(() => done('late'), _RELAY_SLICE_ACK_MS);
+      })]);
+    clearTimeout(timer);
+    if (accepted === 'late') {
+      throw Error(`page took no relay slice in ${_RELAY_SLICE_ACK_MS} ms`);
+    }
+    if (accepted !== true || entry.cancelled) {
+      throw Object.assign(Error('page refused a relay slice'),
+        { name: entry.cancelled ? 'AbortError' : 'Error' });
+    }
+  }
+}
+
 async function _withRelayPriority(run) {
   if (_pendingCommands++ === 0) _relayHold = _relayInFlight > 0;
   try {
@@ -63,6 +97,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab ? String(sender.tab.id) : '';
     const execution = _takeEvalRelay(msg.relayId, tabId);
     if (!execution) return;
+    _stamp(execution.timing, 'sw_relay_result');
+    _copyStamps(execution.timing, msg.timing,
+      ['cs_recv', 'pg_recv', 'pg_done', 'cs_result']);
     const hostname = typeof msg.hostname === 'string' ? msg.hostname : '';
     const extra = { world: `page:${hostname}` };
     if (typeof msg.ms === 'number') extra.exec_ms = msg.ms;
@@ -147,7 +184,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // The raw byte count, for both response types: a limit is measured in
         // bytes, not characters.
         const bodySize = bytes.byteLength;
-        if (msg.responseType === 'arraybuffer') {
+        let chunked;
+        if (fetchId && sender.tab && bodySize > _RELAY_SLICE_BYTES) {
+          chunked = bodySize;
+          await _deliverSlices(sender, fetchId, bytes, fetchEntry);
+          tEncoded = performance.now();
+        } else if (msg.responseType === 'arraybuffer') {
           data = bytesToBase64(bytes);
           tEncoded = performance.now();
         } else {
@@ -176,7 +218,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // from, and reporting the requested URL told a caller a redirect had
         // not happened.
         sendResponse({ status: resp.status, statusText: resp.statusText,
-          finalUrl: resp.url, data, headers });
+          finalUrl: resp.url, data, headers, ...(chunked && { chunked }) });
       } catch (e) {
         clearTimeout(timeoutId);
         if (fetchId) _fetchControllers.delete(fetchId);
@@ -186,10 +228,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // says which happened. Reporting a cancellation as a timeout tells
         // the caller the endpoint was slow when the caller stopped it.
         const isCancel = isAbort && fetchEntry.cancelled;
+        // Expiring before admission is a queue wait, not a fetch timeout.
+        const isQueued = isAbort && !isCancel && !admitted;
         _recordTiming({
           url: msg.url.substring(0, 120),
           method: msg.method || 'GET',
-          error: isCancel ? 'aborted'
+          error: isCancel ? 'aborted' : isQueued ? 'queue-wait'
             : (isAbort ? 'timeout'
               : (isTooLarge ? 'too-large' : (e.message || 'error'))),
           ms_total: +(performance.now() - t0).toFixed(1),
@@ -201,8 +245,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // can only tell them apart if the relay says which happened.
         sendResponse({
           error: isCancel ? 'aborted by the caller'
-            : (isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message),
-          timedOut: isAbort && !isCancel,
+            : isQueued ? 'fetch relay queue wait exceeded'
+              : (isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message),
+          timedOut: isAbort && !isCancel && !isQueued,
           aborted: isCancel,
           tooLarge: isTooLarge,
         });

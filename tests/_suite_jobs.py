@@ -6,15 +6,13 @@ suite's whole body and read a private copy. Every control that reads a
 door set reads it from here, and both files that own one read it here:
 `tests/test_ci_lint_tools.py` and `tests/test_ci_tool_declarations.py`.
 
-`SUITE_RUNNERS` recognises the sanctioned runners by a substring of each
-step's `run:` text, and the complement — every other route into the suite
-tree — is claimed explicitly by the control that owns it. A predicate over
-two basenames is a fingerprint of that property rather than the property:
-a third runner, a `.yaml` workflow, a `uses:` step, a shell loop over
-`tests/*.py` and `unittest discover -s tests` are all routes the
-basenames cannot see, so `_suite_step` reads the step's resolved inputs and
-follows the tracked file a step runs, which is where the mechanism is
-written down whatever the runner is called.
+A predicate over the sanctioned runners' basenames would be a fingerprint
+of the property rather than the property: a third runner, a `.yaml`
+workflow, a `uses:` step, a shell loop over `tests/*.py` and `unittest
+discover -s tests` are all routes the basenames cannot see, so
+`_suite_step` reads the step's resolved inputs and follows the tracked file
+a step runs, which is where the mechanism is written down whatever the
+runner is called.
 
 Two bounds, and they are bounds on the WALK rather than on this control's
 reach. A step that merely NAMES a runner reaches the tree here even where
@@ -44,7 +42,6 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 ROOT = _util.ROOT
 WORKFLOW_DIR = ROOT / '.github' / 'workflows'
-SUITE_RUNNERS = ('run_tests.py', 'coverage_suites.py')
 # A job whose suites it FINDS: a tracked module that enumerates the suite
 # tree and launches what it enumerates. A suite added tomorrow walks
 # through such a job, so it has to install what the suites skip on.
@@ -85,30 +82,12 @@ def _job_steps(workflow, job):
     """Every complete step mapping in one workflow job."""
     mapping = complete_job_mapping(workflow, job)
     assert mapping is not None, f'the workflow has no {job} job'
-    return mapping['steps']
+    return mapping.get('steps') or []
 
 
 def _ordered_job_runs(workflow, job):
     """The ordered `run:` values of every step in one workflow job."""
     return [step.get('run', '') for step in _job_steps(workflow, job)]
-
-
-def _workflow_jobs(marker):
-    """Every job in every workflow with a step whose `run:` names `marker`.
-
-    Read off what the jobs run, not off a list of their names: a job that
-    globs the suites belongs to this control whichever workflow file it was
-    added to, and a control that could only see one file was exactly the
-    defect a third job in a second file walked past.
-    """
-    found = []
-    for source in sorted(WORKFLOW_DIR.glob('*.yml')):
-        workflow = source.read_text(encoding='utf-8')
-        for job in _job_names(workflow):
-            runs = _ordered_job_runs(workflow, job)
-            if any(marker in run for run in runs):
-                found.append((source.name, job, runs))
-    return found
 
 
 def _step_inputs(step):

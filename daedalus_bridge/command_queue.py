@@ -7,6 +7,7 @@ import threading
 import time
 
 from daedalus_bridge import atomic_file
+from daedalus_bridge import exec_timing
 from daedalus_bridge.log_safe import log_safe
 from daedalus_bridge.queue_order import next_seq  # re-exported
 from daedalus_bridge import path_safety
@@ -21,6 +22,10 @@ _cmd_events_lock = threading.Lock()
 # The one name of the dashboard target, so "is this the dashboard" is a
 # single criterion rather than a spelling repeated at each site.
 DASHBOARD_TAB = 'dashboard'
+# Keys a live copy may carry that its retry cannot: the delivery id, and the
+# bridge's stamp object while stamping is on.
+_VOLATILE_KEYS = (
+    ('_did', '_timing') if exec_timing.ENABLED else ('_did',))
 
 # Set by the stream service, which owns the refusal registry, so the TTL
 # sweep can retire a name whose occupant it unlinked. None when nothing
@@ -317,7 +322,8 @@ def event(token):
 
 
 def _live_duplicate(qdir, cmd, command_ttl):
-    """Return the delivery id of a live queued copy of `cmd`, or None.
+    """Return the delivery id and document of a live queued copy of `cmd`,
+    or None.
 
     A live candidate is a complete, non-hidden `.json` entry young enough to
     be delivered — `remove_expired`'s boundary — read through the drain's own
@@ -345,8 +351,9 @@ def _live_duplicate(qdir, cmd, command_ttl):
                     ValueError):
                 continue
         if isinstance(parsed, dict) and {
-                k: v for k, v in parsed.items() if k != '_did'} == cmd:
-            return name[:-len('.json')]
+                k: v for k, v in parsed.items()
+                if k not in _VOLATILE_KEYS} == cmd:
+            return name[:-len('.json')], parsed
     return None
 
 
@@ -363,12 +370,16 @@ def enqueue(cmd_dir, token, tab, cmd, *, command_ttl):
         raise ValueError(f'unsafe tab component: {tab!r}')
     queue_name, _ = command_target_names(token, tab)
     qdir = path_safety.under(cmd_dir, queue_name, secret=token)
+    exec_timing.drop_client_timing(cmd)
     with command_fs_lock:
         qdir.mkdir(parents=True, exist_ok=True)
         live = _live_duplicate(qdir, cmd, command_ttl)
         if live is not None:
-            seq, duplicate = live, True
+            (seq, document), duplicate = live, True
+            if exec_timing.ENABLED and '_timing' in document:
+                cmd['_timing'] = document['_timing']
         else:
+            exec_timing.begin(cmd)
             seq = next_seq(cmd_dir)
             _publish(qdir, seq, {**cmd, '_did': seq})
             duplicate = False

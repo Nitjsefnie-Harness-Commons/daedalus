@@ -144,8 +144,7 @@ def _kill_tree(process, cleanup_timeout):
 def kill_process_tree(pid, cleanup_timeout):
     """Terminate the tree rooted at `pid` and describe what the kill did.
 
-    A pid rather than a `Popen`: `tests/_outer_bound.py` reads a pid a
-    wedged child announced, and reaping is `cleanup_process_tree`'s
+    A pid rather than a `Popen`: reaping is `cleanup_process_tree`'s
     half. Two phases on Windows: a `CTRL_BREAK_EVENT` request to the
     group the launch's `CREATE_NEW_PROCESS_GROUP` flag created, the
     `process_is_gone` bound as the grace, then `taskkill /F /T` whatever

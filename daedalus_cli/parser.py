@@ -171,6 +171,8 @@ def build_parser():
     s.add_argument('--background', action='store_true',
                    help='Open in background (inactive)')
     s.add_argument('--pinned', action='store_true', help='Pin the tab')
+    s.add_argument('-t', '--timeout', type=positive_timeout, default=0,
+                   help='Result timeout seconds (default 10)')
 
     # open-tabs (extension)
     s = sub.add_parser('open-tabs', help='Open many tabs in one round-trip')

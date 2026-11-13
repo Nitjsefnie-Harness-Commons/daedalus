@@ -20,7 +20,7 @@ import _util  # noqa: E402
 from _clientstate import _KILLED_CLIENT_PIPE_RELEASE_S  # noqa: E402,F401
 from _stream_fake import STRICT_FETCH, assert_gate_clean  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    RESPONSE_STUB, STREAM_RESPONSE, event_target_stub)
+    RESPONSE_STUB, STREAM_RESPONSE, event_target_stub, import_scripts_stub)
 
 _STEP_LINE = re.compile(r'^\[step\] (.+)$', re.MULTILINE)
 
@@ -441,9 +441,6 @@ def run_background_overlap(background, commands, order, result_base='',
     result POST past the one per command, a foreign origin — is refused,
     recorded, and fails the caller.
     """
-    # Fabricated suite-runner trees copy _util.py without this helper.
-    from _worker_sources import import_scripts_stub
-
     node = shutil.which('node')
     if not node:
         raise AssertionError(

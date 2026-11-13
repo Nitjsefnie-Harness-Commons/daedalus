@@ -23,11 +23,9 @@ CMD_TTL_DEFAULT = 90
 
 
 def debug_timing():
-    """Whether per-phase timing is switched on for the segment store.
+    """Whether per-phase timing is on, for `segment_store` and `exec_timing`.
 
-    The store snapshots this switch at import; the variable is named
-    here so it does not have to spell it, and only '1' turns it on so
-    that setting it to 0 turns it off rather than on.
+    Both snapshot it at import; only '1' turns it on, so 0 turns it off.
     """
     return os.environ.get('DAEDALUS_DEBUG_TIMING') == '1'
 

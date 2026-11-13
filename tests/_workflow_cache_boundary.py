@@ -8,6 +8,7 @@ import csv
 import io
 import re
 
+from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_names  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -352,7 +353,11 @@ def _cache_writing_jobs(workflow):
         mapping = complete_job_mapping(workflow, job)
         if mapping is None:
             continue
-        if 'uses' in mapping:
+        uses = str(mapping.get('uses'))
+        if uses.startswith('./.github/workflows/'):
+            if _cache_writing_jobs((ROOT / uses).read_text('utf-8')):
+                writers.add(job)
+        elif 'uses' in mapping:
             raise AssertionError(
                 f"cache boundary cannot classify reusable job {job!r}: "
                 'job-level uses requires pending-recursive-inspection')

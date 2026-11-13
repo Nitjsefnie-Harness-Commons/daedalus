@@ -1,12 +1,16 @@
 """Eval and debug tools for the Daedalus MCP front end."""
 
 import json
+import time
 from typing import overload
 
 from daedalus_cli.result_view import public_result
+from daedalus_mcp import timing_view
 
 
 def register(mcp, bridge):
+    window = timing_view.Window()
+
     @overload
     def _flatten_eval(body: dict) -> dict:
         ...
@@ -56,10 +60,13 @@ def register(mcp, bridge):
         sent = await bridge.put('/command', payload)
         if not wait:
             return {'command': sent.get('command')}
-        body = await bridge.poll_result(
+        body = _flatten_eval(await bridge.poll_result(
             tab_id, timeout, expect_id=cmd_id,
-            expect_delivery=sent.get('did'))
-        return _flatten_eval(body)
+            expect_delivery=sent.get('did')))
+        if '_timing' in body:
+            body['timing'] = timing_view.render(
+                body.pop('_timing'), time.time_ns() // 1000, window)
+        return body
 
     @mcp.tool()
     async def exec(cmd_id: str, code: str, tab_id: str = '',
@@ -108,7 +115,6 @@ def register(mcp, bridge):
         """Round-trip a `document.title` eval to `tab_id` (or, with no tab,
     the browser's active tab). `wait=False` sends it and returns the command
     the bridge enqueued, measuring nothing."""
-        import time
         t0 = time.time()
         payload: dict = {'id': '_ping', 'code': 'document.title'}
         if tab_id:
