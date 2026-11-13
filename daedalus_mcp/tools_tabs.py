@@ -13,7 +13,7 @@ def register(mcp, bridge):
             return await sent
         except TimeoutError as unanswered:
             if unanswered.__cause__ is not None:
-                raise  # a failed request: the wait already said "unknown"
+                raise  # already unknown
             raise TimeoutError(
                 UNCONFIRMED.format(unanswered, opened)) from unanswered
 

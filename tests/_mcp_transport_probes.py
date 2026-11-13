@@ -36,7 +36,7 @@ class ClientProbe:
         # A scripted exception is what the transport raised on that GET.
         if isinstance(reply, BaseException):
             raise reply
-        # A dict is a JSON body; anything else is the response itself.
+        # a dict is a JSON body
         return ResponseProbe(reply) if isinstance(reply, dict) else reply
 
     async def post(self, path, **kwargs):

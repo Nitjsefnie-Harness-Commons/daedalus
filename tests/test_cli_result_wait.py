@@ -58,10 +58,9 @@ _SCRIPTED_HARNESS = (
     '                  "now": transport.time.now, "result": result}))\n')
 
 
-def _scripted_wait(replies, timeout=1.0, interval=0.5, delivery='d1'):
-    """The wait over `_request` answers replayed in a cycle on a virtual
-    clock from 1000.0: a body, or "cut" / "500" / "slow" for the failure
-    it raises, "slow" only once the timeout it was handed has passed."""
+def _scripted_wait(replies, timeout=1.0, interval=0.5,
+                   delivery: str | None = 'd1'):
+    """The wait over `_request` answers replayed in a cycle."""
     run = subprocess.run(
         [sys.executable, '-c', _SCRIPTED_HARNESS,
          json.dumps([replies, timeout, interval, delivery])],
@@ -142,14 +141,7 @@ def _wait_for(predicate, timeout=15, what='condition'):
 
 
 def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
-    """Uncorrelated delivery IDs keep polling without consuming a result.
-
-    The virtual clock stands in for time.sleep and records each
-    interval the loop REQUESTS. The real-clock form demanded two polls,
-    a wall-clock margin a busy runner could exhaust - the recorded leg
-    reached no poll at all, failing a correct waiter one level below the
-    intermittency that leg was recorded for.
-    """
+    """Uncorrelated delivery IDs keep polling without consuming a result."""
     del tmp
     for name, sent_id, delivery_field, selector in (
             ('absent', None, {}, '/result?tab=extension'),
@@ -233,8 +225,7 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
 
 
 def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
-    """Every peek failing still ends on the ramp, exactly, as an outcome
-    the wait cannot know: the command was queued before the first peek.
+    """Every peek failing ends on the ramp, exactly, its outcome unknown.
 
     ConnectionFailed from _request is what a proxy cut produces at
     transport level, whatever the HTTP shape of the cut. The virtual
@@ -261,10 +252,7 @@ def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
 
 
 def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
-    """A consume that fails is not the command failing: it ran, and its
-    result is still claimed by a later poll, on the same generation.
-    When nothing claims it, a later pending slot cannot say the consume
-    did not take it, so the deadline reports the outcome unknown."""
+    """A failed consume is retried; never claimed, the outcome is unknown."""
     del tmp
     for failure, named in (
             ('500', "HTTP 500: {'error': 1}"),
@@ -275,15 +263,12 @@ def test_a_failed_consume_is_retried_and_never_reported_as_failed(tmp):
         assert outcome['calls'] == [PEEK, CONSUME] * 2, (failure, outcome)
         outcome = _scripted_wait([OWN, failure] + [{'pending': True}] * 4)
         assert outcome['result'] == _unknown(1.0, named), (failure, outcome)
-        # Five ramp laps, the first one's peek answered and its consume
-        # failed; the four after it found nothing.
         assert outcome['calls'] == [PEEK, CONSUME] + [PEEK] * 4, (
             failure, outcome)
 
 
 def test_a_peek_the_deadline_cuts_short_is_a_plain_timeout(tmp):
-    """A peek is bounded by what is left of the wait, so failing once
-    that has passed is the deadline arriving, not a request failing."""
+    """A peek failing past the deadline is the deadline, not a failure."""
     del tmp
     outcome = _scripted_wait(['slow'])
     assert outcome['result'] is None, outcome
