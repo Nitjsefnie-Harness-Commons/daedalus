@@ -90,9 +90,11 @@ def reclaim_tempdirs(prefix, parent):
 
 
 class OwnedTemporaryDirectory(tempfile.TemporaryDirectory):
-    """A `TemporaryDirectory` the next one under its prefix reclaims."""
+    """A `TemporaryDirectory` the next one under its prefix reclaims; with
+    `refusal_warns`, a refused removal is one WARN line, never a raise."""
 
-    def __init__(self, prefix, **kwargs):
+    def __init__(self, prefix, refusal_warns=False, **kwargs):
+        self._refusal_warns = refusal_warns
         reclaim_tempdirs(prefix, kwargs.get('dir') or tempfile.gettempdir())
         super().__init__(prefix=prefix, **kwargs)
         record = os.open(self.name + '/.owner', os.O_CREAT | os.O_RDWR)
@@ -105,9 +107,12 @@ class OwnedTemporaryDirectory(tempfile.TemporaryDirectory):
         self._release()
         try:
             super().cleanup()
-        except OSError:
+        except OSError as refusal:
             # Left behind after all: written again, the next run takes it.
             with contextlib.suppress(OSError), open(
                     self.name + '/.owner', 'w', encoding='utf-8') as record:
                 record.write('left')
-            raise
+            if not self._refusal_warns:
+                raise
+            print(f'  WARN  {self.name} not removed, the next run reclaims it:'
+                  f' {refusal!r}')

@@ -464,14 +464,13 @@ def _dashboard_program_file(program: str, *, module: bool):
     this tree, so `.mjs` is ESM and `.cjs` is CommonJS whatever the nearest
     manifest would have said.
 
-    The removal is best-effort and silent: the child's own output is the
-    diagnostic, and a removal that failed after a dead child must not replace
-    it. This runs on every launch, so a leak is not an acceptable trade for
-    a louder failure either: what a failed removal leaves, the next launch
-    reclaims.
+    The removal is best-effort and never raises: the child's own output is
+    the diagnostic, and a removal that failed after a dead child must not
+    replace it, so a refusal is one WARN line and what it left behind the
+    next launch reclaims.
     """
     with OwnedTemporaryDirectory('daedalus-dashnode-',
-                                 ignore_cleanup_errors=True) as directory:
+                                 refusal_warns=True) as directory:
         path = Path(directory) / ('program.mjs' if module else 'program.cjs')
         path.write_text(
             'process.argv.splice(1, 1);\n' + program, encoding='utf-8')

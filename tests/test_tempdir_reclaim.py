@@ -58,11 +58,15 @@ def test_an_owner_without_its_lock_or_cleaning_up_is_not_reclaimed(tmp):
     cleaning.cleanup()
 
 
-def test_a_refused_own_cleanup_is_reclaimed_by_the_next_run(tmp):
-    owner = _util.OwnedTemporaryDirectory('owned_', dir=tmp)
+def test_a_refused_own_cleanup_is_reported_and_taken_by_the_next_run(tmp):
+    owner = _util.OwnedTemporaryDirectory('owned_', dir=tmp,
+                                          refusal_warns=True)
     with mock.patch.object(shutil, 'rmtree', side_effect=PermissionError(
-            13, 'held open')), contextlib.suppress(PermissionError):
+            13, 'held open')), contextlib.redirect_stdout(
+                io.StringIO()) as report:
         owner.cleanup()
+    warned = [line for line in report.getvalue().split('\n') if 'WARN' in line]
+    assert len(warned) == 1 and owner.name in warned[0], warned
     _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
     assert not os.listdir(tmp), os.listdir(tmp)
 
