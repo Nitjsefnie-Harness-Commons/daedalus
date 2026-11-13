@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Regression controls for CLI result delivery matching."""
 import json
-import os
 import subprocess
 import sys
 import time
@@ -81,8 +80,8 @@ def _scripted_wait(replies, timeout=1.0, interval=0.5,
     run = subprocess.run(
         [sys.executable, '-c', _SCRIPTED_HARNESS,
          json.dumps([replies, timeout, interval, delivery])],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
+        cwd=str(_util.ROOT), env=cli_env(DAEDALUS_TOKEN=TOK),
+        capture_output=True, text=True, encoding='utf-8', timeout=10)
     assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
     return json.loads(run.stdout)
 
@@ -139,16 +138,6 @@ _OVERSHOOT_HARNESS = (
     '                  "now": transport.time.now,\n'
     '                  "deadline": transport.time.deadline},\n'
     '                 sort_keys=True))\n')
-
-
-def _cli_env():
-    """Environment with the durable token selected for the subprocess."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    env.pop('TOKEN', None)
-    env['DAEDALUS_TOKEN'] = TOK
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    return env
 
 
 def _wait_for(predicate, timeout=15, what='condition'):
@@ -328,8 +317,8 @@ def test_the_result_wait_reports_none_when_the_sleep_spends_the_budget(tmp):
     del tmp
     run = subprocess.run(
         [sys.executable, '-c', _OVERSHOOT_HARNESS],
-        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
-        text=True, encoding='utf-8', timeout=10)
+        cwd=str(_util.ROOT), env=cli_env(DAEDALUS_TOKEN=TOK),
+        capture_output=True, text=True, encoding='utf-8', timeout=10)
     assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
     outcome = json.loads(run.stdout)
     peeks = [path for path in outcome['calls'] if 'consume=1' not in path]

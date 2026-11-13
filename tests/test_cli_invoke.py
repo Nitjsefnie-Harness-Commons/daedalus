@@ -41,7 +41,13 @@ def test_help_exits_zero(tmp):
 
 def test_url_default_and_override(tmp):
     code = 'from daedalus_cli.transport import URL; print(URL)'
-    r = run_python(code, cli_env())
+    env = cli_env()
+    r = run_python(code, env)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() != 'http://127.0.0.1:8081', (
+        'cli_env() resolves to the default bridge URL')
+    del env['DAEDALUS_URL']
+    r = run_python(code, env)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == 'http://127.0.0.1:8081', r.stdout
     r = run_python(code, cli_env(DAEDALUS_URL='http://127.0.0.1:9999/x'))
