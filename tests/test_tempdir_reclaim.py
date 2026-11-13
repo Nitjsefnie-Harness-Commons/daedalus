@@ -80,8 +80,12 @@ def test_both_browser_launches_keep_chromium_temp_files_in_the_run(tmp):
             _realbrowser._worker_absence_verdict(
                 'node', 'chromium', Path(tmp), 'w.js', tmp)
     launched = [call.kwargs['env'] for call in popen.call_args_list]
+    root = str(Path(tmp).parent)  # the run's own root, which owns `tmp`
     expected = dict(os.environ, **dict.fromkeys(
-        ('TMPDIR', 'TMP', 'TEMP', 'MAC_CHROMIUM_TMPDIR'), tmp))
+        ('TMPDIR', 'TMP', 'TEMP', 'MAC_CHROMIUM_TMPDIR'), root))
+    # Linux Chromium aborts once TMPDIR/org.chromium.Chromium.XXXXXX/
+    # SingletonSocket reaches the 108-byte sun_path.
+    assert len(root + '/org.chromium.Chromium.XXXXXX/SingletonSocket') < 108
     # Never the environment itself in a message: it carries credentials.
     assert len(launched) == 2, len(launched)
     for env in launched:
