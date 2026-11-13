@@ -38,7 +38,8 @@ def cli_env(**overrides):
     for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
         env.pop(k, None)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
-    if 'DAEDALUS_URL' not in overrides:  # not the default bridge's port
+    # Never the default bridge's port.
+    if 'DAEDALUS_URL' not in overrides:
         env['DAEDALUS_URL'] = f'http://127.0.0.1:{_util.free_port()}'
     env.update(overrides)
     return env

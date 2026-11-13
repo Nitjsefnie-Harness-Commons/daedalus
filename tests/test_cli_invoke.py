@@ -81,7 +81,7 @@ def test_prefixed_token_and_tab_precede_legacy_environment(tmp):
                             ('DAEDALUS_ID', primary), ('TOKEN', legacy),
                             ('ID', legacy)):
             tag = 't-' if 'TOKEN' in name else 'i-'
-            if value is not None: env[name] = tag + value if value else ''
+            if value is not None: env[name] = (tag + value) if value else ''
         with patch.dict(os.environ, env, clear=True):
             assert transport.token() == ('t-' + want if want else 'durable')
             assert transport.tab() == ('i-' + want if want else '')
