@@ -94,8 +94,7 @@ def test_a_bad_segment_capability_is_refused_before_the_body_arrives(tmp):
     with _util.bridge(tmp, env=env) as (base, docroot):
         job = seg_job()
         sig = minted_sig(base, job)
-        # Exactly the bound the refusal drains, so the server closes without
-        # waiting on bytes this test withholds.
+        # The drained bound exactly, so the server closes without waiting.
         status, payload = post_raw(
             base, f'?job={job}&seg=0&total=1&sig=notthesig', [],
             b'\x47' * 65536, declared=8 * 1024 * 1024)
