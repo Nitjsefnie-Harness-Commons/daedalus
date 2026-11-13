@@ -299,65 +299,45 @@ def _session_then_close():
     ], unregistered=1)
 
 
-def _assert_wrong_shape(value):
-    outcome = _run_close_tab(_command(tabIds=value))
-    assert outcome == {
-        'removes': [],
-        'posted': [{
-            'id': 'close-1',
-            'tabId': 'extension',
-            'result': None,
-            'error': 'tabIds must be an array',
-        }],
-        'outcomes': [{'settled': 'resolved'}],
-        'attachments': [],
-        'unregisters': [],
-    }, outcome
+_WRONG_SHAPE = 'tabIds must be an array'
 
 
-def test_string_tab_ids_is_rejected_without_removing_tabs(tmp):
+def test_each_tab_shape_gets_its_close_answer(tmp):
+    """A present non-array `tabIds` (falsy ones included, and beside a
+    `tabId`) is refused before any removal, as is naming no tab; the rest
+    close what they name in order, parsing string ids, and report a refused
+    removal beside the tabs that did close."""
     del tmp
-    _assert_wrong_shape('7')
-
-
-def test_zero_tab_ids_is_rejected_as_present_wrong_shape(tmp):
-    del tmp
-    _assert_wrong_shape(0)
-
-
-def test_false_tab_ids_is_rejected_as_present_wrong_shape(tmp):
-    del tmp
-    _assert_wrong_shape(False)
-
-
-def test_true_tab_ids_is_rejected_as_present_wrong_shape(tmp):
-    del tmp
-    _assert_wrong_shape(True)
-
-
-def test_nonzero_tab_ids_is_rejected_as_present_wrong_shape(tmp):
-    del tmp
-    _assert_wrong_shape(7)
-
-
-def test_object_tab_ids_is_rejected_without_removing_tabs(tmp):
-    del tmp
-    _assert_wrong_shape({})
-
-
-def test_wrong_shape_tab_ids_is_rejected_even_with_tab_id(tmp):
-    del tmp
-    outcome = _run_close_tab(_command(tabId=5, tabIds='x'))
-    assert outcome['removes'] == [], outcome
-    assert outcome['outcomes'] == [{'settled': 'resolved'}], outcome
-    assert outcome['posted'] == [{
-        'id': 'close-1',
-        'tabId': 'extension',
-        'result': None,
-        'error': 'tabIds must be an array',
-    }], outcome
-    assert outcome['unregisters'] == [], outcome
-    assert outcome['attachments'] == [], outcome
+    one_refused = {'closed': [1, 3],
+                   'errors': [{'id': 2, 'error': 'cannot close 2'}]}
+    for fields, reject, removes, result, error, unregisters in (
+            *(({'tabIds': value}, None, [], None, _WRONG_SHAPE, [])
+              for value in ('7', 0, False, True, 7, {})),
+            ({'tabId': 5, 'tabIds': 'x'}, None, [], None, _WRONG_SHAPE, []),
+            ({'tabIds': [1, '2']}, None, [1, 2],
+             {'closed': [1, 2], 'errors': []}, None, ['1', '2']),
+            ({'tabIds': []}, None, [], {'closed': [], 'errors': []}, None,
+             []),
+            ({'tabId': 5}, None, [5], {'closed': [5], 'errors': []}, None,
+             ['5']),
+            ({'tabId': 5, 'tabIds': None}, None, [5],
+             {'closed': [5], 'errors': []}, None, ['5']),
+            ({}, None, [], None, 'Missing tabId or tabIds', []),
+            ({'tabIds': [1, '2', 3]}, {'2': 'cannot close 2'}, [1, 2, 3],
+             one_refused, None, ['1', '3'])):
+        try:
+            outcome = _run_close_tab(_command(**fields), reject=reject,
+                                     unregistered=len(unregisters))
+        except AssertionError as failure:
+            raise AssertionError(fields, *failure.args) from failure
+        assert outcome == {
+            'removes': removes,
+            'posted': [{'id': 'close-1', 'tabId': 'extension',
+                        'result': result, 'error': error}],
+            'outcomes': [{'settled': 'resolved'}],
+            'attachments': [],
+            'unregisters': unregisters,
+        }, (fields, outcome)
 
 
 def test_settlement_recorder_captures_rejected_eval_dispatch(tmp):
@@ -373,114 +353,6 @@ def test_settlement_recorder_captures_rejected_eval_dispatch(tmp):
         }],
         'attachments': [],
         'unregisters': [],
-    }, outcome
-
-
-def test_mixed_type_tab_ids_are_parsed_and_closed_in_order(tmp):
-    del tmp
-    outcome = _run_close_tab(_command(tabIds=[1, '2']), unregistered=2)
-    assert outcome == {
-        'removes': [1, 2],
-        'posted': [{
-            'id': 'close-1',
-            'tabId': 'extension',
-            'result': {'closed': [1, 2], 'errors': []},
-            'error': None,
-        }],
-        'outcomes': [{'settled': 'resolved'}],
-        'attachments': [],
-        'unregisters': ['1', '2'],
-    }, outcome
-
-
-def test_empty_tab_ids_answers_empty_close_result(tmp):
-    del tmp
-    outcome = _run_close_tab(_command(tabIds=[]))
-    assert outcome == {
-        'removes': [],
-        'posted': [{
-            'id': 'close-1',
-            'tabId': 'extension',
-            'result': {'closed': [], 'errors': []},
-            'error': None,
-        }],
-        'outcomes': [{'settled': 'resolved'}],
-        'attachments': [],
-        'unregisters': [],
-    }, outcome
-
-
-def test_tab_id_alone_is_closed(tmp):
-    del tmp
-    outcome = _run_close_tab(_command(tabId=5), unregistered=1)
-    assert outcome == {
-        'removes': [5],
-        'posted': [{
-            'id': 'close-1',
-            'tabId': 'extension',
-            'result': {'closed': [5], 'errors': []},
-            'error': None,
-        }],
-        'outcomes': [{'settled': 'resolved'}],
-        'attachments': [],
-        'unregisters': ['5'],
-    }, outcome
-
-
-def test_null_tab_ids_falls_back_to_tab_id(tmp):
-    del tmp
-    outcome = _run_close_tab(
-        _command(tabId=5, tabIds=None), unregistered=1)
-    assert outcome == {
-        'removes': [5],
-        'posted': [{
-            'id': 'close-1',
-            'tabId': 'extension',
-            'result': {'closed': [5], 'errors': []},
-            'error': None,
-        }],
-        'outcomes': [{'settled': 'resolved'}],
-        'attachments': [],
-        'unregisters': ['5'],
-    }, outcome
-
-
-def test_missing_tab_ids_and_tab_id_answers_missing_error(tmp):
-    del tmp
-    outcome = _run_close_tab(_command())
-    assert outcome == {
-        'removes': [],
-        'posted': [{
-            'id': 'close-1',
-            'tabId': 'extension',
-            'result': None,
-            'error': 'Missing tabId or tabIds',
-        }],
-        'outcomes': [{'settled': 'resolved'}],
-        'attachments': [],
-        'unregisters': [],
-    }, outcome
-
-
-def test_one_remove_error_is_reported_while_other_tabs_close(tmp):
-    del tmp
-    outcome = _run_close_tab(
-        _command(tabIds=[1, '2', 3]), reject={'2': 'cannot close 2'},
-        unregistered=2)
-    assert outcome == {
-        'removes': [1, 2, 3],
-        'posted': [{
-            'id': 'close-1',
-            'tabId': 'extension',
-            'result': {
-                'closed': [1, 3],
-                'errors': [{'id': 2, 'error': 'cannot close 2'}],
-            },
-            'error': None,
-        }],
-        'outcomes': [{'settled': 'resolved'}],
-        'attachments': [],
-        'unregisters': ['1', '3'],
     }, outcome
 
 
