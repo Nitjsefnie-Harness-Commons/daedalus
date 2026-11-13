@@ -757,7 +757,10 @@ the code you change; field names are exact.
     relies on callers holding `command_fs_lock`); `result_store` (result slots,
     delivery files); `segment_store` (job records, usage accounting, the fixed
     64-stripe lock table with its chain-root key and reserved bookkeeping
-    names); `delivery_stripes` (the keyed stripe mapping delivery and segment
+    names); `segment_retention` (the idle-job sweep the `segment-gc` thread
+    runs: one scan of the segments root, each job decided and removed under
+    its own stripe; binds no configuration); `delivery_stripes` (the keyed
+    stripe mapping delivery and segment
     locks both select from); `path_safety` (component and containment checks);
     `atomic_file` (atomic replacement); `config` (startup paths, settings);
     `data_root_lock` (the exclusive data-root claim of one bridge process);
@@ -1006,7 +1009,9 @@ Every newly minted segment job records fixed values from
 (default `10000`) and `DAEDALUS_MAX_SEGMENT_JOB_SIZE` (default
 `4 * 1024 * 1024 * 1024` bytes); existing jobs with valid quota fields keep
 their recorded values. The request-body limit separately caps each segment
-POST.
+POST. `DAEDALUS_SEGMENT_JOB_RETENTION` (default `7 * 24 * 3600` seconds) is
+how long a job may go without a mint or segment write before the bridge
+removes it.
 
 The dashboard subscribes to `/stream?tab=dashboard`, a **fan-out subscription,
 not an addressed delivery**: every window on one token receives every event
@@ -1097,6 +1102,12 @@ them.
   `data_root_lock` (one bridge process per data root) is what makes mutual
   exclusion hold. A job spends four names under that root: `<job>`,
   `<job>.json`, `.<job>.json.dirty`, `.<job>.json.tmp`; the last two are
-  reserved, and the mint refuses them however the namespace looks.
+  reserved, and the mint refuses them however the namespace looks. A job is
+  removed whole once the newest mtime among its record, dirty marker and
+  directory is `DAEDALUS_SEGMENT_JOB_RETENTION` old, decided and deleted in
+  one hold of its stripe: the record first, revoking the capability, then the
+  marker, the temp and the directory; a resume mint touches the record. Names
+  that are symlinks are never followed or removed, and a segment admitted
+  before the removal finds no record and answers `403 bad sig` unwritten.
   `DAEDALUS_DEBUG_TIMING=1` prints a per-phase `[SEGMENT-TIMING]` line per
   segment write; inert otherwise.

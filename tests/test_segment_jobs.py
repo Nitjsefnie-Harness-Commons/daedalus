@@ -631,6 +631,26 @@ def test_the_segments_root_governs_where_a_resume_reconciles(tmp):
     assert answer['configured_unchanged'] is True, answer
 
 
+def test_a_resume_is_activity_the_retention_sweep_counts(tmp):
+    """Resuming an idle job refreshes its record, so the sweep keeps it."""
+    root = Path(tmp) / 'resume-touch'
+    root.mkdir()
+    bridge = _util.ROOT / 'daedalus_bridge'
+    jobs = _util.load(bridge / 'segment_jobs.py', 'segjobs_touch_jobs')
+    retention = _util.load(
+        bridge / 'segment_retention.py', 'segjobs_touch_retention')
+    quotas, body = jobs.JobQuotas(11, 2, 512), {'job': 'idle-job'}
+    assert jobs.mint_job(root, 'touchtok', body, quotas)[0] == 200
+    long_ago = 1_000_000_000
+    for path in (root / 'idle-job.json', root / 'idle-job'):
+        os.utime(path, (long_ago, long_ago))
+    assert jobs.mint_job(root, 'touchtok', body, quotas)[0] == 200
+    assert (root / 'idle-job.json').stat().st_mtime > long_ago
+    retention.sweep(root, 3600)
+    assert sorted(path.name for path in root.iterdir()) == [
+        'idle-job', 'idle-job.json']
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segjobs_')
 
