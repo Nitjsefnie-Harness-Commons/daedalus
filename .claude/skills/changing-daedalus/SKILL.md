@@ -212,8 +212,9 @@ these terms.
 the text lines of every tracked file under `tests/` and records that total
 under `.github/size-baseline.json`'s `trees` key, tightening it on every main
 push. The `trees` budget is the one record a pull request may raise, and
-only when the judged range contains a commit whose subject starts with
-`feat:` or `feat(scope):`. Non-feature changes pay for growth by trimming
+only through a feature commit as the action's
+[Tree budgets](https://github.com/Nitjsefnie-Actions/size-ratchet#tree-budgets)
+section defines it. Non-feature changes pay for growth by trimming
 their own tests: drop redundant cases, merge parametrisations, or delete
 repeated assertions. A feature must still record a sufficient budget; its
 subject does not waive the line gate.
