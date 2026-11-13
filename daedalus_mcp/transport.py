@@ -164,7 +164,10 @@ class BridgeSession:
         r = await self.http_client().get(
             '/result', params=params, headers=auth, **timeout)
         r.raise_for_status()
-        answer = r.json()
+        try:
+            answer = r.json()
+        except RecursionError as error:
+            raise ValueError('the answer nests too deep to decode') from error
         if not isinstance(answer, dict):
             raise ValueError('the answer is JSON but not an object')
         return answer
@@ -187,8 +190,9 @@ class BridgeSession:
         first sleep was adding half a second of dead time to every single tool
         call.
 
-        A timeout after a failed request is chained to it and names the
-        outcome unknown: a failed consume may have claimed the result."""
+        A timeout after a failed request (a peek's own timeout aside) is
+        chained to it and names the outcome unknown: a failed consume may
+        have claimed the result."""
         peek = {}
         if tab:
             peek['tab'] = tab
@@ -247,11 +251,12 @@ class BridgeSession:
             # httpx's status text names the URL.
             named = (f'HTTP {failure.response.status_code}'
                      if isinstance(failure, httpx.HTTPStatusError)
-                     else f'Connection failed: {failure}')
+                     else 'Connection failed: '
+                     f'{str(failure) or type(failure).__name__}')
             raise TimeoutError(
-                f'no result within {timeout}s, outcome unknown: the last '
-                f'result request failed ({named}). The command was sent and '
-                'may have run; check its effect before retrying.'
+                f'no result within {timeout}s, outcome unknown: a result '
+                f'request failed ({named}). The command was sent and may '
+                'have run; check its effect before retrying.'
             ) from failure
         raise TimeoutError(f'no result within {timeout}s')
 

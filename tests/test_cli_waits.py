@@ -201,7 +201,9 @@ CUT_OFF = 'Connection failed: IncompleteRead(5 bytes read, 35 more expected)'
 FAULTS = ((200, None, CUT_OFF), (502, None, CUT_OFF),
           (502, BAD_GATEWAY, f'HTTP 502: {BAD_GATEWAY.decode()}'),
           (200, b'[]',
-           'Connection failed: the answer is JSON but not an object'))
+           'Connection failed: the answer is JSON but not an object'),
+          (200, b'[' * 200000 + b']' * 200000,
+           'Connection failed: the answer nests too deep to decode'))
 
 
 def test_the_result_wait_outlives_a_failed_peek(tmp):
@@ -220,9 +222,10 @@ def test_the_result_wait_outlives_a_failed_peek(tmp):
                           DAEDALUS_ID='tab4')
             r = run_cli(['exec', 'job4', 'document.title', '-t', '10'], env)
             seen = list(TruncatingFrontEndHandler.seen)
-        assert r.returncode == 0, (status, body, r.returncode, r.stderr)
-        assert 'Traceback' not in r.stderr, (status, body, r.stderr)
-        assert 'Survived' in r.stdout, (status, body, r.stdout)
+        shape = (status, body and body[:40])
+        assert r.returncode == 0, (shape, r.returncode, r.stderr[-300:])
+        assert 'Traceback' not in r.stderr, (shape, r.stderr[-300:])
+        assert 'Survived' in r.stdout, (shape, r.stdout)
         puts = [path for verb, path in seen if verb == 'PUT']
         assert puts == ['/command'], seen
         peeks = [path for verb, path in seen
@@ -306,7 +309,7 @@ def test_the_result_wait_reports_an_unknown_outcome_after_failed_peeks(tmp):
             r = run_cli(['exec', 'job4', 'document.title', '-t', '1'], env)
             seen = list(TruncatingFrontEndHandler.seen)
         assert (r.returncode, r.stderr) == (1, (
-            'Timeout (1s), outcome unknown: the last result request failed '
+            'Timeout (1s), outcome unknown: a result request failed '
             f'({failure}). The command was sent and may have run; check its '
             'effect before retrying.\n')), r
         puts = [path for verb, path in seen if verb == 'PUT']
