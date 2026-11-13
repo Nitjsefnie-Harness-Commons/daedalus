@@ -87,22 +87,28 @@ def test_the_runner_reclaims_exactly_stale_names_and_reports_refusals(tmp):
     Path(tmp, 'outside', '.owner').write_text('1', encoding='utf-8')
     os.symlink(Path(tmp, 'outside'), Path(tmp, 'owned_link0001'),
                target_is_directory=True)
-    # The first removal is refused; the second finds its tree already gone.
-    rmtree = mock.Mock(wraps=shutil.rmtree, side_effect=[
-        PermissionError(13, 'held open'), FileNotFoundError(2, 'gone')] + [
-            mock.DEFAULT] * 20)
+    removed, real_rmtree = [], shutil.rmtree
+
+    def rmtree(path, *args, **kwargs):
+        # The first removal is refused. A stale fixture removed after it
+        # reports itself gone, as when another run took it first.
+        removed.append(os.path.basename(path))
+        if len(removed) == 1:
+            raise PermissionError(13, 'held open', path)
+        real_rmtree(path, *args, **kwargs)
+        if removed[-1] in ('owned_stale001', 'owned_stale_02'):
+            raise FileNotFoundError(2, 'gone', path)
+
     with mock.patch.object(tempfile, 'tempdir', tmp), \
             mock.patch.object(time, 'time', return_value=now), \
             mock.patch.dict(os.environ, DAEDALUS_TEST_SUMMARY=''), \
             mock.patch.object(shutil, 'rmtree', rmtree), \
             contextlib.redirect_stdout(io.StringIO()) as report:
         assert _util.runner([], tmp_prefix='owned_') == 0
-    refused, gone = (os.path.basename(call.args[0])
-                     for call in rmtree.call_args_list[:2])
     left = sorted(os.listdir(tmp))
-    assert left == sorted(kept + [refused, gone]), left
+    assert left == sorted(kept + removed[:1]), left
     warned = [line for line in report.getvalue().split('\n') if 'WARN' in line]
-    assert len(warned) == 1 and refused[0] in warned[0], warned
+    assert len(warned) == 1 and removed[0] in warned[0], warned
     _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
     assert sorted(os.listdir(tmp)) == kept, os.listdir(tmp)
 
