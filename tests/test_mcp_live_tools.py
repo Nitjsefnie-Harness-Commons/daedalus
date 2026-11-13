@@ -579,7 +579,7 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
             with mock.patch.object(mod.bridge, seam, double):
                 answers += asyncio.run(read(*calls))
         # A tab opener whose one result request fails before the deadline:
-        # the wait's own unknown outcome, not a second one wrapped round it.
+        # the wait's unknown outcome, not wrapped in the opener's own clause.
         with mock.patch.object(mod.bridge, '_result', mock.AsyncMock(
                 side_effect=httpx.ReadError('connection reset'))), \
                 mock.patch.object(mod.bridge, 'monotonic', mock.Mock(

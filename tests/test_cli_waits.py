@@ -197,7 +197,7 @@ def test_an_extension_command_with_no_result_times_out_exiting_nonzero(tmp):
 
 BAD_GATEWAY = b'<html>502 Bad Gateway</html>'
 CUT_OFF = 'Connection failed: IncompleteRead(5 bytes read, 35 more expected)'
-# Each front end's fault, and the report a wait that meets only it ends on.
+# Rows: a front end's fault, and what a wait meeting only that fault reports.
 FAULTS = ((200, None, CUT_OFF), (502, None, CUT_OFF),
           (502, BAD_GATEWAY, f'HTTP 502: {BAD_GATEWAY.decode()}'),
           (200, b'[]',
