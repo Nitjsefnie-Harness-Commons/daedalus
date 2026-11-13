@@ -22,6 +22,8 @@ from _bridge import (BRIDGE_ENV, TOK, raw_request, read_answer,  # noqa: E402
                      stalled_request)
 from _segments import JOB_HEADER, SIG_HEADER, mint_job, seg_job  # noqa: E402
 
+JSON_ROUTES = (('POST', '/result'), ('PUT', '/command'), ('DELETE', '/upload'))
+
 
 def answer_json(resp):
     return json.loads(resp.split(b'\r\n\r\n', 1)[1])
@@ -81,7 +83,7 @@ def test_a_malformed_absolute_form_target_is_refused_not_dropped(tmp):
 def test_every_pre_body_refusal_drains_to_the_bound(tmp):
     with _daedalus_env.isolated({'DAEDALUS_DIR': tmp, 'DAEDALUS_PORT': '0'}):
         server = _util.load(_util.ROOT / 'server.py', 'drain_server')
-    bound = server.http_transport.REFUSED_BODY_DRAIN
+    bound = 64 * 1024
     refusals = (
         ('POST', 'http://[', (), 'invalid request target'),
         ('PUT', 'http://[', (), 'invalid request target'),
@@ -91,7 +93,8 @@ def test_every_pre_body_refusal_drains_to_the_bound(tmp):
          'duplicate segment capability header'),
         ('POST', '/segment?sig=a', ((JOB_HEADER, 'j'), (JOB_HEADER, 'j')),
          f'duplicate {JOB_HEADER} header'),
-        ('POST', '/segment?sig=a', (), 'missing job or seg'))
+        ('POST', '/segment?sig=a', (), 'missing job or seg'),
+        *((method, path, (), 'unauthorized') for method, path in JSON_ROUTES))
     replies = []
     for verb, target, carriers, error in refusals:
         handler = server.Handler.__new__(server.Handler)
@@ -160,8 +163,7 @@ def test_a_negative_content_length_does_not_bypass_the_body_cap(tmp):
         assert answer_json(resp) == {'error': 'invalid Content-Length'}, resp
 
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
-        for method, path in (('POST', '/result'), ('PUT', '/command'),
-                             ('DELETE', '/upload')):
+        for method, path in JSON_ROUTES:
             resp = raw_request(
                 base,
                 (f'{method} {path} HTTP/1.0\r\nHost: x\r\n'
@@ -416,11 +418,9 @@ def test_recursive_json_is_refused_on_every_body_verb_before_authentication(
     payload = (b'{"token":"wrongtoken","value":'
                + b'[' * 10000 + b'0' + b']' * 10000 + b'}')
     assert len(payload) == 20032
-    routes = (('POST', '/result'), ('PUT', '/command'),
-              ('DELETE', '/upload'))
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
-        for method, path in routes:
+        for method, path in JSON_ROUTES:
             try:
                 status, raw = _util.request(
                     base + path, method, body=payload,
@@ -461,14 +461,12 @@ def test_recursive_json_is_refused_on_every_body_verb_before_authentication(
 
 def test_json_scalars_arrays_and_null_are_refused_on_every_body_verb(tmp):
     """Syntactically valid JSON still has to be an object for JSON routes."""
-    routes = (('POST', '/result'), ('PUT', '/command'),
-              ('DELETE', '/upload'))
     values = (('scalar', 1), ('array', []), ('null', None))
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         replies = []
         for shape, value in values:
             encoded = json.dumps(value).encode()
-            for method, path in routes:
+            for method, path in JSON_ROUTES:
                 try:
                     status, raw = _util.request(
                         base + path, method, body=encoded,
