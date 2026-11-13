@@ -8,9 +8,8 @@ matrix was never created (issue #1223). Two copies of the expectation would
 be two mechanisms wearing one name, so the expectation, the predicate, the
 set the predicate is asked of and the answer an absent gate gets live here.
 The caller reaches what it uses through this module, and `ci_wait` binds
-the expectation and the filter and calls the predicate. The names a
-conclusion is not read against live here too, beside `ACCEPTABLE`, which is
-the other rule about a conclusion.
+the expectation and the filter and calls the predicate. `ACCEPTABLE`, the
+rule about a conclusion, lives here too.
 
 They are meant to AGREE, and until issue #1262 they did not: one asked the
 question of the set the newest-run-per-workflow filter left, and one of the
@@ -33,16 +32,13 @@ different workflows, and treating either as the gate would reinstate the
 false green this exists to remove. A conclusion is irrelevant to the
 predicate: the caller judges conclusions by rules of its own, and a
 required workflow that is present and red is a failure, not an absence.
-Those rules are the caller's, with the one exception this module holds
-beside `ACCEPTABLE` and for the same reason: `NOT_ABOUT_THE_HEAD` is a name
-whose conclusion is not read at all, and a conclusion rule that lives in a
-caller is one the other reader cannot see, which is the drift a module of
-its own exists to end. The gate question is asked of the set
-below; the wait judges the conclusion question over that set, where a
-watcher's hold once judged it over the raw runs - deliberately not shared,
-and the reason the filter is applied here. The two never meet, so a name a
-caller requires can satisfy the set by its PRESENCE while its conclusion is
-not judged at all: `--required 'pr gate'` is answered by that run existing.
+The gate question is asked of the set below; the wait judges the
+conclusion question over that same set, where a watcher's hold once judged
+it over the raw runs - deliberately not shared, and the reason the filter
+is applied here. No run in that set is exempt from the conclusion
+question: a `pr gate` run carries the pull request's head SHA, so
+`--required 'pr gate'` is answered by its newest run existing AND by that
+run's conclusion, judged like every other run's.
 
 A PUBLISHED CHECK-RUN is the verdict; a workflow run is its container.
 The `gate freshness` job reports its verdict through its exit code. A push
@@ -76,10 +72,6 @@ PUBLISHED_CHECKS = frozenset({'gate freshness'})
 # `ci_wait`'s is an alias of this; `gh_client` spells its own, for a
 # reason its comment gives, and a control holds the two equal.
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
-# What a run's name can be when no conclusion of it is about the commit
-# under test. An admission gate judges the pull request's body, claim and
-# commit metadata, not the code at that head, so no conclusion of it is.
-NOT_ABOUT_THE_HEAD = frozenset({'pr gate'})
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
