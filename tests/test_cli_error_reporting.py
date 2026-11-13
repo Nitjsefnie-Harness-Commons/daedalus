@@ -86,7 +86,7 @@ ONE_OPENER = [sys.executable, '-c', (
     'real = c._create_https_context\n'
     'c._create_https_context = lambda *a: made.append(1) or real(*a)\n'
     'api("GET", "/x"); api("GET", "/x")\n'
-    'print(len(made) <= 1)')]
+    'print(len(made) == 1)')]
 
 
 def test_interim_responses_before_the_final_one_are_skipped(tmp):
