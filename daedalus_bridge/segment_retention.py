@@ -17,8 +17,9 @@ def _candidates(seg_dir_root):
             elif (entry.is_file(follow_symlinks=False)
                   and entry.name.endswith('.json')):
                 names.add(entry.name.removesuffix('.json'))
+    # '' (from a stray `.json`) would make the root itself the job directory.
     return sorted(name for name in names
-                  if not segment_store.unsafe_job_name(name)
+                  if name and not segment_store.unsafe_job_name(name)
                   and not segment_store.reserved_bookkeeping_name(name))
 
 
