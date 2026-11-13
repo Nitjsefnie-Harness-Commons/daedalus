@@ -1,7 +1,7 @@
 {
   ".claude/skills/changing-daedalus/ci_gate.py": [
-    7827,
-    9805
+    7284,
+    9222
   ],
   ".claude/skills/changing-daedalus/ci_wait.py": [
     10152,
@@ -72,8 +72,8 @@
     3110
   ],
   ".github/workflows/tests.yml": [
-    29221,
-    53849
+    27942,
+    53209
   ],
   ".github/workflows/version.yml": [
     2091,
@@ -1028,8 +1028,8 @@
     23719
   ],
   "tests/test_ci_wait_required.py": [
-    8694,
-    16778
+    8246,
+    16717
   ],
   "tests/test_ci_workflows.py": [
     4783,
