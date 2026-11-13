@@ -25,7 +25,6 @@ import hashlib
 import json
 import os
 import sys
-import tempfile
 import threading
 import time
 from ctypes import CDLL
@@ -434,7 +433,7 @@ def _against_a_fresh_bridge(token, run):
     happened to run alongside. The wait puts the import wholly inside every
     round or wholly outside all of them.
     """
-    with tempfile.TemporaryDirectory(prefix='journey_') as directory:
+    with _util.OwnedTemporaryDirectory('journey_') as directory:
         with _util.bridge(directory, env=bridge_env(token),
                           await_mcp=True) as fixture:
             base, docroot = fixture
