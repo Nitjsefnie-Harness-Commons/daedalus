@@ -141,6 +141,50 @@ def test_only_safe_job_names_are_ever_candidates(tmp):
     assert _present(foreign) == foreign, _present(foreign)
 
 
+class _HeldLock:
+    """Stands in for the job's lock and says whether it is held."""
+
+    held = False
+
+    def __enter__(self):
+        self.held = True
+        return self
+
+    def __exit__(self, *exc):
+        self.held = False
+        return False
+
+
+def test_every_removal_happens_inside_the_deciding_hold(tmp):
+    """Record, marker, temp, then directory, each while the lock is held."""
+    tmp = Path(tmp)
+    retention = _retention('segret_held')
+    store = retention.segment_store
+    paths = _job(tmp, 'held-job')
+    lock, removed = _HeldLock(), []
+    real_unlink, real_rmtree, real_lock_for = (
+        Path.unlink, shutil.rmtree, store.seg_lock_for)
+
+    def unlink(path, *args, **kwargs):
+        removed.append((path.name, lock.held))
+        return real_unlink(path, *args, **kwargs)
+
+    def rmtree(path, *args, **kwargs):
+        removed.append((Path(path).name, lock.held))
+        return real_rmtree(path, *args, **kwargs)
+
+    setattr(Path, 'unlink', unlink)
+    shutil.rmtree, store.seg_lock_for = rmtree, lambda _name: lock
+    try:
+        retention.sweep(tmp, RETENTION, now=LONG_AGO)
+    finally:
+        setattr(Path, 'unlink', real_unlink)
+        shutil.rmtree, store.seg_lock_for = real_rmtree, real_lock_for
+    assert removed == [('held-job.json', True), ('.held-job.json.dirty', True),
+                       ('.held-job.json.tmp', True), ('held-job', True)]
+    assert _present(paths) == [], _present(paths)
+
+
 def test_a_half_removed_job_is_collected_from_either_half(tmp):
     """A directory without its record, and a record without its directory."""
     tmp = Path(tmp)
