@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""The poll's delivery-matching rejections, each pinned on the session clock.
-
-A peek whose body does not match the expectation is left in place for
-its owner; each test here proves one rejection axis leaves the shared
-slot untouched and ends the wait at the deadline, never consuming.
-"""
+"""A peek whose body the poll does not expect is left for its owner."""
 import importlib.util
 import sys
 import time
@@ -35,141 +30,36 @@ def _session(transport, token='mcptok', url='http://127.0.0.1:18001'):
     return transport.BridgeSession(url, token_var)
 
 
-def test_poll_rejects_a_body_without_a_delivery_id(tmp):
+def test_poll_leaves_every_unmatched_delivery_in_place(tmp):
+    """One row per rejection axis: the consume after the one peek the clock
+    admits would succeed, so only the matching rule stops the hand-over."""
     del tmp
     transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'command',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    # The receipt after the body proves the only thing that stopped the
-    # hand-over is the matching rule: the consume itself would have succeeded.
-    # The clock script admits exactly one peek, then steps past the deadline.
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
+    for label, command, delivery, expect_delivery in (
+            ('no delivery id', 'command', None, None),
+            ('empty delivery id', 'command', '', None),
+            ('foreign command id', 'other', 'wanted', 'wanted'),
+            ('foreign delivery id', 'command', 'stale', 'wanted'),
+            # '' is where a truthiness check and `is None` disagree.
+            ('empty expectation', 'command', '', '')):
+        body = {'id': command, 'resultGeneration': 'generation-1',
+                'result': {'value': 1}}
+        if delivery is not None:
+            body['deliveryId'] = delivery
+        client = ClientProbe((
+            body, {'consumed': True, 'resultGeneration': 'generation-1'}))
+        session = _session(transport)
+        session.http_client = lambda probe=client: probe
+        session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
 
-    result = _poll_outcome(session.poll_result(
-        '', 0.001, interval=0, expect_id='command'))
+        result = _poll_outcome(session.poll_result(
+            '', 0.001, interval=0, expect_id='command',
+            expect_delivery=expect_delivery))
 
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
-def test_poll_rejects_an_empty_delivery_id(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'command',
-        'deliveryId': '',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
-
-    result = _poll_outcome(session.poll_result(
-        '', 0.001, interval=0, expect_id='command'))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
-def test_poll_rejects_a_matching_delivery_with_a_foreign_command_id(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'other',
-        'deliveryId': 'wanted',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
-
-    result = _poll_outcome(session.poll_result(
-        '', 0.001, interval=0, expect_id='command',
-        expect_delivery='wanted'))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
-def test_poll_rejects_a_matching_command_id_with_a_foreign_delivery_id(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    body = {
-        'id': 'command',
-        'deliveryId': 'stale',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
-
-    result = _poll_outcome(session.poll_result(
-        '', 0.001, interval=0, expect_id='command',
-        expect_delivery='wanted'))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
-
-
-def test_poll_rejects_an_empty_delivery_expectation(tmp):
-    del tmp
-    transport = _transport()
-    session = _session(transport)
-    # The empty string is the one value where a truthiness check and an
-    # `is None` check disagree, so the body has to report the same empty
-    # string the caller sent to catch the weaker spelling.
-    body = {
-        'id': 'command',
-        'deliveryId': '',
-        'resultGeneration': 'generation-1',
-        'result': {'value': 1},
-    }
-    client = ClientProbe((
-        body,
-        {'consumed': True, 'resultGeneration': 'generation-1'},
-    ))
-    session.http_client = lambda: client
-    session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
-
-    result = _poll_outcome(session.poll_result(
-        '', 0.001, interval=0, expect_id='command', expect_delivery=''))
-
-    peeks = [call for call in client.calls if call[1] == '/result']
-    assert len(peeks) == 1, client.calls
-    expected = 'raised TimeoutError: no result within 0.001s'
-    assert result == expected, (result, expected)
+        peeks = [call for call in client.calls if call[1] == '/result']
+        assert len(peeks) == 1, (label, client.calls)
+        expected = 'raised TimeoutError: no result within 0.001s'
+        assert result == expected, (label, result)
 
 
 def main():
