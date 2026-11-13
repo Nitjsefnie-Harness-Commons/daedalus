@@ -588,7 +588,7 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
     unknown = ('timed out: no result within {}s, outcome unknown: the {} '
                'may have opened. Call `list_tabs` to check before retrying.'
                ).format
-    failed = ('timed out: no result within 10.0s, outcome unknown: the last '
+    failed = ('timed out: no result within 10.0s, outcome unknown: a '
               'result request failed (Connection failed: connection reset). '
               'The command was sent and may have run; check its effect '
               'before retrying.')

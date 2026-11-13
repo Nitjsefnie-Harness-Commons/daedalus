@@ -225,7 +225,8 @@ def _failure_report(failure):
     """The words every api* function exits with for a failed request."""
     if isinstance(failure, ErrorStatus):
         return str(failure)
-    return f'Connection failed: {failure}'
+    reason = failure.args[0] if failure.args else failure
+    return f'Connection failed: {str(reason) or type(reason).__name__}'
 
 
 def _json_body(response):
@@ -239,6 +240,9 @@ def _json_body(response):
         return json.loads(response.read())
     except ValueError as error:
         raise ConnectionFailed(error) from error
+    except RecursionError as error:
+        raise ConnectionFailed(
+            'the answer nests too deep to decode') from error
 
 
 def _exchange(req, timeout, read):
@@ -328,9 +332,10 @@ def _result_answer(path, **timeout):
 def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     """Return the result for one command delivery, or None on timeout.
 
-    A timeout after any failed result request exits instead, naming the
-    outcome unknown: the command is queued, and a failed consume may have
-    claimed its result, so no later pending answer can say it did not run.
+    A timeout after any failed result request but a peek's own timeout
+    exits instead, naming the outcome unknown: the command is queued, and a
+    failed consume may have claimed its result, so no later pending answer
+    can say it did not run.
 
     The PUT response's delivery id distinguishes this invocation from a stale
     result with the same command id. Conditional consume names the generation
@@ -374,9 +379,9 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
             # reports a failure for work that goes on to happen, and a
             # retry runs it twice. A failed peek is treated like a pending
             # slot: the deadline still says when to stop. The PUT is never
-            # retried. A peek bounded by what is left of the wait and
-            # ending past it is the deadline arriving, not a failure.
-            if time.monotonic() < deadline:
+            # retried. A peek's own timeout, the budget left of the wait,
+            # is the deadline arriving, not a failure.
+            if not isinstance(error.args[0], TimeoutError):
                 failure = error
             continue
         if res.get('pending'):
@@ -405,8 +410,7 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
             continue
         return res
     if failure is not None:
-        sys.exit(f'Timeout ({timeout}s), outcome unknown: the last result '
-                 f'request failed ({_failure_report(failure)}). The command '
-                 'was sent and may have run; check its effect before '
-                 'retrying.')
+        sys.exit(f'Timeout ({timeout}s), outcome unknown: a result request '
+                 f'failed ({_failure_report(failure)}). The command was sent '
+                 'and may have run; check its effect before retrying.')
     return None

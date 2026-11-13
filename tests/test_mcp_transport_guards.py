@@ -51,6 +51,7 @@ def _capture(coroutine, transport=None):
 
 FIRST = {'id': 'command', 'deliveryId': 'wanted',
          'resultGeneration': 'generation-1', 'result': {'value': 1}}
+DEEP = b'[' * 200000 + b']' * 200000  # past the JSON decoder's recursion
 SECOND = {**FIRST, 'resultGeneration': 'generation-2', 'result': {'value': 2}}
 
 
@@ -249,8 +250,8 @@ def test_poll_survives_the_transport_error_family_on_the_peek(tmp):
 
 
 UNKNOWN = ('raised TimeoutError: no result within {}s, outcome unknown: '
-           'the last result request failed ({}). The command was sent and '
-           'may have run; check its effect before retrying.').format
+           'a result request failed ({}). The command was sent and may '
+           'have run; check its effect before retrying.').format
 
 
 def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
@@ -266,6 +267,13 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
             ([_answer(transport, 200, '<html>sign in</html>')] * 3,
              UNKNOWN(0.001, 'Connection failed: Expecting value: line 1 '
                      'column 1 (char 0)')),
+            ([_answer(transport, 200, DEEP.decode())] * 3,
+             UNKNOWN(0.001, 'Connection failed: the answer nests too deep to '
+                     'decode')),
+            # A consume rides its own 30s, so its timeout is a failure.
+            ([FIRST, transport.httpx.ReadTimeout(''), {'pending': True},
+              {'pending': True}],
+             UNKNOWN(0.001, 'Connection failed: ReadTimeout')),
             ([_answer(transport, 200, '[]')] * 3,
              UNKNOWN(0.001, 'Connection failed: the answer is JSON but not '
                      'an object')),
@@ -273,6 +281,8 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
              UNKNOWN(0.001, 'HTTP 500')),
             # A peek's timeout is the deadline it was handed.
             ([transport.httpx.ReadTimeout('')] * 3,
+             'raised TimeoutError: no result within 0.001s'),
+            ([transport.httpx.ConnectTimeout('')] * 3,
              'raised TimeoutError: no result within 0.001s')):
         session = _session(transport)
         client = ClientProbe(replies)
@@ -562,7 +572,8 @@ def test_poll_survives_a_failed_peek_from_a_real_front_end(tmp):
     del tmp
     transport = _transport()
     for status, body in ((200, None), (502, b'<html>502 Bad Gateway</html>'),
-                         (200, b'<html>sign in</html>'), (200, b'[]')):
+                         (200, b'<html>sign in</html>'), (200, b'[]'),
+                         (200, DEEP)):
         with _shielded_environment() as environ, truncating_front_end(
                 1, status, body) as base:
             environ.pop('DAEDALUS_LOCAL_URL', None)
