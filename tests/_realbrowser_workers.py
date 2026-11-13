@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -90,8 +91,10 @@ def _browser_args(browser, loaded, profile):
 
 
 def _start_browser(browser, loaded, profile):
-    # The run's root: Chromium's socket path must fit Linux's 108-byte sun_path
-    scratch = str(Path(profile).parent.parent)
+    # The run's root: any deeper, Chromium's socket path can outgrow sun_path.
+    temp = Path(tempfile.gettempdir()).resolve()
+    scratch = str(next(parent for parent in Path(profile).resolve().parents
+                       if parent.parent == temp))
     return subprocess.Popen(
         _browser_args(browser, loaded, profile), cwd=ROOT,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
