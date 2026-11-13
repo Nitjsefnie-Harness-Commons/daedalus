@@ -161,7 +161,7 @@ class BridgeSession:
         await asyncio.sleep(seconds)
 
     async def _result(self, params: dict, auth: dict, **timeout) -> dict:
-        """A /result answer, a JSON object; ValueError for any other."""
+        """A /result JSON object; ValueError if a 2xx body is not one."""
         r = await self.http_client().get(
             '/result', params=params, headers=auth, **timeout)
         r.raise_for_status()
@@ -236,7 +236,7 @@ class BridgeSession:
             # The consume is allowed to finish: it is what claims the
             # result, and giving up here leaves one nobody takes. Still
             # bounded, by the ordinary client timeout. A failed one is not
-            # final: the next lap peeks and consumes again.
+            # final while time is left: the next lap peeks and consumes again.
             try:
                 receipt = await self._result(take, auth)
             except (httpx.HTTPError, ValueError) as error:
