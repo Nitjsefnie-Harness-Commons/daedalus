@@ -65,11 +65,10 @@ def _repo(tmp):
 def _drive(work, *args, env=None):
     home = work.parent / 'home'
     home.mkdir(exist_ok=True)
-    child = dict(os.environ, **(env or {}))
-    child.update(HOME=str(home), USERPROFILE=str(home),
+    child = dict(os.environ, GITHUB_OUTPUT=str(work.parent / 'output'))
+    child.update(env or {}, HOME=str(home), USERPROFILE=str(home),
                  DAEDALUS_MASTER_PUSH_DEPLOY_KEY='fixture-key',
                  DAEDALUS_REPO='o/r')
-    child.setdefault('GITHUB_OUTPUT', str(work.parent / 'output'))
     dispatch = _util.load(ROOT / SCRIPT, 'scripts.ci.release_dispatch')
     out, err = io.StringIO(), io.StringIO()
     with (patch.dict(os.environ, child), contextlib.chdir(work),
@@ -93,7 +92,7 @@ def test_bump_current_main_all_sites_and_output(tmp):
     current = _out(work, 'rev-parse', 'HEAD')
     _git(work, 'reset', '--hard', stale)
     (work / 'untracked').write_text('never stage me\n')
-    output = work.parent / 'output'
+    output = work.parent / 'caller-output'
     result = _drive(work, 'bump', VERSION,
                     env={'GITHUB_OUTPUT': str(output)})
     _ok(result)
@@ -108,7 +107,10 @@ def test_bump_current_main_all_sites_and_output(tmp):
     assert checked.stdout.strip() == VERSION, checked.stdout
     assert _drive(work, 'bump', VERSION).returncode != 0
     assert sha == _out(bare, 'rev-parse', 'main')
-    _ok(_drive(work, 'bump', VERSION, '--successor'))
+    exported = work.parent / 'exported'
+    with patch.dict(os.environ, GITHUB_OUTPUT=str(exported)):
+        _ok(_drive(work, 'bump', VERSION, '--successor'))
+    assert not exported.exists() and (work.parent / 'output').is_file()
     assert _out(work, 'log', '-2', '--format=%s').splitlines() == [
         ('chore(release): stop main claiming the version release 0.28.0 '
          'published'),
