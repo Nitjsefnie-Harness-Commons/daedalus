@@ -107,13 +107,14 @@ def test_the_runner_reclaims_exactly_stale_names_and_reports_refusals(tmp):
     assert sorted(os.listdir(tmp)) == kept, os.listdir(tmp)
 
 
-def test_both_browser_launches_keep_chromium_temp_files_in_the_run(tmp):
+def test_every_browser_launch_keeps_chromium_temp_files_in_the_run(tmp):
     with mock.patch.object(subprocess, 'Popen',
                            side_effect=OSError(2, 'no browser')) as popen:
-        with contextlib.suppress(_realbrowser.BrowserEnvironmentSkipped):
-            _realbrowser._launch_and_reach('node', 'chromium', 'x',
-                                           Path(tmp, 'profile'), 'w.js',
-                                           'http://127.0.0.1/', [])
+        for profile in (Path(tmp, 'profile'), Path(tmp, 'case', 'profile')):
+            with contextlib.suppress(_realbrowser.BrowserEnvironmentSkipped):
+                _realbrowser._launch_and_reach('node', 'chromium', 'x',
+                                               profile, 'w.js',
+                                               'http://127.0.0.1/', [])
         with contextlib.suppress(OSError):
             _realbrowser._worker_absence_verdict(
                 'node', 'chromium', Path(tmp), 'w.js', tmp)
@@ -125,7 +126,7 @@ def test_both_browser_launches_keep_chromium_temp_files_in_the_run(tmp):
     # SingletonSocket reaches the 108-byte sun_path.
     assert len(root + '/org.chromium.Chromium.XXXXXX/SingletonSocket') < 108
     # Never the environment itself in a message: it carries credentials.
-    assert len(launched) == 2, len(launched)
+    assert len(launched) == 3, len(launched)
     for env in launched:
         assert env == expected, sorted(
             k for k in {*env, *expected} if env.get(k) != expected.get(k))
