@@ -47,9 +47,8 @@ def log_safe_cases():
         """No `__str__` of its own, so `str()` and f-strings reach this.
 
         The runner reports a subject's own exit code, so a `SystemExit`
-        carrying one of these reaches `repr()` on the report line. The
-        shape was absent here, which left the one input class that report
-        line could not survive untested.
+        carrying one of these reaches `repr()` on the report line, the one
+        input class that report line has to survive.
         """
         def __repr__(self):
             raise RuntimeError('evil repr')

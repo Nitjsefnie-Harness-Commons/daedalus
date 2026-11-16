@@ -671,8 +671,8 @@ def test_windows_retries_when_timed_out_drain_is_reaped(_tmp):
 
 
 def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
-    # Cleanup settling now enables the retry instead of declining it, so the
-    # ordering pin rides on the retried run and the second launch waits for it.
+    # Cleanup settling enables the retry, so the ordering pin rides on the
+    # retried run and the second launch waits for it.
     result, events, _ = retry._controlled_run(
         'win32', (901, [retry._timeout(), retry._timeout('partial', 'error')],
                   {'wait_succeeds': True, 'held_readers': True}),

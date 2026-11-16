@@ -1,4 +1,4 @@
-"""Bounded retry for a teardown a still-held file blocks (issue 313).
+"""Bounded retry for a teardown a still-held file blocks.
 
 Windows holds a per-test directory past the last test from outside this
 process, where no in-process fix reaches. Exhaustion is reported rather than

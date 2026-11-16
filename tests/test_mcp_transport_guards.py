@@ -308,12 +308,10 @@ def test_poll_reports_an_unknown_outcome_after_a_failed_request(tmp):
 def test_poll_deadline_is_not_the_wall_clock(tmp):
     """A wall-clock step backwards must not extend the wait.
 
-    The deadline was time.time() based, so an NTP correction between two
-    polls put the clock before the deadline again and the wait outlived
-    its timeout; the CLI waiter was moved to time.monotonic() for the
-    same reason. The wall clock reads once and then steps back an hour,
-    so a poll that consults it for the deadline runs the reply script
-    dry instead of timing out on the session clock.
+    The deadline runs on time.monotonic(), which an NTP correction cannot
+    move, so the wait ends at its timeout. The wall clock reads once and then
+    steps back an hour, so a poll that consults it for the deadline runs the
+    reply script dry instead of timing out on the session clock.
     """
     del tmp
     transport = _transport()
@@ -402,7 +400,7 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
 
 
 def test_poll_rejects_a_read_exactly_at_the_deadline(tmp):
-    """A read equal to the deadline no longer admits a poll.
+    """A read equal to the deadline does not admit a poll.
 
     The clock steps exactly onto the deadline, where both loop reads
     see it: either the entry check or the post-sleep spent check ends
@@ -574,8 +572,8 @@ def _shielded_environment():
 
 def test_poll_survives_a_failed_peek_from_a_real_front_end(tmp):
     """The scripted controls raise ReadError; a real cut-off body is
-    httpx's RemoteProtocolError, a TransportError that is no ReadError
-    (issue 699). Whole 502 and non-JSON pages fail a peek too."""
+    httpx's RemoteProtocolError, a TransportError that is no ReadError.
+    Whole 502 and non-JSON pages fail a peek too."""
     del tmp
     transport = _transport()
     for status, body in ((200, None), (502, b'<html>502 Bad Gateway</html>'),

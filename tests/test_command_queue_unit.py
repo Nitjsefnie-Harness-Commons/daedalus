@@ -278,11 +278,11 @@ def test_notify_dashboard_delivers_non_ascii_titles_through_the_drain(tmp):
 
     The drain decodes every entry as UTF-8, so an event written in the
     locale code page is undecodable wherever that code page is not UTF-8:
-    `café` was left in place and re-read every tick until the TTL sweep,
-    and an emoji failed inside the write after a zero-byte file already
-    existed. Both lost the event. The child runs with a verified non-UTF-8
-    preferred encoding, because on a UTF-8 host the unfixed write was
-    already UTF-8 by accident and the defect cannot be seen.
+    `café` is left in place and re-read every tick until the TTL sweep,
+    and an emoji fails inside the write after a zero-byte file already
+    exists. Both lose the event. The child runs with a verified non-UTF-8
+    preferred encoding, because on a UTF-8 host a write that ignores the
+    encoding is UTF-8 by accident and the defect cannot be seen.
     """
     report = _drain_under_non_utf8_locale(
         tmp, _util.ROOT / 'daedalus_bridge' / 'command_queue.py',

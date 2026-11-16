@@ -216,12 +216,12 @@ def test_a_stale_fetch_rejecting_leaves_the_newer_entry_held(_tmp):
     """A fetch that fails after a re-render replaced its cache entry must
     not delete the replacement.
 
-    The catch handler of the first fetch used to delete whatever the map
-    held for that path, which by then was the second fetch: its object
-    URL was created outside the cache and so was never revoked, and the
-    next download fetched the file a third time. The stale rejection is
-    delivered only once the second fetch exists, and the download after
-    it is expected to reuse the second fetch rather than start another.
+    By the time the first fetch's catch handler runs, the map holds the
+    second fetch for that path. Its object URL is created outside the cache,
+    so deleting the entry here would leave that URL never revoked, and the
+    next download would fetch the file a third time. The stale rejection is
+    delivered only once the second fetch exists, and the download after it
+    is expected to reuse the second fetch rather than start another.
     """
     result = _dashnode.run_dashboard_node(_LIFECYCLE_HARNESS)
     seen = json.loads(result.stdout)
@@ -309,8 +309,8 @@ phase('dashboard harness finished');
 
 def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
     """A refresh with no token, and one whose listing fails, both replace
-    the rows with a notice; the object URLs those rows held used to stay
-    alive, because only a successful render released them."""
+    the rows with a notice, and the object URLs those rows hold are released
+    with them, as a successful render releases them."""
     result = _dashnode.run_dashboard_node(_REFRESH_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['unplanned'] == [], seen
@@ -323,7 +323,7 @@ def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
 
 # The two pager cases read their harnesses from `tests/_dashpager.py`.
 def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
-    """The issue's reproduction: the last page shows 51–51 / 51, the
+    """The case: the last page shows 51–51 / 51, the
     last-page file is deleted, and the pager must land on the last valid
     page of the shrunken total instead of an impossible range with rows
     from a page the listing no longer has. The mid-list page is pinned

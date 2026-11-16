@@ -5,8 +5,8 @@ Refused: a job whose every ``run:`` script is nothing but a wait — ``sleep``
 or ``Start-Sleep`` with one or more duration operands (digits with an
 optional s/m/h/d suffix), a bare ``wait``, or ``timeout <duration>
 sleep <duration>`` — behind blank lines, comments, trailing comments and
-set-option preambles. Issue 461 closed the waiting-job shape; this pin keeps
-it closed by test. The polling half (waiting on check runs instead of the
+set-option preambles. This pin keeps the waiting-job shape closed by test.
+The polling half (waiting on check runs instead of the
 ``needs:`` dependency) is out of scope here and held by the aggregate
 gate's own coverage control. Out of scope, by design: poll loops,
 unrecognized commands, and jobs with no ``run:`` steps.

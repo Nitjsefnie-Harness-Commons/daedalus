@@ -30,15 +30,14 @@ imported off disk and runs for real: the token header, the
 the per-tab serialisation are the shipped code, never a re-implementation.
 The transport decides only what a planned request answers.
 
-The plan is keyed on the WHOLE request target, which is the answer to
-issue #1083: a route-shaped match would serve an origin the scenario
-never declared, and a relative target is not the absolute one that was
-planned. A target the scenario did not plan is recorded on `unplanned`
-and then refused with a throw, because no section wraps its fetch in a
-catch that turns a throw into a stream error the way `sse.js` does, so a
-thrown refusal is readable and a swallowed one is not. The double never
-answers an unrecognised request: every branch either matches a plan or
-refuses.
+The plan is keyed on the WHOLE request target: a route-shaped match would
+serve an origin the scenario never declared, and a relative target is not
+the absolute one that was planned. A target the scenario did not plan is
+recorded on `unplanned` and then refused with a throw, because no section
+wraps its fetch in a catch that turns a throw into a stream error the way
+`sse.js` does, so a thrown refusal is readable and a swallowed one is not.
+The double never answers an unrecognised request: every branch either
+matches a plan or refuses.
 
 The clock parks every timer for the scenario to fire, and a parked
 poll sleep would strand every command inside its first attempt:
@@ -50,9 +49,9 @@ needs, and a two-click `armedAction` and a toast that has not faded stay
 assertable because nothing outside a window runs.
 
 The transport half lives in `tests/_dashsection_transport.py`, and that
-file's docstring names every name the two halves share. The file that was
-carrying both was at 616 of the 700 lines a `tests/` module is allowed, and
-a file at its ceiling shares its headroom with every other branch.
+file's docstring names every name the two halves share. A `tests/` module
+is capped at 700 lines and a file near that cap shares its headroom with
+every other branch, so the transport is kept apart.
 
 Not every refusal in here is controlled, and the docstring should not
 read as though it were. What the retired harness suite held by mutation:
@@ -375,10 +374,10 @@ def section_runner(scenario, sections, *, plan, setup, by_type=None):
     """The `_run` the section suites share, bound to one suite's own parts.
 
     Each suite assembles its own `scenario` from its own fixtures and names
-    the one section it mounts, and what the six `_run`s had in common was
-    everything except those defaults. So the body lives here once and each
-    suite binds the result under its own module name, rather than six copies
-    of four lines drifting apart from one another.
+    the one section it mounts, and what the six suites' `_run`s have in
+    common is everything except those defaults. So the body lives here once
+    and each suite binds the result under its own module name, rather than
+    six copies of four lines drifting apart from one another.
 
     `setup`, `plan` and `by_type` are the suite's own `_run` defaults, passed
     in rather than guessed: three suites default `setup` to a fixture, two to

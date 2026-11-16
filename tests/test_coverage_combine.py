@@ -2,8 +2,8 @@
 """coverage_combine.py: every parallel file survives, hash collisions included.
 
 `coverage combine` skips a parallel data file whenever its filename-embedded
-content hash was already seen -- and equal hashes do not imply equal data
-(issue #266). coverage_combine.py replaces it in CI so nothing is dropped.
+content hash was already seen -- and equal hashes do not imply equal data.
+coverage_combine.py replaces it in CI so nothing is dropped.
 """
 import re
 import subprocess

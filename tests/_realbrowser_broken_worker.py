@@ -4,9 +4,8 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 This is the mechanism tests/test_real_browser_eval.py's
 `test_a_worker_that_loads_broken_is_a_failure_not_a_skip` runs against a
-real browser, moved out of it. A test function cannot live in a helper —
-being collected is the point — so the mechanism came here and the suite
-kept a test that calls it.
+real browser. A test function cannot live in a helper — being collected is the
+point — so the mechanism lives here and the suite holds a test that calls it.
 """
 import shutil
 import sys
@@ -30,7 +29,7 @@ def broken_worker_extension(tmp):
     Appended, and conditioned on being a real MV3 worker: the script still
     installs and answers, and what breaks is the extension's own state. A
     top-level throw instead makes Chrome retire the registration, which is
-    what the control extension now tells apart from a machine that cannot
+    what the control extension tells apart from a machine that cannot
     reach a worker at all.
     """
     broken = Path(tmp) / 'broken-extension'

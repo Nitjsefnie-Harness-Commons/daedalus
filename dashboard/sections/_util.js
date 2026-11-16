@@ -29,10 +29,9 @@ function appendAll(target, items) {
 
 // One tab-<select> controller for every section that offers a tab target.
 //
-// Five near-copies existed, and four of them refreshed on `tabs-synced`
-// alone. The dashboard also emits `tab-updated` and `tab-unregistered`, so a
-// tab that had been retitled or had gone away stayed offered — and selectable
-// — until the next full sync happened to arrive.
+// The controller refreshes on `tabs-synced`, `tab-updated` and
+// `tab-unregistered`, so a tab that has been retitled or has gone away is
+// withdrawn at once rather than left on offer until the next full sync.
 //
 // A selection survives a refresh only while its tab is still listed. Keeping
 // a value that has gone is what turns a stale picker into a command aimed at
@@ -114,8 +113,8 @@ export function field(text, control, attrs) {
 }
 
 // The blank cell that keeps a button's top edge aligned with the inputs
-// beside it. It was written as an empty <label>, which announces a nameless
-// label and associates with nothing; it is presentation, so it says so.
+// beside it. An empty <label> would announce a nameless label that associates
+// with nothing, so the cell is presentation and says so.
 export function spacer() {
   return h('span', { class: 'label-spacer', 'aria-hidden': 'true' }, '\u00a0');
 }
@@ -171,9 +170,9 @@ export function toast(msg, type = 'info') {
   if (!host) {
     host = document.createElement('div');
     host.id = 'daedalus-toasts';
-    // The audit found no live region anywhere on the page, so every toast
-    // was invisible to a screen reader. Polite for the host; an error names
-    // itself an alert so it interrupts rather than queues behind a success.
+    // Toasts sit in a live region, or a screen reader never announces them.
+    // Polite for the host; an error names itself an alert so it interrupts
+    // rather than queues behind a success.
     host.setAttribute('role', 'status');
     host.setAttribute('aria-live', 'polite');
     host.style.cssText = 'position:fixed;top:54px;right:18px;z-index:100;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:380px;';

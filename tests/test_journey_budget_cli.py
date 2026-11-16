@@ -312,9 +312,8 @@ def test_the_summary_remedies_come_in_the_report_s_order(tmp):
 
     stderr is collapsed by default, so the summary is where a person meets
     a run this gate refuses — and the log beside it lists the same kinds.
-    Three hand-written `if`s each naming a kind were free to print them in
-    a different order from the report, and a reader comparing the two had
-    both orders to hold in their head for no gain.
+    A reader comparing the two should not have to hold two orders in their
+    head.
 
     So the order is `found`'s, which is the report's, and this drives a run
     that refuses on EVERY kind at once — the only shape where an order is
@@ -425,8 +424,8 @@ def test_a_drop_inside_the_tolerance_is_not_recorded(tmp):
     lands inside. Recording a count from inside that band moves the band
     down by the drop, so the run after it — unchanged code, the same
     spread — measures the count that was already recorded and is now over
-    it. That is issue 1484: a single-round tighten put `screenshot` 0.51%
-    below a run that measured 0.35% above it.
+    it: a single-round tighten put `screenshot` 0.51% below a run that
+    measured 0.35% above it.
 
     So a drop is recorded only when it is WIDER than the band: the budget
     the new record produces then still sits below the count the previous
@@ -483,17 +482,16 @@ def test_a_drop_inside_the_tolerance_is_not_recorded(tmp):
 def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
     """`check` and `check --tighten` must agree about the same measurement.
 
-    Probed before this control existed: a run whose measurement refused one
-    journey tightened the other six to 1000 → 10 and printed "tightened the
-    journey budget", and the `check` run after it exited 1 on `unresolved` —
-    the same measurement, read twice, with the two readers disagreeing about
+    Unguarded, a run whose measurement refuses one journey tightens the
+    other six from 1000 to 10 and prints "tightened the journey budget",
+    and the `check` run after it exits 1 on `unresolved` — the same
+    measurement, read twice, with the two readers disagreeing about
     whether the artefact it wrote is a valid one.
 
     The argument is the one the `over` refusal already makes: a budget the
     next check cannot accept should not be written by a command that reports
-    success. An unresolved journey is not a RISE, and the arithmetic is
-    right to skip its row — that part of the counter-argument holds. It is
-    the WRITE that has to give.
+    success. An unresolved journey is not a RISE, so the arithmetic is right
+    to skip its row; it is the WRITE that has to give.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -503,8 +501,8 @@ def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
     before = artifact.read_bytes()
     counts = Path(tmp) / 'counts.json'
     # A journey that MEASURED CHEAPER than recorded, so without the refusal
-    # this write is a real one: the reviewer measured `command-round-trip
-    # 1000 -> 10` and the artefact changing under it.
+    # this write is a real one: it would move `command-round-trip` from 1000
+    # to 10 and change the artefact under it.
     report = _with_a_refused_residual(names, refused)
     report['counters']['perf-instructions']['journeys'][names[1]] = {
         'min': 10, 'max': 10, 'median': 10, 'spread': 0, 'raw': 10}
@@ -523,9 +521,9 @@ def test_a_tighten_writes_no_budget_the_next_check_would_refuse(tmp):
         f'the refusal does not name the journey it is about: {said}')
     # The SENTENCE, not only the journey's name under it. `violations` keys
     # `unresolved` by journey and holds the run's own words as the value, so
-    # joining that mapping's keys put the name on stderr and nothing of why
-    # the run could not resolve it — #1502 on its second reader path, after
-    # the row in the step summary this same refusal reaches first.
+    # joining that mapping's keys would put the name on stderr and nothing of
+    # why the run could not resolve it. stderr is this refusal's second
+    # reader path, after the row in the step summary it reaches first.
     assert _refusal_sentence(refused) in said, (
         "the refusal reached stderr without the run's own sentence, which is "
         f'what says the journey could not be resolved and why: {said}')
@@ -545,10 +543,10 @@ def test_a_tighten_writes_nothing_the_check_refuses_over_a_missing_journey(
     """The same disagreement, one key over: a journey with no count at all.
 
     `unresolved` is a journey the run refused and `unmeasured` is one it
-    never counted, and only the first was guarded. So a measurement that
-    simply lacked a journey let the tighten write six lowered counts and
-    print success, and the `check` on the artefact it wrote exited 1 on
-    `unmeasured`. Same run, same measurement, opposite answers.
+    never counted, and both are guarded. Unguarded, a measurement that
+    simply lacked a journey would let the tighten write six lowered counts
+    and print success, while the `check` on the artefact it wrote exits 1
+    on `unmeasured`. Same run, same measurement, opposite answers.
 
     The sentence that settles it is the same one and is true of both: a
     budget the next check cannot accept is not one this command may write.

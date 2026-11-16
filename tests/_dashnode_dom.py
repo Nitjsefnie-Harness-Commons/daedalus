@@ -3,10 +3,9 @@
 `_dashnode.py` owns the PROCESS boundary: the harness class, the bounded
 await, the outer timeout, the Windows pipe work. The JavaScript DOM the child
 runs against is a different thing with a different consumer list, and
-holding both in one file put this one at its 700-line ceiling with no room
-for a surface a shipped section reads. The scaffold moved here verbatim and
-`_dashnode` imports it, so every existing consumer keeps writing
-`_dashnode.DOM` and nothing else about any of them changed.
+holding both in one file would put it at its 700-line ceiling with no room
+for a surface a shipped section reads. So the scaffold lives here and
+`_dashnode` imports it, so every consumer keeps writing `_dashnode.DOM`.
 
 Which half owns which name, because the modules that follow compose this one
 and a reader has to tell them apart: `phase`, `bounded`, `leave` and

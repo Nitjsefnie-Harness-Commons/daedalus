@@ -57,19 +57,17 @@ def _workflow_text(source):
 def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
     """A tool the installer does not install is declared by a step, first.
 
-    The four jobs that reach the suites all inherited `node` from the
-    `ubuntu-latest` image, and nothing in this repository said so. That was
-    a claim about a hosted image rather than about the job: the moment the
-    image drops node, or a job moves to a runner that never had it, every
-    suite that skips on it goes quiet on every leg at once and the matrix
-    reports green having verified nothing.
+    A claim about a hosted runner image is a claim about the image rather
+    than about the job: the moment the image drops a tool, or a job moves to
+    a runner that never had it, every suite that skips on it goes quiet on
+    every leg at once and the matrix reports green having verified nothing.
 
     ORDER is the property, not membership, and it is measured against the
     first step that REACHES the suite tree rather than the first one that
     runs a suite in it. Those are not the same step: a `--help` probe
     reaches the tree and runs no suite at all, and the walk cannot tell it
-    from a run without encoding which invocations of which runner do what
-    — the basename fingerprint the walk exists to refuse. So the boundary
+    from a run without encoding which invocations of which runner do what —
+    the basename fingerprint the walk exists to refuse. So the boundary
     is conservative on purpose, and the message below says which step it
     is rather than claiming a suite ran there.
 
@@ -119,10 +117,10 @@ def test_every_suite_running_job_declares_the_tools_it_does_not_install(tmp):
 def _declared_above(before, gated):
     """What a job declares above the boundary, phrased so it is true of it.
 
-    "no action at all" was a fallback for an empty `before`, and it is
-    false of any job that reaches that state with a gated action to name:
-    the message denied the job every action and then listed the gated ones
-    in the next clause, so a reader had to read past the assertion to
+    "no action at all" is false as a fallback for an empty `before` in any
+    job that reaches that state with a gated action to name: the message
+    would deny the job every action and then list the gated ones in the
+    next clause, so a reader would have to read past the assertion to
     learn the opposite of what it claimed. A job whose every pre-boundary
     action is gated reaches that state — a gated action is not one the
     control counts — on any tree where the declaration above its boundary
@@ -143,23 +141,21 @@ def _declared_above(before, gated):
 def test_no_exempted_tool_has_a_setup_action_somewhere_in_the_tree(tmp):
     """An image exemption is legal only where the tree offers no other way.
 
-    The `node` entry this branch removed was not a stray exemption that
-    happened to be misplaced. It was a control-shaped sentence — "the
-    hosted images ship it and no workflow step installs it, so a suite
-    that skips on node skips on every leg" — that made the uncontrolled
-    state read as the rule permitting it. Restoring it verbatim satisfied
-    every other control in this file, because an image exemption is a
-    perfectly legal placement for a tool the tree has no way to declare.
+    An exemption can be a control-shaped sentence — "the hosted images ship
+    it and no workflow step installs it, so a suite that skips on node skips
+    on every leg" — that makes the uncontrolled state read as the rule
+    permitting it. Such an entry satisfies every other control in this file,
+    because an image exemption is a perfectly legal placement for a tool the
+    tree has no way to declare.
 
-    So the legality of that placement is now DERIVED rather than asserted.
+    So the legality of that placement is DERIVED rather than asserted.
     `_declared_tool_actions` reads every action name in every workflow, and
     a tool is exempt only when no action anywhere names it. `node` is
-    declared by `actions/setup-node`, which the `eslint` job has used since
-    before this branch existed, so the exemption stays refused no matter
-    what the four suite jobs do — including if all four steps are reverted
-    together.
+    declared by `actions/setup-node`, which the `eslint` job uses, so the
+    exemption stays refused no matter what the four suite jobs do —
+    including if all four steps are reverted together.
 
-    The prose reason each entry carries is now documentation of a fact
+    The prose reason each entry carries is documentation of a fact
     something checks, rather than the thing making it legal.
     """
     del tmp
@@ -189,7 +185,7 @@ def test_the_exemption_predicate_splits_a_name_into_the_words_it_sets_up(
     declares `node`. Every action in this tree except that one is a single
     word in its last segment, so it is the only input on which the
     word-split and the whole-segment reading disagree — and it is the
-    action this branch's central claim turns on. Take the segment as one
+    action the `node` declaration turns on. Take the segment as one
     name instead, put `node` back in `SHIPPED_BY_THE_IMAGE`, empty
     `DECLARED_BY` and delete the setup steps the suite jobs carry, and
     every other control in this file passes over a tree whose workflows
@@ -203,8 +199,8 @@ def test_the_exemption_predicate_splits_a_name_into_the_words_it_sets_up(
     word that appears only in an action's owner or namespace is a tool at
     all. Those are the three readings a simplification of that one line
     reaches for — the segment, the whole name, and a special case for the
-    action this branch happens to need — and every one of them is a name
-    the derivation has to produce on its own.
+    one action the suite jobs need — and every one of them is a name the
+    derivation has to produce on its own.
     """
     del tmp
     declared = _declared_tool_actions()
@@ -294,9 +290,8 @@ def test_every_extension_the_walk_resolves_is_classified_exactly_once(tmp):
     are held to each other here, with the readable third (`.py`, the one
     the walk parses) between them. An extension added to the pattern
     without being classified would leave the residue control silent about
-    a file it can now see, which is the shape that reached the walk with
-    `.ps1`: a real authoring choice on the `windows-latest` leg that no
-    control in this file could answer for.
+    a file the walk can see: a `.ps1` step on the `windows-latest` leg is a
+    real authoring choice that no control in this file could answer for.
     """
     del tmp
     resolved = {f'.{extension}' for extension in _PATH_EXTENSIONS}
@@ -333,10 +328,9 @@ def test_every_skipped_tool_is_answered_by_exactly_one_mechanism(tmp):
     Three mechanisms answer a skipped tool: the shared installer installs
     it, a step declares it, or a claim about the runner image says the image
     has it. Nothing keeps a fourth tool from being waved through with a
-    hand-written exemption, which is exactly what `node` was — an entry
-    whose reason read "the hosted images ship it and no workflow step
-    installs it", so the control stated the defect as the rule that permitted
-    it and a suite skipping on node was green on every leg by construction.
+    hand-written exemption, and an exemption whose reason states the
+    uncontrolled state as the rule that permits it makes a suite skipping on
+    that tool green on every leg by construction.
 
     The three failure shapes are the ones a reader can act on: a tool no
     mechanism answers (add it to one), a tool two of them claim (one of the
@@ -362,13 +356,13 @@ def test_every_skipped_tool_is_answered_by_exactly_one_mechanism(tmp):
 def test_a_mechanisms_share_never_carries_a_tool_the_mechanism_lacks(tmp):
     """The share a control indexes its own table with stays inside it.
 
-    One function once returned the residue unioned with whichever share a
-    caller named, so a caller asking what `DECLARED_BY` had to handle got
-    the residue back too and then indexed `DECLARED_BY` with it. On this
-    tree the residue is empty, so the union was a no-op and the promise was
-    never exercised. Planting a real skip on a binary nothing installs —
-    the exact change these two files exist to catch — put that binary in
-    the share and the declaration control died with `KeyError: 'gojq'`
+    The residue is kept out of the share a caller asks for. Were it unioned
+    in, a caller asking what `DECLARED_BY` has to handle would get the
+    residue back too and index `DECLARED_BY` with it. On this tree the
+    residue is empty, so the union would be a no-op the real tree never
+    exercises; planting a real skip on a binary nothing installs — the exact
+    change these two files exist to catch — would put that binary in the
+    share and the declaration control would die with `KeyError: 'gojq'`
     instead of refusing with a message.
 
     Driven through the same seam, so the crash case is a test rather than

@@ -225,8 +225,8 @@ def test_readiness_get_is_served_only_after_the_mcp_settle(tmp):
 
     A probe served while the front-end import and the mcp-server loop are
     both mid-flight can land on a fresh callgrind thread id nobody
-    recycles — the journey-count high mode (issue 1498). The order is the
-    property, so both events are recorded on the harness's own thread;
+    recycles — the condition behind the journey-count high mode. The order
+    is the property, so both events are recorded on the harness's own thread;
     nothing is timed.
     """
     events = []
@@ -459,8 +459,9 @@ def test_startup_survives_an_undecodable_byte_in_the_data_root(tmp):
     A root whose name carries an undecodable byte arrives through
     surrogateescape; where sys.stdout.errors is strict
     (PYTHONIOENCODING=utf-8:strict forces it here, because this box's
-    C.UTF-8 stdio would mask it), printing it raised UnicodeEncodeError and
-    the server exited 1 before ever serving a request.
+    C.UTF-8 stdio would mask it), printing it naively raises
+    UnicodeEncodeError and the server would exit 1 before ever serving a
+    request.
     """
     _util.require_undecodable_names(tmp)
     bad_root = os.fsencode(tmp) + b'/\xffdocroot'
@@ -515,13 +516,12 @@ def test_an_explicit_port_collision_surfaces_verbatim(tmp):
 
 
 def test_a_lost_draw_no_longer_kills_the_bridge_fixture(tmp):
-    """A drawn port taken by another process used to fail the bridge child.
+    """A drawn port taken by another process must not fail the bridge child.
 
-    The fixture handed the child a number it had already released; a squatter
-    binding it first produced EADDRINUSE under an innocent test's name — the
-    intermittent that surfaced under arbitrary tests in this suite and never
-    reproduced. The fixture now asks the kernel for port 0, so there is no
-    number to lose.
+    Handing the child a number the fixture had already released lets a squatter
+    bind it first, and the child then fails with EADDRINUSE under an innocent
+    test's name. The fixture asks the kernel for port 0, so there is no number
+    to lose.
     """
     squatter = socket.socket()
     squatter.bind(('127.0.0.1', 0))
@@ -587,7 +587,7 @@ def test_a_second_bridge_on_an_in_use_data_root_refuses(tmp):
 def test_shared_log_safe_never_raises_and_stays_useful(tmp):
     """The log-line safeguard must not itself be able to raise.
 
-    str(value) was evaluated outside any fallback: a conversion-limited huge
+    str(value) must run inside the fallback too: a conversion-limited huge
     int raises ValueError under the default int-to-string limit, an exception
     object whose __str__ fails propagates its own error, and a str subclass
     can hand .encode() to code that raises or .decode() to one returning a
@@ -626,8 +626,8 @@ def test_dashboard_responses_refuse_cross_origin_framing(tmp):
     """The token-bearing control surface must not be embeddable.
 
     /dashboard drives the browser and carries the bridge token, so a page
-    that can frame it can overlay its controls. Neither frame-ancestors nor
-    X-Frame-Options was sent on any dashboard response.
+    that can frame it can overlay its controls. Every dashboard response must
+    send both frame-ancestors and X-Frame-Options.
     """
     with _util.bridge(tmp) as (base, _docroot):
         for path in ('/dashboard', '/dashboard/app.js'):

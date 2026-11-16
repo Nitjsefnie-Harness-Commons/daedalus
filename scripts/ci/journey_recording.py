@@ -96,8 +96,8 @@ def carried_tolerances(recorded, counted, draws=(), counter=None,
 
     Absent stays absent, as everywhere else in the document: a re-baseline
     of an artefact that names no per-journey tolerance writes no block, so
-    the canonical rendering of every artefact recorded before the field
-    still round-trips.
+    the canonical rendering of an artefact without the field still
+    round-trips.
 
     `counted` is the journeys this measurement records a COUNT for, not the
     journeys the set carries. A journey recorded at `null` -- the manager's
@@ -105,7 +105,7 @@ def carried_tolerances(recorded, counted, draws=(), counter=None,
     count, so a bound kept beside it is a bound no arithmetic reads and
     `_validated_tolerances` refuses the document for: `--drop` would be the
     one flag that cannot be used on a budget with a per-journey tolerance,
-    and the remedy for that is the hand-edit this command replaces.
+    and the remedy for that would be a hand-edit of the document.
 
     A `--draws` pool governs every journey it names, entry or not: above
     the default it is re-bound, at or below it the entry goes and the
@@ -158,7 +158,7 @@ def derived_tolerances(draws, counter, counted, toolchain, exclusions,
     (tolerance_pct), strictly greater: the default is a floor, never a
     ceiling to tighten under, so a journey at or below it falls back to
     tolerance_pct — a sub-default band over an unseen tail is the next
-    #1519.
+    false failure.
 
     Pool files are quantity identity: each must select the same counter,
     carry the same toolchain and count under the same exclusion map as the

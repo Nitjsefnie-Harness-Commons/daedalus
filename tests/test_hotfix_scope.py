@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Where a stored hotfix runs, and when it runs nowhere at all.
 
-Replay answered a content script's request with the tab id and nothing
-else, and both `executeScript` calls in the MAIN channel named that tab id
-alone. Chrome resolves a tab id to whatever the tab holds at injection
-time, so a document that navigated between the request and the injection
-received the previous document's fix, a prerendered document's request
-injected into the visible one, and a fix stored for one site ran on every
-site. The CDP fallback was tab-bound the same way and had no document
-binding of its own.
+Chrome resolves a tab id to whatever the tab holds at injection time, so a
+delivery that names the tab id alone gives a document that navigated
+between the request and the injection the previous document's fix, injects
+a prerendered document's request into the visible one, and runs a fix
+stored for one site on every site. Delivery therefore binds to the document
+the request carried, not to the tab, on the MAIN channel and the CDP
+fallback alike.
 
 These controls read which DOCUMENT received which fix. The property is
 carried by more than one layer — `documentIds` on the MAIN channel, the
@@ -612,8 +611,8 @@ def test_a_scope_naming_no_usable_host_is_refused_at_store_time(tmp):
 
 # A scope that is not a string cannot be parsed and cannot be compared; the
 # four shapes below are the ones a record can plausibly carry out of the
-# store's own hands, and `true` is the sharpest — the branch spent ruling 9
-# and C13 guaranteeing the clear's own value can never be stored there.
+# store's own hands, and `true` is the sharpest: the clear's own value must
+# never be storable in the scope slot.
 NON_STRING_SCOPES = (123, True, ['*'], {'a': 1})
 
 
@@ -625,7 +624,7 @@ def test_a_stored_scope_that_is_not_a_string_runs_nothing(tmp):
     `match` is a number, a boolean, a list or an object was scoped, and
     reading it as unscoped runs that fix on every site its author scoped it
     away from. The non-parseable STRING beside it is already refused, so the
-    permissive arm is the one place the function's own rule was not honoured.
+    permissive arm has to honour the function's own rule the same way.
     """
     del tmp
     for value in NON_STRING_SCOPES:

@@ -29,8 +29,7 @@ def _log_safe(value):
 
     The repository argument arrives through argv's surrogateescape, so a path
     containing an undecodable byte holds U+DC80..U+DCFF; printing it raises
-    UnicodeEncodeError wherever the stream's errors are strict — the success
-    line died that way AFTER writing a correct .gitignore. Exception text
+    UnicodeEncodeError wherever the stream's errors are strict. Exception text
     carries the same bytes via command lines and paths. backslashreplace
     escapes them, so no diagnostic can kill the run.
 
@@ -204,10 +203,10 @@ HELP_FLAGS = ('--help', '-h')
 def _run(argv):
     """The script's entry point, so a flag is never a repository path.
 
-    The repository is this script's first POSITIONAL argument, so before
-    it meant that `--help` was passed to `git -C` and the failure reported
-    was git's, naming a subcommand nobody asked to run (#1301). A flag
-    that looks like a flag is a request for the usage line, not a path.
+    The repository is this script's first POSITIONAL argument, so a flag
+    passed to `git -C` would be taken for a path: `--help` makes git report
+    a failure naming a subcommand nobody asked to run. A flag that looks
+    like a flag is a request for the usage line, not a path.
     Two flags, so no parser: an argument is a help flag or it is a repo.
     """
     if any(arg in HELP_FLAGS for arg in argv):

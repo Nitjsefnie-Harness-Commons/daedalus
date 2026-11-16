@@ -227,9 +227,8 @@ _SURFACE_VARS = ('--bg', '--panel', '--panel-2')
 def test_dashboard_text_colours_meet_wcag_contrast(tmp):
     """Every text colour clears 4.5:1 against every surface it can sit on.
 
-    `--text-dim` measured 3.778:1 and `--text-dimmer` 2.119:1 on `--panel`,
-    and the dashboard's labels are 10px — normal text, so 4.5:1 is the bar,
-    not the 3:1 large-text one. Each text colour is checked against all three
+    The dashboard's labels are 10px — normal text, so 4.5:1 is the bar, not
+    the 3:1 large-text one. Each text colour is checked against all three
     surfaces rather than the one it happens to be used on today, because the
     pairing is a class attribute away from changing.
     """
@@ -308,8 +307,7 @@ def test_every_served_page_declares_its_encoding(tmp):
     A browser given no declaration falls back to a legacy code page, and the
     fallback applies to every classic script the document loads as well as to
     the markup — so a single em dash in a sibling .js file renders as three
-    wrong characters. The extension's options page shipped that way and
-    displayed its own success message mangled.
+    wrong characters.
 
     Cheap to state and cheap to keep: any page added later inherits the same
     requirement instead of rediscovering it in a screenshot.
@@ -348,9 +346,9 @@ def test_every_static_label_names_a_control(tmp):
     assert not dangling, '\n'.join(dangling)
 
 
-# The harness and the check over its output moved to tests/_dashfield.py,
-# which two sibling suites now read instead of importing this suite whole.
-# Nothing imported the private spelling, so no re-export is left binding it.
+# The harness and the check over its output live in tests/_dashfield.py,
+# which two sibling suites read instead of importing this suite whole.
+# Nothing imports the private spelling, so no re-export binds it.
 
 
 def test_field_associates_every_label_with_its_control(tmp):

@@ -301,8 +301,7 @@ const chrome = {
 #
 # The attribute store is real rather than a set of no-ops. A documentElement
 # that swallowed the write would let a control pass against a page that never
-# planted anything, which is the shape of a false green this suite family has
-# produced before.
+# planted anything, which is the shape of a false green.
 CONTENT_SCRIPT_PAGE = r"""
 function contentScriptPage() {
   const attributes = new Map();

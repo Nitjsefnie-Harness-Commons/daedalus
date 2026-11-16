@@ -1,4 +1,4 @@
-"""The queue-queue name ordering source (issue 1098).
+"""The queue-queue name ordering source.
 
 Owns the one place a queue-entry stem is minted, so the ordering guarantee
 lives in a single module: the millisecond mark, the monotonic counter, the

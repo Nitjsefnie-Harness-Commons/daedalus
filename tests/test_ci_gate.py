@@ -41,9 +41,9 @@ def _gate_run(name, conclusion='success'):
 def _published_check(conclusion='success'):
     """One published `gate freshness` check run, as `ci_wait` reads it.
 
-    A head whose publisher has written nothing is a state of its own
-    since issue 1360, so a control about the WORKFLOW gate states this
-    one green rather than leaving the answer ambiguous.
+    A head whose publisher has written nothing is a state of its own, so a
+    control about the WORKFLOW gate states this one green rather than leaving
+    the answer ambiguous.
     """
     return {'id': 7, 'name': 'gate freshness', 'status': 'completed',
             'conclusion': conclusion, 'completed_at': '2026-09-20T10:10:00Z',
@@ -231,11 +231,11 @@ def test_the_expectation_has_exactly_one_definition(tmp):
         for file, name in _module_declarations(path, watched,
                                                always=('missing_required',)):
             found.append(f'{file} {name}')
-    # BY NAME, not by line: an expected list carrying `first + 3` made a
-    # blank line inserted between the two definitions a red whose message
-    # was a list rather than a reason, and editing the `3` is the first
-    # thing the next author would do. Both names are already in hand, and
-    # a line number would go stale on the next edit above the definition.
+    # BY NAME, not by line: an expected list carrying `first + 3` turns a
+    # blank line inserted between the two definitions into a red whose
+    # message is a list rather than a reason, and editing the `3` is the
+    # first thing the next author would do. Both names are already in hand,
+    # and a line number would go stale on the next edit above the definition.
     named = [entry.split(' ', 1)[1] for entry in found]
     assert named == ['REQUIRED_WORKFLOWS', 'missing_required'], found
     assert {entry.split(' ')[0] for entry in found} == {'ci_gate.py'}, found
@@ -260,7 +260,7 @@ def _module_declarations(path, watched, *, always=()):
     """(file, name) for every definition of `watched` `path` makes itself.
 
     One enumeration, shared with the filter control below: two readings of
-    one property in one file is how the two came to disagree.
+    one property in one file can come to disagree.
 
     A module-scope binding is a DEFINITION unless it was only imported, or
     it is the plain alias `_is_an_alias` recognises - and `always` names
@@ -312,11 +312,10 @@ def _module_assigns(statements):
 def test_the_required_names_are_spelled_in_exactly_one_module(tmp):
     """The same drift under a name the control above would miss.
 
-    A copy need not call itself `missing_required` - the shape the review
-    planted was an expression inside a caller's own body. What every copy
-    has in common is that it spells the workflow names out again, so this
-    looks for the names inside a set or frozenset literal and requires one
-    file to carry them.
+    A copy need not call itself `missing_required`: it can be an expression
+    inside a caller's own body. What every copy has in common is that it
+    spells the workflow names out again, so this looks for the names inside
+    a set or frozenset literal and requires one file to carry them.
     """
     del tmp
     wanted = set(_ci_gate().REQUIRED_WORKFLOWS)
@@ -344,10 +343,8 @@ def test_each_caller_reaches_the_predicate_through_ci_gate(tmp):
     requiring the caller to go through it catches that, and catches a
     caller's own copy for the same reason - it would not call it.
 
-    `ci_wait.py` is the only caller this repository ships: the watcher's
-    hold that read the predicate beside it is gone from the tree, so the
-    property pinned here is the one that survives rather than the one it
-    replaced.
+    `ci_wait.py` is the only caller this repository ships, so the property
+    pinned here is that caller's use of the predicate.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -401,26 +398,25 @@ def _refusing_wait(caller, runs):
 def test_every_reader_answers_over_the_judged_set(tmp):
     """The ANSWER the three readers give, not the set each one passed.
 
-    The control this replaces read the shape of the call - which run ids
-    reached the predicate - and could not do better: the producer names
-    every run of a workflow alike, so on the data it emits the raw reading
-    and the judged reading are one fact and no answer tells them apart. A
-    call shape is the weaker thing in any case, since a caller can hand
-    over exactly the ids a recorder wants and still be asking the wrong
-    question.
+    Reading the shape of the call - which run ids reached the predicate -
+    cannot do better: the producer names every run of a workflow alike, so
+    on the data it emits the raw reading and the judged reading are one fact
+    and no answer tells them apart. A call shape is the weaker thing in any
+    case, since a caller can hand over exactly the ids a recorder wants and
+    still be asking the wrong question.
 
-    So the fixture is the one the removed control called unproducible -
-    two runs of ONE workflow, the older named `tests` and the newer named
-    something else - and what is pinned here is the RULE rather than a
-    shape the producer emits. A workflow's `name:` changing in its own
-    YAML is all it takes to make this set real; until then the control is
-    a guard, and a guard passes on the tree it was written against by
-    construction, so the defect was planted in ci_gate.py to watch it fail.
+    So the fixture is two runs of ONE workflow, the older named `tests` and
+    the newer named something else, and what is pinned here is the RULE
+    rather than a shape the producer emits. A workflow's `name:` changing in
+    its own YAML is all it takes to make this set real; until then the
+    control is a guard, and a guard passes on the tree it was written
+    against by construction, so it is proven by planting the defect in
+    ci_gate.py and watching it fail.
 
-    They are meant to agree (issue #1262). A superseded run's name must
-    not satisfy the gate on its own, which is what issue #1249 established
-    for conclusions; the nearest precedent is #1223, where the hold read a
-    settled green matrix with the gating workflow silently absent.
+    They are meant to agree. A superseded run's name must not satisfy the
+    gate on its own, the same rule that holds for conclusions; the failure
+    to guard against is a settled green matrix with the gating workflow
+    silently absent.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -444,7 +440,7 @@ def test_every_reader_answers_over_the_judged_set(tmp):
     assert wait._missing(runs, [], required_checks=frozenset()) == [
         'no tests run']
     # And the refusal built from that answer names the gate, rather than
-    # printing a doubled space where the name belongs (issue #839).
+    # printing a doubled space where the name belongs.
     code, printed = _refusing_wait(wait, runs)
     assert code == 4, printed
     assert 'no tests run on' in printed, printed
@@ -457,18 +453,18 @@ FILTER_NAMES = frozenset(
 def test_no_caller_declares_a_filter_of_its_own(tmp):
     """That the filter is ci_gate's and not a copy - not that it is reached.
 
-    A copy pasted back into a caller is the drift this branch exists to
-    end, and it survives every other control: a behaviourally identical
+    A copy pasted back into a caller is the drift this filter exists to
+    prevent, and it survives every other control: a behaviourally identical
     `judged` in `ci_wait.py` leaves every suite that reads these modules
     green but this one.
 
     The searched domain is this skill's own directory and nothing wider: a
     `*.py` module beside `ci_gate.py`. It cannot bound the other copies,
     and a copy pasted into any module outside this directory is green
-    here. `scripts/ci/aggregate_gate.py` is such a module: since issue
-    #1260 it binds `_workflow_of` and `_started_key` through the import
-    from `ci_gate` rather than declaring them, and keeps `superseded`
-    local under its own signature - outside the scan's domain either way.
+    here. `scripts/ci/aggregate_gate.py` is such a module: it binds
+    `_workflow_of` and `_started_key` through the import from `ci_gate`,
+    and keeps `superseded` local under its own signature - outside the
+    scan's domain either way.
 
     Within that domain the first half refuses a module-scope definition
     of any name `FILTER_NAMES` watches outside `ci_gate`, whatever nests

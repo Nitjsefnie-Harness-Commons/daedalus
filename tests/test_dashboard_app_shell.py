@@ -339,9 +339,8 @@ def test_a_saved_token_reads_the_same_in_the_bar_as_it_did_at_boot(_tmp):
 def test_the_settings_panel_does_not_import_the_entry_point(_tmp):
     """`sections/settings.js` reaching `app.js` closes a cycle: the entry
     point imports the panel, so the panel importing the entry point makes
-    which body runs first depend on who was loaded first. It did, once,
-    for the meta-bar writer, and the writer now lives beside the panel in
-    `sections/_util.js`.
+    which body runs first depend on who was loaded first. The meta-bar
+    writer lives beside the panel in `sections/_util.js`.
 
     The specifiers are read rather than the text searched, so the whole
     list is what a failure prints and a mention in a comment cannot

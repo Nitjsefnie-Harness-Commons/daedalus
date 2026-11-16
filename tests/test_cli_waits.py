@@ -124,10 +124,11 @@ def test_a_zero_timeout_on_exec_and_put_reads_as_the_default(tmp):
     """`-t 0` waits the documented default; it does not time out at once.
 
     positive_timeout admits 0 on the promise that every call site reads it
-    as unset, the way screenshot and cookies do. put and exec handed it
-    straight to the waiter, whose deadline was now plus nothing, so the CLI
-    reported `Timeout (0s)` for a command the bridge had already queued and
-    the browser went on to run — and a retry ran the side effect twice.
+    as unset, the way screenshot and cookies do, put and exec included.
+    Handed straight to the waiter, 0 would make a deadline of now plus
+    nothing, so the CLI would report `Timeout (0s)` for a command the bridge
+    has already queued and the browser goes on to run — and a retry would run
+    the side effect twice.
     """
     source = Path(tmp) / 'job.js'
     source.write_text('document.title', encoding='utf-8')
@@ -272,13 +273,11 @@ def _wait_harness_output(stdout):
 def test_the_result_wait_records_the_ramp_opening_below_the_interval(tmp):
     """The one sleep an available result costs is the ramp's opening.
 
-    The waiter charged every waited command its whole interval up front,
-    so an available result still cost 500ms. The MCP poller had that
-    shape and was fixed first. A virtual clock records the sleeps the
-    loop REQUESTS, so this pins the ramp's opening: macOS read 0.357s
-    against a 0.25s bound. The fake charges the sleep, not the request,
-    so the request budget is the stalled-poll test below, and the
-    backoff is test_cli_result_wait.py's.
+    An available result costs only the ramp's opening sleep, not the whole
+    interval the call waits on. A virtual clock records the sleeps the loop
+    REQUESTS, so this pins the ramp's opening exactly. The fake charges
+    the sleep, not the request, so the request budget is the stalled-poll
+    test below, and the backoff is test_cli_result_wait.py's.
 
     The opening is also held BELOW the interval this call waits on, and
     that default is read off the signature rather than restated here, so
@@ -498,7 +497,7 @@ def _check_transport_family(family):
 
 def test_a_connection_reset_is_a_connection_failure_on_every_entry(tmp):
     """The cut-off controls raise IncompleteRead, an HTTPException; this
-    is the OSError half of _exchange's transport clauses (issue 699)."""
+    is the OSError half of _exchange's transport clauses."""
     del tmp
     _check_transport_family('ConnectionResetError')
 
@@ -517,10 +516,8 @@ def test_a_bare_oserror_is_a_connection_failure_on_every_entry(tmp):
 def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
     """The timeout bounds the whole wait, not just the top of each lap.
 
-    The loop checked the clock before each iteration and then handed every
-    HTTP call its own fixed 30s, so one stalled poll ran far past what the
-    caller asked for — a 50ms wait returned after 320ms against a single
-    300ms stall.
+    Each HTTP call is handed only the time that remains, never its own fixed
+    30s, so one stalled poll cannot run far past what the caller asked for.
     """
     del tmp
     code = (

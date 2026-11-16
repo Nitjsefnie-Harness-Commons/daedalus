@@ -473,8 +473,8 @@ def test_poll_answers_empty_for_a_missing_or_malformed_file(tmp):
 def test_the_delivered_queue_line_carries_no_full_token(tmp):
     """The queue name is <token>_<tab>: the delivery line may not spell it.
 
-    Every drain fires this line, so a full name here was the credential
-    printed on every delivered command, against the invariant the upload
+    Every drain fires this line, so a full name here would print the
+    credential on every delivered command, against the invariant the upload
     and refusal lines already follow.
     """
     service = _load_service('stream_service_deliver_redact')

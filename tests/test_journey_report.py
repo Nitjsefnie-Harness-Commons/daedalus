@@ -227,9 +227,8 @@ def test_the_table_never_reads_a_refused_journey_as_within_budget(tmp):
 
 def test_the_unmeasured_row_carries_the_reason_the_counter_gave(tmp):
     """The counter's own sentence has to reach a reader of a failed run:
-    the row reporting an unmeasured journey named only the counter, and
-    the sentence survived inside the uploaded `journey-counts.json` and
-    nowhere a person reads.
+    the row reporting an unmeasured journey carries it, not only the
+    uploaded `journey-counts.json`, which no person reads.
 
     The remedy beside it has to name the step that FAILED, cross-checked
     against the job, so a step renamed in one place and not the other is

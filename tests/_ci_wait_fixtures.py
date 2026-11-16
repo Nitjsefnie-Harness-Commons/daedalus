@@ -2,7 +2,7 @@
 
 Not a suite itself — `run_tests.py` only loads `test_*.py`.
 
-These four live here rather than in any one suite because three suites now
+These four live here rather than in any one suite because three suites
 need them: `test_ci_wait.py` and `test_ci_wait_gate.py` both classify runs
 through the verdict contract, and `test_ci_gate.py` asks the gate predicate
 what it answers. `run_tests.py` gives each suite its own process, so one
@@ -17,11 +17,10 @@ runner's, and the `_Clock` declarations belong to suites that are
 genuinely different classes (one records each attempt and may refuse, one
 is a settable wall clock). A `tests/_*.py` module taking a bare `_run` or
 `_Clock` would own a name suites already use, trading the sibling-import
-red for a re-implementation red - and the allowance rows that would have
-cleared it belonged to the suites this branch retired. `_verdict` is the
-same case a third time, ten suites over, and its loader is spelled here
-rather than named `_ci_wait` for the same reason: four modules declare
-that name at module scope and none of them can import this one.
+red for a re-implementation red. `_verdict` is the same case a third time,
+ten suites over, and its loader is spelled here rather than named
+`_ci_wait` for the same reason: four modules declare that name at module
+scope and none of them can import this one.
 """
 import contextlib
 

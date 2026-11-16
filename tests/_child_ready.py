@@ -4,8 +4,8 @@ A wait whose iteration count is a function of wall time is not a measurement.
 The instruction count it contributes grows with however long the machine took
 to get there, and no tolerance absorbs that without also absorbing the
 regression the budget exists to catch — the same argument `JOURNEY
-DETERMINISM` settled when a polled `/health` was replaced by a wait on the
-bridge's own `[MCP]` line.
+DETERMINISM` makes for waiting on the bridge's own `[MCP]` line rather than
+polling `/health`.
 
 So every wait here is EVENT-DRIVEN: it blocks on something the child
 produced, and the number of iterations is the number of things the child

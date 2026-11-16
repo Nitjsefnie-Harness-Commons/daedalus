@@ -255,8 +255,8 @@ def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
     WHICH journey is the unmeasured one, and what the neighbours are followed
     down TO, are chosen here and read out of the tree's own recorded map. A
     control that indexed a journey set by position and spelled the recorded
-    count beside its assertion named two things the journey set may change:
-    it went stale the first time the set grew.
+    count beside its assertion would name two things the journey set may
+    change, and go stale whenever the set grows.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES
@@ -265,8 +265,8 @@ def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
     unmeasured, measured = names[0], names[1:]
     kept = recorded['journeys'][unmeasured]
     # A quarter off, because a tighten follows a journey down only past its
-    # own tolerance (issue 1484), and the fixture's is ten percent: a drop
-    # of one count is the journey's own spread, not a saving to record.
+    # own tolerance, and the fixture's is ten percent: a drop of one count is
+    # the journey's own spread, not a saving to record.
     followed = {name: recorded['journeys'][name] * 3 // 4 for name in measured}
     assert kept not in followed.values(), (
         f'the count {unmeasured} keeps is one a measured journey is followed '
@@ -277,10 +277,9 @@ def test_a_tighten_writes_nothing_for_a_journey_it_measured_nothing(tmp):
     measurements.write_text(json.dumps(measured_report(followed)),
                             encoding='utf-8')
     # The PROPERTY is about `tightened`, and it is driven there: the command
-    # no longer reaches it on this measurement, because a budget the next
-    # check refuses is not one the tighten may write. Reading the property
-    # off a command that no longer calls the function left a fixture
-    # documenting a path nothing takes.
+    # does not reach it on this measurement, because a budget the next check
+    # refuses is not one the tighten may write. Reading the property off the
+    # command would document a path nothing takes.
     assert policy.tightened(followed, recorded, names) == dict(
         followed, **{unmeasured: kept}), (
         f'{unmeasured} was measured by nothing and must keep the count it '
@@ -376,9 +375,9 @@ def test_an_unrecorded_journey_is_reported_and_never_a_violation(tmp):
 def test_rounds_that_disagree_are_a_refusal_naming_both(tmp):
     """A measurement whose rounds disagree about what a journey rendered.
 
-    This case used to live in `violations`, where `main` could no longer reach
-    it — the sha gate refuses first — so it is pinned on the gate that owns
-    it, and the remedy it prints is the one a reader is sent to.
+    This case is pinned on the gate that owns it: through `violations`,
+    `main` cannot reach it, because the sha gate refuses first. The remedy
+    it prints is the one a reader is sent to.
     """
     policy = _journey_contract.policy()
     names = journeys().NAMES

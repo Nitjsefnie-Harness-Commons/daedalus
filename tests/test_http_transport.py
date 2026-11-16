@@ -2,14 +2,13 @@
 """The request transport mixin, the answer convention, the JSON body helpers.
 
 `daedalus_bridge/http_transport.py` carries the request parsing,
-authentication, body limits and response writing that used to sit on
-`server.py`'s Handler, plus the `answer` convention every route module
-returns into. The mixin is exercised here through a stub subclass that
-records what was sent instead of holding a socket, so the rules are pinned
-in-process rather than only end to end through a bridge child. The JSON
-body helpers the mixin parses with live in `daedalus_bridge/json_body.py`;
-their semantics and their configuration-free import are pinned here from
-that module directly.
+authentication, body limits and response writing, plus the `answer`
+convention every route module returns into. The mixin is exercised here
+through a stub subclass that records what was sent instead of holding a
+socket, so the rules are pinned in-process rather than only end to end
+through a bridge child. The JSON body helpers the mixin parses with live in
+`daedalus_bridge/json_body.py`; their semantics and their configuration-free
+import are pinned here from that module directly.
 """
 import io
 import json

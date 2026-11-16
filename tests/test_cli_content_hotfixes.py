@@ -6,23 +6,20 @@ and do_set_permanent in daedalus_cli/commands_content.py.
 `store-hotfix` and the scope column of `list-hotfixes`, and
 `tests/test_cli_segment_origins.py` owns the three segment-origin
 handlers; neither is extended here. What this file adds is the branches
-those suites do not reach, and the one of them that is a defect.
+those suites do not reach.
 
-`--match ''` is the centre of the file. The handler guarded its scope
-field with a truthiness test, so an empty pattern was dropped from the
-request instead of being sent for the extension to refuse -- the CLI,
-the MCP tool and the dashboard form all reported a fix stored unscoped
-for a pattern the operator had typed. The control below fails against
-that guard and passes against a presence test, and `''` is the only
-value that tells the two apart.
+`--match ''` is the centre of the file. An empty pattern must be sent for
+the extension to refuse, not dropped from the request: a truthiness test on
+the scope field would drop it, and the CLI, the MCP tool and the dashboard
+form would all report a fix stored unscoped for a pattern the operator had
+typed. The control below fails against such a test and passes against a
+presence test, and `''` is the only value that tells the two apart.
 
-`do_list_hotfixes` is here for one arm only. Its rows are rendered
-through `time.strftime` on a local timestamp, so a whole-string
-comparison of a row would bake this machine's timezone into the suite;
-`tests/test_cli_hotfixes.py` owns the two columns an operator can act
-on, and this file pins the empty listing, whose `No hotfixes stored`
-line no suite in the tree asserted before -- the branch was driven
-through the CLI with its output unchecked.
+`do_list_hotfixes` is here for one arm only. Its rows are rendered through
+`time.strftime` on a local timestamp, so a whole-string comparison of a row
+would bake this machine's timezone into the suite; `tests/test_cli_hotfixes.py`
+owns the two columns an operator can act on, and this file pins the empty
+listing, whose `No hotfixes stored` line no other suite asserts.
 """
 import sys
 from pathlib import Path
@@ -194,8 +191,8 @@ def test_do_list_hotfixes_says_so_when_none_is_stored(tmp):
 
     One line, no timestamp: the twelve-wide cell and the strftime below
     it are what make a row unpinnable here, and neither of them runs
-    on this arm. Nothing asserted this string before, so a handler that
-    printed nothing at all for an empty buffer passed every suite.
+    on this arm. No other suite asserts this string, so a handler that
+    printed nothing at all for an empty buffer would pass every suite.
     """
     del tmp
     recorded, out = run_cli(

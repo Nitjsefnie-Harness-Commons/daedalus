@@ -3,9 +3,9 @@
 committed artefact may hold, which shapes its schema refuses, and the
 identity fields a count is only comparable on.
 
-Its own half of a module that held the policy, the gates and the command
-line together, because the other two have outgrown what one test file may
-hold. Nothing here asserts a wall-clock margin or a timing bound, because a
+The gates and the command line have test files of their own, because the
+policy, the gates and the command line together outgrow what one test file
+may hold. Nothing here asserts a wall-clock margin or a timing bound, because a
 count is a number this repository must not write down: the runner it was
 measured on is not the runner the next run lands on."""
 import io
@@ -100,12 +100,12 @@ def test_the_contributing_row_names_the_counter_the_artefact_records(tmp):
     """The documented counted window holds for callgrind alone.
 
     `journey_child_env` discloses that a client request is callgrind's own
-    and that `perf` counts the same child from `exec` whatever is issued,
-    but the row a contributor reads stated the window unconditionally — so
-    a runner image that granted `CAP_PERFMON` would make `_selected` prefer
-    perf and the documented window would silently revert to the older
-    quantity. The row is now scoped, and a control keeps the scope pointed at
-    the counter the artefact actually records rather than at a name in prose.
+    and that `perf` counts the same child from `exec` whatever is issued, so
+    the row a contributor reads states the window only for callgrind: a
+    runner image that granted `CAP_PERFMON` would make `_selected` prefer
+    perf and the documented window would silently revert to the other
+    quantity. A control keeps the scope pointed at the counter the artefact
+    actually records rather than at a name in prose.
     """
     del tmp
     policy = _journey_contract.policy()

@@ -2,10 +2,10 @@
 
 Chrome allows one debugger on a tab. A second `chrome.debugger.attach` while
 one is live is refused with `Another debugger is already attached`, and that
-refusal reaches the CALLER as a failed command — so before this claim map
-existed, two `cdp` commands dispatched in the same turn both attached and one
-of the two commands the caller issued came back an error. Nothing was
-misrouted; a call simply failed.
+refusal reaches the CALLER as a failed command — so two `cdp` commands
+dispatched in the same turn must share one attachment, or one of the two
+commands the caller issued comes back an error. Nothing is misrouted; a call
+simply fails.
 
 The teardown half — what a release detaches, what it must not, and what a
 refused detach does to the worker — is in `test_debugger_teardown.py`. The
@@ -22,13 +22,13 @@ from _debugger_attachment_harness import (  # noqa: E402
 
 
 def test_two_commands_dispatched_together_share_one_attachment(tmp):
-    """C1: the issue's own reproduction, unchanged and unproxied.
+    """C1: the pipelined-pair reproduction, unchanged and unproxied.
 
     Two transient cdp commands for one tab, dispatched together and neither
     awaited, is what a caller does when it pipelines. Chrome refuses the
-    second attach, so before the claim map the loser of that race came back
-    `Another debugger is already attached` — a command the caller issued and
-    the browser ran, answered with an error.
+    second attach, so without the claim map the loser of that race comes
+    back `Another debugger is already attached` — a command the caller
+    issued and the browser ran, answered with an error.
     """
     del tmp
     outcome = run_attachment_case({'actions': [

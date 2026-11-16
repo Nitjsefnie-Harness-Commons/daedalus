@@ -20,7 +20,7 @@ on a delivered answer is `REFUSAL_STATUSES` and `exhausted` between them.
 The evidence is read BEFORE the exit-code refusal, because the exit code
 is the last evidence and not the first: a throttled query answers 200
 and exits 1, so a reader that consults the code first raises over the
-carriers and never reaches what the answer actually said (issue 1338).
+carriers and never reaches what the answer actually said.
 
 WHICH CARRIERS an answer is asked on, and the one fact that decides
 it: an `errors[]` entry is read whatever the answer delivered; the
@@ -29,16 +29,15 @@ difference is WHO OWNS THE WORDS. An entry's `type` and `code` are
 labels the server writes and no caller can put its own data into, so
 asking a delivered answer about one cannot read its data. The other
 three are places a caller's field, or a coincidence, spells the same
-two words - and that is not a theory, it is what the widening cost
-before this gate existed. Measured on this branch without it: a 200
-that SUCCEEDED, carrying complete data, with a `gh` warning on stderr
-that merely mentions a limit, was answered `RateLimited(resume_at=None)`
-- a flat minute's pause over a call that worked; and the LAST successful
-request before the window closes, carrying `X-Ratelimit-Remaining: 0`
-beside valid data, was discarded for the reset. `rateLimit` is the name
-of a REAL GraphQL extension, which is why a body-text reading fires on
-the very body that most certainly IS a refusal, and on bodies that are
-not.
+two words - and that is not a theory, it is measured without this gate:
+a 200 that SUCCEEDED, carrying complete data, with a `gh` warning on
+stderr that merely mentions a limit, is answered
+`RateLimited(resume_at=None)` - a flat minute's pause over a call that
+worked; and the LAST successful request before the window closes,
+carrying `X-Ratelimit-Remaining: 0` beside valid data, is discarded for
+the reset. `rateLimit` is the name of a REAL GraphQL extension, which is
+why a body-text reading fires on the very body that most certainly IS a
+refusal, and on bodies that are not.
 
 REACHABILITY, so a reader can check it rather than believe it. Two
 queries exist in this tree and both name ONE top-level selection,
@@ -49,8 +48,8 @@ field produces `{"data": {"repository": {...}}, "errors": [RATE_LIMIT]}`,
 which a delivery-only gate reads as DELIVERED. That false negative is
 why `errors[]` is read on a delivered answer at all.
 
-What the tree holds is one capture, from 2026-09-29, and it is the OTHER
-shape: `{"errors":[{"type":"RATE_LIMIT", ...}]}` with no `data` member.
+The one captured refusal in the tree is the other shape:
+`{"errors":[{"type":"RATE_LIMIT", ...}]}` with no `data` member.
 Nothing establishes that GitHub's throttler never produces the partial
 one - the GraphQL specification permits a partial answer beside a
 non-null `errors[]`, and a `gh` double could emit it - nothing in this
@@ -124,10 +123,10 @@ def _header_evidence(status, headers, now):
     """(exhausted, when to resume) from the response headers alone.
 
     A `Retry-After` is a report on its own. A reset is one wherever it
-    appears: beside a spent counter, which is the pair the live refusal
-    carries on a 200 GitHub exits 1 over (issue 1338), or on a 403 or
-    429, where the status has already said the request was refused and
-    the reset says when to try again.
+    appears: beside a spent counter, which is the pair a refusal carries on
+    a 200 that GitHub exits 1 over, or on a 403 or 429, where the status
+    has already said the request was refused and the reset says when to
+    try again.
 
     Neither a reset on its own nor a spent counter with no moment
     behind it is evidence: both say the limit is gone without saying

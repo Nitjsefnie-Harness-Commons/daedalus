@@ -14,15 +14,15 @@ does not move when the file is opened, read, or closed, and on Windows it is
 the filesystem's own file index. Both are properties of the object rather
 than of any observation of it.
 
-**What is gone, and why.** `st_ctime_ns` was the third component and is not
-one. POSIX allows a filesystem that does not maintain access times to report
-them through `st_ctime`, and a bridge that cannot tell whether a candidate is
-a command has to open and read it — so on such a filesystem the act of
+**What is left out, and why.** `st_ctime_ns` is not a component. POSIX
+allows a filesystem that does not maintain access times to report them
+through `st_ctime`, and a bridge that cannot tell whether a candidate is a
+command has to open and read it — so on such a filesystem the act of
 deciding moves the very value the key is built from, and the redelivery of
-one file arrives under an id the ledger has never seen. That is what macOS
-does (daedalus issue 1411), and it is a property of reading a file, not of
-the filesystem: the same two reads, microseconds apart, agree, which is why
-an in-process control cannot see it and an end-to-end one can.
+one file arrives under an id the ledger has never seen. macOS does this, and
+it is a property of reading a file, not of the filesystem: the same two
+reads, microseconds apart, agree, which is why an in-process control cannot
+see it and an end-to-end one can.
 
 **What takes its place.** The generation: how many times this drain has
 vacated that name. It has to cover the one way an object at a name can change
@@ -31,15 +31,15 @@ later being filled by a file that got the inode back — and it covers it by
 counting its own removals. It needs no second signal for the other case: a
 publisher replacing a file whose removal failed is already a different inode,
 because a file that is still there holds its own and no replacement can have
-it. That was measured, not assumed — a generation that advanced only on an
-object change and not on a vacate passed every control there was, because
-the inode was already separating those drops on its own.
+it. That is measured, not assumed: a generation that advances only on an
+object change and not on a vacate passes every control, because the inode
+already separates those drops on its own.
 
 A redelivery fires no signal at all, which is what makes its id stable.
 
 The generation lives in this process, so a restart and the eviction past the
-bound both return a name to its first value. That residual is unchanged by
-this derivation and is disclosed in `stream_service`'s own docstring.
+bound both return a name to its first value. That residual is disclosed in
+`stream_service`'s own docstring.
 """
 import threading
 

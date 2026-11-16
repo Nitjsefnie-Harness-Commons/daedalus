@@ -32,8 +32,8 @@ saveBtn.addEventListener('click', () => {
   }, () => {
     updateStatus(token);
     // Ping the server to verify — but only once there is a server to ping.
-    // Saving a blank URL previously fired a relative request at the options
-    // page itself and reported the resulting failure as "Server unreachable".
+    // A blank URL is skipped: a relative request would go to the options
+    // page itself and report its failure as "Server unreachable".
     if (!server) {
       setStatus('err', 'Set a bridge URL — nothing will connect until you do');
       return;

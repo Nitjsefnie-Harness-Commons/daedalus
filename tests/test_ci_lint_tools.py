@@ -89,16 +89,16 @@ def test_an_asserted_tool_is_a_requirement_and_not_a_skip(tmp):
 def test_a_tool_the_tree_also_asserts_is_still_required(tmp):
     """A skip is a skip, whatever another function says about the binary.
 
-    The required set was once `skipped - present`, on the argument that a
-    tool in both is covered by a control that fails rather than skips. That
-    argument is one the derivation cannot check — it cannot tell an assert
-    the tree always reaches from one behind a condition that is false on
-    every ordinary run — and two reviews drove a false green through it: a
-    `which('jq')` + skip arm grew the skip set, jq was in the present set
-    because of the assert behind `needs_jq_stub`, and the control stayed
-    green with no job installing jq. The second case is the sharper one,
-    because the old derivation read the FileNotFoundError skip as a tool
-    the tree had DECIDED may not be absent: it inverted the site.
+    The required set is not `skipped - present`: the argument that a tool in
+    both is covered by a control that fails rather than skips is one the
+    derivation cannot check — it cannot tell an assert the tree always
+    reaches from one behind a condition that is false on every ordinary
+    run. Under that subtraction a `which('jq')` + skip arm grows the skip
+    set, jq is in the present set because of the assert behind
+    `needs_jq_stub`, and the control stays green with no job installing jq.
+    The sharper case is a FileNotFoundError skip, which that subtraction
+    reads as a tool the tree has DECIDED may not be absent: it inverts the
+    site.
     """
     del tmp
     for label, body in BOTH_ON.items():
@@ -129,8 +129,7 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
 
     `needs:` sequences jobs without sharing an environment between them, so
     the job that lints the workflows hands the suite jobs nothing. An
-    installer step in one of them leaves the others skipping silently, which
-    is the shape issue 1353 was.
+    installer step in one of them leaves the others skipping silently.
 
     The job set is the DERIVED one, not the two sanctioned runner
     basenames. A job that reaches the suites by any other discovery
@@ -168,11 +167,9 @@ def test_every_suite_running_job_installs_the_tools_its_suites_may_skip_on(
 def _unjournalled_sentence():
     """What the suites actually skip on, for a message that must be true.
 
-    The message this replaces named the installer's declaration and called
-    it the derived set. On this tree the two differ: the derived set is
-    empty until 1307's suites land, so the control was asserting in its own
-    output that the suites it discovers skip on actionlint and shellcheck,
-    which no suite here does.
+    The message names the derived set, not the installer's declaration: the
+    two differ whenever a declared tool has no suite that skips on it, and a
+    message naming the declaration would assert skips no suite performs.
     """
     unjournalled = sorted(_unjournalled())
     return (', '.join(unjournalled) if unjournalled
@@ -320,8 +317,7 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     # The base the step NAMES, not the file and not merely the step's text:
     # a whole-file substring is satisfied by a comment quoting the old URL,
     # and a step-scoped one is satisfied too, because the run block is a
-    # `>-` scalar that keeps its `#` lines. Both were planted, and both left
-    # this green with the two bases genuinely diverged. What is compared is
+    # `>-` scalar that keeps its `#` lines. What is compared is
     # the base on a non-comment line, and exactly one of them.
     #
     # ADMITTED SUBSET, and what it cannot see. This reads LINES, not shell.
@@ -329,13 +325,13 @@ def test_the_installed_build_is_the_one_the_actionlint_job_pins(tmp):
     # rather than seen: neither puts the whole base on one line, so this
     # over-refuses a shape it might have accepted. A base consumed through a
     # variable the control does handle — the whole base on one line, read
-    # once, is exactly what it looks for. What it cannot see is the residue
-    # a plant confirmed: a step that names the base correctly on one line
-    # and then fetches elsewhere through another variable. It is not a
-    # silent pass in practice — the pinned sha256 fails on bytes that are
-    # not the ones verified — so what this bounds is the JOB, not the
-    # download. Red is the safe direction, and a line-based reading cannot
-    # do better than this without a shell evaluator.
+    # once, is exactly what it looks for. What it cannot see is the residue:
+    # a step that names the base correctly on one line and then fetches
+    # elsewhere through another variable. It is not a silent pass in
+    # practice — the pinned sha256 fails on bytes that are not the ones
+    # verified — so what this bounds is the JOB, not the download. Red is
+    # the safe direction, and a line-based reading cannot do better than
+    # this without a shell evaluator.
     downloaded = [line.strip() for line
                   in _actionlint_job_step('Install actionlint').splitlines()
                   if not line.lstrip().startswith('#')]

@@ -23,12 +23,11 @@ SCHEMA_VERSION = 1
 ROOT = Path(__file__).resolve().parents[2]
 ARTIFACT = ROOT / '.github' / 'journey-budget.json'
 
-# `thread_bands` is the record made before a thread's role was read from
-# what it executed: the `Ir` thresholds that used to decide which role a
-# thread fell in. Nothing compares it and no re-baseline writes it — the
-# signatures below replaced it as the table a count is classified under —
-# and it stays in the schema only so a document recorded before that change
-# still loads until it is re-recorded.
+# `thread_bands` holds the `Ir` thresholds that decided which role a thread
+# fell in, in a document recorded before a thread's role was read from what it
+# executed. Nothing compares it and no re-baseline writes it -- the signatures
+# below are the table a count is classified under -- and it stays in the
+# schema only so such a document still loads until it is re-recorded.
 # `tolerances` is the per-journey override of `tolerance_pct`, beside the
 # counts rather than inside them: a journey's own work differs by orders of
 # magnitude across the set, so one number cannot be tight for a large one and
@@ -196,13 +195,13 @@ def _validated_exclusions(value, journeys):
 
 
 def _validated_bands(value):
-    """The `Ir` thresholds a count was recorded under, before roles came
-    from identity.
+    """The `Ir` thresholds a count was recorded under, in a document recorded
+    before roles came from identity.
 
-    A role is no longer read from a thread's total, so these numbers decide
-    nothing and no gate compares them; `thread_signatures` is the table that
-    does. The shape is still checked — a document carrying this field has to
-    carry a sane one — so a half-written artefact is refused rather than
+    A role is read from a thread's identity, not its total, so these numbers
+    decide nothing and no gate compares them; `thread_signatures` is the table
+    that does. The shape is still checked — a document carrying this field has
+    to carry a sane one — so a half-written artefact is refused rather than
     loaded and re-rendered, and a re-baseline drops the field outright.
     """
     if value is None:
@@ -236,10 +235,8 @@ def _validated_signatures(value):
     table that PUTS a thread in one of them is guarded nowhere, so a run
     that read a profile by different symbols would compare a count taken
     under one classifier against counts taken under another. That is why
-    this field exists, and it is why it replaced the `Ir` bands rather than
-    sitting beside them: the bands stopped deciding a role when identity
-    replaced size, so a gate comparing them would be comparing a field
-    nothing reads.
+    this field exists. The `Ir` bands decide no role, so a gate comparing
+    them would be comparing a field nothing reads.
 
     Absent is the state, not a shape error, exactly as for the roles: until
     the first recording of this field there is nothing to compare, which is

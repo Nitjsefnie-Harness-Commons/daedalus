@@ -48,11 +48,10 @@ def test_the_declared_exemptions_are_the_jobs_left_over(tmp):
 def test_the_control_reads_the_shape_off_a_literal_oracle(tmp):
     """The shape oracle is a literal set, read off a fixture by hand.
 
-    The control recomputed `descendants` with the helper it judges, so
-    it agreed with whatever the helper returned. `direct` pins the
-    listed half of the rule, `mid` and `leaf` the needs-closure half,
-    `inner` and `outer` the issue's downstream-only jobs, absent however
-    far their needs reach.
+    A `descendants` recomputed with the helper it judges would agree with
+    whatever that helper returned. `direct` pins the listed half of the
+    rule, `mid` and `leaf` the needs-closure half, `inner` and `outer` the
+    issue's downstream-only jobs, absent however far their needs reach.
     """
     source = ('jobs:\n'
               '  aggregate:\n    needs:\n'
@@ -151,9 +150,9 @@ def test_the_documentation_check_reads_only_the_exempt_jobs_comment(tmp):
 def test_the_comparison_is_step_name_agnostic(tmp):
     """Steps are never consulted, so their spellings cannot move the set.
 
-    Issue 156's silent miss hid a duplicated `Check dependency results`
-    step behind its field order; the pin holds the shape beside a
-    genuine coverage gap to show the two do not interact.
+    A duplicated `Check dependency results` step, with its fields in either
+    order, is held beside a genuine coverage gap to show the two do not
+    interact.
     """
     steps = ('    steps:\n'
              '      - name: Check dependency results\n'

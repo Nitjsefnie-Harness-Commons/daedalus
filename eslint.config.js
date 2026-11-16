@@ -1,9 +1,8 @@
-// Flat config for the pinned ESLint, replacing the retired .eslintrc.json
-// format. The old file's semantics are carried over: the recommended rule
-// set, module sources by default, the browser globals the dashboard and the
-// extension assume, and the same per-path source types.
+// Flat config for the pinned ESLint: the recommended rule set, module
+// sources by default, the browser globals the dashboard and the extension
+// assume, and the per-path source types.
 //
-// There is still deliberately NO package.json: ESLint and the two helpers
+// There is deliberately NO package.json: ESLint and the two helpers
 // this config requires are pinned in .github/workflows/tests.yml and
 // installed with --no-save, so the repository does not read as having
 // adopted a build step it does not have.

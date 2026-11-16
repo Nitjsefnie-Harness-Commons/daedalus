@@ -164,15 +164,14 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
     — that is the at-least-once outcome, and it is certain here rather than
     a thing that depends on which hosts take an unlink.
 
-    The redelivery is asserted as its place on the wire rather than as a
-    count read at a moment: the last command enqueued is followed, with no
-    other command and no silence between them, by another copy of the stuck
-    file. A count was what this test used to assert, and it read correct
-    code as a defect on a loaded cell — one repeat had landed when the
-    count was taken. Where the two drains sit inside a single scan is
-    `test_the_extension_stream_delivers_every_queue_it_owns`'s business,
-    since a reordering of them still leaves the two adjacent on the wire.
-    What this pins is that a scan which delivers a command also delivers
+    The redelivery is asserted as its place on the wire, not as a count read at
+    a moment: the last command enqueued is followed, with no other command and
+    no silence between them, by another copy of the stuck file. A count read at
+    a moment reads correct code as a defect on a loaded cell, since one repeat
+    may have landed when the count was taken. Where the two drains sit inside a
+    single scan is `test_the_extension_stream_delivers_every_queue_it_owns`'s
+    business, since a reordering of them still leaves the two adjacent on the
+    wire. What this pins is that a scan which delivers a command also delivers
     the file, and that the two land next to each other.
 
     The two readers here are not interchangeable. The redelivery is read

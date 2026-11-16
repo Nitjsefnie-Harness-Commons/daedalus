@@ -456,11 +456,11 @@ def test_a_refused_tab_creation_answers_an_error(tmp):
 def test_a_non_string_url_is_refused_before_tab_creation(tmp):
     """A non-string `openTab` URL answers an error and never reaches create.
 
-    `new URL` stringifies whatever it is handed, so the protocol gate read
-    the issue's one-element array as a web URL and handed that array itself
+    `new URL` stringifies whatever it is handed, so the protocol gate alone
+    would read a one-element array as a web URL and hand that array itself
     to `chrome.tabs.create`. The real API refuses a non-string url argument
-    with a synchronous TypeError, the listener propagated it, and the page
-    was left with no answer at all.
+    with a synchronous TypeError, the listener would propagate it, and the
+    page would be left with no answer at all.
     """
     del tmp
     outcome = _run_relay_authority('open-guard')
@@ -477,10 +477,9 @@ def test_a_non_string_url_is_refused_before_tab_creation(tmp):
 def test_a_synchronous_tab_create_refusal_answers_an_error(tmp):
     """A synchronous `tabs.create` refusal answers `{error}`, not a throw.
 
-    Chrome can refuse the call itself, before any callback is scheduled.
-    That exception escaped the listener, so `sendResponse` never fired and
-    the page waited on an answer nothing would send — the same zero-answer
-    outcome the callback refusal path had already been fixed not to produce.
+    Chrome can refuse the call itself, before any callback is scheduled. The
+    listener catches that exception and answers `{error}`, so the page is
+    never left waiting on an answer nothing would send.
     """
     del tmp
     outcome = _run_relay_authority('create-sync-throw')
@@ -495,11 +494,11 @@ def test_a_synchronous_tab_create_refusal_answers_an_error(tmp):
 
 
 def test_a_web_url_still_opens_with_one_answer(tmp):
-    """A valid web URL opens exactly as before: one create, one answer.
+    """A valid web URL opens: one create, one answer.
 
-    Guards the success path while the failure paths around it gain the
-    string gate and the invocation guard: the URL travels to create as the
-    string the page sent, and the success shape stays `{tabId}`.
+    Guards the success path beside the failure paths' string gate and
+    invocation guard: the URL travels to create as the string the page
+    sent, and the success shape is `{tabId}`.
     """
     del tmp
     outcome = _run_relay_authority('open-guard')
@@ -517,11 +516,9 @@ def test_a_web_url_still_opens_with_one_answer(tmp):
 def test_a_non_string_url_is_refused_before_download(tmp):
     """A non-string `download` URL answers an error and never downloads.
 
-    The worker handed `msg.url` to `chrome.downloads.download` unread, and
-    the real API refuses a non-string url argument with a synchronous
-    TypeError. The listener propagated that exception, so `sendResponse`
-    was never called — the download twin of the openTab hole issue 712
-    closed.
+    The real API refuses a non-string url argument with a synchronous
+    TypeError. The gate refuses the value before `chrome.downloads.download`
+    is called, so that exception never reaches the listener.
     """
     del tmp
     outcome = _run_relay_authority('download-guard')
@@ -547,9 +544,9 @@ def test_a_non_string_url_is_refused_before_download(tmp):
 def test_a_synchronous_download_refusal_answers_an_error(tmp):
     """A synchronous `downloads.download` refusal answers `{error}`.
 
-    Chrome can refuse the call itself, before any callback is scheduled,
-    so the callback that answers `lastError` refusals never runs. That
-    exception escaped the listener, and `sendResponse` never fired.
+    Chrome can refuse the call itself, before any callback is scheduled, so
+    the callback that answers `lastError` refusals never runs. The listener
+    catches that exception and answers `{error}` itself.
     """
     del tmp
     outcome = _run_relay_authority('download-sync-throw')
@@ -566,9 +563,8 @@ def test_a_synchronous_download_refusal_answers_an_error(tmp):
 def test_a_refused_download_answers_an_error(tmp):
     """A `lastError` download refusal answers `{error}` exactly once.
 
-    The callback path already answered correctly before the fix; the fix
-    wraps its invocation in the try that answers synchronous refusals.
-    This pins the wrapped callback's answer so the guard cannot regress
+    The callback's invocation sits inside the try that answers synchronous
+    refusals. This pins the callback's answer so the guard cannot regress
     it.
     """
     del tmp

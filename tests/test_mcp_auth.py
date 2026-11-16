@@ -130,9 +130,8 @@ def _drive_body(body_chunks, max_body_size, method='POST',
 def test_oversized_chunked_body_is_refused_inside_the_read(tmp):
     """An undeclared body is bounded while received, not after buffering.
 
-    The pulled-bytes bound is the assertion that separates this from the
-    old behavior, which read every chunk before comparing the total against
-    the limit.
+    The pulled-bytes bound is the assertion that fails a reader which buffers
+    every chunk before comparing the total against the limit.
     """
     del tmp
     result = _drive_body([b'x'] * 64, max_body_size=16)

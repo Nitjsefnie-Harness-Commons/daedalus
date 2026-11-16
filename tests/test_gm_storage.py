@@ -461,8 +461,7 @@ def test_writes_from_one_origin_commit_in_submission_order(tmp):
     """One origin alone keeps its own submission order, every write answered.
 
     The rotation is only consulted when another origin is waiting, so a single
-    origin's own backlog must read exactly as it did before one queue served
-    every origin.
+    origin's own backlog is served in submission order.
     """
     del tmp
     case = _gm_two_origin.run_two_origin()['admission']['singleOrigin']

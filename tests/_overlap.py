@@ -26,8 +26,8 @@ _STEP_LINE = re.compile(r'^\[step\] (.+)$', re.MULTILINE)
 
 # The bridge origin a child is handed when no real result server is
 # configured. The gate refuses a request whose origin it does not permit, and
-# the old fake's relative `test-bridge` server URL has no origin at all, so
-# the synthetic path needs a real one for the gate to accept it.
+# a relative `test-bridge` server URL has no origin at all, so the synthetic
+# path needs a real one for the gate to accept it.
 SYNTHETIC_BRIDGE = 'https://synthetic-bridge.example.com'
 SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
@@ -367,18 +367,18 @@ function ownerPosted(owner) {
 
 _OVERLAP_INNER_WAIT_S = 15
 
-# The recording this harness's scenarios make today, on the pre-change tree,
-# measured with a temporary recorder (no tracked file changed): the shipped
-# background's boot opens the stream once, syncs the tab list once itself and
-# once on the stream's connect, then each dispatched command posts one
-# result. A child with a real result base forwards that one result route to
-# the real server; a child without one gets the gate's ordinary 200. The
-# stream is answered `hang` — a connected 200 whose body never yields — so the
-# boot fetch is one fetch, the count is the same on every run, and the stream
-# loop parks instead of reconnecting on a wall clock. The temporary workers the
-# suites splice in place of the background (a `loadConfig` that resolves, a
-# `dispatchCommand` that posts) make no stream or sync call at all, so a
-# caller running one of those declares `boot=False`.
+# The recording this harness's scenarios make, measured with a temporary
+# recorder (no tracked file changed): the shipped background's boot opens the
+# stream once, syncs the tab list once itself and once on the stream's connect,
+# then each dispatched command posts one result. A child with a real result
+# base forwards that one result route to the real server; a child without one
+# gets the gate's ordinary 200. The stream is answered `hang` — a connected 200
+# whose body never yields — so the boot fetch is one fetch, the count is the
+# same on every run, and the stream loop parks instead of reconnecting on a
+# wall clock. The temporary workers the suites splice in place of the
+# background (a `loadConfig` that resolves, a `dispatchCommand` that posts)
+# make no stream or sync call at all, so a caller running one of those
+# declares `boot=False`.
 BOOT = [SYNC, SYNC]
 
 

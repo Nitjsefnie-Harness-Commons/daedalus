@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The worker's served command types, checked against every shipped client.
 
-Issue 204: nothing enumerated the command types the worker serves, so a
-`case` no client sends and no route-table row names passed every suite. The
-switch is read lexically, the clients from the AST, and the two compared
-both ways; nothing is derived twice, so neither read can vouch for the
-other, and a runtime dispatch pins the one served type no client names.
+Without an enumeration of the command types the worker serves, a `case` no
+client sends and no route-table row names would pass every suite. The switch
+is read lexically, the clients from the AST, and the two compared both ways;
+nothing is derived twice, so neither read can vouch for the other, and a
+runtime dispatch pins the one served type no client names.
 
 The readers live in ``_command_type_readers``; this suite observes them. A
 marker nothing observes is a comment, so every marker they carry has a

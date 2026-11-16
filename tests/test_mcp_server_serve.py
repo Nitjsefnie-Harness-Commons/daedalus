@@ -246,7 +246,7 @@ def test_a_persistent_mcp_collision_surfaces_the_verbatim_bind_error(tmp):
     """An explicit squatted MCP port surfaces the original bind error itself.
 
     What is pinned is the OS bind text surfacing in the child's drained
-    output, never how soon it arrives (issue 503). The deadline is a
+    output, never how soon it arrives. The deadline is a
     reporting bound, not a margin: the child outlives its crashed serve, so
     expiry turns a lost crash line into a failure carrying the output.
     """

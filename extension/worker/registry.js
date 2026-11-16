@@ -3,8 +3,8 @@
 
 // One place for the tab-registry control plane's error handling. fetch
 // resolves normally for 401, 413 and 500, so a caller that only catches
-// network errors reads a refusal as a success — which is how the server's
-// registry could sit stale with nothing said about it anywhere.
+// network errors reads a refusal as a success, and the server's registry
+// can sit stale with nothing said about it anywhere.
 //
 // Returns the parsed answer, or null when the request was refused or never
 // arrived. The response detail is bounded: it is a diagnostic, not a payload.
@@ -81,10 +81,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // ─── Register all tabs ───
 
 // Coalesce burst syncs. Opening N tabs fires onCreated N times, and each sync
-// is a chrome.tabs.query plus a POST carrying the ENTIRE tab list — for a
-// 10-url open_tabs that was 10 full-registry uploads racing the result POST on
-// the same service-worker event loop. The 30s heartbeat re-syncs anyway, so
-// losing a coalesced trailing sync to a worker shutdown is self-correcting.
+// is a chrome.tabs.query plus a POST carrying the ENTIRE tab list: a
+// 10-url open_tabs would otherwise make 10 full-registry uploads racing the
+// result POST on the same service-worker event loop. The 30s heartbeat
+// re-syncs anyway, so losing a coalesced trailing sync to a worker shutdown
+// is self-correcting.
 let _syncTimer = null;
 function scheduleRegisterAllTabs() {
   if (_syncTimer) return;

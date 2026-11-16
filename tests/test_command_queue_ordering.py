@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`next_seq` names are ordered by publish, not by the wall clock (issue 1098).
+"""`next_seq` names are ordered by publish, not by the wall clock.
 
 A queue entry's stem is `<ms:013d>_<counter:020d>`. If the wall clock steps
 backwards between two mints, the later stem sorts below the earlier one and
@@ -220,8 +220,8 @@ def test_a_survivor_at_the_millisecond_ceiling_does_not_overflow_the_field(
     must not push the mark to 14 digits.
 
     `{ms:013d}` is a minimum width, not a fixed one: at a survivor of
-    9999999999999 the unclamped `highest + 1` printed as
-    10000000000000_... and sorted below every 13-digit entry — the exact
+    9999999999999 an unclamped `highest + 1` prints as
+    10000000000000_... and sorts below every 13-digit entry — the exact
     inversion this module exists to prevent, and a silent dashboard loss. The
     seed clamps the mark to the field's width, so a mint stays 13 digits and
     is ordered by the counter against a same-millisecond 20-digit survivor.

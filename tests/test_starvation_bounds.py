@@ -2,9 +2,9 @@
 """Serviced and attempt-count bounds on work a starved process still owes.
 
 A wall-clock bound rejects or kills work that was never scheduled, where a
-serviced or attempt-based bound would have waited (issue 925). Each control
-below was watched failing against the wall-clock code it replaces, for the
-defect's own reason.
+serviced or attempt-based bound would have waited. Each control below was
+watched failing against a wall-clock bound, for the defect's own
+reason.
 """
 import sys
 from pathlib import Path
@@ -194,8 +194,7 @@ drive().catch((error) => {
 # as well as on correct code: a mutation that wedged the child must not
 # become a job timeout. The launcher's hang detector in `tests/_noderun.py`
 # is what ends it, and it names the scenario and the child's output rather
-# than a suite, which is why the number that used to sit here was not simply
-# put back.
+# than a suite.
 
 
 def _starve_run(mode):
@@ -231,9 +230,9 @@ def test_a_cdp_settlement_needing_one_turn_after_a_freeze_still_settles(
 def test_a_cdp_guard_rejects_only_once_serviced_for_its_budget(tmp):
     """A never-settling step still rejects, on serviced evidence only.
 
-    The rejection names the same label the wall guard named, and the late
-    response a rejected race abandons is released exactly as before: the
-    `timedOut` flip on serviced expiry is what releases it.
+    The rejection names the settlement-timeout label, and the late response
+    a rejected race abandons is released by the `timedOut` flip on serviced
+    expiry.
     """
     del tmp
     outcome = _starve_run('serviced')

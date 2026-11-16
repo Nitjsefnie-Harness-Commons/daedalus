@@ -1,4 +1,4 @@
-"""The one call the suite runner makes per test (issue 872).
+"""The one call the suite runner makes per test.
 
 Calling an `async def` test only creates a coroutine, and calling a
 generator-function test only creates a generator, so a runner that

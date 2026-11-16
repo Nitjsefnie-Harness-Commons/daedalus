@@ -345,10 +345,10 @@ def test_the_numeric_bound_spellings_are_acceptances(tmp):
 def _planted(tmp):
     """Copy tests.yml, minus the aggregate's bound, and its callee into `tmp`.
 
-    The bound is READ from the real workflow rather than written here: two
-    branches have now moved that literal, and a copy of it turns each move
-    into a dozen failures in this file. The spelling comes from the reader
-    too, so an inline comment or a quoted scalar still plants.
+    The bound is READ from the real workflow rather than written here: a
+    copy of that literal would turn each change to it into a dozen failures
+    in this file. The spelling comes from the reader too, so an inline
+    comment or a quoted scalar still plants.
     """
     root = Path(tmp) / '.github' / 'workflows'
     root.mkdir(parents=True, exist_ok=True)

@@ -325,7 +325,7 @@ def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
     directory for them — nothing blocks, so there is no worker and no poll.
     Returns (what the tool returned, the payload the bridge got).
 
-    `docroot` is unused now that the queue is not read; it stays in the
+    `docroot` is unused because the queue is not read; it stays in the
     signature so a call site that passes the fixture unchanged keeps working.
     """
     del docroot

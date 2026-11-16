@@ -1,7 +1,7 @@
 """Terminate a child's whole process tree and report what the kill did.
 
 Beside the callers rather than in either of them (`tests/_noderun.py`
-imports it too): two modules needed one launcher, and mutual import was
+imports it too): two modules need one launcher, and mutual import would be
 a cycle.
 """
 import ctypes
@@ -238,7 +238,7 @@ def _taskkill(pid, cleanup_timeout, stopped):
 
 
 def _reap(process, cleanup, cleanup_timeout):
-    """Reap without restoring the unbounded wait the cleanup just replaced."""
+    """Reap without an unbounded wait."""
     try:
         process.wait(timeout=cleanup_timeout)
     except subprocess.TimeoutExpired:

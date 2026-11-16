@@ -2,12 +2,12 @@ name: version
 
 # One public version identifies one distributable content set.
 #
-# The version is bumped only when a release is cut, so between releases every
-# commit on this branch built a wheel that called itself the released version
-# while shipping different content — two artifacts named `daedalus-cli 0.19.0`
-# with different digests, and no way to tell from the outside which one a
-# machine had. The extension carries the same string, so the same ambiguity
-# reached the page.
+# If the version moved only when a release is cut, every commit between
+# releases would build a wheel that calls itself the released version while
+# shipping different content — two artifacts with one name and different
+# digests, and no way to tell from the outside which one a machine has. The
+# extension carries the same string, so the same ambiguity would reach the
+# page.
 #
 # The rule this gate enforces is narrow and mechanical: the version in the
 # tree must not be one that has already been published. That is the whole
@@ -50,7 +50,7 @@ permissions:
   contents: read
 
 # The non-pull-request fallback is the commit SHA, not the ref, so a newer
-# push cannot cancel a landed main SHA's in-flight verdict (issue #1579).
+# push cannot cancel a landed main SHA's in-flight verdict.
 # A pull request keeps one group per number.
 concurrency:
   group: version-${{ github.event.pull_request.number || github.sha }}

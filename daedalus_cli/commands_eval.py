@@ -27,9 +27,9 @@ def do_tabs(args):
 
 # `-t 0` is "unset": positive_timeout admits zero on the promise that
 # every call site reads it as the subcommand's own default, the way
-# screenshot and cookies do. Handing it to the waiter as-is made the
-# deadline now plus nothing, so the CLI reported `Timeout (0s)` for a
-# command the browser then ran anyway.
+# screenshot and cookies do. Passed to the waiter as-is, it would make the
+# deadline now plus nothing, so the CLI would report `Timeout (0s)` for a
+# command the browser then runs anyway.
 def do_put(args):
     if args.file == '-':
         code = sys.stdin.read()

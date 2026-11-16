@@ -276,11 +276,11 @@ def build_parser():
     s = sub.add_parser('store-hotfix',
                        help='Store a persistent hotfix in the extension')
     s.add_argument('fix_id', help='Hotfix identifier')
-    # Two named modes rather than one positional the filesystem disambiguates.
-    # The old form asked whether the string was a path that existed, so a
-    # mistyped path became persistent page code instead of an error, and
-    # inline source that happened to name a file was replaced by that file's
-    # contents. Neither miss was visible in the output.
+    # Two named modes rather than one positional the filesystem disambiguates:
+    # a positional that asks whether the string is an existing path turns a
+    # mistyped path into persistent page code instead of an error, and replaces
+    # inline source that happens to name a file with that file's contents,
+    # neither visible in the output.
     source = s.add_mutually_exclusive_group(required=True)
     source.add_argument('--file', help='Read the hotfix source from this path')
     source.add_argument('--code', help='Use this string as the hotfix source')

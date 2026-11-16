@@ -54,8 +54,8 @@ async function handleClearCookies(cmd) {
       const target = { url, name: c.name };
       // A partitioned cookie is matched only when its partition is named, and
       // a cookie in a non-default store only by that store. Dropping either
-      // left the cookie in place -- and the count was incremented per
-      // iteration rather than per removal, so it said the cookie had gone.
+      // leaves the cookie in place; the count is incremented per removal, so it
+      // reports only cookies that are gone.
       if (c.partitionKey) target.partitionKey = c.partitionKey;
       if (c.storeId) target.storeId = c.storeId;
       if (await chrome.cookies.remove(target)) removed++;

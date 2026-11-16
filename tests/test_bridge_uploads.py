@@ -325,11 +325,10 @@ def test_an_upload_path_that_escapes_through_a_symlink_is_refused(tmp):
 def test_upload_pagination_bounds_the_work_not_only_the_answer(tmp):
     """A page of one must not cost a stat of every file in the namespace.
 
-    Pagination bounded the response and nothing else: every upload directory
-    was enumerated, every file statted twice to build a record, the whole list
-    materialized, and only then sliced. The count still has to visit every
-    entry — `total` says how many pages there are — but counting an entry is
-    what the kernel already told us, and describing one is a syscall.
+    Pagination must bound the work, not only the response: only the page's
+    files are described. The count still has to visit every entry — `total`
+    says how many pages there are — but counting an entry is what the kernel
+    already reports, and describing one is a syscall.
 
     Measured rather than asserted about the code: sitecustomize counts every
     os.stat under the uploads root, so the number is what the handler actually
@@ -373,7 +372,6 @@ def test_upload_pagination_bounds_the_work_not_only_the_answer(tmp):
 
     stats = after - before
     # One per id directory to order them, one for the file being described.
-    # The old shape was two per file across the whole namespace.
     assert stats <= ids + 4, (
         f'listing one upload cost {stats} stats over {ids * per_id} files')
 
@@ -381,11 +379,9 @@ def test_upload_pagination_bounds_the_work_not_only_the_answer(tmp):
 def test_upload_pagination_is_validated_before_the_directory_is_looked_at(tmp):
     """The same query must get the same answer whether or not files exist.
 
-    The missing-directory shortcut returned before limit and offset were
-    parsed, so a malformed `limit` answered 200 on an empty data root and 400
-    once any upload had created the directory — the validity of a request
-    depended on unrelated filesystem state. The empty page also reported
-    limit 0 and offset 0 rather than what was asked for.
+    limit and offset are parsed before the missing-directory shortcut, so a
+    malformed value is refused the same way on an empty data root as on one
+    that holds uploads. The empty page reports the limit and offset asked for.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         malformed = base + '/upload?' + urllib.parse.urlencode(
@@ -413,9 +409,9 @@ def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
     """Fetching by id returns the newest file; a capture wants its own.
 
     Screenshot ids are reused — `_ss` is the default — so a second capture
-    under the same id lands beside the first. A client that correlated its
-    own result and then fetched by id downloaded whichever file was newest
-    at that moment, which is the next invocation's whenever one overlapped.
+    under the same id lands beside the first. A client that correlates its own
+    result and then fetches by id must name the file, because the newest one
+    may be the next invocation's whenever two overlap.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for name, payload in (('capture-a.png', PNG + b'-A'),
@@ -474,11 +470,9 @@ def test_a_screenshot_path_cannot_leave_its_own_token(tmp):
 def test_every_accepted_screenshot_format_can_be_served_back(tmp):
     """A format the upload route accepts must be one /screenshot can return.
 
-    `webp` was accepted, stored and answered 200, and then /screenshot said
-    `no screenshot` because discovery listed three suffixes and the accepted
-    set had four. The two lists are now one list, so they cannot drift again;
-    this walks every accepted format rather than naming the one that was
-    missing.
+    The upload route and screenshot discovery read one list of suffixes, so
+    they cannot drift apart; this walks every accepted format rather than
+    naming a few.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         for index, fmt in enumerate(('png', 'jpeg', 'jpg', 'webp')):
@@ -634,10 +628,9 @@ def test_an_upload_path_serves_that_file_to_a_header_credential(tmp):
 def test_the_credential_stays_inside_the_bridge(tmp):
     """The filing scenario, end to end against the real handler.
 
-    POST /upload answers and logs the token-free relative path, and a
-    result body is stored without the token that authenticated it — the
-    slot file and the delivery copy alike. Before the fix the bridge's
-    stdout capture and every stored result were copies of the credential.
+    POST /upload answers and logs the token-free relative path, and a result
+    body is stored without the token that authenticated it — the slot file and
+    the delivery copy alike.
     """
     served = []
     with _util.bridge(tmp, env=BRIDGE_ENV, output=served) as (base, docroot):

@@ -116,10 +116,10 @@ def test_accept_stores_the_result_without_the_credential(tmp):
     """The stored body is not a copy of the control credential.
 
     The body arrives carrying `token` because that is how the caller
-    authenticated, so storing it verbatim made every slot and delivery file
-    under results/ a copy of the credential. PUT /command strips `token`
-    from what it stores, and POST /result now does the same; the dashboard
-    event never carried it.
+    authenticated, and storing it verbatim would make every slot and delivery
+    file under results/ a copy of the credential. PUT /command and POST /result
+    both strip `token` from what they store; the dashboard event does not carry
+    it.
     """
     routes = _load('fixture_result_routes_cred')
     token, did = 'credtok', 'cred-1'

@@ -213,12 +213,12 @@ def test_every_mcp_command_tool_sends_its_documented_command(tmp):
 def test_a_waited_eval_round_trip_reaches_the_extension(tmp):
     """`wait=True` still answers its result, live.
 
-    The branch's headline claim is that a waited send is byte-for-byte what
-    it was, and rewriting the harness to send unwaited took the last live
-    EVAL round trip with it: the pinned table answers through a double, and
-    the typed path survives live only through the coalesced second call in
-    test_client_credentials. The extension simulator answers a tab-targeted
-    command exactly as it answers a broadcast one.
+    A waited send must answer exactly its result, and the harness sends
+    unwaited, so this is the only live EVAL round trip: the pinned table
+    answers through a double, and the typed path runs live only through
+    the coalesced second call in test_client_credentials. The extension
+    simulator answers a tab-targeted command exactly as it answers a
+    broadcast one.
     """
     _need_deps()
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
@@ -466,8 +466,8 @@ def test_two_concurrent_mcp_callers_receive_only_their_own_results(tmp):
 
 
 def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
-    """segment_status obtains the job capability itself; a job owned by another
-    token used to surface as a bare httpx 409 through raise_for_status."""
+    """segment_status obtains the job capability itself and reports a job owned
+    by another token, rather than a bare httpx 409 through raise_for_status."""
     _mcp_load._need_deps()
     with _util.bridge(tmp, env=_mcp_load.BRIDGE_ENV) as (base, _docroot):
         mod = _mcp_load._load_mcp(base)
@@ -478,7 +478,7 @@ def test_segment_status_tool_fetches_sig_and_reports_foreign_jobs(tmp):
         res = asyncio.run(mod.segment_status('mcpjob'))
         assert res == {'done': [], 'count': 0, 'gaps': []}, res
         # A record left by an earlier token is a foreign job after rotation.
-        # Plant it directly: the live bridge no longer lets a request mint one.
+        # Plant it directly: the live bridge does not let a request mint one.
         segment_root = Path(_docroot) / 'segments'
         (segment_root / 'mcpjob2').mkdir()
         (segment_root / 'mcpjob2.json').write_text(json.dumps({

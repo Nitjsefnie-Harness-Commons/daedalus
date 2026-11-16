@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Issue 665: a failed header delivery must release the stream registration.
+"""A failed header delivery must release the stream registration.
 
-GET /stream registered the stream before its response headers were written,
-and the try/finally that unregisters began only after end_headers(). A peer
-that was already gone raised out of the flush, outside that try, and the
-registration leaked: a tabless stream's until process exit, /health
-overcounting by one per such failure.
+GET /stream registers the stream before its response headers are written, so
+the try/finally that unregisters must cover the header flush too. A peer that
+is already gone raises out of the flush, and a registration left behind
+leaks: a tabless stream's until process exit, /health overcounting by one per
+such failure.
 """
 import io
 import os

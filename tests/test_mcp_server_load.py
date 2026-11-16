@@ -228,8 +228,8 @@ def test_transport_clients_are_isolated_by_event_loop(tmp):
 def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
     """A bad MCP setting names itself instead of raising a bare ValueError.
 
-    Both were parsed with bare int(): a malformed value arrived as an
-    import-time traceback and a negative body size refused every request.
+    A malformed value must not surface as an import-time traceback, and a
+    negative body size must not refuse every request.
     """
     _mcp_load._need_deps()
     cases = (
@@ -262,9 +262,9 @@ def test_mcp_numeric_settings_fail_cleanly_at_startup(tmp):
 
 
 def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
-    """An invalid DAEDALUS_MCP_* value exported in the suite's own shell used
-    to refuse the in-process load before any test ran: the loader parsed the
-    suite process's environment. The load must see the caller's settings alone.
+    """An invalid DAEDALUS_MCP_* value exported in the suite's own shell must
+    not refuse the in-process load before any test runs. The load sees the
+    caller's settings alone, never the suite process's environment.
     """
     del tmp
     _mcp_load._need_deps()

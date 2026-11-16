@@ -171,7 +171,7 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
         # What the loop REQUESTS, which a real clock records nothing of.
         # No exact peek count: how many laps clear a 0.5s budget is a
         # float-accumulation artifact of the stand-in's epoch, and it
-        # moved when only the epoch changed.
+        # changes when only the epoch changes.
         assert sleeps[:1] == [0.02], brief         # opens below interval
         assert set(sleeps[1:-1]) == {0.01}, brief  # saturates at interval
         # The last lap is cut to the budget that was left, so the loop
@@ -241,7 +241,7 @@ def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
     clock records the sleeps the loop REQUESTS and advances by nothing
     else, so the poll count and sleep list below are the ramp
     arithmetic itself — a loaded runner cannot starve them, which is
-    the property the CLI-level pins could not have (issue 901).
+    the property the CLI-level pins cannot have.
     """
     del tmp
     outcome = _scripted_wait(['cut'])
@@ -452,8 +452,8 @@ def test_two_same_id_clients_receive_only_their_own_results(tmp):
     def client_argv(owner):
         # The client's patience has to cover this fixture's whole setup -- a
         # node spawn and the harness's own waits -- and the default ten
-        # seconds does not on a loaded Windows runner: both clients exited
-        # with `Timeout (10s)` before the first result was posted, leaving
+        # seconds does not on a loaded Windows runner, where a client can exit
+        # with `Timeout (10s)` before the first result is posted, leaving
         # nobody to consume it.
         return CLI + [
             'cookies', '--domain', owner, '--timeout', '120',
@@ -486,10 +486,10 @@ def test_two_same_id_clients_receive_only_their_own_results(tmp):
 def test_a_negative_timeout_is_refused_before_the_command_is_sent(tmp):
     """Refusing the wait is only useful if nothing was admitted first.
 
-    The command was PUT before the deadline was evaluated, so a negative
-    timeout polled zero times, told the caller it had timed out, and left a
-    command the browser was still free to execute. Retrying after that
-    report runs the side effect twice.
+    A command PUT before the deadline is evaluated would, on a negative
+    timeout, poll zero times, tell the caller it had timed out, and leave a
+    command the browser is still free to execute. Retrying after that
+    report would run the side effect twice.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)

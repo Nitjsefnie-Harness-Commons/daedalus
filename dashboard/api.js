@@ -94,7 +94,7 @@ function nextId(prefix = 'dash') {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// Per-tab mutex. Commands no longer collide -- they go to a per-target FIFO
+// Per-tab mutex. Commands do not collide -- they go to a per-target FIFO
 // directory -- but RESULTS still share one `{token}_{tab}` file, so two
 // concurrent calls against the same tab can cross-deliver: whichever poller
 // looks first sees the other's result. Serialize per tab; distinct tabs

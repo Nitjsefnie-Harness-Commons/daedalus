@@ -1,14 +1,13 @@
 """The open pull requests whose head is one commit SHA.
 
-Its own module rather than another query in `gh_client.py`, which measured
-490 lines at the commit this branch starts from against the size-ratchet
-action's 500-line ceiling: ten lines of headroom, and the query and its
-two filters are more than ten lines. The whole of a subject
+Its own module rather than another query in `gh_client.py`, which sits
+near the size-ratchet action's 500-line ceiling: the query and its two
+filters need more lines than that file has room for. The whole of a subject
 lives here, and `gh_client` stays the transport it already is for every
 watcher in this directory. That ceiling is why reading a refusal is
-`gh_rate_limit`'s subject and not this one's (issue 1338): one reader for
-the evidence is the thing worth protecting, and it does not fit beside the
-request that produces it.
+`gh_rate_limit`'s subject and not this one's: one reader for the evidence
+is the thing worth protecting, and it does not fit beside the request that
+produces it.
 
 Both filters are load-bearing, and `origin/main` is why. That tip is an
 ancestor of the head of a branch whose pull request has been merged, so the

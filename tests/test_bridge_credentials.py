@@ -394,9 +394,9 @@ def test_authenticated_get_routes_accept_a_bearer_header(tmp):
     """A reusable credential need not be written into the request target.
 
     A request target is retained by reverse-proxy access logs, browser
-    tooling and anything that copies a URL, so the token every authenticated
-    GET carried was reusable and durably recorded. The header is the carrier
-    that keeps it out of all three.
+    tooling and anything that copies a URL, so a token carried there is
+    reusable and durably recorded. The header is the carrier that keeps it
+    out of all three.
     """
     auth = {'Authorization': f'Bearer {TOK}'}
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):

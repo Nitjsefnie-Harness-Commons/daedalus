@@ -1,9 +1,9 @@
 """Bring the optional MCP front end up without holding back readiness.
 
 Importing daedalus_mcp costs over a second — mcp, pydantic, httpx,
-opentelemetry — and every caller waiting on the bridge's Listening line paid
-it. That listener already binds on a thread of its own and announces itself
-on its own [MCP] line, so readiness never meant the front end was up.
+opentelemetry — and every caller waiting on the bridge's Listening line would
+pay it. That listener binds on a thread of its own and announces itself
+on its own [MCP] line, so readiness does not mean the front end is up.
 
 An import that never returns is what this costs: the main thread blocks on
 the module lock this one holds, so the interpreter stops answering SIGINT.

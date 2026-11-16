@@ -284,7 +284,7 @@ def _bare_trigger_sweep(paths):
 
 
 def test_every_shipped_workflow_decodes_with_its_bare_triggers_as_none(tmp):
-    """The sweep the issue was filed against: no shipped file is refused."""
+    """The sweep over the shipped files refuses none of them."""
     del tmp
     paths = workflow_files()
     names = {path.name for path in paths}

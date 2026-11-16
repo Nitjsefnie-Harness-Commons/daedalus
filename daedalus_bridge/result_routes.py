@@ -2,8 +2,7 @@
 
 `accept_result` and `fetch_result` each return `(status, payload)` and take
 the result directory as a parameter. `result_store` owns the locks, the slot
-primitives and the accepted-delivery record; both routes call it exactly as
-the request handler used to.
+primitives and the accepted-delivery record; both routes call it.
 
 `res_dir` is the results root, and every file either route writes is
 resolved under it: the slot files directly, and the delivery files through

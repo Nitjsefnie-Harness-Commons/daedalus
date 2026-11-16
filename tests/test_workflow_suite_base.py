@@ -36,9 +36,9 @@ def _is_a_runnable_suite_file(node):
     """Whether this string names a file under tests/ THAT CAN BE RUN.
 
     A directory (`tests/`), a listing flag (`-- tests/`) and an
-    unrelated path are not a launch. Reading them as one put a job that
-    ran `git ls-files -- tests/` into the policed set, in a set whose
-    stated reason was that the rule recognises a launch.
+    unrelated path are not a launch. Reading them as one would put a job
+    that runs `git ls-files -- tests/` into the policed set, whose members
+    are the jobs that launch suites.
     """
     if not (isinstance(node, ast.Constant)
             and isinstance(node.value, str)):
@@ -109,16 +109,13 @@ def _enumerates_the_tests_tree(source):
     directory — so `(ROOT / "tests").glob("test_*.py")` and
     `(tree / 'tests').glob(...)` both count, and a sibling directory
     that merely CONTAINS the word (`old_tests`) does not. The receiver is
-    the PARSED node, not its source text: the unparsed form matched
-    `old_tests` and every other name with the letters in it, which is
-    the substring match this docstring argues against, one level down.
+    the PARSED node, not its source text: a substring match would count
+    `old_tests` and every other name that contains the letters.
 
-    It is an AST and not a substring because the substring version of
-    this question matched a docstring: it put two non-runners in the set
-    and MISSED `coverage_suites`, which is the job whose fetch-depth
-    matters most. Same mention-versus-call mistake the
-    re-implementation control's `__main__` rule had, in a second
-    control, and it is why the rule reads the tree.
+    It is an AST and not a substring because a substring match takes a
+    mention for a call: it matches a docstring, puts two non-runners in
+    the set and misses `coverage_suites`, which is the job whose
+    fetch-depth matters most. That is why the rule reads the tree.
 
     Two of the twenty-five tracked scripts enumerate the tests tree, and
     they are the two that run suites: `run_tests.py` and
@@ -185,18 +182,16 @@ def _checkout_widths(job):
 def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     """Each job THIS GUARD IDENTIFIES must fetch the merge base.
 
-    The branch-boundary controls the retired reserved-name suite
-    carried read the merge base's own declarations, and a checkout
-    that resolved neither `origin/main` nor a local `main` made both
-    boundary tests take their refusal arm quietly in a job that ran
-    the suites without failing on one.
+    A suite that reads the merge base's own declarations, in a checkout
+    that resolves neither `origin/main` nor a local `main`, takes its
+    refusal arm quietly in a job that runs the suites without failing on
+    one.
 
     WHAT THIS DOES NOT COVER, and the test is named for what it proves
     rather than for an enumeration it cannot deliver. A named bypass is a
     disclosure; an unnamed one is a hole, and a test called "every" with
     a docstring saying "every" is the next contributor's licence to add a
-    route without noticing. These are the routes it does NOT follow, each
-    found by the review that sent this wave back:
+    route without noticing. These are the routes it does NOT follow:
 
       * (a) A JOB THAT NAMES A SUITE DIRECTLY, which no bullet below
         reaches: a step carrying a fixed list of suite paths runs them
@@ -246,8 +241,8 @@ def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):
             ('out = (ROOT / "dashboard").glob("test_*.py")', False)):
         assert _enumerates_the_tests_tree(source) is expected, source
     # A callee whose NAME merely contains a launch word, with an
-    # argument that does not name a suite: the source-text callee test
-    # this replaced counted it.
+    # argument that does not name a suite: a source-text callee test
+    # would count it.
     assert not _launches_a_tests_file(
         'import subprocess\nsubprocess.runner(["python3", "docs/x.py"])\n')
     # The two names added because the guard this arm shadows declares
@@ -276,9 +271,8 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
     """Each member of the policed set, pinned — including the ones no
     hand-written fixture stands for.
 
-    An earlier version named three runners and left a fourth in the set
-    with nothing holding it, so a change to that script would have
-    dropped its job with the guard green. The members are named.
+    The members are named, so a change that drops one from the set fails
+    this test.
 
     One thing this test does NOT show, because it is true: removing the
     literal-launch arm leaves the set unchanged. Both runners glob, so
@@ -307,8 +301,8 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
 def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
     """The rule reads the AST, and over-includes in the safe direction.
 
-    A substring version of this question put two CI scripts whose
-    DOCSTRINGS name runners into the set and missed
+    A substring version of this question would put two CI scripts whose
+    DOCSTRINGS name runners into the set and miss
     `coverage_suites` — the job whose fetch-depth matters most.
     """
     del tmp

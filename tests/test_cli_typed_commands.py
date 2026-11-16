@@ -19,10 +19,9 @@ from _cli_helpers import (  # noqa: E402
 def test_every_typed_subcommand_sends_its_documented_command(tmp):
     """Each typed subcommand reaches the extension as the command it claims.
 
-    These handlers were the largest unexercised region of the CLI, and what
-    goes wrong in them is not a crash — it is a payload that names the wrong
-    `type` or routes a browser tab id through `tab`, which the bridge would
-    deliver to a queue nobody reads.
+    What goes wrong in these handlers is not a crash — it is a payload that
+    names the wrong `type` or routes a browser tab id through `tab`, which the
+    bridge would deliver to a queue nobody reads.
     """
     hotfix = Path(tmp) / 'fix.js'
     hotfix.write_text('console.log(1)\n', encoding='utf-8')

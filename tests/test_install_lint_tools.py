@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """The lint-tool installer has to work on hosts this one is not.
 
-Every measurement taken while it was written was taken on Linux, and every
-defect this suite exists to catch was Windows-only: a checksum key CPython
-never returns there, an archive branch no host could take, a wheel member
-placed where no PATH entry reached. So the platform functions are stubbed
-and a real archive of each shape is built in memory — this suite fails
-anywhere, which is the only way a Windows leg is covered before one runs.
-`tests/test_ci_lint_tools.py` is the other half: it holds the jobs to the
-tool set this installer declares.
+The defects this suite exists to catch are Windows-only: a checksum key
+CPython never returns there, an archive branch no host could take, a wheel
+member placed where no PATH entry reached. So the platform functions are
+stubbed and a real archive of each shape is built in memory — this suite
+fails anywhere, which is the only way a Windows leg is covered before one
+runs. `tests/test_ci_lint_tools.py` is the other half: it holds the jobs to
+the tool set this installer declares.
 """
 import contextlib
 import hashlib
@@ -138,8 +137,7 @@ def _key_for(installer, host):
 def actionlint_binary(host):
     """The name the installer gives the actionlint executable on `host`.
 
-        One place: this file used to spell it three times, each written
-        when the installer named it differently."""
+        One place, so a second spelling cannot drift from the installer's."""
     return (f'{ACTIONLINT_BINARY}.exe' if _is_windows(host)
             else ACTIONLINT_BINARY)
 
@@ -258,8 +256,8 @@ def test_every_name_this_file_uses_is_the_one_the_installer_uses(tmp):
     """This file's names against the installer's, for every pinned host.
 
         A hand-spelled name outliving the code that stopped spelling it is
-        the condition, and four of them did it. One helper each now; this
-        pins the helpers against `_extract` and `_asset_name` themselves."""
+        the condition. One helper each; this pins the helpers against
+        `_extract` and `_asset_name` themselves."""
     tmp = Path(tmp)
     installer = _installer()
     for host, asset, zipped in PINNED:
@@ -322,8 +320,8 @@ def _forced_windows():
         time from it, so no later patch supplies one, and patching it makes
         `pathlib` refuse to build a `WindowsPath` here. The win32 branch of
         `shutil.which` is therefore unreachable without a Windows
-        interpreter, so the resolver is left to the runner. Nothing in
-        production was changed to make this easier."""
+        interpreter, so the resolver is left to the runner. Production code
+        carries no test-only seam for this."""
     with mock.patch.object(sys, 'platform', 'win32'), \
             mock.patch('platform.system', return_value='Windows'), \
             mock.patch('platform.machine', return_value='AMD64'):
@@ -372,8 +370,8 @@ def test_the_whole_step_runs_on_a_host_this_machine_is_not(tmp):
             mock.patch.object(installer, 'shutil', mock.Mock(
                 which=lambda tool: str(tools / f'{tool}.exe'))):
         # The stub answers from inside the tool directory, the only place
-        # `_record` accepts. A stub from anywhere else used to pass and
-        # does not now: the check working, not the test being wrong.
+        # `_record` accepts. A stub from anywhere else is refused: the check
+        # working, not the test being wrong.
         assert installer.main() == 0
     installed = tools / actionlint_binary(WINDOWS_X64)
     assert installed.read_bytes() == EXECUTABLE
@@ -388,7 +386,7 @@ def _wheel(directory, members, name=None, scheme=None):
 
         Built rather than stubbed, because the code under test OPENS the
         wheel: a fake that only satisfied the call would leave the whole
-        extraction path untested, which is where the Windows failure was.
+        extraction path untested.
         A member is `(name-in-the-scripts-scheme, bytes)`; a trailing
         slash asks for the directory entry the manylinux wheel carries."""
     wheel = Path(directory) / (name or DEFAULT_WHEEL)
@@ -520,10 +518,9 @@ def test_the_binary_the_installer_names_on_this_host_is_one_which_can_find(
         tmp):
     """The binary the installer names on this host is one `which` finds.
 
-        A run that passed `shellcheck` then failed on `actionlint` was a
-        fixture stubbing the platform to say Linux on a Windows process.
-        Stated as a property, not a platform, so it holds wherever the
-        suite runs."""
+        A fixture stubbing the platform to say Linux on a Windows process
+        passes `shellcheck` and then fails on `actionlint`. Stated as a
+        property, not a platform, so it holds wherever the suite runs."""
     tmp = Path(tmp)
     installer = _installer()
     host = (installer.platform.system(), installer.platform.machine())
@@ -625,17 +622,17 @@ def test_a_wheel_that_carries_the_wrong_binary_is_refused(tmp):
 def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
     """The whole point, on a PATH that has neither binary on it.
 
-        One job used to pass because the ubuntu-latest image carries a
-        shellcheck at a version no pin names, and "does it resolve" cannot
-        tell that from an install. This runs the real entry point and then
-        looks at WHERE the binary it found lives."""
+        The ubuntu-latest image carries a shellcheck at a version no pin
+        names, and "does it resolve" cannot tell that from an install. This
+        runs the real entry point and then looks at WHERE the binary it
+        found lives."""
     tmp = Path(tmp)
     installer = _installer()
     tools = tmp / 'tools'
     later = tmp / 'path.txt'
     recorded = tmp / 'env.txt'
     # The host's OWN pair, not a claim about another one: stubbing the
-    # platform to say Linux on a Windows process made the installer name
+    # platform to say Linux on a Windows process makes the installer name
     # the binary the POSIX way and a `which` following Windows' rule miss
     # it. Restubbing the real values keeps the map keyed as `_asset_name`
     # builds it, without pretending this is somewhere it is not.

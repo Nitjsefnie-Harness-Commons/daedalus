@@ -27,12 +27,12 @@ _FAILURE_MARKER = '(suite did not pass; its coverage still counts)'
 
 
 def test_a_windows_read_gets_the_same_sentence_and_refuses_the_dead_one(tmp):
-    """The sentence no longer depends on the platform the runner read.
+    """The sentence does not depend on the platform the runner read.
 
     Both routes ask before they escalate, so the sentence an operator
     reads is the same under a Windows read as under a POSIX one, and the
-    forced-only wording this runner retired is refused: a conditional
-    that resurrects it for one platform is red here rather than silent.
+    forced-only wording is refused: a conditional that resurrects it for
+    one platform is red here rather than silent.
     """
     outcome = _launch.run_main(tmp, platform='win32', scripts={
         'test_alpha': {'result': (0, _launch.KILLED)}})
@@ -67,8 +67,7 @@ def test_the_runner_removes_its_outputs_through_the_bounded_removal(tmp):
 
     Nothing else watches what this launcher does with its output
     directory -- and a bare `shutil.rmtree` there raises out of `main()`
-    and takes the `TIMED OUT:` report below it with it, which is issue
-    #1485 on the second of the two launchers.
+    and takes the `TIMED OUT:` report below it with it.
 
     The two halves are asserted apart, because either alone is satisfied
     by the other: the stand-in's own log says the bounded function was

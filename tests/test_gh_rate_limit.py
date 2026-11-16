@@ -17,8 +17,8 @@ stderr complaint are three places a caller's own field spells the two
 words. So each carrier is driven in BOTH directions here, pause and
 near miss, because a classifier pinned in one direction is a classifier
 pinned on whichever direction was written first. The two false positives
-that shape produced are recorded in the module's own docstring - a 200
-that SUCCEEDED with complete data and a `gh` warning that merely
+this rule must not produce are recorded in the module's own docstring - a
+200 that SUCCEEDED with complete data and a `gh` warning that merely
 mentioned a limit, and the last good request before the window closes
 carrying `X-Ratelimit-Remaining: 0` beside valid data - both rows
 below, each its pause-shaped partner with one field changed.
@@ -164,7 +164,7 @@ def test_an_empty_answer_whose_complaint_names_nothing_is_a_failure(tmp):
 
 def test_a_complaint_naming_a_limit_pauses_an_answer_that_did_not_deliver(
         tmp):
-    """The live shape, issue 1338: a throttled GraphQL query is answered
+    """The live shape: a throttled GraphQL query is answered
     200 and `gh` exits 1 over a message naming the limit. The status
     says nothing is wrong, the body carries the query's complete data,
     and the words are on stderr. Read the exit code first and this is
@@ -349,9 +349,9 @@ def test_a_delivered_200_carrying_a_limit_name_is_not_a_pause(tmp):
 
 def test_a_delivered_200_with_a_limit_mention_on_stderr_is_not_a_pause(
         tmp):
-    """The other false positive the module's docstring records, measured:
-    a 200 that SUCCEEDED, carrying complete data, with a `gh` warning on
-    stderr that merely mentions a limit was answered
+    """The other false positive the module's docstring records: a 200
+    that SUCCEEDED, carrying complete data, with a `gh` warning on
+    stderr that merely mentions a limit must not be answered
     `RateLimited(resume_at=None)` - a flat minute's pause over a call
     that worked. The identical stderr beside an exit code of 1 IS the
     pause, the row above this one; the delivery is the difference."""
@@ -363,10 +363,10 @@ def test_a_delivered_200_with_a_limit_mention_on_stderr_is_not_a_pause(
 
 
 def test_the_last_good_request_is_not_discarded_for_its_own_reset(tmp):
-    """The second measured false positive: the LAST successful request
+    """The second false positive: the LAST successful request
     before the window closes carries `X-Ratelimit-Remaining: 0` and the
-    reset beside valid data, and reading that pair as a report threw
-    away a good answer to wait for a limit that had not refused it. The
+    reset beside valid data, and reading that pair as a report throws
+    away a good answer to wait for a limit that has not refused it. The
     same headers on an undelivered answer are the pause three rows up;
     delivery is the difference again."""
     client = _client()

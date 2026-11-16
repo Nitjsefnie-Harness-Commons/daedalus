@@ -3,7 +3,7 @@ name: gate freshness
 # scripts/ci/gate_freshness.py owns freshness, gate paths and the call budget.
 #
 # JOB CONTEXT. The event job carries its own verdict. API-created checks can
-# land in the app's oldest suite, ignored once superseded (issue #1655).
+# land in the app's oldest suite, ignored once superseded.
 #
 # SCRIPT PUBLICATION. PATCH only script-owned checks. Push keeps fresh or
 # already-red heads and re-runs other heads' event runs only when this workflow
@@ -36,7 +36,7 @@ permissions:
   pull-requests: read
 
 # The non-pull-request fallback is the commit SHA, not the ref, so a newer
-# push cannot cancel a landed main SHA's in-flight verdict (issue #1579).
+# push cannot cancel a landed main SHA's in-flight verdict.
 # A pull request keeps one group per number.
 concurrency:
   group: gate-freshness-${{ github.event.pull_request.number || github.sha }}

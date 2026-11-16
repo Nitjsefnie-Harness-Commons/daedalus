@@ -34,13 +34,12 @@ export function mount(container) {
 
   // An <a href> cannot carry an Authorization header, so a file is fetched
   // with one and handed to the browser as an object URL, the way §03 shows
-  // a screenshot. Links used to name /uploads/<path>, a route the bridge
-  // does not have, and since the listed path begins with the token every
-  // click both 404ed and wrote the credential into browser history and
-  // the proxy access log. Fetched on demand rather than with the listing:
-  // a page holds fifty arbitrary files, and fetching each one up front is
-  // a download of the page. One fetch per file serves both its preview and
-  // its download, and the page's URLs are revoked when its rows go.
+  // a screenshot. The listed path begins with the token, so a link to it
+  // would write the credential into browser history and the proxy access
+  // log. Fetched on demand rather than with the listing: a page holds fifty
+  // arbitrary files, and fetching each one up front is a download of the
+  // page. One fetch per file serves both its preview and its download, and
+  // the page's URLs are revoked when its rows go.
   let held = new Map();
 
   function release() {
@@ -101,9 +100,9 @@ export function mount(container) {
 
   async function load() {
     const token = getToken();
-    // The rows go either way from here, so what they held goes first: a
-    // refresh with no token, or one whose listing failed, used to replace
-    // them with a notice and leave every object URL of the page alive.
+    // The rows go either way from here, so what they held goes first,
+    // including on a refresh with no token or one whose listing failed: every
+    // object URL of the page is revoked before a notice replaces them.
     release();
     if (!token) { listEl.innerHTML = '<div class="dim italic small">no token.</div>'; return; }
     listEl.innerHTML = '<div class="dim italic small">loading…</div>';

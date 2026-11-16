@@ -404,9 +404,8 @@ def test_the_refusal_pass_refuses_an_unregistered_allowlist_entry(_tmp):
 def test_the_refusal_pass_refuses_a_second_witness_of_one_site(_tmp):
     """Two refusal cases landing on one raise site are refused.
 
-    The refusal pass accumulated its (tool, site) pairs into a set, so a
-    case whose site another case already witnessed was deletable without
-    any test noticing.
+    A case whose site another case already witnesses must not be deletable
+    without any test noticing.
     """
     duplicated = _mcp_tool_commands.TOOL_REFUSALS['net_capture'] + [
         ({'max_requests': 99999}, ValueError,

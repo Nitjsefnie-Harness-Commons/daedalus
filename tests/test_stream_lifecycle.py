@@ -182,8 +182,8 @@ def test_an_mcp_bind_crash_surfaces_in_the_health_payload(tmp):
 def test_a_healthy_child_reports_the_mcp_front_end_up(tmp):
     """The healthy case must read as healthy, not merely not-down.
 
-    'down' without a crash is worse than the silence it replaced and
-    'starting' forever confirms nothing: a serving child must reach 'up'.
+    'down' without a crash is worse than silence, and 'starting' forever
+    confirms nothing: a serving child must reach 'up'.
     """
     if not all(importlib.util.find_spec(name) is not None
                for name in ('httpx', 'mcp', 'starlette')):

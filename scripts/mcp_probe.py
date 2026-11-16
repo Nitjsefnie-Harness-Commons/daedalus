@@ -18,8 +18,8 @@ if not TOKEN:
 def rpc(client, session_id, method, params=None):
     payload = {'jsonrpc': '2.0', 'method': method}
     # A notification carries no id. With one, the transport reads it as a
-    # request and answers -32601 Method not found, so the handshake the
-    # probe performed was initialize followed by a malformed request.
+    # request and answers -32601 Method not found, so the handshake would be
+    # initialize followed by a malformed request.
     if not method.startswith('notifications/'):
         payload['id'] = str(uuid.uuid4())
     if params is not None:

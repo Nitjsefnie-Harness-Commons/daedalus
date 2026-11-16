@@ -111,11 +111,11 @@ export function mount(container, bus) {
       recentUrls = [];
       clear(recent);
       if (shown.length === 0) { recent.appendChild(h('div', { class: 'dim italic small' }, 'no screenshots.')); return; }
-      // Fetched together, not one after another: an <img src> used to let the
-      // browser load the grid in parallel, and awaiting each in turn costs a
-      // serial round trip per thumbnail. A capture that has since been
-      // deleted yields no URL and its tile is rendered without an image
-      // rather than failing the whole grid.
+      // Fetched together, not one after another: awaiting each in turn costs
+      // a serial round trip per thumbnail, where the browser would load an
+      // <img src> grid in parallel. A capture that has been deleted yields no
+      // URL and its tile is rendered without an image rather than failing the
+      // whole grid.
       const fetched = await Promise.all(shown.map(
         f => objectUrl('/screenshot?path=' + encodeURIComponent(f.path))
           .catch(() => '')));

@@ -142,9 +142,8 @@ def test_run_refuses_an_empty_target_and_names_where_untargeted_code_runs(
         _tmp):
     """An empty selection is not a target; only the explicit button sends
     none, and it says the code runs in the browser's active tab. The
-    refusal sentence is asserted whole, so rewriting it (the review
-    mutation that replaced the message with 'nope') fails here and not
-    merely at the non-empty check kept beside it."""
+    refusal sentence is asserted whole, so rewriting it (to 'nope', say)
+    fails here and not merely at the non-empty check kept beside it."""
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
     # Every faked route is an exact target -- one command, one `/tabs`,
@@ -188,8 +187,7 @@ def test_eval_status_names_the_active_tab_on_both_untargeted_surfaces(_tmp):
     tab: the pre-flight line the section paints the moment the run
     starts, and the post-run line the settled envelope repaints. The two
     fallbacks are separate strings in the section, so each is asserted,
-    and either regressing to the old 'broadcast' reading fails its own
-    assertion."""
+    and either reading 'broadcast' instead fails its own assertion."""
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['activeTab']['statusBefore'] == (
@@ -204,9 +202,9 @@ def test_the_settled_status_names_where_the_broadcast_ran(_tmp):
     post-run line must read tab=11. The envelope preference is the only
     spelling that gets there, because the submitted target was empty;
     reducing the expression to the submitted tabId (`String(tabId ||
-    'active tab')`, the review mutation) reads 'active tab' and fails
-    here. The first untargeted run keeps an empty envelope, so the
-    'active tab' fallback stays held by the status test beside this."""
+    'active tab')`) reads 'active tab' and fails here. The first untargeted
+    run keeps an empty envelope, so the 'active tab' fallback stays held
+    by the status test beside this."""
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
     assert re.fullmatch(r'tab=11  channel=page  \d+ms',
@@ -216,8 +214,7 @@ def test_the_settled_status_names_where_the_broadcast_ran(_tmp):
 def test_the_pre_flight_label_names_the_chosen_tab(_tmp):
     """With 11 selected the pre-flight line reads tab=11 before any
     result exists — the label tracks the selection, so hard-coding the
-    active-tab spelling into it (the review mutation that stopped the
-    line following the target) fails here; the untargeted run's
+    active-tab spelling into it fails here; the untargeted run's
     identical-looking label remains the status test's to hold."""
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
@@ -226,10 +223,9 @@ def test_the_pre_flight_label_names_the_chosen_tab(_tmp):
 
 def test_the_timeout_renders_clamped_to_the_section_bounds(_tmp):
     """The pre-flight line cannot carry a raw field value: 999999 clamps
-    to 60000 and 500 to 1000, so dropping the clamp (the review mutation
-    that rendered the field bare) reads the raw numbers and fails here.
-    Only the timeout suffix is asserted, leaving the tab prefix to the
-    label pin beside it."""
+    to 60000 and 500 to 1000, so dropping the clamp reads the raw numbers
+    and fails here. Only the timeout suffix is asserted, leaving the tab
+    prefix to the label pin beside it."""
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['highTimeout'].endswith('  timeout=60000ms'), seen
@@ -373,8 +369,7 @@ phase('dashboard harness finished');
 
 def test_settings_caveat_says_where_an_untargeted_command_runs(_tmp):
     """The settings caveat must keep saying an untargeted command runs
-    once, in whichever tab is active — the sentence the issue's
-    mutation replaced with an all-tabs claim, which would tell an
+    once, in whichever tab is active — an all-tabs claim would tell an
     operator that one command fans out over every tab. The sentence is
     asserted whole, and both all-tabs spellings are refused beside it."""
     result = _dashnode.run_dashboard_node(_SETTINGS_HARNESS)

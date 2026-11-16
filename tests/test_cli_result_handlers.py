@@ -57,8 +57,8 @@ def test_do_result_adds_the_consume_flag_only_when_it_was_asked(tmp):
 
     The rendered line is byte-identical to the unconsumed arm's, and that
     is the point: `-c` changes the QUERY and nothing an operator reads
-    back. Pinned here as a whole string, because this arm's rendering was
-    otherwise pinned nowhere for this handler.
+    back. Pinned here as a whole string, because nothing else pins this
+    arm's rendering for this handler.
     """
     del tmp
     _recorded, out = run_cli(

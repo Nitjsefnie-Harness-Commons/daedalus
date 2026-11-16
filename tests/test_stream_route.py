@@ -144,7 +144,7 @@ def test_resolve_targets_names_the_four_paths_under_cmd_dir(tmp):
 
 
 def test_the_loop_waits_on_the_registry_event_publication_sets(tmp):
-    """Issue 213: severing the wake link fails this, without timing."""
+    """Severing the wake link fails this, without timing."""
     route = _load_route('stream_route_wake')
     cq = route.command_queue
     root = Path(tmp)

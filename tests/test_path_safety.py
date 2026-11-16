@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Caller-supplied values must never become path components unchecked.
 
-Every test here failed against the code as it stood before these fixes, which
-is the only reason to trust them. The bug they pin was real: `POST /result`
-validated the token and nothing else, so a `tabId` of `../../x` wrote
-attacker-controlled JSON wherever it pointed, and `GET /result?tab=` read it
-back. The same shape existed on `GET /upload?id=` and `GET /screenshot?id=`.
+Every test here fails against code without these checks, which is the only
+reason to trust them. If `POST /result` validated the token and nothing else,
+a `tabId` of `../../x` would write attacker-controlled JSON wherever it
+pointed, and `GET /result?tab=` would read it back. The same holds for
+`GET /upload?id=` and `GET /screenshot?id=`.
 
 The assertion is deliberately not just the status code. A handler can answer
 400 and still have written the file, so each test checks the filesystem
@@ -197,7 +197,7 @@ def test_a_stream_tab_cannot_select_a_queue_outside_the_docroot(tmp):
 
 
 def test_a_screenshot_format_cannot_become_a_path_fragment(tmp):
-    """`format` was appended to the stored filename with nothing checked."""
+    """`format` is checked before it is appended to the stored filename."""
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         for fmt in ('../../escaped', 'png/../..', 'a\\b'):
             status, _ = _util.post_json(
@@ -314,7 +314,7 @@ def test_one_token_cannot_read_another_tokens_results(tmp):
 
     Token `victim_x` and the pair (token `victim`, tab `x`) name the same file,
     so one principal's result is readable by another and both write the same
-    command queue. Reproduced against the real server before the fix.
+    command queue.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         status, _ = _util.post_json(
@@ -415,8 +415,8 @@ def test_a_refusal_line_redacts_the_credential_it_names(tmp):
 
     The evidence is the point of the line — a refusal that cannot be
     diagnosed is useless — so the parts and the resolved attempts render
-    exactly as before, with the secret replaced by the 8-character prefix
-    the stream connect line already prints. The substitution is substring
+    in full, with the secret replaced by the 8-character prefix the
+    stream connect line already prints. The substitution is substring
     replacement, because the secret reaches the line inside derived names
     (`<token>.json`) and resolved absolute paths, never only as a bare
     component.

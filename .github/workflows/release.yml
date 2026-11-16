@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     # The wait below can spend half an hour reading the gates on this commit,
     # and the suite and build come after it. A ceiling shorter than the wait
-    # would kill the job for being patient, which is the one thing it is now
+    # would kill the job for being patient, which is the one thing it is
     # supposed to be.
     timeout-minutes: 60
 
@@ -163,10 +163,8 @@ jobs:
           persist-credentials: false
           # This job runs the suites from a DETACHED TAG, and a tag is a
           # commit ON main, so the merge base of a tag checkout IS its
-          # head. The retired branch-boundary controls read that merge
-          # base, and no surviving suite pins this setting any more; it
-          # is kept conservative for tag builds, which have no branch to
-          # compare against.
+          # head. No suite pins this setting; it is kept conservative
+          # for tag builds, which have no branch to compare against.
           fetch-depth: 0
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -197,8 +195,8 @@ jobs:
       # A mistagged release publishes a wheel whose version contradicts the
       # tag, and the checksums then make the wrong pairing authoritative.
       - name: Refuse a tag that does not match the version being built
-        # No `if:` any more — the guard above has already established that
-        # this run is on a v* tag, so this check is unconditional rather
+        # This check has no `if:`: the guard above has already established
+        # that this run is on a v* tag, so the check is unconditional rather
         # than skipping itself on exactly the refs it could not vouch for.
         run: |
           tagged="${GITHUB_REF_NAME#v}"
@@ -256,10 +254,7 @@ jobs:
         # artifacts is a change that belongs on its own, after it has been
         # proved by a release rather than alongside a lint fix.
         #
-        # v3.0.0 moved the action's runtime from Node 20 to Node 24 and
-        # changed no inputs; this step passes only `files` and
-        # `generate_release_notes`. The SHA was re-resolved against
-        # upstream's annotated v3.0.2 tag rather than taken from the bot.
+        # This step passes only `files` and `generate_release_notes`.
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
         with:
           files: |
