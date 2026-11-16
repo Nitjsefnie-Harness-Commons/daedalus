@@ -1,23 +1,23 @@
 {
   ".claude/skills/changing-daedalus/ci_gate.py": [
-    7284,
-    9222
+    6781,
+    8719
   ],
   ".claude/skills/changing-daedalus/ci_wait.py": [
     10152,
     18218
   ],
   ".claude/skills/changing-daedalus/gh_client.py": [
-    5614,
-    13805
+    5598,
+    13789
   ],
   ".claude/skills/changing-daedalus/gh_head_prs.py": [
-    1556,
-    2196
+    1493,
+    2133
   ],
   ".claude/skills/changing-daedalus/gh_rate_limit.py": [
-    6040,
-    8278
+    5948,
+    8186
   ],
   ".claude/skills/changing-daedalus/plant.py": [
     2694,
@@ -44,40 +44,40 @@
     2820
   ],
   ".github/workflows/codeql.yml": [
-    2375,
-    3310
+    2362,
+    3326
   ],
   ".github/workflows/coverage-comment.yml": [
     3368,
     12492
   ],
   ".github/workflows/gate-freshness.yml": [
-    1218,
-    1933
+    1194,
+    1909
   ],
   ".github/workflows/pr-gate.yml": [
     427,
     1095
   ],
   ".github/workflows/release.yml": [
-    5063,
-    9027
+    4854,
+    8849
   ],
   ".github/workflows/scorecard.yml": [
     432,
     1438
   ],
   ".github/workflows/secrets.yml": [
-    2055,
-    3110
+    2042,
+    3097
   ],
   ".github/workflows/tests.yml": [
-    27942,
-    53209
+    27594,
+    52876
   ],
   ".github/workflows/version.yml": [
-    2091,
-    3141
+    2056,
+    3125
   ],
   "daedalus_bridge/__init__.py": [
     67,
@@ -116,36 +116,36 @@
     14060
   ],
   "daedalus_bridge/json_body.py": [
-    1949,
-    2811
+    1938,
+    2800
   ],
   "daedalus_bridge/legacy_ids.py": [
-    3215,
-    3693
+    3132,
+    3610
   ],
   "daedalus_bridge/log_safe.py": [
     1145,
     1347
   ],
   "daedalus_bridge/mcp_bootstrap.py": [
-    1239,
-    2127
+    1236,
+    2124
   ],
   "daedalus_bridge/path_safety.py": [
     5524,
     8246
   ],
   "daedalus_bridge/queue_order.py": [
-    3420,
-    4684
+    3409,
+    4673
   ],
   "daedalus_bridge/result_routes.py": [
-    2884,
-    9167
+    2852,
+    9210
   ],
   "daedalus_bridge/result_store.py": [
-    4994,
-    9789
+    4863,
+    9658
   ],
   "daedalus_bridge/route_answer.py": [
     446,
@@ -160,28 +160,28 @@
     8640
   ],
   "daedalus_bridge/segment_store.py": [
-    12250,
-    17185
+    12172,
+    17107
   ],
   "daedalus_bridge/static_routes.py": [
-    811,
-    1797
+    750,
+    1736
   ],
   "daedalus_bridge/stream_route.py": [
     1450,
     4930
   ],
   "daedalus_bridge/stream_service.py": [
-    7245,
-    13549
+    7198,
+    13648
   ],
   "daedalus_bridge/tab_registry.py": [
     1062,
     3153
   ],
   "daedalus_bridge/upload_routes.py": [
-    5308,
-    12473
+    5070,
+    12235
   ],
   "daedalus_cli/__init__.py": [
     798,
@@ -260,36 +260,36 @@
     8107
   ],
   "dashboard/api.js": [
-    1880,
-    5237
+    1877,
+    5234
   ],
   "dashboard/app.js": [
     639,
     4234
   ],
   "dashboard/sections/_util.js": [
-    2534,
-    8642
+    2437,
+    8545
   ],
   "dashboard/sections/css-injector.js": [
-    2371,
-    6875
+    2363,
+    6867
   ],
   "dashboard/sections/screenshot.js": [
-    779,
-    4915
+    769,
+    4905
   ],
   "dashboard/sections/uploads.js": [
-    1408,
-    6699
+    1338,
+    6629
   ],
   "dashboard/sse.js": [
     1542,
     4304
   ],
   "eslint.config.js": [
-    1048,
-    2008
+    961,
+    1921
   ],
   "examples/hls-segment-relay.js": [
     4026,
@@ -320,8 +320,8 @@
     11239
   ],
   "extension/options.js": [
-    286,
-    1655
+    271,
+    1640
   ],
   "extension/page.js": [
     2231,
@@ -347,10 +347,6 @@
     2791,
     5854
   ],
-  "extension/worker/cookies.js": [
-    337,
-    2185
-  ],
   "extension/worker/evaluate.js": [
     3145,
     8930
@@ -372,12 +368,12 @@
     9528
   ],
   "extension/worker/netcapture.js": [
-    1784,
-    6652
+    1769,
+    6637
   ],
   "extension/worker/registry.js": [
-    1237,
-    3028
+    1234,
+    3025
   ],
   "extension/worker/segment_mint.js": [
     1092,
@@ -420,24 +416,24 @@
     5609
   ],
   "scripts/ci/coverage_combine.py": [
-    746,
-    1118
+    737,
+    1109
   ],
   "scripts/ci/coverage_suites.py": [
-    1221,
-    4011
+    1218,
+    4460
   ],
   "scripts/ci/diff_coverage.py": [
     5393,
     13658
   ],
   "scripts/ci/install_lint_tools.py": [
-    9016,
-    16612
+    8912,
+    16529
   ],
   "scripts/ci/journey_artifact.py": [
-    7803,
-    15222
+    7713,
+    15132
   ],
   "scripts/ci/journey_budget.py": [
     7894,
@@ -448,36 +444,36 @@
     3317
   ],
   "scripts/ci/journey_counters.py": [
-    8078,
-    15676
+    8044,
+    15642
   ],
   "scripts/ci/journey_function_rows.py": [
-    5309,
-    7537
+    5217,
+    7445
   ],
   "scripts/ci/journey_gates.py": [
-    5308,
-    9941
+    5235,
+    9868
   ],
   "scripts/ci/journey_rebaseline.py": [
-    7586,
-    13246
+    7279,
+    12939
   ],
   "scripts/ci/journey_recording.py": [
-    3543,
-    6417
+    3537,
+    6411
   ],
   "scripts/ci/journey_report.py": [
-    6989,
-    14843
+    6929,
+    14783
   ],
   "scripts/ci/journey_residual.py": [
-    1652,
-    2250
+    1638,
+    2236
   ],
   "scripts/ci/journey_thread_rows.py": [
-    3187,
-    4328
+    3180,
+    4321
   ],
   "scripts/ci/journey_threads.py": [
     15736,
@@ -516,24 +512,24 @@
     5847
   ],
   "scripts/gen_gitignore.py": [
-    3621,
-    7267
+    3554,
+    7200
   ],
   "scripts/mcp_probe.py": [
-    589,
-    2376
+    576,
+    2363
   ],
   "scripts/version_regions.py": [
-    2817,
-    10296
+    2811,
+    10290
   ],
   "server.py": [
-    5152,
-    14847
+    5006,
+    15004
   ],
   "tests/_actionlint.py": [
-    10797,
-    20010
+    10527,
+    19776
   ],
   "tests/_block_field_probes.py": [
     503,
@@ -556,32 +552,32 @@
     1653
   ],
   "tests/_child_ready.py": [
-    3812,
-    5894
+    3808,
+    5890
   ],
   "tests/_ci_imports.py": [
     1118,
     2487
   ],
   "tests/_ci_wait_fixtures.py": [
-    2399,
-    3529
+    2318,
+    3448
   ],
   "tests/_classifier_calls.py": [
-    576,
-    867
+    523,
+    814
   ],
   "tests/_cli_arg_audit_resolver.py": [
-    3627,
-    18282
+    3616,
+    18271
   ],
   "tests/_cli_dispatch.py": [
-    5639,
-    10827
+    5626,
+    10814
   ],
   "tests/_cli_handler_wire.py": [
-    917,
-    1509
+    858,
+    1450
   ],
   "tests/_cli_helpers.py": [
     1469,
@@ -592,8 +588,8 @@
     690
   ],
   "tests/_clientstate.py": [
-    1662,
-    3249
+    1653,
+    3240
   ],
   "tests/_cmdqueue_faults.py": [
     2695,
@@ -604,12 +600,12 @@
     925
   ],
   "tests/_command_type_readers.py": [
-    4532,
-    14528
+    4473,
+    14469
   ],
   "tests/_completion.py": [
-    396,
-    932
+    386,
+    922
   ],
   "tests/_coverage_comment_workflow.py": [
     676,
@@ -628,16 +624,16 @@
     1959
   ],
   "tests/_dashfield.py": [
-    1102,
-    4349
+    1019,
+    4266
   ],
   "tests/_dashnode.py": [
-    3904,
-    17952
+    3884,
+    17932
   ],
   "tests/_dashnode_dom.py": [
-    1174,
-    5404
+    1125,
+    5355
   ],
   "tests/_dashnode_retry_control.py": [
     750,
@@ -648,8 +644,8 @@
     503
   ],
   "tests/_dashsection.py": [
-    4516,
-    13278
+    4480,
+    13242
   ],
   "tests/_dashsection_wave1.py": [
     2683,
@@ -664,16 +660,16 @@
     460
   ],
   "tests/_diff_coverage_fixtures.py": [
-    406,
-    526
+    362,
+    482
   ],
   "tests/_drain.py": [
     631,
     1190
   ],
   "tests/_fake_gh.py": [
-    5218,
-    11412
+    5207,
+    11401
   ],
   "tests/_fanout.py": [
     879,
@@ -696,8 +692,8 @@
     6771
   ],
   "tests/_gm_harness.py": [
-    2573,
-    14896
+    2471,
+    14794
   ],
   "tests/_hotfix_outcome.py": [
     501,
@@ -712,8 +708,8 @@
     2105
   ],
   "tests/_journey_typed.py": [
-    11829,
-    20006
+    11077,
+    19254
   ],
   "tests/_journeys.py": [
     10841,
@@ -728,20 +724,20 @@
     1901
   ],
   "tests/_lint_tool_mechanisms.py": [
-    9132,
-    12881
+    8633,
+    12289
   ],
   "tests/_lint_tool_refusals.py": [
     6880,
     13591
   ],
   "tests/_lint_tool_roles.py": [
-    12201,
-    22125
+    11582,
+    21506
   ],
   "tests/_log_safe_cases.py": [
-    1185,
-    1981
+    1143,
+    1939
   ],
   "tests/_mcp_arm_derivation.py": [
     4681,
@@ -784,16 +780,16 @@
     20131
   ],
   "tests/_mcp_tools_helpers.py": [
-    705,
-    3948
+    695,
+    3938
   ],
   "tests/_netcapture_harness.py": [
     2856,
     12884
   ],
   "tests/_node_harness_fixtures.py": [
-    278,
-    351
+    177,
+    250
   ],
   "tests/_node_launch_routing.py": [
     2265,
@@ -808,20 +804,20 @@
     935
   ],
   "tests/_overlap.py": [
-    3161,
-    15602
+    3125,
+    15566
   ],
   "tests/_overlap_clients.py": [
-    1189,
-    4328
+    1186,
+    4343
   ],
   "tests/_pip_cache.py": [
     412,
     913
   ],
   "tests/_processtree.py": [
-    3271,
-    7764
+    3241,
+    7734
   ],
   "tests/_queueread.py": [
     949,
@@ -832,8 +828,8 @@
     19832
   ],
   "tests/_realbrowser_broken_worker.py": [
-    1191,
-    2341
+    1177,
+    2327
   ],
   "tests/_realbrowser_controls.py": [
     141,
@@ -888,8 +884,8 @@
     737
   ],
   "tests/_util.py": [
-    10011,
-    20292
+    10002,
+    20282
   ],
   "tests/_version_contract.py": [
     1654,
@@ -900,12 +896,12 @@
     1731
   ],
   "tests/_version_contract_scanners.py": [
-    1907,
-    6670
+    1900,
+    6657
   ],
   "tests/_watcher_fixtures.py": [
-    1483,
-    2284
+    1461,
+    2262
   ],
   "tests/_wffixtures.py": [
     4652,
@@ -960,12 +956,12 @@
     13352
   ],
   "tests/test_aggregate_needs.py": [
-    2245,
-    9314
+    2208,
+    9277
   ],
   "tests/test_bridge_credentials.py": [
-    2729,
-    16184
+    2710,
+    16183
   ],
   "tests/test_bridge_requests.py": [
     3033,
@@ -976,64 +972,64 @@
     13375
   ],
   "tests/test_bridge_startup.py": [
-    4295,
-    19653
+    4243,
+    19723
   ],
   "tests/test_bridge_streams_legacy.py": [
-    3478,
-    8123
+    3460,
+    8105
   ],
   "tests/test_bridge_uploads.py": [
-    5314,
-    23124
+    4872,
+    22682
   ],
   "tests/test_case_fold_parent.py": [
     11399,
     21340
   ],
   "tests/test_checkout_pin.py": [
-    2142,
-    10336
+    2102,
+    10874
   ],
   "tests/test_ci_gate.py": [
-    11072,
-    20254
+    10819,
+    20001
   ],
   "tests/test_ci_lint_tool_refusals.py": [
     1544,
     2662
   ],
   "tests/test_ci_lint_tools.py": [
-    8663,
-    21084
+    8417,
+    21023
   ],
   "tests/test_ci_pip_cache.py": [
-    790,
-    3932
+    727,
+    3869
   ],
   "tests/test_ci_tool_declarations.py": [
-    8581,
-    16579
+    8262,
+    16260
   ],
   "tests/test_ci_wait.py": [
-    6426,
-    20513
+    6298,
+    20385
   ],
   "tests/test_ci_wait_gate.py": [
     9766,
     23717
   ],
   "tests/test_ci_wait_published.py": [
-    10965,
-    23719
+    10897,
+    23651
   ],
   "tests/test_ci_wait_required.py": [
-    8246,
-    16717
+    8100,
+    16571
   ],
   "tests/test_ci_workflows.py": [
-    4783,
-    22692
+    4595,
+    22504
   ],
   "tests/test_claim_workflow.py": [
     708,
@@ -1068,24 +1064,24 @@
     6019
   ],
   "tests/test_cli_content_hotfixes.py": [
-    3527,
-    8601
+    3421,
+    8495
   ],
   "tests/test_cli_duplicate_admission.py": [
     733,
     3267
   ],
   "tests/test_cli_error_reporting.py": [
-    1599,
-    6805
+    1585,
+    6791
   ],
   "tests/test_cli_eval_commands.py": [
     1355,
     8010
   ],
   "tests/test_cli_eval_handlers.py": [
-    5752,
-    17877
+    5669,
+    17794
   ],
   "tests/test_cli_hotfixes.py": [
     1490,
@@ -1100,20 +1096,20 @@
     9325
   ],
   "tests/test_cli_output.py": [
-    1442,
-    3851
+    1231,
+    3640
   ],
   "tests/test_cli_result_handlers.py": [
-    1472,
-    3298
+    1462,
+    3288
   ],
   "tests/test_cli_result_wait.py": [
     4654,
     17855
   ],
   "tests/test_cli_typed_commands.py": [
-    948,
-    3669
+    901,
+    3622
   ],
   "tests/test_cli_waits.py": [
     5309,
@@ -1128,48 +1124,48 @@
     19299
   ],
   "tests/test_command_queue_ordering.py": [
-    4362,
-    9096
+    4348,
+    9082
   ],
   "tests/test_config_boot_generation.py": [
     5312,
     17096
   ],
   "tests/test_coverage_combine.py": [
-    1022,
-    5270
+    1011,
+    5259
   ],
   "tests/test_coverage_comment_boundary.py": [
     3385,
     19276
   ],
   "tests/test_coverage_suites_launch.py": [
-    3262,
-    7471
+    3197,
+    7406
   ],
   "tests/test_dashboard_accessibility.py": [
-    3927,
-    12301
+    3768,
+    12142
   ],
   "tests/test_dashboard_app_shell.py": [
-    4152,
-    20665
+    4122,
+    20635
   ],
   "tests/test_dashboard_drain_blocking.py": [
     2165,
     6051
   ],
   "tests/test_dashboard_eval.py": [
-    4369,
-    19178
+    4158,
+    18967
   ],
   "tests/test_dashboard_fanout.py": [
-    5700,
-    19216
+    5662,
+    19178
   ],
   "tests/test_dashboard_hotfixes.py": [
-    2437,
-    8276
+    2434,
+    8273
   ],
   "tests/test_dashboard_section_block_rules.py": [
     2965,
@@ -1184,8 +1180,8 @@
     11457
   ],
   "tests/test_dashboard_section_css_injector.py": [
-    7423,
-    25578
+    7410,
+    25565
   ],
   "tests/test_dashboard_section_fetch_timings.py": [
     5982,
@@ -1204,12 +1200,12 @@
     14477
   ],
   "tests/test_debugger_attachment.py": [
-    4366,
-    9468
+    4355,
+    9457
   ],
   "tests/test_debugger_teardown.py": [
-    7496,
-    12343
+    7388,
+    12235
   ],
   "tests/test_delivery_stripe_acceptance.py": [
     1641,
@@ -1228,8 +1224,8 @@
     14158
   ],
   "tests/test_exclusive_bind.py": [
-    6408,
-    20457
+    6397,
+    20446
   ],
   "tests/test_extension_boundary.py": [
     5252,
@@ -1248,32 +1244,32 @@
     16083
   ],
   "tests/test_gh_client_lifetime.py": [
-    6922,
-    18756
+    6873,
+    18737
   ],
   "tests/test_gh_rate_limit.py": [
-    10123,
-    19556
+    10108,
+    19541
   ],
   "tests/test_gitignore_control.py": [
     189,
     664
   ],
   "tests/test_gitignore_generator.py": [
-    5815,
-    17820
+    5768,
+    17773
   ],
   "tests/test_gm_relay_authority.py": [
-    4189,
-    18098
+    3956,
+    17865
   ],
   "tests/test_gm_segment_job.py": [
     1701,
     8272
   ],
   "tests/test_gm_storage.py": [
-    6141,
-    17400
+    6113,
+    17372
   ],
   "tests/test_hotfix_commands.py": [
     13091,
@@ -1284,8 +1280,8 @@
     18979
   ],
   "tests/test_hotfix_scope.py": [
-    9744,
-    22285
+    9646,
+    22187
   ],
   "tests/test_hotfix_scope_clear.py": [
     4826,
@@ -1296,64 +1292,64 @@
     11507
   ],
   "tests/test_http_transport.py": [
-    4730,
-    17026
+    4695,
+    16991
   ],
   "tests/test_install_lint_tools.py": [
-    7564,
-    22378
+    7373,
+    22208
   ],
   "tests/test_journey_baseline.py": [
-    7860,
-    22900
+    7823,
+    22881
   ],
   "tests/test_journey_boundary.py": [
     2317,
     6454
   ],
   "tests/test_journey_budget.py": [
-    6214,
-    19336
+    6204,
+    19354
   ],
   "tests/test_journey_budget_cli.py": [
-    8295,
-    25105
+    8129,
+    24939
   ],
   "tests/test_journey_budget_gates.py": [
-    5304,
-    24315
+    5232,
+    24243
   ],
   "tests/test_journey_counters.py": [
     5098,
     21254
   ],
   "tests/test_journey_payloads.py": [
-    7930,
-    17360
+    7828,
+    17258
   ],
   "tests/test_journey_placement.py": [
     1745,
     4440
   ],
   "tests/test_journey_real_profile.py": [
-    3175,
-    6154
+    2974,
+    5953
   ],
   "tests/test_journey_rebaseline.py": [
     2972,
     13826
   ],
   "tests/test_journey_report.py": [
-    5308,
-    13866
+    5274,
+    13832
   ],
   "tests/test_journey_thread_rows.py": [
     2968,
     12671
   ],
   "tests/test_journey_threads.py": [
-    9020,
-    21617
+    8852,
+    21449
   ],
   "tests/test_journey_tighten.py": [
     2750,
@@ -1372,8 +1368,8 @@
     7554
   ],
   "tests/test_mcp_guard_floor.py": [
-    4738,
-    18664
+    4688,
+    18504
   ],
   "tests/test_mcp_hotfix_scope.py": [
     2072,
@@ -1396,12 +1392,12 @@
     1971
   ],
   "tests/test_mcp_server_load.py": [
-    1630,
-    10015
+    1605,
+    9990
   ],
   "tests/test_mcp_server_serve.py": [
-    2708,
-    17249
+    2698,
+    17239
   ],
   "tests/test_mcp_transport.py": [
     1191,
@@ -1412,36 +1408,36 @@
     16731
   ],
   "tests/test_path_safety.py": [
-    4536,
-    20390
+    4454,
+    20326
   ],
   "tests/test_pyright_scope.py": [
     1220,
     4265
   ],
   "tests/test_queued_command.py": [
-    2863,
-    12039
+    2849,
+    12025
   ],
   "tests/test_real_browser_eval.py": [
     3871,
     11222
   ],
   "tests/test_release_scan.py": [
-    1738,
-    6546
+    1583,
+    6391
   ],
   "tests/test_result_command_write_retry.py": [
     901,
     5242
   ],
   "tests/test_result_routes.py": [
-    2335,
-    13029
+    2330,
+    13017
   ],
   "tests/test_result_stripe.py": [
-    6620,
-    14708
+    6619,
+    14707
   ],
   "tests/test_screenshot_quality.py": [
     622,
@@ -1452,8 +1448,8 @@
     9952
   ],
   "tests/test_segment_job_names.py": [
-    3549,
-    7820
+    3525,
+    7796
   ],
   "tests/test_segment_jobs.py": [
     4670,
@@ -1464,8 +1460,8 @@
     7528
   ],
   "tests/test_segment_lock_stripes.py": [
-    10066,
-    20767
+    9865,
+    20566
   ],
   "tests/test_segment_mint.py": [
     2805,
@@ -1476,68 +1472,68 @@
     22491
   ],
   "tests/test_segment_storage.py": [
-    5059,
-    22562
+    4981,
+    22484
   ],
   "tests/test_segment_store.py": [
-    3231,
-    20071
+    3225,
+    20065
   ],
   "tests/test_speed_gate_jobs.py": [
-    1343,
-    3931
+    1326,
+    3914
   ],
   "tests/test_starvation_bounds.py": [
-    2004,
-    7754
+    1893,
+    7643
   ],
   "tests/test_stream_lifecycle.py": [
-    6306,
-    21310
+    6294,
+    21468
   ],
   "tests/test_stream_registration.py": [
-    899,
-    2480
+    877,
+    2458
   ],
   "tests/test_stream_route.py": [
-    3357,
-    13037
+    3348,
+    13028
   ],
   "tests/test_stream_service_legacy_ids.py": [
-    4014,
-    10336
+    3981,
+    10303
   ],
   "tests/test_tab_registry.py": [
-    1272,
-    7411
+    1259,
+    7398
   ],
   "tests/test_upload_routes.py": [
     2032,
     12769
   ],
   "tests/test_version_contract.py": [
-    2715,
-    14270
+    2646,
+    14201
   ],
   "tests/test_version_contract_empty_rev.py": [
     992,
     2674
   ],
   "tests/test_version_contract_quote_duplicates.py": [
-    1047,
-    3518
+    1023,
+    3494
   ],
   "tests/test_version_empty_values.py": [
-    1076,
-    4858
+    1042,
+    4824
   ],
   "tests/test_version_set_atomic.py": [
     855,
     2466
   ],
   "tests/test_worker_command_types.py": [
-    4856,
-    21131
+    4853,
+    21128
   ],
   "tests/test_worker_module_boundary.py": [
     3259,
@@ -1552,11 +1548,11 @@
     4837
   ],
   "tests/test_workflow_job_timeouts.py": [
-    3640,
-    14370
+    3624,
+    14448
   ],
   "tests/test_workflow_suite_base.py": [
-    5985,
-    11171
+    5616,
+    10802
   ]
 }
