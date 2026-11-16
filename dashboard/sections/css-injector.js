@@ -115,11 +115,10 @@ export function mount(container, bus) {
             class: 'ghost sm danger',
             onclick: async () => {
               // A failed record carries no confirmation the rule is
-              // live, and asking the worker to remove it is what left
-              // the record stuck before: drop it here. A live record
-              // still goes to the worker first -- the record is the only
-              // way back to an exact match, so a refused removal leaves
-              // it in place.
+              // live, and asking the worker to remove it can leave the
+              // record stuck, so drop it here. A live record still goes
+              // to the worker first -- the record is the only way back to
+              // an exact match, so a refused removal leaves it in place.
               if (s.failed) {
                 toast('removed', 'ok');
                 dropByContents(s);

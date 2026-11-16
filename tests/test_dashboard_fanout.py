@@ -22,8 +22,8 @@ import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 # Shared wiring lives in _fanout so the drain-blocking suite uses the same
-# by-path loader and queue helpers; imported under their former local names
-# so the controls below are unchanged.
+# by-path loader and queue helpers; imported under the local names the
+# controls below use.
 from _fanout import (  # noqa: E402
     DASHBOARD,
     captured_stdout as _captured,
@@ -442,11 +442,11 @@ def test_an_expired_entry_past_a_subscriber_cursor_is_not_delivered(tmp):
 def test_two_events_across_the_counter_overflow_are_both_delivered(tmp):
     """The counter-boundary control, AT the boundary that matters.
 
-    Seed the shared counter at 999999 — the first value at which the
-    original six-digit counter field overflowed: 999999 formats as six
-    digits but 1000000 as seven, and '1' < '9', so byte order inverted and
-    the second event fell below the first window's cursor and was dropped.
-    The widened twenty-digit field keeps the order across that transition.
+    Seed the shared counter at 999999, the last six-digit value: 999999
+    formats as six digits but 1000000 as seven, and '1' < '9', so a
+    six-digit field would invert the byte order, the second event would
+    fall below the first window's cursor, and it would be dropped. The
+    twenty-digit field keeps the order across that transition.
     (A high seed such as 10**19 would not distinguish the widths: both
     values already format to twenty digits and ascend either way — the
     overflow is only observable at the six-to-seven transition.) Both

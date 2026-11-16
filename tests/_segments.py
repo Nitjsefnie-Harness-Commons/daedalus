@@ -21,9 +21,8 @@ SEG_HEADER = 'X-Daedalus-Segment-Seg'
 TOTAL_HEADER = 'X-Daedalus-Segment-Total'
 SIG_HEADER = 'X-Daedalus-Segment-Sig'
 
-# Segment storage lives under the bridge's own data root (<docroot>/segments/)
-# since the capability fix; the pre-auth server wrote to a world-shared
-# /tmp/hls-segments instead. One test pins that nothing lands there any more;
+# Segment storage lives under the bridge's own data root (<docroot>/segments/),
+# not a world-shared /tmp/hls-segments. One test pins that nothing lands there;
 # that path means something else on Windows, so the /tmp assertion skips
 # there.
 TMP_SEG_ROOT = Path('/tmp/hls-segments')

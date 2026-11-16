@@ -4,11 +4,10 @@
 HTML lets one element be written several ways: an unquoted attribute value,
 uppercase tag and attribute names, further attributes after `class`, and
 whitespace before the `>`. A second version element written any of those ways
-used to match nothing at all, so the checker reported a tree consistent while
-the page rendered two different versions (522). The status line was the one
-site still pinned to whitespace after `class`; the four cells that shared its
-class moved onto `sl-meta`, so it admits the whole region like the rail
-footer (538).
+must still be matched, or the checker reports a tree consistent while the page
+renders two different versions. The status line's class `sl-v` names one
+element, the four cells beside it carrying `sl-meta`, so it admits the whole
+region like the rail footer.
 """
 import sys
 from pathlib import Path
@@ -30,8 +29,8 @@ from _version_contract_dashboard_duplicates import (  # noqa: E402
 _RAIL = 'dashboard rail footer'
 _STATUS = 'dashboard status line'
 
-# Spellings of one element that are equally valid HTML and were equally
-# invisible. `uppercase_tag` and `uppercase_attribute` split the uppercase
+# Spellings of one element that are equally valid HTML and must be equally
+# matched. `uppercase_tag` and `uppercase_attribute` split the uppercase
 # case so each scoped `(?i:...)` flag is pinned on its own. The `unquoted_*`
 # rows combine the unquoted value with a further axis, so an intersection
 # cannot break silently behind the single-axis row it shares an arm with.
@@ -62,8 +61,8 @@ _STATUS_SPELLINGS = {
     'unquoted_space_before_gt': '<span class=sl-v >9.9.9</span>',
     'unquoted_gt_in_earlier_attribute': (
         "<span title='a>b' class=sl-v>9.9.9</span>"),
-    # The trailing-attribute rows the status site admits now (538): any
-    # attribute after `class` is a duplicate, named no way.
+    # The trailing-attribute rows the status site admits: any attribute
+    # after `class` is a duplicate, named no way.
     'trailing_attribute': "<span class='sl-v' id='x'>9.9.9</span>",
     'data_attribute': "<span class='sl-v' data-meta='x'>9.9.9</span>",
     'uppercase_trailing_attribute': "<SPAN CLASS='sl-v' ID='X'>9.9.9</SPAN>",
@@ -232,7 +231,7 @@ def test_status_line_shipped_class_names_one_element(tmp_path):
 
 
 def test_shipped_meta_cells_are_not_status_line_sites(tmp_path):
-    """The class the four status cells moved to is not a version class."""
+    """The class the four status cells use is not a version class."""
     _assert_markup_is_not_a_site(
         tmp_path, "<span class='sl-meta' data-meta='x'>9.9.9</span>", _STATUS)
     for name, markup, desc in (

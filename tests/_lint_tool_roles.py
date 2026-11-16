@@ -244,10 +244,8 @@ def _names_subprocess(func, modules):
     """Whether a call goes through the subprocess module, aliased or not.
 
     The alias set is the module's own import bindings rather than a list of
-    spellings: the docstring used to claim "aliased or not" while reading
-    the identifier `subprocess` and one hardcoded abbreviation, so
-    `import subprocess as sp` followed by `sp.run(...)` was a subprocess
-    call the derivation did not see.
+    spellings, so `import subprocess as sp` followed by `sp.run(...)` is a
+    subprocess call the derivation sees.
     """
     if isinstance(func, ast.Attribute):
         return (isinstance(func.value, ast.Name)
@@ -267,14 +265,12 @@ def _lookup_target_names(statement, lookup):
         first = found = shutil.which(t)
 
     The second is an `ast.AnnAssign`, which is not a subclass of
-    `ast.Assign` and carries `.target` rather than `.targets` — so the arm
-    that read `targets[0]` never fired on it, and a tool bound that way
-    landed in NEITHER set. That is the worst of these failures: not a tool
-    in the wrong set, but a tool the derivation concluded the tree states
+    `ast.Assign` and carries `.target` rather than `.targets` — so an arm
+    that reads `targets[0]` never fires on it, and a tool bound that way
+    lands in NEITHER set. That is the worst of these failures: not a tool
+    in the wrong set, but a tool the derivation concludes the tree states
     no requirement about at all. An annotation is a plausible habit in a
-    repository that runs two pyright configurations, and `_constants`
-    already read them, so the evidence a reader would use to rule this
-    hole out was on screen and pointed the wrong way.
+    repository that runs two pyright configurations.
 
     The fourth is a chained assignment, where ONE value reaches every
     target: `first = found = which(t)` puts the same tool in both names, so
@@ -403,10 +399,7 @@ def _skip_texts(tree):
     this way and nowhere else.
 
     It is not what makes the control see a guarded `which`, and nothing
-    here depends on a human having named the binary in the message. While
-    it was the only thing standing between an ordinary guard and
-    invisibility, the control's sensitivity to a whole class of real suites
-    was decided by the wording of a skip message.
+    here depends on a human having named the binary in the message.
     """
     texts = []
     for node in ast.walk(tree):
@@ -449,15 +442,14 @@ def _derive_tool_roles(sources=None):
     unverified. A tool in neither is not a requirement the tree states at
     all.
 
-    `present` is NOT an exemption from the required set. It was one, on the
-    argument that a tool in both is covered by a control that fails rather
-    than skips — an argument this derivation could not support, because it
-    cannot tell an assert the tree always reaches from one it never does.
-    What genuinely needs no install is named in the control's
-    SHIPPED_BY_THE_IMAGE, one entry and one reason each. `present` is read
-    so the control can say which binaries the tree already insists on, and
-    so neither channel can go empty without the non-vacuity assertion
-    noticing.
+    `present` is NOT an exemption from the required set. A tool in both
+    would count as covered by a control that fails rather than skips only if
+    this derivation could tell an assert the tree always reaches from one it
+    never does, and it cannot. What genuinely needs no install is named in
+    the control's SHIPPED_BY_THE_IMAGE, one entry and one reason each.
+    `present` is read so the control can say which binaries the tree already
+    insists on, and so neither channel can go empty without the non-vacuity
+    assertion noticing.
 
     `sources` is a seam for the controls that drive this derivation over a
     synthetic module: what the recognisers read is a question about the
@@ -544,7 +536,7 @@ def _parents_of(tree):
 # but it also means the table's real job is to hold one witness per way
 # the recogniser's STRUCTURE can fail, so that a structural change which
 # drops an arm is red rather than silent. The shapes still open, recorded
-# so the next round does not re-derive them, and kept in step with what
+# so nobody re-derives them, and kept in step with what
 # `_lookup_target_names` below says it cannot read:
 #
 # - a `which` over a loop variable, where the tool is never a CANDIDATE at
@@ -554,13 +546,11 @@ def _parents_of(tree):
 #   string rather than an argv element;
 # - a locally named skip helper whose name is neither `skip*` nor
 #   `*Skipped`, which is a class bound — the recogniser matches call
-#   NAMES, not call intent — rather than one defect;
-# - a multi-target assignment, `a = b = which(t)` and the comma-separated
-#   `a = b, c = which(t), None` beside it, which are now READ and are rows
-#   in the table below rather than open shapes. They were open until this
-#   round, and the previous list did not say so, which is the failure this
-#   paragraph exists to stop repeating: a disclosure a reader consults has
-#   to name what the recogniser actually declines.
+#   NAMES, not call intent — rather than one defect.
+#
+# A multi-target assignment, `a = b = which(t)` and the comma-separated
+# `a = b, c = which(t), None` beside it, is READ and is a row in the table
+# below rather than an open shape.
 #
 # And one shape that is named because it CANNOT RUN, so handling it would
 # be handling a program nobody can execute: `(a, b) = c = which(t)` unpacks
@@ -643,8 +633,8 @@ REQUIRED_ON = {
         'subprocess.run([TOOL, "--version"], check=True)',
 }
 # A tool the tree both insists on and tolerates the absence of. Nothing in
-# the tree is written this way today; two independent plants were, and both
-# read green, which is what these cases are here to refuse.
+# the tree is written this way today; a planted one reads green without
+# these cases, which is what they are here to refuse.
 BOTH_ON = {
     'asserted elsewhere, skipped here':
         'def required():\n    assert shutil.which(TOOL), "the parser is '

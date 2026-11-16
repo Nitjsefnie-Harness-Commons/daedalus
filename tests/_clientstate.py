@@ -42,8 +42,8 @@ def client_states(processes, grace: float | None,
     A client the helper killed records no `returncode`. The status read after
     that kill is the kill's own — Windows `Popen.kill()` is
     `TerminateProcess(handle, 1)`, POSIX's raises SIGKILL and records `-9` —
-    so reporting it as the client's outcome is how one process came to be
-    described as both still running and exited non-zero.
+    so reporting it as the client's outcome would describe one process as
+    both still running and exited non-zero.
     """
     states = {}
     for owner, proc in processes.items():

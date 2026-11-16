@@ -123,9 +123,9 @@ _JS_CASES = (
 )
 
 
-# (label, source) pairs no interpreter can tokenize. Each used to leave the
-# scanner with no regions at all, so text inside the malformed string was
-# read as the binding it never was.
+# (label, source) pairs no interpreter can tokenize. A scanner left with no
+# regions for one of them would read text inside the malformed string as the
+# binding it never was.
 _MALFORMED = (
     ('an-unterminated-triple-quoted-string', "x = '''never closed\n"),
     ('a-bad-indentation', 'def f():\n    pass\n   pass\n'),

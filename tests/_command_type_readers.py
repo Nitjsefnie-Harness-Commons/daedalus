@@ -11,8 +11,7 @@ requires one definition and one reference.
 
 Reaching the send helper
 ------------------------
-The recognition claim the refusals are checked against. It was wrong at four
-ways until an aliased import clause proved a fifth.
+The recognition claim the refusals are checked against.
 
 1. ``ext_cmd('_id', 'cookies')`` / ``bridge.ext_cmd(...)`` / ``extCmd(...)``
    -- a direct call, plain string literal, no starred argument. READ.

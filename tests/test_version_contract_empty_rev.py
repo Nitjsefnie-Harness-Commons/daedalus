@@ -3,8 +3,8 @@
 
 A present-but-empty --rev builds the `:<path>` spec, which git reads as the
 index, so a run asking for a revision was answered about some other source.
-test_version_contract.py holds the checker's other contracts; this test was
-moved here when that file met its 700-line ceiling.
+test_version_contract.py holds the checker's other contracts; this test lives
+here to keep that file under its 700-line ceiling.
 """
 import re
 import sys
@@ -54,8 +54,8 @@ def test_check_versions_refuses_an_empty_revision_name(tmp):
         missing.returncode, missing.stdout, missing.stderr)
     assert 'cannot read' in missing.stderr, missing.stderr
 
-    # Nor may the refusal depend on the tree being clean: the dirty tree is
-    # where the old behavior mislabeled the index as the working tree.
+    # Nor may the refusal depend on the tree being clean: a dirty tree is
+    # where an empty --rev would mislabel the index as the working tree.
     manifest = copy_root / 'extension' / 'manifest.json'
     text = manifest.read_text(encoding='utf-8')
     dirty_text, n = re.subn(r'"version"\s*:\s*"[^"]+"',

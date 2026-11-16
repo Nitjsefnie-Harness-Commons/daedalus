@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """The type checker's scope, pinned as a property rather than a pattern.
 
-`include` once carried `scripts/*.py`, which matches the files directly
-under `scripts/` and descends into none of its subdirectories, so the
-seventeen modules under `scripts/ci/` were checked by nothing while the job
-reported success. Widening that glob to the next directory up would have
-left the same defect with a larger radius: the next package added outside
-the listed set is unchecked again, silently, and no gate says so.
+A glob such as `scripts/*.py` matches the files directly under `scripts/` and
+descends into none of its subdirectories, so the modules under `scripts/ci/`
+would be checked by nothing while the job reports success. Widening the glob
+to the next directory up leaves the same defect with a larger radius: the
+next package added outside the listed set is unchecked again, silently, and
+no gate says so.
 
 So the property this suite pins is the whole tree minus a stated exclusion
 list, and the mechanism is a refusal: an `include` entry carrying a glob

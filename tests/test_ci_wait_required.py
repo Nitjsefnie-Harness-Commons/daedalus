@@ -85,8 +85,8 @@ def _run_main(mod, clock, argv, runs, pulls=(), err=None):
 
 
 def test_a_gate_the_caller_names_certifies_a_green_head(tmp):
-    """Issue 1318, the first half: this repository's gate is `ci` and every
-    run on the head is green; only the name mismatch refuses."""
+    """This repository's gate is `ci` and every run on the head is green;
+    only the name mismatch refuses."""
     del tmp
     mod = _ci_wait()
     code, text = _run_main(
@@ -163,8 +163,7 @@ def test_a_named_gate_that_is_still_absent_names_the_callers_own(tmp):
 
 def test_the_named_gate_set_is_all_of(tmp):
     """Two names, one of them present, is not satisfied: the same all-of
-    reading `verdict` has always given, carried now by the caller's own
-    set rather than by a default that names one workflow. Satisfied by
+    reading `verdict` gives, carried by the caller's own set. Satisfied by
     either would be satisfied by neither."""
     del tmp
     mod = _ci_wait()
@@ -232,13 +231,13 @@ def test_the_trial_call_reads_the_named_gate_too(tmp):
 
 
 def test_an_empty_or_blank_required_value_is_a_rejected_invocation(tmp):
-    """Issue #1320: the set an empty value builds holds a name no run can
-    ever carry, so every head refused; a value of whitespace builds the
-    same requirement past a guard testing for emptiness alone.
+    """The set an empty value builds holds a name no run can ever carry,
+    so every head refused; a value of whitespace builds the same requirement
+    past a guard testing for emptiness alone.
 
     Refused the way this tool already refuses a malformed SHA and a
     non-positive bound: named on stderr, exit 3, and nothing at all on
-    stdout. A conflicting pull request makes the unfixed path terminate
+    stdout. A conflicting pull request makes an unguarded path terminate
     on this fixture rather than reach for the network.
     """
     del tmp
@@ -254,14 +253,13 @@ def test_an_empty_or_blank_required_value_is_a_rejected_invocation(tmp):
         assert text == '', (value, text)
 
 
-# ---- the flag may only tighten, where this tool knows the gate (issue #1217)
+# ---- the flag may only tighten, where this tool knows the gate
 
 def test_the_flag_cannot_drop_this_repositories_own_gate(tmp):
-    """The false green #1217 exists to remove, reopened through the flag:
-    a head with no `tests` run at all is `acceptable` the moment a caller
-    names a workflow that DID run, because on this repository the caller's
-    names replaced the default instead of adding to it - and nothing on
-    the output says the gating matrix never ran.
+    """The false green the flag could reopen: a head with no `tests` run at
+    all would be `acceptable` the moment a caller names a workflow that DID
+    run, if the caller's names replaced the default instead of adding to it -
+    and nothing on the output would say the gating matrix never ran.
 
     The refusal names `tests` and not the caller's name, because the
     caller's workflow is present and only the gate is missing; a control
@@ -297,9 +295,8 @@ def test_a_named_gate_that_did_not_run_still_refuses_naming_both(tmp):
                             '--grace', '1', '--interval', '1'],
                            _green('gate freshness', 'CodeQL'))
     assert code == 4, text
-    # Each absent gate is named as its own phrase, since issue 1360 added
-    # the second kind: a reader told "no ci or tests run" cannot tell
-    # which gate to go and look for.
+    # Each absent gate is named as its own phrase: a reader told "no ci or
+    # tests run" cannot tell which gate to go and look for.
     assert 'no ci run and no tests run on' in text, text
     assert '--required' not in text, text
 
@@ -308,8 +305,8 @@ def test_naming_this_repositories_own_gate_is_unaffected(tmp):
     """A caller who names the gate this tool already knows asks for what
     it was given, and gets it: the union of the default with a name it
     already carries is the default. This is the no-op the direction rule
-    has to have, and it is true on the base too - it is a regression
-    control, not a RED."""
+    has to have, and it is a regression control, not a RED: it passes with
+    or without the direction rule."""
     del tmp
     mod = _ci_wait()
     code, text = _run_main(mod, _Clock(),
@@ -377,7 +374,7 @@ def test_every_spelling_of_this_repository_is_still_the_default(tmp):
 
 def test_a_padded_required_name_is_the_name_it_pads(tmp):
     """A name that is whitespace AROUND something is the third spelling of
-    #1320. `not name.strip()` refuses a name that is only whitespace, but
+    a bad value. `not name.strip()` refuses a name that is only whitespace, but
     `' ci '` survives it and builds a requirement no run carries - and
     the refusal renders the padding into the name slot, so it reads
     `no  ci  run on <sha>` and names a workflow nobody can supply.

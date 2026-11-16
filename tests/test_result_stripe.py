@@ -359,9 +359,9 @@ def test_a_no_tab_read_under_a_stat_failure_answers_pending(tmp):
     before it scans, and `Path.exists()` re-raises a stat that failed for a
     reason other than absence -- a permission error among the three this
     repository can raise on purpose. The scan's own probe has the same shape.
-    Both are now answered as "not there", which is what a read can say
-    without one: the delivery is still there, and the next read that can stat
-    will find it. Before, the exception left `do_GET` and the client with a
+    Both are answered as "not there", which is what a read can say without
+    one: the delivery is still there, and the next read that can stat will
+    find it. An exception here would leave `do_GET` and the client with a
     closed connection -- measured against the real handler on EACCES, with
     ENOTDIR and ELOOP already absorbed by `Path.exists()`'s own list.
     """

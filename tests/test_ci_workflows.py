@@ -363,8 +363,8 @@ def test_an_audit_run_validates_the_threshold_document(tmp):
 
     tests.yml and codeql.yml ignore pushes that touch only
     .github/ci-thresholds.json, so a ratchet commit does not re-run the
-    expensive gates; the price was that a malformed hand edit pushed alone
-    to main waited for the next unrelated push to be told it was invalid.
+    expensive gates; the cost is that a malformed hand edit pushed alone
+    to main would wait for the next unrelated push to be told it was invalid.
     audit.yml's push trigger is unfiltered, so the validation runs there
     instead: exactly one job may run it, unconditionally -- neither that
     job nor its validating step may carry an `if` condition or
@@ -405,9 +405,8 @@ def _pinned_actions():
 def test_a_release_waits_for_the_gates_on_its_own_commit(tmp):
     """Publication reads the other gates instead of racing them.
 
-    v0.19.0 went public two seconds before `tests` concluded and nine minutes
-    before the slowest gate beside it: the tag started every workflow
-    independently and the release never looked at any of them.
+    A tag starts every workflow independently, so a release that looked at
+    none of them could go public before the gates beside it conclude.
 
     The property that makes the wait a gate rather than a pause is that ZERO
     runs is a failure. "Nothing is pending" is true of a commit whose gates
@@ -558,9 +557,9 @@ def test_the_wheel_job_proves_both_published_formats(tmp):
 def test_one_action_family_is_pinned_to_one_version(tmp):
     """Two `uses:` lines from the same action must name the same commit.
     CodeQL refuses to run when `init` and `analyze` name different versions,
-    and Dependabot treats them as two dependencies — so a bump arrived as two
-    pull requests, each of which could only be red, and merging either one
-    would have left main red until the other landed. The rule is wider than
+    and Dependabot treats them as two dependencies — so a bump arrives as two
+    pull requests, each of which can only be red, and merging either one
+    leaves main red until the other lands. The rule is wider than
     CodeQL: an action split across sub-paths is one component, whatever its
     package manager thinks.
     """
@@ -612,10 +611,8 @@ def test_dependabot_groups_an_action_used_under_more_than_one_path(tmp):
 
 def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     """Each dependency manifest in the tree has an ecosystem watching it.
-    Dependabot covered `github-actions` alone while the Python pins — the mcp
-    extra, the lint pins and the coverage pin — were frozen indefinitely. The
-    check is keyed off what is tracked rather than off a remembered list, so a
-    manifest of a new kind fails here instead of ageing unwatched.
+    The check is keyed off what is tracked rather than off a remembered list,
+    so a manifest of a new kind fails here instead of ageing unwatched.
     """
     del tmp
     config = (ROOT / '.github' / 'dependabot.yml').read_text(encoding='utf-8')

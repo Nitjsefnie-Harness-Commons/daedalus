@@ -24,7 +24,7 @@ from _journey_contract import (  # noqa: E402
 # CALL that file has to still make, matched as a call. A call rather than a
 # name, because the name survives a rename in a comment: with
 # `captureVisibleTab` renamed at its one call site and the citation left
-# saying the word, a word search stayed green — the same false green as a
+# saying the word, a word search stays green — the same false green as a
 # basis nobody can re-derive. `None` is where there is no product claim to
 # make and the basis is a property of the content rather than of this tree.
 #
@@ -32,9 +32,8 @@ from _journey_contract import (  # noqa: E402
 # journeys module. A call and a SIZE are two different claims, and the tab
 # count is only in the second: `chrome.tabs.query({}, …)` carries no `10`,
 # the extension's own comment at `scheduleRegisterAllTabs` does. A pin that
-# checked only the call let the product change its statement of a 10-url
-# session to a 30-url one without a word — which is exactly the loose end
-# the call recogniser introduced when it replaced the word search.
+# checked only the call would let the product change its statement of a
+# 10-url session to a 30-url one without a word.
 BASES = (
     ('SHOT_CAPTURE_BYTES', 196608, 'captureVisibleTab',
      'extension/worker/capture.js',
@@ -110,9 +109,9 @@ def test_every_resized_payload_carries_the_size_it_was_given(tmp):
     typed = _journeys_module('_journey_typed')
     # `4 * -(-n // 3)` and not `4n // 3`: base64 emits one character per
     # three bytes plus a `=` pad per remainder, so the length of an ENCODING
-    # is the ceiling. `(4n) // 3` holds only for a multiple of three and reds
-    # on a 4 MiB capture — a valid encoding of exactly that size — so the
-    # arithmetic was refusing a real body rather than a bad one.
+    # is the ceiling. `(4n) // 3` holds only for a multiple of three and would
+    # refuse a 4 MiB capture — a valid encoding of exactly that size — as if it
+    # were a bad body.
     assert len(typed.SHOT_CAPTURE_B64) == 4 * -(
         -typed.SHOT_CAPTURE_BYTES // 3), (
         'the capture body the journey posts is not the base64 of a capture '
@@ -137,11 +136,11 @@ def test_every_basis_is_still_the_call_it_cites(tmp):
     Matched as a call, in a file that has to exist. A word search does not
     survive the move a basis pin exists for: with `captureVisibleTab` renamed
     at its one call site and the citation left saying the word, the suite
-    stayed 3/3 — so the number stayed quoted from something the product no
-    longer does. The recogniser is anchored on the call and on its arguments
-    where an argument carries the size (`periodInMinutes: 0.5`), because a
-    heartbeat that still fires but fires twice a minute is a different basis,
-    not the same one.
+    would stay 3/3 — so the number would stay quoted from something the
+    product no longer does. The recogniser is anchored on the call and on its
+    arguments where an argument carries the size (`periodInMinutes: 0.5`),
+    because a heartbeat that still fires but fires twice a minute is a
+    different basis, not the same one.
 
     The segment size is the row with no product claim to resolve: an HLS
     segment's length is a property of the encode a page happens to be

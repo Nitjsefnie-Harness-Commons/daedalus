@@ -484,19 +484,17 @@ Promise.all(settled).then(() => {
 #   So the real cost is a fixed unit of work, and what a bound on it must
 #   cover is a WEDGED child, never a slow one. The samples are measured
 #   with the machine busy, because a wall-clock bound is two margins and a
-#   bare 90 measured only the second. This one call site serves three
-#   harnesses, and the table is the SLOWEST child's: the other two cost a
-#   fraction of it, so one figure covers all three.
+#   single hand-picked figure measures only the second. This one call site
+#   serves three harnesses, and the table is the SLOWEST child's: the other
+#   two cost a fraction of it, so one figure covers all three.
 #
 #   GM_CHILD_SAMPLES_S   the eight slowest-child runs, idle then busy
 #   GM_CHILD_SLOWEST_S   18.015  max of those
 #   SITE_HANG_MULTIPLE   5       a wedged child, not a slow one
 #   GM_CHILD_DEADLINE_S  90      round(18.015 * 5)
 #
-# The composed figure lands on the 90 this wrote by hand, which is a
-# coincidence worth stating rather than hiding. What changed is that the
-# number is now re-derivable from the four lines above, and that the expiry
-# is a named failure carrying the child's own output instead of a
+# The figure is re-derivable from the four lines above, and the expiry is a
+# named failure carrying the child's own output instead of a
 # `TimeoutExpired` that reaches the suite as an error naming the whole
 # command.
 #

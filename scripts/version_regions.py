@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The region scanners the version checker filters decoys by (#316).
+"""The region scanners the version checker filters decoys by.
 
 A version pattern inside a comment, a string, a template literal's text or a
 regex literal is not a binding. Text no region covers is code, and that is

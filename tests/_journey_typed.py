@@ -66,12 +66,12 @@ SHOT_FILE = 'capture.png'
 # band rather than at its edge, and it is the number the tolerance and the
 # recorded count are measured against: a payload past the size the product
 # produces is a number nobody measured, and a payload under it is the
-# defect this journey was resized to remove.
+# defect this journey is sized to rule out.
 SHOT_CAPTURE_BYTES = 196608
 # A capture's body is base64, so the JSON envelope is 4/3 of this: 256 KiB,
 # which is four times `DAEDALUS_MAX_UNAUTHENTICATED_BODY`. That is why the
 # upload below carries its credential in a header — at a 1x1 PNG the body
-# form was accepted, and at a real capture's size the same call is answered
+# form is accepted, and at a real capture's size the same call is answered
 # 401 without the body ever being read.
 SHOT_CAPTURE_B64 = base64.b64encode(
     _high_entropy(SHOT_CAPTURE_BYTES, 0x5EEDC0DE)).decode('ascii')
@@ -149,10 +149,9 @@ def screenshot(base, docroot):
     The capture is a real capture's SIZE, sized from `SHOT_CAPTURE_BYTES`,
     and the credential travels in an `Authorization` header because of it:
     the base64 of that capture is four times
-    `DAEDALUS_MAX_UNAUTHENTICATED_BODY`, so the same call made in the body
-    form this journey used at a 1x1 PNG is now answered 401 without the
-    body being read. A journey that asserted that would be measuring the
-    refusal rather than the store.
+    `DAEDALUS_MAX_UNAUTHENTICATED_BODY`, so a body-carried credential is
+    answered 401 without the body being read. A journey that asserted that
+    would be measuring the refusal rather than the store.
 
     ITS RECORDED BUDGET IS AN ORDER OF MAGNITUDE ABOVE `command-round-trip`'s,
     and that is a constant rather than a defect. This journey excludes the
@@ -163,16 +162,11 @@ def screenshot(base, docroot):
     developer box's, about 12.7% hot against the runner that records the
     budgets and on a different toolchain, so they are not the runner's.
 
-    The exclusion list is the import alone. Under size bands this was the
-    only robust choice: its own request thread measured 6,603,084, only
-    1.51x below the serve floor, so growth would have reclassified that
-    thread as the serve loop sitting beside the bridge's constant one, and
-    `classify` refuses two threads of an excluded role rather than dropping
-    one (issue 1461, bridge side). Roles now come from what a thread
-    executed, so that growth can no longer happen: this journey's own work
-    is a `request` thread at any size and no journey excludes `request`
-    (issue 1466). The list is unchanged because it is the one the recorded
-    count was measured under, not because the band argument still holds.
+    The exclusion list is the import alone. Roles come from what a thread
+    executed, so this journey's own work is a `request` thread at any size,
+    and no journey excludes `request`; `classify` refuses two threads of an
+    excluded role rather than dropping one. The list is kept as it is
+    because the recorded count was measured under it.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -291,11 +285,8 @@ def cdp_result(base, docroot):
     alongside this journey's own work and the front end's bootstrap import
     is not, which is the rule every journey runs under — an exclusion list
     may never cover work the journey itself caused — and the same deal of
-    counting a constant rather than dropping it. Under size bands this
-    journey's request thread was itself barred from the serve role by
-    sitting at 47 million, above the floor that role started at; a role now
-    comes from the process the thread ran in, so that bar is gone (issue
-    1466).
+    counting a constant rather than dropping it. A role comes from the
+    process the thread ran in.
     """
     del docroot
     status, raw = _bridge.put_command(base, {
@@ -520,23 +511,19 @@ def segment_relay(base, docroot):
     is recorded.
 
     Each segment is a real segment's SIZE, sized from `SEG_BODY_BYTES` and
-    cited there. At the 800 characters this journey used to post, no thread
-    of this journey rose above the background every child shares, so its own
-    work was not separable from it at all and the count was a measurement of
-    the harness's plumbing rather than of the relay.
+    cited there. A segment of 800 characters would leave no thread of this
+    journey above the background every child shares, so its own work would not
+    be separable from it and the count would measure the harness's plumbing
+    rather than the relay.
 
     ITS RECORDED BUDGET IS AN ORDER OF MAGNITUDE ABOVE `command-round-trip`'s,
     and for the same reason `screenshot`'s is: only the front end's import
     is excluded, so the bridge's uvicorn serve loop is counted as the
-    constant it is. The alternative — excluding the serve role, as
-    `command-round-trip` does — used to put this journey's own work, on any
-    growth that lifted its request thread past the serve floor, into a role
-    the bridge's constant serve loop already occupied, and `classify`
-    refuses two threads of an excluded role rather than dropping one: the
-    count comes back unavailable and the gate exits 1 (issue 1461, bridge
-    side). A role comes from what the thread executed now, so no growth can
-    put this journey's own work in one, and it counts whatever it costs
-    (issue 1466). The import alone stays the robust list.
+    constant it is. `classify` refuses two threads of an excluded role
+    rather than dropping one, so such a count comes back unavailable and the
+    gate exits 1; a role comes from what the thread executed, so no growth
+    can put this journey's own work in one, and it counts whatever it costs.
+    The import alone stays the robust list.
     """
     status, minted = _util.post_json(base + '/segment-job', {
         'token': SEG_TOKEN, 'job': SEG_JOB,

@@ -2,7 +2,7 @@
 
 The helpers here keep the subprocesses of an overlap run observable. They live
 beside the Node harness itself in `_overlap`, which holds the driver they call
-back into; every suite imports each name from the module that now owns it.
+back into; every suite imports each name from the module that owns it.
 """
 import json
 import os

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Duplicate version spellings the checker must refuse (#319, #320).
+"""Duplicate version spellings the checker must refuse.
 
 A second assignment whose value carries the other quote character, or runs
 across a continuation, is still what Python binds at import time, so the
@@ -7,7 +7,7 @@ three mirror tests refuse every spelling `_DUPLICATE_SPELLINGS` holds,
 and a separate test pins that the widened value class still admits a
 foreign quote inside a value that is not a duplicate at all.
 test_version_contract.py holds the checker's other contracts; these tests
-were moved here when that file met its 700-line ceiling.
+live here to keep that file under its 700-line ceiling.
 """
 import re
 import sys
@@ -30,7 +30,7 @@ _DUPLICATE_SPELLINGS = (('9.9.9"', "'"), ("9.9.9'", '"'), ('9.9.\\\n9', "'"))
 
 def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
     """A duplicate `__version__` whose value carries a quote other than
-    its own delimiter, or across a continuation, is refused (#319): the
+    its own delimiter, or across a continuation, is refused: the
     canonical needle is derived, and a CRLF continuation matches the class."""
     for second_value, quote in _DUPLICATE_SPELLINGS:
         copy_root = Path(tmp) / 'tree'
@@ -53,7 +53,7 @@ def test_check_versions_refuses_the_other_quote_package_duplicate(tmp):
 def test_check_versions_package_value_may_contain_a_different_quote(tmp):
     """The value class only has to refuse whichever delimiter `q` captured, so
     a single-quoted value may still carry a double quote the way page.js's
-    already does, and the widened pattern must still see it (#319)."""
+    already does, and the widened pattern must still see it."""
     copy_root = Path(tmp) / 'tree'
     _copy_versioned_tree(copy_root)
     _break_one_site(copy_root, replacement='9.9.9"', quote="'")

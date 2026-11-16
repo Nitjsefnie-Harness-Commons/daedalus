@@ -14,20 +14,18 @@ rejection is a parse error no directive can suppress. `shellcheck` is
 installed from its pinned wheel, at the pin READ OUT OF
 `requirements-test.txt` rather than written here: a version pin spelled in
 two files is a pin that will drift, and the whole point of a pin is that
-the thing running is the thing named. `requirements-test.txt` keeps the pin
-it always had, and the three jobs that install that file into their own
-environment still resolve a shellcheck from it — at the same version,
-because it is the same line of the same file. This script's copy lands in
-the tool directory, which is prepended to PATH, so on those three it is the
-copy that wins; that is the uniformity the pin is for, not a shadow of a
-different version.
+the thing running is the thing named. `requirements-test.txt` holds the pin,
+and the three jobs that install that file into their own environment still
+resolve a shellcheck from it — at the same version, because it is the same
+line of the same file. This script's copy lands in the tool directory, which
+is prepended to PATH, so on those three it is the copy that wins; that is
+the uniformity the pin is for, not a shadow of a different version.
 
 A runner image shipping a shellcheck of its own is not a supply route this
-relies on. It was, once: a job that invokes its interpreters by absolute
-path cannot see a venv's console scripts, so it resolved shellcheck 0.9.0
-from the hosted image while the other doors linted with the pinned
-0.11.0.1. A pin that is not the version running on one of the doors is
-the class of defect this script exists to remove, so every door now
+relies on: a job that invokes its interpreters by absolute path cannot see a
+venv's console scripts, so it would resolve a hosted shellcheck at a version
+other than the pinned one. A pin that is not the version running on one of
+the doors is the class of defect this script exists to remove, so every door
 installs it.
 
 On a CI runner the installed directories are prepended to PATH for the
@@ -389,14 +387,13 @@ def _installed_here(path):
 def _record():
     """Write TOOLS where the control reads them, and verify each resolves.
 
-    "Resolves" is not enough, and this is the check's second revision. A
-    plain `shutil.which` scans the whole PATH, so it is satisfied by a
-    binary this install did nothing about: pip leaves an empty console
-    script directory, the hosted image's shellcheck answers instead, and
-    the check passes on ubuntu-latest — the image this whole change is
-    about. That is a pin that is not the version in use, passing because
-    something else on the machine supplied it, which is the defect class
-    this script was written to close, one function down.
+    "Resolves" is not enough. A plain `shutil.which` scans the whole PATH, so
+    it is satisfied by a binary this install did nothing about: pip leaves an
+    empty console script directory, the hosted image's shellcheck answers
+    instead, and the check passes on ubuntu-latest — an image CI runs on.
+    That is a pin that is not the version in use, passing because something
+    else on the machine supplied it, which is the defect class this script
+    exists to close, one function down.
 
     So each tool must resolve INSIDE the directory this install published.
     A tool found elsewhere is reported with the path that was found,

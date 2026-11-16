@@ -3,7 +3,7 @@
 
 `gh_client.spawn_watched` and `gh_client.watch_parent` are the half of the
 module that has no `ci_wait` in it: the untracked watchers the skill ships
-rest on this guarantee, and nothing measured it. The guarantee is the
+rest on this guarantee, and the rows here measure it. The guarantee is the
 pipe's, not a parent id's - a pid against `os.getppid()` is re-parented on
 POSIX and historical on Windows, and a process-group kill orphans rather
 than ends - so the rows here are its two directions, on a real child: write
@@ -11,10 +11,10 @@ end open and child alive, write end closed and gone. The platform arms are
 not faked: `os.name` is never patched, because patching it would claim a
 runtime this run is not. The coverage matrix unions the three platforms, so
 a row written for the platform it runs on measures the `nt` arms there and
-the POSIX arms here; what the Windows half cannot see is stated in the PR
-body. Five rows reach inside the module, direct calls - a stray `os._exit`
-here takes the suite down: the `watch_parent` refusals and the four ending
-rows on `_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and `REAP_LIMIT`."""
+the POSIX arms here. Five rows reach inside the module, direct calls - a
+stray `os._exit` here takes the suite down: the `watch_parent` refusals and
+the four ending rows on `_end_inflight`, `_INFLIGHT_LOCK`, `_INFLIGHT` and
+`REAP_LIMIT`."""
 import contextlib
 import errno
 import os
@@ -399,7 +399,7 @@ def _alive_on_windows(pid):
 
 
 def test_the_in_flight_gh_ends_with_its_watcher(tmp):
-    """Issue 1389's defect on the real surfaces: a watcher process with a `gh`
+    """On the real surfaces: a watcher process with a `gh`
     call held in flight by the fake's gate, and the write end closing under it
     - the `gh` process must end with its watcher, and the pid from the fake's
     call log is what shows it. Off Windows: there the `gh` is `cmd.exe`, whose

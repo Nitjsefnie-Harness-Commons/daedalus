@@ -333,8 +333,7 @@ def ci_state(owner, name, sha):
     Through the commit's check suites rather than the check-runs list, for
     the reason `ci_wait.py` documents; a run with no suite yet reads as no
     runs at all, a wait, never a pass. The check runs are read off EVERY
-    suite: dropping those with no workflow run is what hid a red gate
-    (issue #1360).
+    suite: dropping those with no workflow run hides a red gate.
     """
     pages = paginate(
         RUNS_QUERY,

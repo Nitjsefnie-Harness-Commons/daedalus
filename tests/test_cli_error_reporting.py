@@ -20,8 +20,8 @@ from daedalus_cli.output import print_result  # noqa: E402
 TOK = 'clitok'
 
 
-# One malformed argument per handler module, in the shapes issue 673
-# reproduced: each died in its handler with a Python traceback.
+# One malformed argument per handler module, in the shapes that would
+# otherwise end the handler in a Python traceback.
 MALFORMED_PER_MODULE = (
     ['close-tab', 'x'],
     ['inject-css', '--css', 'a{color:red}', '--chrome-tab', 'x'],
@@ -42,10 +42,10 @@ def test_a_malformed_argument_refuses_before_anything_is_printed(tmp):
 def test_a_200_with_an_html_body_is_a_connection_failure(tmp):
     """A proxy's captive page is not an answer, but it is not a crash either.
 
-    transport.api() JSON-decoded every 200 outside its ConnectionFailed
-    handling, so a front end answering HTML where the bridge's JSON should
-    be killed the command with a JSONDecodeError traceback instead of the
-    Connection-failed line every other broken-transport shape gets.
+    transport.api() decodes the JSON of every 200 inside its ConnectionFailed
+    handling, so a front end answering HTML where the bridge's JSON should be
+    ends the command with the Connection-failed line every other
+    broken-transport shape gets, not a JSONDecodeError traceback.
     """
     del tmp
     with html_front_end() as base:

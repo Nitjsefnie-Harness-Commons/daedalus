@@ -31,9 +31,8 @@ from daedalus_bridge import path_safety
 
 # The bridge logs ids and page-supplied text it did not choose, to a console
 # whose encoding it did not choose either: under a C locale a result id
-# carrying an accent killed the handler thread mid-request and the client saw
-# the connection close. This used to happen by accident — importing the CLI
-# ran it as an import side effect — so it is called here, where a reader can
+# carrying an accent would kill the handler thread mid-request and the client
+# would see the connection close. So it is called here, where a reader can
 # see the bridge depends on it.
 configure_stdio()
 
@@ -281,9 +280,8 @@ class Handler(RequestMixin):
                      or 'application/json' not in content_type)):
             # Everything this route authorizes on rides in the query string
             # and headers, so the answer never depends on a byte of the body.
-            # Deciding first keeps a refusal cheap: reading the body and then
-            # answering 403 charged the process for a request it was always
-            # going to reject.
+            # Deciding first keeps a refusal cheap: the body of a request that
+            # is going to be rejected is never read.
             params = self._parse_query(parsed.query)
             if params is None:
                 # A refusal is written; the body is drained rather than
@@ -400,9 +398,8 @@ class Handler(RequestMixin):
             return self._json(400, {'error': 'missing id or code/type'})
         # token and tab are ROUTING and never reach the client, which is
         # why a browser target travels as `tabId` -- the field the rest of
-        # the command set already uses. Screenshot and CDP used to send it
-        # as `tab`, so this strip removed it, and in one sender it also
-        # overwrote the routing value: both silently hit the active tab.
+        # the command set already uses. A target sent as `tab` would be
+        # stripped here, and the command would silently hit the active tab.
         cmd = {k: v for k, v in body.items() if k not in ('token', 'tab')}
         try:
             did, duplicate = command_queue.enqueue(

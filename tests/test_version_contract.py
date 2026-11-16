@@ -180,9 +180,8 @@ def test_check_versions_reports_a_site_that_changed_shape(tmp):
 
 def test_check_versions_refuses_a_second_version_assignment(tmp):
     """A second `__version__` line -- even spelled with the other quote
-    character, which the site's old pattern could not see at all -- must not
-    let the checker report the tree consistent while Python binds a
-    different value at import time (#228)."""
+    character -- must not let the checker report the tree consistent while
+    Python binds a different value at import time."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     path, desc, _pattern = checker.SITES[-1]
@@ -236,9 +235,9 @@ def test_check_versions_set_refuses_a_second_version_assignment(tmp):
 
 
 def test_check_versions_refuses_a_page_js_version_in_a_template_literal(tmp):
-    """The same duplicate, spelled with a backtick. Review on #247 pointed
-    out a template literal is a third valid way to write this string, and
-    the widened pattern needs to catch it the same as the other two."""
+    """The same duplicate, spelled with a backtick: a template literal is a
+    third valid way to write this string, and the widened pattern needs to
+    catch it the same as the other two."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     path, desc, _pattern = checker.SITES[2]

@@ -643,10 +643,10 @@ def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
 def test_remove_drops_a_failed_record_and_refuses_a_live_one(_tmp):
     """One refused injection reserves a record the row's own remove takes
     away WITHOUT the worker: the panel holds no confirmation the rule is
-    live, and asking the worker anyway is what stuck the record before.
+    live, and asking the worker anyway would leave the record stuck.
     The next click is the seeded LIVE record, which still goes to the
     worker first and stays put when the worker refuses -- the
-    refuse-before-splice order of issue 1179. The flag and the row's
+    refuse-before-splice order. The flag and the row's
     failed state are pinned by
     `test_a_failed_inject_keeps_the_record_it_reserved`."""
     report = _store_after(

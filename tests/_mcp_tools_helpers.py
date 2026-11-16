@@ -8,7 +8,7 @@ drive a tool against a bridge it controls has to load the module with
 installs and the probe that replaces the bridge are one inseparable unit, so
 they live together here: a second copy of the probe is a second bridge, and
 two bridges answering the same queue is the exact class of defect this
-relocation exists to remove.
+module keeps out.
 """
 import importlib
 import sys

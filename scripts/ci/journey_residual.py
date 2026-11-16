@@ -20,11 +20,11 @@ def row(name, raw_values, bridge):
     Measured on real profiles (CPython 3.13.14, valgrind 3.24.0), the
     startup-only child kept 1,028,521,011 instructions and the bridge-only
     child kept 1,624,572,928 through `command-round-trip`'s own exclusion
-    list, against a `command-round-trip` raw of 1,577,825,117 — so the
-    shipped three-operand subtraction reported -1,075,268,822 for a journey
-    whose own work is a positive number, and the two-operand one reports
-    -46,747,811 for the same two runs. Neither is the journey's cost; the
-    second is at least the shape the rest of this module describes.
+    list, against a `command-round-trip` raw of 1,577,825,117 — so a
+    three-operand subtraction gives -1,075,268,822 for a journey whose own
+    work is a positive number, and the two-operand one gives -46,747,811
+    for the same two runs. Neither is the journey's cost; the second is at
+    least the shape the rest of this module describes.
 
     Both numbers are reported because only one of them is the budget: a
     journey's own total carries the interpreter start, the imports and the

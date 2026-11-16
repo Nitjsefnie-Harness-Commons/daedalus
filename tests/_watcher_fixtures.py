@@ -21,8 +21,8 @@ def page_info(has_next=False, cursor=None):
 # carries, so keying on the connection answers a query that asks for
 # no check runs at all. Keyed on the SELECTION, a query with the
 # `checkRuns` clause deleted finds no fixture and is refused - the only
-# thing that authenticates the query text, the change's own central
-# regression being a query that asks for less.
+# thing that authenticates the query text, the regression this guards
+# being a query that asks for less.
 
 
 RUNS_QUERY = 'checkRuns(first: 100)'
@@ -39,11 +39,10 @@ def suite(rid, conclusion: str | None = 'SUCCESS', status='COMPLETED',
           name=None, check_runs=None):
     """One check suite of a workflow run, as the live schema reports it.
     `name` overrides the workflow's own name, how a fixture carries the
-    gating workflow: since issue 1217 a run set with no run of it is an
-    INCOMPLETE set, not a settled one. `check_runs` are the suite's own
-    check runs; `workflow=None` leaves the suite with no `workflowRun`
-    at all, which is what a suite published through the Checks API
-    arrives in."""
+    gating workflow: a run set with no run of it is an INCOMPLETE set, not a
+    settled one. `check_runs` are the suite's own check runs; `workflow=None`
+    leaves the suite with no `workflowRun` at all, which is what a suite
+    published through the Checks API arrives in."""
     # Annotated, because the suite gains a `workflowRun` and a
     # `checkRuns` it does not start with: inferred from the three
     # string keys it would be a `dict[str, str]` and both of those

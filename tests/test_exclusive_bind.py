@@ -11,12 +11,12 @@ it for a quick restart through TIME_WAIT.
 
 The rest of this suite covers the MCP front end's serve loop. Its
 `Server` subclass arms no timer while nothing is asked of it, so the work
-uvicorn's 0.1 s loop used to do — refreshing the cached `Date` header, and
+uvicorn's 0.1 s loop does — refreshing the cached `Date` header, and
 consulting `limit_max_requests` and `callback_notify` — runs per request
 instead, and a refusal from the auth middleware or from uvicorn's own
 parser reads that cached list too. The controls pin where the refresh
-lands, when it lands relative to the app, and that the loop it replaced
-armed nothing.
+lands, when it lands relative to the app, and that no timer is armed
+while idle.
 """
 import asyncio
 import contextlib
@@ -522,7 +522,7 @@ def test_a_connection_refreshes_the_headers_a_parser_refusal_answers(tmp):
 
 
 def test_the_serve_loop_honours_the_max_requests_limit(tmp):
-    """`limit_max_requests` still ends the serve, now per request. uvicorn
+    """`limit_max_requests` ends the serve, checked per request. uvicorn
     decides it inside `on_tick`, so a request tick that stopped consulting
     `on_tick` would silently drop the limit. The request that takes the
     served total to the limit is the one that sets `should_exit`, and the

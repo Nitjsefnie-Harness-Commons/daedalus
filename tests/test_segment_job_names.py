@@ -126,10 +126,10 @@ def test_a_case_varied_bookkeeping_name_is_refused(tmp):
     The stripe key folds case, so on a case-insensitive filesystem a
     varied spelling and `.{job}.json.dirty` are one directory, and the
     accepted one parks a directory exactly where `mark_dirty` has to
-    write. #1167. The owner limb and the suffix limb are varied on their
-    own on purpose: fixing one limb and missing its twin is the mistake
-    the review rounds caught on the fold controls, so neither literal
-    rides on the other's assertion.
+    write. The owner limb and the suffix limb are varied on their
+    own on purpose: fixing one limb and missing its twin is an easy
+    mistake on the fold controls, so neither literal rides on the
+    other's assertion.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()

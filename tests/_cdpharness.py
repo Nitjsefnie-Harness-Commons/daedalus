@@ -21,9 +21,9 @@ RESULT = 'POST /result'
 
 # The recording on this tree, not a wish. A `hang` stream is a connected
 # body that never settles, so the worker's stream loop retries and each
-# connect re-syncs: two `POST /sync-tabs`, not the one the old
-# never-settling fetch hid. The three results are the compile, throw and
-# reject evals. The stream itself is fetched once, answered `hang`.
+# connect re-syncs: two `POST /sync-tabs`. The three results are the
+# compile, throw and reject evals. The stream itself is fetched once,
+# answered `hang`.
 _PLAN = {
     'planned': [SYNC, SYNC, RESULT, RESULT, RESULT],
     'statuses': ['hang'],

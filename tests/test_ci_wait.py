@@ -29,9 +29,8 @@ def _filter_verdict(runs):
 
     Every case in this suite is about the RUN filter, so each says so
     here rather than each call carrying the keyword. A head whose
-    publisher has written no verdict is a different state and
-    `ci_wait` now reads it (issue 1360);
-    `tests/test_ci_wait_published.py` is where it is under test.
+    publisher has written no verdict is a different state, read by
+    `ci_wait`; `tests/test_ci_wait_published.py` is where it is under test.
     """
     return _ci_wait_verdict(runs, required_checks=frozenset())
 
@@ -49,9 +48,9 @@ def _filter_wait(mod, repo, sha, interval, bound, out, grace=300):
 def test_superseded_cancelled_run_is_ignored(tmp):
     """The defect case: a re-run's cancelled remnant must not fail the wait."""
     del tmp
-    # Named as the gating workflow because an `acceptable` verdict now also
-    # requires that workflow to have a run at all (issue 1217); a green set
-    # without it reads as incomplete, which is the defect itself.
+    # Named as the gating workflow because an `acceptable` verdict also
+    # requires that workflow to have a run at all; a green set without it
+    # reads as incomplete, which is the defect itself.
     runs = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
@@ -118,12 +117,11 @@ def test_the_newest_run_decides_even_when_it_is_still_queued(tmp):
 
 
 def test_a_superseded_failure_beside_a_newer_green_run_is_acceptable(tmp):
-    """Issue 1249's repro, as a control. A close/reopen dispatches a second
-    run of a workflow against a new merge ref while the first run's failure
-    still hangs on the same SHA, and the verdict used to count both: the
-    older failure outvoted the newer green and the head read unacceptable.
-    The verdict for a workflow is the run GitHub's required-check status
-    reports, which is the newest one."""
+    """A close/reopen dispatches a second run of a workflow against a new
+    merge ref while the first run's failure still hangs on the same SHA.
+    Counting both would let the older failure outvote the newer green and
+    read the head unacceptable. The verdict for a workflow is the run
+    GitHub's required-check status reports, which is the newest one."""
     del tmp
     runs = [
         _run(1, 'failure', '2026-09-07T10:00:00Z', name='tests'),
@@ -218,10 +216,10 @@ def test_fractional_second_stamps_are_ordered_by_instant_not_text(tmp):
 def test_an_unidentifiable_run_is_never_superseded(tmp):
     """A run with no workflow id and no file path belongs to no workflow, and
     `gh_client` emits exactly that shape when the suite's workflow record and
-    its file are both null. Two such runs shared one group, so the newer
-    cleared the older one's conclusion and an unrelated failure was dropped
-    by a filter with nothing to tell the two apart. With no workflow to
-    group on, the conservative answer is that the run is judged as it stands.
+    its file are both null. Grouping two such runs together would let the
+    newer clear the older one's conclusion, dropping an unrelated failure by a
+    filter with nothing to tell the two apart. With no workflow to group on,
+    the conservative answer is that the run is judged as it stands.
     """
     del tmp
     runs = [
@@ -356,10 +354,9 @@ def test_the_discarded_count_agrees_with_the_runs_it_names(tmp):
 def test_the_grouping_is_by_workflow_and_not_by_run_name(tmp):
     """The discriminator the control above cannot be, because on the shape
     the producer emits the two groupings agree. Two runs of ONE workflow
-    whose names differ - a shape the producer does not emit, and the reason
-    the fixtures that carried it were corrected - are still one workflow,
-    and the newer still supersedes the older. A filter grouping on `name`
-    sees two workflows here and judges both."""
+    whose names differ - a shape the producer does not emit - are still one
+    workflow, and the newer still supersedes the older. A filter grouping on
+    `name` sees two workflows here and judges both."""
     del tmp
     runs = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='gate freshness'),
@@ -412,7 +409,7 @@ def test_the_success_line_is_unchanged_without_ignored_runs(tmp):
 
 
 def test_a_timeout_names_the_runs_still_open(tmp):
-    """Issue 1088: a bound reached with no refusal pending is a plain
+    """A bound reached with no refusal pending is a plain
     timeout, so it must name the runs that are still open."""
     del tmp
     mod = _ci_wait()

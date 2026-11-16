@@ -187,8 +187,8 @@ class BridgeSession:
         sent without an expectation admits nothing and always times out.
 
         The wait ramps 20ms -> `interval` instead of sleeping a flat `interval`
-        up front: most commands finish in tens of milliseconds, and the fixed
-        first sleep was adding half a second of dead time to every single tool
+        up front: most commands finish in tens of milliseconds, and a fixed
+        first sleep would add half a second of dead time to every single tool
         call.
 
         A timeout after a failed request, except a peek timeout landing at the

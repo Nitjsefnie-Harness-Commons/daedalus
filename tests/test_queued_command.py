@@ -66,7 +66,7 @@ def test_a_queue_read_retries_a_refusal_and_then_reads(tmp):
     """The queue-entry read survives the refusal Windows reports on publish.
 
     An open that lands while the bridge is renaming its temp over the final
-    name is denied and then works; failing a correct run on it is issue 301.
+    name is denied and then works, so a correct run must not fail on it.
     """
     qdir = Path(tmp) / 'commands' / 'tok_extension'
     qdir.mkdir(parents=True)
@@ -294,7 +294,7 @@ def test_mcp_suite_has_no_json_loads_of_read_text_results(tmp):
 
 
 def test_a_queue_read_spends_one_poll_delay_per_attempt(tmp):
-    """The wait's budget is poll attempts, not elapsed time (issue 925).
+    """The wait's budget is poll attempts, not elapsed time.
 
     A wall deadline spends the queue reader under a starved runner: the
     reader polls `ceil(timeout / POLL_DELAY)` times and rejects at its

@@ -151,7 +151,7 @@ def _hotfix_scope(_tmp):
 
 
 def test_the_hotfix_form_carries_a_scope_into_the_command(_tmp):
-    """C9: the dashboard's own create form sends the scope it was given.
+    """The dashboard's own create form sends the scope it was given.
 
     The store button is the only way a fix is created here, so a scope the
     form collects and never sends is a field the operator believes they set.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The version checker's decoy-region scanner contracts (#316).
+"""The version checker's decoy-region scanner contracts.
 
 HTML text-mode cases live in test_version_contract_template_scanners.py.
 """

@@ -2,46 +2,40 @@
 
 One waiter reads the run list and has to answer the question of it: was
 the workflow that gates the merge dispatched on this commit at all?
-`ci_wait.py` refuses with exit 4 when it was not (issue #1217), and a
-watcher once kept its hold rather than releasing a batch whose gating
-matrix was never created (issue #1223). Two copies of the expectation would
-be two mechanisms wearing one name, so the expectation, the predicate, the
-set the predicate is asked of and the answer an absent gate gets live here.
-The caller reaches what it uses through this module, and `ci_wait` binds
-the expectation and the filter and calls the predicate. `ACCEPTABLE`, the
-rule about a conclusion, lives here too.
+`ci_wait.py` refuses with exit 4 when it was not. Two copies of the
+expectation would be two mechanisms wearing one name, so the expectation,
+the predicate, the set the predicate is asked of and the answer an absent
+gate gets live here. The caller reaches what it uses through this module,
+and `ci_wait` binds the expectation and the filter and calls the predicate.
+`ACCEPTABLE`, the rule about a conclusion, lives here too.
 
-They are meant to AGREE, and until issue #1262 they did not: one asked the
-question of the set the newest-run-per-workflow filter left, and one of the
-set it was handed. The two readings coincide only while every run of a
-workflow carries the same `name`, which the producer guarantees today and a
-`name:` edit in the workflow's own YAML ends. The filter therefore lives
-here and `missing_required` applies it itself, so a caller passing the raw
-list and a caller passing the filtered list get one answer; the reading
-that survives is the one issue #1249 established for conclusions - a
-superseded run's name does not satisfy the gate on its own. The nearest
-precedent is #1223, where a hold read a settled green matrix with the gating
-workflow silently absent.
+The two readings must AGREE: one asks the question of the set the
+newest-run-per-workflow filter leaves, the other of the set it is handed.
+They coincide only while every run of a workflow carries the same `name`,
+which the producer guarantees and a `name:` edit in the workflow's own YAML
+would end. The filter therefore lives here and `missing_required` applies
+it itself, so a caller passing the raw list and a caller passing the
+filtered list get one answer; a superseded run's name does not satisfy the
+gate on its own.
 
-It is a module of its own for a third reason: the callers sit near the
-size-ratchet action's 500-line ceiling, and an expectation that lives
-inside a caller is an expectation the other caller can drift from.
+It is a module of its own because the callers sit near the size-ratchet
+action's 500-line ceiling, and an expectation that lives inside a caller is
+an expectation the other caller can drift from.
 
 A run satisfies a requirement by its `name`, exactly. `Tests` and `test` are
-different workflows, and treating either as the gate would reinstate the
-false green this exists to remove. A conclusion is irrelevant to the
+different workflows, and treating either as the gate would produce the false
+green this module exists to prevent. A conclusion is irrelevant to the
 predicate, and a required workflow that is present and red is a failure,
 not an absence. The gate question is asked of the set below; the wait
-judges conclusions, against `ACCEPTABLE`, over that same set, where a
-watcher's hold once judged them over the raw runs - the reason the filter
-is applied here. No run in that set is exempt: a `pr gate` run carries the
+judges conclusions, against `ACCEPTABLE`, over that same set, not over the
+raw runs. No run in that set is exempt: a `pr gate` run carries the
 pull request's head SHA, so `--required 'pr gate'` is answered by its
 newest run existing AND by that run's conclusion.
 
 A PUBLISHED CHECK-RUN is the verdict; a workflow run is its container.
 The `gate freshness` job reports its verdict through its exit code. A push
-keeps fresh or already-red heads and dispatches stale heads only when
-their workflow and gate script match its checkout. Read the push run for
+keeps fresh or already-red heads and dispatches stale heads only when their
+workflow and gate script match its checkout. Read the push run for
 eligibility refusals or dispatch failures, then the head's job check and run.
 The script PATCHes and retires its completed checks, identified by
 its `external_id`; runner-owned checks stay with their job. Read the run and
@@ -113,9 +107,8 @@ def judged(runs):
 
     A workflow's verdict is the one GitHub's required-check status reports
     for it, so a cancelled remnant of a re-run and a FAILED run the re-run
-    then cleared are both out whatever they concluded (issue #1249). The
-    grouping is by workflow id with the path standing in, never by the
-    run's name.
+    then cleared are both out whatever they concluded. The grouping is by
+    workflow id with the path standing in, never by the run's name.
     """
     return [run for run in runs if not superseded(run, runs)]
 
@@ -188,10 +181,11 @@ def required_workflows(repo, named):
     make a waiter STRICTER where it already knows the gate, and may only
     REPLACE a requirement where it was guessing. Here the caller's names
     are UNIONED with `REQUIRED_WORKFLOWS` - which puts the `tests`
-    protection out of reach of any argument, and with it the false green of
-    issue #1217 - while on another repository they replace a guess. Each
-    name is stripped, so `' ci '` is the requirement `ci` rather than a
-    name no run carries and no report can spell legibly (issue #1320).
+    protection out of reach of any argument, and with it the false green
+    of a commit `tests` was never dispatched on - while on another
+    repository they replace a guess. Each name is stripped, so `' ci '` is
+    the requirement `ci` rather than a name no run carries and no report
+    can spell legibly.
     """
     if not named:
         return REQUIRED_WORKFLOWS
@@ -236,15 +230,13 @@ class GateAbsent:
     None (nothing to judge). Its own type rather than a falsy value, so it
     can never be read as one of the other three by an `is` comparison, and
     it carries the names so a refusal can name the workflow instead of
-    falling back on "unknown" - the shape issue #839 was filed about.
+    falling back on "unknown".
 
     What constructs it, exactly: `missing_required` above answers with the
-    missing NAMES, and a caller turned those names into this value. No
-    caller in this tree does so any more, and nothing here raises it, so
-    the class is carried with no builder; `ci_wait.py` never names it.
-    Removing it is a code change and this branch changes comments and
-    docstrings here only, so the honest state is recorded rather than
-    fixed.
+    missing NAMES, and nothing in this tree turns those names into this
+    value. Nothing here raises it either, so the class is carried with no
+    builder; `ci_wait.py` never names it. It stays until a code change
+    removes it.
     """
 
     def __init__(self, missing):

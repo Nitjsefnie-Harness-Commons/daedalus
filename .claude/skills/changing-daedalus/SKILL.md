@@ -43,10 +43,8 @@ For an implementation plan with independent tasks in the current session:
 
 **Run them bare** - `bash-harness-antipatterns` owns why, and it covers the
 whole family (piping a runner, a trailing status echo, an `|| true` evidence
-fallback). What it costs here specifically: a filtered run of a blank-line
-truncation check dropped half of a two-line failure message and read as a
-serious regression that did not exist, and roughly ten minutes went on a false
-alarm manufactured by the filter.
+fallback). A filtered run can drop part of a failure message and make a check
+look broken when it is not.
 
 **Do not run `run_tests.py`** - invoke the suites directly.
 
@@ -59,9 +57,9 @@ cross-file duplicate check is silently skipped.
 
 ## Choosing which suites to run
 
-Choose by what the change *touches*, not by what it is *about*. Six suites were
-once chosen for a change because they "touch striping"; all six passed and all
-twelve CI legs then failed on a suite that loads `server.py` by path.
+Choose by what the change *touches*, not by what it is *about*. A suite that
+loads `server.py` by path is touched by any change to that file, whatever the
+change is about.
 
 - Changed a module's import surface or a shared helper? Enumerate every suite
   that imports the changed thing and run all of them.
@@ -73,8 +71,8 @@ twelve CI legs then failed on a suite that loads `server.py` by path.
   way. Add every scanner
   to the list whenever a change adds or edits a **string** in a tracked file -
   a different trigger from changing an import surface. A fake hostname inside a
-  new test has failed all twelve legs at once while every suite that imports
-  the changed modules passed locally.
+  new test fails all twelve legs at once while every suite that imports the
+  changed modules passes locally.
 
 ## Tests that actually pin something
 
@@ -85,11 +83,10 @@ are the parts it does not cover.
 `superpowers:verification-before-completion` owns the cycle - write, pass,
 revert the fix, watch it fail, restore. What this repository adds is that
 reverting a *patch* is not enough: reintroduce the defect into the real code
-and record the failure, because two
-ordinary fixes here shipped tests that passed against unfixed code - one
-asserted on an unlink race microseconds wide, another pinned an extracted
-helper thoroughly while passing with `server.py` fully reverted. Reading a test
-reveals neither.
+and record the failure. A test can pass against unfixed code while reading as
+sound - one asserting on an unlink race microseconds wide, another pinning an
+extracted helper while `server.py` is fully reverted. Reading a test reveals
+neither.
 
 **Restore the way `plant.py` does, never with the VCS.** Run
 `python3 .claude/skills/changing-daedalus/plant.py save FILE` before you
@@ -162,8 +159,8 @@ file is invisible until you name it - see `CONTRIBUTING.md`. Regenerate with
 - **Verify by regenerating on a clean tree and asserting no diff**
   (`git diff --exit-code -- .gitignore`). That catches triplication, a missing
   entry and ordering drift together. Do not verify by exit status - the
-  generator reported `ok - 140 tracked files named, none ignored` while the
-  file was wrong, and both halves of that "ok" were true. Duplicate `!` entries
+  generator can report `ok - N tracked files named, none ignored` while the
+  file is wrong, with both halves of that "ok" true. Duplicate `!` entries
   are semantically inert, which is why they go unnoticed and why they break the
   one number that would otherwise reveal a genuinely missing entry.
 
@@ -254,13 +251,12 @@ file that is gone is removed by hand.
 **`js_coverage_baseline` admits exactly one hand edit: a new module.** The
 `--tighten` command iterates what the record already names, so it can
 lower a number and drop an entry but never add one; a module the record
-does not name is admitted the way the seed itself was - at its measured
-uncovered count, in the same reviewed diff that introduces the module,
-after which the ordinary ratchet applies to it like any other. The
-alternative is to cover its lines, and then it needs no entry at all. Do
-not leave a new module unrecorded expecting the next tightening run to
-pick it up; it will not. `tests/test_js_module_coverage.py` gates the
-measurement, refusal and tightening behavior.
+does not name is admitted at its measured uncovered count, in the same
+reviewed diff that introduces the module, after which the ordinary ratchet
+applies to it like any other. The alternative is to cover its lines, and then
+it needs no entry at all. Do not leave a new module unrecorded expecting the
+next tightening run to pick it up; it will not. `tests/test_js_module_coverage.py`
+gates the measurement, refusal and tightening behavior.
 
 ## Git and CI
 
@@ -275,8 +271,7 @@ with `CONTRIBUTING.md`; for GPT-5.6 Sol only
 **Count a branch's commits before asserting the count anywhere.** Run
 `git rev-list --count <base>..HEAD`; never state a range from reading the tail
 of a log. A wrong count does not merely mislead - it invites someone to make it
-true. A brief here said "the six commits the branch owns" when the branch owned
-23, and a `rebase (fixup)` collapsed 18 reviewed commits into one.
+true.
 
 **Create a recovery anchor before any history rewrite** - tag the current head
 before a rebase, reset or amend, and delete the tag only once the push is
@@ -289,8 +284,7 @@ than the process.** If a correct result exists in a bad shape, tag it and make
 tree equality the acceptance test: `git diff <verified-tag> HEAD` must be
 empty. That proves a rewritten history reaches exactly the content that already
 passed the gates, and it is one command instead of re-reading every conflict
-resolution - 23 resolutions did not have to be re-reviewed here, only the tree
-compared.
+resolution.
 
 **Base movement is checked once, at the final gate; it is not a mid-work
 event.** During implementation, draft pushes, CI and review rounds, do not
@@ -376,11 +370,6 @@ draft head is that working, not damage.
 
 ## Watching a pull request
 
-A watcher used to be shipped here: `watch_all.py`, with `ci_watch.py` and
-`pr_comment_watch.py` as its children. None of the three is repository content
-any more - a checkout carries no copy - and the prose describing how the
-aggregator batched, held and condensed its children's output is cut with it.
-What follows is the tooling that is still shipped.
 
 Waiting on one commit's CI is `ci_wait.py`, beside this file:
 
@@ -410,16 +399,15 @@ reset and polls again, bounded by the same `--timeout` - and a bound
 reached inside such a pause is still exit 2, never 3. The refusal is
 recognised from the EVIDENCE the answer carries and from whether it
 delivered, never from the status or the exit code on their own, because
-GitHub really does answer a throttled query with a 200 and an exit 1
-(issue 1338).
+GitHub really does answer a throttled query with a 200 and an exit 1.
 
 **Exit 4 exists because "every run that happened to exist passed" is not
-"every run that should exist did"** (issue #1217, PR #1122 head
-`cb67badf`). That head conflicts with its base, so the merge ref cannot be
-built, no `pull_request` workflow is dispatched, and the twelve-cell `tests`
-matrix has no run at all. `gate freshness` and CodeQL do run and both
-conclude `success`; the tool reported `all 2 run(s) acceptable` and exited
-0, and every seat on this fleet reads that exit code as its green read. The
+"every run that should exist did".** On a head that conflicts with its base
+the merge ref cannot be built, no `pull_request` workflow is dispatched, and
+the twelve-cell `tests` matrix has no run at all, while `gate freshness` and
+CodeQL do run and both conclude `success`: without exit 4 the tool would
+report `all 2 run(s) acceptable` and exit 0, and every seat on this fleet
+reads that exit code as its green read. The
 same false green appears on a mergeable head in the first minutes of a
 push, while the short workflows have concluded and the matrix is still being
 created. So an absent required workflow is `REQUIRED_WORKFLOWS`
@@ -461,42 +449,37 @@ required nowhere else, where that name on a stranger's repository is a
 guess - the same asymmetry the workflows follow, and for the same reason.
 
 **`--required NAME` states a gate, and what that may DO depends on which
-repository this is** (issue #1318). It is repeatable and all-of:
-`--required ci --required lint` needs both, the same reading `verdict` has
-always given. Absent, the expectation is `REQUIRED_WORKFLOWS` exactly as
-before - nothing about the exit-4 refusal above moves, and a caller who
-names no gate still cannot switch it off.
+repository this is**. It is repeatable and all-of:
+`--required ci --required lint` needs both, the same reading `verdict` gives.
+Absent, the expectation is `REQUIRED_WORKFLOWS`, and the exit-4 refusal above
+applies unchanged; a caller who names no gate still cannot switch it off.
 
 What it exists for is `--repo`: `tests` is THIS repository's gate and is not
-any other one's, so on a repository whose gating workflow is named
-something else an all-green head used to exit 4 with a line reading as "the
-gate never started" when in fact the gate was never what this tool looked
-for. A caller who names another repository and no gate is told that on the
-refusal itself - which name is the only one checked, and that `--required`
-is how to state a different one - rather than left to read a missing
+any other one's. A caller who names another repository and no gate is told on
+the refusal itself which name is the only one checked, and that `--required`
+is how to state a different one, rather than left to read a missing
 workflow as a head nobody verified.
 
 The direction is not symmetric, and the asymmetry IS the rule. This tool
 knows daedalus's gate and is only guessing about another repository's, so
 here the names are ADDED to the required set: naming a workflow can only
-make the tool stricter, and `tests` cannot be dropped by argument - which
-is the #1217 false green, made unreachable through the flag that fixes its
-other face. On another repository they REPLACE the set, because there the
-default was only ever a guess. So `--required ci` on this repository means
-"ci AS WELL AS tests", not "ci instead of tests". The note is empty on this
-repository under every spelling of its name, and empty whenever `--required`
-was given at all; naming the gate this tool already knows leaves the output
-byte for byte what it was.
+make the tool stricter, and `tests` cannot be dropped by argument, so no
+argument can produce a green from a missing `tests` run. On another repository
+they REPLACE the set, because there the default is only a guess. So
+`--required ci` on this repository means "ci AS WELL AS tests", not "ci instead
+of tests". The note is empty on this repository under every spelling of its
+name, and empty whenever `--required` was given at all; naming the gate this
+tool already knows leaves the output byte for byte unchanged.
 
 **A workflow's verdict is the run GitHub's required-check status reports for
 it, which is that workflow's NEWEST run on the SHA.** Every older run of the
-same workflow is out of the judged set whatever it concluded (issue #1249).
-A cancelled remnant of a re-run has always gated nothing; a FAILED one is
-the intermittent failure the re-run then cleared, and the same status
-supersedes it. A close/reopen is the shape that shows it - the head gets a
-second run against a new merge ref while the first run's failure lingers on
-the same SHA - and on such a head the older failure used to outvote the
-newer green. A run with NO newer sibling is judged as it stands, so a
+same workflow is out of the judged set whatever it concluded.
+A cancelled remnant of a re-run gates nothing; a FAILED one is the
+intermittent failure the re-run clears, and the same status supersedes it.
+A close/reopen produces that shape - the head gets a second run against a
+new merge ref while the first run's failure lingers on the same SHA - and on
+such a head the older failure must not outvote the newer green. A run with
+NO newer sibling is judged as it stands, so a
 deliberate cancel and an unretried failure both still fail, and nothing is
 judged by a run name: the grouping is by workflow id, the path standing in
 when the id is absent, with "newer" by `run_started_at`, `created_at`
@@ -523,8 +506,8 @@ verdict.
 thread has been dealt with.
 
 This is not redundant with the local suites, which cover one platform: a
-`.gitattributes` regression here passed every local suite and all eight Linux
-and macOS cells, then failed all four Windows cells because `bash` there
+`.gitattributes` regression can pass every local suite and all eight Linux
+and macOS cells and still fail all four Windows cells, because `bash` there
 resolves to the WSL launcher.
 
 ## Issues, claims and labels
@@ -651,13 +634,13 @@ own contract is how the contract stops meaning anything.
 **That test has two limbs, and the symptom alone is the wrong one.** A defect
 is pre-existing only when the symptom reproduces on the base **and** the code
 responsible for it is unchanged there. Where the observable effect is identical
-on the base but its cause is code the branch **adds**, it is the branch's. Seen
-here: a change fixing a suppressed write error added a marker whose own write
-failure it suppressed the same way, so the observable bypass looked unchanged
-on the base while the `except OSError: pass` producing it sat inside the fix
-under review. A fix that reintroduces the defect it closes, one level down, is
-the most common shape this project sees, and a symptom-only test is blind to
-exactly that shape.
+on the base but its cause is code the branch **adds**, it is the branch's. For
+example, a change fixing a suppressed write error can add a marker whose own
+write failure it suppresses the same way: the observable bypass then looks
+unchanged on the base, while the `except OSError: pass` producing it sits inside
+the fix under review. A fix that reintroduces the defect it closes, one level
+down, is the most common shape this project sees, and a symptom-only test is
+blind to exactly that shape.
 
 **A defect some other gate happens to reject is still a defect.** That another
 checker refuses the input is a mitigation, not a licence for the code under
@@ -691,8 +674,7 @@ consecutively with no blank line between them registers both.
 **Never interpolate prose into a `gh api -f` value.** Pass bodies as
 `-F field=@<file>`, and anything containing quotes, apostrophes or newlines via
 `--input <json>` built by a JSON serializer. Shell quoting mangles it silently:
-an issue here was filed reading *"a pull request own added lines"* because an
-apostrophe could not survive `-f title='...'`.
+an apostrophe inside `-f title='...'` does not survive.
 
 **A pull request body is not a battle log.** It describes what the change is
 and why, as it stands - not how it got there. A body that narrates the rounds,
@@ -1063,10 +1045,9 @@ them.
     excluded: the key must be stable across every read of one file, and on a
     filesystem keeping no access time POSIX lets `st_ctime` report it, so
     reading a candidate moves `st_ctime_ns`, a redelivery arrives under an id
-    the ledger
-    never saw, and a non-idempotent typed command runs twice (daedalus issue
-    1411). `st_dev` / `st_ino` are unique among existing files on a device and
-    fixed while the file exists, so reading cannot perturb them.
+    the ledger never saw, and a non-idempotent typed command runs twice.
+    `st_dev` / `st_ino` are unique among existing files on a device and fixed
+    while the file exists, so reading cannot perturb them.
   - `gen` advances only when the bridge vacates a legacy name by unlinking a
     file it delivered, the one way the object at a name changes while keeping
     the name's inode: a redelivery after a failed removal keeps its id and the

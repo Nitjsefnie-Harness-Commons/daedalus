@@ -62,10 +62,7 @@ def test_every_journey_is_counted_on_every_preserved_run(tmp):
     A journey whose exclusion names a role no thread carries is refused, and
     that refusal is correct — so a classifier that finds nothing refuses
     every journey, and no suite written against the classifier's own
-    constants ever notices. On the three preserved profiles the signature
-    table matched NOTHING on `command-round-trip` and one thread on the
-    other two, so six of seven journeys refused on one run and on another the
-    bridge's whole serve loop read as its one-off import.
+    constants ever notices.
     """
     for journey in sorted(_journey_profile_fixture.runs()):
         classifier, rows = _read(journey)

@@ -134,7 +134,7 @@ def main(argv=None):
     if timed_out:
         # A suite that overran is not a suite that failed, and what it
         # leaves behind is what it managed to flush before the bound --
-        # which is now decided the same way on every platform, because
+        # which is decided the same way on every platform, because
         # both routes ask before they escalate. A suite that took the
         # request to stop flushed what it had measured, and one that did
         # not contributes nothing; on Windows only a suite that handles

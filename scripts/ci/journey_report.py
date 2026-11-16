@@ -5,10 +5,9 @@ what a run SAYS about either. Each function here takes data and returns
 lines; writing them is the callers' business.
 
 Nothing here writes the artefact, and nothing here prints it either. A
-re-baseline used to be pasted out of a block of JSON, which made the
-numbers a person reviewed a transcription of a table rather than the run's
-own measurement. It is now one command, over the measurement the job
-uploaded, so the reading survives and the copying does not.
+re-baseline is one command, `journey_rebaseline.py`, over the measurement the
+job uploaded, so the numbers a person reviews are the run's own measurement
+rather than a transcription of a table.
 """
 import os
 import sys
@@ -195,8 +194,8 @@ def verdict_lines(document, counts, found, why=None):
     `why` is the counter's own refusal, and it is a parameter rather than
     something read out of `report` here because this module renders data it
     is handed: the sentence a counter refused with is the only thing that
-    tells a reader WHICH step to go and look at, and it used to survive only
-    inside the uploaded measurement.
+    tells a reader WHICH step to go and look at, so it is carried into the
+    verdict cell of the row it explains.
     """
     over = found['over']
     unmeasured = found['unmeasured']

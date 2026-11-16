@@ -38,8 +38,7 @@ on:
 
 # One group per commit on push, dispatch and schedule: a landed main SHA's
 # verdict must complete, so a newer push cannot cancel it. A pull request
-# keeps one group per number, so a superseded head push is still cancelled
-# (issue #1579).
+# keeps one group per number, so a superseded head push is still cancelled.
 concurrency:
   group: codeql-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true

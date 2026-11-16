@@ -161,8 +161,7 @@ def test_an_or_nested_in_the_test_is_refused(_tmp):
 def test_a_compound_condition_hides_in_no_nested_statement(_tmp):
     """A `try` under the deciding `if` does not hide its `or`.
 
-    The shape issue 570 planted in the real tools: the raise is wrapped in a
-    `try` that decides nothing.
+    The shape: the raise is wrapped in a `try` that decides nothing.
     """
     sites, module = _mcp_guard_floor.guard_shape_probe(_tmp)
     try:
@@ -243,7 +242,7 @@ def guarded(value):
 
 
 def test_a_construct_the_walk_does_not_classify_is_refused(_tmp):
-    """A construct dropped from the table refuses the scan (issue 570).
+    """A construct dropped from the table refuses the scan.
 
     The class comes off the node the parsed fixture's own tree produced, so
     the plant cannot miss the statement it means.
@@ -501,7 +500,7 @@ def test_a_site_two_refusal_cases_witness_is_a_duplicate_gap(_tmp):
     """duplicate_witness_gaps reports each pair's surplus witnesses.
 
     A count above one means a case has no condition of its own to refuse,
-    and deleting it used to ship green.
+    and deleting it would ship green.
     """
     del _tmp
     site, other = ('m', 'f', 'c'), ('m', 'f', 'd')
@@ -583,7 +582,7 @@ def test_module_level_sync_test_citations_are_accepted(_tmp):
 
 
 def test_a_module_level_helper_citation_is_reported_missing(_tmp):
-    """A helper the runner never collects pins nothing (issue 864)."""
+    """A helper the runner never collects pins nothing."""
     del _tmp
     citation = 'tests/test_mcp_tools.py::_bridge_interactions'
     missing = _mcp_guard_floor.missing_citations([

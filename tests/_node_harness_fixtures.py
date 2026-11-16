@@ -1,8 +1,6 @@
 """The fixture the extension boundary suite sizes a command line with.
 
-`_command_line_length` is what remains of the fixtures the Node-subprocess
-dashboard, overlap and boundary suites each copied; the rest were retired
-with the suites that used them.
+`_command_line_length` is the only fixture this module holds.
 """
 
 

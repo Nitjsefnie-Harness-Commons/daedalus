@@ -39,9 +39,7 @@ def dashboard_asset(dashboard_dir, path):
     if any(path_safety.unsafe_component(part) for part in rel.split('/')):
         return 400, {'error': 'bad path'}
     # Same containment as every other root, through the same helper:
-    # this route grew its own resolve-and-contain before there was one,
-    # and two spellings of one rule is one more than anybody will keep
-    # in step.
+    # two spellings of one rule is one more than anybody will keep in step.
     try:
         target = path_safety.under(dashboard_dir, *rel.split('/'))
     except (ValueError, OSError):

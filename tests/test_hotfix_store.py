@@ -2,8 +2,8 @@
 """The hotfix record's byte bound: what crosses it is refused, and nothing
 but the extension can fill the area its own state depends on.
 
-`handleStoreHotfix` read the whole record, filtered the replaced fixId, and
-wrote the result back with no measure. 160 fixes of 64 KiB pass Chrome's
+`handleStoreHotfix` reads the whole record, filters the replaced fixId, and
+measures the result before writing it back. 160 fixes of 64 KiB pass Chrome's
 10,485,760-byte `local` quota, after which the extension's OTHER writes are
 the ones that fail. Chrome measures QUOTA_BYTES as the JSON stringification
 of every value plus every key's length, and the record is one key, so its

@@ -507,7 +507,7 @@ def _call_read(node, function, handler_globals, scope_binds,
     constant second argument, 46 distinct values, none a frame member, so
     ``api('GET', 'f_locals')`` is refused whatever the callee is — nothing
     in the tree is refused today — gating on the callee would name a member
-    through a shadowed one, the false green I-1 closed. What the audit
+    through a shadowed one, a false green. What the audit
     cannot read is a read too, and a proven builtin ``getattr`` or
     attribute-protocol callee whose name is an expression selects a member
     the source does not spell; a one-argument visible-callee call is not a

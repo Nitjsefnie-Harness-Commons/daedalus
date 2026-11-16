@@ -227,8 +227,7 @@ def _respond(response, argv):
     exits. `gh` exits 1 on any error status and writes
     `gh: ... (HTTP NNN)` to stderr; a suite overrides that pair with
     `exit` and `stderr` because a throttled GraphQL query is a 200 that
-    exits 1 over a limit (issue 1338), a shape the status alone cannot
-    produce."""
+    exits 1 over a limit, a shape the status alone cannot produce."""
     spec = _response(response)
     status = spec['status']
     text = (spec['body'] if isinstance(spec['body'], str)

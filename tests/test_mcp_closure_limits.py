@@ -3,7 +3,7 @@
 walk's arms are enumerated in `test_mcp_import_refusals.py`). The lambda
 case stays because dropping the lambda arm from `static_value` reds it
 alone; the settled-callee families and their bounds are the callee-value
-question at the five forms issue 1213 records.
+question at the five callee families `SETTLED_CALLEES` drives.
 """
 import sys
 from pathlib import Path
@@ -103,7 +103,7 @@ def test_scan_set_walks_a_deep_subscript_chain_in_linear_cost(_tmp):
             names
 
 
-# The five callee families issue 1213 records: each refused at base while
+# The five callee families: each refused at base while
 # the runtime imports the leaf (driven values differ where it matters).
 _LEAF = {'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n'}
 SETTLED_CALLEES = (

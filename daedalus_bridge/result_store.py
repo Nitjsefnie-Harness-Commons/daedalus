@@ -41,8 +41,7 @@ def delivery_stripe_key(target_dir):
     on a case-insensitive parent while carrying two different names, and
     two names take two locks: the serialization the stripe exists to
     provide, silently absent. An inode is not a spelling and is not
-    something a caller can compute or steer, which is a little more than
-    the per-process secret alone was asked for.
+    something a caller can compute or steer.
 
     None means there is no entry to stripe on. That is not the same as "key
     it on the name": a name-keyed stripe for a directory that is not there
@@ -55,15 +54,14 @@ def delivery_stripe_key(target_dir):
     the delivery files.
 
     An entry that exists and reports no inode number is a different case:
-    the entry is there, so it is keyed on its name -- the pre-round
-    behaviour, and over-serialized rather than not at all, which is the
-    direction a mutual-exclusion device may err in.
+    the entry is there, so it is keyed on its name: over-serialized rather
+    than not serialized at all, which is the direction a mutual-exclusion
+    device may err in.
     """
     if not isinstance(target_dir, os.PathLike):
-        # The mistake that shipped as the original bug was a caller handing
-        # this a bare name, and a name here is silently resolvable against
-        # the process working directory -- it would take a stripe for a
-        # directory nobody in the request ever named. Refused instead.
+        # A bare name here is silently resolvable against the process working
+        # directory, so it would take a stripe for a directory nobody in the
+        # request ever named. A bare name is refused instead.
         raise TypeError('delivery stripe takes a directory, not a name')
     try:
         info = os.stat(target_dir)

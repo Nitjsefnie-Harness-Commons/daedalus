@@ -9,7 +9,7 @@ PROMISE settles rather than until the call is made. That second half is what
 makes the detach/attach window observable at all.
 
 A rejecting `chrome.debugger.detach` is modelled too, because a detach whose
-rejection escapes ends the extension's service worker (issue #1161).
+rejection escapes ends the extension's service worker.
 """
 import json
 import shutil

@@ -98,12 +98,10 @@ def test_the_root_holds_no_python_module_but_the_entry_points(tmp):
 def test_no_deployment_strings_in_tree(tmp):
     """No shipped file may name a host or an absolute path off this machine.
 
-    This asserts a PROPERTY rather than a list of forbidden strings. The
-    previous version carried the private hostname and docroot as needles, split
-    across a concatenation so the file would not match itself — which published
-    the very strings the scrub existed to remove, reconstructible by anyone who
-    read the test. A rule that can only be written by quoting the secret is the
-    wrong rule.
+    This asserts a PROPERTY rather than a list of forbidden strings. A list
+    has to quote the strings it guards, and a test that quotes them publishes
+    them, reconstructible by anyone who reads it. A rule that can only be
+    written by quoting the secret is the wrong rule.
     """
     # Hosts a public release may legitimately contact or document.
     allowed_hosts = {'127.0.0.1', 'localhost', 'github.com'}
@@ -144,10 +142,9 @@ def test_no_hardcoded_deployment_urls(tmp):
     # https:// URL is either a deployment endpoint or a call home, and neither
     # ships.
     #
-    # The font hosts used to be allowed here, which meant this test would have
-    # watched the dashboard fetch a webfont from Google on every load without
-    # objecting. The stylesheet now uses a local font stack, so the allowance
-    # goes with it: a re-introduced @import fails this test.
+    # Font hosts get no allowance: one would let the dashboard fetch a webfont
+    # from Google on every load without this test objecting. The stylesheet
+    # uses a local font stack, so a re-introduced @import fails this test.
     allowed_exact = {'github.com'}
     violations = []
     for path in iter_tree_files(ROOT):

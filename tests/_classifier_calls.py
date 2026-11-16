@@ -2,16 +2,14 @@
 
 `classify_changes.classify` takes a workflow event and a `run` callable it
 reads the changed paths through, so driving it needs a webhook event and a
-stand-in for that read. Both classifier suites built both, each with its own
-copy, so a change to either shape reached one of them and not the other.
+stand-in for that read. Both classifier suites use the copies here, so a
+change to either shape reaches both of them.
 
-`_recording_run` is a rename. It was `_recorder`, and the short name is
-already held by `tests/test_aggregate_gate.py` over a different body — a
-`gh` read answering the own-run query — so a shared helper does not
-adopt it.
+`_recording_run` cannot be `_recorder`: that short name is already held by
+`tests/test_aggregate_gate.py` over a different body — a `gh` read answering
+the own-run query — so a shared helper does not adopt it.
 
-`_event` is a byte-identical move under its own name: it is bound nowhere
-else in `tests/`.
+`_event` is bound nowhere else in `tests/`, so it keeps its own name.
 """
 
 

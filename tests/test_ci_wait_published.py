@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """The published `gate freshness` verdict, which is a check-run and not a run.
 
-Issue 1360: `ci_wait.py` certified a head whose `gate freshness` CHECK-RUN
-was red - publishing the verdict is that workflow's own run's job, the
-publisher writes a check run through the Checks API and the rulesets
-read the check, not the run; the run read was the one nothing gates on.
-`8ddfec21f32d484657e7ebc56c46a1b395670ca9` is the shape: seven workflow
-runs concluded `success` and the `gate freshness` check concluded FAILURE.
-Every control here drives the REAL `ci_wait.py` as a process against the
-fake `gh` in `_fake_gh.py`, so the query, the read and the verdict are
-the shipped ones and only the transport is a double. The suite-level
-controls sit beside the end-to-end ones because they are the same
-question on a smaller surface: the predicate and the read both waiters
-would otherwise have to grow their own.
+Publishing the verdict is that workflow's own run's job: the publisher writes
+a check run through the Checks API, and the rulesets read the check, not the
+run, so the run is the one nothing gates on. A verdict read from the runs
+alone can certify a head whose `gate freshness` CHECK-RUN is red: seven
+workflow runs concluding `success` beside a `gate freshness` check concluding
+FAILURE is the shape. Every control here drives the REAL `ci_wait.py` as a
+process against the fake `gh` in `_fake_gh.py`, so the query, the read and
+the verdict are the shipped ones and only the transport is a double. The
+suite-level controls sit beside the end-to-end ones because they are the same
+question on a smaller surface: the predicate and the read both waiters would
+otherwise have to grow their own.
 """
 import contextlib
 import io
@@ -99,8 +98,8 @@ def _green(*names):
 def test_a_red_published_verdict_fails_a_head_of_green_runs(tmp):
     """The live shape, unchanged: the `gate freshness` run concludes
     SUCCESS - publishing the verdict is that run's job and it did it -
-    and the check it published is FAILURE. Reading only runs certifies
-    this head, issue 1360. What is asserted is the correct contract:
+    and the check it published is FAILURE. Reading only runs would
+    certify this head. What is asserted is the correct contract:
     exit 1, and the line naming the check, its conclusion and its URL,
     so a reader can go and look."""
     done, _ = _wait(tmp, [], _green('tests', PUBLISHED)
@@ -288,7 +287,7 @@ def test_a_missing_run_and_a_missing_check_are_named_together(tmp):
     assert 'no tests run and no gate freshness check on' in text, text
 
 
-# ---- the direction rule (issue #1318, applied to the check) ----
+# ---- the direction rule, applied to the check ----
 
 def test_another_repository_requires_no_published_check(tmp):
     """`gate freshness` is THIS repository's published gate, and on
@@ -330,7 +329,7 @@ def test_this_repository_cannot_switch_the_published_check_off(tmp):
 
 def test_either_spelling_of_this_repository_keeps_the_published_check(tmp):
     """The direction rule's two halves must agree, and only the workflow
-    half was proven case-insensitive. The discriminating row of
+    half is proven case-insensitive elsewhere. The discriminating row of
     `test_every_spelling_of_this_repository_is_still_the_default` drives
     a MISSING WORKFLOW, which `required_workflows` answers: a
     `required_published` that compared `repo == DEFAULT_REPO` would
@@ -482,14 +481,13 @@ def test_ci_state_answers_both_questions_from_one_walk(tmp):
 def test_an_unconcluded_check_is_a_wait_not_a_red_verdict(tmp):
     """A check with no conclusion has not reached a verdict, and reading
     it as a red one is a failure reported for a check still running.
-    The run limb has always had a status check for exactly this, and
-    the check limb reading a conclusion with no status beside it was
-    the asymmetry: `conclusion: None` fails the acceptable-set test, so
-    the offender line would print `gate freshness: None <url>` and the
-    exit would be 1 - a red verdict for a check the publisher had not
-    finished writing. Not reachable today, the publisher POSTing status
-    and conclusion in one call; the SHAPE, not this publisher, is what
-    a reader must survive."""
+    The run limb has a status check for exactly this, and the check limb
+    must not read a conclusion with no status beside it:
+    `conclusion: None` fails the acceptable-set test, so the offender line
+    would print `gate freshness: None <url>` and the exit would be 1 - a
+    red verdict for a check the publisher had not finished writing. Not
+    reachable today, the publisher POSTing status and conclusion in one
+    call; the SHAPE, not this publisher, is what a reader must survive."""
     mod = _ci_wait()
     running = [_check(PUBLISHED, None, status='in_progress')]
     assert mod.verdict([_head_run('tests')], running) == (
@@ -543,7 +541,7 @@ def test_the_bound_report_names_the_check_that_is_still_running(tmp):
         code = mod.wait(DEFAULT_REPO, SHA, 10, 20, out, grace=300)
     text = out.getvalue()
     assert code == 2, text
-    # The prefix is right; what was wrong was an EMPTY list after it.
+    # The prefix is right; what must not follow it is an EMPTY list.
     assert f'still open: {PUBLISHED} (in_progress)' in text, text
     assert not text.rstrip().endswith('still open:'), text
 

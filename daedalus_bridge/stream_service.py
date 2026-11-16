@@ -272,10 +272,9 @@ def every_subscription_past(token, name):
     prefix is not raw wall-clock time — every mint clamps it to a mark that
     the seed set strictly above every parseable survivor on disk. A backwards
     clock step therefore does not place a later event below an earlier one,
-    within a process or across a restart, so the hole this cursor once turned
-    into a loss is closed. This is the whole warrant for a name-ordered
-    cursor: a stem not ordered by publish order (a random suffix, an
-    overflowing counter field, or a millisecond minted below a survivor)
+    within a process or across a restart. This is the whole warrant for a
+    name-ordered cursor: a stem not ordered by publish order (a random suffix,
+    an overflowing counter field, or a millisecond minted below a survivor)
     sorts arbitrarily, lands below a window's cursor, and is dropped as
     already-consumed. The same-millisecond, counter-boundary,
     narrow-survivor and cursor-invariant controls fail if this property stops

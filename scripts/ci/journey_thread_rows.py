@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Every counted thread's own total, kept beside the count it was summed into.
 
-The journey budget records ONE instruction count per journey, and two runs
-of unchanged code have produced counts about seven percent apart with
-nothing in the tree to explain it. The measurement already reads every
+The journey budget records ONE instruction count per journey, and unchanged
+code can produce counts about seven percent apart with nothing in the tree
+to explain the gap. The measurement already reads every
 thread's own total out of the callgrind out-files -- `journey_threads.read`
 hands them over -- and `total_for` sums them. This module keeps what that
 sum was made of, so a later run can say WHICH THREAD carries the difference

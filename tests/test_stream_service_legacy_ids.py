@@ -44,11 +44,11 @@ def _refusing_unlink(name):
 def test_a_legacy_command_the_drain_cannot_remove_redelivers_one_id(tmp):
     """A failed removal redelivers, and the repeat carries the same id.
 
-    The id's shape and the values behind it are both pinned, because the
-    first review round found a mutant that deleted a component and passed:
-    every component has to be load-bearing, and the generation is the one
-    that stands still here — it advances when the object at the name
-    changes or the drain vacates it, and a failed removal is neither.
+    The id's shape and the values behind it are both pinned: a mutant that
+    deletes a component must fail, so every component has to be load-bearing.
+    The generation is the one that stands still here — it advances when the
+    object at the name changes or the drain vacates it, and a failed removal
+    is neither.
     """
     service = _load_service('stream_service_legacy_redelivery_id')
     legacy = Path(tmp) / 'tok_42.json'

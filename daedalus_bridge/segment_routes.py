@@ -210,8 +210,8 @@ def store_segment(raw, admission):
             # the write_usage call below must not be the one window
             # where that disagreement leaves no trace at all. Refusing
             # the write outright when even this cannot be established
-            # is the alternative #203 asks for to a mark that fails
-            # silently and lets the write through unaccounted.
+            # is the alternative to a mark that fails silently and lets
+            # the write through unaccounted.
             if not segment_store.mark_dirty(seg_dir_root, job):
                 return 500, {'error': 'segment storage failure'}
             try:
@@ -269,8 +269,8 @@ def lookup_job(seg_dir_root, token, params):
 
     POST mints a job that does not exist yet, which is what a producer
     wants and the opposite of what a status query wants: asking about a
-    name that was never used created it, so a typo left a permanent
-    record behind and answered as though the job were real.
+    name that was never used would create it, so a typo would leave a
+    permanent record behind and answer as though the job were real.
 
     Unlike GET /segment-status this route takes the bridge token, so an
     absent job can be reported as absent — the capability route has to

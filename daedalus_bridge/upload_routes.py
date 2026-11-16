@@ -17,9 +17,8 @@ from daedalus_bridge import atomic_file, path_safety
 
 # One table for every place a screenshot format is decided: what /upload
 # accepts, what /screenshot will discover on disk, and what content type it is
-# served with. They were three separate lists, and `webp` was in the first
-# only -- so the upload stored a file and answered 200 that /screenshot then
-# reported as absent.
+# served with. Separate lists let these drift apart: an upload could store a
+# file and answer 200 that /screenshot then reports as absent.
 SCREENSHOT_TYPES = {
     'png': 'image/png',
     'jpeg': 'image/jpeg',
@@ -105,10 +104,7 @@ def list_uploads(upload_dir, token, params):
     if upload_id and path_safety.unsafe_component(upload_id):
         return 400, {'error': 'invalid path component'}
     # Before the directory is looked at, so that whether a query is well
-    # formed does not depend on whether anything has been uploaded yet:
-    # the shortcut below used to answer 200 for a malformed limit on an
-    # empty data root and 400 for the same query once the directory
-    # existed.
+    # formed does not depend on whether anything has been uploaded yet.
     paged = limit_p is not None or offset_p is not None
     lim, off = 200, 0
     if paged:
@@ -135,8 +131,7 @@ def list_uploads(upload_dir, token, params):
         return 200, []
     # Counting is not describing. Every stored file is counted, because
     # `total` says how many pages there are; only the page's own files are
-    # statted, because size and mtime are a syscall each. `limit=1` used
-    # to stat every file in the namespace twice to describe one of them.
+    # statted, because size and mtime are a syscall each.
     window = range(off, off + lim) if paged else None
     results = []
     total = 0
@@ -182,8 +177,8 @@ def store_upload(upload_dir, body):
     fmt = body.get('format', 'png')
     # isinstance BEFORE the membership test: `[] in SCREENSHOT_TYPES`
     # raises TypeError rather than answering False, and an exception here
-    # killed the request thread, so the caller got a dropped connection
-    # instead of the refusal this line already knew how to write.
+    # would kill the request thread, so the caller would get a dropped
+    # connection instead of the refusal this line already knows how to write.
     if not isinstance(fmt, str) or fmt not in SCREENSHOT_TYPES:
         return 400, {'error': 'unsupported format'}
     if not upload_id:
@@ -255,9 +250,9 @@ def delete_upload(upload_dir, body):
     if _reserved_name(filename):
         return 400, {'error': 'invalid path component'}
     # A filename names a file inside an id, so without one it matches
-    # neither the file branch nor the id branch below and used to reach the
-    # branch that removes the token's whole namespace: naming one file
-    # deleted every upload the token had, and answered that as success.
+    # neither the file branch nor the id branch below and would reach the
+    # branch that removes the token's whole namespace: naming one file would
+    # delete every upload the token had, and answer that as success.
     if filename and not upload_id:
         return 400, {'error': 'filename requires id'}
     # under rather than a join: this branch removes trees, so the
@@ -341,10 +336,9 @@ def named_upload(upload_dir, token, named):
 
     `named` is the `path` the upload answer returned and the result
     carries, in either of two forms: the relative `<id>/<file>` the
-    answer has carried since it stopped naming the token directory, and
-    the legacy token-led `<token>/<id>/<file>` that results already
-    stored under earlier bridges keep using — back-compat, not an
-    invitation: the leading component still has to be the caller's own
+    answer carries, and the legacy token-led `<token>/<id>/<file>` that
+    results already stored under earlier bridges keep using — back-compat,
+    not an invitation: the leading component still has to be the caller's own
     token, so one token's paths never name another's storage. Screenshot
     ids are reused — `_ss` is the default one — so an id identifies a
     directory rather than a capture, and the newest file in it belongs

@@ -481,7 +481,7 @@ print(json.dumps(out, sort_keys=True))
 def test_a_mark_that_cannot_be_written_is_reported_not_swallowed(tmp):
     """Publishing bytes that make storage disagree with the record is gated
     on establishing the durable marker first. A marker that cannot land is
-    the caller's signal to refuse the write (#203), so `mark_dirty` has to
+    the caller's signal to refuse the write, so `mark_dirty` has to
     say so instead of letting the write proceed unaccounted.
     """
     _root, answer = _probe(tmp, _MARK_DIRTY_PROBE)

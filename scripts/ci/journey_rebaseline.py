@@ -5,9 +5,9 @@ decides whether a count may be compared and `journey_artifact.py` owns the
 shape one is recorded in, while the mapping from a measurement to that
 shape is neither of those jobs.
 
-A re-baseline stays a reviewed commit — the maintainer's ruling is
-"autocommit tighten only, where a PR can increase its own cap if
-necessary" — so what this removes is the transcription, not the decision.
+A re-baseline stays a reviewed commit — only a tighten autocommits, and a
+PR can increase its own cap where necessary — so what this removes is the
+transcription, not the decision.
 One command reads the `measure --out` files it is given and writes the
 artefact from them, so what lands is the runs' own measurements rather
 than a reader's copy of a table. Several files are one recording: the
@@ -136,11 +136,7 @@ def _restored(dropped, held, restore, reports, counter):
 
     TWO lists, and each means only what its name says. `held` is every
     journey the artefact records at `null`; `dropped` is those the caller is
-    not already dropping, which is why the two differ. A one-line subtraction
-    used to hand `dropped` to both, and the second reader rendered it as
-    "journeys held at null" — so a journey being dropped and held at null at
-    once was reported as holding a COUNT, and `--restore X --drop X` together
-    was refused on the one invocation that works.
+    not already dropping, which is why the two differ.
 
     A measurement that could not separate one of these carries no count for
     it, and the refusal in the counts loop would have fired first — unless
@@ -172,8 +168,7 @@ def _named_journeys(named, flag):
     """Every name on `flag` that no journey is called.
 
     The likeliest thing that goes wrong with a per-journey flag is a
-    misspelling, and it used to be reported as a fact about the budget
-    instead. One failure, one sentence, and it is this one.
+    misspelling. One failure, one sentence, and it is this one.
     """
     names = journey_counters.journey_names()
     for name in sorted(set(named)):

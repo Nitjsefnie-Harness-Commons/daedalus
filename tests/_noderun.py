@@ -15,7 +15,7 @@ from _processtree import cleanup_process_tree
 
 # --- the hang detector -----------------------------------------------------
 #
-# A HANG DETECTOR, not a health margin (issue #1117): a tight bound only
+# A HANG DETECTOR, not a health margin: a tight bound only
 # measures how busy the runner is, and nothing correct reaches this number.
 #   SLOWEST_CORRECT_CHILD_SAMPLES  the freeze control's observed times
 #   SLOWEST_CORRECT_CHILD_S  10.70   max of those samples

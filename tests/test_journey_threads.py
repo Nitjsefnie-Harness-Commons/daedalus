@@ -146,10 +146,10 @@ def test_a_clone_of_the_front_ends_init_symbol_still_matches(tmp):
 
 def test_a_thread_in_the_journeys_own_process_is_main_or_request_at_any_size(
         tmp):
-    """Issue 1466's regression: a role that moves when the work grows.
+    """A role that must not move when the work grows.
 
     A per-connection request thread measured 3,548,079 instructions, which
-    is 2.82x under the floor a band read held the serve thread to. Grow that
+    is 2.82x under the floor a band read holds the serve thread to. Grow that
     thread past it and a band-ordered classifier calls it background — a
     role `command-round-trip` and `dashboard-fanout` exclude — so the
     journey's own work silently leaves the count.
@@ -199,14 +199,11 @@ def test_a_thread_outside_the_journeys_process_is_background(tmp):
 
 def test_a_request_thread_that_imports_one_module_is_still_a_request_thread(
         tmp):
-    """The finding that made the generic signature unshippable.
-
-    A request thread that imports anything at all is the thread the
-    journeys that exclude the import silently drop, with a plausible
-    number and nothing said — issue 1466's own shape through the new
-    door — so the signature names the front end rather than imports, and
-    the PROCESS is read before the signature at all: a thread of the
-    journey's own process that imported the front end is still the
+    """A request thread that imports anything at all is the thread the
+    journeys that exclude the import silently drop, with a plausible number
+    and nothing said, so the signature names the front end rather than
+    imports, and the PROCESS is read before the signature at all: a thread of
+    the journey's own process that imported the front end is still the
     journey's.
     """
     del tmp
@@ -300,12 +297,11 @@ def test_a_refusal_names_a_role_that_has_no_symbol_of_its_own(tmp):
 
 
 def test_a_thread_below_the_floor_is_a_refusal_naming_it(tmp):
-    """The floor is a shape check now, and it stays.
+    """The floor is a shape check, and it stays.
 
-    `REQUEST_FROM` no longer decides a role; it says a thread this small
-    never entered the interpreter, so a profile carrying one is not the
-    shape this gate reads. A refusal is still the answer, and it still
-    names the thread and its count.
+    `REQUEST_FROM` decides no role; it says a thread this small never entered
+    the interpreter, so a profile carrying one is not the shape this gate
+    reads. A refusal is the answer, and it names the thread and its count.
     """
     del tmp
     classifier = _journey_contract.threads()
@@ -318,13 +314,12 @@ def test_a_thread_below_the_floor_is_a_refusal_naming_it(tmp):
 def test_a_thread_the_profile_does_not_have_is_a_refusal(tmp):
     """A missing background thread is a failure, never a silent whole-tree sum.
 
-    The failure this guards is the one the whole change exists to end: a
-    profile the classifier could not read, summed as though every thread in
-    it counted, and reported as a number nobody can read back. A journey
-    that excludes a role no thread carries is refused here — the check is
-    more load-bearing now that a missing role is a missing process rather
-    than a missing symbol, and a gate that silently widened its count to
-    cover one would be back to summing a whole tree.
+    The failure this guards: a profile the classifier could not read, summed
+    as though every thread in it counted, and reported as a number nobody can
+    read back. A journey that excludes a role no thread carries is refused
+    here. A missing role is a missing process, not a missing symbol, so this
+    check carries the weight: a gate that silently widened its count to cover
+    one would sum a whole tree.
     """
     del tmp
     threads = _journey_contract.threads()
@@ -377,7 +372,7 @@ def test_several_threads_of_one_excluded_role_are_all_dropped(tmp):
 
 
 def test_one_thread_in_a_role_nobody_excludes_just_counts(tmp):
-    """The plain case the widened rule has to leave exactly as it was."""
+    """The plain case the exclusion rule has to leave untouched."""
     del tmp
     threads = _journey_contract.threads()
     rows = [row(1, 430_000_000, HARNESS),
@@ -487,7 +482,7 @@ def test_every_journey_says_which_roles_it_stops_counting(tmp):
     can return, because a name that is not a role excludes nothing while
     looking like it excludes something. And no journey may exclude `main` or
     `request`: both are the journey's own process, and an exclusion that
-    could reach either is issue 1466.
+    could reach either would drop the journey's own work.
     """
     del tmp
     threads = _journey_contract.threads()
@@ -562,10 +557,10 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
     """The committed `excluded_threads` IS the live table, by NAME.
 
     Both arms of every recorded-vs-measured comparison are built from
-    `excluded_for`, so the committed map and the table were never compared
-    against each other by name: putting `uvicorn-serve` back into
-    `net-capture` changed what the gate drops and only a baseline literal
-    that happens to move noticed.
+    `excluded_for`, so those comparisons never set the committed map against
+    the table by name: putting `uvicorn-serve` back into `net-capture` would
+    change what the gate drops, and only a baseline literal that happens to
+    move would notice.
     """
     del tmp
     threads = _journey_contract.threads()

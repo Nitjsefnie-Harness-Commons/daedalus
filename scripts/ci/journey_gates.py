@@ -141,7 +141,7 @@ def tightened(counts, document, names):
     unchanged code, and recording it moves the band down by exactly the
     spread: the next unchanged run measures the count this one found the
     old record already holding and is over the budget the tighten left
-    behind (issue 1484). Past the band the new ceiling still sits below the
+    behind. Past the band the new ceiling still sits below the
     count the previous run measured, so that run passes against it, which
     is the whole property a tighten has to keep.
 
@@ -268,8 +268,7 @@ def _report_state(document, names, counter, report):
     Both reach here, and the run's exit then comes from the counts rather
     than from here: a null counter leaves nothing measured, and a null
     tolerance leaves a budget equal to the recorded count, so a movement in
-    either direction shows in the counts instead. Both were driven on the
-    CLI, which is what refuted the claim this replaces.
+    either direction shows in the counts instead.
     """
     if counter is None:
         print('the journey budget names no counter yet, so no count is '

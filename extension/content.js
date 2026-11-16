@@ -131,8 +131,8 @@ window.addEventListener('message', (e) => {
       } else {
         // resp.finalUrl is where the body came from after any redirects;
         // msg.url is only where the caller asked. Falling back to the request
-        // URL keeps a background that reports neither working, but it is a
-        // fallback rather than the answer it used to be.
+        // URL keeps a background that reports neither working, but it is only
+        // a fallback.
         window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'xmlhttpRequest', event: 'load',
           status: resp.status, statusText: resp.statusText || '',
           data: resp.data, headers: resp.headers,
@@ -145,10 +145,9 @@ window.addEventListener('message', (e) => {
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'openInTab' }, '*');
     });
   } else if (msg.handler === 'setClipboard') {
-    // Acknowledged only once the write has actually settled. The empty catch
-    // here used to swallow the rejection while the acknowledgement went out
-    // immediately, so a page without user activation -- where Chromium
-    // refuses the write -- was told the clipboard had been set.
+    // Acknowledged only once the write has actually settled, so a page
+    // without user activation, where Chromium refuses the write, is never
+    // told the clipboard had been set.
     navigator.clipboard.writeText(msg.text).then(() => {
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setClipboard' }, '*');
     }, (e) => {
@@ -160,12 +159,12 @@ window.addEventListener('message', (e) => {
     window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'notification' }, '*');
   } else if (msg.handler === 'download') {
     chrome.runtime.sendMessage({ type: 'download', url: msg.url, filename: msg.name }, (resp) => {
-      // Three ways this fails; only one of them used to be noticed. A
+      // Three ways this fails, each of which must be noticed. A
       // sendMessage that never reaches the worker reports through
-      // chrome.runtime.lastError and passes NO response, so `resp` was
-      // undefined, `resp && resp.error` was false, and the page got a load
-      // event for a download that was never started. A response carrying no
-      // downloadId is the same story arriving from the other side.
+      // chrome.runtime.lastError and passes NO response, so `resp` is
+      // undefined, `resp && resp.error` is false, and the page would get a
+      // load event for a download that never started. A response carrying no
+      // downloadId is the same failure arriving from the other side.
       const err = chrome.runtime.lastError && chrome.runtime.lastError.message;
       const failure = err || (resp && resp.error)
         || (!resp && 'no response from background (service worker dead?)')

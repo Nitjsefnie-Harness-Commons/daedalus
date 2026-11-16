@@ -42,9 +42,7 @@ ROOT = _util.ROOT
 # `publish` reach it through a root checkout. A job that checks its trees
 # out into subdirectories reaches the same file as
 # `head/scripts/ci/install_lint_tools.py`, and a constant holding the whole
-# invocation pinned that second spelling, so the correct path turned the
-# control red with a message arguing for the revert — this branch's own
-# lesson arriving for the third time, after the tool set and the door set.
+# invocation would pin that second spelling and turn the correct path red.
 # Matching the path with a substring covers both, because the prefixed form
 # ends with the root-relative one.
 #
@@ -58,15 +56,14 @@ ROOT = _util.ROOT
 #   it and would fail at runtime. A path that does not resolve in the job's
 #   own directory layout is not a step that runs the installer, and this
 #   substring is green on it. That error runs the OTHER way — toward a
-#   green control over a broken job — and it is not hypothetical: this
-#   branch shipped exactly that, when a job named a root-relative script
-#   and checked its trees out into subdirectories, and the control stayed
-#   green through two review rounds on the strength of this
-#   assertion. N1 fixed the instance; nothing in the tree catches the
-#   class, and no spelling of this assertion can, because the information
-#   that is missing is whether the file exists from where the step runs.
-#   The control that would need it is a workflow control resolving each
-#   `run:` path against a checkout layout, which does not exist here.
+#   green control over a broken job — and it is not hypothetical: a job
+#   that names a root-relative script and checks its trees out into
+#   subdirectories is green under this assertion. Nothing in the tree
+#   catches the class, and no spelling of this assertion can, because the
+#   information that is missing is whether the file exists from where the
+#   step runs. The control that would need it is a workflow control
+#   resolving each `run:` path against a checkout layout, which does not
+#   exist here.
 INSTALLER_PATH = 'scripts/ci/install_lint_tools.py'
 INSTALLER_SOURCE = ROOT / INSTALLER_PATH
 # Tools the suites skip on that no job installs, named here with a reason
@@ -191,24 +188,20 @@ def _unjournalled(sources=None):
     """The tools a suite may run without, minus every mechanism that answers.
 
     The property is *a tool the suites can skip on*, so the required set is
-    the skip set itself. The earlier narrowing subtracted the tools the tree
-    treats as present, on the argument that a tool in both is already
-    covered by a control which fails rather than skips — and that argument
-    is false of the code as written, because the derivation could not tell
-    an assert the tree always reaches from one it never does. Two reviews
-    drove a false green through it: a suite skipping on `jq` grew the skip
-    set, `jq` was in the present set because of an assert behind a stub
-    environment that is off on every ordinary run, and the control stayed
-    green with no job installing `jq`. So the subtraction is gone, and
-    what genuinely needs no install is named below with a reason per entry.
+    the skip set itself. Tools the tree treats as present are not subtracted:
+    a tool in both sets is covered by a control that fails rather than skips
+    only if the derivation can tell an assert the tree always reaches from
+    one it never does, and it cannot. A `jq` assert behind a stub
+    environment that is off on every ordinary run puts `jq` in the present
+    set, so subtracting it would leave the control green with no job
+    installing `jq`. What genuinely needs no install is named below with a
+    reason per entry.
 
     This is the RESIDUE — what no mechanism answers at all — and a
     mechanism's own share is a different question, asked by
-    `_mechanism_share`. The two used to be one function returning a union,
-    which leaked the residue into a caller's share and raised `KeyError`
-    on the one input a future tool takes: a suite skipping on a binary no
-    mechanism names put that binary into the declaration control's share,
-    which then looked it up in a table that does not carry it.
+    `_mechanism_share`. Keeping the two apart keeps the residue out of a
+    caller's share, where a binary no mechanism names would be looked up in
+    a table that does not carry it and raise `KeyError`.
 
     The `requires=` channel on `_util.runner` is the other machine-readable
     one, and it is not read here: its only value in the tree is the prose

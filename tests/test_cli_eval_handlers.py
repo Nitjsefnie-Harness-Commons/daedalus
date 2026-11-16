@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Every branch of every handler in daedalus_cli/commands_eval.py.
 
-`do_ping`, `do_title` and `do_url` had no test at all before this file, and
-the rest had untested render arms. Each test here asserts BOTH halves of a
+Each test here asserts BOTH halves of a
 handler: the exact request it put on the wire — method, path, and the body
 field names and values — and the exact output an operator would read,
 compared as one string. The rendered halves differ only in spacing and in
@@ -246,8 +245,9 @@ def test_do_put_refuses_a_file_that_is_not_there(tmp):
 def test_do_put_waits_the_default_fifteen_seconds_and_not_the_zero(tmp):
     """`-t 0` reads as unset, so the deadline is the documented default.
 
-    Handing the zero to the waiter made the deadline now plus nothing, and
-    the CLI reported `Timeout (0s)` for a command the browser then ran.
+    Handing the zero to the waiter would make the deadline now plus
+    nothing, and the CLI would report `Timeout (0s)` for a command the
+    browser then runs.
     """
     path = _source(tmp)
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title',

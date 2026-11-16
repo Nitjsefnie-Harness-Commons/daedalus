@@ -4,9 +4,9 @@
 `coverage combine` skips any parallel data file whose embedded content hash
 it has already seen. Equal hashes do not imply equal data: one hash value was
 observed covering 15 distinct datasets across 145 of this repo's own parallel
-files (issue #266), and `combine` kept one file from each collision and threw
-the rest away. Every combinable file is unioned here instead; nothing is
-skipped by hash.
+files, and `combine` keeps one file from each collision and throws the rest
+away. Every combinable file is unioned here instead; nothing is skipped by
+hash.
 """
 import sys
 

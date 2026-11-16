@@ -243,7 +243,7 @@ def require_undecodable_names(directory):
     survive it. The behaviour is real and the tests are worth keeping — but
     APFS rejects such a name with `Illegal byte sequence` and Windows refuses
     to decode it at all, so on those platforms the fixture cannot be built
-    and the test was reporting the platform's refusal as a bridge failure.
+    and the test would report the platform's refusal as a bridge failure.
 
     Probe once, here, rather than in each test: a caller that gets past this
     is on a filesystem where the scenario under test can actually occur.
@@ -264,11 +264,11 @@ _drawn_ports = set()
 def free_port():
     """A port nothing is listening on, for a test that wants a dead address.
 
-    No fixture draws numbers any more: both the bridge child and the MCP
-    listener bind port 0 and announce the port they actually got, so there is
-    no window between choosing a number and binding it. What is left is the
-    opposite need — the CLI connection-failure test, which wants an address
-    it can be sure nothing answers on, and never binds it at all.
+    No fixture draws numbers: both the bridge child and the MCP listener bind
+    port 0 and announce the port they actually got, so there is no window
+    between choosing a number and binding it. What is left is the opposite
+    need — the CLI connection-failure test, which wants an address it can be
+    sure nothing answers on, and never binds it at all.
 
     Two tests still replace this helper with a squatted port. They are
     guarding the fixtures rather than calling it: if a fixture went back to
@@ -393,8 +393,8 @@ def bridge(tmp, env=None, output=None, proc_out=None, await_mcp=False):
     handling or the queue, none of which a mock would reproduce.
 
     The child binds port 0, so there is no drawn number for a concurrent
-    process to take: the window between choosing a port and binding it no
-    longer exists. A drain thread relays the child's combined output into
+    process to take: the window between choosing a port and binding it does
+    not exist. A drain thread relays the child's combined output into
     `output` when the caller passes a list, keeping the pipe from ever
     filling.
 
@@ -532,9 +532,9 @@ def _report_safely():
 
     A failure detail carries whatever the test was comparing, and on Windows
     the runner's stdout is a legacy code page where `print` raises rather
-    than degrading. One failing assertion whose message held an arrow
-    therefore aborted the whole file with a UnicodeEncodeError, and every
-    test after it never ran — the report was lost along with the tests.
+    than degrading. A failing assertion whose message holds an arrow would
+    otherwise abort the whole file with a UnicodeEncodeError, so every test
+    after it never runs and the report is lost along with the tests.
 
     A runner that cannot say what went wrong is worse than the thing that
     went wrong, so the stream degrades instead: `errors='replace'`

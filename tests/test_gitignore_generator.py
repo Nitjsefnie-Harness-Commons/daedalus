@@ -276,11 +276,12 @@ def test_gitignore_survives_an_undecodable_byte_in_the_repo_path(tmp):
     """A repository path carrying a raw byte must not crash the generator.
 
     argv arrives via surrogateescape, so a byte 0xff in the path becomes
-    U+DCFF in the value the diagnostics print; under
-    PYTHONIOENCODING=utf-8:strict both the success line and the failure
-    lines raised UnicodeEncodeError — the success one AFTER a correct
-    .gitignore had already been written. Run as a subprocess because the
-    strict encoding has to be in force before the interpreter starts.
+    U+DCFF in the value the diagnostics print. Under
+    PYTHONIOENCODING=utf-8:strict the success line and the failure lines
+    must both print without raising UnicodeEncodeError, the success line
+    included, since it follows the write of a correct .gitignore. Run as a
+    subprocess because the strict encoding has to be in force before the
+    interpreter starts.
     """
     _util.require_undecodable_names(tmp)
     repo = os.fsencode(tmp) + b'/\xffrepo'
@@ -310,13 +311,12 @@ def test_gitignore_survives_an_undecodable_byte_in_the_repo_path(tmp):
 def test_gitignore_log_safe_never_raises_and_stays_useful(tmp):
     """The generator's copy of the log safeguard must not itself raise.
 
-    Same finding as the server copy: str(value) and the encode step ran
-    outside any fallback, so a conversion-limited huge int, an exception
-    object with a failing __str__, or a str subclass with a raising encode
-    or a non-string decode turned the diagnostic into the failure. The
-    standalone script runs without the repository root on its import path,
-    so it keeps a behavior-identical copy; this test holds that copy to the
-    shared contract.
+    str(value) and the encode step run inside the fallback, so a
+    conversion-limited huge int, an exception object with a failing __str__,
+    or a str subclass with a raising encode or a non-string decode cannot
+    turn the diagnostic into the failure. The standalone script runs without
+    the repository root on its import path, so it keeps a behavior-identical
+    copy; this test holds that copy to the shared contract.
     """
     del tmp
     generator = _util.load(
@@ -336,7 +336,7 @@ def test_the_shared_log_safe_contract_table_is_complete(tmp):
     Every consumer loops over it and asserts each row, so a table truncated
     to one row leaves all of them green while they verify almost nothing —
     a re-export that returns a slice is exactly the mistake a simplifier
-    makes, and nothing in the tree noticed.
+    makes, and nothing else in the tree would notice.
 
     The universe is derived from the property the table's own docstring
     states, not from a count: it carries three classes of value — pass
@@ -368,8 +368,8 @@ def test_the_shared_log_safe_contract_table_is_complete(tmp):
 
 
 def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
-    """No repo argument used to reach `max()` on an empty generator and raise
-    ValueError instead of telling the caller what the script needs (#215)."""
+    """A call with no repo argument tells the caller what the script needs;
+    it does not reach `max()` on an empty generator and raise ValueError."""
     del tmp
     result = subprocess.run(
         [sys.executable, str(ROOT / 'scripts' / 'gen_gitignore.py')],
@@ -381,18 +381,17 @@ def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
 
 
 def test_gitignore_help_flag_prints_usage_and_exits_zero(tmp):
-    """`--help` and `-h` are flags, not repository paths (#1301).
+    """`--help` and `-h` are flags, not repository paths.
 
-    The script takes the repository as its first positional argument, so
-    `--help` was handed straight to `git -C` and the failure reported was
-    git's, naming a subcommand nobody meant to run. A reader who typed a
+    The script takes the repository as its first positional argument, so a
+    flag must be recognised before it reaches `git -C`, which would report a
+    failure naming a subcommand nobody meant to run. A reader who typed a
     flag gets the usage line and exit 0.
 
     Both spellings are driven as real invocations rather than a call into
     a helper, and both assert the output carries no `FAIL` and no `git
-    ls-files`. That second half is the part that would catch a regression
-    to the behaviour above: the old failure is usage-shaped, so an
-    assertion on "says usage" alone would pass against it.
+    ls-files`. That second half matters: git's own failure is usage-shaped,
+    so an assertion on "says usage" alone would pass against it.
     """
     del tmp
     for flag in ('--help', '-h'):
@@ -501,7 +500,7 @@ def test_the_derivation_launches_nothing_and_ignores_its_input_order(tmp):
 def test_main_writes_exactly_what_the_shared_derivation_returns(tmp):
     """`main` must ship the shared derivation's text, not a second copy.
 
-    Two callers now need the file this generator writes, and a second copy
+    Two callers need the file this generator writes, and a second copy
     of the rendering is one nobody keeps correct. Swapping `derive` for a
     stub is what makes the hand-off observable: the stub names one path,
     and the file `main` leaves behind has to be that stub's text.

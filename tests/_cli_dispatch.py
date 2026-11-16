@@ -168,8 +168,8 @@ class RecordingExtCmd:
         self.target_tab = target_tab
         self.token_value = token
         self.clock = VirtualTime(clock)
-        # `calls` keeps the (id, type, fields) shape the original recorder
-        # published; the other three are per-shape and new.
+        # `calls` keeps the (id, type, fields) shape existing callers
+        # unpack; the other three are per-shape.
         self.calls = []
         self.api_calls = []
         self.waits = []

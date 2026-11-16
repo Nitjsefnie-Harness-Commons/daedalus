@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Segment storage locks: one job's stripe, and never two jobs'.
 
-The segment relay used to hold one module-level lock across every job, so
-independent HLS relays serialised behind each other's disk writes. The
-invariant that made that lock load-bearing — two segments of the SAME job
-cannot both spend the same remaining bytes — does not need it, because a
-job's files are disjoint from every other job's. They are not entirely
+Two segments of the SAME job cannot both spend the same remaining bytes,
+and that invariant needs only a stripe per job, because a job's files are
+disjoint from every other job's; independent HLS relays therefore do not
+serialise behind each other's disk writes. The files are not entirely
 disjoint: the namespace is flat, so the job named `a` and the job named
 `a.json` own one filesystem entry between them. Both halves are pinned
 here, and neither is pinned with a clock: the injected patch records which
@@ -108,8 +107,7 @@ def _require_holder_holding(gate_dir):
     # `holding-acquired` is written by the ACQUIRE path when a real acquire
     # completes while the holder has announced. `holding` is the holder's own
     # announcement and is on disk whether or not it ever took the lock, so a
-    # premise read from it would pass a run that held nothing — which is how
-    # a neutered fixture used to turn this control green. A premise the
+    # premise read from it would pass a run that held nothing. A premise the
     # control did not earn must skip the run, not grade it.
     if not (gate_dir / 'holding-acquired').exists():
         _util.skip(
@@ -285,13 +283,13 @@ def test_a_held_job_stripe_blocks_only_that_job(tmp):
             holder, unrelated_ids, _lock_calls(gate_dir))
         # Recorded, not sampled: the held job acquiring a lock while its own
         # stripe is held IS the claim that it was blocked, and it is a fact
-        # about an acquire rather than a moment's reading of a thread. The
-        # liveness sample that used to stand here went green whenever the
-        # write was merely slow, and it went RED whenever the hold was
-        # neutered even though the control's claim — an unrelated job's write
-        # completes — was satisfied. A fixture that announces it is holding
-        # without holding is not a block, and the seam now counts real holds
-        # rather than reading that announcement.
+        # about an acquire rather than a moment's reading of a thread. A
+        # liveness sample here would go green whenever the write was merely
+        # slow, and RED whenever the hold was neutered even though the
+        # control's claim — an unrelated job's write completes — was
+        # satisfied. A fixture that announces it is holding without holding
+        # is not a block, so the seam counts real holds rather than reading
+        # that announcement.
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         held_thread.join(timeout=30)
         assert not held_thread.is_alive(), held_box
@@ -391,8 +389,8 @@ def _overlap_report(gate_dir, job=None):
     `asked == job` check, which is exact where this is a hash. The
     held-stripe control is carried by the unrelated write completing and by
     its lock-id witness; it has no settlement assertion at all, and reading
-    this marker as though it shared the other control's coverage is the
-    mistake I-1 named. The marker's own value is that it says WHICH job took
+    this marker as though it shared the other control's coverage is a
+    mistake. The marker's own value is that it says WHICH job took
     a lock during a hold, which none of those assertions says.
 
     Read it only once every request has finished. A selection trace cannot
@@ -497,9 +495,8 @@ def test_two_writes_to_one_job_stay_atomic_inside_the_critical_section(tmp):
 def test_every_site_takes_one_stripe_for_a_job(tmp):
     """The mint, the lookup and the write serialise on one job's stripe.
 
-    Four sites used to share one module-level lock and so agreed by
-    construction. Keyed, they agree only while each asks for the same job's
-    lock, and the load-bearing pair cannot drift at all now that the
+    Keyed, the four sites agree only while each asks for the same job's
+    lock, and the load-bearing pair cannot drift at all because the
     admission carries what the write path holds. The holder parks inside one
     job's stripe; a site that asked for a different one would acquire it
     while the holder is provably inside this one, and the injected seam
@@ -577,8 +574,8 @@ def test_every_site_takes_one_stripe_for_a_job(tmp):
         # and no stripe count between the record and the claim — so a site
         # that decorates the name to reach a stripe of its own is caught here
         # by the name it asked for rather than by a coincidence of hashing.
-        # The old form compared lock ids for the exact job name, which a
-        # decorated name simply never appears under.
+        # Comparing lock ids for the exact job name alone would miss it: a
+        # decorated name simply never appears under that name.
         for ident, asked, outcome in _settlements(gate_dir):
             assert asked == job, (
                 f'thread {ident} was handed {asked!r} for job {job!r} '

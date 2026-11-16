@@ -44,8 +44,8 @@ permissions:
 
 # Per-commit groups on push and workflow_dispatch: a landed main SHA's
 # verdict must complete, so neither a newer push nor a re-run of an older
-# SHA may cancel it (issue #1547) — under github.ref every main push shared
-# one group and the newer run cancelled the incumbent. pull_request events
+# SHA may cancel it — under github.ref every main push would share one
+# group and the newer run would cancel the incumbent. pull_request events
 # carry pull_request.number, so a PR keeps one group per number and a
 # superseded head push is still cancelled. Push and workflow_dispatch of
 # the same commit share that commit's group, and the later run supersedes
@@ -114,11 +114,11 @@ jobs:
           python-version: "3.15"
 
       # The pip cache is restored on every event and saved only from a push
-      # of main, as in the matrix and coverage jobs — `cache: pip` saves in
+      # of main, as in the matrix and coverage jobs. `cache: pip` saves in
       # a post-job step running after the pull-request checkout, the
-      # poisoning shape those jobs dropped (issues #166, #185). The key
-      # shares the matrix jobs' 3.15 namespace: the cache holds fetched
-      # packages, so what one job warmed any of them reuses.
+      # poisoning shape those jobs avoid. The key shares the matrix jobs' 3.15
+      # namespace: the cache holds fetched packages, so what one job warmed
+      # any of them reuses.
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -289,10 +289,9 @@ jobs:
             ~\AppData\Local\pip\Cache
           key: pip-${{ runner.os }}-3.15-${{ hashFiles('requirements-*.txt') }}
 
-  # The JavaScript half of the tree had no static analysis at all:
-  # pycodestyle and pylint run over *.py and pyright checks types, while the
-  # extension service worker, the page relay and the dashboard modules were
-  # checked only where a bespoke test happened to model them.
+  # pycodestyle and pylint run over *.py and pyright checks types; this job
+  # gives the extension service worker, the page relay and the dashboard
+  # modules static analysis of their own.
   #
   # The value here is no-undef and no-unused-vars — a typo'd identifier in
   # the service worker should be found by CI rather than by a user whose
@@ -304,7 +303,7 @@ jobs:
   # and installed with --no-save, so the repository does not read as having
   # adopted a build step it does not have. The job also checks every pin
   # against its own registry: an out-of-date major fails the job, so no pin
-  # can silently rot the way an unnoticed eslint@8 did.
+  # can silently rot.
   #
   # examples/ is NOT linted, and that is a real gap rather than an oversight.
   # Those files are snippets the bridge wraps in an async function before
@@ -621,8 +620,7 @@ jobs:
       # main. Restore and save are separate steps so the event gate can sit
       # between them: `cache: pip` saves in a post-job step that runs after the
       # job has checked out and executed the code under test, so a pull-request
-      # run could write what a later main run restores — the shape issue #166
-      # recorded.
+      # run could write what a later main run restores.
       - name: Restore the pip cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -661,11 +659,9 @@ jobs:
       # trigger whose checkout this repository produced. The save's position
       # does not change WHAT the cache holds, only who writes one: a run
       # cancelled during the suites never reaches this step. The installer
-      # above runs pip, so the comment this replaced — that nothing between
-      # the install and here runs pip — is no longer true, and the claim now
-      # made in its place is the one that matters: that pip call installs
-      # the same wheel this job's own install already put in the restored
-      # key, so the save publishes nothing the restore did not already hold.
+      # above runs pip, and that pip call installs the same wheel this job's
+      # own install already put in the restored key, so the save publishes
+      # nothing the restore did not already hold.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -729,9 +725,9 @@ jobs:
 
       # Uploaded only when a smoke test above did NOT pass. This job exists to
       # prove both published formats install and expose their entry point, and
-      # it proved that the moment the steps before this one succeeded —
-      # keeping the artifacts after that retained a distributable wheel and
-      # sdist per push, per pull request and per manual run, 90 days each.
+      # it has proved that once the steps before this one succeed; keeping the
+      # artifacts after that would retain a distributable wheel and sdist per
+      # push, per pull request and per manual run, 90 days each.
       # Durable copies belong to releases, which release.yml publishes with
       # checksums.
       #
@@ -755,7 +751,7 @@ jobs:
       - eslint
       - actionlint
     # Ubuntu and windows only: macOS runs no covered line ubuntu misses
-    # (win32-vs-POSIX), and its queue must not gate the combine (#1705).
+    # (win32-vs-POSIX), and its queue must not gate the combine.
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true' }}
     strategy:
@@ -1256,11 +1252,10 @@ jobs:
   journey-budget:
     runs-on: ubuntu-latest
     # Headroom over a measured run, not a figure derived from one. All
-    # seven journeys finished this job in 9m06s (run 36968752929); the
-    # three-journey run on main took 5m13s against the 45 minutes it was
-    # allowed. Seven journeys therefore cost less than twice what three
-    # cost, so 60 is several times what the measured run needs — room for
-    # a slower runner, which is what a ceiling is for.
+    # seven journeys finished this job in 9m06s (run 36968752929), and a
+    # three-journey run took 5m13s, so seven journeys cost less than twice
+    # what three cost and 60 is several times what the measured run needs —
+    # room for a slower runner, which is what a ceiling is for.
     timeout-minutes: 60
     # The branch policy refuses other refs; an empty name binds no
     # environment, so pull requests can still run these checks.
@@ -1271,7 +1266,7 @@ jobs:
       # these counts are deterministic, so a discarded warm-up round buys
       # nothing. A higher value exists to derive a tolerance from a spread,
       # once, and is not what every run should pay for — three is how each
-      # baseline's tolerance has been measured, on the per-journey number.
+      # baseline's tolerance is measured, on the per-journey number.
       DAEDALUS_JOURNEY_ROUNDS: "1"
 
     steps:
@@ -1400,8 +1395,8 @@ jobs:
 
       # A re-baseline raises a recorded count, so it stays a reviewed commit.
       # What the refusal below prints is one command over THIS run's own
-      # measurement, which is what travels with the run: a pasted block was
-      # a reader copying numbers out of a table, and the copy is what went
+      # measurement, which is what travels with the run: a pasted block is a
+      # reader copying numbers out of a table, and the copy is what goes
       # wrong.
       - name: Upload the measured counts
         if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
@@ -1593,7 +1588,7 @@ jobs:
       # It also requires the `secrets` workflow's gitleaks job on this head
       # SHA. That job is in no `needs:` set and no required context of this
       # repository, so `needs:` cannot reach it and a pull request whose
-      # scan is red would otherwise merge green (issue 1491).
+      # scan is red would otherwise merge green.
       #
       # No event skips it, workflow_dispatch included: a dispatch publishes
       # its check run on the SHA it ran against, and GitHub reads required

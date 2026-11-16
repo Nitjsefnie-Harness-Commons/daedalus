@@ -4,8 +4,8 @@ The dashboard behaviour suite runs shipped JavaScript modules in short Node
 processes. This helper keeps process setup and captured failures consistent.
 
 The shared DOM scaffold the section harnesses mount shipped modules into lives
-in `_dashnode_dom` and is re-exported here as `DOM`, so every consumer that
-wrote `_dashnode.DOM` keeps working and the scaffold has room to grow.
+in `_dashnode_dom` and is re-exported here as `DOM`, so consumers can use
+`_dashnode.DOM` and the scaffold has room to grow.
 
 The JavaScript `bounded` helper races settlement but cannot cancel the losing
 work or any handles that work owns. A caller that recovers from its timeout
@@ -398,8 +398,8 @@ def _format_timeout_attempt(record):
         f'stdout: {record.stdout!r}; stderr: {record.stderr!r}')
 
 
-# A loaded windows-latest leg cold-started several node.exe at once and left
-# one unscheduled past every bound (issue 1030); no wider bound fixes that.
+# Under load, a windows-latest leg can cold-start several node.exe at once and
+# leave one unscheduled past every bound; no wider bound fixes that.
 def _dashboard_gate_path():
     digest = hashlib.sha256(str(ROOT).encode('utf-8')).hexdigest()
     return Path(tempfile.gettempdir()) / f'daedalus-node-{digest}.lock'
@@ -443,10 +443,10 @@ def _dashboard_child_gate():
 def _dashboard_program_file(program: str, *, module: bool):
     """Write the child program to a file and yield the path to run it from.
 
-    `--eval` handed the whole program to node as ONE argv element, so the
-    command line grew with everything the child reads -- the prelude, the
-    timeout constant, and whatever the scenario body carried. Windows caps one
-    command line at 32,767 characters and `CreateProcessW` refuses past it
+    `--eval` hands the whole program to node as ONE argv element, so the
+    command line would grow with everything the child reads -- the prelude,
+    the timeout constant, and whatever the scenario body carries. Windows caps
+    one command line at 32,767 characters and `CreateProcessW` refuses past it
     with `ERROR_FILENAME_EXCED_RANGE`, which Python surfaces as a
     `FileNotFoundError` naming the FILENAME rather than the length, so the
     failure reads like a missing node. A file takes the program off the line

@@ -29,8 +29,8 @@ def _named_step_index(steps, name):
 def test_the_cached_jobs_declare_no_pip_cache_on_setup_python(tmp):
     """`cache: pip` saves in a post-job step that runs after untrusted code.
 
-    That post step is the cache-poisoning shape issue #166 recorded: a
-    pull_request run would write what a later main run restores.
+    That post step is the cache-poisoning shape: a pull_request run would
+    write what a later main run restores.
     """
     del tmp
     workflow = _tests_yml()
@@ -50,8 +50,7 @@ def test_the_cached_jobs_restore_the_pip_cache_before_they_install(tmp):
     A prefix fallback can reuse an older dependency set's fetched packages,
     so the restore must precede the install and carry no `if` gate. The
     action's contract inputs (path, key, restore-keys) are deliberately
-    unread — fleet-rules "Merging and CI" with:-inputs ruling: a legitimate
-    reconfiguration of the cache layout must pass.
+    unread: a legitimate reconfiguration of the cache layout must pass.
     """
     del tmp
     workflow = _tests_yml()

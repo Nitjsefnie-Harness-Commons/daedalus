@@ -282,11 +282,10 @@ def test_the_startup_baseline_is_read_through_the_same_reader(tmp):
     """`startup-only` is measured by the REAL leaf, so its row is a number.
 
     The callgrind leaf answers rows for every name it is given, the startup
-    baseline is measured by that same leaf, and a leaf whose answer was
-    taken raw put a mapping where a count belongs. The crash that reached
-    was unhandled where it landed — `journey_budget` catches no `TypeError`
-    — so `measure` aborted and the gate produced no counts at all, on the
-    one counter this artefact is denominated in.
+    baseline is measured by that same leaf, and a leaf whose answer is taken
+    raw puts a mapping where a count belongs. `journey_budget` catches no
+    `TypeError`, so that mapping aborts `measure` and leaves the gate with no
+    counts at all, on the one counter this artefact is denominated in.
 
     Only the launcher is planted. The leaf, `journey_threads.read`, the
     classification and the whole subtraction are the shipped code.

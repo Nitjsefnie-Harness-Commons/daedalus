@@ -13,8 +13,7 @@ def json_nests_deeper_than(raw, limit):
 
     A count of the bytes rather than a parse: the answer has to be settled
     before json.loads builds anything, and before the interpreter's own
-    recursion limit gets to decide it — which it did, differently per
-    version.
+    recursion limit, which differs per version, gets to decide it.
 
     The opener count comes first, at C speed, and is an upper bound on the
     true depth: every container that opens contributes one opener, and an

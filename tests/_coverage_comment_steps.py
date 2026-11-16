@@ -657,8 +657,7 @@ def assert_privileged_step_allowlist(workflow, expected_steps):
             elif key == 'with':
                 # Only the keys the expectation declares are compared —
                 # the trust-boundary run-id/token. The action's other
-                # contract inputs are the workflow's business
-                # (fleet-rules, "Merging and CI" with:-inputs ruling).
+                # contract inputs are the workflow's business.
                 actual_with = actual.get(key) or {}
                 actual[key] = {k: actual_with.get(k) for k in value}
         if actual == expected:

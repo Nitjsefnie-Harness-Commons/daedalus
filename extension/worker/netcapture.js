@@ -10,9 +10,9 @@ const _netCaptures = {}; // tabId → { requests, maxRequests, claim }
 
 // A capture buffer lives in the service worker and grows to hold headers and
 // response bodies, so its size is a memory budget rather than a preference.
-// `cmd.maxRequests || 1000` accepted anything a caller sent: -1 was kept and
-// evicted the only event on arrival, leaving an empty capture, and 1e9 was
-// kept and buffered everything.
+// The limit is validated rather than taken as sent: -1 would be kept and
+// evict the only event on arrival, leaving an empty capture, and 1e9 would
+// buffer everything.
 const NET_CAPTURE_DEFAULT = 1000;
 const NET_CAPTURE_MAX = 20000;
 

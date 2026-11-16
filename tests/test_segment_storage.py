@@ -78,10 +78,10 @@ def test_legacy_segment_job_migrates_with_existing_usage(tmp):
 def test_a_segment_write_reads_its_totals_instead_of_recounting(tmp):
     """The write path trusts the record, and never counts the directory.
 
-    Admission used to scan the job directory twice and stat every stored
-    segment on every valid POST, so a job approaching its cap made each new
-    segment cost more than the last -- 6.6 requests/s at 5,000 stored against
-    110 on an empty job. The totals now live in the record.
+    Counting means scanning the job directory twice and statting every
+    stored segment on every valid POST, so a job approaching its cap makes
+    each new segment cost more than the last -- 6.6 requests/s at 5,000
+    stored against 110 on an empty job. The totals live in the record.
 
     Pinned without a clock, because a timing assertion decides differently on
     a loaded runner. The record here claims the job is full while its
@@ -182,8 +182,8 @@ def test_segment_index_is_bound_by_minted_job_quota(tmp):
         assert status == 200, (status, minted)
         sig = minted['sig']
 
-        # Exact reviewer reproduction: the request claims total=1 but selects
-        # segment 999999. Only the server-minted record is authoritative.
+        # Exact case: the request claims total=1 but selects segment 999999.
+        # Only the server-minted record is authoritative.
         status, body = post_segment(base, job, sig, '999999', total='1')
         assert status == 400, (status, body)
         assert json.loads(body)['error'] == 'seg out of range', body
@@ -323,10 +323,10 @@ def test_segment_write_failure_removes_temp_and_answers(tmp):
 def test_a_stale_temp_never_enters_the_accounting_and_is_swept_on_resume(tmp):
     """A crashed write's temp costs the job nothing, and the mint clears it.
 
-    Sweeping it cost a full directory scan on every admitted segment, which is
-    most of what made a large job slow. The guarantee that mattered was never
-    the sweep's timing: it is that a temp outside the finalized .ts set is not
-    charged against the job's byte budget. That still holds, and the
+    Sweeping it on the write path would cost a full directory scan on every
+    admitted segment, which is most of what makes a large job slow. The
+    guarantee is not the sweep's timing: it is that a temp outside the
+    finalized .ts set is not charged against the job's byte budget, and the
     documented resume -- a re-mint by the owner -- is where the file goes.
     """
     env = {
@@ -344,7 +344,7 @@ def test_a_stale_temp_never_enters_the_accounting_and_is_swept_on_resume(tmp):
         stale.write_bytes(b'stale bytes outside finalized accounting')
 
         # 39 stale bytes against a 3-byte job budget: admitted anyway, which
-        # is the accounting guarantee. The write path no longer scans, so the
+        # is the accounting guarantee. The write path does not scan, so the
         # temp is still there afterwards.
         status, body = post_segment(base, job, sig, '0', payload=b'abc')
         assert status == 200, (status, body)
@@ -428,13 +428,12 @@ def test_segment_storage_never_touches_the_old_tmp_root(tmp):
 
 def test_a_failing_accounting_write_still_leaves_the_quota_enforced(tmp):
     """The job mints fine, but every write_usage after that fails to land,
-    and the count quota still has to hold (#203).
+    and the count quota still has to hold.
 
-    Before this was fixed, the record kept reporting whatever it recorded
-    at mint, zero, forever, and every request after the first read that
-    same zero and got waved through. Two segments land, a third should not,
-    and the only way it still gets refused is if something other than the
-    record notices two are already on disk.
+    The record keeps reporting whatever it recorded at mint, zero, so every
+    request would read that same zero and be waved through. Two segments
+    land, a third should not, and the only way it still gets refused is if
+    something other than the record notices two are already on disk.
     """
     fault_dir = Path(tmp) / 'fault-injection'
     fault_dir.mkdir()
@@ -474,9 +473,9 @@ def test_a_failing_accounting_write_still_leaves_the_quota_enforced(tmp):
 
 
 def test_a_write_that_cannot_mark_itself_dirty_is_refused_not_published(tmp):
-    """If the mark itself cannot be written, the segment must not land either
-    (#203): an unmarked write that then also fails to update the record would
-    leave neither a trace nor a correct total.
+    """If the mark itself cannot be written, the segment must not land either:
+    an unmarked write that then also fails to update the record would leave
+    neither a trace nor a correct total.
     """
     fault_dir = Path(tmp) / 'fault-injection'
     fault_dir.mkdir()
@@ -506,7 +505,7 @@ def test_a_write_that_cannot_mark_itself_dirty_is_refused_not_published(tmp):
 def test_a_recount_reconciles_and_clears_the_mark_before_a_rejection(tmp):
     """A write that lands under a stale mark reconciles the record from the
     mark's own scan and clears it before this request's own quota is checked
-    against that scan (#203) — a rejection must not be the one outcome that
+    against that scan — a rejection must not be the one outcome that
     leaves the next request paying for the same full scan again.
     """
     fault_dir = Path(tmp) / 'fault-injection'

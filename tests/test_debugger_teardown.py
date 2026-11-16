@@ -95,7 +95,7 @@ def test_a_closed_tab_is_detached_once_and_forgotten(tmp):
 
 
 def test_a_forgotten_claim_does_not_stop_a_newer_one_from_attaching(tmp):
-    """I-1: a stale release must not detach a NEWER claim's attachment.
+    """A stale release must not detach a NEWER claim's attachment.
 
     A transient claim is live, Chrome detaches us for its own reasons — the
     entry goes with it — and a second claim attaches the now-free tab. The
@@ -178,15 +178,14 @@ def test_a_second_release_on_one_handle_detaches_once(tmp):
 
 def test_a_refused_detach_on_a_closed_capturing_tab_is_survived_and_traced(
         tmp):
-    """#1161, in the issue's own shape: a capturing tab is closed.
+    """A capturing tab is closed.
 
     A tab running a capture is the one the extension really attaches a
     debugger for, so tab close is where a refused `chrome.debugger.detach`
     happens. The worker is a Node process and Node ends a process on an
     unhandled rejection, so a detach site that lets its own rejection escape
     does not fail one command — it takes the extension's worker, and every
-    other tab's capture with it. That was the base's `netcapture.js`, whose
-    detach was the one of three not awaited.
+    other tab's capture with it.
 
     Two things must hold, and the control states both: the worker is still
     alive, and the record is released. A caught refusal that leaves no trace
@@ -226,7 +225,7 @@ def test_a_refused_detach_on_a_closed_capturing_tab_is_survived_and_traced(
 
 
 def test_a_refused_detach_on_a_transient_release_is_survived_and_traced(tmp):
-    """#1161 on the RELEASE detach site, which settles for a joining claim.
+    """The RELEASE detach site, which settles for a joining claim.
 
     One of two controls, one per detach site, and not to be merged: the
     capturing-tab control above drives `cdpForgetAttachment`, this one drives

@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Which function inside a thread paid the cost a kept count recorded.
 
-Issue 1530 records collapsed rounds: a kept `uvicorn-serve` request thread
-counts about a tenth of its neighbouring rounds, and the missing
-instructions are counted by no thread at all. The per-thread rows
-localise the thread; nothing names the function inside it. These rows
-break every accepted slot into its declared functions' SELF instruction
-totals, so a collapsed round can be diffed against a neighbouring round
-function by function, which is the follow-up both issue 1530's Suggested
-Fix and PR 1523 name.
+A kept `uvicorn-serve` request thread can count about a tenth of its
+neighbouring rounds, with the missing instructions counted by no thread at
+all. The per-thread rows localise the thread; nothing names the function
+inside it. These rows break every accepted slot into its declared
+functions' SELF instruction totals, so a collapsed round can be diffed
+against a neighbouring round function by function.
 
 It is INSTRUMENTATION and nothing else. The rows are assembled in the
 parent, after valgrind has exited, from the files it left on disk:

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """A version whose value is the empty string still binds, and still competes.
 
-Every site in scripts/check_versions.py quantified its value class
-one-or-more, so a zero-length value produced no second match at all: a
-duplicate carrying '' came back consistent, --print handed out the first
-value, and --set rewrote past it (#324). These tests drive the checker
+A site in scripts/check_versions.py that quantified its value class
+one-or-more would give a zero-length value no second match at all: a
+duplicate carrying '' would come back consistent, --print would hand out the
+first value, and --set would rewrite past it. These tests drive the checker
 against trees that spell a version as nothing, and pin the two gates that
 refuse them.
 """
@@ -25,9 +25,8 @@ from _version_contract import (  # noqa: E402
 def _duplicate_the_status_line_version(copy_root, second_value='9.9.9'):
     """Add a second dashboard status-line version span in the COPY.
 
-    `second_value=''` is the reproduction from #324: a span whose value is
-    the empty string, which the site's one-or-more value class turned into
-    no second match at all.
+    `second_value=''` adds a span whose value is the empty string, which a
+    one-or-more value class would turn into no second match at all.
     """
     dashboard = copy_root / 'dashboard' / 'index.html'
     text = dashboard.read_text(encoding='utf-8')
@@ -82,7 +81,7 @@ def test_check_versions_refuses_an_empty_version_duplicate(tmp):
 
 def test_check_versions_print_refuses_an_empty_value_duplicate(tmp):
     """--print must not hand out a value while a second, empty assignment
-    competes with the first, so stdout stays empty (#324)."""
+    competes with the first, so stdout stays empty."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     _path, _desc, _pattern = checker.SITES[2]
@@ -97,7 +96,7 @@ def test_check_versions_print_refuses_an_empty_value_duplicate(tmp):
 
 def test_check_versions_set_refuses_an_empty_value_duplicate(tmp):
     """--set must refuse a tree an empty duplicate has made ambiguous, and
-    must not rewrite the file holding it (#324). Both argparse spellings of
+    must not rewrite the file holding it. Both argparse spellings of
     the flag take the same refusal: the separated token and `--set=<value>`."""
     copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)

@@ -33,10 +33,10 @@ def debug_timing():
 def env_int(name, default, minimum, maximum=None):
     """Read one integer setting and stop startup with a specific error.
 
-    Bare int() used to let a malformed value reach the caller as an import-time
-    ValueError traceback, and let a negative body size be accepted, which made
-    every non-negative Content-Length exceed the configured maximum and
-    refused every request the front end received.
+    A malformed value is reported by name at startup rather than as an
+    import-time ValueError traceback, and a negative body size is refused: it
+    would make every non-negative Content-Length exceed the configured maximum
+    and refuse every request the front end receives.
     """
     raw = os.environ.get(name, str(default))
     requirement = (

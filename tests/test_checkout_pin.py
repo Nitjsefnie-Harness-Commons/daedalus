@@ -159,9 +159,9 @@ def test_checkout_pin_checks_contexts_after_a_github_access(tmp):
     """A leading GitHub access cannot exempt later dotted accesses.
 
     Every checkout in the shipped workflows spells its `ref:` as
-    `${{ github.sha }}`, so there is no longer a real expression carrying a
-    second operand to mutate. The shapes are carried here instead, one
-    synthetic workflow per shape rather than an edit of a shipped file.
+    `${{ github.sha }}`, so no real expression carries a second operand to
+    mutate. The shapes are carried here instead, one synthetic workflow per
+    shape rather than an edit of a shipped file.
     """
     del tmp
 
@@ -380,14 +380,13 @@ def test_checkout_refs_refuses_a_duplicate_jobs_behind_a_quoted_key(tmp):
 def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     """No checkout's `ref:` may come from a name that reads like a head.
 
-    CodeQL's untrusted-checkout query (code-scanning alert #82) reads an
-    actions/checkout step as pulling a pull request's untrusted head when
-    its `ref:` comes from a `steps.*` output whose name contains `head`,
-    `branch`, `ref`, `sha` or `commit`. A checkout that pulls the pull
-    request's merge base or a release tag is fetching trusted code, so the
-    output carrying that ref is named `point`; naming it `ref` was what
-    drew the alert. This pins the name class, so a rename back goes red
-    here rather than in the next default-branch analysis.
+    CodeQL's untrusted-checkout query reads an actions/checkout step as pulling
+    a pull request's untrusted head when its `ref:` comes from a `steps.*`
+    output whose name contains `head`, `branch`, `ref`, `sha` or `commit`. A
+    checkout that pulls the pull request's merge base or a release tag is
+    fetching trusted code, so the output carrying that ref is named `point`.
+    This pins the name class, so a rename back goes red here rather than in
+    the next default-branch analysis.
 
     The pin is a conservative superset of the analyser heuristic's checked
     identifier-name class for non-`github` dotted expressions: every segment
@@ -396,7 +395,8 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     `vars` is intentionally over-approximated because CodeQL does not model
     it. The query's regexpMatch is case-sensitive, so `BASE_REF` would evade
     the analyser itself; the check tests each name as written and lowercased
-    because a human-readable spelling stays one rename away from the alert.
+    because a human-readable spelling stays one rename away from tripping the
+    analyser.
     """
     workflows = sorted((ROOT / '.github' / 'workflows').glob('*.yml'))
     workflows += sorted((ROOT / '.github' / 'workflows').glob('*.yaml'))

@@ -84,9 +84,8 @@ def host_tool_name(name):
     the platform it did not run on. `shutil.which` resolves a command plus
     a PATHEXT extension on Windows and only the bare name elsewhere, so a
     fixture written as `actionlint` proves nothing on nt — and one written
-    as `actionlint.exe` proves nothing on posix. Every review round on this
-    branch has found a fresh copy of that mistake, so the naming lives here
-    and the fixtures ask.
+    as `actionlint.exe` proves nothing on posix. The naming lives here, and
+    the fixtures ask.
     """
     return f'{name}.exe' if os.name == 'nt' else name
 
@@ -99,8 +98,7 @@ def planted_job():
     precisely what the platform-scoped decision trades away, and the POSIX
     legs keep every shellcheck finding. The test asserts which kind it
     planted rather than skipping: a door that could not find a defect would
-    be a silent pass, and a skip is the exact failure this branch exists to
-    close.
+    be a silent pass, and a skip hides exactly that.
     """
     return _PLANTED_EXPRESSION_JOB if os.name == 'nt' else \
         _PLANTED_SHELLCHECK_JOB
@@ -227,10 +225,9 @@ def _planted_workflow_tree(tmp):
 def _facts(overrides):
     """One lint run's facts, defaulted to a run that lints clean.
 
-    `overrides` arrives positionally: a `**`-carrying call was a bounded
-    launch under the retired launch audit, whatever it called.
+    `overrides` arrives positionally.
     The installed version defaults to the PIN, so raising it needs no edit
-    here and no fixture carries a version this branch wrote down.
+    here and no fixture hard-codes a version.
     """
     pinned = _pinned_actionlint_version()
     facts = {'binary': _ACTIONLINT, 'shellcheck': _SHELLCHECK,
@@ -457,8 +454,8 @@ def _assert_caller_refuses_unlaunchable(binary):
     A skip would be wrong twice over: the skip arms are for a tool that is
     absent, and a machine with a broken actionlint must not read as a
     machine with no actionlint. So this control fails on a skip as loudly
-    as it fails on a clean verdict — the failure it is closing raised
-    straight through this caller in two review rounds.
+    as it fails on a clean verdict — a launch that cannot start would raise
+    straight through this caller.
     """
     try:
         _lint_workflows(ROOT, actionlint=binary)
@@ -477,9 +474,9 @@ def _assert_unlaunchable_binary_is_a_refusal(tmp):
     """A binary that resolves but cannot start is refused at both depths.
 
     Once against the guard, and once through `_lint_workflows`, which is
-    where a launch site the guard does not cover would raise. Two review
-    rounds found that class by reaching only the guard, so the second
-    depth is the point rather than a duplicate.
+    where a launch site the guard does not cover would raise. Reaching only
+    the guard would miss that class, so the second depth is the point rather
+    than a duplicate.
     """
     found = _unlaunchable_binary(tmp)
     assert _run_actionlint(found, _SHELLCHECK, [found]) is None
@@ -569,8 +566,7 @@ def _lint_workflows(root, actionlint=None):
     `actionlint` is a parameter so a test can hand this a binary that
     resolves and cannot start. `shutil.which` cannot tell that from a
     working one, so without the parameter a launch site this function
-    does not guard is unreachable from any test — which is how the second
-    one in this module stayed unguarded through two review rounds.
+    does not guard is unreachable from any test.
     """
     pinned = _pinned_actionlint_version()
     binary = (shutil.which(_ACTIONLINT) if actionlint is None else actionlint)

@@ -298,7 +298,7 @@ def notify_dashboard(cmd_dir, token, payload):
     except Exception as e:
         # The stream connect line's by-design residual; alert 124 is a
         # false positive, dismissed on the Security tab: this prefix
-        # prints, not the credential (issue 890).
+        # prints, not the credential.
         print(f'[DASH-NOTIFY-FAIL] '
               f'{path_safety.redacted(log_safe(e), token)}', flush=True)
 

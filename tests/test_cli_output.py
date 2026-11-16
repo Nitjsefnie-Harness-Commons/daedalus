@@ -45,13 +45,12 @@ def test_the_printer_survives_a_console_that_cannot_encode_it(tmp):
     """A legacy code page degrades the output; it never aborts the command.
 
     Windows consoles default to one — cp1252 on the hosted runners — where
-    `print` raises UnicodeEncodeError rather than degrading, and the arrow in
-    the result header used to abort `daedalus result` with a traceback and no
-    output at all. Two different things can be unencodable: the markers this
-    module chooses, which fall back to ASCII, and caller data such as a tab
-    title, which cannot be chosen and is replaced character by character.
-    Both are exercised here, because fixing only the markers would leave the
-    command still able to die on somebody's page title.
+    `print` raises UnicodeEncodeError rather than degrading. Two different
+    things can be unencodable: the markers this module chooses, which fall
+    back to ASCII, and caller data such as a tab title, which cannot be
+    chosen and is replaced character by character. Both are exercised here,
+    because fixing only the markers would leave the command still able to
+    die on somebody's page title.
     """
     del tmp
     code = (
@@ -77,11 +76,9 @@ def test_the_entry_point_leaves_an_explicit_encoding_alone(tmp):
 
     The module's own stdio policy treats an explicit PYTHONIOENCODING as an
     operator decision and leaves it alone, and a test already covers that at
-    import. The entry point then reconfigured both streams to UTF-8 a second
-    time, unconditionally, so the policy held for anything that imported the
-    module and not for anyone who actually ran the command — the bytes a
-    caller received were UTF-8 whatever they asked for. Raw bytes, because
-    decoding them here with the encoding under test would pass either way.
+    import. The entry point must honour the same rule for anyone who runs the
+    command, not only for importers of the module. Raw bytes, because decoding
+    them here with the encoding under test would pass either way.
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
         _util.post_json(base + '/sync-tabs', {'token': TOK, 'tabs': [

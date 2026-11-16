@@ -5,9 +5,8 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 The source scan in tests/test_dashboard_accessibility.py proves each
 control is built inside a `field()` call; it cannot prove `field()` writes
 a `for` that resolves. The harness proving the second half, and the check
-reading its output, both lived in that suite — which two sibling suites
-then imported whole to reach one name. They live here now, so an importing
-suite runs the mechanism without executing another suite's body.
+reading its output, live here, so an importing suite runs the mechanism
+without executing another suite's body.
 """
 import json
 

@@ -12,12 +12,11 @@ unavailable rather than aborting the run. `facts()` settles which one this
 machine allows BY MEASUREMENT — `perf` on PATH is not `perf` permitted to
 count — so the choice of counter is never an assumption.
 
-There is deliberately NO CPU-time counter. `time.process_time` was one, and
-it is gone because it fails the property the ratchet exists for twice over:
-it cannot see the bridge, which is a child process, and process CPU time
-still varies with the runner's CPU model, so it is not a quantity load
-cannot perturb either. A count that moves when the machine changes is not a
-baseline.
+There is deliberately NO CPU-time counter. `time.process_time` fails the
+property the ratchet exists for twice over: it cannot see the bridge, which
+is a child process, and process CPU time still varies with the runner's CPU
+model, so it is not a quantity load cannot perturb either. A count that moves
+when the machine changes is not a baseline.
 """
 import json
 import os
@@ -328,9 +327,8 @@ def _callgrind(name, root, workdir):
 
 
 # How a counter's own measurement is read is the classifier's question, not
-# this module's, so `kept_for` lives there and is bound here under its old
-# name for the callers below and for the suites that reach it through this
-# module.
+# this module's, so `kept_for` lives there and is bound here under the name
+# the callers below and the suites that reach it through this module use.
 kept_for = journey_threads.kept_for
 
 

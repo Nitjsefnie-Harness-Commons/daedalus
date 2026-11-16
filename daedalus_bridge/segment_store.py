@@ -84,8 +84,8 @@ def _folded(name):
 
     ONE fold, and both halves of the namespace derive from it — the chain
     root the lock key is built from, and the shape the mint refuses on. A
-    second normalisation beside the first rebuilds #1167, which is what a
-    case-sensitive reservation beside a folded key is: the refused
+    second normalisation beside the first would reopen the collision a
+    case-sensitive reservation beside a folded key allows: the refused
     `.a.json.dirty` and the accepted `.a.json.DIRTY` are one directory on a
     case-insensitive filesystem, so the accepted spelling parks a directory
     exactly where `mark_dirty` has to write and every later write for the
@@ -187,12 +187,11 @@ def seg_lock_for(job):
 
     ONE authority: this is the only function that turns a job name into a
     lock, and every caller passes the job name it was given, unchanged.
-    Four sites used to share one module-level lock and so agreed by
-    construction; keyed, they agree only as long as each one calls this
-    with the same name, and an edit that passes a decorated name is a
-    concurrency change wearing a rename's clothes. `admit_segment` and
-    `store_segment` no longer even compute it independently — the admission
-    carries the lock, so the load-bearing pair cannot drift apart.
+    Keyed by name, the sites agree only while each one calls this with the
+    same name, so an edit that passes a decorated name is a concurrency
+    change wearing a rename's clothes. `admit_segment` and `store_segment`
+    take the lock from the admission, which carries it, so the load-bearing
+    pair cannot drift apart.
 
     Keyed on the job's chain root, so the `a` / `a.json` pair takes one
     lock and two unrelated jobs generally do not. Every caller takes this

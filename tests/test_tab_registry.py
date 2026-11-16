@@ -104,11 +104,11 @@ def test_replace_answers_the_count_of_the_list_it_wrote(tmp):
     """The count a /sync-tabs caller is answered with, and the count its
     tabs-synced event carries, are the size of the list that caller sent.
 
-    The count was read from the shared registry after the lock had been
-    released, so a concurrent sync of the same token landing in that
-    window was counted for this caller instead. The lock double below
-    performs that concurrent sync synchronously on first release, so the
-    window is driven deterministically and single-threaded.
+    A count read from the shared registry after the lock is released would
+    count a concurrent sync of the same token landing in that window for
+    this caller instead. The lock double below performs that concurrent
+    sync synchronously on first release, so the window is driven
+    deterministically and single-threaded.
     """
     reg = _load('fixture_tab_registry_replace_count')
 

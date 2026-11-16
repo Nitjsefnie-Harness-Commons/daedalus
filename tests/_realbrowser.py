@@ -138,10 +138,10 @@ def _raise_start_failure(label, executable, why):
             ) from minimal_failure
         except subprocess.TimeoutExpired as minimal_failure:
             # BEFORE the `SubprocessError` arm, which this one shadows:
-            # `TimeoutExpired` IS a `SubprocessError`, and a message saying
-            # the cause is undetermined when it is a `TimeoutExpired` with a
-            # known deadline is the defect this branch exists to remove. The
-            # detector's own failure carries the child and its output.
+            # `TimeoutExpired` IS a `SubprocessError`, and a `TimeoutExpired`
+            # with a known deadline is reported as that deadline, not as an
+            # undetermined cause. The detector's own failure carries the child
+            # and its output.
             raise node_bound_expiry(
                 minimal_failure, MINIMAL_SPAWN_DEADLINE_S,
                 f' while diagnosing {label}: {executable}') from why
@@ -463,10 +463,10 @@ def _configured_fixture(node, bridge_url, token, worker_target,
     # listener. Awaiting loadConfig() FIRST settles any in-flight boot
     # generation before the write, so nothing reassigns `config` from a stale
     # pre-write snapshot afterwards; the write then changes the settled values
-    # and its onChanged is the last writer. The other order let a boot read
-    # slower than this write clobber `config`, after which the serverUrl never
-    # recovered (storage already held the target, so no onChanged re-fired for
-    # it) and the verdict stayed false for the whole budget.
+    # and its onChanged is the last writer. The other order would let a boot
+    # read slower than this write clobber `config`, after which the serverUrl
+    # never recovers (storage already holds the target, so no onChanged
+    # re-fires for it) and the verdict stays false for the whole budget.
     configure = (
         '(async () => { await loadConfig(); '
         + 'await chrome.storage.local.set(' + storage

@@ -78,7 +78,7 @@ export function mount(container, bus) {
     // still loading, none registered, an error, or the chosen tab gone and
     // reset by the controller — and the bridge reads an empty tab as "no
     // tab named", which the extension runs in whatever tab is active. RUN
-    // after the target closed used to run the code on an unintended tab;
+    // after the target closed would run the code on an unintended tab, so
     // only the button that says so sends a command with no tab.
     if (!activeTab && !sel.value) {
       metaEl.textContent = 'no target tab selected — choose one, or use "run in active tab"';
