@@ -64,6 +64,14 @@ packages = ["daedalus_cli"]
 # the extension's version so the wheel cannot drift from the wire format.
 version = { attr = "daedalus_cli.__version__" }
 
+[tool.pytest.ini_options]
+# No paths in addopts: test-ratchet cuts addopts paths down to its shard.
+# Plain asserts keep operand values, such as whole environments, out of logs.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_"]
+addopts = "--assert=plain"
+
 [tool.coverage.run]
 # parallel, because every suite is measured in its own subprocess and then
 # combined — the same shape run_tests.py executes. Measuring one merged
