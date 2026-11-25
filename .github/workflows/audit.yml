@@ -209,7 +209,7 @@ jobs:
         # it in hash mode — which is exactly why it cannot join the
         # shared invocation above: every unpinned surface there would
         # fail on hashes it does not carry. A dedicated run resolves the
-        # three hashed pins against their own hashes and audits them
+        # hashed pins against their own hashes and audits them
         # alone, with the same five-outcome retry for the same reasons.
         run: |
           for attempt in 1 2 3; do
