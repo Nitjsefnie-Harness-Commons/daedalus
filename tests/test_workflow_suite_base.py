@@ -9,13 +9,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _suite_jobs import _pytest_finds_suites  # noqa: E402
 from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
 
 # Which jobs run the suites is DERIVED, not written here: a job is in
-# the set when one of its steps invokes a tracked script that enumerates
-# the tests tree. Deriving it is the whole point — a hand list is a
+# the set when a step runs pytest over the tree or a tracked script that
+# enumerates it. Deriving it is the whole point — a hand list is a
 # second statement of the same fact, and a matrix leg added beside the
 # jobs it replaces would leave both boundary controls unevaluated there
 # without any of this noticing.
@@ -161,7 +162,9 @@ def _jobs_running_suites(workflow, runners):
         for step in steps:
             if not step:
                 continue
-            invoked = _invoked_scripts(str(step.get('run', '')), runners)
+            run = str(step.get('run', ''))
+            invoked = _invoked_scripts(run, runners) | (
+                {'pytest'} if _pytest_finds_suites(run) else set())
             if invoked:
                 found.setdefault(job, set()).update(invoked)
     return found
@@ -296,6 +299,20 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
     assert _launches_a_tests_file(
         'import subprocess, sys\n'
         'subprocess.run([sys.executable, "tests/test_x.py"])\n')
+
+
+def test_a_job_running_pytest_over_the_tree_is_in_the_policed_set(tmp):
+    """pytest finds every suite; over named files it is bullet (a)."""
+    del tmp
+    runners = _suite_runners(_tracked_scripts(ROOT))
+    for run, policed in (('python -m pytest -n auto tests/', True),
+                         ('pytest -n auto', True),
+                         ('python run_tests.py', True),
+                         ('python -m pytest tests/test_a.py', False)):
+        workflow = ('jobs:\n  suites:\n    runs-on: ubuntu-latest\n'
+                    f'    steps:\n      - run: {run}\n')
+        jobs = _jobs_running_suites(workflow, runners)
+        assert ('suites' in jobs) is policed, (run, jobs)
 
 
 def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
