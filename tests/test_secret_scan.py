@@ -26,17 +26,17 @@ STEPS = (None, 'Refuse a shallow clone',
          'Download gitleaks and verify its digest',
          "Take the scan's config and ignore list from the trusted commit",
          'Scan the tree and the history')
-TRUSTED = '[extend]\nuseDefault = true\n# trusted\n'
+BASE_CONFIG = '[extend]\nuseDefault = true\n# trusted\n'
 DEFAULT = '[extend]\nuseDefault = true\n'
-TRUSTED_CASES = (
-    ('pull_request', 'base', TRUSTED, 'trusted\n'),
-    ('push', 'base', TRUSTED, 'trusted\n'),
-    ('workflow_dispatch', '', TRUSTED, 'trusted\n'),
+BASE_CASES = (
+    ('pull_request', 'base', BASE_CONFIG, 'trusted\n'),
+    ('push', 'base', BASE_CONFIG, 'trusted\n'),
+    ('workflow_dispatch', '', BASE_CONFIG, 'trusted\n'),
     ('push', '0' * 40, DEFAULT, ''),
     # Empty would read the index and HEAD the head: both the judged tree.
     ('pull_request', '', DEFAULT, ''),
     ('pull_request', 'HEAD', DEFAULT, ''),
-    ('pull_request', 'base', TRUSTED + '[Extend]\nPath = "j.toml"\n', None))
+    ('pull_request', 'base', BASE_CONFIG + '[Extend]\nPath = "j.toml"\n', None))
 
 
 def _read(relative):
@@ -123,7 +123,7 @@ def test_a_verified_download_feeds_a_bare_scan_of_trusted_rules(tmp):
     assert '||' not in scan['run'] and len(commands) == 3, commands
     # The judged tree's own exemptions are gone before the scan starts.
     assert commands[:2] == ['rm -rf .gitleaksignore',
-                            "echo '* !diff' > \"$ATTRIBUTES\""], commands
+                            "echo '* diff' > \"$ATTRIBUTES\""], commands
     argv = shlex.split(commands[2])
     assert argv[:2] == ['./gitleaks', 'detect'], argv
     assert {'--verbose', '--redact', '--ignore-gitleaks-allow'} <= set(argv)
@@ -131,7 +131,7 @@ def test_a_verified_download_feeds_a_bare_scan_of_trusted_rules(tmp):
     assert ignore.startswith('$RUNNER_TEMP/'), argv
     assert argv[argv.index('--config') + 1] == ignore + '/.gitleaks.toml'
     # Shell quoting hands gitleaks the bound walk as ONE argument.
-    assert '--log-opts=--full-history --diff-filter=tuxdb HEAD' in argv, argv
+    assert '--log-opts=--full-history --diff-filter=uxdb HEAD' in argv, argv
 
 
 def _git(repo, *args):
@@ -144,11 +144,11 @@ def _git(repo, *args):
 def test_rules_come_from_the_trusted_commit_never_the_judged_tree(tmp):
     if os.name == 'nt':
         _util.skip('the step runs under bash on ubuntu-latest only')
-    for case, (event, sha, config, ignore) in enumerate(TRUSTED_CASES):
+    for case, (event, sha, config, ignore) in enumerate(BASE_CASES):
         repo, runner_temp = Path(tmp) / f'repo{case}', Path(tmp) / f'rt{case}'
         runner_temp.mkdir(parents=True)
         _git(tmp, 'init', '-q', str(repo))
-        for toml, listed in ((TRUSTED if ignore is not None else config,
+        for toml, listed in ((BASE_CONFIG if ignore is not None else config,
                               'trusted'), ('[[allowlists]]', 'judged')):
             (repo / '.gitleaks.toml').write_bytes(toml.encode())
             (repo / '.gitleaksignore').write_bytes(f'{listed}\n'.encode())
