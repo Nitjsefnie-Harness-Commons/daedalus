@@ -1,9 +1,14 @@
 # The actions in .github/workflows/ are pinned to commit SHAs, which is the
 # point — a tag is a moving pointer and a SHA is not. The cost is that
-# nothing updates them, so this asks Dependabot for one pull request per
-# action when a new release appears; it rewrites the SHA and the trailing
-# version comment together, which makes a refresh a reviewed change rather
-# than a silent one.
+# nothing updates them, so this asks Dependabot for a pull request when a
+# new release appears; it rewrites the SHA and the trailing version comment
+# together, which makes a refresh a reviewed change rather than a silent one.
+#
+# `include: scope` makes each subject Conventional Commits, and the scope
+# is Dependabot's classification of the dependency, not a constant: `deps`,
+# or `deps-dev` for a manifest it reads as a development requirement. So
+# actions arrive as `ci(deps): ...`, requirements-test.txt as
+# `build(deps): ...` and requirements-dev.txt as `build(deps-dev): ...`.
 #
 # Wednesday and off the hour, for the same reason the workflow crons are:
 # every schedule on GitHub fires at :00 on Monday, and jobs queue there.
@@ -14,10 +19,12 @@ updates:
     schedule:
       interval: weekly
       day: wednesday
-      time: "05:17"
-    open-pull-requests-limit: 4
+      time: "04:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
     commit-message:
       prefix: ci
+      include: scope
     # `github/codeql-action/init` and `github/codeql-action/analyze` are two
     # dependencies to Dependabot and one component to CodeQL, which refuses to
     # run when the two `uses:` lines name different versions. Ungrouped, the
@@ -60,6 +67,16 @@ updates:
         applies-to: security-updates
         patterns:
           - "Nitjsefnie-Actions/test-ratchet*"
+      # Everything else, in one pull request. Dependabot files a dependency
+      # under the FIRST group whose patterns match, so this stays last and
+      # each family above keeps its own pull request.
+      github-actions:
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   # The Python surface: the `mcp` extra in pyproject.toml, which is the only
   # third-party code that runs in production, and the tool pins in
@@ -75,9 +92,6 @@ updates:
   # Neither replaces the other, and both are needed because the pins exist to
   # stop a tool release turning CI red on an unchanged commit — a pin nobody
   # ever moves is how a dependency quietly ages out of support.
-  #
-  # Later in the Wednesday window than the actions entry, so the two do not
-  # open their pull requests in the same minute.
   - package-ecosystem: pip
     directory: /
     # Every Python dependency here is pinned exactly, so what arrives is one
@@ -90,7 +104,9 @@ updates:
     schedule:
       interval: weekly
       day: wednesday
-      time: "05:41"
-    open-pull-requests-limit: 4
+      time: "04:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
     commit-message:
       prefix: build
+      include: scope
