@@ -47,7 +47,7 @@ fallback). A filtered run can drop part of a failure message and make a check
 look broken when it is not.
 
 **Run one suite file at a time** - `python3 -m pytest tests/<file>.py`;
-the whole tree (`python3 -m pytest -n auto tests/`) is CI's run.
+every suite (`python3 -m pytest -n auto tests/`) is CI's run.
 
 **Run `pylint` as a single invocation over all files.** Split it and the
 cross-file duplicate check is silently skipped.
