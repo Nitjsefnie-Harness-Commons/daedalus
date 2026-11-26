@@ -21,6 +21,9 @@ sys.path.insert(0, str(_util.ROOT))
 import daedalus_cli.output as CLI_OUTPUT  # noqa: E402
 from daedalus_mcp import timing_view  # noqa: E402
 
+REQUIRES = 'Chromium and Node'
+ALLOWED_SKIPS = (BrowserEnvironmentSkipped,)
+
 
 def test_hostile_page_eval_matrix_has_descriptive_channels_only(tmp):
     """A page-selected value never gains a trust claim from its channel.
@@ -356,7 +359,7 @@ def test_a_timed_eval_carries_every_page_main_leg_and_untimed_none(tmp):
 
 def main():
     return _realbrowser_controls.run_real_browser_tests(
-        globals(), tmp_prefix='realbrowser_', requires='Chromium and Node')
+        globals(), tmp_prefix='realbrowser_', requires=REQUIRES)
 
 
 if __name__ == '__main__':
