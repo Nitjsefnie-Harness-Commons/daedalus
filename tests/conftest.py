@@ -56,8 +56,8 @@ def tmp_alias(tmp):
 
 
 def confine(path, before):
-    # A checkout module first imported for one test file is that file's
-    # alone, as under the runner's process per file; CONFINED keeps it.
+    # A checkout module first imported for one test file stays that file's;
+    # CONFINED keeps it.
     for name in sys.modules.keys() - before:
         source = Path(getattr(sys.modules[name], '__file__', None) or '/')
         source = source.resolve()
@@ -170,7 +170,7 @@ def expire(config, nodeid):
 
 @contextlib.contextmanager
 def bounded(config, path, nodeid):
-    # The runner's per-file bound, spent across this process's work on it.
+    # The per-file bound, spent across this process's work on it.
     started = time.monotonic()
     timer = threading.Timer(BOUND - SPENT[path], expire, (config, nodeid))
     timer.daemon = True
