@@ -65,7 +65,7 @@ SHELLCHECK_PACKAGE = 'shellcheck-py'
 # is read from the wheel rather than computed here.
 SHELLCHECK_BINARY = 'shellcheck'
 SCRIPTS_SCHEME = '.data/scripts/'
-ACTIONLINT_VERSION = '1.7.12-queue.1'
+ACTIONLINT_VERSION = '1.7.12-queue.3'
 # sha256 of each release asset, taken from the release's own checksums.txt.
 # Bump the version and this table together. The key is (platform.system(),
 # platform.machine().lower()), which is why the Windows row is amd64 and not
@@ -74,21 +74,21 @@ ACTIONLINT_VERSION = '1.7.12-queue.1'
 # plainly has.
 ACTIONLINT_SHA256 = {
     ('Linux', 'x86_64'):
-        'dcc2c42a7caaa197dfe63584a3851f62ef260f80b2cf221baaf05479661e1521',
+        '56693f8e7182360d8ecb67cbfc39cc674cde5d1b510507fff562b158bb4fc7bc',
     ('Darwin', 'x86_64'):
-        'f8a7fa5b23fd73955174cb1e50854acb6a20db28e8a758a310a7c86b0e5d9614',
+        'f2df55522beba7a18bd5ac9ad65966a61c33c9e6cc72a420fceccbceda54c4d1',
     ('Darwin', 'arm64'):
-        'ae90d22922d2fae0090078c7e55152eaffab3ef296fa70de29b2bc23c5978c85',
+        '9b14b2cd6b69566a96a5b71f619f85b9871341c4613ae7a006b6beaa7b9a8a43',
     ('Windows', 'amd64'):
-        '182449e11cf42e22e4729ec12f29156e2655e099136155c95893c448915c80f9',
+        '1f4399470245d70495169bb42bce95b2eb66f4a0c344a45930a9853f779a8739',
 }
 # A fork build, not an upstream release. 1.7.12 is the latest upstream
 # actionlint and it rejects `queue` under a workflow's `concurrency:` section,
 # a key GitHub documents, with a parse error no actionlint directive can
 # suppress — so a workflow here cannot express the key at all. This build is
-# upstream's v1.7.12 TAG plus rhysd/actionlint#654 cherry-picked unchanged,
-# so the source delta is exactly that patch; the binaries are not
-# byte-identical to upstream's assets (built with a newer Go). Every door
+# upstream's v1.7.12 TAG plus rhysd/actionlint#654, #732 and #707
+# cherry-picked unchanged, so the source delta is exactly those patches;
+# the binaries are not byte-identical to upstream's assets. Every door
 # that reaches the suites must get the SAME build, which is why the pin
 # lives here rather than in the job that lints, because the two must NAME
 # THE SAME BUILD. They are separate: the job's env is read by the workflow
@@ -118,7 +118,7 @@ ACTIONLINT_SHA256 = {
 # that fails, instead of made structurally impossible. Worth revisiting if
 # the pin ever moves somewhere both can read without parsing a workflow.
 #
-# When #654 merges and ships upstream, move this back to an upstream version,
+# When upstream ships all three, move this back to an upstream version,
 # the rhysd URL, and the checksum table above with it. The checksum file
 # beside the asset is published by whoever published the binary, so what
 # bounds a replaced asset is this recorded table, read at review time.
