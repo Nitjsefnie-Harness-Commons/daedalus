@@ -5,9 +5,12 @@ them in a child process with the real conftest loaded as a plugin.
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
+import sysconfig
 import textwrap
+import venv
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -18,7 +21,8 @@ OUTCOME = re.compile(r'^(\S+::\S+) (PASSED|FAILED|SKIPPED|ERROR)', re.M)
 VERDICT = re.compile(r'^(?:NO COVERAGE|NOT RUN HERE): .*$', re.M)
 
 
-def run_pytest(tmp, files, *args, **env):
+def run_pytest(tmp, files, *args, python=sys.executable, tests=TESTS,
+               **env):
     """Exit code, output and verbose per-test outcomes of one pytest run."""
     for name, body in files.items():
         Path(tmp, name).write_text(textwrap.dedent(body), encoding='utf-8')
@@ -28,9 +32,9 @@ def run_pytest(tmp, files, *args, **env):
     environ = {key: value for key, value
                in _util.child_coverage('scrub').items()
                if not key.startswith('PYTEST_')}
-    environ.update(env, PYTHONPATH=str(TESTS))
+    environ.update(env, PYTHONPATH=str(tests))
     done = subprocess.run(
-        [sys.executable, '-m', 'pytest', '-p', 'conftest', '-v', *args,
+        [python, '-m', 'pytest', '-p', 'conftest', '-v', *args,
          *files], cwd=tmp, env=environ, stdin=subprocess.DEVNULL,
         capture_output=True, encoding='utf-8', errors='replace',
         timeout=300)
@@ -291,10 +295,12 @@ def test_a_file_past_its_bound_fails_and_a_hang_ends_the_run(tmp):
 
 
 def test_each_test_starts_at_root_with_process_state_restored(tmp):
-    # Each loads the bridge's config with its own root, one at import and
-    # one in narrowed_suite; the runner gave each file a process.
+    # Each file loads the bridge's config with its own root: a at import,
+    # b in narrowed_suite after a session fixture loaded one outside any
+    # file, d at import with a scope whose exit raises, c only in its test.
+    # The runner gave each file a process, so each must see its own.
     load = '''
-        import os, sys, _util, _daedalus_env
+        import contextlib, os, sys, pytest, _util, _daedalus_env
         from unittest import mock
         SOURCE = _util.ROOT / 'daedalus_bridge' / 'http_transport.py'
 
@@ -304,11 +310,27 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
                 _util.load(SOURCE)
 
         def test_own_config():
+            if __name__ == 'test_c':
+                load('c')
             config = sys.modules['daedalus_bridge.config']
             assert str(config.BASE) == __name__[-1], config.BASE
         '''
-    loads = {'test_a.py': load + "load('a')\n", 'test_b.py': (
-        load + "def narrowed_suite():\n            load('b')\n")}
+    loads = {'test_a.py': load + "load('a')\n", 'test_b.py': load + '''
+        def narrowed_suite():
+            load('b')
+
+        @pytest.fixture(scope='session', autouse=True)
+        def early():
+            load('early')
+        ''', 'test_d.py': load + '''load('d')
+
+        @contextlib.contextmanager
+        def suite_scope():
+            yield
+            raise RuntimeError('the scope failed to exit')
+        ''', 'test_c.py': load}
+    own = {f'test_{side}.py::test_own_config': 'PASSED' for side in 'abc'}
+    own['test_d.py::test_own_config'] = 'ERROR'
     code, output, outcomes = run_pytest(tmp, {**loads, 'test_state.py': f'''
         import contextlib
         import os
@@ -332,13 +354,30 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
             assert 'harness-leak' not in sys.path
             assert os.environ['HARNESS_SCOPE'] == '1'
             assert 'daedalus_bridge.config' not in sys.modules
-            assert '_daedalus_env' in sys.modules, 'a helper was confined'
+            assert '_daedalus_env' not in sys.modules, 'a helper leaked'
         '''})
-    assert (code, outcomes) == (0, {
-        'test_a.py::test_own_config': 'PASSED',
-        'test_b.py::test_own_config': 'PASSED',
-        'test_state.py::test_leaks': 'PASSED',
+    assert (code, outcomes) == (1, {
+        **own, 'test_state.py::test_leaks': 'PASSED',
         'test_state.py::test_sees_none': 'PASSED'}), output
+    # The same files, run from a checkout inside the interpreter's prefix.
+    builder = venv.EnvBuilder(symlinks=os.name != 'nt')
+    builder.create(os.path.join(tmp, 'venv'))
+    context = builder.ensure_directories(os.path.join(tmp, 'venv'))
+    Path(context.lib_path, 'harness.pth').write_text(
+        sysconfig.get_path('purelib') + '\n', encoding='utf-8')
+    checkout = Path(tmp, 'venv', 'checkout')
+    for package in ('daedalus_bridge', 'daedalus_cli'):
+        shutil.copytree(_util.ROOT / package, checkout / package)
+    shutil.copytree(TESTS, checkout / 'tests', ignore=shutil.ignore_patterns(
+        'test_*', '__pycache__'))
+    (checkout / 'scripts' / 'ci').mkdir(parents=True)
+    shutil.copy(_util.ROOT / 'scripts' / 'ci' / 'suite_bound.py',
+                checkout / 'scripts' / 'ci')
+    os.mkdir(os.path.join(tmp, 'prefixed'))
+    code, output, outcomes = run_pytest(
+        os.path.join(tmp, 'prefixed'), loads, python=context.env_exe,
+        tests=checkout / 'tests')
+    assert (code, outcomes) == (1, own), output
 
 
 if __name__ == '__main__':
