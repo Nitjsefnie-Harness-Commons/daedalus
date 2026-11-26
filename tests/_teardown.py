@@ -13,6 +13,7 @@ import runpy
 import shutil
 import tempfile
 import time
+import warnings
 import weakref
 
 ATTEMPTS = 8
@@ -96,7 +97,7 @@ def suite_root(prefix):
         yield os.path.realpath(td.name)
     finally:
         if not settle(td.cleanup):
-            print(f'  WARN  temporary tree left behind: {td.name}')
+            warnings.warn(f'temporary tree left behind: {td.name}')
 
 
 class OwnedTemporaryDirectory(tempfile.TemporaryDirectory):

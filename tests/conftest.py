@@ -72,7 +72,8 @@ def pytest_make_collect_report(collector):
     if not isinstance(collector, pytest.Module):
         return (yield)
     environ, cwd = dict(os.environ), os.getcwd()
-    report = yield
+    with bounded(collector.config, collector.path, collector.nodeid):
+        report = yield
     changed = sorted(key for key in environ.keys() | os.environ.keys()
                      if environ.get(key) != os.environ.get(key))
     if report.failed:
@@ -97,7 +98,8 @@ def pytest_collection_modifyitems(config, items):
         module = getattr(item, 'module', None)
         if module not in wanted:
             narrowed = getattr(module, 'narrowed_suite', None)
-            wanted[module] = narrowed() if narrowed else None
+            with bounded(config, item.path, item.nodeid.split('::')[0]):
+                wanted[module] = narrowed() if narrowed else None
         requires = getattr(module, 'REQUIRES', None)
         if requires:
             item.user_properties.append(('requires', requires))
@@ -132,30 +134,35 @@ def pytest_runtest_makereport(item, call):
     return report
 
 
-def expire(item):
-    capture = item.config.pluginmanager.get_plugin('capturemanager')
+def expire(config, nodeid):
+    capture = config.pluginmanager.get_plugin('capturemanager')
     with getattr(capture, 'global_and_fixture_disabled',
                  contextlib.nullcontext)():
         faulthandler.dump_traceback(sys.stderr, all_threads=True)
-        sys.stderr.write(
-            _util.SUITE_BOUND.timeout_record(item.nodeid, BOUND, None))
+        sys.stderr.write(_util.SUITE_BOUND.timeout_record(nodeid, BOUND, None))
         sys.stderr.flush()
     os._exit(1)
 
 
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_protocol(item):
-    # The runner's per-file bound, spent across this process's tests of it.
+@contextlib.contextmanager
+def bounded(config, path, nodeid):
+    # The runner's per-file bound, spent across this process's work on it.
     started = time.monotonic()
-    timer = threading.Timer(BOUND - SPENT[item.path], expire, (item,))
+    timer = threading.Timer(BOUND - SPENT[path], expire, (config, nodeid))
     timer.daemon = True
-    if SPENT[item.path] < BOUND:
+    if SPENT[path] < BOUND:
         timer.start()
     try:
-        return (yield)
+        yield
     finally:
         timer.cancel()
-        SPENT[item.path] += time.monotonic() - started
+        SPENT[path] += time.monotonic() - started
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item):
+    with bounded(item.config, item.path, item.nodeid):
+        return (yield)
 
 
 def pytest_runtest_setup(item):
@@ -175,7 +182,7 @@ def pytest_sessionfinish(session):
     reporter = session.config.pluginmanager.get_plugin('terminalreporter')
     write = getattr(reporter, 'write_line', print)
     for path, counts in sorted(OUTCOMES.items()):
-        if counts['passed']:
+        if counts['passed'] or counts['failed']:
             continue
         if NEEDS[path]:
             write(f"NOT RUN HERE: {path} ({counts['skipped']} skipped, "

@@ -59,8 +59,32 @@ def test_tmp_is_a_private_resolved_directory_named_for_its_test(tmp):
 
         def test_alias(_tmp):
             record('test_alias', _tmp)
+        ''', 'test_held.py': '''
+        import contextlib
+        import _teardown
+
+        REAL, ATTEMPTS = _teardown.OwnedTemporaryDirectory.cleanup, 2
+        held = []
+
+        def refuse(self):
+            held.append(self)
+            raise PermissionError(13, 'held open', self.name)
+
+        @contextlib.contextmanager
+        def suite_scope():
+            saved, _teardown.ATTEMPTS = _teardown.ATTEMPTS, ATTEMPTS
+            _teardown.OwnedTemporaryDirectory.cleanup = refuse
+            yield
+            _teardown.OwnedTemporaryDirectory.cleanup = REAL
+            _teardown.ATTEMPTS = saved
+            assert len(held) == ATTEMPTS, f'cleanup tried {len(held)} times'
+            REAL(held[0])
+
+        def test_held(tmp):
+            pass
         '''}, TMPDIR=os.path.join(tmp, 'link'))
     assert (code, set(outcomes.values())) == (0, {'PASSED'}), output
+    assert 'UserWarning: temporary tree left behind: ' in output, output
     paths = dict(line.split('\t') for line in
                  Path(seen).read_text(encoding='utf-8').splitlines())
     assert sorted(paths) == ['test_alias', 'test_first', 'test_second']
@@ -112,6 +136,7 @@ def test_only_a_skip_in_allowed_skips_skips(tmp):
         'test_narrowed.py::test_browser': 'SKIPPED',
         'test_narrowed.py::test_component': 'FAILED'}, output
     assert 'Skipped is not in ALLOWED_SKIPS: excused' in output, output
+    assert VERDICT.findall(output) == [], output
 
 
 def test_a_test_whose_body_does_not_run_to_completion_fails(tmp):
@@ -249,6 +274,20 @@ def test_a_file_past_its_bound_fails_and_a_hang_ends_the_run(tmp):
     assert ('SUITE TIMED OUT after 2.0 s (returncode None) in '
             'test_hang.py::test_hang; its last lines are above') in output, (
         output)
+    hangs = {'test_import_hang.py': ('-n', '2'), 'test_narrow_hang.py': ()}
+    for name, args in hangs.items():
+        code, output, _ = run_pytest(tmp, {name: '''
+            import threading
+
+            def narrowed_suite():
+                threading.Event().wait()
+
+            def test_x():
+                pass
+            ''' + ('threading.Event().wait()' if args else '')}, *args,
+            DAEDALUS_SUITE_TIMEOUT='2')
+        assert code != 0 and (f'SUITE TIMED OUT after 2.0 s (returncode '
+                              f'None) in {name}; ') in output, output
 
 
 def test_each_test_starts_at_root_with_process_state_restored(tmp):
@@ -259,8 +298,9 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
 
         @contextlib.contextmanager
         def suite_scope():
-            os.environ['HARNESS_SCOPE'] = '1'
+            cwd, os.environ['HARNESS_SCOPE'] = os.getcwd(), '1'
             yield
+            assert os.getcwd() == cwd, 'cwd leaked past the tests'
             del os.environ['HARNESS_SCOPE']
 
         def test_leaks():
