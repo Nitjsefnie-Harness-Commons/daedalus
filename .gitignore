@@ -426,6 +426,7 @@
 !/tests/_yamlread.py
 !/tests/_yamlscalar.py
 !/tests/_yamlsteps.py
+!/tests/conftest.py
 !/tests/test_aggregate_gate.py
 !/tests/test_aggregate_needs.py
 !/tests/test_atomic_file.py
@@ -621,6 +622,7 @@
 !/tests/test_stream_route.py
 !/tests/test_stream_service.py
 !/tests/test_stream_service_legacy_ids.py
+!/tests/test_suite_harness.py
 !/tests/test_tab_registry.py
 !/tests/test_tempdir_reclaim.py
 !/tests/test_type_errors.py
