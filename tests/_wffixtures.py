@@ -142,15 +142,20 @@ AUDIT_RETRY_FIXTURES = (
      'connection: [Errno 111] Connection refused\n', 3, 1),
     ('a finding about refused connections', 'Found 1 known vulnerability in '
      'test/pkg\nConnection refused: Failed to establish a session\n', 1, 1),
+    ('a failed name lookup', "NameResolutionError: Failed to resolve 'x.invali"
+     "d' ([Errno -2] Name or service not known)\n", 3, 1),
+    ('a failed pip upgrade', 'ERROR:pip_audit._cli:Failed to upgrade `pip`: '
+     "['python3', '-m', 'pip', 'install', '--upgrade', 'pip']\n", 3, 1),
+    ('a connect timeout', "ConnectTimeoutError: 'Connection to 10.255.255.1 "
+     "timed out. (connect timeout=15)'\n", 3, 1),
+    ('a finding about lookups and timeouts', 'Found 1 known vulnerability in '
+     'test/pkg\nFailed to resolve test/pkg: connect timeout=0\n', 1, 1),
     ('a 404', 'HTTPError: 404 Client Error: Not Found\n', 1, 1),
     ('a 403', 'HTTPError: 403 Client Error: Forbidden\n', 1, 1),
     ('a 401', 'HTTPError: 401 Client Error: Unauthorized\n', 1, 1),
     ('a 400', 'HTTPError: 400 Client Error: Bad Request\n', 1, 1),
-    # The row longer than the retry arm's excerpt window, so that window is
-    # pinned too: on a report this size the excerpt's lines are printed once
-    # per attempt and everything above them only in the report the last one
-    # ends with. An unbounded `cat` there prints the whole report per
-    # attempt, and the shorter rows cannot tell the two apart.
+    # Longer than the retry arm's excerpt, which it pins: only the last lines
+    # print per attempt, where an unbounded `cat` would print the whole report.
     ('a transport failure under a long report',
      'Checking 12 packages\n'
      'Resolving dependencies\n'
@@ -159,13 +164,11 @@ AUDIT_RETRY_FIXTURES = (
      'Vulnerability ID: PYSEC-2026-1\n'
      'Retrying the advisory feed\n'
      'HTTPError: 503 Service Unavailable\n', 3, 1),
-    # The row that pins the ORDER: a refusal the index will not repeat, on
-    # one line, beside a transport failure the block must retry.
+    # Pins the ORDER: a refusal the index will not repeat beside a retry line.
     ('a 404 reported beside a transport line',
      'HTTPError: 404 Client Error: Not Found\n'
      'ServiceError: pypi.org returned 502\n', 1, 1),
-    # The row that pins the 429 exception's SCOPE: the substring is there
-    # and it is not a status, on a line the 4xx test never matched.
+    # Pins the 429 exception's SCOPE: a 429 that is no status, off a 4xx line.
     ('a 404 reported beside a 429 that is not a status',
      'HTTPError: 404 Client Error: Not Found\n'
      'Fixed-by: 6.0.429\n'

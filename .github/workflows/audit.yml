@@ -188,7 +188,7 @@ jobs:
               exit 1
             fi
 
-            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit.out; then
+            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|failed to resolve .*\(\[errno|\(connect timeout=|failed to upgrade .pip.|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit.out; then
               echo "attempt $attempt: index failure talking to PyPI, retrying"
               tail -n 5 audit.out
               sleep $(( attempt * 15 ))
@@ -257,7 +257,7 @@ jobs:
               exit 1
             fi
 
-            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit-test.out; then
+            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|failed to resolve .*\(\[errno|\(connect timeout=|failed to upgrade .pip.|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit-test.out; then
               echo "attempt $attempt: index failure talking to PyPI or OSV, retrying"
               tail -n 5 audit-test.out
               sleep $(( attempt * 15 ))
