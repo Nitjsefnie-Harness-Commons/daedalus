@@ -19,7 +19,7 @@ import _util
 from _teardown import suite_root
 
 BOUND = _util.SUITE_BOUND.suite_timeout()
-SPENT = collections.Counter()
+SPENT = collections.defaultdict(float)
 OUTCOMES = collections.defaultdict(collections.Counter)
 NEEDS = {}
 SKIP_ALLOWED = pytest.StashKey[bool]()
@@ -98,8 +98,9 @@ def pytest_collection_modifyitems(config, items):
         if module not in wanted:
             narrowed = getattr(module, 'narrowed_suite', None)
             wanted[module] = narrowed() if narrowed else None
-        if getattr(module, 'REQUIRES', None):
-            item.user_properties.append(('requires', module.REQUIRES))
+        requires = getattr(module, 'REQUIRES', None)
+        if requires:
+            item.user_properties.append(('requires', requires))
         names = wanted[module]
         (kept if names is None or item.name in names else dropped).append(
             item)
