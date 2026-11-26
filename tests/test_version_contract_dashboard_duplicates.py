@@ -55,9 +55,9 @@ def _use_single_quotes_for_only_site(copy_root, class_name):
     dashboard.write_text(rewritten, encoding='utf-8')
 
 
-def test_check_versions_refuses_mixed_dashboard_delimiters(tmp_path):
+def test_check_versions_refuses_mixed_dashboard_delimiters(tmp):
     for class_name, desc in _SITE_CASES:
-        copy_root = Path(tmp_path) / class_name / 'tree'
+        copy_root = Path(tmp) / class_name / 'tree'
         checker = _copy_versioned_tree(copy_root)
         canonical = _canonical_dashboard_value(copy_root, checker, desc)
         _use_single_quotes_for_only_site(copy_root, class_name)
@@ -107,7 +107,7 @@ def test_check_versions_refuses_mixed_dashboard_delimiters(tmp_path):
          "<span class='sl-v '>8.8.8</span>", '8.8.8'),
     )
     for label, desc, markup, second_value in cases:
-        copy_root = Path(tmp_path) / label / 'tree'
+        copy_root = Path(tmp) / label / 'tree'
         checker = _copy_versioned_tree(copy_root)
         canonical = _canonical_dashboard_value(copy_root, checker, desc)
         _insert_before_body(copy_root, markup)
@@ -116,8 +116,8 @@ def test_check_versions_refuses_mixed_dashboard_delimiters(tmp_path):
 
 
 def test_check_versions_print_refuses_single_quoted_dashboard_duplicate(
-        tmp_path):
-    copy_root = Path(tmp_path) / 'tree'
+        tmp):
+    copy_root = Path(tmp) / 'tree'
     _copy_versioned_tree(copy_root)
     _duplicate_dashboard_version(copy_root, 'rail-foot')
     result = _run_checker(copy_root, '--print')
@@ -128,8 +128,8 @@ def test_check_versions_print_refuses_single_quoted_dashboard_duplicate(
 
 
 def test_check_versions_set_refuses_without_partial_dashboard_rewrite(
-        tmp_path):
-    copy_root = Path(tmp_path) / 'tree'
+        tmp):
+    copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     _duplicate_dashboard_version(copy_root, 'sl-v')
     before = {path: (copy_root / path).read_bytes()
@@ -143,9 +143,9 @@ def test_check_versions_set_refuses_without_partial_dashboard_rewrite(
 
 
 def test_single_quoted_dashboard_site_passes_and_set_preserves_markup(
-        tmp_path):
+        tmp):
     for class_name, desc in _SITE_CASES:
-        copy_root = Path(tmp_path) / class_name / 'tree'
+        copy_root = Path(tmp) / class_name / 'tree'
         checker = _copy_versioned_tree(copy_root)
         canonical = _canonical_dashboard_value(copy_root, checker, desc)
         _use_single_quotes_for_only_site(copy_root, class_name)
@@ -163,8 +163,8 @@ def test_single_quoted_dashboard_site_passes_and_set_preserves_markup(
             canonical, '9.9.9')
 
 
-def test_prefixed_class_attributes_are_not_dashboard_sites(tmp_path):
-    copy_root = Path(tmp_path) / 'tree'
+def test_prefixed_class_attributes_are_not_dashboard_sites(tmp):
+    copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     prefixes = ('data-', 'x:', '@', '.', '#')
     markup = '\n'.join(
@@ -225,13 +225,13 @@ def test_prefixed_class_attributes_are_not_dashboard_sites(tmp_path):
           + '<div ' * anchors + 'title="' + 'a' * anchors)),
     )
     for label, desc, markup in cases:
-        copy_root = Path(tmp_path) / label / 'tree'
+        copy_root = Path(tmp) / label / 'tree'
         checker = _copy_versioned_tree(copy_root)
         _insert_before_body(copy_root, markup)
         _assert_one_dashboard_match(copy_root, checker, desc)
 
 
-def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp_path):
+def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp):
     separators = (
         ('TAB', '\t'),
         ('LF', '\n'),
@@ -239,7 +239,7 @@ def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp_path):
         ('CR', '\r'),
     )
     for label, separator in separators:
-        copy_root = Path(tmp_path) / label / 'tree'
+        copy_root = Path(tmp) / label / 'tree'
         checker = _copy_versioned_tree(copy_root)
         desc = 'dashboard rail footer'
         canonical = _canonical_dashboard_value(copy_root, checker, desc)
@@ -252,8 +252,8 @@ def test_ascii_tag_whitespace_separates_real_rail_attributes(tmp_path):
         _assert_duplicate_refused(result, desc, canonical, '9.9.9')
 
 
-def test_mismatched_dashboard_delimiters_are_not_sites(tmp_path):
-    rail_root = Path(tmp_path) / 'rail-foot' / 'tree'
+def test_mismatched_dashboard_delimiters_are_not_sites(tmp):
+    rail_root = Path(tmp) / 'rail-foot' / 'tree'
     _copy_versioned_tree(rail_root)
     _insert_before_body(
         rail_root, "<div class='rail-foot\">v9.9.9</div>")
@@ -261,7 +261,7 @@ def test_mismatched_dashboard_delimiters_are_not_sites(tmp_path):
     assert rail_result.returncode == 0, (
         rail_result.returncode, rail_result.stdout, rail_result.stderr)
 
-    status_root = Path(tmp_path) / 'sl-v' / 'tree'
+    status_root = Path(tmp) / 'sl-v' / 'tree'
     _copy_versioned_tree(status_root)
     dashboard = status_root / 'dashboard' / 'index.html'
     text = dashboard.read_text(encoding='utf-8')
@@ -274,9 +274,9 @@ def test_mismatched_dashboard_delimiters_are_not_sites(tmp_path):
     assert 'no version found for dashboard status line' in status_result.stderr
 
 
-def test_backticks_are_not_html_attribute_delimiters(tmp_path):
+def test_backticks_are_not_html_attribute_delimiters(tmp):
     for class_name, _desc in _SITE_CASES:
-        copy_root = Path(tmp_path) / class_name / 'tree'
+        copy_root = Path(tmp) / class_name / 'tree'
         _copy_versioned_tree(copy_root)
         _duplicate_dashboard_version(copy_root, class_name, quote='`')
         result = _run_checker(copy_root)
@@ -337,7 +337,7 @@ def test_backticks_are_not_html_attribute_delimiters(tmp_path):
          "// open</SCRIPT><span class='sl-v'>{canonical}</span>"),
     )
     for label, replace_site, markup in cases:
-        copy_root = Path(tmp_path) / label / 'tree'
+        copy_root = Path(tmp) / label / 'tree'
         checker = _copy_versioned_tree(copy_root)
         if replace_site:
             desc = 'dashboard status line'

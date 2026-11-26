@@ -188,4 +188,5 @@ def test_every_suite_failing_is_refused_even_without_the_gate(tmp):
         assert _FAILURE_MARKER in block, block
 
 
-raise SystemExit(_util.runner(_util.collect(dict(globals()))))
+if __name__ == '__main__':
+    raise SystemExit(_util.runner(_util.collect(dict(globals()))))
