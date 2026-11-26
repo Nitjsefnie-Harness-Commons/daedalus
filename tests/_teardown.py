@@ -89,6 +89,16 @@ def reclaim_tempdirs(prefix, parent):
                   f'{refusal!r}')
 
 
+@contextlib.contextmanager
+def suite_root(prefix):
+    td = OwnedTemporaryDirectory(prefix)
+    try:
+        yield os.path.realpath(td.name)
+    finally:
+        if not settle(td.cleanup):
+            print(f'  WARN  temporary tree left behind: {td.name}')
+
+
 class OwnedTemporaryDirectory(tempfile.TemporaryDirectory):
     """A `TemporaryDirectory` the next one under its prefix reclaims; with
     `refusal_warns`, a refused removal is one WARN line, never a raise."""
