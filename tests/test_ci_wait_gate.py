@@ -451,12 +451,9 @@ def test_a_failed_pull_request_lookup_still_refuses_on_the_grace(tmp):
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')]))
     # The transport, not the accessor: this control is about the REAL
     # head_pull_requests propagating a failed read into the wait's handler.
-    # ONE run, and its own output is what is asserted: the earlier version
-    # restored the real transport in a `finally` and then ran a SECOND wait
-    # whose output it asserted, so the verdict turned on a live
-    # `gh api graphql` failing against a repository that does not exist -
-    # and it still passed with gh off PATH, because a missing gh is an
-    # OSError and so a QueryError, and the same branch ran.
+    # ONE run, and its own output is what is asserted: a second wait after
+    # restoring the real transport would turn the verdict on a live
+    # `gh api graphql` failing against a repository that does not exist.
     real = mod.gh_client.graphql
     setattr(mod.gh_client, 'graphql', _refuse)
     try:

@@ -133,8 +133,8 @@ def test_the_scan_step_is_the_bare_gate(tmp):
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     scan = steps[3]
     assert set(scan) == {'name', 'run'}, scan
-    # The single quotes are SHELL syntax and survive into the decoded
-    # string: they are what hands gitleaks one --log-opts value.
+    # The single quotes are SHELL syntax and survive decoding: they hand
+    # gitleaks one --log-opts value.
     assert scan['run'] == (
         './gitleaks detect --verbose --redact --config .gitleaks.toml'
         " --log-opts='--full-history --diff-filter=tuxdb HEAD'")

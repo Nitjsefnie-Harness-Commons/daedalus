@@ -11,8 +11,8 @@ tells an admission from a refusal.
 
 `DAEDALUS_DIR`, `DAEDALUS_PORT` and the three segment quota variables
 are set here so the segments directory most of these tests pass in is the
-one configuration names; the controls for the root parameter deliberately
-pass a different one. Each test uses its own job name, because the
+one configuration names; the root parameter's controls pass a different
+one. Each test uses its own job name, because the
 configured directory is process-wide.
 """
 import atexit

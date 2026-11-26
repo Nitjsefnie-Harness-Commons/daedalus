@@ -20,7 +20,7 @@ sys.path.insert(0, str(_util.ROOT))
 from daedalus_mcp import timing_view, tools_eval  # noqa: E402
 
 _T = 1_700_000_000_000  # server wall clock, ms
-_LEAD = 5000  # the browser clock runs this far ahead of the server's
+_LEAD = 5000  # the browser clock's lead on the server's
 
 
 def _stamps(server, browser):
