@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 from _dashqueue import _events  # noqa: E402
 
@@ -29,12 +30,15 @@ _OWNED = _util.OwnedTemporaryDirectory('resultroutes_base_',
                                        refusal_warns=True)
 atexit.register(_OWNED.cleanup)
 _BASE = _OWNED.name
-os.environ['DAEDALUS_DIR'] = _BASE
-os.environ['DAEDALUS_PORT'] = '0'
 RES_DIR = Path(_BASE) / 'results'
 # Above any delivery count these tests store, so eviction never fires in
 # them; the cap has its own controls.
 DELIVERY_CAP = 8
+
+
+def suite_scope():
+    return _daedalus_env.isolated({'DAEDALUS_DIR': _BASE,
+                                   'DAEDALUS_PORT': '0'})
 
 
 def _load(name):
@@ -405,8 +409,11 @@ def test_a_compat_consume_removes_the_delivery_copy_in_the_passed_root(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='resultroutes_')
+    summary = os.environ.get('DAEDALUS_TEST_SUMMARY', '')
+    with suite_scope():
+        os.environ['DAEDALUS_TEST_SUMMARY'] = summary
+        return _util.runner(_util.collect(globals()),
+                            tmp_prefix='resultroutes_')
 
 
 if __name__ == '__main__':
