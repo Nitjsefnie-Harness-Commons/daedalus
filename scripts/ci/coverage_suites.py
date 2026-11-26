@@ -95,8 +95,8 @@ def main(argv=None):
 
     failed = 0
     timed_out = []
-    # The runner's shape, for its reason: a removal that cannot finish must
-    # not take the `TIMED OUT:` report below with it.
+    # A removal of this directory that cannot finish must not take the
+    # `TIMED OUT:` report below with it.
     outputs = tempfile.mkdtemp(prefix="daedalus-outputs-")
     try:
         workers = worker_count(len(suites))
