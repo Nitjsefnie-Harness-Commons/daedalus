@@ -130,8 +130,8 @@ def test_a_verified_download_feeds_a_bare_scan_of_trusted_rules(tmp):
     ignore = argv[argv.index('--gitleaks-ignore-path') + 1]
     assert ignore.startswith('$RUNNER_TEMP/'), argv
     assert argv[argv.index('--config') + 1] == ignore + '/.gitleaks.toml'
-    # Shell quoting hands gitleaks the bound walk as ONE argument.
-    assert '--log-opts=--full-history --diff-filter=uxdb HEAD' in argv, argv
+    walk = '--full-history --diff-filter=uxdb --diff-merges=remerge HEAD'
+    assert f'--log-opts={walk}' in argv, argv  # ONE argument, by quoting
 
 
 def _git(repo, *args):
