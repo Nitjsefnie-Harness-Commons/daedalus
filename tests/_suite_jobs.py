@@ -113,15 +113,14 @@ def _pytest_finds_suites(text):
     """Whether a pytest launch in the text collects rather than lists.
 
     pytest discovers the tree itself (`testpaths` when no path is given),
-    so a suite added tomorrow reaches it unless every positional argument
-    is a suite file: an option's value lists nothing, a glob collects.
+    so a launch lists its suites only when every word after it in its
+    command is `tests/`, then word characters, `/`, `.` or `-`, then
+    `.py`; any other word, an option included, reads as collecting.
     """
     for match in PYTEST.finditer(text.replace('\\\n', ' ')):
         words = match.group(1).split()
-        paths = [word for before, word in zip([''] + words, words)
-                 if not word.startswith('-') and not before.startswith('-')]
-        if not paths or not all(re.fullmatch(r'tests/[^*?\[]+\.py', path)
-                                for path in paths):
+        if not words or not all(re.fullmatch(r'tests/[\w/.-]+\.py', word)
+                                for word in words):
             return True
     return False
 
