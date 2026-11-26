@@ -461,23 +461,26 @@ jobs:
     env:
       # A fork build, not an upstream release. v1.7.12 is the latest upstream
       # tag and it rejects `queue` under `concurrency`, a key GitHub documents,
-      # so the key cannot be expressed in a workflow here. 1.7.12-queue.1 is
-      # the v1.7.12 TAG plus rhysd/actionlint#654 cherry-picked unchanged, so
-      # the source delta from upstream v1.7.12 is exactly that patch. The
-      # binaries are not byte-identical to upstream's asset: this one is built
-      # with go1.26.4 and upstream's v1.7.12 with go1.26.1.
+      # so the key cannot be expressed in a workflow here. 1.7.12-queue.3 is
+      # the v1.7.12 TAG plus three upstream patches cherry-picked unchanged:
+      # rhysd/actionlint#654 (`queue` under `concurrency`), #732 (`$/`
+      # self-repository `uses:`) and #707 (`job.workflow_ref`,
+      # `job.workflow_sha`, `job.workflow_repository`,
+      # `job.workflow_file_path`), so the source delta from upstream v1.7.12
+      # is exactly those patches. The binaries are not byte-identical to
+      # upstream's asset: the fork builds this one itself, with go1.26.4.
       #
-      # When #654 merges and ships upstream, move this back to an upstream
+      # When upstream ships all three, move this back to an upstream
       # version string, the rhysd release URL below, and the checksum above
       # with them. The fork lags upstream by the ten commits merged after the
       # v1.7.12 tag, two of which are behavioural (service-container
       # `entrypoint`/`command`, and a darwin shellcheck deadlock fix), so
       # returning to upstream is a pin change and no merge.
-      DAEDALUS_ACTIONLINT_VERSION: 1.7.12-queue.1
-      # sha256 of actionlint_1.7.12-queue.1_linux_amd64.tar.gz, from the
+      DAEDALUS_ACTIONLINT_VERSION: 1.7.12-queue.3
+      # sha256 of actionlint_1.7.12-queue.3_linux_amd64.tar.gz, from the
       # release's own checksums file. Bump both together.
       DAEDALUS_ACTIONLINT_SHA256: >-
-        dcc2c42a7caaa197dfe63584a3851f62ef260f80b2cf221baaf05479661e1521
+        56693f8e7182360d8ecb67cbfc39cc674cde5d1b510507fff562b158bb4fc7bc
 
     steps:
       # actions/checkout v7.0.1
