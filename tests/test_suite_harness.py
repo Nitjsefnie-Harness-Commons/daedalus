@@ -193,8 +193,8 @@ def test_a_module_that_collects_no_clean_test_fails_collection(tmp):
     errors = dict(re.findall(r'^_+ ERROR collecting (\S+) _+\n(.*)$', output,
                              re.M))
     # pytest itself refuses a generator test; the rest are conftest's.
-    assert code == 2 and 'yield' in errors.pop('test_generator.py', ''), (
-        output)
+    generator = errors.pop('test_generator.py', '')
+    assert code == 2 and 'yield' in generator, output
     assert errors == {
         'test_none.py': 'it collected no test',
         'test_env_write.py':
