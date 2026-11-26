@@ -74,7 +74,7 @@ addopts = "--assert=plain"
 
 [tool.coverage.run]
 # parallel, because every suite is measured in its own subprocess and then
-# combined, as each suite runs. Measuring one merged process would report
+# combined. Measuring one merged process would report
 # coverage for a program nobody runs.
 parallel = true
 # The bridge fixture ends every child with terminate(), and coverage saves on
