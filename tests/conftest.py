@@ -12,6 +12,7 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +24,8 @@ SPENT = collections.defaultdict(float)
 OUTCOMES = collections.defaultdict(collections.Counter)
 NEEDS = {}
 SKIP_ALLOWED = pytest.StashKey[bool]()
+CONFINED = collections.defaultdict(dict)
+OUTSIDE = (_util.ROOT / 'tests', Path(sys.prefix).resolve())
 
 
 def pytest_configure(config):
@@ -50,10 +53,24 @@ def tmp_alias(tmp):
     return tmp
 
 
+def confine(path, before):
+    # A repository module one test file imported is that file's alone, as
+    # under the runner's process per file; CONFINED holds it between uses.
+    for name in sys.modules.keys() - before:
+        source = Path(getattr(sys.modules[name], '__file__', None) or '/')
+        source = source.resolve()
+        if source.is_relative_to(_util.ROOT) and not any(
+                source.is_relative_to(out) for out in OUTSIDE):
+            CONFINED[path][name] = sys.modules.pop(name)
+
+
 @pytest.fixture(autouse=True, scope='module')
 def module_scope(request):
+    before = set(sys.modules)
+    sys.modules.update(CONFINED[request.path])
     with getattr(request.module, 'suite_scope', contextlib.nullcontext)():
         yield
+    confine(request.path, before)
 
 
 @pytest.fixture(autouse=True)
@@ -71,9 +88,10 @@ def process_state():
 def pytest_make_collect_report(collector):
     if not isinstance(collector, pytest.Module):
         return (yield)
-    environ, cwd = dict(os.environ), os.getcwd()
+    environ, cwd, before = dict(os.environ), os.getcwd(), set(sys.modules)
     with bounded(collector.config, collector.path, collector.nodeid):
         report = yield
+    confine(collector.path, before)
     changed = sorted(key for key in environ.keys() | os.environ.keys()
                      if environ.get(key) != os.environ.get(key))
     if report.failed:
@@ -98,8 +116,10 @@ def pytest_collection_modifyitems(config, items):
         module = getattr(item, 'module', None)
         if module not in wanted:
             narrowed = getattr(module, 'narrowed_suite', None)
+            before = set(sys.modules)
             with bounded(config, item.path, item.nodeid.split('::')[0]):
                 wanted[module] = narrowed() if narrowed else None
+            confine(item.path, before)
         requires = getattr(module, 'REQUIRES', None)
         if requires:
             item.user_properties.append(('requires', requires))
