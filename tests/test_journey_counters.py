@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
     ROOT,
-    _util,
     boundary_set, counter_facts,
     journeys, launch_refusal, planting,
 )
@@ -619,12 +618,3 @@ def test_a_strace_run_that_wrote_no_readable_summary_is_refused(tmp):
                   _run=lambda argv: (0, '', '')):
         value, why = counters._syscalls('mcp-exec', ROOT, tmp)
     assert (value, why) == (14, None), (value, why)
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeybudget_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

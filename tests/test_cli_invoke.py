@@ -85,7 +85,3 @@ def test_prefixed_token_and_tab_precede_legacy_environment(tmp):
         with patch.dict(os.environ, env, clear=True):
             assert transport.token() == ('t-' + want if want else 'durable')
             assert transport.tab() == ('i-' + want if want else '')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

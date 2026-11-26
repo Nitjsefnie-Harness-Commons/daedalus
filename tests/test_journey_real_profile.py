@@ -17,9 +17,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 import _journey_profile_fixture  # noqa: E402
-from _journey_contract import (  # noqa: E402
-    _util,
-)
 
 # The symbol the front end's import is told by. `test_journey_threads.py`
 # pins its spelling against the extension; this file is about the PROFILE:
@@ -153,12 +150,3 @@ def test_the_front_ends_symbol_is_declared_two_ways_on_one_kind_of_thread(
     assert _declared_as('command-round-trip') == {'cfn'}, \
         _declared_as('command-round-trip')
     assert _declared_as('mcp-exec') == {'fn', 'cfn'}, _declared_as('mcp-exec')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeybudget_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -102,7 +102,3 @@ def test_screenshot_without_q_sends_no_quality(tmp):
     method, path, body = recorded.calls[0]
     assert (method, path) == ('PUT', '/command'), recorded.calls
     assert 'quality' not in body, recorded.calls
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

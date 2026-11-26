@@ -660,7 +660,3 @@ def test_unterminated_suite_output_gets_a_group_separator(tmp):
     expected = ('::group::tests/test_unterminated.py\nno newline\n'
                 '::endgroup::\n')
     assert result.stdout == expected, result.stdout
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(dict(globals()))))

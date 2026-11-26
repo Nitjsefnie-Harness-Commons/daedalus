@@ -31,7 +31,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _hotfixharness import run_hotfix_case  # noqa: E402
 from _repo import EXTENSION_ROOT  # noqa: E402
 
@@ -664,12 +663,3 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
                 f'The double said: {stderr!r}') from failure
         assert outcome['posted'] == [], (named, outcome)
         assert outcome['record'] == [], (named, outcome)
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='hotfixcommands_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

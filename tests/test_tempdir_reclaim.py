@@ -138,7 +138,3 @@ def test_every_browser_launch_keeps_chromium_temp_files_in_the_run(tmp):
     for env in launched:
         assert env == expected, sorted(
             k for k in {*env, *expected} if env.get(k) != expected.get(k))
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

@@ -10,7 +10,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _boundary  # noqa: E402
 import _noderun  # noqa: E402
-import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import imported_worker_paths  # noqa: E402
@@ -620,13 +619,3 @@ def narrowed_suite():
     except AssertionError:
         return ['test_imported_worker_modules_are_tracked']
     return None
-
-
-def main():
-    kept = narrowed_suite()
-    return _util.runner([test for test in _util.collect(globals())
-                         if kept is None or test.__name__ in kept])
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -390,11 +390,3 @@ def test_do_clear_cookies_exits_with_the_error_the_extension_reported(tmp):
 
     assert code == 'Error: Extension asleep', code
     assert out == '', repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clibrowsec_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

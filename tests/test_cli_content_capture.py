@@ -421,11 +421,3 @@ def test_do_net_capture_get_prints_the_whole_result_as_json_when_raw(tmp):
         '  ],\n'
         '  "tabId": 4\n'
         '}\n'), repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clicontcap_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

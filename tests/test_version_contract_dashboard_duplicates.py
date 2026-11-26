@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _run_checker,
@@ -349,12 +348,3 @@ def test_backticks_are_not_html_attribute_delimiters(tmp):
         result = _run_checker(copy_root)
         assert result.returncode == 0, (
             result.returncode, result.stdout, result.stderr)
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='versioncontract_dashboard_duplicates_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

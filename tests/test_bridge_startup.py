@@ -654,11 +654,3 @@ def test_dashboard_refuses_traversal(tmp):
         status, raw = _util.get(base + '/dashboard/%2e%2e/server.py')
         assert status in (400, 404), status
         assert raw != server_py and b'BaseHTTPRequestHandler' not in raw
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='bridgestartup_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

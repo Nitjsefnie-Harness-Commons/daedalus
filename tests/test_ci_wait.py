@@ -653,11 +653,3 @@ def test_a_non_positive_interval_is_refused(tmp):
     assert code == 3, (code, err.getvalue())
     assert err.getvalue() == (
         '--interval must be positive, got 0\n'), err.getvalue()
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ciwait_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

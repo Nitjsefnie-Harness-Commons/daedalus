@@ -262,7 +262,3 @@ def test_validate_statement_records_refuses_an_omitted_statement(tmp):
             f'missing executable statement records for {source}: 2')
     else:
         raise AssertionError('an omitted statement record was accepted')
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(dict(locals()))))

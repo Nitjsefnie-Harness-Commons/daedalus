@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _boundary import (run_extension_capability_routes,  # noqa: E402
                        run_extension_command_result)
 from _command_type_readers import (  # noqa: E402
@@ -663,11 +662,3 @@ def test_a_python_payload_type_from_a_sibling_scope_is_refused(tmp):
         _python_reads(written),
         'a payload forwarding through a sibling scope was accepted')
     assert 'neither a plain string literal nor a parameter' in message, message
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='commandtypes_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

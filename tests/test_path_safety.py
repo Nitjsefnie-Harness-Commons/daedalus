@@ -476,10 +476,6 @@ def test_under_refuses_with_the_credential_redacted(tmp):
     assert 'tok-veri…' in line, line
 
 
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='pathsafety_')
-
-
 _CONTAINMENT_PROBE = r"""
 import json
 import os
@@ -607,7 +603,3 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
     # And the backstop still refuses a real escape under the same spelling,
     # which is the half a looser comparison would have given away.
     assert answer['escape'] == 'refused', answer
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

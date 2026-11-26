@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _coverage_comment_steps import GH_CHECK_STUB  # noqa: E402
 from _coverage_comment_workflow import (  # noqa: E402
@@ -274,7 +273,3 @@ def test_missing_artifact_reports_failure_with_prior_marker(tmp):
         else:
             assert comments == [], comments
         assert checks['checks'][0]['conclusion'] == 'failure', checks
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

@@ -415,11 +415,3 @@ def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):
             'status': status,
         }
         assert evaluate_if(commit['if'], context) is expected, context
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ciratchets_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

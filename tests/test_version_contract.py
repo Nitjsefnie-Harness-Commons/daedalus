@@ -394,11 +394,3 @@ def test_console_scripts_resolve(tmp):
             assert callable(target), f'{name}: {spec} does not resolve to a callable'
     finally:
         sys.path.remove(str(ROOT))
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='versioncontract_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

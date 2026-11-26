@@ -26,7 +26,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_arm_derivation  # noqa: E402
 import _mcp_dead_code  # noqa: E402
-import _util  # noqa: E402
 from _block_field_probes import (  # noqa: E402
     block_probe, claimed_block_fields, field_unread)
 from _mcp_import_fixtures import (  # noqa: E402
@@ -572,7 +571,3 @@ def _indexed_composition(bindings, call):
     return (f'\nimport importlib\n{bindings}\n\n\ndef load():\n'
             '    return [importlib.import_module, 0]'
             f'[{call}]("pkg.leaf")\n')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

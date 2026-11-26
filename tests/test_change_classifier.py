@@ -468,12 +468,3 @@ def test_main_records_the_fallback_outputs_and_returns_zero(tmp):
     assert lines == ['docs_only=false',
                      f'matrix={json.dumps(mod.FULL_MATRIX)}',
                      'workflows=true'], lines
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='changeclassifier_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

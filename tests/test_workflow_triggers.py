@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _ghexpr import _tokenize, _unwrap, sole_context_path  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_if_expression  # noqa: E402
@@ -537,12 +536,3 @@ def test_concurrency_groups_scope_per_commit_and_per_pull(tmp):
             'group': group,
             'cancel-in-progress': 'true',
         }, f'{name} concurrency: {concurrency!r}'
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='workflowtriggers_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

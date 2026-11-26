@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import (  # noqa: E402
@@ -605,11 +604,3 @@ def test_a_download_that_never_started_reaches_onerror(tmp):
         'acknowledged': [{'handler': handler, 'error': None}
                          for handler in ('openInTab', 'notification')],
     }, actual
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='gmtransfers_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

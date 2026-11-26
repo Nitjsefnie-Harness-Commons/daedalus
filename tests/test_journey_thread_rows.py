@@ -405,12 +405,3 @@ def test_function_rows_are_wired_beside_the_count_only_when_on(tmp):
             _measured(_profile(100_000)),
             {'mcp-exec': [(_measured(_profile(100_000)), [])]})
     assert only_empty is None, only_empty
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeythreadrows_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

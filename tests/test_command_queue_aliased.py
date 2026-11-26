@@ -638,7 +638,3 @@ def test_the_refusal_key_separates_a_changed_change_time(tmp):
             service.refusal_once((f'queue:tok/{victim.name}', bumped),
                                  'q=x', 'synthetic')
     assert len(_refusals(captured)) == 2, _refusals(captured)
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

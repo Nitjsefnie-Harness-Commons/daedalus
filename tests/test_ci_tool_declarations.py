@@ -421,11 +421,3 @@ def test_a_mechanisms_share_never_carries_a_tool_the_mechanism_lacks(tmp):
         f'set: covered={sorted(covered)}, residue={residue}, '
         f'skipped={sorted(derived)}. A tool in two shares is enforced by '
         'neither, and one in neither is enforced by nothing')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='citooldecls_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

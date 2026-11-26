@@ -583,5 +583,3 @@ def _parent_main(tmp, mode):
 if __name__ == '__main__':
     if len(sys.argv) == 4 and sys.argv[1] == '--parent':
         _parent_main(sys.argv[2], sys.argv[3])
-    else:
-        sys.exit(_util.runner(_util.collect(dict(locals()))))

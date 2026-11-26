@@ -26,7 +26,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _lint_tool_refusals import (  # noqa: E402
     no_pin, no_wheel, oversize_wheel, recorded_missing,
     recorded_outside_the_tool_dir,
@@ -74,11 +73,3 @@ def test_a_tool_that_does_not_resolve_is_refused(tmp):
     """Neither binary answering is a failure, named one by one."""
     del tmp
     recorded_missing()
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='lintrefusals_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -672,15 +672,3 @@ def test_the_passed_quota_is_the_one_the_write_path_enforces(tmp):
         200, {'ok': True})
     assert _admit_and_store(routes, payload['sig'], job, 1, b'cd', root) == (
         413, {'error': 'segment count limit exceeded'})
-
-
-def main():
-    summary = os.environ.get('DAEDALUS_TEST_SUMMARY', '')
-    with suite_scope():
-        os.environ['DAEDALUS_TEST_SUMMARY'] = summary
-        return _util.runner(_util.collect(globals()),
-                            tmp_prefix='segroutes_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

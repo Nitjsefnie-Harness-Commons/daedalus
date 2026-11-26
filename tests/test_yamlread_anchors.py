@@ -6,7 +6,6 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -538,7 +537,3 @@ def test_two_tags_on_one_node_are_refused(tmp):
     del tmp
     _reader_refused(
         _step_with_field('name: !!str !!str target'), 'two YAML tags')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

@@ -649,7 +649,3 @@ def test_a_bare_reraise_carries_its_own_line(_tmp):
     assert _mcp_guard_floor.guard_keys(sites) == [
         ('reraise_shapes', 'inner', 'value is None'),
         ('reraise_shapes', 'outer', 'bare raise at line 11')]
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

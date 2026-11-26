@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
 from _dashsection import section_runner  # noqa: E402
 
@@ -367,11 +366,3 @@ def test_a_bus_tab_event_repopulates_the_select_and_keeps_the_choice(_tmp):
     assert report['options'] == ['(active tab)', '11  first tab',
                                  '22  https://two.example.com/two'], report
     assert report['unplanned'] == [], report
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashcdp_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

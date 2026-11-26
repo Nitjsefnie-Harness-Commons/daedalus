@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
 from _dashsection import section_runner  # noqa: E402
 
@@ -457,11 +456,3 @@ def test_a_command_the_bridge_refused_answers_nothing_at_all(_tmp):
     assert shared.legs(report)['poll'] == [], report
     assert shared.legs(report)['consume'] == [], report
     assert report['pane'][0][1] == 'HTTP 503: bridge down', report
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashfetch_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

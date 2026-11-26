@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
     journeys,
@@ -396,12 +395,3 @@ def test_a_dropped_journey_carries_no_bound_with_it(tmp):
     written = policy.load(artifact)
     assert written['journeys'][dropped] is None, written['journeys']
     assert dropped not in written['tolerances'], written['tolerances']
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeyrebaseline__')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

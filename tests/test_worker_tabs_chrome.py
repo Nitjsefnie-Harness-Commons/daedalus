@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _netcapture_harness import apis  # noqa: E402
 from _tabs_harness import command, run_tabs  # noqa: E402
 
@@ -471,11 +470,3 @@ def test_remove_css_removal_rejection_posts_the_message(tmp):
         'target': {'tabId': 5, 'allFrames': False},
         'css': CSS,
     }]]], outcome
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='tabschrome_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

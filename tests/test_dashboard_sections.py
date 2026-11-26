@@ -572,11 +572,3 @@ def test_recent_captures_show_newest_24_within_one_id(tmp):
         case = Path(tmp) / str(count)
         case.mkdir()
         _recent_captures(case, count, ids)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashsections_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

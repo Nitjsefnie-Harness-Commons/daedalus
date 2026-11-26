@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _cdpharness import run_cdp_handle_lifecycle  # noqa: E402
 from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
@@ -627,11 +626,3 @@ def test_a_page_whose_clock_throws_still_answers_a_relayed_eval(tmp):
             ('1', '1', {**base, 'timing': {'cs_recv': 1}})):
         got = answer(poison, timed)
         assert got == {'errors': [], 'posted': [posted]}, (poison, got)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='evalrelay_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

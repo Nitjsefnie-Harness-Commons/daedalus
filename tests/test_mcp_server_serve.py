@@ -564,8 +564,3 @@ def test_bearer_middleware_fails_closed_without_configured_token(tmp):
                      'Accept': 'application/json, text/event-stream'})
         assert status == 401, (status, body)
         assert json.loads(body)['error'] == 'unauthorized', body
-
-
-if __name__ == '__main__':
-    with suite_scope():
-        sys.exit(_util.runner(_util.collect(dict(locals()))))

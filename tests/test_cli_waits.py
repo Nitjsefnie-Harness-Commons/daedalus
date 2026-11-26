@@ -552,7 +552,3 @@ def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
     # polling past its deadline. A generous ceiling, because this asserts the
     # absence of a 30-second poll, not the scheduler's precision.
     assert float(fields['ELAPSED']) < 3.0, r.stdout
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

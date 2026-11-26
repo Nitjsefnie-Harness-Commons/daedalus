@@ -217,12 +217,3 @@ def test_the_module_imports_without_daedalus_configuration(_tmp):
         [sys.executable, '-c', 'import daedalus_bridge.tab_registry'],
         env=env, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='tabregistry_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

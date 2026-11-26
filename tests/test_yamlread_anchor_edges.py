@@ -6,7 +6,6 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -554,7 +553,3 @@ def test_flow_member_properties_keep_unquoted_hashes_as_comments(tmp):
                           parsed['jobs']['sample']['steps'][0]['with']['args'])
             if member == members[0]:
                 assert collection == ['x', 'b'], collection
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

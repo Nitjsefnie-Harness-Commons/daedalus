@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _duplicate_the_page_js_version,
@@ -64,12 +63,3 @@ def test_check_versions_set_writes_every_site_or_none(tmp):
                     path, desc, site.group('v'))
             else:
                 assert site and site.group('v') == '1.2.3', (argv, path, desc)
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='version_set_atomic_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

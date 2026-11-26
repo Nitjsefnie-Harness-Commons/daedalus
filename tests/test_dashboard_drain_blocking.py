@@ -19,7 +19,6 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _fanout import (  # noqa: E402
     DASHBOARD,
     captured_stdout as _captured,
@@ -169,8 +168,3 @@ def test_the_cursor_never_advances_past_an_unconsumed_entry(tmp):
         'the cursor advanced past an entry this connection never consumed',
         cursor, head.name)
     assert frames == [], frames
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(
-        _util.collect(globals()), tmp_prefix='dashdrainblocking_'))

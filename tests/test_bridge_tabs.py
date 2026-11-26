@@ -207,11 +207,3 @@ def test_poll_legacy_escape_hatch(tmp):
         assert status == 200, status
         status, body = _util.post_json(base + '/poll', {'token': TOK})
         assert body == {}, body
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='bridgetabs_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

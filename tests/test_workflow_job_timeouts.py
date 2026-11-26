@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wffixtures import _probe_workflow  # noqa: E402
 from _wfjobs import bound_source, load, workflow_files  # noqa: E402
@@ -482,7 +481,3 @@ def _where(workflow, name):
     """The file, line and literal header text one job sits at."""
     line, text = workflow.starts[name]
     return f'{workflow.path.name}:{line}: {text!r}'
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

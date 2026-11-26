@@ -504,7 +504,3 @@ def test_a_negative_timeout_is_refused_before_the_command_is_sent(tmp):
         # subcommand's own default applies — and is not refused.
         r = run_cli(['screenshot', '--timeout', '0', '--help'], env)
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

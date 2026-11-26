@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
 import _dashnode_retry_control as retry  # noqa: E402
-import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import event_target_stub  # noqa: E402
@@ -690,11 +689,3 @@ def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
                if event[0] in ('reader-join', 'wait')]
     assert budgets[0] > budgets[1] > budgets[2] >= 0, budgets
     assert result.stdout == 'recovered', result
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashbehaviour_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

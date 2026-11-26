@@ -62,12 +62,3 @@ def test_poll_caps_the_ramp_pause_at_the_remaining_window(tmp):
     assert len(pauses) == len(peeks), (pauses, peeks)
     expected_pause = 100.0 + 0.05 - 100.0499
     assert pauses == [expected_pause, expected_pause], pauses
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='mcppollpause_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

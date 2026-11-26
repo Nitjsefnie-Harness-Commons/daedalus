@@ -359,11 +359,3 @@ def test_a_symlinked_alias_is_refused(tmp):
     assert refused, output
     assert output.count('kind=alias') == 1, output
     assert not list(real.iterdir()), list(real.iterdir())
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='result_store_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

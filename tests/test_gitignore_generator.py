@@ -536,11 +536,3 @@ def test_main_writes_exactly_what_the_shared_derivation_returns(tmp):
     assert handed == [['tracked.txt']], handed
     assert (repo / '.gitignore').read_text(encoding='utf-8') == stub_text, (
         'main wrote a file the derivation did not')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='gitignoregen_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

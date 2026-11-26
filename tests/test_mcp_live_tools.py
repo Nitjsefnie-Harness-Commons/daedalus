@@ -606,8 +606,3 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
         text = text.replace(f'{sdk}: segment_status: ', f'{sdk}: ')
         assert answer.is_error and text == (
             sdk if reason is None else f'{sdk}: {reason}'), text
-
-
-if __name__ == '__main__':
-    with suite_scope():
-        sys.exit(_util.runner(_util.collect(dict(locals()))))

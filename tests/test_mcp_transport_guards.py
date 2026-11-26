@@ -628,12 +628,3 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
     assert raised == 'RemoteProtocolError', raised
     assert seen == [('GET', '/result?delivery=d1')] * 2 + [
         ('GET', '/result')], seen
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='mcptransportguards_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

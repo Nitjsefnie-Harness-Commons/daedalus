@@ -251,11 +251,3 @@ def test_e_a_retry_coalesces_as_the_flag_leaves_it(tmp):
     # Flag off, a body's own _timing is dropped, so the retry coalesces.
     assert _run(tmp, script.replace('EXTRA', '{"_timing": {}}'),
                 None) == 'False True'
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='exec_timing_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

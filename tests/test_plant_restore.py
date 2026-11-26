@@ -96,12 +96,3 @@ def test_the_isolation_refuses_a_duplicated_anchor(tmp):
     except AssertionError:
         refused = True
     assert refused, 'a paragraph carrying an anchor twice was not refused'
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='plantrestore_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

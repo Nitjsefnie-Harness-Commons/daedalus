@@ -8,7 +8,6 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _boundary import (observe_extension_worker_paths,  # noqa: E402
                        run_extension_capability_routes,
                        run_extension_command_result)
@@ -649,11 +648,3 @@ def test_limitation_unknown_lexical_name_is_not_attributed(tmp):
     }], background_path=background)['sources'][str(worker)]
     assert observed['bindingExecutionError'] is None
     assert observed['bindings'] == [], observed
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='workermodule_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

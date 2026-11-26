@@ -443,7 +443,3 @@ def test_a_symlinked_tab_named_like_the_extension_is_drained(tmp):
 
     assert sink.ids() == ['behind-the-link'], sink.ids()
     assert sink.tags() == ['Extension'], sink.tags()
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

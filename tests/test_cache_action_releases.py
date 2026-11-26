@@ -552,11 +552,3 @@ def test_the_real_tree_carries_both_pins_for_every_cache_writing_job(tmp):
     assert refusals == [], refusals
     assert len(pins) == 2 * len(_CACHE_WRITING_JOBS), (
         len(pins), len(_CACHE_WRITING_JOBS))
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='cacherel_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

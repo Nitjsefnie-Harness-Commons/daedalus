@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _duplicate_the_package_version,
@@ -135,11 +134,3 @@ def test_check_versions_refuses_a_tree_of_empty_versions(tmp):
             r = _run_checker(copy_root)
             assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
             assert '9.9.9a' in r.stderr, r.stderr
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='versionempty_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -214,7 +214,3 @@ def test_missing_token_is_an_error(tmp):
     r = run_cli(['tabs'], cli_env(DAEDALUS_URL='http://127.0.0.1:1'))
     assert r.returncode != 0, (r.returncode, r.stdout)
     assert 'DAEDALUS_TOKEN is not set' in r.stderr, r.stderr
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

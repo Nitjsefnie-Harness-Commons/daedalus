@@ -478,12 +478,3 @@ def test_a_query_token_still_authorizes_a_get(tmp):
         status, payload = _util.get_json(base + '/tabs')
         assert status == 400 and payload == {'error': 'bad token'}, (
             status, payload)
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='bridgecredentials_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

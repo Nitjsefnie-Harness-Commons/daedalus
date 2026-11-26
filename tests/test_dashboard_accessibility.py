@@ -13,7 +13,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashfield  # noqa: E402
-import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 
@@ -399,11 +398,3 @@ def test_the_field_check_rejects_a_label_with_no_associated_control(tmp):
     unhidden = dict(healthy, spacerHidden=None)
     problems = _dashfield.field_association_failures(unhidden)
     assert any('spacerHidden' in problem for problem in problems), problems
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dasha11y_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

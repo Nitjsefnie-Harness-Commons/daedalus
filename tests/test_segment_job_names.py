@@ -201,12 +201,3 @@ def test_a_status_query_for_an_over_derived_job_is_refused(tmp):
             status, body = _util.get_json(base + target)
             assert (status, body) == (
                 400, {'error': 'bad job'}), (status, body)
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='segjobnames_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

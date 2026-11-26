@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
 from _dashsection import section_runner  # noqa: E402
 
@@ -318,11 +317,3 @@ def test_a_failed_listing_renders_the_error_pane(_tmp):
     # The counter is written inside `render`, which never ran.
     assert report['sub'] == '', report
     assert report['unplanned'] == [], report
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashcook_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -19,7 +19,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 # Shared wiring lives in _fanout so the drain-blocking suite uses the same
 # by-path loader and queue helpers; imported under the local names the
@@ -550,8 +549,3 @@ def test_the_client_drops_a_replayed_event_id(_tmp):
     # empty record is a claim that `sse.js` asked for nothing else.
     assert seen['unplanned'] == [], seen
     assert seen['seen'] == ['e1', 'e2'], seen
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(
-        _util.collect(globals()), tmp_prefix='dashboardfanout_'))

@@ -70,12 +70,3 @@ def test_ratchet_commit_blocks_old_heads_until_they_rebase(tmp):
         assert code == 0, verdicts
         assert verdicts[0].conclusion == 'success', verdicts
         assert fresh_published, 'the green verdict was never published'
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='gatefreshratchet_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

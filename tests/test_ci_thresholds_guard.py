@@ -331,10 +331,6 @@ def test_guard_jobs_execute_one_judged_base_and_refuse_missing_history(tmp):
     assert all(word in result.stderr for word in ('unknown', 'HEAD^'))
 
 
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='thguard_')
-
-
 def test_threshold_base_prefixed_environment_precedes_legacy(tmp):
     import os
     policy = _util.load(GUARD.with_name('threshold_base.py'), 'base_env')
@@ -351,7 +347,3 @@ def test_threshold_base_prefixed_environment_precedes_legacy(tmp):
               patch.object(policy, 'resolve', return_value='resolved') as run):
             assert policy.main() == 0
         assert run.call_args.args == values, run.call_args
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

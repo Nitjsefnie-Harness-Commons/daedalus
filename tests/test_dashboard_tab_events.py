@@ -14,7 +14,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
@@ -638,11 +637,3 @@ def test_an_empty_listing_interlude_recovers_the_table(_tmp):
     assert seen['rowBack'] is True, seen
     assert seen['noticeGone'] is True, seen
     assert seen['totalFetches'] == 2, seen
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashtabevents_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

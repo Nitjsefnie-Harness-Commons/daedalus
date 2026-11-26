@@ -2,7 +2,6 @@
 """HTML template text-mode boundary contracts for version regions."""
 from pathlib import Path
 
-import _util
 from _version_contract import _copy_versioned_tree, _run_checker
 from _version_contract_scanners import (
     _checker,
@@ -241,12 +240,3 @@ def test_annotation_xml_direct_svg_uses_the_svg_namespace(tmp):
               '</annotation-xml></math>')
     assert _surviving(regions, _DASHBOARD, direct, site) == 0
     assert _surviving(regions, _DASHBOARD, nested, site) == 1
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='versioncontract_template_scanners_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

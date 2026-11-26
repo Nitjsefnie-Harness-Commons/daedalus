@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _hotfixharness import run_hotfix_case  # noqa: E402
 from test_hotfix_scope import (  # noqa: E402
     ELSEWHERE, FILE_SCOPE, FIX, SCOPE, SITE, _delivered, _errors, _logs)
@@ -289,11 +288,3 @@ def test_an_unparseable_pattern_is_still_refused_with_the_record_intact(tmp):
     })
     row = accepted['record'][0]
     assert (row['code'], row['match']) == ('kept', FILE_SCOPE), accepted
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='hotfixclear_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

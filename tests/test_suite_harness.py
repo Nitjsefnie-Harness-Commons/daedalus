@@ -378,7 +378,3 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
         os.path.join(tmp, 'prefixed'), loads, python=context.env_exe,
         tests=checkout / 'tests')
     assert (code, outcomes) == (1, own), output
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

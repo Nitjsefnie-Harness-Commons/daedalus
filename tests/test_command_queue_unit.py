@@ -613,7 +613,3 @@ def test_gc_loop_forwards_directory_and_ttl_after_sleep(_tmp):
         ('sleep', 30.0),
         ('collect', cmd_dir, 45),
     ]
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

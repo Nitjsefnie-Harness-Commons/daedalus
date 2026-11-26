@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _netcapture_harness import apis  # noqa: E402
 from _repo import declared_version  # noqa: E402
 from _tabs_harness import command, run_tabs  # noqa: E402
@@ -145,11 +144,3 @@ def test_ext_reload_defers_the_reload_by_the_margin_that_lands_the_post(tmp):
     reload_timers = [t for t in outcome['timers'] if t['ranReload']]
     assert len(reload_timers) == 1, outcome['timers']
     assert reload_timers[0]['delay'] == 500, reload_timers
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='tabsmisc_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

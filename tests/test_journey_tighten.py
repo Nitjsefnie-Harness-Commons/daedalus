@@ -446,12 +446,3 @@ def test_a_measurement_missing_a_journeys_threads_is_not_recorded(tmp):
     report['excluded_threads'].pop(journeys().NAMES[0])
     _assert_refused(report, tmp,
                     'a measurement that excludes no thread for one journey')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeytighten_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

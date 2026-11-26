@@ -139,7 +139,3 @@ print('ROOT_COUNTS', *counts)
     counts = tuple(int(value) for value in marker.split()[1:])
     assert counts == (0, 0, 0), (
         f'flat loads changed the repository root count: {counts}')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

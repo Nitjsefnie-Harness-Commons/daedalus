@@ -651,11 +651,6 @@ def test_both_selectors_name_shipped_workflows_and_the_right_job(tmp):
     assert job.get('name') in (None, mod.SECRETS_JOB), job.get('name')
 
 
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='aggregategate_')
-
-
 def test_poll_bound_environment_precedence(tmp):
     del tmp
     mod = _gate()
@@ -667,7 +662,3 @@ def test_poll_bound_environment_precedence(tmp):
             env['DAEDALUS_SECRETS_POLL_BOUND_S'] = primary
         with mock.patch.dict(os.environ, env, clear=True):
             assert mod.poll_bound() == want
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

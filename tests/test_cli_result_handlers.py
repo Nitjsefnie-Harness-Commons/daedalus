@@ -102,11 +102,3 @@ def test_do_result_renders_an_undefined_result_as_a_word(tmp):
         plan=[_api_get('/result?tab=tab0')], target_tab='tab0', token=TOK)
 
     assert _rendered(out) == f'{IN} job1  tab=tab0\n(undefined)\n', repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='cliresult_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

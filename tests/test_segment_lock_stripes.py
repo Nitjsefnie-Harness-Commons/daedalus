@@ -582,12 +582,3 @@ def test_every_site_takes_one_stripe_for_a_job(tmp):
                 f'({outcome}); every site must ask for the job by name')
         held_ids = set(_job_lock_ids(gate_dir, job))
         assert held_ids == {_holder_lock(gate_dir)[1]}, (held_ids, job)
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='seglockstripes_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -80,7 +80,3 @@ const evaluator = require('path').resolve('extension/worker/evaluate.js');
     assert checked.returncode == 0, checked.stderr
     actual = json.loads(checked.stdout)
     assert actual == [row[2] for row in cases], actual
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

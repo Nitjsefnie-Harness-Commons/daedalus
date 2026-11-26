@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _hotfixharness import run_hotfix_case  # noqa: E402
 from _hotfix_outcome import _delivered, _errors  # noqa: E402
 
@@ -687,11 +686,3 @@ def test_a_scope_does_not_match_a_query_carrying_its_own_text(tmp):
         skipped = [line for line in _logs(outcome) if 'by site scope' in line]
         assert len(skipped) == (0 if delivers else 1), (page, outcome)
         assert not _errors(outcome), (page, outcome)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='hotfixscope_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

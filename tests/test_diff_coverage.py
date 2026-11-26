@@ -652,7 +652,3 @@ def test_an_undecodable_path_is_reported_not_a_traceback(tmp):
     assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
     assert 'Traceback' not in done.stderr, done.stderr
     assert 'coverage report invalid' in done.stderr, done.stderr
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

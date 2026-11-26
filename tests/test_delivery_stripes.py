@@ -405,12 +405,3 @@ def test_the_selector_key_is_the_entry_and_takes_no_name(tmp):
     assert answer['present_is_an_identity'] is True, answer
     assert answer['refused_bare_name'] is True, answer
     assert answer['refused_str_path'] is True, answer
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='deliverystripes_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

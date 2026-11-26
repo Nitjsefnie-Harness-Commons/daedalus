@@ -10,7 +10,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(
     1, str(Path(__file__).resolve().parents[1] / 'scripts' / 'ci'))
-import _util  # noqa: E402
 from workflow_yaml import (  # noqa: E402
     YAMLReadError, job_names, workflow_step_items)
 
@@ -62,11 +61,3 @@ def test_job_names_refuse_a_jobs_value_that_is_not_a_mapping(tmp):
         assert str(error) == 'jobs is not a mapping', error
         return
     raise AssertionError('a flow-mapping jobs value was accepted')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='wfyamluses_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

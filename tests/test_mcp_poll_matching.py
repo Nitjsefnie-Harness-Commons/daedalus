@@ -60,12 +60,3 @@ def test_poll_leaves_every_unmatched_delivery_in_place(tmp):
         assert len(peeks) == 1, (label, client.calls)
         expected = 'raised TimeoutError: no result within 0.001s'
         assert result == expected, (label, result)
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='mcppollmatching_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

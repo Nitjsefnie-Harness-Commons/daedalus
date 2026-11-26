@@ -153,11 +153,3 @@ def test_an_exhausted_command_write_still_answers_500(tmp):
         qdir = Path(docroot) / 'commands' / _QUEUE
         assert qdir.is_dir(), 'the queue directory itself must survive'
         assert list(qdir.iterdir()) == [], list(qdir.iterdir())
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='writeretry_')
-
-
-if __name__ == '__main__':
-    sys.exit(main())

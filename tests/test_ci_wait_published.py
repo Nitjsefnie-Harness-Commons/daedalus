@@ -629,11 +629,3 @@ def _ci_wait():
 
 
 DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ciwaitpub_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

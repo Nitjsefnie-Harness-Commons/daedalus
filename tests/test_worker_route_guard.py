@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _boundary import run_extension_capability_routes  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
@@ -111,7 +110,3 @@ def test_route_reports_delete_then_recreate(tmp):
     assert observations[0].get('mutatedSymbols') == [
         'handleUnblockRequests',
     ], observations
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

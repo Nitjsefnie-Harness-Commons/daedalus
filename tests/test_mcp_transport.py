@@ -158,12 +158,6 @@ def test_an_extension_command_answers_on_the_terms_its_wait_set(tmp):
     assert len(sent) == before, sent
 
 
-def main():
-    with suite_scope():
-        return _util.runner(_util.collect(globals()),
-                            tmp_prefix='mcptransport_')
-
-
 class ClosingClient:
     """A cached client whose clean close yields before it records. A
     raising close never yields: the test can only see an early propagation
@@ -278,7 +272,3 @@ def test_mcp_lifespan_closes_loop_clients(tmp):
         return not mod.BridgeTransport.clients.get(loop)
 
     assert asyncio.run(drive_lifespan())
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

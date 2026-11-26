@@ -202,11 +202,3 @@ def test_store_hotfix_carries_a_clear_out_and_refuses_a_contradiction(_tmp):
         _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
                                 code='console.log(1)', match=SCOPE, wait=True),
     ], composition.bridge.calls
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='mcphotfix_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

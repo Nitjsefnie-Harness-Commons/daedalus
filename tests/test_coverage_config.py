@@ -215,7 +215,3 @@ def test_whitespace_only_report_lines_are_ignored(tmp):
 
     assert rows.get('driver.py') == (2, 0, 100.0), rows
     assert rows.get('ran.py') == (2, 0, 100.0), rows
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

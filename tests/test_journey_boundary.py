@@ -12,7 +12,6 @@ import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
     BOUNDARY_ENV,
     ROOT,
-    _util,
     boundary_loader, boundary_probe, counted_run,
     environment, journeys,
 )
@@ -159,12 +158,3 @@ def test_the_valgrind_argv_keeps_the_spawned_bridge_instrumented(tmp):
                 if part.startswith('--instr-atstart')], (
         'no toggle may be added or flipped: the bridge the harness spawns is '
         f'instrumented from birth only while the default stands: {asked}')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeyboundary_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -682,11 +682,3 @@ def test_z_the_decorated_controls_restore_the_environment(_tmp):
     assert now == _DAEDALUS_BASELINE, (
         f'the decorated controls changed the environment: '
         f'{sorted(now.items())} != {sorted(_DAEDALUS_BASELINE.items())}')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='segment_store_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

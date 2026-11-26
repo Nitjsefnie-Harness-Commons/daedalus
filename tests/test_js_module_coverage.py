@@ -397,12 +397,3 @@ def test_workflow_gates_per_module_coverage_and_tightens_it(tmp):
     assert workflow.index(tighten) < workflow.index(
         'python scripts/ci/thresholds.py --check')
     assert '- name: JavaScript per-module coverage gate' in workflow
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='jsmodulecoverage_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

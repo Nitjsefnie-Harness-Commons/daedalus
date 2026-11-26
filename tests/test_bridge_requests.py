@@ -483,11 +483,3 @@ def test_json_scalars_arrays_and_null_are_refused_on_every_body_verb(tmp):
         assert all(
             status == 400 and error == 'JSON body must be an object'
             for _shape, _method, status, error in replies), replies
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='bridgerequests_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

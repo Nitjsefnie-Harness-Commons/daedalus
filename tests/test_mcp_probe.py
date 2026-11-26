@@ -258,7 +258,3 @@ def test_probe_prefers_prefixed_token_and_accepts_legacy_fallback(tmp):
         with httpx.Client(transport=transport) as client:
             probe.rpc(client, None, 'tools/list')
         assert [r['authorization'] for r in seen] == ['Bearer ' + want], seen
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

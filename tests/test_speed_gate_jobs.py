@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -158,12 +157,3 @@ def test_work_scripts_are_refused(tmp):
     del tmp
     for script in _WORK_SCRIPTS:
         assert not _wait_only(script), script
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='speedgate_jobs_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

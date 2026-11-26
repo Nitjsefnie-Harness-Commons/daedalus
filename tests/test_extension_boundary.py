@@ -15,7 +15,6 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _noderun  # noqa: E402
 import _overlap  # noqa: E402
-import _util  # noqa: E402
 from _boundary import HARNESS, run_extension_result_boundary  # noqa: E402
 from _boundary_env import ENVIRONMENT  # noqa: E402
 from _node_harness_fixtures import _command_line_length  # noqa: E402
@@ -597,11 +596,3 @@ def test_the_relay_ceiling_is_declared_once_and_bounds_the_default(tmp):
     assert values['GM_FETCH_MAX_RESPONSE'] > 0, values
     assert (values['GM_FETCH_RESPONSE_CEILING']
             >= values['GM_FETCH_MAX_RESPONSE']), values
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='extboundary_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

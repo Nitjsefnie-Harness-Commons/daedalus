@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
 
@@ -187,11 +186,3 @@ def test_the_allowlist_admits_exactly_the_example_uuid(tmp):
     assert 'RFC 4122' in description, description
     assert 'bridge-token fixture' in description, description
     assert 'what would clear this entry' in description, description
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='secretscan_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

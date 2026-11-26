@@ -683,11 +683,3 @@ def test_health_counts_a_stream_that_named_no_tab(tmp):
         finally:
             tabless.close()
             tabless_conn.close()
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='bridgestreams_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

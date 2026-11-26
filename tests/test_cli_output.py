@@ -92,7 +92,3 @@ def test_the_entry_point_leaves_an_explicit_encoding_alone(tmp):
         assert result.returncode == 0, (result.returncode, result.stderr)
         assert b'caf\xe9' in result.stdout, result.stdout
         assert b'caf\xc3\xa9' not in result.stdout, result.stdout
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

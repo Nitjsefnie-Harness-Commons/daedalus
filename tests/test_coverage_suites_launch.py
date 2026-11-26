@@ -17,7 +17,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _coverage_launch_stubs as _launch  # noqa: E402
 from _coverage_suite_fixture import (  # noqa: E402
     OPERATOR_ASKS_FIRST, OPERATOR_FORCES)
@@ -186,7 +185,3 @@ def test_every_suite_failing_is_refused_even_without_the_gate(tmp):
     for name in suites:
         block = _launch.group(outcome, name)
         assert _FAILURE_MARKER in block, block
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(dict(globals()))))

@@ -15,7 +15,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _DOM = _dashnode.DOM
@@ -243,11 +242,3 @@ def test_the_scope_column_carries_a_header(_tmp):
     seen = _hotfix_scope(_tmp)
 
     assert 'scope' in seen['headers'], seen
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashhotfix_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

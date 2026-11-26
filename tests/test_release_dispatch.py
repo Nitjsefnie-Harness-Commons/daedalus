@@ -403,8 +403,3 @@ def test_prefixed_credentials_and_wait_repository_precede_legacy(tmp):
             assert dispatch.main(['wait-gates', SHA]) == 0
         assert prepare.call_args.args == ('fixture-key',)
         assert wait.call_args.args[1:3] == ('o/r', SHA)
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals()),
-                                  tmp_prefix='release_dispatch_'))

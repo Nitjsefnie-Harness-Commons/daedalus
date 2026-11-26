@@ -334,11 +334,3 @@ def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
     assert 'scripts/ci/coverage_suites.py' in runners, (
         'coverage_suites reaches the suites through run_tests; a rule '
         'that misses it misses the job whose fetch-depth matters most')
-
-
-def main():
-    return _util.runner(_util.collect(globals()))
-
-
-if __name__ == '__main__':
-    sys.exit(main())

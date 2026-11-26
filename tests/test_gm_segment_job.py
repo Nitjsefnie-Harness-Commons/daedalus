@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import CONTENT_SCRIPT_PAGE  # noqa: E402
@@ -292,11 +291,3 @@ def test_a_non_string_job_is_relayed_unvalidated(tmp):
     assert outcome['sent'] == [{'type': 'segmentJob', 'job': 42}], outcome
     assert outcome['settled'] == [
         {'state': 'rejected', 'value': 'Missing job'}], outcome
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='gmsegjob_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

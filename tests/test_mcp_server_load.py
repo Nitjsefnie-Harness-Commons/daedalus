@@ -326,8 +326,3 @@ def test_mcp_uses_the_shared_log_safe_function(tmp):
     _mcp_load._need_deps()
     mod = _mcp_load._load_mcp('http://127.0.0.1:1')
     assert mod.log_safe is sys.modules['daedalus_bridge.log_safe'].log_safe
-
-
-if __name__ == '__main__':
-    with suite_scope():
-        sys.exit(_util.runner(_util.collect(dict(locals()))))

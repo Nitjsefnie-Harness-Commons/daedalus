@@ -422,12 +422,3 @@ def test_a_stat_failure_answers_a_client_instead_of_dropping_it(tmp):
             'error': None, 'ts': 1, '_did': 'stat-failure-1'})
     assert status == 500, status
     assert body == {'error': 'result storage failure'}, body
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='resultstripe_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

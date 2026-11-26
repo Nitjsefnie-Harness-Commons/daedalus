@@ -12,7 +12,6 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_code_eval  # noqa: E402
 import _mcp_import_closure  # noqa: E402
-import _util  # noqa: E402
 from _mcp_import_fixtures import _scan_verdict, _write_tree  # noqa: E402
 
 
@@ -221,7 +220,3 @@ def test_the_undecided_callees_stay_refused(_tmp):
                 or 'reaches the import-by-name operation' not in detail:
             wrong.append(f'{label}: {verdict}: {detail}')
     assert not wrong, '; '.join(wrong)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

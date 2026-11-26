@@ -534,7 +534,3 @@ def test_queue_write_failure_keeps_file_and_releases_claim(tmp):
             assert server.command_queue.claim(key) is True
         finally:
             server.command_queue.release(key)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

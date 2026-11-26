@@ -601,7 +601,3 @@ def _symlinked_legacy_file(command_dir):
     except (OSError, NotImplementedError) as why:
         _util.skip(f'this filesystem will not hold a symlink: {why}')
     return real, alias
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

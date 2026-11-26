@@ -267,8 +267,3 @@ def test_the_seed_is_taken_once_not_per_mint(tmp):
         setattr(cq, 'time', saved)
     assert int(second.split('_', 1)[1]) < 99999, (
         'the second mint rescanned the commands root', second)
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(
-        _util.collect(globals()), tmp_prefix='cmdorder_'))

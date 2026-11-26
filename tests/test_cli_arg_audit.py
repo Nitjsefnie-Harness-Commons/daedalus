@@ -654,7 +654,3 @@ def test_cli_handlers_read_only_declared_args(tmp):
     details = '\n'.join(f'{name}: {construct} in {handler}'
                         for name, construct, handler in violations)
     assert not violations, f'CLI argument audit violations:\n{details}'
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

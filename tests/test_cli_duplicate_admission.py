@@ -94,7 +94,3 @@ def test_a_no_wait_retry_names_what_it_did_not_wait_on(tmp):
         assert 'already queued' in second.stdout, second.stdout
         assert 'not waiting' in second.stdout, second.stdout
         assert 'waiting on that delivery' not in second.stdout, second.stdout
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

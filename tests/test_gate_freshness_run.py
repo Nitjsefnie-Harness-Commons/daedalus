@@ -660,10 +660,6 @@ def test_workflow_timeout_leaves_slack_above_the_call_estimate(tmp):
     assert (needed_minutes, timeout) == (30, 35)
 
 
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='gatefreshrun_')
-
-
 def test_call_budget_environment_precedence(tmp):
     m = _mod()
     for primary, legacy, want in (('17', '9', 17), (None, '9', 9),
@@ -674,7 +670,3 @@ def test_call_budget_environment_precedence(tmp):
             env['DAEDALUS_GATE_FRESHNESS_MAX_CALLS'] = primary
         with patch.dict(os.environ, env, clear=True):
             assert m._call_budget() == want
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

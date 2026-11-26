@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _pip_cache import _CACHE_JOBS  # noqa: E402
 from _wfgraph import _tests_yml  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
@@ -114,11 +113,3 @@ def test_the_cached_jobs_pin_one_cache_release(tmp):
             _index, step = _cache_step(steps, action)
             shas.add(step['uses'].split('@')[1])
     assert len(shas) == 1, f'distinct actions/cache SHAs: {sorted(shas)}'
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='cipipcache_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

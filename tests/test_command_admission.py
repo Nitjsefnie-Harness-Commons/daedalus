@@ -59,7 +59,3 @@ def test_a_put_with_the_same_id_but_a_new_payload_enqueues_fresh(tmp):
         # Each answer names its own delivery rather than a shared one.
         assert [answer['command'] for answer in (first, second)] == payloads, (
             first, second, payloads)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

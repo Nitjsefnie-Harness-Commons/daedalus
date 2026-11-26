@@ -551,11 +551,3 @@ def test_a_retry_waits_the_window_the_status_asked_for(tmp):
         'rather than delay-seconds; there is no clock here to compare a date '
         'against, so it falls back to the backoff instead of being read as a '
         'number nobody could have checked')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='linttools_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

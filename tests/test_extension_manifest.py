@@ -25,7 +25,6 @@ import sys
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 EXTENSION_ROOT = ROOT / 'extension'
@@ -688,11 +687,3 @@ def test_the_path_safety_branches_are_refused(tmp):
     )
     for label, build, where, reason in rows:
         _assert_one_refusal(label, build, where, reason)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='extmanifest_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -629,12 +629,3 @@ def test_an_eof_during_the_spawn_waits_out_the_registration(tmp):
         if not closed:
             os.close(write_fd)
         _ended(child)
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='ghclientlife_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

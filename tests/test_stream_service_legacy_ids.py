@@ -14,7 +14,6 @@ import sys
 
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _service_loader import _load_service  # noqa: E402
 
 
@@ -295,12 +294,3 @@ def test_the_generation_table_drops_its_oldest_names_past_the_bound(_tmp):
     finally:
         ids._generations.clear()
         ids._generations.update(saved)
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='streamlegacyids_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

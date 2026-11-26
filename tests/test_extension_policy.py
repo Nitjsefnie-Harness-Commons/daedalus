@@ -678,12 +678,3 @@ def test_the_manifest_does_not_grant_activeTab_beside_all_urls(tmp):
     assert '<all_urls>' in hosts, (
         'the <all_urls> host permission the activeTab removal leans on '
         'is gone')
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='extensionpolicy_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

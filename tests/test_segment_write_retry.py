@@ -221,11 +221,3 @@ def test_a_non_permission_error_is_not_retried(tmp):
         seg_dir = Path(docroot) / 'segments' / job
         assert list(seg_dir.glob('*.ts')) == [], list(seg_dir.glob('*.ts'))
         assert list(seg_dir.glob('*.tmp')) == [], list(seg_dir.glob('*.tmp'))
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='segretry_')
-
-
-if __name__ == '__main__':
-    sys.exit(main())

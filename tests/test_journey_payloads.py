@@ -465,12 +465,3 @@ def test_the_fan_out_reads_every_event_and_notices_one_that_never_arrived(tmp):
             'a session that lost an event was read as a complete one, so '
             'the count is a count of what arrived rather than of what the '
             'journey published')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeypayloads_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())
