@@ -291,7 +291,25 @@ def test_a_file_past_its_bound_fails_and_a_hang_ends_the_run(tmp):
 
 
 def test_each_test_starts_at_root_with_process_state_restored(tmp):
-    code, output, outcomes = run_pytest(tmp, {'test_state.py': f'''
+    # Each loads the bridge's config with its own root, one at import and
+    # one in narrowed_suite; the runner gave each file a process.
+    load = '''
+        import os, sys, _util
+        from unittest import mock
+        SOURCE = _util.ROOT / 'daedalus_bridge' / 'http_transport.py'
+
+        def load(side):
+            with mock.patch.dict(os.environ, DAEDALUS_DIR=side,
+                                 DAEDALUS_PORT='0'):
+                _util.load(SOURCE)
+
+        def test_own_config():
+            config = sys.modules['daedalus_bridge.config']
+            assert str(config.BASE) == __name__[-1], config.BASE
+        '''
+    loads = {'test_a.py': load + "load('a')\n", 'test_b.py': load +
+             "def narrowed_suite():\n            load('b')\n"}
+    code, output, outcomes = run_pytest(tmp, {**loads, 'test_state.py': f'''
         import contextlib
         import os
         import sys
@@ -313,8 +331,11 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
             assert 'HARNESS_LEAK' not in os.environ
             assert 'harness-leak' not in sys.path
             assert os.environ['HARNESS_SCOPE'] == '1'
+            assert 'daedalus_bridge.config' not in sys.modules
         '''})
     assert (code, outcomes) == (0, {
+        'test_a.py::test_own_config': 'PASSED',
+        'test_b.py::test_own_config': 'PASSED',
         'test_state.py::test_leaks': 'PASSED',
         'test_state.py::test_sees_none': 'PASSED'}), output
 
