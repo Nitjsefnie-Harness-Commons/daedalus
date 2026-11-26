@@ -6,183 +6,183 @@ decoded values: the workflow through the shared decoder, the config through
 a reader that refuses any shape it does not recognise — a substring scan
 would accept a lookalike the scanner reads differently.
 """
+import os
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _workflowrun import run_step  # noqa: E402
 from _yamlsteps import workflow_mapping  # noqa: E402
 
 EXAMPLE_UUID = '123e4567-e89b-12d3-a456-426614174000'
 CONFIG = '.gitleaks.toml'
-
 WORKFLOW = '.github/workflows/secrets.yml'
+STEPS = (None, 'Refuse a shallow clone',
+         'Download gitleaks and verify its digest',
+         "Take the scan's config and ignore list from the trusted commit",
+         'Scan the tree and the history')
+TRUSTED = '[extend]\nuseDefault = true\n# trusted\n'
+DEFAULT = '[extend]\nuseDefault = true\n'
+TRUSTED_CASES = (
+    ('pull_request', 'base', TRUSTED, 'trusted\n'),
+    ('push', 'base', TRUSTED, 'trusted\n'),
+    ('workflow_dispatch', '', TRUSTED, 'trusted\n'),
+    ('push', '0' * 40, DEFAULT, ''),
+    # Empty would read the index and HEAD the head: both the judged tree.
+    ('pull_request', '', DEFAULT, ''),
+    ('pull_request', 'HEAD', DEFAULT, ''),
+    ('pull_request', 'base', TRUSTED + '[Extend]\nPath = "j.toml"\n', None))
 
 
 def _read(relative):
-    path = ROOT / relative
-    assert path.is_file(), f'{relative} does not exist yet'
-    return path.read_text(encoding='utf-8')
+    return (ROOT / relative).read_text(encoding='utf-8')
 
 
-def _decoded_workflow():
-    return workflow_mapping(_read(WORKFLOW))
+def _job():
+    return workflow_mapping(_read(WORKFLOW))['jobs']['gitleaks']
+
+
+def _step(index):
+    step = _job()['steps'][index]
+    assert step.get('name') == STEPS[index], step
+    return step
 
 
 def _toml_sections(text):
-    """The config's sections as [(header, {key: raw value})].
-
-    A duplicate key, a key outside any section, or a line that is not
-    `key = value` is refused rather than guessed at; comments and blank
-    lines carry no decoded value.
-    """
+    """The config's [(header, {key: raw value})], refusing what it cannot
+    decode: a repeat, a key outside a section, a line not `key = value`."""
     sections = []
-    for line in text.splitlines():
-        stripped = line.strip()
+    for stripped in (line.strip() for line in text.splitlines()):
         if not stripped or stripped.startswith('#'):
             continue
         if stripped.startswith('['):
-            assert stripped not in dict(sections), (
-                f'{CONFIG} declares {stripped!r} twice')
+            assert stripped not in dict(sections), f'repeated {stripped!r}'
             sections.append((stripped, {}))
             continue
-        assert sections, (
-            f'{CONFIG} has a key outside any section: {stripped!r}')
-        key, marker, value = stripped.partition('=')
-        assert marker, (
-            f'{CONFIG} line is not a key = value pair: {stripped!r}')
-        entries = sections[-1][1]
-        assert key.strip() not in entries, (
-            f'{CONFIG} declares {key.strip()!r} twice in one section')
-        entries[key.strip()] = value.strip()
+        key, marker, value = (part.strip() for part in stripped.partition('='))
+        assert sections and marker, f'{CONFIG}: undecodable {stripped!r}'
+        assert key not in sections[-1][1], f'{CONFIG}: repeated {key!r}'
+        sections[-1][1][key] = value
     return sections
 
 
-def _single_list_item(raw, owner):
+def _single_list_item(raw):
     """The single quoted item of a `['...']` TOML value, as a string."""
-    assert raw.startswith('[') and raw.endswith(']'), (owner, raw)
-    inner = raw[1:-1].strip()
-    assert inner and ',' not in inner, (owner, raw)
-    assert len(inner) >= 2 and inner[0] == "'" and inner[-1] == "'", (
-        owner, raw)
-    return inner[1:-1]
+    item = re.fullmatch(r"\[\s*'([^',]*)'\s*\]", raw)
+    assert item, raw
+    return item.group(1)
 
 
-def _double_quoted(raw, owner):
-    """The body of a double-quoted TOML string."""
-    assert len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"', (owner, raw)
-    body = raw[1:-1]
-    assert '"' not in body, (owner, raw)
-    return body
-
-
-def test_triggers_cover_main_pushes_prs_the_cron_and_manual_runs(tmp):
+def test_one_bounded_read_only_job_runs_on_main_prs_cron_and_dispatch(tmp):
     del tmp
-    on = _decoded_workflow()['on']
-    assert on == {
-        'push': {'branches': ['main']},
-        'pull_request': None,
-        'schedule': [{'cron': '26 5 * * *'}],
-        'workflow_dispatch': None,
-    }, on
-
-
-def test_permissions_are_exactly_read_only(tmp):
-    del tmp
-    permissions = _decoded_workflow()['permissions']
-    assert permissions == {'contents': 'read'}, (
-        f'unsafe decoded permissions: {permissions!r}')
-
-
-def test_the_workflow_declares_no_other_top_level_key(tmp):
-    del tmp
-    top = _decoded_workflow()
+    top = workflow_mapping(_read(WORKFLOW))
     assert set(top) == {
         'name', 'on', 'permissions', 'concurrency', 'jobs'}, sorted(top)
+    assert top['on'] == {
+        'push': {'branches': ['main']}, 'pull_request': None,
+        'schedule': [{'cron': '26 5 * * *'}], 'workflow_dispatch': None,
+    }, top['on']
+    assert top['permissions'] == {'contents': 'read'}, top['permissions']
+    job = top['jobs']['gitleaks']
+    assert tuple(step.get('name') for step in job['steps']) == STEPS, job
+    assert set(job) == {'runs-on', 'timeout-minutes', 'steps'}, job
+    assert (job['runs-on'], job['timeout-minutes']) == ('ubuntu-latest', '10')
+    for step in job['steps']:
+        assert not {'if', 'continue-on-error'} & set(step), step
 
 
-def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):
+def test_a_verified_download_feeds_a_bare_scan_of_trusted_rules(tmp):
     del tmp
-    steps = _decoded_workflow()['jobs']['gitleaks']['steps']
-    download = steps[2]
+    download = _step(2)
     assert set(download) == {'name', 'run'}, download
     # The release choice is the workflow's business; the lines must agree.
-    lines = download['run'].splitlines()
-    assert len(lines) == 3, lines
+    fetch, digest, untar = download['run'].splitlines()
+    curl = shlex.split(fetch)
     # Split literal: the release scanners read the host out of source text.
-    url_line = re.fullmatch(
-        r'curl --connect-timeout 5 --max-time 120 -fsSLO '
+    url = re.fullmatch(
         'https://' r'github\.com/gitleaks/gitleaks/releases/download/'
         r'v(?P<ver>\d+\.\d+\.\d+)/(?P<tar>gitleaks_'
-        r'(?P<tarver>\d+\.\d+\.\d+)_linux'
-        r'_x64\.tar\.gz)',
-        lines[0])
-    assert url_line, lines[0]
-    tarball = url_line.group('tar')
-    assert url_line.group('tarver') == url_line.group('ver'), (
-        'tarball must name the release')
-    assert re.fullmatch(
-        r"echo '[0-9a-f]{64}  " + re.escape(tarball)
-        + r"' \| sha256sum -c -", lines[1]), lines[1]
-    assert lines[2] == f'tar xzf {tarball} gitleaks', lines[2]
+        r'(?P<tarver>\d+\.\d+\.\d+)_linux_x64\.tar\.gz)', curl[-1])
+    assert curl[0] == 'curl' and url, curl
+    assert url.group('tarver') == url.group('ver'), 'tarball names release'
+    assert {'-fsSLO', '--retry-all-errors'} <= set(curl), curl
+    for option in ('--retry', '--retry-delay', '--connect-timeout',
+                   '--max-time'):
+        assert int(curl[curl.index(option) + 1]) > 0, (option, curl)
+    assert re.fullmatch(r"echo '[0-9a-f]{64}  " + re.escape(url.group(
+        'tar')) + r"' \| sha256sum -c -", digest), digest
+    assert untar == f"tar xzf {url.group('tar')} gitleaks", untar
+    scan = _step(4)
+    assert scan['env'] == {'ATTRIBUTES': '.git/info/attributes'}, scan
+    commands = scan['run'].replace('\\\n', ' ').splitlines()
+    assert '||' not in scan['run'] and len(commands) == 3, commands
+    # The judged tree's own exemptions are gone before the scan starts.
+    assert commands[:2] == ['rm -rf .gitleaksignore',
+                            "echo '* !diff' > \"$ATTRIBUTES\""], commands
+    argv = shlex.split(commands[2])
+    assert argv[:2] == ['./gitleaks', 'detect'], argv
+    assert {'--verbose', '--redact', '--ignore-gitleaks-allow'} <= set(argv)
+    ignore = argv[argv.index('--gitleaks-ignore-path') + 1]
+    assert ignore.startswith('$RUNNER_TEMP/'), argv
+    assert argv[argv.index('--config') + 1] == ignore + '/.gitleaks.toml'
+    # Shell quoting hands gitleaks the bound walk as ONE argument.
+    assert '--log-opts=--full-history --diff-filter=tuxdb HEAD' in argv, argv
 
 
-def test_the_scan_step_is_the_bare_gate(tmp):
-    del tmp
-    steps = _decoded_workflow()['jobs']['gitleaks']['steps']
-    scan = steps[3]
-    assert set(scan) == {'name', 'run'}, scan
-    # The single quotes are SHELL syntax and survive decoding: they hand
-    # gitleaks one --log-opts value.
-    assert scan['run'] == (
-        './gitleaks detect --verbose --redact --config .gitleaks.toml'
-        " --log-opts='--full-history --diff-filter=tuxdb HEAD'")
-    assert 'if' not in scan and 'continue-on-error' not in scan, scan
-    assert '|| true' not in scan['run'], scan
+def _git(repo, *args):
+    return subprocess.run(
+        ('git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid',
+         '-C', str(repo)) + args, check=True, capture_output=True,
+        text=True, env=_util.child_coverage('scrub')).stdout.split()
 
 
-def test_no_step_and_no_job_key_escapes_the_gate(tmp):
-    del tmp
-    job = _decoded_workflow()['jobs']['gitleaks']
-    steps = job['steps']
-    assert len(steps) == 4, steps
-    verify, scan = ('Download gitleaks and verify its digest',
-                    'Scan the tree and the history')
-    names = [step.get('name') for step in steps]
-    assert names.index(verify) < names.index(scan), steps
-    assert set(job) == {'runs-on', 'timeout-minutes', 'steps'}, job
+def test_rules_come_from_the_trusted_commit_never_the_judged_tree(tmp):
+    if os.name == 'nt':
+        _util.skip('the step runs under bash on ubuntu-latest only')
+    for case, (event, sha, config, ignore) in enumerate(TRUSTED_CASES):
+        repo, runner_temp = Path(tmp) / f'repo{case}', Path(tmp) / f'rt{case}'
+        runner_temp.mkdir(parents=True)
+        _git(tmp, 'init', '-q', str(repo))
+        for toml, listed in ((TRUSTED if ignore is not None else config,
+                              'trusted'), ('[[allowlists]]', 'judged')):
+            (repo / '.gitleaks.toml').write_bytes(toml.encode())
+            (repo / '.gitleaksignore').write_bytes(f'{listed}\n'.encode())
+            _git(repo, 'add', '.')
+            _git(repo, 'commit', '-qm', 'c')
+        base, head = _git(repo, 'rev-parse', 'HEAD^', 'HEAD')
+        _git(repo, 'update-ref', 'refs/remotes/origin/main', base)
+        sha = base if sha == 'base' else sha
+        # The variable this event does not read names the judged head.
+        done = run_step(repo, _step(3), {
+            **os.environ, 'RUNNER_TEMP': str(runner_temp), 'EVENT_NAME': event,
+            'BASE_SHA': sha if event == 'pull_request' else head,
+            'BEFORE_SHA': sha if event == 'push' else head})
+        rules = runner_temp / 'gitleaks-trusted'
+        if ignore is None:
+            assert done.returncode and 'refusing to scan' in done.stderr, case
+            continue
+        assert done.returncode == 0, (case, done.stdout, done.stderr)
+        assert [(rules / name).read_text(encoding='utf-8') for name in (
+            '.gitleaks.toml', '.gitleaksignore')] == [config, ignore], case
 
 
-def test_the_job_bounds_itself_with_a_timeout(tmp):
-    del tmp
-    job = _decoded_workflow()['jobs']['gitleaks']
-    assert job['runs-on'] == 'ubuntu-latest', job
-    assert job['timeout-minutes'] == '10', job
-
-
-def test_the_config_extends_the_default_rules(tmp):
+def test_the_config_extends_the_default_rules_and_admits_one_uuid(tmp):
     del tmp
     sections = _toml_sections(_read(CONFIG))
-    assert [header for header, _ in sections] == [
-        '[extend]', '[[allowlists]]'], sections
+    assert [h for h, _ in sections] == ['[extend]', '[[allowlists]]']
     assert sections[0][1] == {'useDefault': 'true'}, sections[0]
-    assert sections[1][1].get('useDefault') is None, sections[1]
-
-
-def test_the_allowlist_admits_exactly_the_example_uuid(tmp):
-    del tmp
-    allowlist = _toml_sections(_read(CONFIG))[1][1]
+    allowlist = sections[1][1]
     assert set(allowlist) == {'description', 'rules', 'regexes'}, allowlist
-    assert _single_list_item(allowlist['rules'], 'rules') == (
-        'generic-api-key'), allowlist['rules']
-    pattern = _single_list_item(allowlist['regexes'], 'regexes')
+    assert _single_list_item(allowlist['rules']) == 'generic-api-key'
+    pattern = _single_list_item(allowlist['regexes'])
     assert pattern == f'^{EXAMPLE_UUID}$', pattern
-    assert re.fullmatch(pattern, EXAMPLE_UUID), pattern
-    for rejected in (EXAMPLE_UUID.upper(), 'x' + EXAMPLE_UUID,
-                     EXAMPLE_UUID + 'x', f"'{EXAMPLE_UUID}'"):
-        assert re.fullmatch(pattern, rejected) is None, (pattern, rejected)
-    description = _double_quoted(allowlist['description'], 'description')
-    assert 'RFC 4122' in description, description
-    assert 'bridge-token fixture' in description, description
-    assert 'what would clear this entry' in description, description
+    description = allowlist['description']
+    assert re.fullmatch(r'"[^"]*"', description), description
+    for phrase in ('RFC 4122', 'bridge-token fixture',
+                   'what would clear this entry'):
+        assert phrase in description, description
