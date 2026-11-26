@@ -21,8 +21,8 @@ import _mcp_ready
 from _log_safe_cases import log_safe_cases  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
-# Suites start in parallel processes, so each process's first bridge start
-# pays its cold import costs alongside the other firsts.
+# Parallel processes each run many files; a process's first bridge start
+# pays its cold imports alongside the other firsts.
 COLD_START_TIMEOUT = 60
 WARM_START_TIMEOUT = 20
 DRAIN_JOIN_TIMEOUT = 1
