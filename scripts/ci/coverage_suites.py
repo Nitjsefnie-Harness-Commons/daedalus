@@ -47,7 +47,7 @@ def _run_suite(suite, outputs, bound):
     output_path = Path(outputs) / f"{suite.stem}.output"
     returncode, cleanup = launch_suite(
         [sys.executable, "-m", "coverage", "run", "--parallel-mode",
-         "-m", "pytest", str(suite)],
+         "-m", "pytest", "-p", "no:cacheprovider", str(suite)],
         cwd=ROOT, output_path=output_path, timeout=bound)
     if cleanup:
         with output_path.open("ab") as output:
