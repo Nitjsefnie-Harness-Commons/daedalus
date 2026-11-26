@@ -13,6 +13,8 @@ _CACHE_JOBS = (
     # step the restore must precede).
     ('test', '${{ matrix.python }}', "Run the shard's suites",
      'Install the test dependencies and project'),
+    ('serial', '${{ matrix.python }}', 'Run every suite serially',
+     'Install the test dependencies and project'),
     ('pycodestyle', '3.15', 'pycodestyle', 'Install linters'),
     ('pylint', '3.15', 'pylint', 'Install linters and import dependencies'),
     ('pyright', '3.15', 'pyright',

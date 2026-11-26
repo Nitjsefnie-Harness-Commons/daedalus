@@ -247,7 +247,7 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
 
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
-                  'actionlint', 'plan', 'test', 'wheel', 'report',
+                  'actionlint', 'plan', 'test', 'serial', 'wheel', 'report',
                   'ratchets', 'journey-budget', 'size-baseline', 'thresholds')
 CONDITION_CONTEXTS = (
     ({'success': True, 'failure': False, 'cancelled': False}, True),
@@ -337,7 +337,7 @@ def test_static_analysis_jobs_keep_their_required_ids_and_names(tmp):
 def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
     del tmp
     workflow = _tests_yml()
-    for job in ('test', 'wheel'):
+    for job in ('test', 'serial', 'wheel'):
         expected = ['changes', *GATE_JOBS]
         if job == 'test':
             expected.append('plan')
@@ -356,7 +356,7 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
         tmp):
     del tmp
     workflow = _tests_yml()
-    for job in ('test', 'wheel'):
+    for job in ('test', 'serial', 'wheel'):
         expression = _job_if_expression(workflow, job)
         assert expression is not None, job
         for status, should_run in CONDITION_CONTEXTS:
@@ -401,6 +401,19 @@ def test_actionlint_survives_a_replacement_push_and_keeps_pr_behavior(tmp):
         assert _actionlint_runs(
             workflow, 'pull_request', 'true' if workflows else 'false') is (
                 expected)
+
+
+def test_serial_runs_the_classifiers_matrix(tmp):
+    """The matrix's size is the classifier's declaration, never a pin."""
+    del tmp
+    serial = '\n'.join(_job_section(_tests_yml(), 'serial'))
+    matrix_lines = [line.strip() for line in serial.splitlines()
+                    if line.strip().startswith('matrix:')]
+    assert matrix_lines == [
+        'matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}'], (
+        matrix_lines)
+    assert not re.search(r'^\s+(?:os|python|shard): ', serial,
+                         re.MULTILINE), serial
 
 
 def test_main_records_the_fallback_outputs_and_returns_zero(tmp):

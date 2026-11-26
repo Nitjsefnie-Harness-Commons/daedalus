@@ -14,7 +14,8 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 
 _CACHE_WRITING_JOBS = frozenset((
-    'test', 'journey-budget', 'pycodestyle', 'pylint', 'pyright',
+    'test', 'serial', 'journey-budget', 'pycodestyle', 'pylint',
+    'pyright',
 ))
 
 _REVIEWED_NONCACHE_ACTIONS = frozenset((
