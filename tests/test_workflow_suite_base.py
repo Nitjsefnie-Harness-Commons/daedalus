@@ -46,8 +46,7 @@ def _is_a_runnable_suite_file(node):
         return False
     path = node.value.replace(chr(92) * 2, '/')
     return (path.startswith('tests/')
-            and (fnmatch.fnmatch(path, 'tests/run_tests.py')
-                 or fnmatch.fnmatch(path, 'tests/test_*.py')))
+            and fnmatch.fnmatch(path, 'tests/test_*.py'))
 
 
 # Five names a retired resolver-bypass guard enumerated, plus the two
@@ -118,10 +117,9 @@ def _enumerates_the_tests_tree(source):
     the set and misses `coverage_suites`, which is the job whose
     fetch-depth matters most. That is why the rule reads the tree.
 
-    Two of the twenty-five tracked scripts enumerate the tests tree, and
-    they are the two that run suites: `run_tests.py` and
-    `scripts/ci/coverage_suites.py`. They write the identical expression,
-    which is exactly what a SHAPE rule reads and a name rule does not.
+    The tracked script that enumerates the tests tree is the one that runs
+    suites, `scripts/ci/coverage_suites.py`, and its expression is what a
+    SHAPE rule reads and a name rule does not.
     """
     for node in ast.walk(ast.parse(source)):
         if (isinstance(node, ast.Call)
@@ -135,7 +133,7 @@ def _enumerates_the_tests_tree(source):
 def _tracked_scripts(root):
     """{repo-relative path: source} for the tracked entry-point scripts."""
     listed = subprocess.run(
-        ['git', 'ls-files', 'run_tests.py', 'scripts/ci/*.py'], cwd=root,
+        ['git', 'ls-files', 'scripts/ci/*.py'], cwd=root,
         capture_output=True, text=True, check=True,
         env=_util.child_coverage('scrub')).stdout.split()
     return {name: (root / name).read_text(encoding='utf-8')
@@ -278,19 +276,19 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
     this test.
 
     One thing this test does NOT show, because it is true: removing the
-    literal-launch arm leaves the set unchanged. Both runners glob, so
+    literal-launch arm leaves the set unchanged. The runner globs, so
     the arm currently contributes NO member — it is kept for the route it
     is meant to cover, a workflow step that runs a suite directly
     (bullet (a)), and not for a member of today's set.
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
-    for runner in ('run_tests.py', 'scripts/ci/coverage_suites.py'):
-        assert runner in runners, (
-            f'{runner} no longer enumerates the tests tree or launches a '
-            'suite file, so the guard drops the job that runs it. The rule '
-            'is a shape now, so this is a change to what the tree does, '
-            'not a rename.')
+    runner = 'scripts/ci/coverage_suites.py'
+    assert runner in runners, (
+        f'{runner} no longer enumerates the tests tree or launches a '
+        'suite file, so the guard drops the job that runs it. The rule '
+        'is a shape now, so this is a change to what the tree does, '
+        'not a rename.')
     # The listing that is NOT a launch, and the launch that is.
     assert not _launches_a_tests_file(
         "import subprocess\n"
@@ -309,7 +307,7 @@ def test_a_job_running_pytest_over_the_tree_is_in_the_policed_set(tmp):
                          ('pytest -n auto', True),
                          ('pytest --ignore tests/test_b.py', True),
                          ('pytest tests/test_a.py -x tests/', True),
-                         ('python run_tests.py', True),
+                         ('python scripts/ci/coverage_suites.py', True),
                          ('python -m pytest tests/test_a.py', False)):
         workflow = ('jobs:\n  suites:\n    runs-on: ubuntu-latest\n'
                     f'    steps:\n      - run: {run}\n')
@@ -332,5 +330,5 @@ def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
             f'{planner_only} is in the runner set and enumerates no tests '
             'tree; the rule has grown past what it claims')
     assert 'scripts/ci/coverage_suites.py' in runners, (
-        'coverage_suites reaches the suites through run_tests; a rule '
+        'coverage_suites launches the suites; a rule '
         'that misses it misses the job whose fetch-depth matters most')

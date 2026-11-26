@@ -1,6 +1,6 @@
 """`field()`'s label association: the Node harness and the check it earns.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 The source scan in tests/test_dashboard_accessibility.py proves each
 control is built inside a `field()` call; it cannot prove `field()` writes

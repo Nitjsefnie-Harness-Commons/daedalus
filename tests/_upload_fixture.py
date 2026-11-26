@@ -4,7 +4,7 @@
 module against a temporary upload root, and both need the module by path
 and a way to place a file in the namespace without going through a route.
 
-Not a suite itself — `run_tests.py` only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 """
 import sys
 from pathlib import Path

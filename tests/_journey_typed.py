@@ -1,6 +1,6 @@
 """The typed-command and page-facing journeys the ratchet measures.
 
-Not a suite itself — run_tests.py only loads `test_*.py`, and
+Not a suite itself — pytest only collects `test_*.py`, and
 `tests/_journeys.py` is what runs a journey. This module is the other half
 of that registry.
 

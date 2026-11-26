@@ -1,6 +1,6 @@
 """Loading the MCP server with its bridge replaced by a recording probe.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 `daedalus_mcp.server` binds its transport at import, so a case that wants to
 drive a tool against a bridge it controls has to load the module with

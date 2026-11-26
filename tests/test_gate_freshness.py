@@ -50,10 +50,10 @@ def test_the_set_is_exactly_the_documented_patterns(tmp):
     m = _mod()
     assert tuple(m.GATE_PATTERNS) == (
         '.github/workflows/**', '.github/ci-thresholds.json', '.gitleaks.toml',
-        '.github/journey-budget.json', 'scripts/ci/**', '.pylintrc',
+        '.github/journey-budget.json', 'scripts/ci/**', 'tests/conftest.py',
         'scripts/check_versions.py', 'scripts/version_regions.py', 'setup.cfg',
         'scripts/version_html_context.py', 'pyrightconfig.json',
-        'run_tests.py', 'pyrightconfig.tests.json', 'eslint.config.js',
+        '.pylintrc', 'pyrightconfig.tests.json', 'eslint.config.js',
         'pyproject.toml', '.claude/skills/changing-daedalus/ci_gate.py',
         'requirements-dev.txt', 'requirements-test.txt',
         'requirements-release.txt', 'tests/_journeys.py',
@@ -72,7 +72,7 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
         'tests/test_gate_freshness.py', 'daedalus_bridge/result_routes.py',
         '.github/dependabot.yml',     # proposes updates; decides no verdict
         '.github/ci-thresholds.json.bak', 'pyrightconfig.jsonx',
-        'setup.cfg.bak', 'run_tests.pyc', 'scripts/check_version.py',
+        'setup.cfg.bak', 'tests/conftest.pyc', 'scripts/check_version.py',
         '.gitleaks.toml.bak', 'server.py', 'README.md',
     )
     for path in negatives:

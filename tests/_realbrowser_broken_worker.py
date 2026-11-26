@@ -1,6 +1,6 @@
 """The property that a worker loading broken fails rather than skips.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 This is the mechanism tests/test_real_browser_eval.py's
 `test_a_worker_that_loads_broken_is_a_failure_not_a_skip` runs against a

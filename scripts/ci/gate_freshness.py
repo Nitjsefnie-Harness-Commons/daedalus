@@ -29,9 +29,9 @@ APP_SLUG = 'github-actions'
 BASE_BRANCH = 'main'
 GATE_PATTERNS = (
     '.github/workflows/**', '.github/ci-thresholds.json', '.gitleaks.toml',
-    '.github/journey-budget.json', 'scripts/ci/**', '.pylintrc',
+    '.github/journey-budget.json', 'scripts/ci/**', 'tests/conftest.py',
     'scripts/check_versions.py', 'scripts/version_regions.py', 'setup.cfg',
-    'scripts/version_html_context.py', 'pyrightconfig.json', 'run_tests.py',
+    'scripts/version_html_context.py', 'pyrightconfig.json', '.pylintrc',
     'pyrightconfig.tests.json', 'eslint.config.js', 'pyproject.toml',
     '.claude/skills/changing-daedalus/ci_gate.py', 'requirements-dev.txt',
     'requirements-test.txt', 'requirements-release.txt', 'tests/_journeys.py',

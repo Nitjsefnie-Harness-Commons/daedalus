@@ -1,6 +1,6 @@
 """Driving a real Chrome with the unpacked extension loaded.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 Starting a browser, finding its DevTools endpoint, waiting for OUR service
 worker among whatever else is running, serving the test pages and evaluating

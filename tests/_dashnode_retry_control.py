@@ -1,6 +1,6 @@
 """The Windows process-boundary doubles the dashboard behaviour suite drives.
 
-Not a suite itself -- `run_tests.py` only loads `test_*.py`, so the
+Not a suite itself -- pytest only collects `test_*.py`, so the
 CASES stay in `tests/test_dashboard_behaviour.py` and only the doubles
 they stand on live here.
 

@@ -1,6 +1,6 @@
 """The verdict the `actionlint` job produces, reachable from a local suite.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 The job lints every file under .github/workflows in both extensions GitHub
 accepts and fails on a nonzero exit; the step's own shape is pinned in the

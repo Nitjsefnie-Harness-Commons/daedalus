@@ -479,13 +479,9 @@ def test_json_body_imports_without_daedalus_configuration(_tmp):
 
 
 def test_the_suite_process_starts_without_inherited_daedalus_names(_tmp):
-    """The suite's scope holds only its own two `DAEDALUS_` settings.
-
-    `DAEDALUS_TEST_SUMMARY` is the old runner's channel, which `main` keeps.
-    """
+    """The suite's scope holds only its own two `DAEDALUS_` settings."""
     names = sorted(name for name in os.environ
-                   if name.startswith('DAEDALUS_')
-                   and name != 'DAEDALUS_TEST_SUMMARY')
+                   if name.startswith('DAEDALUS_'))
     assert names == ['DAEDALUS_DIR', 'DAEDALUS_PORT'], names
 
 

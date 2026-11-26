@@ -455,7 +455,7 @@ def missing_citations(table, root):
     A citation is data: its suite is parsed with `ast` and the named test
     function must be a plain `def` — the runner refuses an async one —
     defined at module level there under the `test_`
-    prefix the runner's `_util.collect` selects on, so a helper it never
+    prefix pytest's `python_functions` selects on, so a helper it never
     runs pins nothing; a suite path that names no file is absent the same
     way. A None citation is a stated gap, and the
     class is data too: a None row whose key no STATED_GAPS entry covers

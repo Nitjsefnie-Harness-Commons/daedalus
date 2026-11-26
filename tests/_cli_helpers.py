@@ -1,6 +1,6 @@
 """Running the real CLI against a fixture bridge, and answering what it sent.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 The CLI is always run as a subprocess, the way a shell would run it, and it
 reads its configuration from the environment. Both of those are one decision

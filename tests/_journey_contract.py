@@ -6,7 +6,7 @@ module here exists: the loaders are the same four lines, and a duplicated
 loader is one that drifts from the module it names without anything
 noticing. The profile fixture is here because a callgrind out file is a
 journey fact rather than a counter fact. Not a suite itself —
-`run_tests.py` only loads `test_*.py`.
+pytest only collects `test_*.py`.
 """
 import contextlib
 import io

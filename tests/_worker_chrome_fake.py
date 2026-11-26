@@ -1,6 +1,6 @@
 """The tail of a fake `chrome` object literal for a Node-hosted worker.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. The text assumes
+Not a suite itself — pytest only collects `test_*.py`. The text assumes
 a `messageListeners` array and an `eventTarget` factory in scope, so
 `runtime.onMessage` records the worker's listener for the harness's own
 `send()`. The factory is the shared `event_target_stub`, which every

@@ -1,12 +1,11 @@
 """The run builder, the frozen clock and the verdict the ci_wait suites drive.
 
-Not a suite itself — `run_tests.py` only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 These four live here rather than in any one suite because three suites
 need them: `test_ci_wait.py` and `test_ci_wait_gate.py` both classify runs
 through the verdict contract, and `test_ci_gate.py` asks the gate predicate
-what it answers. `run_tests.py` gives each suite its own process, so one
-cannot import another; a `tests/_*.py` module is where a shared helper
+what it answers. A `tests/_*.py` module is where a shared helper
 belongs, and this is that module for these three.
 
 All four carry a `ci_wait` prefix and none keeps the bare name it had in

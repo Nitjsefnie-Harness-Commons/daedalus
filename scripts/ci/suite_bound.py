@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """One per-suite wall-clock bound, and the bounded teardown that enforces it.
 
-`run_tests.py` and `scripts/ci/coverage_suites.py` both launch every suite
-in `tests/`, so both are ended by a wedge in any one of them, and both take
-away what their suites wrote -- which a suite killed at its bound can still
-be holding open on Windows. The bound, the launch that enforces it and the
-removal of what a suite left live here rather than in either launcher
-because a number two files each hold is two premises: widening one leaves
-the other bounding the value before, and neither file says so.
+`scripts/ci/coverage_suites.py` launches every suite and
+`tests/conftest.py` times each, so a wedge in any suite ends both, and the
+launcher takes away what its suites wrote -- which a suite killed at its
+bound can still be holding open on Windows. The bound, the launch that
+enforces it and the removal of what a suite left live here rather than in
+either file because a number two files each hold is two premises: widening
+one leaves the other bounding the value before, and neither file says so.
 
 The bound is a parameter of the launch, never a value captured when this
 module was written, so a control that shrinks the constant at runtime sees

@@ -1,6 +1,6 @@
 """A child process that cannot find libc, for the malloc-tuning branch.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 The bridge tunes glibc's malloc arenas at import and reports the failure
 when it cannot. Reaching that report on a glibc host needs the failure

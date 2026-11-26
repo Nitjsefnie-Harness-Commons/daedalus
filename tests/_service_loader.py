@@ -1,6 +1,6 @@
 """The shared by-path loader for the SSE stream service module.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. The stream-service
+Not a suite itself — pytest only collects `test_*.py`. The stream-service
 suites load `stream_service.py` by path through this one definition instead
 of each keeping a private copy. The command-queue loader is a different seam:
 it lives in `tests/_command_candidates.py` as `_load_queue`, not here.

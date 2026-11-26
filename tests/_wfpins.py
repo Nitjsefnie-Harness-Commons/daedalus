@@ -1,6 +1,6 @@
 """Read this repository's pins, and what Dependabot is told to do with them.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 One question with three surfaces: where an action is pinned, where a CI tool
 is pinned, and how dependabot.yml groups the first. Dependabot is the only

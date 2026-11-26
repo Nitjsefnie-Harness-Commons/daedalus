@@ -1,6 +1,6 @@
 """Shared fixtures for the repository-contract suites.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 These suites read the tree rather than run the bridge, so what they share is
 where the tree is, how to walk the part that ships, and its version.

@@ -1,6 +1,6 @@
 """Scaffolding for the threshold-publisher controls in test_ci_ratchets.py.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. The publisher
+Not a suite itself — pytest only collects `test_*.py`. The publisher
 half of that suite builds a throwaway checkout, stubs a coverage
 measurement and runs the real workflow step against it; the scaffolding
 for that is here so the suite holds controls rather than setup, and so

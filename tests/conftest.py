@@ -1,4 +1,4 @@
-"""The rules run_tests.py and _util.runner held, as pytest fixtures and hooks.
+"""The suite harness's rules, as pytest fixtures and hooks.
 
 A test module may define `suite_scope()` (entered around its tests),
 `narrowed_suite()` (None, or the test names to keep), `ALLOWED_SKIPS` (the
@@ -31,8 +31,8 @@ INSTALLED = tuple(Path(sysconfig.get_path(key)).resolve() for key in (
 
 
 def pytest_configure(config):
-    # A returned value is a body the call may not have run, as
-    # _completion.py refuses it; pytest itself only warns.
+    # A returned value is a body the call may not have run; pytest itself
+    # only warns.
     config.addinivalue_line(
         'filterwarnings', 'error::pytest.PytestReturnNotNoneWarning')
 

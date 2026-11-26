@@ -71,7 +71,8 @@ def test_a_refused_own_cleanup_is_reported_and_taken_by_the_next_run(tmp):
     assert not os.listdir(tmp), os.listdir(tmp)
 
 
-def test_the_runner_reclaims_exactly_stale_names_and_reports_refusals(tmp):
+def test_the_suite_root_reclaims_exactly_stale_names_and_reports_refusals(
+        tmp):
     kept = ['outside', 'owned_base_abcdefgh', 'owned_creating',
             'owned_link0001', 'owned_younger1']
     now = time.time()  # the one clock the reclaim reads, frozen below
@@ -101,10 +102,10 @@ def test_the_runner_reclaims_exactly_stale_names_and_reports_refusals(tmp):
 
     with mock.patch.object(tempfile, 'tempdir', tmp), \
             mock.patch.object(time, 'time', return_value=now), \
-            mock.patch.dict(os.environ, DAEDALUS_TEST_SUMMARY=''), \
             mock.patch.object(shutil, 'rmtree', rmtree), \
-            contextlib.redirect_stdout(io.StringIO()) as report:
-        assert _util.runner([], tmp_prefix='owned_') == 0
+            contextlib.redirect_stdout(io.StringIO()) as report, \
+            _teardown.suite_root('owned_'):
+        pass
     left = sorted(os.listdir(tmp))
     assert left == sorted(kept + removed[:1]), left
     warned = [line for line in report.getvalue().split('\n') if 'WARN' in line]
