@@ -104,7 +104,6 @@ def _audit_step(name):
 # A row matching both arms pins the ORDER of the block's two tests: its retry
 # predicate matches and its refusal one does not, so reading the retry test
 # first runs it three times. The 429 rows pin what the 429 EXCEPTION admits.
-#
 # (label, what pip-audit wrote, how many times the block ran it, its exit).
 AUDIT_RETRY_FIXTURES = (
     ('clean', 'No known vulnerabilities found\n', 1, 0),
@@ -195,6 +194,9 @@ def audit_step_outcome(body, output, cwd, env, code=1):
     (root / 'fixture.out').write_text(output, encoding='utf-8')
     (root / 'runs.log').write_text('', encoding='utf-8')
     (root / 'sleeps.log').write_text('', encoding='utf-8')
+    if not (root / 'requirements-test.txt').exists():  # the step derives one
+        (root / 'requirements-test.txt').write_bytes(
+            (ROOT / 'requirements-test.txt').read_bytes())
     script = ('sleep() { echo "$1" >> sleeps.log; }\n'
               'pip-audit() { echo "x $*" >> runs.log; cat fixture.out;'
               ' return "$AUDIT_CODE"; }\n') + body
@@ -204,9 +206,10 @@ def audit_step_outcome(body, output, cwd, env, code=1):
         cwd=cwd,
         env=_util.child_coverage(
             'scrub', {**env, 'AUDIT_CODE': str(code)}))
-    runs = (root / 'runs.log').read_text(encoding='utf-8').splitlines()
+    calls = (root / 'runs.log').read_text(encoding='utf-8').splitlines()
+    runs = [call for call in calls if '--disable-pip' not in call]
     waits = (root / 'sleeps.log').read_text(encoding='utf-8').split()
-    return {'runs': len(runs), 'args': runs, 'code': result.returncode,
+    return {'runs': len(runs), 'args': calls, 'code': result.returncode,
             'sleeps': [int(value) for value in waits],
             'out': (result.stdout + result.stderr).strip()}
 
@@ -255,12 +258,8 @@ def assert_the_audit_covers_every_dependency_surface():
 def _audit_announcements(body):
     """Every line the block names an outcome with, each tagged by its stream.
 
-    A refusal names itself on stderr and ends the job; the retry arm names
-    itself on stdout with the tail of what the tool wrote, and that line is
-    the ONLY way a reader of the log learns a retry happened. Both are read
-    here, because a reader that took the stderr one alone reports the block as
-    covering its outcomes while the line the retry path prints — the one the
-    retry path prints at all — is asserted by nothing.
+    A refusal names itself on stderr; the retry arm names itself on stdout,
+    the ONLY line telling a log reader a retry happened, so both are read.
     """
     return ([('refusal', text)
              for text in re.findall(r'^\s*echo "([^"]+)" >&2$', body,
@@ -273,20 +272,13 @@ def _audit_announcements(body):
 def assert_the_audit_retry_is_narrow_and_ordered(tmp):
     """One executed fixture per arm of audit.yml's own retry block.
 
-    Every predicate gets a value it accepts and one just past it, because a
-    single-valued set makes "retries this" and "gives up on that" look the
-    same while pinning neither. The block is RUN rather than read: only a run
-    can tell a 404 the index will not repeat out of a 502 beside it, and only
-    a run can tell which of the block's two tests was read first.
-
-    What it PRINTS is asserted too: the runs taken, the block's exit, the
-    per-attempt retry announcements, and the bounded excerpt each attempt
-    shows. Every one of the block's five outcomes is named by exactly the
-    arm that owns it and by no other.
+    The block is RUN rather than read: only a run tells a 404 the index will
+    not repeat from a 502 beside it, or which of its two tests is read first.
+    The runs, the exit, each attempt's announcement and its bounded excerpt
+    are asserted; each outcome is named by the arm that owns it alone.
     """
-    # Both pip-audit blocks, the shared four-surface one and the hash-pinned
-    # one, carry the same five-outcome retry and run the same fixtures: a
-    # copy of retried machinery nobody runs is machinery nobody has pinned.
+    # Both blocks, the shared four-surface one and the hash-pinned one, carry
+    # the same retry and run the same fixtures: unrun copies are unpinned.
     blocks = [_audit_step('Audit dependencies'),
               _audit_step('Audit the hash-pinned test toolchain')]
     for body in blocks:
@@ -351,3 +343,11 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
         code=0)
     assert (outcome['runs'], outcome['code']) == (1, 1), outcome
     assert '--vulnerability-service osv' in outcome['args'][0], outcome
+    base = (Path(tmp) / 'pytest-base.txt').read_text(encoding='utf-8')
+    assert re.fullmatch(r'pytest==[0-9.]+\n', base) and all(
+        flag in outcome['args'][1] for flag in (
+            'osv', '--no-deps --disable-pip', 'pytest-base.txt')), outcome
+    (Path(tmp) / 'requirements-test.txt').write_text('pytest==1\n', 'utf-8')
+    outcome = audit_step_outcome(blocks[1], '', cwd=tmp,
+                                 env=_util.child_coverage('scrub'), code=0)
+    assert (outcome['runs'], outcome['code']) == (0, 1), outcome
