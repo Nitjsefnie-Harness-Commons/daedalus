@@ -454,6 +454,7 @@ def test_a_failed_pull_request_lookup_still_refuses_on_the_grace(tmp):
     # ONE run, and its own output is what is asserted: a second wait after
     # restoring the real transport would turn the verdict on a live
     # `gh api graphql` failing against a repository that does not exist.
+    # That second run also passed with `gh` off PATH: a false green.
     real = mod.gh_client.graphql
     setattr(mod.gh_client, 'graphql', _refuse)
     try:

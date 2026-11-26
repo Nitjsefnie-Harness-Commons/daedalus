@@ -2,7 +2,7 @@
 """One per-suite wall-clock bound, and the bounded teardown that enforces it.
 
 `scripts/ci/coverage_suites.py` launches every suite and
-`tests/conftest.py` times each, so a wedge in any suite ends both, and the
+`tests/conftest.py` times each, so a hung suite ends at one bound, and the
 launcher takes away what its suites wrote -- which a suite killed at its
 bound can still be holding open on Windows. The bound, the launch that
 enforces it and the removal of what a suite left live here rather than in

@@ -1,6 +1,7 @@
-# Coverage toolchain, kept apart from requirements-dev.txt so the lint and
-# type pins are not dragged into a job that only measures. Pinned for the same
-# reason they are: a tool release must not turn CI red on an unchanged commit.
+# Test toolchain (coverage, pytest, PyYAML, shellcheck-py), kept apart from
+# requirements-dev.txt so the lint and type pins stay out of the test jobs.
+# Pinned for the same reason they are: a tool release must not turn CI red on
+# an unchanged commit.
 #
 # HASH-PINNED AS A WHOLE, not per pin: pip turns hash checking on for an
 # entire resolution the moment any requirement in it carries a hash, so one
@@ -140,8 +141,7 @@ coverage==7.17.4 \
 # The pytest toolchain the suite runs under: pytest and its whole
 # dependency closure, which hash mode requires pinned (pytest-xdist for
 # `-n auto`). colorama is Windows-only and carries the marker pytest gives it.
-# Versions follow Nitjsefnie-Actions/test-ratchet v1.0.0's own pins, so the
-# action and this suite install the same bytes.
+# Versions were taken from Nitjsefnie-Actions/test-ratchet v1.0.0's pins.
 
 pytest==9.2.0 \
     --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588 \

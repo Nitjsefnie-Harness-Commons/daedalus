@@ -109,6 +109,8 @@ python3 -m pytest -n auto tests/                  # every suite
 python3 -m pytest tests/test_bridge_streams.py    # one suite
 ```
 
+CI also runs a serial `python3 -m pytest tests/` pass after the parallel one.
+
 The suites start the real bridge as a child process and talk to it over
 loopback — there are no mocks of the HTTP layer, because every bug worth
 catching lives in request parsing, path handling or the queue.
