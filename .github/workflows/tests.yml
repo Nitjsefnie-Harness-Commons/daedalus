@@ -562,7 +562,7 @@ jobs:
           persist-credentials: false
 
       - id: plan
-        uses: Nitjsefnie-Actions/test-ratchet/plan@972529077c00a9331f0481c0a434a171d502c402 # v2.4.1
+        uses: Nitjsefnie-Actions/test-ratchet/plan@96562a47e9b7fe74b55cc70a4636d1b5d7b542e2 # v2.4.2
         with:
           tests: tests/**/test_*.py
           times: .github/test-times.json
@@ -663,7 +663,7 @@ jobs:
       # on, and `javascript-all-files` keeps a file no test loads in it at
       # 0 hits.
       - name: Run the shard's suites
-        uses: Nitjsefnie-Actions/test-ratchet/run@972529077c00a9331f0481c0a434a171d502c402 # v2.4.1
+        uses: Nitjsefnie-Actions/test-ratchet/run@96562a47e9b7fe74b55cc70a4636d1b5d7b542e2 # v2.4.2
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         with:
@@ -860,7 +860,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: Nitjsefnie-Actions/test-ratchet/report@972529077c00a9331f0481c0a434a171d502c402 # v2.4.1
+      - uses: Nitjsefnie-Actions/test-ratchet/report@96562a47e9b7fe74b55cc70a4636d1b5d7b542e2 # v2.4.2
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
