@@ -149,9 +149,9 @@ jobs:
         # So there are exactly six outcomes, and the block reaches all six:
         #
         #   * a clean run exits 0 and prints the output;
-        #   * a real finding matches neither test below, carries pip-audit's
-        #     `Found N known vulnerabilities` summary, and is reported
-        #     immediately and verbatim;
+        #   * a real finding carries pip-audit's `Found N known
+        #     vulnerabilities` summary, matches neither the 4xx nor the retry
+        #     test, and is reported immediately and verbatim;
         #   * a 4xx that is not a 429 is the index answering about THIS
         #     request rather than about the network, so it is reported at
         #     once. It is tested FIRST, which is what keeps the widening
@@ -164,8 +164,8 @@ jobs:
         #     failed `pip` upgrade says that instead, since pip-audit drops
         #     pip's own error and the output cannot tell a transport failure
         #     from a permanent one;
-        #   * any other failure carries no such summary, so it is reported as
-        #     pip-audit failing, not as findings.
+        #   * any other failure has no such summary and is reported as
+        #     pip-audit failing.
         #
         # Every arm above is pinned by a fixture in tests/_wffixtures.py,
         # which runs this block rather than reading it, and asserts on what it
@@ -194,7 +194,7 @@ jobs:
               exit 1
             fi
 
-            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|failed to resolve .*\(\[errno|\(connect timeout=|failed to upgrade .pip.|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit.out; then
+            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|failed to resolve .*\(\[errno|\(connect timeout=|failed to upgrade .pip.|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)' audit.out; then
               echo "attempt $attempt: index failure talking to PyPI, retrying"
               tail -n 5 audit.out
               sleep $(( attempt * 15 ))
@@ -271,7 +271,7 @@ jobs:
               exit 1
             fi
 
-            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|failed to resolve .*\(\[errno|\(connect timeout=|failed to upgrade .pip.|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit-test.out; then
+            if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|failed to establish a new connection|failed to resolve .*\(\[errno|\(connect timeout=|failed to upgrade .pip.|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)' audit-test.out; then
               echo "attempt $attempt: index failure talking to PyPI or OSV, retrying"
               tail -n 5 audit-test.out
               sleep $(( attempt * 15 ))
