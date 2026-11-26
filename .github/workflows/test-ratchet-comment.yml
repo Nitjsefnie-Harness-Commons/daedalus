@@ -23,11 +23,11 @@ jobs:
       pull-requests: write
       actions: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: Nitjsefnie-Actions/test-ratchet/report@96562a47e9b7fe74b55cc70a4636d1b5d7b542e2 # v2.4.2
+      - uses: Nitjsefnie-Actions/test-ratchet/report@972529077c00a9331f0481c0a434a171d502c402 # v2.4.1
         with:
           github-token: ${{ github.token }}
           cell: ubuntu-latest-py3.15
