@@ -18,8 +18,7 @@ from _ghexpr import evaluate_if  # noqa: E402
 from _wfgraph import (  # noqa: E402
     _actionlint_runs,
     _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
-    _job_names_with_outputs, _job_step_ids, _matrix_job_running,
-    _python_matrix, _tests_yml)
+    _job_names_with_outputs, _job_step_ids, _tests_yml)
 
 
 def _classifier():
@@ -247,11 +246,9 @@ def test_documentation_patterns_match_the_workflow_path_filters(tmp):
 
 
 GATE_JOBS = ('pycodestyle', 'pylint', 'pyright', 'eslint', 'actionlint')
-_MEASUREMENT_JOB, _ = _matrix_job_running(
-    _tests_yml(), _python_matrix(_tests_yml()), 'coverage_suites.py')
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
-                  'actionlint', 'suites', 'wheel', 'coverage-matrix',
-                  'coverage', 'journey-budget', 'size-baseline', 'thresholds')
+                  'actionlint', 'plan', 'test', 'wheel', 'report',
+                  'ratchets', 'journey-budget', 'size-baseline', 'thresholds')
 CONDITION_CONTEXTS = (
     ({'success': True, 'failure': False, 'cancelled': False}, True),
     ({'success': False, 'failure': False, 'cancelled': False}, True),
@@ -287,7 +284,7 @@ def test_output_jobs_reference_existing_step_ids(tmp):
     del tmp
     workflow = _tests_yml()
     output_jobs = _job_names_with_outputs(workflow)
-    assert set(output_jobs) == {'changes'}, output_jobs
+    assert set(output_jobs) == {'changes', 'plan'}, output_jobs
     assert len(output_jobs) == len(set(output_jobs)), output_jobs
     for job in output_jobs:
         referenced = _job_output_step_ids(workflow, job)
@@ -340,10 +337,10 @@ def test_static_analysis_jobs_keep_their_required_ids_and_names(tmp):
 def test_expensive_jobs_wait_on_every_static_analysis_gate(tmp):
     del tmp
     workflow = _tests_yml()
-    for job in ('suites', 'wheel', 'coverage'):
+    for job in ('test', 'wheel'):
         expected = ['changes', *GATE_JOBS]
-        if job == 'coverage':
-            expected.append(_MEASUREMENT_JOB)
+        if job == 'test':
+            expected.append('plan')
         needs = _job_needs(workflow, job)
         assert set(needs) == set(expected), (job, needs, expected)
         assert len(needs) == len(set(needs)) == len(expected), (
@@ -359,7 +356,7 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
         tmp):
     del tmp
     workflow = _tests_yml()
-    for job in ('suites', 'wheel', 'coverage'):
+    for job in ('test', 'wheel'):
         expression = _job_if_expression(workflow, job)
         assert expression is not None, job
         for status, should_run in CONDITION_CONTEXTS:
@@ -369,10 +366,7 @@ def test_expensive_job_conditions_run_after_a_skipped_gate_not_a_failed_one(
                     'needs': {'changes': {'outputs': {
                         'docs_only': docs_only}}},
                 }
-                expected = (
-                    should_run
-                    and not (job == 'coverage'
-                             and docs_only == 'true'))
+                expected = should_run
                 assert evaluate_if(expression, context) is expected, (
                     job, status, docs_only, expression)
 
@@ -407,44 +401,6 @@ def test_actionlint_survives_a_replacement_push_and_keeps_pr_behavior(tmp):
         assert _actionlint_runs(
             workflow, 'pull_request', 'true' if workflows else 'false') is (
                 expected)
-
-
-def test_coverage_and_suites_take_their_shape_from_the_classifier(tmp):
-    """coverage skips on docs_only; suites runs the classifier's matrix.
-
-    The suites job declares no literal axis list anywhere in its section,
-    and FULL_MATRIX's members are nonempty strings: the matrix's size is
-    the classifier's own declaration, never a pin of it. The coverage
-    rows declare the classifier's newest interpreter -- the two sides of
-    the interpreter decision move together, one bump or both, and a
-    one-sided bump reds here. Values are pinned, never their size.
-    """
-    del tmp
-    mod = _classifier()
-    workflow = _tests_yml()
-    assert 'changes' in _job_needs(workflow, 'coverage')
-    assert 'changes' in _job_needs(workflow, 'suites')
-    coverage = _job_section(workflow, 'coverage')
-    assert any(line.startswith('    if:') for line in coverage), (
-        'coverage has no job-level if')
-    assert any('needs.changes.outputs.docs_only' in line
-               for line in coverage), coverage
-    suites = '\n'.join(_job_section(workflow, 'suites'))
-    matrix_lines = [line.strip() for line in suites.splitlines()
-                    if line.strip().startswith('matrix:')]
-    assert matrix_lines == [
-        'matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}'], (
-        matrix_lines)
-    assert not re.search(r'^\s+(?:os|python): \[', suites, re.MULTILINE), (
-        suites)
-    for axis, values in mod.FULL_MATRIX.items():
-        assert values, (axis, values)
-        for value in values:
-            assert isinstance(value, str) and value, (axis, value)
-    declared = {row['python']
-                for row in _python_matrix(workflow)['include']}
-    assert declared == {max(mod.FULL_MATRIX['python'])}, (
-        sorted(declared), sorted(mod.FULL_MATRIX['python']))
 
 
 def test_main_records_the_fallback_outputs_and_returns_zero(tmp):

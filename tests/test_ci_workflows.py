@@ -38,63 +38,13 @@ from _wfpins import (  # noqa: E402
     assert_the_pip_install_reader_refuses_what_it_cannot_model,
     assert_the_zizmor_manifest_is_hash_pinned)
 from _repo import ROOT  # noqa: E402
-from _wfgraph import (_job_condition_runs, _job_if_expression,  # noqa: E402
-                      _job_names, _job_section, _tests_yml)
+from _wfgraph import _job_names, _job_section, _tests_yml  # noqa: E402
 from _wfjobs import (  # noqa: E402
     load, run_path_candidates, workflow_files)
 from _wfskip import implicit_skip_violations  # noqa: E402
-from _wfskip_cases import suites_skip_violation  # noqa: E402
-from _yamlread import job_mapping, step_scalar  # noqa: E402
+from _wfskip_cases import job_skip_violation  # noqa: E402
+from _yamlread import step_scalar  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
-from _workflows import _trigger_names  # noqa: E402
-
-
-def _assert_diff_coverage_permissions(workflow):
-    permissions = job_mapping(workflow, 'diff-coverage', 'permissions')
-    assert permissions == {'contents': 'read'}, (
-        f'unsafe decoded permissions: {permissions!r}')
-
-
-def _assert_permissions_mutation_refused(workflow):
-    try:
-        _assert_diff_coverage_permissions(workflow)
-    except AssertionError as error:
-        assert 'unsafe decoded permissions' in str(error), str(error)
-        return
-    raise AssertionError('widened decoded permissions were accepted')
-
-
-def test_diff_coverage_runs_when_its_coverage_artifact_is_available(tmp):
-    del tmp
-    source = _tests_yml()
-    cases = (
-        {'name': 'all-success', 'event': 'pull_request', 'result': 'success',
-         'success': True, 'expected': True},
-        {'name': 'skipped ancestor', 'event': 'pull_request',
-         'result': 'success', 'expected': True},
-        {'name': 'cancelled PR', 'event': 'pull_request', 'result': 'success',
-         'cancelled': True, 'expected': False},
-        {'name': 'coverage skipped', 'event': 'pull_request',
-         'result': 'skipped', 'expected': False},
-        {'name': 'coverage failed', 'event': 'pull_request',
-         'result': 'failure', 'failure': True, 'expected': False},
-    )
-    cases += tuple({'name': f'event {event}', 'event': event,
-                    'result': 'success', 'success': True,
-                    'expected': event == 'pull_request'}
-                   for event in _trigger_names(source))
-    for case in cases:
-        status = {name: case.get(name, False)
-                  for name in ('success', 'failure', 'cancelled')}
-        context = {'github': {'event_name': case['event']},
-                   'needs': {'coverage': {'result': case['result']}},
-                   'status': status}
-        expression = _job_if_expression(source, 'diff-coverage')
-        actual = _job_condition_runs(source, 'diff-coverage', context=context)
-        assert actual is case['expected'], {
-            'case': case['name'], 'condition': expression,
-            'expected': case['expected'], 'actual': actual,
-            'status': status}
 
 
 def test_skip_guard_uses_condition_behaviour_not_function_names(tmp):
@@ -108,7 +58,7 @@ def test_skip_guard_uses_condition_behaviour_not_function_names(tmp):
         "github.event_name == 'push'": False,
         None: True,
     }
-    actual = {condition: suites_skip_violation(_tests_yml(), condition)
+    actual = {condition: job_skip_violation(_tests_yml(), condition)
               for condition in cases}
     assert actual == cases, {'expected': cases, 'actual': actual}
 
@@ -117,107 +67,6 @@ def test_skippable_ancestors_cannot_implicitly_skip_dependants(tmp):
     del tmp
     violations = implicit_skip_violations(_tests_yml())
     assert not violations, '\n'.join(violations)
-
-
-def test_import_resolving_jobs_install_the_pinned_statement_analyzer(tmp):
-    del tmp
-    pins = re.findall(r'^coverage==.*$',
-                      (ROOT / 'requirements-test.txt').read_text(
-                          encoding='utf-8'), re.MULTILINE)
-    assert len(pins) == 1, pins
-    workflow_dir = ROOT / '.github' / 'workflows'
-    tests = _tests_yml()
-    release = (workflow_dir / 'release.yml').read_text(encoding='utf-8')
-
-    def before(source, job, consumer):
-        section = source.partition(f'\n  {job}:\n')[2].partition(consumer)
-        return section[0] if section[1] else ''
-    measurement_jobs = []
-    for name in _job_names(tests):
-        steps = complete_job_mapping(tests, name).get('steps', [])
-        consumers = [index for index, step in enumerate(steps)
-                     if 'coverage_suites.py' in step.get('run', '')]
-        if consumers:
-            assert len(consumers) == 1, (name, consumers)
-            prefix = '\n'.join(
-                step.get('run', '') for step in steps[:consumers[0]])
-            measurement_jobs.append((name, prefix))
-    assert len(measurement_jobs) == 1, measurement_jobs
-    jobs = (
-        ('diff-coverage', before(tests, 'diff-coverage',
-                                 '- name: Measure the coverage')),
-        measurement_jobs[0],
-        ('suites', before(tests, 'suites', '- name: Run every suite')),
-        ('pylint', before(tests, 'pylint', '- name: pylint')),
-        ('release', before(release, 'publish',
-                           '- name: Run every suite before publishing')),
-    )
-    install = re.compile(
-        r'pip install (?:-r|--requirement) requirements-test[.]txt')
-    missing = [name for name, job in jobs if not install.search(job)]
-    assert not missing, (
-        'jobs that import diff_coverage do not install coverage.py from '
-        f'requirements-test.txt: {", ".join(missing)}')
-    for name, job in jobs:
-        assert 'coverage==' not in job, f'{name} duplicated the version pin'
-
-
-def test_permission_whitespace_mutation_is_refused(tmp):
-    del tmp
-    workflow = _tests_yml()
-    mutated = workflow.replace(
-        '      contents: read\n',
-        '      contents: read\n      pull-requests : write\n', 1)
-    assert mutated != workflow, 'real permission mapping was not mutated'
-    _assert_permissions_mutation_refused(mutated)
-
-
-def test_quoted_and_escaped_permission_keys_are_refused(tmp):
-    del tmp
-    workflow = _tests_yml()
-    additions = (
-        "      'pull-requests': write\n",
-        '      "pull\\x2drequests": write\n',
-    )
-    for addition in additions:
-        mutated = workflow.replace(
-            '      contents: read\n',
-            '      contents: read\n' + addition, 1)
-        assert mutated != workflow, addition
-        _assert_permissions_mutation_refused(mutated)
-
-
-def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
-    del tmp
-    workflow = _tests_yml()
-    replacements = (
-        "    'permissions':\n",
-        '    "permis\\x73ions":\n',
-    )
-    for field in replacements:
-        mutated = workflow.replace(
-            '    permissions:\n      contents: read\n',
-            field + '      contents: read\n'
-            '      pull-requests: write\n', 1)
-        assert mutated != workflow, field
-        _assert_permissions_mutation_refused(mutated)
-
-
-def test_permission_values_and_unknown_keys_fail_closed(tmp):
-    del tmp
-    workflow = _tests_yml()
-    mutations = (
-        workflow.replace('      contents: read\n',
-                         '      contents: write\n', 1),
-        workflow.replace('      contents: read\n',
-                         '      contents: "wr\\x69te"\n', 1),
-        workflow.replace(
-            '      contents: read\n',
-            '      contents: read\n      future-scope: read\n', 1),
-    )
-    for mutated in mutations:
-        assert mutated != workflow, 'real permission mapping was not mutated'
-        _assert_permissions_mutation_refused(mutated)
 
 
 def test_actionlint_lints_every_workflow_extension_github_accepts(tmp):

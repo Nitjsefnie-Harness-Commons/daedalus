@@ -4,7 +4,6 @@
   },
   "schema_version": 1,
   "baseline": {
-    ".github/workflows/coverage-comment.yml": 515,
     ".github/workflows/tests.yml": 1611
   }
 }

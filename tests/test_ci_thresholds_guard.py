@@ -259,7 +259,7 @@ def test_guard_jobs_execute_one_judged_base_and_refuse_missing_history(tmp):
     binding = '${{ github.event.pull_request.base.sha }}'
     assert resolver['env']['DAEDALUS_BASE_SHA'] == binding
     jobs = workflow_mapping((ROOT / '.github/workflows/tests.yml').read_text())
-    for name in ('suites', 'coverage-matrix', 'coverage', 'pyright'):
+    for name in ('test', 'ratchets', 'pyright'):
         steps = jobs['jobs'][name]['steps']
         assert sum(s.get('run') == 'python scripts/ci/threshold_base.py'
                    for s in steps) == 1

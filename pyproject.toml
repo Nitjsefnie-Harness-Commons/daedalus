@@ -73,9 +73,8 @@ python_functions = ["test_"]
 addopts = "--assert=plain"
 
 [tool.coverage.run]
-# parallel, because every suite is measured in its own subprocess and then
-# combined. Measuring one merged process would report
-# coverage for a program nobody runs.
+# parallel, so each measured process (the bridge children the suites start
+# included) writes a data file of its own and none overwrites another's.
 parallel = true
 # The bridge fixture ends every child with terminate(), and coverage saves on
 # interpreter exit — which SIGTERM is not. Without this the only children that

@@ -11,12 +11,8 @@ table, so one spelling of the job list has to reach both.
 _CACHE_JOBS = (
     # (job, the key's python component, the step a save must follow, the
     # step the restore must precede).
-    ('suites', '${{ matrix.python }}', 'Run every suite',
+    ('test', '${{ matrix.python }}', "Run the shard's suites",
      'Install the test dependencies and project'),
-    ('coverage-matrix', '${{ matrix.python }}', 'Measure',
-     'Install the coverage toolchain and the project'),
-    ('coverage', '3.15', 'Install the coverage toolchain and the project',
-     'Install the coverage toolchain and the project'),
     ('pycodestyle', '3.15', 'pycodestyle', 'Install linters'),
     ('pylint', '3.15', 'pylint', 'Install linters and import dependencies'),
     ('pyright', '3.15', 'pyright',

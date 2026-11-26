@@ -75,6 +75,7 @@
 !/.github/dependabot.yml
 !/.github/journey-budget.json
 !/.github/size-baseline.json
+!/.github/test-times.json
 
 # ─── .github/ISSUE_TEMPLATE ───
 !/.github/
@@ -88,7 +89,6 @@
 !/.github/workflows/claim.yml
 !/.github/workflows/codeql.yml
 !/.github/workflows/comment-share.yml
-!/.github/workflows/coverage-comment.yml
 !/.github/workflows/gate-freshness.yml
 !/.github/workflows/pin-guard.yml
 !/.github/workflows/pr-gate.yml
@@ -97,6 +97,7 @@
 !/.github/workflows/scorecard.yml
 !/.github/workflows/secrets.yml
 !/.github/workflows/size-baseline.yml
+!/.github/workflows/test-ratchet-comment.yml
 !/.github/workflows/tests.yml
 !/.github/workflows/version.yml
 
@@ -244,9 +245,6 @@
 !/scripts/ci/cache_action_releases.py
 !/scripts/ci/callgrind_boundary.c
 !/scripts/ci/classify_changes.py
-!/scripts/ci/coverage_combine.py
-!/scripts/ci/coverage_suites.py
-!/scripts/ci/diff_coverage.py
 !/scripts/ci/gate_freshness.py
 !/scripts/ci/install_lint_tools.py
 !/scripts/ci/journey_artifact.py
@@ -261,11 +259,8 @@
 !/scripts/ci/journey_residual.py
 !/scripts/ci/journey_thread_rows.py
 !/scripts/ci/journey_threads.py
-!/scripts/ci/js_coverage.py
-!/scripts/ci/js_lines.py
 !/scripts/ci/js_module_coverage.py
 !/scripts/ci/line_lengths.py
-!/scripts/ci/ratchet.py
 !/scripts/ci/ratchet_push.py
 !/scripts/ci/release_dispatch.py
 !/scripts/ci/suite_bound.py
@@ -293,7 +288,6 @@
 !/tests/_child_boot_env.py
 !/tests/_child_ready.py
 !/tests/_ci_imports.py
-!/tests/_ci_publisher.py
 !/tests/_ci_wait_fixtures.py
 !/tests/_classifier_calls.py
 !/tests/_cli_arg_audit_resolver.py
@@ -307,11 +301,6 @@
 !/tests/_cmdqueue_faults.py
 !/tests/_command_candidates.py
 !/tests/_command_type_readers.py
-!/tests/_coverage_comment_publication.py
-!/tests/_coverage_comment_steps.py
-!/tests/_coverage_comment_workflow.py
-!/tests/_coverage_launch_stubs.py
-!/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
 !/tests/_dashdom.py
 !/tests/_dashfetch.py
@@ -328,7 +317,6 @@
 !/tests/_deadline_reach.py
 !/tests/_debugger_attachment_harness.py
 !/tests/_deliveries.py
-!/tests/_diff_coverage_fixtures.py
 !/tests/_drain.py
 !/tests/_evalpages.py
 !/tests/_fake_gh.py
@@ -390,7 +378,6 @@
 !/tests/_segments.py
 !/tests/_service_loader.py
 !/tests/_stream_fake.py
-!/tests/_suite_bound_stubs.py
 !/tests/_suite_jobs.py
 !/tests/_tabs_harness.py
 !/tests/_teardown.py
@@ -487,13 +474,7 @@
 !/tests/test_command_queue_ordering.py
 !/tests/test_command_queue_unit.py
 !/tests/test_config_boot_generation.py
-!/tests/test_coverage_combine.py
-!/tests/test_coverage_comment_boundary.py
-!/tests/test_coverage_comment_fork.py
-!/tests/test_coverage_comment_workflow.py
 !/tests/test_coverage_config.py
-!/tests/test_coverage_suites.py
-!/tests/test_coverage_suites_launch.py
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_app_shell.py
 !/tests/test_dashboard_behaviour.py
@@ -515,9 +496,6 @@
 !/tests/test_debugger_teardown.py
 !/tests/test_delivery_stripe_acceptance.py
 !/tests/test_delivery_stripes.py
-!/tests/test_diff_coverage.py
-!/tests/test_diff_coverage_boundaries.py
-!/tests/test_diff_coverage_javascript.py
 !/tests/test_eval_relay.py
 !/tests/test_examples_parse.py
 !/tests/test_exclusive_bind.py
@@ -560,9 +538,6 @@
 !/tests/test_journey_thread_rows.py
 !/tests/test_journey_threads.py
 !/tests/test_journey_tighten.py
-!/tests/test_js_coverage.py
-!/tests/test_js_coverage_workflow.py
-!/tests/test_js_lines.py
 !/tests/test_js_module_coverage.py
 !/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py

@@ -16,18 +16,21 @@ on:
     # request open is not a tree anyone is reviewing.
     branches: [main]
     # Ratchet commits change only this data; audit still gates those pushes.
-    # The journey budget's counts, comment-share and size records join them:
-    # a tighten commit changes one JSON file, and its ratchet already ran.
+    # The journey budget's counts, comment-share and size records join them,
+    # and test-ratchet's records commit writes the test times beside the
+    # thresholds: a ratchet commit changes only these files, and its ratchet
+    # already ran.
     paths-ignore:
       - '.github/ci-thresholds.json'
       - '.github/journey-budget.json'
       - '.github/comment-share.json'
       - '.github/size-baseline.json'
+      - '.github/test-times.json'
     # release.yml needs a run on the tagged SHA; audit remains unfiltered.
     #
     # Documentation-only runs are narrowed inside the workflow instead, by
-    # the classifier's docs_only output: one suite leg runs, coverage skips,
-    # and the required checks still report.
+    # the classifier's docs_only output: one suite cell runs, and the
+    # required checks still report.
   # `pull_request`, never `pull_request_target`: journey-budget RUNS the
   # proposed code; the latter runs it with a writable token and base secrets.
   # BASE FILTER. A non-main base's green would survive a retarget to main.
@@ -56,7 +59,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Documentation-only runs pay for one suite leg and no coverage. The
+  # Documentation-only runs pay for one suite cell. The
   # pull_request trigger has no path filter, so required checks still report;
   # this job reads the changed paths and emits the suites matrix and a
   # docs_only flag instead, and every fallback over-runs.
@@ -65,10 +68,6 @@ jobs:
     timeout-minutes: 5
     # A job-level block replaces the workflow-level one rather than adding
     # to it: the pulls/<n>/files read needs pull-requests, nothing more.
-    # The trailing notes are load-bearing, not decoration: without them
-    # this `contents: read` line is byte-identical to diff-coverage's, and
-    # the permission-mutation tests in tests/test_ci_workflows.py anchor
-    # on the first occurrence in the file.
     permissions:
       contents: read  # the checkout and the push compare read
       pull-requests: read  # the pulls/<n>/files read
@@ -114,9 +113,9 @@ jobs:
           python-version: "3.15"
 
       # The pip cache is restored on every event and saved only from a push
-      # of main, as in the matrix and coverage jobs. `cache: pip` saves in
+      # of main, as in the test job. `cache: pip` saves in
       # a post-job step running after the pull-request checkout, the
-      # poisoning shape those jobs avoid. The key shares the matrix jobs' 3.15
+      # poisoning shape that job avoids. The key shares the test job's 3.15
       # namespace: the cache holds fetched packages, so what one job warmed
       # any of them reuses.
       - name: Restore the pip cache
@@ -185,7 +184,8 @@ jobs:
       # the pyright job: pylint resolves imports, so without them every httpx,
       # mcp, starlette and uvicorn line in daedalus_mcp/server.py (and httpx in
       # scripts/mcp_probe.py) reports as import-error instead of being checked.
-      # diff_coverage.py likewise imports the pinned statement analyzer.
+      # The suites likewise import the pytest and PyYAML pinned in
+      # requirements-test.txt.
       - name: Install linters and import dependencies
         run: |
           python -m pip install --upgrade pip
@@ -262,9 +262,9 @@ jobs:
             pip-${{ runner.os }}-3.15-
 
       - name: Install the type checker and the dependencies it resolves
-        # scripts/ci is in the checker's scope, and two of its modules import
-        # coverage, so the measurement pins belong here as well as in the
-        # matrix that runs them. An unresolved import is a type error.
+        # The suites' scope imports the pytest and PyYAML pinned in
+        # requirements-test.txt, so those pins belong here as well as in the
+        # job that runs them. An unresolved import is a type error.
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
@@ -562,7 +562,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/cache_action_releases.py
 
-  suites:
+  # The suites run through test-ratchet: `plan` splits the test files into
+  # shards, `test` runs one shard per cell with Python and JavaScript
+  # coverage measured, and `report` merges the shards, gates the floors in
+  # .github/ci-thresholds.json and, on a push of main, commits the records
+  # that rose with .github/test-times.json.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: plan
+        uses: Nitjsefnie-Actions/test-ratchet/plan@916a819580fdb4133805bd7e4f46608849f05c7f  # v2.4.0
+        with:
+          tests: tests/**/test_*.py
+          times: .github/test-times.json
+          shards: 3
+
+  test:
     needs:
       - changes
       - pycodestyle
@@ -570,13 +593,18 @@ jobs:
       - pyright
       - eslint
       - actionlint
+      - plan
     if: ${{ !cancelled() && !failure() }}
     strategy:
       fail-fast: false
       # The os/python lists live in FULL_MATRIX in
       # scripts/ci/classify_changes.py, which the changes job renders:
-      # one leg for a documentation-only run, all twelve otherwise.
-      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+      # one cell for a documentation-only run, all six otherwise. Each
+      # cell runs every shard plan lists.
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.matrix).os }}
+        python: ${{ fromJSON(needs.changes.outputs.matrix).python }}
+        shard: ${{ fromJSON(needs.plan.outputs.matrix).shard }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
 
@@ -632,8 +660,9 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-${{ matrix.python }}-
 
-      # Without the MCP extra that suite skips; test_diff_coverage imports the
-      # statement analyzer pinned in requirements-test.txt.
+      # Without the MCP extra that suite skips. requirements-test.txt goes
+      # into the interpreter the run step below installs its own toolchain
+      # into, before it, so the pins it holds are the ones the suites see.
       - name: Install the test dependencies and project
         run: |
           python -m pip install --upgrade pip . ".[mcp]"
@@ -649,19 +678,32 @@ jobs:
       - name: Install the lint tools the suites drive
         run: python scripts/ci/install_lint_tools.py
 
-      - name: Run every suite
+      # `javascript` names the shipped JavaScript the floor was measured
+      # on, and `javascript-all-files` keeps a file no test loads in it at
+      # 0 hits. `-p no:cacheprovider`: pytest processes sharing one rootdir
+      # race on `.pytest_cache`'s staging directory, which aborts a
+      # sibling's collection on Windows.
+      - name: Run the shard's suites
+        uses: Nitjsefnie-Actions/test-ratchet/run@916a819580fdb4133805bd7e4f46608849f05c7f  # v2.4.0
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m pytest -n auto tests/ && python -m pytest tests/
+        with:
+          runner: pytest
+          tests: tests/**/test_*.py
+          times: .github/test-times.json
+          cell: ${{ matrix.os }}-py${{ matrix.python }}
+          shard: ${{ matrix.shard }}
+          javascript: extension/**/*.js,dashboard/**/*.js
+          javascript-code-only: 'true'
+          javascript-any-character: 'true'
+          javascript-all-files: 'true'
+          args: -p no:cacheprovider
 
       # The gate is the answer to the cache-poisoning findings: an untrusted
       # event never writes cross-run state, and a push of main is the one
       # trigger whose checkout this repository produced. The save's position
       # does not change WHAT the cache holds, only who writes one: a run
-      # cancelled during the suites never reaches this step. The installer
-      # above runs pip, and that pip call installs the same wheel this job's
-      # own install already put in the restored key, so the save publishes
-      # nothing the restore did not already hold.
+      # cancelled during the suites never reaches this step.
       - name: Save the pip cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         if: ${{ !cancelled() && github.event_name == 'push'
@@ -742,219 +784,55 @@ jobs:
             dist/*.tar.gz
           retention-days: 14
 
-  coverage-matrix:
-    needs:
-      - changes
-      - pycodestyle
-      - pylint
-      - pyright
-      - eslint
-      - actionlint
-    # Ubuntu and windows only: macOS runs no covered line ubuntu misses
-    # (win32-vs-POSIX), and its queue must not gate the combine.
-    if: ${{ !cancelled() && !failure()
-               && needs.changes.outputs.docs_only != 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python: "3.15"
-            shard: 1
-            shards: 1
-          - os: windows-latest
-            python: "3.15"
-            shard: 1
-            shards: 3
-          - os: windows-latest
-            python: "3.15"
-            shard: 2
-            shards: 3
-          - os: windows-latest
-            python: "3.15"
-            shard: 3
-            shards: 3
-    runs-on: ${{ matrix.os }}
-    # Keep the 45-minute hang backstop while the shards are measured in CI.
-    timeout-minutes: 45
-
-    env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      COVERAGE_FILE: "${{ github.workspace }}/.coverage"
+  # Runs after every test job, also when one failed, and is skipped with
+  # them. Its job token comments on a pull request; it checks out the tree
+  # only for the floors and runs nothing from it.
+  report:
+    needs: test
+    if: ${{ !cancelled() && needs.test.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The branch policy refuses other refs; an empty name binds no
+    # environment, so pull requests can still run these checks.
+    environment: ${{ github.event_name == 'push'
+      && github.ref == 'refs/heads/main' && 'main-push' || '' }}
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          # This job runs the suites too, so it fetches the same merge
-          # base the retired branch-boundary controls read; see the
-          # suites job.
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+      - uses: Nitjsefnie-Actions/test-ratchet/report@916a819580fdb4133805bd7e4f46608849f05c7f  # v2.4.0
         with:
-          python-version: ${{ matrix.python }}
+          github-token: ${{ github.token }}
+          cell: ubuntu-latest-py3.15
+          times: .github/test-times.json
+          push-key: ${{ secrets.MASTER_PUSH_DEPLOY_KEY }}
 
-      - name: Resolve threshold base
-        env:
-          DAEDALUS_REPO: ${{ github.repository }}
-          DAEDALUS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          DAEDALUS_EVENT: ${{ github.event_name }}
-          DAEDALUS_BEFORE: ${{ github.event.before }}
-        run: python scripts/ci/threshold_base.py
-
-      # Same reason and the same order as the suites job: the suites reached
-      # here skip on node, so this job declares it instead of inheriting the
-      # image, and a declaration below the first suite-running step is not
-      # one. `package-manager-cache: false` keeps this job out of the set of
-      # cache-writing jobs test_workflow_cache_boundary.py records, which is
-      # what the suites job's step does too.
-      # actions/setup-node v7.1.0
-      - uses: >-
-          actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
-        with:
-          node-version: "22"
-          package-manager-cache: false
-
-      # Same cache, same gate as the suites job: restore on every event, save
-      # only from a push of main, and never through `cache: pip`, whose
-      # post-job save runs after the code under test.
-      - name: Restore the pip cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: |
-            ~/.cache/pip
-            ~/Library/Caches/pip
-            ~\AppData\Local\pip\Cache
-          key: pip-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('requirements-*.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-${{ matrix.python }}-
-
-      - name: Install the coverage toolchain and the project
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
-          python -m pip install . ".[mcp]"
-
-      # The suites drive real binaries, and a suite that finds one missing
-      # SKIPS — on every leg, silently, so this job can publish a coverage
-      # number that never measured the part that needed the binary. One of
-      # the two tools it names arrives with the install above; the step runs
-      # no pip itself, so the cache save below is unaffected by it.
-      - name: Install the lint tools the suites drive
-        run: python scripts/ci/install_lint_tools.py
-
-      - name: Measure the bridge's child processes too
-        # On Windows terminate() kills fixture children without a coverage
-        # flush, so child-process lines may be undercounted. Cross-platform
-        # flushing is follow-up work.
-        run: >-
-          python -c "from pathlib import Path; import sysconfig; Path(
-          sysconfig.get_paths()['purelib'], 'coverage-subprocess.pth').write_text(
-          'import coverage; coverage.process_startup()\n', encoding='ascii')"
-
-      - name: Enable JavaScript coverage on Ubuntu
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        shell: bash
-        run: >-
-          echo "NODE_V8_COVERAGE=$GITHUB_WORKSPACE/.node-v8-coverage"
-          >> "$GITHUB_ENV"
-
-      - name: Measure
-        id: measure
-        env:
-          COVERAGE_PROCESS_START: ${{ github.workspace }}/pyproject.toml
-        run: python scripts/ci/coverage_suites.py --require-all --shard ${{ matrix.shard }}/${{ matrix.shards }}
-
-      # Same gate as the suites job: a pull-request or workflow_dispatch run
-      # restores a cache and never writes one. Nothing between the install
-      # and here runs pip either, so the save sits after the measurement for
-      # the same reason: a cancelled run reaches no save. The coverage job
-      # places its save at the install and accepts that write instead.
-      - name: Save the pip cache
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        if: ${{ !cancelled() && github.event_name == 'push'
-                && github.ref == 'refs/heads/main' }}
-        with:
-          path: |
-            ~/.cache/pip
-            ~/Library/Caches/pip
-            ~\AppData\Local\pip\Cache
-          key: pip-${{ runner.os }}-${{ matrix.python }}-${{ hashFiles('requirements-*.txt') }}
-
-      - name: Upload Ubuntu coverage data
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success'
-                && matrix.os == 'ubuntu-latest' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: coverage-data-${{ matrix.os }}-shard${{ matrix.shard }}
-          path: |
-            .coverage.*
-            .node-v8-coverage
-          include-hidden-files: true
-          if-no-files-found: error
-
-      - name: Upload Python coverage data
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success'
-                && matrix.os != 'ubuntu-latest' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: coverage-data-${{ matrix.os }}-shard${{ matrix.shard }}
-          path: .coverage.*
-          include-hidden-files: true
-          if-no-files-found: error
-
-  coverage:
-    needs:
-      - changes
-      - pycodestyle
-      - pylint
-      - pyright
-      - eslint
-      - actionlint
-      - coverage-matrix
-    # Skipped on a documentation-only run: no coverage number can move, and
-    # a skipped required check reports success rather than going missing.
-    if: ${{ !cancelled() && !failure()
-               && needs.changes.outputs.docs_only != 'true' }}
-    # The matrix measures one interpreter on ubuntu and windows. This
-    # job owns the single combined gate: a Python line is covered when any OS
-    # executed it, while JavaScript remains the Ubuntu measurement because
-    # V8 records embed runner-specific file URLs.
+  # The ratchets test-ratchet does not cover, read off the gated cell's
+  # JavaScript reports: the per-module uncovered-line counts, and on a push
+  # of main the long-line and per-module baselines following a file down.
+  ratchets:
+    needs: test
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     # The branch policy refuses other refs; an empty name binds no
     # environment, so pull requests can still run these checks.
     environment: ${{ github.event_name == 'push'
       && github.ref == 'refs/heads/main' && 'main-push' || '' }}
 
-    env:
-      PYTHONDONTWRITEBYTECODE: "1"
-      # Absolute, because suites run measured children with a temporary tree
-      # as the working directory. A relative data file follows the child's
-      # cwd, so its measurements were written inside the tree and deleted
-      # with it.
-      COVERAGE_FILE: "${{ github.workspace }}/.coverage"
-      # Node children inherit NODE_V8_COVERAGE from this job environment,
-      # so V8 writes here directly; no harness plumbing is needed.
-      NODE_V8_COVERAGE: "${{ github.workspace }}/.node-v8-coverage"
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # The SHA the event named, not `refs/pull/N/merge` resolved now.
-          # `diff-coverage` checks out the same value, so the report and the
-          # diff describe one tree even if GitHub recomputes the merge ref
-          # between the two jobs.
-          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      # No `cache: pip`. It saves in a post-job step, after the job has run
-      # untrusted code, so the cache is two explicit steps instead: restore on
-      # every event, save only from a push of main — the gate that answers the
-      # cache-poisoning findings, as in the suites and coverage-matrix jobs.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.15"
@@ -967,171 +845,48 @@ jobs:
           DAEDALUS_BEFORE: ${{ github.event.before }}
         run: python scripts/ci/threshold_base.py
 
-      - name: Restore the pip cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      # actions/download-artifact v8.0.2
+      - uses: >-
+          actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          path: |
-            ~/.cache/pip
-            ~/Library/Caches/pip
-            ~\AppData\Local\pip\Cache
-          key: pip-${{ runner.os }}-3.15-${{ hashFiles('requirements-*.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-3.15-
-
-      - name: Install the coverage toolchain and the project
-        run: |
-          python -m pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
-          # The mcp extra too: without it the MCP suite skips itself entirely
-          # and daedalus_mcp/server.py contributes a zero to a number that is supposed
-          # to describe the code this repository ships.
-          python -m pip install . ".[mcp]"
-
-      # Immediately after the install, the last step that adds anything to
-      # what the cache holds: no step below installs a package. Same gate as
-      # the suites and coverage-matrix jobs, but placed before this job's
-      # work rather than after it — so a run cancelled later still leaves a
-      # cache written here, which their placement avoids.
-      - name: Save the pip cache
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        if: ${{ !cancelled() && github.event_name == 'push'
-                && github.ref == 'refs/heads/main' }}
-        with:
-          path: |
-            ~/.cache/pip
-            ~/Library/Caches/pip
-            ~\AppData\Local\pip\Cache
-          key: pip-${{ runner.os }}-3.15-${{ hashFiles('requirements-*.txt') }}
-
-      - name: Download per-OS coverage data
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          pattern: coverage-data-*
-          path: coverage-data
-          merge-multiple: false
-
-      - name: Combine per-OS coverage data
-        id: measure
-        run: |
-          python scripts/ci/coverage_combine.py coverage-data/coverage-data-*
-          mkdir -p "$NODE_V8_COVERAGE"
-          find coverage-data/coverage-data-ubuntu-latest-shard*/.node-v8-coverage \
-            -type f -name 'coverage-*.json' \
-            -exec cp {} "$NODE_V8_COVERAGE" \;
-
-      - name: Python coverage summary
-        # Renders whether or not the gate below passes — a coverage
-        # regression is only actionable if you can see WHICH file lost
-        # lines, and re-reading a scrolled CI log to find that is exactly
-        # the friction that gets a gate disabled.
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        run: |
-          {
-            echo '### Python coverage'
-            echo
-            printf '%s %s\n' \
-              'Python statement coverage and JavaScript physical code-line' \
-              'coverage are separate metrics; do not add them together.'
-            echo
-            python -m coverage report --format=markdown --precision=1
-          } >> "$GITHUB_STEP_SUMMARY"
-          python -m coverage xml -o coverage.xml
-
-      - name: JavaScript coverage summary
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        run: |
-          {
-            echo '### JavaScript coverage'
-            echo
-            python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \
-              --xml javascript-coverage.xml
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload coverage XML
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: coverage-xml
-          path: |
-            coverage.xml
-            javascript-coverage.xml
-          if-no-files-found: error
-
-      # Policy tests select this step by its exact name.
-      - name: Python coverage gate
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        run: |
-          python_floor="$(python scripts/ci/thresholds.py \
-            --coverage-floor python)"
-          python -m coverage report "--fail-under=$python_floor" --precision=1
-
-      # Policy tests select this step by its exact name.
-      - name: JavaScript coverage gate
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
-        # JavaScript floors use physical code-line coverage.
-        run: |
-          javascript_floor="$(python scripts/ci/thresholds.py \
-            --coverage-floor javascript)"
-          python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \
-            --xml javascript-coverage.xml \
-            "--fail-under=$javascript_floor"
+          pattern: test-ratchet-ubuntu-latest-py3.15-*
+          path: ${{ runner.temp }}/test-ratchet
 
       # Policy tests select this step by its exact name.
       - name: JavaScript per-module coverage gate
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
         # A total can clear its floor while one module rots, so every
         # tracked file carries its own count of uncovered code lines.
-        run: |
-          python scripts/ci/js_module_coverage.py "$NODE_V8_COVERAGE"
+        env:
+          DAEDALUS_REPORTS: ${{ runner.temp }}/test-ratchet
+        run: python scripts/ci/js_module_coverage.py "$DAEDALUS_REPORTS"
 
-      - name: Work out the raise this run justifies
+      - name: Work out the tighten this run justifies
         # Only measurements from main may change its calibration.
         id: ratchet
-        if: ${{ !cancelled() && steps.measure.conclusion == 'success'
-                && github.event_name == 'push'
+        if: ${{ github.event_name == 'push'
                 && github.ref == 'refs/heads/main' }}
+        env:
+          DAEDALUS_REPORTS: ${{ runner.temp }}/test-ratchet
         run: |
-          python_measured="$(
-            python -m coverage report --format=total --precision=1
-          )"
-          javascript_measured="$(
-            python scripts/ci/js_coverage.py "$NODE_V8_COVERAGE" \
-              --format=total
-          )"
-          python scripts/ci/ratchet.py --language python \
-            --measured "$python_measured" \
-            --thresholds .github/ci-thresholds.json
-          python scripts/ci/ratchet.py --language javascript \
-            --measured "$javascript_measured" \
-            --thresholds .github/ci-thresholds.json
-          # The long-line and per-module coverage baselines ratchet the
-          # other way: each follows a file down when it shrinks, so the
-          # lines cannot come back for free. Growth is never written
-          # here — that stays a decision a reviewer sees. File sizes and
-          # the suite tree's line budget are the size-ratchet action's
-          # records, in a workflow of their own.
+          # The long-line and per-module coverage baselines follow a file
+          # down when it shrinks, so the lines cannot come back for free.
+          # Growth is never written here — that stays a decision a reviewer
+          # sees. File sizes and the suite tree's line budget are the
+          # size-ratchet action's records, in a workflow of their own.
           python scripts/ci/line_lengths.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/js_module_coverage.py --tighten \
-            "$NODE_V8_COVERAGE" \
+            "$DAEDALUS_REPORTS" \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/thresholds.py --check \
             --thresholds .github/ci-thresholds.json
           paths='.github/ci-thresholds.json'
           if git diff --quiet -- $paths; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            # Two specifiers, two arguments. Splitting the second message
-            # across a continuation would concatenate the halves with no
-            # space between them, which is how this line lost one once.
-            printf '%s %s\n' \
-              "Python coverage ${python_measured}% and JavaScript coverage" \
-              "${javascript_measured}% justified no raise; no file lost an over-limit line and no module lost an uncovered JavaScript line." \
+            echo 'No file lost an over-limit line and no module lost an uncovered JavaScript line.' \
               >> "$GITHUB_STEP_SUMMARY"
           else
-            {
-              echo 'changed=true'
-              echo "python_measured=${python_measured}"
-              echo "javascript_measured=${javascript_measured}"
-            } >> "$GITHUB_OUTPUT"
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
             {
               echo '### Recorded by this run'
               echo
@@ -1141,18 +896,13 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Commit the raise
-        # A deploy key, not the built-in token, and the difference is not a
-        # preference. `main requires green checks` lists `coverage` among its
-        # required contexts — this job — so a commit pushed from here has no
-        # green checks yet and the ruleset refuses it. GitHub Actions cannot be
-        # added as a bypass actor either: the API answers "must be part of the
-        # ruleset source or owner organization". A deploy key can, it is scoped
-        # to this one repository rather than to an account, and revoking it is
-        # deleting one key.
-        #
-        # A threshold-only push does not re-run tests or CodeQL;
-        # audit.yml remains unfiltered.
+      - name: Commit the tighten
+        # A deploy key, not the built-in token: a commit pushed from here
+        # has no green checks yet, so a ruleset requiring them refuses the
+        # built-in token's push. GitHub Actions cannot be added as a bypass
+        # actor either; a deploy key can, it is scoped to this one
+        # repository rather than to an account, and revoking it is deleting
+        # one key.
         if: ${{ !cancelled() && steps.ratchet.outputs.changed == 'true' }}
         env:
           DAEDALUS_MASTER_PUSH_DEPLOY_KEY: >-
@@ -1161,84 +911,6 @@ jobs:
         run: |
           python3 scripts/ci/ratchet_push.py .github/ci-thresholds.json \
             'ci: update CI ratchets'
-
-  diff-coverage:
-    # INFORMATIONAL, never a gate — which is why it is deliberately absent
-    # from `aggregate` below. A comment that failed to post must not be able
-    # to block a merge, and the number it reports is one a reviewer judges:
-    # a refactor that only moves code, and a fix whose test lives behind an
-    # optional dependency, both read low for reasons a threshold cannot tell
-    # apart. The ratchet in `coverage` is the gate.
-    #
-    # Pull requests only, and only when coverage produced the artifact this
-    # job consumes. A skipped ancestor must not hide that successful result.
-    if: ${{ !cancelled() && needs.coverage.result == 'success'
-               && github.event_name == 'pull_request' }}
-    needs: coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    # This job reads the proposed tree, so it must not carry a token that can
-    # write conversation. The trusted workflow_run commenter owns that token.
-    permissions:
-      contents: read
-
-    steps:
-      # actions/checkout v7.0.1
-      - uses: >-
-          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          # The merge commit the event named, and the exact SHA `coverage`
-          # measured. Resolving `refs/pull/N/merge` here instead would let
-          # GitHub hand this job a different tree than the one the coverage
-          # report describes.
-          ref: ${{ github.sha }}
-          # Both parents of that merge commit, which the diff below needs.
-          fetch-depth: 0
-          persist-credentials: false
-
-      # actions/download-artifact v8.0.2
-      - uses: >-
-          actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
-        with:
-          name: coverage-xml
-
-      - name: Install the pinned statement analyzer
-        run: "python3 -m pip install --requirement requirements-test.txt --only-binary=:all: --no-binary=PyYAML"
-
-      - name: Measure the coverage of this change
-        # HEAD is the merge tree checked out above and HEAD^1 is, by
-        # construction, the base tip that was merged into it. The event
-        # payload's `base.sha` is NOT that: the base branch can advance
-        # between the event and the checkout, and every base commit merged in
-        # since would then be reported as a line this pull request added.
-        run: |
-          git diff --text --no-ext-diff --no-textconv --unified=0 \
-            HEAD^1 HEAD > patch.diff
-          # Both reports live in the one coverage-xml artifact this job
-          # downloaded; the comment says which languages it measured.
-          python3 scripts/ci/diff_coverage.py \
-            --coverage coverage.xml \
-            --js-coverage javascript-coverage.xml \
-            --diff patch.diff > body.md
-          cat body.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Package the comment for the trusted commenter
-        env:
-          DAEDALUS_PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          printf '%s\n' "$DAEDALUS_PR_NUMBER" > pr-number.txt
-
-      - name: Upload the comment for the trusted commenter
-        # actions/upload-artifact v7.0.2
-        uses: >-
-          actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: diff-coverage-comment
-          path: |
-            body.md
-            pr-number.txt
-          if-no-files-found: error
 
   # What seven real user journeys cost, counted in instructions rather than
   # in the wall clock a test function happened to take.
@@ -1448,7 +1120,7 @@ jobs:
       # One script, both jobs. `scripts/ci/ratchet_push.py` holds the deploy
       # key, the pinned host key and the discrimination between a refused
       # push and a concurrent one, so a second copy of a write credential
-      # cannot exist here to drift from the coverage job's.
+      # cannot exist here to drift from the ratchets job's.
       - name: Commit the tighten
         if: ${{ !cancelled() && steps.tighten.outputs.changed == 'true' }}
         env:
@@ -1510,10 +1182,11 @@ jobs:
       - pyright
       - eslint
       - actionlint
-      - suites
+      - plan
+      - test
       - wheel
-      - coverage-matrix
-      - coverage
+      - report
+      - ratchets
       - journey-budget
       - size-baseline
       - thresholds

@@ -47,10 +47,6 @@
     2362,
     3326
   ],
-  ".github/workflows/coverage-comment.yml": [
-    3368,
-    12492
-  ],
   ".github/workflows/gate-freshness.yml": [
     1194,
     1909
@@ -411,18 +407,6 @@
     2084,
     5609
   ],
-  "scripts/ci/coverage_combine.py": [
-    737,
-    1109
-  ],
-  "scripts/ci/coverage_suites.py": [
-    1203,
-    4483
-  ],
-  "scripts/ci/diff_coverage.py": [
-    5393,
-    13658
-  ],
   "scripts/ci/install_lint_tools.py": [
     8912,
     16529
@@ -599,18 +583,6 @@
     4473,
     14469
   ],
-  "tests/_coverage_comment_workflow.py": [
-    676,
-    3714
-  ],
-  "tests/_coverage_launch_stubs.py": [
-    3419,
-    7219
-  ],
-  "tests/_coverage_suite_fixture.py": [
-    1074,
-    4644
-  ],
   "tests/_dashfetch.py": [
     1205,
     1959
@@ -650,10 +622,6 @@
   "tests/_deadline_reach.py": [
     347,
     460
-  ],
-  "tests/_diff_coverage_fixtures.py": [
-    362,
-    482
   ],
   "tests/_drain.py": [
     631,
@@ -850,10 +818,6 @@
   "tests/_stream_fake.py": [
     2467,
     12144
-  ],
-  "tests/_suite_bound_stubs.py": [
-    2463,
-    5996
   ],
   "tests/_suite_jobs.py": [
     8127,
@@ -1119,18 +1083,6 @@
     5312,
     17096
   ],
-  "tests/test_coverage_combine.py": [
-    1011,
-    5259
-  ],
-  "tests/test_coverage_comment_boundary.py": [
-    3385,
-    19276
-  ],
-  "tests/test_coverage_suites_launch.py": [
-    3197,
-    7406
-  ],
   "tests/test_dashboard_accessibility.py": [
     3768,
     12142
@@ -1202,10 +1154,6 @@
   "tests/test_delivery_stripes.py": [
     3552,
     12764
-  ],
-  "tests/test_diff_coverage_javascript.py": [
-    3672,
-    12509
   ],
   "tests/test_eval_relay.py": [
     5242,
@@ -1342,10 +1290,6 @@
   "tests/test_journey_tighten.py": [
     2750,
     15785
-  ],
-  "tests/test_js_lines.py": [
-    1915,
-    8308
   ],
   "tests/test_js_module_coverage.py": [
     4149,

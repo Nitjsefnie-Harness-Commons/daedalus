@@ -14,8 +14,7 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 
 
 _CACHE_WRITING_JOBS = frozenset((
-    'suites', 'coverage-matrix', 'coverage', 'journey-budget',
-    'pycodestyle', 'pylint', 'pyright',
+    'test', 'journey-budget', 'pycodestyle', 'pylint', 'pyright',
 ))
 
 _REVIEWED_NONCACHE_ACTIONS = frozenset((
@@ -23,6 +22,9 @@ _REVIEWED_NONCACHE_ACTIONS = frozenset((
     'actions/upload-artifact',
     'actions/download-artifact',
     'nitjsefnie-actions/size-ratchet',
+    'nitjsefnie-actions/test-ratchet/plan',
+    'nitjsefnie-actions/test-ratchet/run',
+    'nitjsefnie-actions/test-ratchet/report',
 ))
 
 _DECISIVE_CONTROLS = {

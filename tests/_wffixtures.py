@@ -27,7 +27,8 @@ BLOCK_NEEDS = (
     '      - pylint\n'
     '      - pyright\n'
     '      - eslint\n'
-    '      - actionlint\n')
+    '      - actionlint\n'
+    '      - plan\n')
 BLOCK_OUTPUTS = (
     '    outputs:\n'
     '      matrix: ${{ steps.classify.outputs.matrix }}\n'

@@ -28,6 +28,7 @@ on:
     paths-ignore:
       - '.github/ci-thresholds.json'
       - '.github/size-baseline.json'
+      - '.github/test-times.json'
     # release.yml needs a run on the tagged SHA; audit remains unfiltered.
   pull_request:
   schedule:

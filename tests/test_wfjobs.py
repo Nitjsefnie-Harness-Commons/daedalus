@@ -15,7 +15,7 @@ import yaml  # noqa: E402
 from _wffixtures import (  # noqa: E402
     BLOCK_NEEDS, BLOCK_OUTPUTS, _real, _refuses, _replaced)
 from _wfgraph import (  # noqa: E402
-    _job_needs, _job_output_mapping, _matrix_job_running, _python_matrix,
+    _job_needs, _job_output_mapping, _matrix_job_running,
     _tests_yml)
 from _wfjobs import (  # noqa: E402
     jobs_mapping, load, run_path_candidates, unresolved_run_paths,
@@ -375,16 +375,16 @@ def test_a_bare_empty_job_field_reads_as_none_through_every_job_reader(tmp):
 def test_an_absent_needs_field_reads_as_no_dependencies(tmp):
     """A job with no `needs:` key names no job, though the next one does."""
     del tmp
-    assert _job_needs(_replaced(BLOCK_NEEDS, ''), 'suites') == []
+    assert _job_needs(_replaced(BLOCK_NEEDS, ''), 'test') == []
 
 
 def _planted_needs(spelling):
-    """`_job_needs` on the shipped suites job with one `needs:` spelling.
+    """`_job_needs` on the shipped test job with one `needs:` spelling.
 
     Named for the planting, and not `_needs_of`: test_aggregate_needs.py
     keeps a different helper under that name, over its own decoder.
     """
-    return _job_needs(_replaced(BLOCK_NEEDS, spelling), 'suites')
+    return _job_needs(_replaced(BLOCK_NEEDS, spelling), 'test')
 
 
 def _refuses_needs(spelling):
@@ -395,7 +395,7 @@ def _refuses_needs(spelling):
     """
     workflow = _replaced(BLOCK_NEEDS, spelling)
     try:
-        message = _refuses(_job_needs, workflow, 'suites')
+        message = _refuses(_job_needs, workflow, 'test')
     except AssertionError as accepted:
         raise AssertionError(
             f'{spelling!r} accepted: {accepted}') from accepted
@@ -419,20 +419,20 @@ def test_the_needs_spellings_only_the_tolerance_grants_all_decode(tmp):
 def test_a_needs_flow_sequence_names_the_same_jobs_in_order(tmp):
     """A flow sequence decodes to the block sequence's list, in order.
 
-    Six names, not one: a one-item sequence survives any reordering.
+    Seven names, not one: a one-item sequence survives any reordering.
     """
     del tmp
     expected = ['changes', 'pycodestyle', 'pylint', 'pyright',
-                'eslint', 'actionlint']
+                'eslint', 'actionlint', 'plan']
     flow = ('    needs: [changes, pycodestyle, pylint, pyright,'
-            ' eslint, actionlint]\n')
-    assert _job_needs(_tests_yml(), 'suites') == expected, 'shipped block'
+            ' eslint, actionlint, plan]\n')
+    assert _job_needs(_tests_yml(), 'test') == expected, 'shipped block'
     assert _planted_needs(flow) == expected, flow
 
 
 def test_a_needs_mapping_is_refused_as_not_a_list_of_names(tmp):
     workflow = _real(tmp, _replaced(BLOCK_NEEDS, '    needs:\n'))
-    message = _refuses(_job_needs, workflow, 'suites')
+    message = _refuses(_job_needs, workflow, 'test')
     assert 'needs is not a list of job names' in message, message
 
     for spelling in ('    needs: [[changes, suites], pylint]\n',
@@ -454,15 +454,15 @@ def test_a_bare_empty_outputs_is_refused_as_not_a_mapping(tmp):
 def test_a_bare_empty_strategy_elsewhere_still_finds_the_matrix_job(tmp):
     """A job whose strategy, steps or run is null runs nothing."""
     real = _tests_yml()
-    matrix = _python_matrix(real)
-    name, _job = _matrix_job_running(real, matrix, 'coverage_suites.py')
+    matrix = (complete_job_mapping(real, 'test') or {})['strategy']['matrix']
+    name, _job = _matrix_job_running(real, matrix, 'install_lint_tools.py')
     header = '    name: Aggregate workflow checks\n'
-    install = '      - name: Install the coverage toolchain and the project\n'
+    install = '      - name: Install the lint tools the suites drive\n'
     for old, plant in ((header, header + '    strategy:\n'),
                        (install, '      - run:\n' + install)):
         workflow = _real(tmp, _replaced(old, plant))
         found, _job = _matrix_job_running(
-            workflow, matrix, 'coverage_suites.py')
+            workflow, matrix, 'install_lint_tools.py')
         assert found == name, (plant, found)
     source = _real(tmp, (
         'jobs:\n'

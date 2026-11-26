@@ -38,6 +38,9 @@ SUITE_DOORS: dict[tuple[str, str], str] = {
         'runs no suite: its only tests/ references are size-ratchet '
         "inputs, the ceiling override 'tests/: 700' and the tree budget "
         "'tests/', so the fixed list it names is empty",
+    ('tests.yml', 'plan'):
+        'runs no suite: test-ratchet plan only splits the files its tests '
+        'glob matches into shards, and the test job runs them',
 }
 
 
@@ -231,9 +234,9 @@ def test_no_job_reaches_the_suites_by_a_door_this_control_does_not_name(tmp):
 def test_every_tool_the_installer_recorded_resolves_on_path(tmp):
     """What the installer says it installed has to be there afterwards.
 
-    Gated on the variable the installer writes, so this reaches the `suites`,
-    `coverage-matrix` and `publish` jobs in `tests.yml` and `release.yml`,
-    and nowhere else: those three are the jobs whose steps run
+    Gated on the variable the installer writes, so this reaches the `test`
+    and `publish` jobs in `tests.yml` and `release.yml`, and nowhere else:
+    those two are the jobs whose steps run
     `python scripts/ci/install_lint_tools.py`.
     Off a CI leg the installer has not run and there is no subject to
     check. A leg where it DID run and the binary is still missing fails

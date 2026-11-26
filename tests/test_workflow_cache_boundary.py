@@ -303,7 +303,7 @@ def test_production_cache_steps_keep_restore_and_save_separate(tmp):
     from _yamlsteps import complete_job_mapping  # noqa: PLC0415
 
     workflow = _tests_yml()
-    for job in ('suites', 'coverage-matrix', 'coverage'):
+    for job in ('test',):
         mapping = complete_job_mapping(workflow, job)
         assert mapping is not None, job
         steps = mapping['steps']

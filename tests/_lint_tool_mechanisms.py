@@ -38,8 +38,8 @@ ROOT = _util.ROOT
 # reading it back, so the two spell it once each and nowhere else.
 #
 # The path, NOT the command that runs it. A job's install step is correct
-# because it runs the installer, and `suites`, `coverage-matrix` and
-# `publish` reach it through a root checkout. A job that checks its trees
+# because it runs the installer, and `test` and `publish` reach it through
+# a root checkout. A job that checks its trees
 # out into subdirectories reaches the same file as
 # `head/scripts/ci/install_lint_tools.py`, and a constant holding the whole
 # invocation would pin that second spelling and turn the correct path red.
@@ -69,10 +69,9 @@ INSTALLER_SOURCE = ROOT / INSTALLER_PATH
 # Tools the suites skip on that no job installs, named here with a reason
 # each rather than derived. The derivation cannot supply this list: it read
 # the tree's own `present` set as covering a tool, and `present` is an
-# assertion the tree may never reach — the jq assert in
-# `tests/_coverage_comment_publication.py` sits behind a stub-environment
-# condition that is false on every ordinary run, which is how a suite
-# skipping on a binary nothing installs read green. Each entry is a claim
+# assertion the tree may never reach — an assert behind a stub-environment
+# condition that is false on every ordinary run is how a suite skipping on
+# a binary nothing installs read green. Each entry is a claim
 # about the runner image, written down so a human can check it and change
 # it, and no derivation can be asked to confirm it.
 #
