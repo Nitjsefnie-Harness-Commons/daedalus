@@ -26,17 +26,17 @@ STEPS = (None, 'Refuse a shallow clone',
          'Download gitleaks and verify its digest',
          "Take the scan's config and ignore list from the trusted commit",
          'Scan the tree and the history')
-BASE_CONFIG = '[extend]\nuseDefault = true\n# trusted\n'
+BASE_CFG = '[extend]\nuseDefault = true\n# trusted\n'
 DEFAULT = '[extend]\nuseDefault = true\n'
 BASE_CASES = (
-    ('pull_request', 'base', BASE_CONFIG, 'trusted\n'),
-    ('push', 'base', BASE_CONFIG, 'trusted\n'),
-    ('workflow_dispatch', '', BASE_CONFIG, 'trusted\n'),
+    ('pull_request', 'base', BASE_CFG, 'trusted\n'),
+    ('push', 'base', BASE_CFG, 'trusted\n'),
+    ('workflow_dispatch', '', BASE_CFG, 'trusted\n'),
     ('push', '0' * 40, DEFAULT, ''),
     # Empty would read the index and HEAD the head: both the judged tree.
     ('pull_request', '', DEFAULT, ''),
     ('pull_request', 'HEAD', DEFAULT, ''),
-    ('pull_request', 'base', BASE_CONFIG + '[Extend]\nPath = "j.toml"\n', None))
+    ('pull_request', 'base', BASE_CFG + '[Extend]\nPath = "j.toml"\n', None))
 
 
 def _read(relative):
@@ -148,7 +148,7 @@ def test_rules_come_from_the_trusted_commit_never_the_judged_tree(tmp):
         repo, runner_temp = Path(tmp) / f'repo{case}', Path(tmp) / f'rt{case}'
         runner_temp.mkdir(parents=True)
         _git(tmp, 'init', '-q', str(repo))
-        for toml, listed in ((BASE_CONFIG if ignore is not None else config,
+        for toml, listed in ((BASE_CFG if ignore is not None else config,
                               'trusted'), ('[[allowlists]]', 'judged')):
             (repo / '.gitleaks.toml').write_bytes(toml.encode())
             (repo / '.gitleaksignore').write_bytes(f'{listed}\n'.encode())
