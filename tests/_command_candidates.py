@@ -1,6 +1,6 @@
 """Machinery for staging a command candidate in a test's temporary tree.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. The helpers build
+Not a suite itself — pytest only collects `test_*.py`. The helpers build
 the command-candidate shapes the queue and legacy rows assert on: the queue
 module loaded by path, a plain command file, a hard-linked or symlinked
 alias of one, and a skip when the filesystem will not hold that alias.

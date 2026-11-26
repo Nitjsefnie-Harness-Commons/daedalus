@@ -1,4 +1,4 @@
-"""Controls for tests/conftest.py, one per run_tests.py rule it carries.
+"""Controls for tests/conftest.py, one per suite rule it carries.
 
 Each control writes test files into its own directory and runs pytest on
 them in a child process with the real conftest loaded as a plugin.

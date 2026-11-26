@@ -1,6 +1,6 @@
 """The version checker's copied-tree fixtures, shared across its suites.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 Split out of tests/test_version_contract.py so the suites that drive the
 checker read one copy of these instead of executing that whole suite to

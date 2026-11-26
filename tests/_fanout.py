@@ -1,6 +1,6 @@
 """Shared fixtures for the dashboard fan-out stream suites.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. The dashboard
+Not a suite itself — pytest only collects `test_*.py`. The dashboard
 fan-out controls span two suites (the core fan-out behaviour and the drain's
 blocking/stop-reason behaviour); the by-path stream-service loader, the
 dashboard queue helpers, and the stdout capture live here so both use one

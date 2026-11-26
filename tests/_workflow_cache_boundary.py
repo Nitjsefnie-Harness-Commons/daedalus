@@ -1,6 +1,6 @@
 """Which workflow jobs may write the Actions cache, and why one may not.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 The whole engine moved here out of tests/test_workflow_cache_boundary.py.
 """

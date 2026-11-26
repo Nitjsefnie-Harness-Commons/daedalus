@@ -1,6 +1,6 @@
 """The uploads pager harnesses: the clamp case and the emptied-list case.
 
-Not a suite itself -- `run_tests.py` only loads `test_*.py`.
+Not a suite itself -- pytest only collects `test_*.py`.
 
 Two harnesses, one question each, both driven by the same parked confirm
 timer. They moved out of `tests/test_dashboard_sections.py`, which naming

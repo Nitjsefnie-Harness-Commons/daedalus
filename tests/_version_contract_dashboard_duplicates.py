@@ -1,6 +1,6 @@
 """The dashboard version site's markup fixtures, shared across its suites.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 Split out of tests/test_version_contract_dashboard_duplicates.py so
 test_version_contract_dashboard_spellings.py reads one copy of these

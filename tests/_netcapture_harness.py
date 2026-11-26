@@ -1,6 +1,6 @@
 """Shared Node-VM harness for the extension/worker/netcapture.js suite.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 The chrome surface is the shared stub plus the debugger deltas this module
 owns, and the retained `eventTarget` is the shared helper, so

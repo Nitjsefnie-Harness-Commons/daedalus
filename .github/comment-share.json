@@ -391,10 +391,6 @@
     2595,
     4620
   ],
-  "run_tests.py": [
-    1456,
-    5370
-  ],
   "scripts/check_versions.py": [
     6814,
     12770
@@ -602,10 +598,6 @@
   "tests/_command_type_readers.py": [
     4473,
     14469
-  ],
-  "tests/_completion.py": [
-    386,
-    922
   ],
   "tests/_coverage_comment_workflow.py": [
     676,
@@ -830,10 +822,6 @@
   "tests/_realbrowser_broken_worker.py": [
     1177,
     2327
-  ],
-  "tests/_realbrowser_controls.py": [
-    141,
-    742
   ],
   "tests/_realbrowser_errors.py": [
     247,

@@ -1,10 +1,9 @@
 """Which workflow jobs reach the test suites, read off what the jobs run.
 
-Shared, because `run_tests.py` gives every suite its own process: a
-control that imported a sibling suite for this would re-execute that
-suite's whole body and read a private copy. Every control that reads a
-door set reads it from here, and both files that own one read it here:
-`tests/test_ci_lint_tools.py` and `tests/test_ci_tool_declarations.py`.
+Shared, so no control imports a sibling suite for this: every control
+that reads a door set reads it from here, and both files that own one
+read it here: `tests/test_ci_lint_tools.py` and
+`tests/test_ci_tool_declarations.py`.
 
 A predicate over the sanctioned runners' basenames would be a fingerprint
 of the property rather than the property: a third runner, a `.yaml`
@@ -223,7 +222,7 @@ def _suite_step(workflow, job):
 
     The INDEX is half the answer, because where a step sits in a job decides
     what its siblings could count on: a `setup-node` step after
-    `python run_tests.py` declares nothing, and only the position tells that
+    `python -m pytest` declares nothing, and only the position tells that
     apart from a step that declares it first. Every question about a suite
     job's ordering asks this function rather than re-walking the steps, so
     two controls cannot disagree about which step is the one that reaches.

@@ -8,24 +8,23 @@ import socket
 import subprocess
 import sys
 import time
-import traceback
 import typing
 from pathlib import Path
 
 import _child_ready  # noqa: E402
 import _mcp_ready
-from _completion import run_to_completion
 # A re-export, not a use: the suites read the log-rendering contract table at
 # the `_util.log_safe_cases()` spelling, while the table is a `log_safe`
 # fixture with nothing to do with running a test. `__all__` would be a false
 # promise here, as it is for `_dashnode.DOM`.
 # pylint: disable-next=unused-import
 from _log_safe_cases import log_safe_cases  # noqa: F401
-from _teardown import OwnedTemporaryDirectory, settle
+# pylint: disable-next=unused-import
+from _teardown import OwnedTemporaryDirectory  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
-# run_tests.py starts the sorted suites in a process wave, so each process's
-# first bridge start pays its cold import costs alongside the other firsts.
+# Suites start in parallel processes, so each process's first bridge start
+# pays its cold import costs alongside the other firsts.
 COLD_START_TIMEOUT = 60
 WARM_START_TIMEOUT = 20
 DRAIN_JOIN_TIMEOUT = 1
@@ -516,148 +515,3 @@ def header_stream(base, target, headers):
         conn.putheader(name, value)
     conn.endheaders()
     return conn, conn.getresponse()
-
-
-def _assertion_site(exc):
-    """`file:line: source` of the assert that failed, for bare asserts."""
-    frames = traceback.extract_tb(exc.__traceback__)
-    if not frames:
-        return ''
-    last = frames[-1]
-    return f'{os.path.basename(last.filename)}:{last.lineno}: {last.line}'
-
-
-def _report_safely():
-    """Make sure a failure can always be reported.
-
-    A failure detail carries whatever the test was comparing, and on Windows
-    the runner's stdout is a legacy code page where `print` raises rather
-    than degrading. A failing assertion whose message holds an arrow would
-    otherwise abort the whole file with a UnicodeEncodeError, so every test
-    after it never runs and the report is lost along with the tests.
-
-    A runner that cannot say what went wrong is worse than the thing that
-    went wrong, so the stream degrades instead: `errors='replace'`
-    throughout, and UTF-8 where the output is a pipe or a file, which is
-    what `run_tests.py` reads.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, 'reconfigure', None)
-        if reconfigure is None:
-            continue
-        try:
-            if os.environ.get('PYTHONIOENCODING') or stream.isatty():
-                reconfigure(errors='replace')
-            else:
-                reconfigure(encoding='utf-8', errors='replace')
-        except (OSError, ValueError):
-            continue
-
-
-def _rendered_safely(value, render=repr):
-    """One value's rendering, or a type name when the value refuses it.
-
-    A report line that raises while formatting ends the run it is reporting
-    on, which is the one outcome a failure report must never produce. The
-    values are the subject's own — its exit code, its exception message — so
-    the rendering is subject-controlled too, and `tests/_log_safe_cases.py`
-    is the shared corpus of the shapes that refuse.
-
-    `except Exception` and not `BaseException`, deliberately: a hostile
-    `__repr__` is caught, and a real Ctrl-C raised by one still aborts rather
-    than being laundered into a report line.
-    """
-    try:
-        return render(value)
-    except Exception:  # noqa: BLE001
-        return f'<{type(value).__name__} that will not render>'
-
-
-def runner(tests, tmp_prefix='daedalustests_', requires=None):
-    """Shared main(): run every callable, print PASS/FAIL, return exit code.
-
-    Each test takes one argument: an isolated temp dir, handed over fully
-    resolved — macOS resolves /var to /private/var, and a test comparing a path
-    it was given against a path the code produced would otherwise see two
-    spellings of one directory and call them different.
-
-    `requires` names an external dependency the WHOLE suite needs — a real
-    browser, say. A suite that verified nothing is normally an aggregate
-    failure, because a suite whose every test skipped is indistinguishable
-    from a broken one; a suite that says what it needs is the one case where
-    it is distinguishable, and the aggregate reports it as unrun rather than
-    as verified. Only pass it where every test genuinely depends on the same
-    absent thing.
-    """
-    _report_safely()
-    failed, skipped = [], []
-    # The acquisition stays outside the try: if it raises, `td` is unbound and
-    # the finally would report an UnboundLocalError over the original OSError.
-    td = OwnedTemporaryDirectory(tmp_prefix)
-    try:
-        tmp = os.path.realpath(td.name)
-        for t in tests:
-            d = os.path.join(tmp, t.__name__)
-            os.makedirs(d, exist_ok=True)
-            try:
-                run_to_completion(t, d)
-                print(f'  PASS  {t.__name__}')
-            except Skipped as e:
-                skipped.append(t.__name__)
-                print(f'  SKIP  {t.__name__}: {_rendered_safely(e, str)}')
-            except AssertionError as e:
-                failed.append(t.__name__)
-                detail = _rendered_safely(e, str) or _assertion_site(e)
-                print(f'  FAIL  {t.__name__}: {detail}')
-            except Exception as e:  # noqa: BLE001
-                failed.append(t.__name__)
-                print(f'  ERROR {t.__name__}: {type(e).__name__}: '
-                      f'{_rendered_safely(e, str)}')
-            # Named, and not folded into the arms above: a wider catch would
-            # take a real Ctrl-C and report it as a FAIL, then carry on. Every
-            # code counts, 0 included — a subject that exits 0 is how a run
-            # reads as green having verified nothing.
-            except SystemExit as e:
-                failed.append(t.__name__)
-                print(f'  FAIL  {t.__name__}: '
-                      f'SystemExit({_rendered_safely(e.code)}) ended the run '
-                      f'from inside a test')
-    finally:
-        if not settle(td.cleanup):
-            print(f'  WARN  temporary tree left behind: {td.name}')
-    passed = len(tests) - len(failed) - len(skipped)
-    summary = f'\n{passed}/{len(tests)} passed'
-    if skipped:
-        summary += f', {len(skipped)} skipped'
-    print(summary)
-    _write_summary(len(tests), passed, len(skipped), len(failed), requires)
-    return 1 if failed else 0
-
-
-def _write_summary(total, passed, skipped, failed, requires=None):
-    """Hand the counts to the aggregate runner, when one asked for them.
-
-    The aggregate cannot see them otherwise: every suite streams straight to
-    the runner's own stdout, and capturing that stream to parse a number back
-    out of it would trade live output for the number. A run whose coverage
-    was entirely skipped has to be distinguishable from a verified one, and
-    an exit code alone cannot say that.
-    """
-    path = os.environ.get('DAEDALUS_TEST_SUMMARY')
-    if not path:
-        return
-    try:
-        with open(path, 'w', encoding='utf-8') as handle:
-            json.dump({'total': total, 'passed': passed,
-                       'skipped': skipped, 'failed': failed,
-                       'requires': requires}, handle)
-    except OSError:
-        # Not swallowed so much as reported elsewhere: run_tests.py reads this
-        # file to aggregate counts and treats a suite that produced none as a
-        # failure, so a write that fails turns up there rather than here.
-        pass
-
-
-def collect(namespace):
-    return [v for k, v in sorted(namespace.items())
-            if k.startswith('test_') and callable(v)]

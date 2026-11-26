@@ -1,6 +1,6 @@
 """The user journeys the performance ratchet measures.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. `scripts/ci/
+Not a suite itself — pytest only collects `test_*.py`. `scripts/ci/
 journey_budget.py` drives each one in a fresh child process, so this module
 has to be runnable from a `__main__` handed nothing but a journey name and
 the repository root.

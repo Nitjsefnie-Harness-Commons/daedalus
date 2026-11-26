@@ -242,7 +242,7 @@ def test_the_guard_still_refuses_a_symlink_the_parent_folds(tmp):
     volume folds and holds symlinks. The workflow takes **no step** to
     obtain the symlink privilege those legs need: `tests.yml`'s `suites`
     job is checkout, setup-python, pip cache, pip install, the lint-tools
-    install, `run_tests.py`, and nothing in `.github/workflows/` mentions
+    install, `pytest`, and nothing in `.github/workflows/` mentions
     symlinks, Developer Mode or `SeCreateSymbolicLink`. It therefore rests
     on two ambient facts
     rather than on the tree: the `windows-latest` image runs its account as

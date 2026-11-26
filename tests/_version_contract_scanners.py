@@ -1,6 +1,6 @@
 """The version checker's decoy-region fixtures and cases, shared across suites.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 Split out of tests/test_version_contract_scanners.py so
 test_version_contract_template_scanners.py reads one copy of these instead

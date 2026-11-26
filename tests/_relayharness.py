@@ -1,6 +1,6 @@
 """The Node VM harness the eval-relay tests run the shipped scripts in.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 The background, content and page scripts are loaded into one VM with a fake
 browser under them, so an evaluation can be watched all the way through:

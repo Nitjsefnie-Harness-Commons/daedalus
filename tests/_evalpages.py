@@ -1,6 +1,6 @@
 """Pages and probes the real-browser eval tests serve.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 Each of these is a page whose own rules are the point: one that replaces
 every evaluator it can reach, one whose CSP forbids dynamic compilation, one

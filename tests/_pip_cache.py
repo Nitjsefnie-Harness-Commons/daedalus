@@ -1,6 +1,6 @@
 """The tests workflow's pip-cache job table.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 `_CACHE_JOBS` moved here out of tests/test_ci_pip_cache.py, which
 tests/test_cache_action_releases.py imported for it: that suite's release

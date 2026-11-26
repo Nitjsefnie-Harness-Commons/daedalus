@@ -1,6 +1,6 @@
 """Loading the MCP front end against a fixture bridge, and driving it.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
+Not a suite itself — pytest only collects `test_*.py`.
 
 Every suite that needs the MCP server loads it through here, so the
 settings deciding WHERE it loads from are read in one place: a shell

@@ -47,7 +47,6 @@
 !/requirements-release.txt
 !/requirements-test.txt
 !/requirements-zizmor.txt
-!/run_tests.py
 !/server.py
 !/setup.cfg
 
@@ -308,7 +307,6 @@
 !/tests/_cmdqueue_faults.py
 !/tests/_command_candidates.py
 !/tests/_command_type_readers.py
-!/tests/_completion.py
 !/tests/_coverage_comment_publication.py
 !/tests/_coverage_comment_steps.py
 !/tests/_coverage_comment_workflow.py
@@ -382,7 +380,6 @@
 !/tests/_ratchet_fixture.py
 !/tests/_realbrowser.py
 !/tests/_realbrowser_broken_worker.py
-!/tests/_realbrowser_controls.py
 !/tests/_realbrowser_errors.py
 !/tests/_realbrowser_pages.py
 !/tests/_realbrowser_workers.py

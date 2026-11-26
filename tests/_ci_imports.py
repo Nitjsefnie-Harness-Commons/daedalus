@@ -1,6 +1,6 @@
 """Which of the CI scripts select an import on how they were loaded.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. A module that
+Not a suite itself — pytest only collects `test_*.py`. A module that
 branches on `__package__` has two spellings, and only a package import
 reaches the first. Every such module is therefore required to be
 reachable from a package import: promoted itself, or imported by a

@@ -203,7 +203,7 @@ def _unjournalled(sources=None):
     caller's share, where a binary no mechanism names would be looked up in
     a table that does not carry it and raise `KeyError`.
 
-    The `requires=` channel on `_util.runner` is the other machine-readable
+    The `REQUIRES` attribute a suite sets is the other machine-readable
     one, and it is not read here: its only value in the tree is the prose
     string `'Chromium and Node'`, so a control that demanded a job install
     that string would be asserting something no job can satisfy and no plant

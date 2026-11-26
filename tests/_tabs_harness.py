@@ -1,6 +1,6 @@
 """Shared Node-VM harness for the extension/worker/tabs.js suites.
 
-Not a suite itself — run_tests.py only loads `test_*.py`. It owns the whole
+Not a suite itself — pytest only collects `test_*.py`. It owns the whole
 worker control plane the tab suites share and hands back the posted
 postResult payloads alongside every recorded chrome call. The suites supply
 the plan and assert the answer and the calls together; this module never
