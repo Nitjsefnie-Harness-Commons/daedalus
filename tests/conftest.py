@@ -148,12 +148,19 @@ def pytest_runtest_protocol(item):
     started = time.monotonic()
     timer = threading.Timer(BOUND - SPENT[item.path], expire, (item,))
     timer.daemon = True
-    timer.start()
+    if SPENT[item.path] < BOUND:
+        timer.start()
     try:
         return (yield)
     finally:
         timer.cancel()
         SPENT[item.path] += time.monotonic() - started
+
+
+def pytest_runtest_setup(item):
+    if SPENT[item.path] >= BOUND:
+        pytest.fail(_util.SUITE_BOUND.timeout_record(item.nodeid, BOUND, None),
+                    pytrace=False)
 
 
 def pytest_runtest_logreport(report):

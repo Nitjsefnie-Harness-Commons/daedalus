@@ -33,7 +33,7 @@ def run_pytest(tmp, files, *args, **env):
         [sys.executable, '-m', 'pytest', '-p', 'conftest', '-v', *args,
          *files], cwd=tmp, env=environ, stdin=subprocess.DEVNULL,
         capture_output=True, encoding='utf-8', errors='replace',
-        timeout=600)
+        timeout=300)
     output = done.stdout + done.stderr
     return done.returncode, output, dict(OUTCOME.findall(output))
 
@@ -193,7 +193,8 @@ def test_a_module_that_collects_no_clean_test_fails_collection(tmp):
     errors = dict(re.findall(r'^_+ ERROR collecting (\S+) _+\n(.*)$', output,
                              re.M))
     # pytest itself refuses a generator test; the rest are conftest's.
-    assert code == 2 and errors.pop('test_generator.py', None), output
+    assert code == 2 and 'yield' in errors.pop('test_generator.py', ''), (
+        output)
     assert errors == {
         'test_none.py': 'it collected no test',
         'test_env_write.py':
@@ -225,14 +226,26 @@ def test_narrowed_suite_deselects_every_test_it_does_not_name(tmp):
     assert ' 1 deselected' in output, output
 
 
-def test_a_file_past_its_bound_ends_the_run_naming_the_test(tmp):
-    code, output, _ = run_pytest(tmp, {'test_hang.py': '''
+def test_a_file_past_its_bound_fails_and_a_hang_ends_the_run(tmp):
+    # test_spent moves the clock the bound is read on past the bound, so
+    # test_after starts with no budget left whatever the machine's speed.
+    code, output, outcomes = run_pytest(tmp, {'test_spent.py': '''
+        import time
+
+        def test_spent():
+            time.monotonic = lambda clock=time.monotonic: clock() + 2
+
+        def test_after():
+            pass
+        ''', 'test_hang.py': '''
         import threading
 
         def test_hang():
             threading.Event().wait()
         '''}, DAEDALUS_SUITE_TIMEOUT='2')
-    assert code == 1, output
+    assert (code, outcomes) == (1, {'test_spent.py::test_spent': 'PASSED',
+                                    'test_spent.py::test_after': 'ERROR'}), (
+        output)
     assert ('SUITE TIMED OUT after 2.0 s (returncode None) in '
             'test_hang.py::test_hang; its last lines are above') in output, (
         output)
