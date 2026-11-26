@@ -211,12 +211,21 @@ jobs:
         # fail on hashes it does not carry. A dedicated run resolves the
         # hashed pins against their own hashes and audits them
         # alone, with the same five-outcome retry for the same reasons.
+        # It asks OSV, not PyPI: a pin with a local version (+osc1) is not
+        # on PyPI, whose feed skips it, while OSV matches it against the
+        # advisory ranges. A skip still exits 0, so it is refused here.
         run: |
           for attempt in 1 2 3; do
             if pip-audit \
                  --progress-spinner off \
+                 --vulnerability-service osv \
                  --requirement requirements-test.txt \
                  > audit-test.out 2>&1; then
+              if grep -q 'Skip Reason' audit-test.out; then
+                echo "pip-audit skipped a requirement it did not audit:" >&2
+                cat audit-test.out >&2
+                exit 1
+              fi
               cat audit-test.out
               exit 0
             fi
@@ -233,7 +242,7 @@ jobs:
             fi
 
             if grep -qiE 'SSLError|Could not connect to (PyPI|OSV).*vulnerability feed|connection (abort|aborted|reset|error)|read timed out|temporary failure in name resolution|5[0-9][0-9] (Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)|429 (Client Error|Too Many Requests)|ServiceError' audit-test.out; then
-              echo "attempt $attempt: index failure talking to PyPI, retrying"
+              echo "attempt $attempt: index failure talking to PyPI or OSV, retrying"
               tail -n 5 audit-test.out
               sleep $(( attempt * 15 ))
               continue
@@ -244,7 +253,7 @@ jobs:
             exit 1
           done
 
-          echo "pip-audit could not reach PyPI after 3 attempts:" >&2
+          echo "pip-audit could not reach PyPI or OSV after 3 attempts:" >&2
           cat audit-test.out >&2
           exit 1
 
