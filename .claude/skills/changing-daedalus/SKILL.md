@@ -46,14 +46,16 @@ whole family (piping a runner, a trailing status echo, an `|| true` evidence
 fallback). A filtered run can drop part of a failure message and make a check
 look broken when it is not.
 
-**Do not run `run_tests.py`** - invoke the suites directly.
+**Run one suite file at a time** - `python3 -m pytest tests/<file>.py`;
+the whole tree (`python3 -m pytest -n auto tests/`) is CI's run.
 
 **Run `pylint` as a single invocation over all files.** Split it and the
 cross-file duplicate check is silently skipped.
 
 **Check added lines against 79 characters yourself.** `setup.cfg` sets
 `max-line-length = 10000`, so pycodestyle will not catch a long line;
-`python3 tests/test_line_lengths.py` does, against the recorded baseline.
+`python3 -m pytest tests/test_line_lengths.py` does, against the recorded
+baseline.
 
 ## Choosing which suites to run
 

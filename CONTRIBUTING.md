@@ -105,8 +105,8 @@ environment, or read the extension's from its options page.
 ## Tests
 
 ```bash
-python3 run_tests.py                    # all six suites
-python3 tests/test_bridge_streams.py    # one suite
+python3 -m pytest -n auto tests/                  # every suite
+python3 -m pytest tests/test_bridge_streams.py    # one suite
 ```
 
 The suites start the real bridge as a child process and talk to it over
@@ -133,8 +133,8 @@ pip install -r requirements-test.txt --only-binary=:all: --no-binary=PyYAML
 
 Formatting opinions are switched off on purpose
 (`max-line-length = 10000`), so treat anything the linters *do* flag as a real
-finding; the 79-column limit is gated by `python3 tests/test_line_lengths.py`
-instead.
+finding; the 79-column limit is gated by
+`python3 -m pytest tests/test_line_lengths.py` instead.
 
 Some tests need `node` or Chromium and skip cleanly without them. **A skip is
 not a pass** — the extension-relay and real-page tests are where the browser

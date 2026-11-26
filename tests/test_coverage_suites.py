@@ -215,6 +215,8 @@ def test_every_suite_is_measured_in_its_own_process(tmp):
         assert len(invocations) == len(expected), invocations
         assert len({tuple(x['process']) for x in invocations}) == len(expected)
         assert {Path(x['argv'][-1]).name for x in invocations} == expected
+        assert {tuple(x['argv'][:-1]) for x in invocations} <= {
+            ('run', '--parallel-mode', '-m', 'pytest')}
 
 
 def test_require_all_applies_only_to_the_shard(tmp):
@@ -263,6 +265,8 @@ def test_concurrent_measurements_write_distinct_coverage_files(tmp):
 from pathlib import Path
 Path(__file__).with_suffix('.pid').write_text(
     str(os.getpid()), encoding='ascii')
+def test_ran():
+    pass
 """
     suites = {name: suite_source for name in (
         'test_alpha.py', 'test_beta.py', 'test_gamma.py')}

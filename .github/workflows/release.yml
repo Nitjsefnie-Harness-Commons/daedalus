@@ -217,7 +217,7 @@ jobs:
       - name: Run every suite before publishing anything
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python run_tests.py
+        run: python -m pytest -n auto tests/
 
       - name: Build the wheel and the source distribution
         # Both formats. The wheel is what almost everyone installs, but it is

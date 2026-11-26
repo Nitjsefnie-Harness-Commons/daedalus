@@ -578,7 +578,7 @@ jobs:
       # one leg for a documentation-only run, all twelve otherwise.
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -652,7 +652,7 @@ jobs:
       - name: Run every suite
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -c "import subprocess as s,sys;sys.exit(max(s.call(['python']+a)for a in(['run_tests.py'],['-m','pytest','-n','auto','tests/'],['-m','pytest','tests/'])))"
+        run: python -m pytest -n auto tests/ && python -m pytest tests/
 
       # The gate is the answer to the cache-poisoning findings: an untrusted
       # event never writes cross-run state, and a push of main is the one

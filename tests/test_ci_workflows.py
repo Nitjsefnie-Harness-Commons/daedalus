@@ -430,7 +430,7 @@ def test_a_release_waits_for_the_gates_on_its_own_commit(tmp):
     # The wait has to come before the expensive half and before anything is
     # published, or it is a report rather than a gate.
     order = [workflow.index('- name: Wait for the gates'),
-             workflow.index('run: python run_tests.py'),
+             workflow.index('run: python -m pytest -n auto tests/'),
              workflow.index('softprops/action-gh-release')]
     assert order == sorted(order), order
 
@@ -470,7 +470,7 @@ def test_a_release_attests_every_artifact_it_publishes(tmp):
     # spends twenty minutes to be told the release already exists.
     order = [workflow.index('already carries artifacts'),
              workflow.index('actions/checkout@'),
-             workflow.index('run: python run_tests.py')]
+             workflow.index('run: python -m pytest -n auto tests/')]
     assert order == sorted(order), order
 
 
