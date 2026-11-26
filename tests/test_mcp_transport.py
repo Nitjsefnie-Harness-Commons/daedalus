@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_load  # noqa: E402
 import _util  # noqa: E402
 
-
+suite_scope = _mcp_load.token_env
 DEPS = importlib.util.find_spec('httpx') is not None
 
 
@@ -159,7 +159,9 @@ def test_an_extension_command_answers_on_the_terms_its_wait_set(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='mcptransport_')
+    with suite_scope():
+        return _util.runner(_util.collect(globals()),
+                            tmp_prefix='mcptransport_')
 
 
 class ClosingClient:

@@ -19,11 +19,7 @@ import _util  # noqa: E402
 import _mcp_load  # noqa: E402
 
 DEPS = _mcp_load.DEPS
-if DEPS:
-    import logging
-    logging.getLogger('httpx').setLevel(
-        logging.WARNING)  # quiet per-request logs
-    logging.getLogger('mcp').setLevel(logging.WARNING)  # quiet mcp INFO logs
+suite_scope = _mcp_load.quiet_token_env
 
 
 def _module_list_tabs(mod):
@@ -333,4 +329,5 @@ def test_mcp_uses_the_shared_log_safe_function(tmp):
 
 
 if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))
+    with suite_scope():
+        sys.exit(_util.runner(_util.collect(dict(locals()))))

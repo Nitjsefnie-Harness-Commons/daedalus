@@ -37,6 +37,7 @@ _load_mcp = mcp._load_mcp
 _need_deps = mcp._need_deps
 _answer_mcp_command = mcp._answer_mcp_command
 _surface_responder_errors = mcp.surface_responder_errors
+suite_scope = mcp.token_env
 
 
 def _ext_routing_tools():
@@ -608,4 +609,5 @@ def test_a_client_reads_why_a_tool_failed_and_never_a_crash(tmp):
 
 
 if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))
+    with suite_scope():
+        sys.exit(_util.runner(_util.collect(dict(locals()))))

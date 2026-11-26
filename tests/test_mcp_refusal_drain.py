@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _daedalus_env  # noqa: E402
@@ -13,8 +14,11 @@ import _util  # noqa: E402
 
 TOK = 'mcptok'
 REFUSED_PAYLOAD = bytes(range(256)) * 32
-os.environ['DAEDALUS_TOKEN_OVERRIDE'] = ''
-os.environ['DAEDALUS_TOKEN'] = TOK
+
+
+def suite_scope():
+    return mock.patch.dict(os.environ, _mcp_load.BRIDGE_ENV,
+                           DAEDALUS_TOKEN_OVERRIDE='')
 
 
 def _request_contains_payload(request, payload):
@@ -456,4 +460,5 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
 
 
 if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))
+    with suite_scope():
+        sys.exit(_util.runner(_util.collect(dict(locals()))))

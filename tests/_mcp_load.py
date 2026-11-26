@@ -14,11 +14,13 @@ import http.client
 import importlib.util
 import io
 import json
+import logging
 import os
 import socket
 import sys
 import time
 import types
+from unittest import mock
 
 import _daedalus_env
 import _util
@@ -31,9 +33,25 @@ DEPS = all(importlib.util.find_spec(name) is not None
 TOK = 'mcptok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'DAEDALUS_TOKEN_OVERRIDE': TOK}
 
-# Requests resolve credentials after load isolation ends, so publish a
-# nonempty override to keep a legacy shell alias from replacing TOK.
-os.environ.update(BRIDGE_ENV)
+
+def token_env():
+    # Requests resolve credentials after load isolation ends, so publish a
+    # nonempty override to keep a legacy shell alias from replacing TOK.
+    return mock.patch.dict(os.environ, BRIDGE_ENV)
+
+
+@contextlib.contextmanager
+def quiet_token_env():
+    loggers = [logging.getLogger(name) for name in ('httpx', 'mcp')]
+    levels = [logger.level for logger in loggers]
+    try:
+        for logger in loggers:
+            logger.setLevel(logging.WARNING)  # quiet per-request INFO logs
+        with token_env():
+            yield
+    finally:
+        for logger, level in zip(loggers, levels):
+            logger.setLevel(level)
 
 
 class _FakeUvicornServer:
