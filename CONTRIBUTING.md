@@ -284,7 +284,9 @@ scope and `!` optional, the type one of `build`, `chore`, `ci`, `docs`, `feat`,
 `fix`, `perf`, `refactor`, `revert`, `style`, `test`. The type and the `!` must
 fit the change, and a breaking change carries the `!`. A message an
 automation writes (a bot commit, Dependabot's prefix, the release dispatch)
-follows it too.
+follows it too. Scopes here are free-form: no name is reserved, so no scope
+table is enforced, and the pull-request gate checks the `type(scope)!: subject`
+shape only.
 
 Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. The gate runs when the pull
