@@ -294,7 +294,7 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
     # Each loads the bridge's config with its own root, one at import and
     # one in narrowed_suite; the runner gave each file a process.
     load = '''
-        import os, sys, _util
+        import os, sys, _util, _daedalus_env
         from unittest import mock
         SOURCE = _util.ROOT / 'daedalus_bridge' / 'http_transport.py'
 
@@ -332,6 +332,7 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
             assert 'harness-leak' not in sys.path
             assert os.environ['HARNESS_SCOPE'] == '1'
             assert 'daedalus_bridge.config' not in sys.modules
+            assert '_daedalus_env' in sys.modules, 'a helper was confined'
         '''})
     assert (code, outcomes) == (0, {
         'test_a.py::test_own_config': 'PASSED',
