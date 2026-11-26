@@ -288,7 +288,7 @@ def test_pytest_over_the_tree_finds_its_suites_and_over_files_names_them(
             ('python -m pytest -n auto tests/', RUNNER),
             ('pytest', RUNNER),
             ('python -m pytest tests/ tests/test_a.py', RUNNER),
-            ('pytest -n auto && ls tests/test_a.py', RUNNER),
+            ('pytest tests/a.py && ls', NAMES),
             ('python -m pytest -n auto --ignore tests/test_b.py', RUNNER),
             ('|\n          pytest tests/a.py \\\n          tests/', RUNNER),
             ('pytest tests/test_*.py', RUNNER),
@@ -298,7 +298,8 @@ def test_pytest_over_the_tree_finds_its_suites_and_over_files_names_them(
             ('py.test', RUNNER),
             ('pytest-3 -n auto', RUNNER),
             ('python run_tests.py', RUNNER),
-            ('pytest -n auto tests/test_a.py tests/test_b.py', NAMES),
+            ('pytest -n auto tests/test_a.py tests/test_b.py', RUNNER),
+            ('pytest tests/$SUITE.py', RUNNER),
             ('|\n          pytest tests/a.py \\\n          tests/b.py', NAMES),
             ('coverage run --parallel-mode -m pytest tests/test_a.py', NAMES),
             ('pip install pytest-xdist pytest==9 && cat pytest.ini', None)):
