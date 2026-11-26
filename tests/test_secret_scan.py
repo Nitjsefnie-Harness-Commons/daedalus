@@ -118,12 +118,12 @@ def test_a_verified_download_feeds_a_bare_scan_of_trusted_rules(tmp):
         'tar')) + r"' \| sha256sum -c -", digest), digest
     assert untar == f"tar xzf {url.group('tar')} gitleaks", untar
     scan = _step(4)
-    assert scan['env'] == {'ATTRIBUTES': '.git/info/attributes'}, scan
+    assert scan['env'] == {'DAEDALUS_ATTRS': '.git/info/attributes'}, scan
     commands = scan['run'].replace('\\\n', ' ').splitlines()
     assert '||' not in scan['run'] and len(commands) == 3, commands
     # The judged tree's own exemptions are gone before the scan starts.
     assert commands[:2] == ['rm -rf .gitleaksignore',
-                            "echo '* diff' > \"$ATTRIBUTES\""], commands
+                            "echo '* diff' > \"$DAEDALUS_ATTRS\""], commands
     argv = shlex.split(commands[2])
     assert argv[:2] == ['./gitleaks', 'detect'], argv
     assert {'--verbose', '--redact', '--ignore-gitleaks-allow'} <= set(argv)
@@ -158,10 +158,10 @@ def test_rules_come_from_the_trusted_commit_never_the_judged_tree(tmp):
         _git(repo, 'update-ref', 'refs/remotes/origin/main', base)
         sha = base if sha == 'base' else sha
         # The variable this event does not read names the judged head.
-        done = run_step(repo, _step(3), {
-            **os.environ, 'RUNNER_TEMP': str(runner_temp), 'EVENT_NAME': event,
-            'BASE_SHA': sha if event == 'pull_request' else head,
-            'BEFORE_SHA': sha if event == 'push' else head})
+        env = {'RUNNER_TEMP': str(runner_temp), 'DAEDALUS_EVENT_NAME': event,
+               'DAEDALUS_BASE_SHA': sha if event == 'pull_request' else head,
+               'DAEDALUS_BEFORE_SHA': sha if event == 'push' else head}
+        done = run_step(repo, _step(3), {**os.environ, **env})
         rules = runner_temp / 'gitleaks-trusted'
         if ignore is None:
             assert done.returncode and 'refusing to scan' in done.stderr, case
