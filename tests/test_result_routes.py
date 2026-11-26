@@ -4,12 +4,12 @@
 `daedalus_bridge/result_routes.py` owns the POST body that stores a result
 and the GET body that peeks at or consumes one. Both take the result
 directory as a parameter and call `daedalus_bridge.result_store` for the
-locks and the slot primitives.
+locks and slot primitives.
 
 `DAEDALUS_DIR` and `DAEDALUS_PORT` are set here so the result directory
 most of these tests pass in is the one configuration names; the root
 parameter's controls pass a different one. Each test uses
-its own token and its own delivery ids, because the accepted-delivery
+its own token and delivery ids, because the accepted-delivery
 record is process-wide.
 """
 import atexit
@@ -32,8 +32,8 @@ _OWNED = _teardown.OwnedTemporaryDirectory('resultroutes_base_',
 atexit.register(_OWNED.cleanup)
 _BASE = _OWNED.name
 RES_DIR = Path(_BASE) / 'results'
-# Above any delivery count these tests store, so eviction never fires in
-# them; the cap has its own controls.
+# Above any delivery count stored here, so eviction never fires; the cap
+# has its own controls.
 DELIVERY_CAP = 8
 
 

@@ -298,7 +298,7 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
     # Each file loads the bridge's config with its own root: a at import,
     # b in narrowed_suite after a session fixture loaded one outside any
     # file, d at import with a scope whose exit raises, c only in its test.
-    # The runner gave each file a process, so each must see its own.
+    # Each must see its own, never a sibling's.
     load = '''
         import contextlib, os, sys, pytest, _util, _daedalus_env
         from unittest import mock
