@@ -614,13 +614,18 @@ def test_imported_worker_modules_are_tracked(tmp):
     _assert_imported_modules_are_tracked(_tracked_paths())
 
 
-def main():
-    tests = _util.collect(globals())
+def narrowed_suite():
     try:
         _assert_imported_modules_are_tracked(_tracked_paths())
     except AssertionError:
-        tests = [test_imported_worker_modules_are_tracked]
-    return _util.runner(tests)
+        return ['test_imported_worker_modules_are_tracked']
+    return None
+
+
+def main():
+    kept = narrowed_suite()
+    return _util.runner([test for test in _util.collect(globals())
+                         if kept is None or test.__name__ in kept])
 
 
 if __name__ == '__main__':
