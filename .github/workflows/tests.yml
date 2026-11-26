@@ -680,9 +680,7 @@ jobs:
 
       # `javascript` names the shipped JavaScript the floor was measured
       # on, and `javascript-all-files` keeps a file no test loads in it at
-      # 0 hits. `-p no:cacheprovider`: pytest processes sharing one rootdir
-      # race on `.pytest_cache`'s staging directory, which aborts a
-      # sibling's collection on Windows.
+      # 0 hits.
       - name: Run the shard's suites
         uses: Nitjsefnie-Actions/test-ratchet/run@916a819580fdb4133805bd7e4f46608849f05c7f  # v2.4.0
         env:
@@ -697,7 +695,6 @@ jobs:
           javascript-code-only: 'true'
           javascript-any-character: 'true'
           javascript-all-files: 'true'
-          args: -p no:cacheprovider
 
       # The gate is the answer to the cache-poisoning findings: an untrusted
       # event never writes cross-run state, and a push of main is the one
