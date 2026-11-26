@@ -10,6 +10,7 @@ import contextlib
 import faulthandler
 import os
 import sys
+import sysconfig
 import threading
 import time
 from pathlib import Path
@@ -25,7 +26,8 @@ OUTCOMES = collections.defaultdict(collections.Counter)
 NEEDS = {}
 SKIP_ALLOWED = pytest.StashKey[bool]()
 CONFINED = collections.defaultdict(dict)
-OUTSIDE = (_util.ROOT / 'tests', Path(sys.prefix).resolve())
+INSTALLED = tuple(Path(sysconfig.get_path(key)).resolve() for key in (
+    'stdlib', 'platstdlib', 'purelib', 'platlib'))
 
 
 def pytest_configure(config):
@@ -54,13 +56,13 @@ def tmp_alias(tmp):
 
 
 def confine(path, before):
-    # A repository module one test file imported is that file's alone, as
-    # under the runner's process per file; CONFINED holds it between uses.
+    # A checkout module first imported for one test file is that file's
+    # alone, as under the runner's process per file; CONFINED keeps it.
     for name in sys.modules.keys() - before:
         source = Path(getattr(sys.modules[name], '__file__', None) or '/')
         source = source.resolve()
-        if source.is_relative_to(_util.ROOT) and not any(
-                source.is_relative_to(out) for out in OUTSIDE):
+        if (source.is_relative_to(_util.ROOT) and source != path.resolve()
+                and not any(source.is_relative_to(i) for i in INSTALLED)):
             CONFINED[path][name] = sys.modules.pop(name)
 
 
@@ -68,9 +70,11 @@ def confine(path, before):
 def module_scope(request):
     before = set(sys.modules)
     sys.modules.update(CONFINED[request.path])
-    with getattr(request.module, 'suite_scope', contextlib.nullcontext)():
-        yield
-    confine(request.path, before)
+    try:
+        with getattr(request.module, 'suite_scope', contextlib.nullcontext)():
+            yield
+    finally:
+        confine(request.path, before - CONFINED[request.path].keys())
 
 
 @pytest.fixture(autouse=True)
