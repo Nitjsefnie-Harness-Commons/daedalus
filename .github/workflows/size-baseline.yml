@@ -25,7 +25,10 @@ jobs:
         uses: Nitjsefnie-Actions/size-ratchet@84009b67a653bd057115a0318b61da7b937d810a # v4.0.3
         with:
           ceilings: ''
+          # The test tree's per-file ceiling is 700, not the default 500.
           overrides: 'tests/: 700'
+          # examples/ holds worked-example page scripts, not modules the
+          # ceiling policy governs.
           exclude: 'examples/'
           unclassified: 'ignore'
           records: '.github/size-baseline.json'
