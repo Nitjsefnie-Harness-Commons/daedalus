@@ -157,11 +157,9 @@ AUDIT_RETRY_FIXTURES = (
     # Longer than the retry arm's excerpt, which it pins: only the last lines
     # print per attempt, where an unbounded `cat` would print the whole report.
     ('a transport failure under a long report',
-     'Checking 12 packages\n'
-     'Resolving dependencies\n'
+     'Checking 12 packages\nResolving dependencies\n'
      'Found 1 known vulnerability in test/pkg\n'
-     'Upgrade test/pkg to 1.2.3 to fix it.\n'
-     'Vulnerability ID: PYSEC-2026-1\n'
+     'Upgrade test/pkg to 1.2.3 to fix it.\nVulnerability ID: PYSEC-2026-1\n'
      'Retrying the advisory feed\n'
      'HTTPError: 503 Service Unavailable\n', 3, 1),
     # Pins the ORDER: a refusal the index will not repeat beside a retry line.
@@ -200,7 +198,8 @@ def audit_step_outcome(body, output, cwd, env, code=1):
         (root / 'requirements-test.txt').write_bytes(
             (ROOT / 'requirements-test.txt').read_bytes())
     script = ('sleep() { echo "$1" >> sleeps.log; }\n'
-              'pip-audit() { echo "x $*" >> runs.log; cat fixture.out;'
+              'pip-audit() { echo "x $*" >> runs.log; case "$*" in'
+              ' *--disable-pip*) ;; *) cat fixture.out;; esac;'
               ' return "$AUDIT_CODE"; }\n') + body
     result = subprocess.run(
         [_util.workflow_bash(), '-e', '-c', script],
@@ -349,7 +348,9 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
     assert re.fullmatch(r'pytest==[0-9.]+\n', base) and all(
         flag in outcome['args'][1] for flag in (
             'osv', '--no-deps --disable-pip', 'pytest-base.txt')), outcome
-    (Path(tmp) / 'requirements-test.txt').write_text('pytest==1\n', 'utf-8')
-    outcome = audit_step_outcome(blocks[1], '', cwd=tmp,
-                                 env=_util.child_coverage('scrub'), code=0)
-    assert (outcome['runs'], outcome['code']) == (0, 1), outcome
+    wheel = 'pytest @ u/pytest-1+a-py3-none-any.whl\n'
+    for manifest, runs in (('pytest==1\n', 0), (wheel * 2, 0), (wheel, 1)):
+        (Path(tmp) / 'requirements-test.txt').write_text(manifest, 'utf-8')
+        outcome = audit_step_outcome(
+            blocks[1], '', cwd=tmp, env=_util.child_coverage('scrub'), code=0)
+        assert (outcome['runs'], outcome['code']) == (runs, 1 - runs), outcome
