@@ -289,8 +289,17 @@ def test_pytest_over_the_tree_finds_its_suites_and_over_files_names_them(
             ('pytest', RUNNER),
             ('python -m pytest tests/ tests/test_a.py', RUNNER),
             ('pytest -n auto && ls tests/test_a.py', RUNNER),
+            ('python -m pytest -n auto --ignore tests/test_b.py', RUNNER),
+            ('|\n          pytest tests/a.py \\\n          tests/', RUNNER),
+            ('pytest tests/test_*.py', RUNNER),
+            ('pytest tests/**/test_*.py', RUNNER),
+            ('pytest tests/test_a.py tests', RUNNER),
+            ('pytest tests/test_a.py .', RUNNER),
+            ('py.test', RUNNER),
+            ('pytest-3 -n auto', RUNNER),
             ('python run_tests.py', RUNNER),
             ('pytest -n auto tests/test_a.py tests/test_b.py', NAMES),
+            ('|\n          pytest tests/a.py \\\n          tests/b.py', NAMES),
             ('coverage run --parallel-mode -m pytest tests/test_a.py', NAMES),
             ('pip install pytest-xdist pytest==9 && cat pytest.ini', None)):
         workflow = ('jobs:\n  suites:\n    runs-on: ubuntu-latest\n'

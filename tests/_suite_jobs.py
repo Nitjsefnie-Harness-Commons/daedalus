@@ -57,7 +57,7 @@ NAMES = 'names'
 # reach the end of the line or a closing quote.
 SUITE_TREE = re.compile(r"""(?<![\w/.-])tests(?:/|[\s'")\\]*(?:#.*)?$)""")
 # A pytest launch, then the rest of its shell command.
-PYTEST = re.compile(r'pytest(?![\w.=-])([^;&|)\n]*)')
+PYTEST = re.compile(r'(?:py\.test|pytest(?:-3)?)(?![\w.=-])([^;&|)\n]*)')
 # A tracked file a step's own text names, by an extension worth reading.
 # The list is the whole universe this walk can resolve, and it is one
 # tuple rather than a set spelled into the pattern: a step naming a
@@ -113,13 +113,15 @@ def _pytest_finds_suites(text):
     """Whether a pytest launch in the text collects rather than lists.
 
     pytest discovers the tree itself (`testpaths` when no path is given),
-    so a suite added tomorrow reaches it unless every tree path it is
-    handed is a suite file.
+    so a suite added tomorrow reaches it unless every positional argument
+    is a suite file: an option's value lists nothing, a glob collects.
     """
-    for match in PYTEST.finditer(text):
-        tree = [arg for arg in match.group(1).split()
-                if arg.startswith('tests/')]
-        if not tree or not all(arg.endswith('.py') for arg in tree):
+    for match in PYTEST.finditer(text.replace('\\\n', ' ')):
+        words = match.group(1).split()
+        paths = [word for before, word in zip([''] + words, words)
+                 if not word.startswith('-') and not before.startswith('-')]
+        if not paths or not all(re.fullmatch(r'tests/[^*?\[]+\.py', path)
+                                for path in paths):
             return True
     return False
 
