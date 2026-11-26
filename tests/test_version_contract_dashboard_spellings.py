@@ -79,33 +79,33 @@ _STATUS_SPELLINGS = {
 }
 
 
-def _assert_duplicate_spelling_refused(tmp_path, markup, desc):
+def _assert_duplicate_spelling_refused(tmp, markup, desc):
     """`markup` planted before `</body>` makes `desc` match twice."""
     try:
-        copy_root = Path(tmp_path) / 'tree'
+        copy_root = Path(tmp) / 'tree'
         checker = _copy_versioned_tree(copy_root)
         canonical = _canonical_dashboard_value(copy_root, checker, desc)
         _insert_before_body(copy_root, markup)
         _assert_duplicate_refused(_run_checker(copy_root), desc, canonical,
                                   '9.9.9')
     except AssertionError as exc:
-        raise AssertionError(f'{Path(tmp_path).name}: {exc}') from exc
+        raise AssertionError(f'{Path(tmp).name}: {exc}') from exc
 
 
-def _assert_markup_is_not_a_site(tmp_path, markup, desc):
+def _assert_markup_is_not_a_site(tmp, markup, desc):
     """`markup` planted before `</body>` leaves `desc` matching once."""
     try:
-        copy_root = Path(tmp_path) / 'tree'
+        copy_root = Path(tmp) / 'tree'
         checker = _copy_versioned_tree(copy_root)
         _insert_before_body(copy_root, markup)
         _assert_one_dashboard_match(copy_root, checker, desc)
     except AssertionError as exc:
-        raise AssertionError(f'{Path(tmp_path).name}: {exc}') from exc
+        raise AssertionError(f'{Path(tmp).name}: {exc}') from exc
 
 
-def test_attribute_before_class_status_line_duplicate_is_refused(tmp_path):
+def test_attribute_before_class_status_line_duplicate_is_refused(tmp):
     _assert_duplicate_spelling_refused(
-        tmp_path, _STATUS_SPELLINGS['attribute_before_class'], _STATUS)
+        tmp, _STATUS_SPELLINGS['attribute_before_class'], _STATUS)
     for name, markup, desc in (
             ('case-data-attribute-status-line-duplicate',
              "<span class='sl-v' data-meta='x'>9.9.9</span>",
@@ -154,10 +154,10 @@ def test_attribute_before_class_status_line_duplicate_is_refused(tmp_path):
              _STATUS),
     ):
         _assert_duplicate_spelling_refused(
-            Path(tmp_path) / name, markup, desc)
+            Path(tmp) / name, markup, desc)
 
 
-def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp_path):
+def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp):
     """A `<` inside a later attribute value does not end the tag early.
 
     Both quote spellings, so the twin is not itself a single-spelling
@@ -167,7 +167,7 @@ def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp_path):
     for name in ('quoted_lt_in_trailing_attribute',
                  'double_quoted_lt_in_trailing_attribute'):
         _assert_duplicate_spelling_refused(
-            Path(tmp_path) / name, _STATUS_SPELLINGS[name], _STATUS)
+            Path(tmp) / name, _STATUS_SPELLINGS[name], _STATUS)
     for name, markup, desc in (
             ('case-quoted-gt-in-trailing-attribute-status-line-duplicate',
              "<span class='sl-v' title='a>b'>9.9.9</span>",
@@ -183,12 +183,12 @@ def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp_path):
              _RAIL),
     ):
         _assert_duplicate_spelling_refused(
-            Path(tmp_path) / name, markup, desc)
+            Path(tmp) / name, markup, desc)
 
 
-def test_unquoted_uppercase_names_rail_duplicate_is_refused(tmp_path):
+def test_unquoted_uppercase_names_rail_duplicate_is_refused(tmp):
     _assert_duplicate_spelling_refused(
-        tmp_path, _RAIL_SPELLINGS['unquoted_uppercase_names'], _RAIL)
+        tmp, _RAIL_SPELLINGS['unquoted_uppercase_names'], _RAIL)
     for name, markup, desc in (
             ('case-unquoted-uppercase-names-status-line-duplicate',
              '<SPAN CLASS=sl-v>9.9.9</SPAN>',
@@ -213,16 +213,16 @@ def test_unquoted_uppercase_names_rail_duplicate_is_refused(tmp_path):
              _STATUS),
     ):
         _assert_duplicate_spelling_refused(
-            Path(tmp_path) / name, markup, desc)
+            Path(tmp) / name, markup, desc)
 
 
-def test_status_line_shipped_class_names_one_element(tmp_path):
+def test_status_line_shipped_class_names_one_element(tmp):
     """The trailing region rests on this class naming one element.
 
     The four cells that made the region ambiguous moved onto `sl-meta` (538),
     leaving this one to be the class the site admits the whole region for.
     """
-    copy_root = Path(tmp_path) / 'tree'
+    copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     text = (copy_root / 'dashboard' / 'index.html').read_text(
         encoding='utf-8')
@@ -230,10 +230,10 @@ def test_status_line_shipped_class_names_one_element(tmp_path):
     _assert_one_dashboard_match(copy_root, checker, _STATUS)
 
 
-def test_shipped_meta_cells_are_not_status_line_sites(tmp_path):
+def test_shipped_meta_cells_are_not_status_line_sites(tmp):
     """The class the four status cells use is not a version class."""
     _assert_markup_is_not_a_site(
-        tmp_path, "<span class='sl-meta' data-meta='x'>9.9.9</span>", _STATUS)
+        tmp, "<span class='sl-meta' data-meta='x'>9.9.9</span>", _STATUS)
     for name, markup, desc in (
             ('case-class-token-prefix-status-line-not-a-site',
              "<span class='notsl-v' id='x'>9.9.9</span>",
@@ -282,34 +282,34 @@ def test_shipped_meta_cells_are_not_status_line_sites(tmp_path):
              _STATUS),
     ):
         _assert_markup_is_not_a_site(
-            Path(tmp_path) / name, markup, desc)
+            Path(tmp) / name, markup, desc)
 
 
-def test_wrong_tag_name_in_new_spellings_is_not_a_rail_site(tmp_path):
+def test_wrong_tag_name_in_new_spellings_is_not_a_rail_site(tmp):
     for name, markup in _RAIL_SPELLINGS.items():
         wrong = markup.replace('div', 'span').replace('DIV', 'SPAN')
-        copy_root = Path(tmp_path) / name / 'tree'
+        copy_root = Path(tmp) / name / 'tree'
         checker = _copy_versioned_tree(copy_root)
         _insert_before_body(copy_root, wrong)
         _assert_one_dashboard_match(copy_root, checker, _RAIL)
 
 
-def test_wrong_tag_name_in_new_spellings_is_not_a_status_line_site(tmp_path):
+def test_wrong_tag_name_in_new_spellings_is_not_a_status_line_site(tmp):
     for name, markup in _STATUS_SPELLINGS.items():
         wrong = markup.replace('span', 'div').replace('SPAN', 'DIV')
-        copy_root = Path(tmp_path) / name / 'tree'
+        copy_root = Path(tmp) / name / 'tree'
         checker = _copy_versioned_tree(copy_root)
         _insert_before_body(copy_root, wrong)
         _assert_one_dashboard_match(copy_root, checker, _STATUS)
 
 
-def test_unquoted_class_prose_is_not_a_rail_site(tmp_path):
+def test_unquoted_class_prose_is_not_a_rail_site(tmp):
     _assert_markup_is_not_a_site(
-        tmp_path, '<p>ordinary class=rail-foot>v9.9.9</p>', _RAIL)
+        tmp, '<p>ordinary class=rail-foot>v9.9.9</p>', _RAIL)
 
 
-def test_new_spelling_decoys_in_script_are_ignored(tmp_path):
-    copy_root = Path(tmp_path) / 'tree'
+def test_new_spelling_decoys_in_script_are_ignored(tmp):
+    copy_root = Path(tmp) / 'tree'
     _copy_versioned_tree(copy_root)
     script = (
         '<script>\n'
@@ -325,7 +325,7 @@ def test_new_spelling_decoys_in_script_are_ignored(tmp_path):
 
 
 def test_repeated_class_runs_without_a_close_do_not_flip_the_verdict(
-        tmp_path):
+        tmp):
     """The shape the trailing region is walked over most: many anchors, many
     `class` candidates, and no `>v` for any of them to reach. This pins the
     verdict on that shape, not the guard's presence: removing the rail
@@ -333,18 +333,18 @@ def test_repeated_class_runs_without_a_close_do_not_flip_the_verdict(
     """
     anchors = 200
     _assert_markup_is_not_a_site(
-        tmp_path,
+        tmp,
         '<div ' * anchors + "class='rail-foot' " * anchors + 'a' * anchors,
         _RAIL)
     _assert_markup_is_not_a_site(
-        Path(tmp_path) / "status",
+        Path(tmp) / "status",
         '<span ' * anchors + "class='sl-v' " * anchors
         + 'a' * anchors, _STATUS)
 
 
-def test_canonical_tree_passes_and_set_preserves_dashboard_markup(tmp_path):
+def test_canonical_tree_passes_and_set_preserves_dashboard_markup(tmp):
     """The widened patterns still read the shipped markup exactly once."""
-    copy_root = Path(tmp_path) / 'tree'
+    copy_root = Path(tmp) / 'tree'
     checker = _copy_versioned_tree(copy_root)
     checked = _run_checker(copy_root)
     assert checked.returncode == 0, (checked.returncode, checked.stdout,

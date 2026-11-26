@@ -658,4 +658,5 @@ def test_unterminated_suite_output_gets_a_group_separator(tmp):
     assert result.stdout == expected, result.stdout
 
 
-raise SystemExit(_util.runner(_util.collect(dict(globals()))))
+if __name__ == '__main__':
+    raise SystemExit(_util.runner(_util.collect(dict(globals()))))
