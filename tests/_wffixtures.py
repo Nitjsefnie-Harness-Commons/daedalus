@@ -98,18 +98,12 @@ def _audit_step(name):
 
 
 # One fixture per arm of audit.yml's retry block, with a value ON each
-# predicate and one just PAST it: a single-valued fixture set makes "retries
-# this" and "gives up on that" indistinguishable, so the boundary is unpinned
-# while the outcomes look pinned hard. The bare-ServiceError row and the
-# 401/403/404 rows are the ones a narrow classifier and a broad one disagree
-# on, and the multi-line report is the shape a real audit prints.
-# The ORDER of the block's two tests is the narrowness it claims, and a row
-# that matches both arms is the only thing that pins it: one whose retry
-# predicate also matches while its refusal predicate does not, so a block
-# reading the retry test first runs it three times and a block reading the
-# refusal test first reports at once. The 429 rows pin the 429 EXCEPTION,
-# which is a different property — they discriminate what the exception
-# admits, not which test is read first.
+# predicate and one just PAST it, or "retries this" and "gives up on that"
+# look alike. The bare-ServiceError and 401/403/404 rows split a narrow
+# classifier from a broad one; the multi-line report is a real audit's shape.
+# A row matching both arms pins the ORDER of the block's two tests: its retry
+# predicate matches and its refusal one does not, so reading the retry test
+# first runs it three times. The 429 rows pin what the 429 EXCEPTION admits.
 #
 # (label, what pip-audit wrote, how many times the block ran it, its exit).
 AUDIT_RETRY_FIXTURES = (
@@ -148,6 +142,8 @@ AUDIT_RETRY_FIXTURES = (
     ('a DNS failure', 'Temporary failure in name resolution\n', 3, 1),
     ('an unreachable advisory feed', 'Could not connect to PyPI or the '
      'vulnerability feed\n', 3, 1),
+    ('an unreachable OSV feed', 'ERROR:pip_audit._cli:Could not connect '
+     "to OSV's vulnerability feed\n", 3, 1),
     ('a 404', 'HTTPError: 404 Client Error: Not Found\n', 1, 1),
     ('a 403', 'HTTPError: 403 Client Error: Forbidden\n', 1, 1),
     ('a 401', 'HTTPError: 401 Client Error: Unauthorized\n', 1, 1),
@@ -183,27 +179,24 @@ def audit_step_outcome(body, output, cwd, env, code=1):
     """Run audit.yml's own retry block over one pip-audit output.
 
     `pip-audit` and `sleep` become shell functions, so the block's OWN
-    control flow answers: how many times it ran the tool, what it exited
-    with, what it printed, and how long it waited between attempts.
-    `runs.log` counts invocations rather than the block's own "retrying"
-    line, so a retry it announced without taking cannot pass for one it
-    took; `sleeps.log` records the argument of every sleep, so a backoff the
-    block printed without taking cannot pass for one it took either.
+    control flow answers: each run of the tool and its arguments
+    (`runs.log`, not the block's "retrying" line), its exit, what it
+    printed, and every sleep it took (`sleeps.log`), so a retry or backoff
+    announced without being taken cannot pass for one.
 
-    The block arrives as a decoded `run:` scalar on a script this builds and
-    is handed to bash through `-c`, never through `$( )`: macOS ships bash
-    3.2, whose here-doc handling inside a substitution differs.
+    The block is handed to bash through `-c`, never `$( )`: macOS ships
+    bash 3.2, whose here-doc handling inside a substitution differs.
 
-    `env` is the environment the caller declares for the launches this one
-    makes: `tmp` is not a tree [tool.coverage.paths] maps back, so the child
-    must not inherit the collector this process is running under.
+    `env` is the environment the caller declares for these launches: `tmp`
+    is not a tree [tool.coverage.paths] maps back, so the child must not
+    inherit the collector this process is running under.
     """
     root = Path(cwd)
     (root / 'fixture.out').write_text(output, encoding='utf-8')
     (root / 'runs.log').write_text('', encoding='utf-8')
     (root / 'sleeps.log').write_text('', encoding='utf-8')
     script = ('sleep() { echo "$1" >> sleeps.log; }\n'
-              'pip-audit() { echo x >> runs.log; cat fixture.out;'
+              'pip-audit() { echo "x $*" >> runs.log; cat fixture.out;'
               ' return "$AUDIT_CODE"; }\n') + body
     result = subprocess.run(
         [_util.workflow_bash(), '-e', '-c', script],
@@ -211,9 +204,9 @@ def audit_step_outcome(body, output, cwd, env, code=1):
         cwd=cwd,
         env=_util.child_coverage(
             'scrub', {**env, 'AUDIT_CODE': str(code)}))
-    runs = len((root / 'runs.log').read_text(encoding='utf-8').split())
+    runs = (root / 'runs.log').read_text(encoding='utf-8').splitlines()
     waits = (root / 'sleeps.log').read_text(encoding='utf-8').split()
-    return {'runs': runs, 'code': result.returncode,
+    return {'runs': len(runs), 'args': runs, 'code': result.returncode,
             'sleeps': [int(value) for value in waits],
             'out': (result.stdout + result.stderr).strip()}
 
@@ -291,10 +284,9 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
     shows. Every one of the block's five outcomes is named by exactly the
     arm that owns it and by no other.
     """
-    # Both pip-audit blocks carry the same five-outcome retry: the shared
-    # four-surface invocation and the dedicated hash-pinned one, each
-    # driven through the same executed fixtures -- a copy of a retried
-    # block is retried machinery nobody has pinned.
+    # Both pip-audit blocks, the shared four-surface one and the hash-pinned
+    # one, carry the same five-outcome retry and run the same fixtures: a
+    # copy of retried machinery nobody runs is machinery nobody has pinned.
     blocks = [_audit_step('Audit dependencies'),
               _audit_step('Audit the hash-pinned test toolchain')]
     for body in blocks:
@@ -351,3 +343,11 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
                        for first, second in zip(waits, waits[1:])), (
                 f'{label}: each attempt must wait longer than the one '
                 f'before it: {waits}')
+    # The hash-pinned run asks OSV and refuses a clean exit that skipped.
+    outcome = audit_step_outcome(
+        blocks[1], 'No known vulnerabilities found\nName Skip Reason\n'
+        'test-pkg Dependency not found on PyPI and could not be audited: '
+        'test-pkg (1.0+local)\n', cwd=tmp, env=_util.child_coverage('scrub'),
+        code=0)
+    assert (outcome['runs'], outcome['code']) == (1, 1), outcome
+    assert '--vulnerability-service osv' in outcome['args'][0], outcome
