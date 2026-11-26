@@ -336,7 +336,7 @@ jobs:
       - uses: >-
           actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.3"
           package-manager-cache: false
 
       - name: Install eslint (pinned, no package.json, no build step)
@@ -644,7 +644,7 @@ jobs:
       - uses: >-
           actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.3"
           package-manager-cache: false
 
       # The pip cache is restored on every event and saved only from a push of
@@ -754,7 +754,7 @@ jobs:
       - uses: >-
           actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "22"
+          node-version: "24.22.3"
           package-manager-cache: false
 
       - name: Restore the pip cache
