@@ -37,6 +37,8 @@ on:
     - cron: '47 3 * * 3'
   workflow_dispatch:
 
+permissions: {}
+
 # One group per commit on push, dispatch and schedule: a landed main SHA's
 # verdict must complete, so a newer push cannot cancel it. A pull request
 # keeps one group per number, so a superseded head push is still cancelled.
@@ -48,7 +50,7 @@ jobs:
   analyze:
     name: analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     permissions:
       # Writing the analysis results is the whole point; everything else

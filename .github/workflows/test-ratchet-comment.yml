@@ -17,7 +17,7 @@ jobs:
       && (github.event.workflow_run.head_repository.full_name != github.repository
       || github.event.workflow_run.actor.login == 'dependabot[bot]')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
