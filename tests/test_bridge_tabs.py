@@ -183,7 +183,7 @@ def test_poll_legacy_escape_hatch(tmp):
         legacy.write_text(json.dumps({'id': 'legacy1', 'code': '1'}))
         status, body = _util.post_json(base + '/poll', {'token': TOK})
         assert status == 200 and body['id'] == 'legacy1', (status, body)
-        assert not legacy.exists()  # consumed
+        assert not legacy.exists()
 
         legacy.write_text('{not json', encoding='utf-8')
         try:

@@ -7,8 +7,8 @@ directory as a parameter and call `daedalus_bridge.result_store` for the
 locks and the slot primitives.
 
 `DAEDALUS_DIR` and `DAEDALUS_PORT` are set here so the result directory
-most of these tests pass in is the one configuration names; the controls
-for the root parameter deliberately pass a different one. Each test uses
+most of these tests pass in is the one configuration names; the root
+parameter's controls pass a different one. Each test uses
 its own token and its own delivery ids, because the accepted-delivery
 record is process-wide.
 """
