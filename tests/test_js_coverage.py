@@ -535,12 +535,3 @@ def test_filename_naming_vm_loads_run_verbatim_source(tmp):
     assert coverage.covered_lines, (
         'the worker observer ran evaluate.js but no covered line was '
         'attributed to it')
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='jscoverage_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

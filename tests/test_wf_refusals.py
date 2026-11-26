@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wffixtures import _value_error  # noqa: E402
 from _yamlread import (  # noqa: E402
@@ -130,11 +129,3 @@ def test_a_step_scalar_written_inline_and_nested_is_refused(_tmp):
               '        if:\n          b\n')
     assert _value_error(
         lambda: step_scalar(source, 'sample', 'x', 'if')) == DUP + 'if'
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='wfrefusals_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

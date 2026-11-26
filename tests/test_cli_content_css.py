@@ -188,11 +188,3 @@ def test_do_remove_css_carries_all_frames_only_when_it_was_asked_for(tmp):
                                {'css': 'a{}', 'allFrames': True})], \
         recorded.calls
     assert out == 'Removed 3 chars CSS from tab 2\n', repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clicontentcss_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

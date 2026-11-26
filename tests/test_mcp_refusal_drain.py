@@ -457,8 +457,3 @@ def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
         assert not hasattr(request, '_body'), name
         assert not _request_contains_payload(
             request, REFUSED_PAYLOAD), name
-
-
-if __name__ == '__main__':
-    with suite_scope():
-        sys.exit(_util.runner(_util.collect(dict(locals()))))

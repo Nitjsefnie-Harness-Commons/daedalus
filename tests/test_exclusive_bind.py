@@ -675,13 +675,3 @@ def test_a_refused_request_still_refreshes_the_date_header(tmp):
     assert headers[b'date'] == _frozen_date(fresh), headers
     assert headers[b'date'] != _frozen_date(stale), headers
     handed[0].close()
-
-
-def main():
-    with suite_scope():
-        return _util.runner(_util.collect(globals()),
-                            tmp_prefix='exclusivebind_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -368,8 +368,3 @@ def test_the_bridge_starts_the_sweep_on_its_segments_root_and_setting(tmp):
             time.sleep(0.05)
     assert json.loads(record.read_text(encoding='utf-8')) == [
         str(Path(docroot) / 'segments'), 7.5]
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals()),
-                                  tmp_prefix='segret_'))

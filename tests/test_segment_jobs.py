@@ -671,11 +671,3 @@ def test_a_resume_whose_touch_fails_still_resumes(tmp):
         setattr(os, 'utime', real)
     assert (answer, refused) == (
         (200, {'ok': True, 'sig': first['sig']}), ['touch-job.json'])
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='segjobs_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

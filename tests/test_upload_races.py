@@ -18,7 +18,6 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _upload_fixture import _load, _place_upload  # noqa: E402
 
 
@@ -443,12 +442,3 @@ def test_listing_skips_an_in_progress_temp_sibling(tmp):
     assert payload['total'] == 1, payload
     answer = routes.latest_screenshot(Path(tmp), 'tok', {})
     assert answer.path == real, answer
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='uploadraces_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

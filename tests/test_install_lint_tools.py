@@ -666,12 +666,3 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
             'inherit, so a suite would find whatever the runner image '
             'happens to carry instead')
     assert recorded.read_text(encoding='utf-8')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='installtools_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

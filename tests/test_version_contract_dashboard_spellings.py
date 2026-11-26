@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _run_checker,
@@ -358,12 +357,3 @@ def test_canonical_tree_passes_and_set_preserves_dashboard_markup(tmp):
                                      written.stderr)
     assert dashboard.read_text(encoding='utf-8') == before.replace(
         canonical, '9.9.9')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='versioncontract_dashboard_spellings_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

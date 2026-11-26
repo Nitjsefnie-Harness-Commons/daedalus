@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wffixtures import _refuses  # noqa: E402
 from _wfgraph import _tests_yml  # noqa: E402
@@ -315,8 +314,3 @@ def test_production_cache_steps_keep_restore_and_save_separate(tmp):
         assert len(restores) == len(saves) == 1, (job, restores, saves)
         assert _cache_write_reason(restores[0], job, 1) is None
         assert _cache_write_reason(saves[0], job, 1) is not None
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals())),
-                          tmp_prefix='cacheboundary_'))

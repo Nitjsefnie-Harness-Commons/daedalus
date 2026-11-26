@@ -58,11 +58,3 @@ def test_skill_mutations_are_caught_independently(tmp):
         path = Path(tmp) / f'{name}.md'
         path.write_text(source.replace(old, new), encoding='utf-8')
         assert not _skill_decisions(path)[name], name
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='typeerrors_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

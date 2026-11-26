@@ -185,7 +185,3 @@ def test_read_retries_a_transient_refusal_then_returns_the_text(tmp):
 
     assert attempts == [record, record, record], attempts
     assert text == payload, text
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

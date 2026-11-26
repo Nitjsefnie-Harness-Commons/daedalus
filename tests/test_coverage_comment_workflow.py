@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
 from _wfjobs import workflow_files  # noqa: E402
@@ -532,7 +531,3 @@ def test_the_coverage_commenter_guards_its_privileged_shell(tmp):
             '$DAEDALUS_PR_NUMBER/comments') in workflow, workflow
     assert '"$claimed" != "$DAEDALUS_PR_NUMBER"' in workflow, workflow
     assert '(.body // "")' in workflow, workflow
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

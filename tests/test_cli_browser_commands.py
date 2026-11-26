@@ -422,11 +422,3 @@ def test_do_ext_self_reload_reports_the_version_it_reloaded_from(tmp):
 
     assert out == ('Extension reloading from v? — will reconnect '
                    'SSE automatically\n'), repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clibrowcmd_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

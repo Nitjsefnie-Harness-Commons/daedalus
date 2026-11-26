@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -153,7 +152,3 @@ def test_a_step_name_and_id_may_be_written_as_a_block_scalar(tmp):
     assert _fields(_step('name: |', '\n', '     id: gate\n')) == [
         ('', 'gate')]
     assert _fields(_step('name: |+', '\n\n')) == [('\n\n', None)]
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

@@ -127,12 +127,3 @@ def test_main_propagates_classify_value_error(tmp):
         os.environ.clear()
         os.environ.update(saved)
     assert not out.exists(), 'main wrote fallback outputs after refusal'
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='changeclassifiercallers_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

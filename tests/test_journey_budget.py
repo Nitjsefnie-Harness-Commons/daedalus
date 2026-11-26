@@ -21,7 +21,6 @@ from _journey_contract import (  # noqa: E402
     ARTIFACT,
     ROOT,
     _report_file,
-    _util,
     budget_document,
     journeys,
     line_endings,
@@ -524,12 +523,3 @@ def test_a_recorded_journey_the_set_no_longer_has_is_reported(tmp):
     # report can name, and printing it under one of them is a reader sent
     # to fix a budget that is fine.
     assert 'unrecorded, reported and passing' not in said, said
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeybudget_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

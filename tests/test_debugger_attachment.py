@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _debugger_attachment_harness import (  # noqa: E402
     REFUSAL, _by_id, _cdp, _ran, run_attachment_case)
 
@@ -264,12 +263,3 @@ def test_a_claim_arriving_mid_detach_waits_for_that_detach(tmp):
     assert outcome['attachCalls'] == [7, 7, 7], outcome
     assert outcome['detachCalls'] == [7, 7, 7], outcome
     assert outcome['live'] == [], outcome
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='attachclaim_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _actionlint import (  # noqa: E402
                          _ACTIONLINT, _assert_run_guard_both_ways,
                          _assert_unlaunchable_binary_is_a_refusal, _job_step,
@@ -679,11 +678,3 @@ def test_every_run_step_names_only_tracked_paths(tmp):
                     if name not in tracked and not name.startswith(roots))
     assert examined >= 1 and produced, (examined, sorted(produced))
     assert not unresolved, '\n'.join(unresolved)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ciworkflows_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

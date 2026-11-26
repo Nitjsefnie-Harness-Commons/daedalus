@@ -655,7 +655,3 @@ def test_store_hotfix_schema_pins_nullable_permanent(_tmp):
         'store_hotfix required schema must include fix_id and code')
     assert 'default' in permanent and permanent['default'] is None, (
         'store_hotfix permanent schema default must be null')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

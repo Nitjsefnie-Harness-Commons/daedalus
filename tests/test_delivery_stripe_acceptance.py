@@ -144,12 +144,3 @@ def test_acceptance_recorded_on_the_delivery_write_path(tmp):
         'discovering a shared stripe by timing a write is accepted; '
         f'bullet {bullets} is missing a match for a pattern of '
         f'{ACCEPTANCE_TERMS}')
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='deliverystripeacceptance_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

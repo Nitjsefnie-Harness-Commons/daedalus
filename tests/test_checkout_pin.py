@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 import _wfcheckout  # noqa: E402
 from _wfjobs import workflow_files  # noqa: E402
@@ -403,7 +402,3 @@ def test_checkout_refs_from_step_outputs_avoid_the_analyser_heuristic(tmp):
     for path in workflows:
         text = path.read_text(encoding='utf-8')
         _assert_checkout_refs_safe(text, path.name)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

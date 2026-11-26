@@ -359,11 +359,3 @@ def test_workflow_tightens_long_lines_before_the_document_check(tmp):
     lines = workflow.index('python scripts/ci/line_lengths.py --tighten')
     check = workflow.index('python scripts/ci/thresholds.py --check')
     assert lines < check
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='linelengths_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

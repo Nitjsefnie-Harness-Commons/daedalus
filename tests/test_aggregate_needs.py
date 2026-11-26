@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _wffixtures import _probe_workflow  # noqa: E402
 from _wfjobs import load, workflow_files  # noqa: E402
@@ -315,7 +314,3 @@ def _copy_real(tmp):
     (root / 'tests.yml').write_text(
         _REAL.read_text(encoding='utf-8'), encoding='utf-8')
     return root
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

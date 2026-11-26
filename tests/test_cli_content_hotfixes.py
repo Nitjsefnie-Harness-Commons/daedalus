@@ -256,11 +256,3 @@ def test_do_set_permanent_exits_when_the_extension_found_no_such_fix(tmp):
 
     assert code == 'No hotfix with id "ghost"', code
     assert out == '', repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clicontfix_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

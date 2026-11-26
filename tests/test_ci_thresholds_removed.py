@@ -226,11 +226,3 @@ def test_exemptions_survive_a_base_member_this_loader_retired(tmp):
     assert removed.exempt_paths(
         rev, 'HEAD', repo, 'long_line_baseline',
         head['long_line_baseline'], ['backend/kept.py']) == {'backend/kept.py'}
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='thremoved_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -513,11 +513,3 @@ def test_a_failed_query_refuses_at_once_with_its_reason(tmp):
     assert code == 3, (code, err)
     assert err == 'query failed: gh: not found (exit 1)\n', err
     assert text == '', text
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ciwaitreq_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _run_checker,
@@ -360,12 +359,3 @@ def test_set_rewrites_every_site_beside_decoys(tmp):
     r = _run_checker(copy_root)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     assert 'ok:' in r.stdout, r.stdout
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='versioncontract_scanners_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

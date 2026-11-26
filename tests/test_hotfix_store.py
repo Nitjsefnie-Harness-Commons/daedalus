@@ -26,7 +26,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _boundary import run_extension_hotfix_quota  # noqa: E402
 from _repo import EXTENSION_ROOT, declared_version  # noqa: E402
 
@@ -305,11 +304,3 @@ def test_the_two_quotas_leave_the_reserve_the_comment_promises(tmp):
         f'entry ({allowlist_term} bytes) is no longer under the '
         f'delivery-id ledger\'s term ({LEDGER_TERM_BYTES} bytes) the '
         'worker comments size the 3 MiB reserve against')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='hotfixstore_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

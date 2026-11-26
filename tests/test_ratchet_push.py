@@ -312,10 +312,6 @@ def test_push_secrets_bind_only_the_main_push_environment(tmp):
             assert actual == expected, (name, event, ref, actual)
 
 
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ratchetpush_')
-
-
 def test_prefixed_credentials_precede_legacy_environment(tmp):
     from unittest.mock import patch
     mod = _util.load(PUSH, 'ratchet_environment')
@@ -331,7 +327,3 @@ def test_prefixed_credentials_precede_legacy_environment(tmp):
         assert git.call_args.args == ('push', 'git@github.com:o/r.git',
                                       'HEAD:main'), git.call_args
         assert (Path(tmp) / '.ssh/ratchet').read_text() == 'fixture-key\n'
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

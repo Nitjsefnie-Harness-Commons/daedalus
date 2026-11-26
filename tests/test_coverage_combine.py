@@ -155,7 +155,3 @@ def test_parallel_files_from_each_os_artifact_are_unioned(tmp):
         '.coverage.*'))
     assert not list((root / 'coverage-data-windows-latest').glob(
         '.coverage.*'))
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

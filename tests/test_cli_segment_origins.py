@@ -118,7 +118,3 @@ def refuse_missing_origin(argv):
         assert required in message, message
     else:
         assert False, f'{argv} parsed without its origin'
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

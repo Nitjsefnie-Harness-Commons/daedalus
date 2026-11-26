@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 
 
@@ -209,11 +208,3 @@ def test_release_scanners_ignore_caches_and_scan_published_files(tmp):
             path.write_text('tracked release content\n', encoding='utf-8')
     finally:
         ROOT = real_root
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='releasescan_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

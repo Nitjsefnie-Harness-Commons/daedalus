@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
 from _deliveries import real_eval, real_ext_command  # noqa: E402
 from _realbrowser_broken_worker import (  # noqa: E402
@@ -355,12 +354,3 @@ def test_a_timed_eval_carries_every_page_main_leg_and_untimed_none(tmp):
     assert [leg['leg'] for leg in view['legs']] == [
         f'{a} -> {b}' for a, b in zip(chain, chain[1:])], view
     assert (view['world'], view['missing']) == ('page-main', []), view
-
-
-def main():
-    return _realbrowser_controls.run_real_browser_tests(
-        globals(), tmp_prefix='realbrowser_', requires=REQUIRES)
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

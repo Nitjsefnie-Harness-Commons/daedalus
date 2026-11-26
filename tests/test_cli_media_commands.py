@@ -272,7 +272,3 @@ def test_segment_status_subcommand_reports_a_foreign_job_cleanly(tmp):
         assert r.returncode != 0, (r.returncode, r.stdout)
         assert 'owned by a different token' in r.stderr, r.stderr
         assert 'HTTP 409' not in r.stderr, r.stderr
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

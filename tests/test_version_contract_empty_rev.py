@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _version_contract import (  # noqa: E402
     _run_checker,
     _versioned_git_tree,
@@ -68,12 +67,3 @@ def test_check_versions_refuses_an_empty_revision_name(tmp):
     assert 'cannot read an empty revision name' in dirty.stderr, dirty.stderr
     for path, body in before.items():
         assert (copy_root / path).read_bytes() == body, path
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='versioncontract_empty_rev_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

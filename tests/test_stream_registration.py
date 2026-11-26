@@ -86,8 +86,3 @@ def test_a_failed_header_delivery_releases_a_named_stream(tmp):
 
             assert server.stream_service.snapshot() == (0, []), (
                 'the registration outlived the failed header delivery')
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(
-        _util.collect(globals()), tmp_prefix='streamregistration_'))

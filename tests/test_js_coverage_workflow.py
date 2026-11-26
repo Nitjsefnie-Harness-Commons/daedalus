@@ -591,12 +591,3 @@ def test_javascript_gate_reads_floor_from_thresholds_file(tmp):
         json.dumps(document), encoding='utf-8')
     failed = run_step(work, gate, environment, workflow={}, job={})
     assert failed.returncode != 0, (failed.stdout, failed.stderr)
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='jscoverageworkflow_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

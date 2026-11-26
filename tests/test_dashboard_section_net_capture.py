@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
 from _dashsection import section_runner  # noqa: E402
 
@@ -624,11 +623,3 @@ def test_a_request_with_no_body_says_which_flag_fetches_one(_tmp):
                   setup=TABS + NO_BODY, answers=(ANSWER_ONE,))
     assert '"bodyBase64": false' in report['text'], report
     assert '"body": "(no body — use bodies=on)"' in report['text'], report
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashnet_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

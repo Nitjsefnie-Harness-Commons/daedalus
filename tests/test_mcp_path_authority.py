@@ -152,8 +152,3 @@ def test_live_mcp_has_no_server_path_authority(tmp):
             'schemas_with_path_authority': schema_failures,
             'recovered_sentinels': leaked,
         }
-
-
-if __name__ == '__main__':
-    with suite_scope():
-        sys.exit(_util.runner(_util.collect(dict(locals()))))

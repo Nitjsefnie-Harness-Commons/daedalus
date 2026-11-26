@@ -15,7 +15,6 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _queueread  # noqa: E402
-import _util  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
     _assert_slept_its_attempt_budget,
     _scope_map,
@@ -375,7 +374,3 @@ def test_a_queue_read_does_not_retry_a_vanished_entry(tmp):
         raise AssertionError('the vanished entry was swallowed')
     assert len(attempts) == 1, attempts
     assert failure.filename == str(entry), failure
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

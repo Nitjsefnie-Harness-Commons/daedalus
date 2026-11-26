@@ -8,9 +8,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
-from _journey_contract import (  # noqa: E402
-    _util,
-)
 
 
 def test_rendering_of_runs_a_journey_on_the_main_thread(tmp):
@@ -132,12 +129,3 @@ def test_the_mcp_front_end_is_loaded_off_the_journeys_main_thread(tmp):
         front = journeys._load_front_end('http://127.0.0.1:1')
     assert front == 'front end', front
     assert loaded and loaded[0] is not threading.main_thread(), loaded
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeyplacement_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

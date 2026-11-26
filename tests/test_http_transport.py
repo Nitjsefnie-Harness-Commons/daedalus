@@ -521,15 +521,3 @@ def test_the_transport_re_exports_the_answer_types(_tmp):
     from daedalus_bridge import route_answer  # noqa: PLC0415
     assert transport.FileAnswer is route_answer.FileAnswer
     assert transport.BytesAnswer is route_answer.BytesAnswer
-
-
-def main():
-    summary = os.environ.get('DAEDALUS_TEST_SUMMARY', '')
-    with suite_scope():
-        os.environ['DAEDALUS_TEST_SUMMARY'] = summary
-        return _util.runner(_util.collect(globals()),
-                            tmp_prefix='httptransport_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
     ROOT,
-    _util,
     counter_facts,
     planting,
 )
@@ -625,12 +624,3 @@ def test_a_pool_file_must_match_the_measurements_quantity_identity(tmp):
             [str(more)], str(lists_artifact), draws=[str(pool)]) == 0
     written = policy.load(lists_artifact)
     assert written['tolerances'][first] == 30.0, written.get('tolerances')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeybaseline_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -15,7 +15,6 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 from _journey_contract import (  # noqa: E402
     IDENTITY,
     ROOT,
-    _util,
     budget_document,
     counter_facts,
     journeys,
@@ -365,12 +364,3 @@ def test_an_unresolved_row_carries_the_refusal_the_gate_gave(tmp):
         r'| command-round-trip | not measured | 1100 | — | this run could '
         r'not resolve it: the journey measured [2000] net [-9000] and it '
         r'said \| perf |'), row
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeyreport_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

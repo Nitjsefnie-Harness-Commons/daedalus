@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import yaml  # noqa: E402
 from _wffixtures import (  # noqa: E402
     BLOCK_NEEDS, BLOCK_OUTPUTS, _real, _refuses, _replaced)
@@ -574,7 +573,3 @@ def test_the_planted_step_is_refused_and_the_verdict_flips_on_resolution(tmp):
         'scripts/ci/install_lint_tools_that_does_not_exist.py']
     tracked |= {'scripts/ci/install_lint_tools_that_does_not_exist.py'}
     assert unresolved_run_paths(run_text, tracked) == []
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

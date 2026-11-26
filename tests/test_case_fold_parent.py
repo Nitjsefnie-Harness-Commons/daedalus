@@ -611,12 +611,3 @@ def test_a_folded_symlinked_legacy_file_is_still_reserved(tmp):
         assert delivered == 0, delivered
         assert frames == [], frames
         assert alias.is_symlink() and real.exists()
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='casefoldparent_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

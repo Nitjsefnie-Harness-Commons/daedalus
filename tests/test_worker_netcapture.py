@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _netcapture_harness import (  # noqa: E402
     ATTACH, BOUND, DETACH, ENABLE, FROZEN, QUERY, SEND, answers, apis,
     attach_call, channels, cmd, detach_call, entries, errors, finished,
@@ -544,11 +543,3 @@ def test_a_stop_swallows_a_detach_that_failed(tmp):
     ], chromeReject={'debugger.detach': 'target closed'})
     assert apis(outcome, DETACH) == [detach_call(5)], outcome
     assert answers(outcome)[-1]['count'] == 1, outcome
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='netcapture_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

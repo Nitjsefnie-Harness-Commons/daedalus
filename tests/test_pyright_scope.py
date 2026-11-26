@@ -117,7 +117,3 @@ def test_the_two_configs_agree_outside_their_deliberate_differences(tmp):
         f'other than {sorted(deliberate)} must stay byte-identical, so the '
         'two scopes are one policy stated twice rather than two drifting '
         'ones')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

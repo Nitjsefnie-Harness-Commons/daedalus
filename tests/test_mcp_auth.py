@@ -566,9 +566,3 @@ def test_mcp_host_and_origin_repeated_headers_are_rejected(tmp):
         assert (host_replies == expected_hosts
                 and origin_replies == expected_origins), (
                     host_replies, origin_replies)
-
-
-if __name__ == '__main__':
-    with suite_scope():
-        sys.exit(_util.runner(_util.collect(dict(locals())),
-                              tmp_prefix='mcpauth_'))

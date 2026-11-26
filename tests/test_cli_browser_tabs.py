@@ -190,11 +190,3 @@ def test_do_ext_reload_names_the_cache_bypass_in_its_output_too(tmp):
         assert recorded.calls == [('_reload', 'reload', fields)], \
             recorded.calls
         assert out == expected, repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clibrowtab_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

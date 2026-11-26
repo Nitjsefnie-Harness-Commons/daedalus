@@ -271,8 +271,3 @@ def test_mcp_title_preserves_application_paths(tmp):
 def test_mcp_url_preserves_application_paths(tmp):
     del tmp
     _mcp_preserves_application_paths('url')
-
-
-if __name__ == '__main__':
-    with suite_scope():
-        sys.exit(_util.runner(_util.collect(globals())))

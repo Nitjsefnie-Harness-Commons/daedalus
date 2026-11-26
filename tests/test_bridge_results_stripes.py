@@ -415,12 +415,3 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='bridgeresultstripes_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

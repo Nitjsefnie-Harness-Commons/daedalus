@@ -277,8 +277,3 @@ def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):
             lambda: polls.append(1) or len(polls) >= 2,
             what='the frozen condition')
     assert len(polls) == 2, polls
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals())),
-                          tmp_prefix='starve_'))

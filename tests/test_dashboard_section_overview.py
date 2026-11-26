@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
 from _dashsection import section_runner  # noqa: E402
 
@@ -444,11 +443,3 @@ def _stamp(ms):
     host's, so the expectation is computed in it rather than pinned to a
     literal."""
     return time.strftime('%H:%M:%S', time.localtime(ms / 1000))
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashovw_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

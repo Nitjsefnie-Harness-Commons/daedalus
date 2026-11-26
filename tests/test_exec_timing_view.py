@@ -347,11 +347,3 @@ def test_exec_renders_timing_only_for_a_result_that_carries_it(tmp):
         assert view['legs'][-1]['ms'] == 7994.0, view
         assert view['total_ms'] == 8000.0, view
     assert reads == ['wall', 'window'] * 2, reads
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='timing_view_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

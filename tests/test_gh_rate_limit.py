@@ -530,11 +530,3 @@ def test_the_instant_is_taken_from_the_first_carrier_that_carries_one(tmp):
                  'errors': [{'type': 'RATE_LIMITED',
                              'extensions': {'resetAt': STAMP}}]}})
     assert second.resume_at == STAMP_EPOCH, second.resume_at
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ghratelimit_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

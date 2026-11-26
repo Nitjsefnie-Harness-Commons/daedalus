@@ -442,11 +442,3 @@ def test_a_refusal_naming_no_instant_is_the_plain_minute(tmp):
                                      resume_at)
         assert watcher._wait_seconds(refusal, now=FROZEN) == expected, (
             resume_at)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ghclient_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

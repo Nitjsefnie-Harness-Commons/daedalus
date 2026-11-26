@@ -21,7 +21,6 @@ from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _gm_harness  # noqa: E402
 import _gm_two_origin  # noqa: E402
 
@@ -513,11 +512,3 @@ def test_a_storage_callback_entered_twice_still_serialises_writes(tmp):
     assert case['errors'].count(AGGREGATE_ERROR) == 1, case
     assert case['seeded'] + 3 * case['charge'] > case['cap'], case
     assert case['total'] == case['seeded'] + 2 * case['charge'], case
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='gmstorage_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

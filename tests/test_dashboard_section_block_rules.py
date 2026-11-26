@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
 from _dashsection import section_runner  # noqa: E402
 
@@ -283,11 +282,3 @@ def test_remove_all_arms_before_it_sends_and_omits_the_rule_id(_tmp):
     assert bulk['type'] == 'unblock-requests', report
     assert 'ruleId' not in bulk, report
     assert report['toasts'] == [{'type': 'ok', 'text': 'all removed'}], report
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dashblk_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

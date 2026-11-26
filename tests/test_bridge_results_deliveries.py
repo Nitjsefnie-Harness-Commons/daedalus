@@ -546,7 +546,3 @@ def test_a_retried_result_never_replaces_a_newer_one(tmp):
         stored = json.loads((docroot / 'results' / f'{TOK}_extension.json')
                             .read_text(encoding='utf-8'))
         assert stored['deliveryId'] == '1700000000001_000002', stored
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

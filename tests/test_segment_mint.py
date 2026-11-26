@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
@@ -642,11 +641,3 @@ def test_a_list_behind_an_in_flight_allow_sees_the_write(tmp):
         'id': 'list', 'error': None, 'result': {'origins': [ALLOWED]},
     }, outcome
     assert outcome['stored'] == [ALLOWED], outcome
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='segmentmint_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

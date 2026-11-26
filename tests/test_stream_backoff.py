@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import STRICT_FETCH  # noqa: E402
@@ -625,12 +624,3 @@ def test_a_post_boot_token_change_still_reconnects_after_the_gate(tmp):
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
     assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='streambackoff_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

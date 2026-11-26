@@ -105,8 +105,3 @@ def test_claim_keeps_its_serialization_and_runner_shape(tmp):
     steps = step_mappings(workflow, 'claim')
     assert steps is not None and len(steps) == 1, (
         'claim.yml must have exactly one action step')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals())),
-                          tmp_prefix='claimworkflow_'))

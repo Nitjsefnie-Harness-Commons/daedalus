@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _workflowrun  # noqa: E402
 import _coverage_comment_steps as _ccs  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
@@ -646,7 +645,3 @@ def test_the_stub_writer_never_reaches_the_text_layer(tmp):
     write_executable(target, _GH_COMMENT_STUB)
     assert RecordingPath.text_writes == 0
     assert target.read_bytes() == _GH_COMMENT_STUB.encode('utf-8')
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

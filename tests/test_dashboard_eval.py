@@ -23,7 +23,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _DOM = _dashnode.DOM
@@ -520,11 +519,3 @@ def test_saving_token_restarts_stream_independently_of_probe(_tmp):
             {'target': 'https://example.com/second/stream?tab=dashboard',
              'auth': 'Bearer replacement-token'},
         ], seen
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='dasheval_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

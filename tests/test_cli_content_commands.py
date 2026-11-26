@@ -112,7 +112,3 @@ def test_store_hotfix_sends_a_code_value_verbatim(tmp):
             'the store-hotfix command')
     assert queued['code'] == str(decoy), queued
     assert queued['fixId'] == 'ambiguous', queued
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

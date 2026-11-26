@@ -383,7 +383,3 @@ def test_a_replace_that_never_clears_is_still_answered(tmp):
             'token': TOK, 'tabId': 'refused', 'id': 'lost', 'result': 'value'})
         assert status == 500, (status, payload)
         assert payload == {'error': 'result storage failure'}, payload
-
-
-if __name__ == '__main__':
-    raise SystemExit(_util.runner(_util.collect(globals())))

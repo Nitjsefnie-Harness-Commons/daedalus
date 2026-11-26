@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
 
 
@@ -43,11 +42,3 @@ def test_candidate_program_text_does_not_enter_probe(tmp):
     )
     for candidate, marker in candidates:
         _assert_candidate_does_not_enter_program(tmp, candidate, marker)
-
-
-def main():
-    return _util.runner(_util.collect(globals()))
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

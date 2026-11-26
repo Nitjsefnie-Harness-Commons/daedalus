@@ -656,12 +656,3 @@ def test_the_stream_expires_a_command_by_the_ttl_not_the_max_age(tmp):
 
         assert delivered['id'] == 'inside-the-ttl', delivered
         assert not stale.exists(), stale
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='streamlifecycle_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

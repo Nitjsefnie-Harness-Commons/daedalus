@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _dashshell import run_scenario  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
@@ -614,11 +613,3 @@ report({ seen });
 """, modules=_APP_SSE)
     assert report['seen'] == [['sse-status', True], ['sse-status', True],
                               ['tab-updated', False]], report
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='app_shell_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

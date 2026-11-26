@@ -85,7 +85,3 @@ def test_every_typed_subcommand_sends_its_documented_command(tmp):
             assert 'tab' not in queued, (argv, queued)
             for key, value in fields.items():
                 assert queued.get(key) == value, (argv, key, queued)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

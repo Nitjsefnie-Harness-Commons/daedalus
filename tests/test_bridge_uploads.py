@@ -653,11 +653,3 @@ def test_the_credential_stays_inside_the_bridge(tmp):
         assert 'token' not in stored, stored
         assert 'token' not in delivery, delivery
         assert not [line for line in served if TOK in line], served
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='bridgeuploads_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

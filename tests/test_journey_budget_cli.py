@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 import _journey_contract  # noqa: E402
 from _journey_contract import (  # noqa: E402
     ROOT,
@@ -664,12 +663,3 @@ def test_the_recording_boundary_is_pinned_in_both_directions(tmp):
         assert budget.read_bytes() == before, (
             f'a report whose round count was {label} rewrote the artefact '
             f'anyway: {done.stdout}')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeycli__')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

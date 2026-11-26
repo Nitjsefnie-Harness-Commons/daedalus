@@ -88,7 +88,3 @@ def test_fetch_timings_larger_counts_keep_the_selection(tmp):
         for entry, visible in zip(TIMINGS, shown):
             present = entry['url'] in out
             assert present is visible, (argv, entry['url'], out)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

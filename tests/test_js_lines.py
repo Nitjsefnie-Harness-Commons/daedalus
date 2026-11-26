@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -320,11 +319,3 @@ def test_shipped_denominators_are_pinned_for_witness_files(tmp):
         assert len(found) == expected, (
             f'{relative}: {len(found)} code lines where '
             f'{expected} were pinned')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='jslines_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

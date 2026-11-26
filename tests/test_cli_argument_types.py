@@ -132,7 +132,3 @@ def test_well_formed_values_parse_to_their_typed_values(tmp):
                         ('null', None)):
         args = accepted(['cdp', 'Page.enable', '-p', text])
         assert args.params == value, (text, args.params)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

@@ -544,11 +544,3 @@ def test_do_url_asks_the_page_for_its_location_in_the_tab(tmp):
     assert _rendered(out) == (
         f'{OUT} _url {OUT} bcast  (13 bytes)\n'
         f'{IN} _url\nhttps://example.com/a\n'), repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clieval_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

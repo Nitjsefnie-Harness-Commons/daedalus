@@ -372,11 +372,3 @@ def test_a_query_sig_still_authorizes_a_segment_route(tmp):
             base + f'/segment-status?job={job}&sig={sig}')
         assert status == 200 and payload == {'done': [1], 'count': 1}, (
             status, payload)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='segcapability_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

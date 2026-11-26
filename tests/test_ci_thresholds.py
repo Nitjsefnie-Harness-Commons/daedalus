@@ -368,11 +368,3 @@ def test_successful_render_is_deterministic_loadable_and_mode_stable(tmp):
     thresholds.write(target, thresholds.load(target))
     assert target.read_bytes() == first
     assert not list(target.parent.glob(f'.{target.name}.*.tmp'))
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='cithresholds_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

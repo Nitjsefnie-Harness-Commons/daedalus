@@ -124,11 +124,3 @@ def test_list_hotfixes_prints_an_absent_scope_as_absent(tmp):
     assert SCOPE in scoped, repr(out)
     assert '(none)' in bare, repr(out)
     assert 'None' not in bare and 'null' not in bare, repr(out)
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='clihotfix_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

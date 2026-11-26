@@ -676,11 +676,3 @@ def test_both_contract_surfaces_agree_on_what_exit_four_means(tmp):
     # merge-gated, and is the one place the word belongs.
     assert 'gates the merge' in ' '.join((mod.__doc__ or '').split()), (
         'the cb67badf narrative no longer says what gates it')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='ciwaitgate_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

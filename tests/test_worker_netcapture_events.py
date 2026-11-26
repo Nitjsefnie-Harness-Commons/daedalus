@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _netcapture_harness import (  # noqa: E402
     BOUND, FROZEN, answers, buffered, errors, event, finished, read,
     request,
@@ -266,11 +265,3 @@ def test_the_oldest_is_evicted_past_the_limit(tmp):
     assert [entry['requestId'] for entry in over] == ['r2', 'r3'], over
     assert [entry['url'] for entry in over] == [
         'https://a.example.com/two', 'https://a.example.com/three'], over
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='netcaptureev_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

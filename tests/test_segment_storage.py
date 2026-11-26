@@ -689,11 +689,3 @@ def test_z_the_decorated_controls_restore_the_environment(_tmp):
     assert now == _DAEDALUS_BASELINE, (
         f'leaked {sorted(now.items())} '
         f'!= {sorted(_DAEDALUS_BASELINE.items())}')
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='segstorage_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

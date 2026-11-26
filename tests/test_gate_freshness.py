@@ -591,11 +591,3 @@ def test_a_pull_request_not_based_on_main_is_skipped(tmp):
         'base': {'ref': 'release/1.0'},
     }
     assert m.select_heads([pr]) == []
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='gatefresh_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

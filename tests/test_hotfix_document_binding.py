@@ -35,7 +35,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _hotfixharness import run_hotfix_case  # noqa: E402
 from _hotfix_outcome import _delivered, _errors  # noqa: E402
 
@@ -544,12 +543,3 @@ def test_a_replay_that_cannot_read_the_store_runs_nothing_and_answers(tmp):
     ran = run_hotfix_case(case)
     assert _delivered(ran) == {'doc-2': ['fix1']}, ran
     assert not _errors(ran), ran
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='hotfixdocbind_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

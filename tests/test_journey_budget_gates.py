@@ -643,12 +643,3 @@ def test_valgrind_install_restores_and_replenishes_debs_and_refuses_missing(
         assert (cache / 'candidate.deb').read_bytes() == b'candidate'
         if state != 'cold':
             assert (archives / 'cached.deb').read_bytes() == b'cached'
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeygates_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

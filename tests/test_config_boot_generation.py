@@ -23,7 +23,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
@@ -491,12 +490,3 @@ def test_a_successful_boot_arms_the_heartbeat(tmp):
     # The success path itself ran: the fresh install minted its token, so the
     # arming is observed on a resolved read, never a rejected one.
     assert outcome['mintedTokens'] == ['relay-1'], outcome
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='configbootgen_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

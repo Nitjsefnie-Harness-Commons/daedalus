@@ -569,11 +569,3 @@ def test_a_naive_timestamp_is_read_as_utc(tmp):
         # either way and the control would be green with the defect in
         # place.
         assert set(anchors) == {'replace'}, sorted(set(anchors))
-
-
-def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='cigate_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

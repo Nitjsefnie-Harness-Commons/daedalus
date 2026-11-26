@@ -389,7 +389,3 @@ def test_the_reporter_never_opens_the_configured_data_file(tmp):
     assert not data_file.exists(), data_file
     after = _tree_paths(tmp)
     assert after == before, set(after).symmetric_difference(before)
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

@@ -234,12 +234,3 @@ def test_a_legacy_file_the_bridge_cannot_remove_keeps_being_delivered(tmp):
         finally:
             response.close()
             conn.close()
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='bridgelegacystreams_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

@@ -192,12 +192,3 @@ def test_the_chain_root_is_a_fixpoint(tmp):
         assert root == again, (name, root, again)
         # And the fold does not depend on how the name was spelled.
         assert store.seg_lock_for(name) is store.seg_lock_for(root), name
-
-
-def main():
-    return _util.runner(
-        _util.collect(globals()), tmp_prefix='seglockkey_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

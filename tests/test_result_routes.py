@@ -406,15 +406,3 @@ def test_a_compat_consume_removes_the_delivery_copy_in_the_passed_root(tmp):
     assert status == 200 and consumed.get('value') == 'paired', consumed
     assert not (root / f'{token}_2.json').exists()
     assert not delivery.exists(), 'the delivery copy under this root stayed'
-
-
-def main():
-    summary = os.environ.get('DAEDALUS_TEST_SUMMARY', '')
-    with suite_scope():
-        os.environ['DAEDALUS_TEST_SUMMARY'] = summary
-        return _util.runner(_util.collect(globals()),
-                            tmp_prefix='resultroutes_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

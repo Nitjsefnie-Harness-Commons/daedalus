@@ -120,11 +120,3 @@ def test_path_equality_rechecks_a_degraded_resolution_before_refusing(tmp):
     assert same is True, same
     assert different is False, different
     assert calls == expected_calls, calls
-
-
-def main():
-    return _util.runner(_util.collect(globals()))
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

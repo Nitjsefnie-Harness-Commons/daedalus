@@ -221,7 +221,3 @@ def test_token_one_off_override_wins(tmp):
                                       DAEDALUS_TOKEN_OVERRIDE=TOK))
         assert r.returncode == 0, (r.returncode, r.stderr)
         assert 'https://example.com/override' in r.stdout, r.stdout
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))

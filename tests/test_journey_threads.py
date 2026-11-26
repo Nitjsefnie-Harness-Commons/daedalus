@@ -17,9 +17,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _journey_contract  # noqa: E402
-from _journey_contract import (  # noqa: E402
-    _util,
-)
 
 # The front end's signature has no literal HERE, deliberately: its owner is
 # the installed extension, and `front_end_symbol()` derives the init symbol
@@ -584,12 +581,3 @@ def test_the_artefact_is_the_table_it_was_recorded_under(tmp):
         'an entry at or below tolerance_pct means the artefact was '
         'recorded under the pre-floor convention and must be re-derived: '
         f'{own}')
-
-
-def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='journeybudget_')
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

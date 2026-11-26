@@ -10,7 +10,6 @@ from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _segments import (  # noqa: E402
     JOB_HEADER, SEG_HEADER, SIG_HEADER, TOTAL_HEADER)
@@ -177,7 +176,3 @@ def test_every_upload_of_a_job_shares_one_url_and_carries_its_headers(tmp):
         (str(i), '6') for i in range(1, 7)], posts
     assert {(c[2][JOB_HEADER], c[2][SIG_HEADER]) for c in posts} == {
         (quote(job, safe=''), 'given-sig')}, posts
-
-
-if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))
