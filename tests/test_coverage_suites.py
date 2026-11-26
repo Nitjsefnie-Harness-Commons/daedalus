@@ -216,7 +216,8 @@ def test_every_suite_is_measured_in_its_own_process(tmp):
         assert len({tuple(x['process']) for x in invocations}) == len(expected)
         assert {Path(x['argv'][-1]).name for x in invocations} == expected
         assert {tuple(x['argv'][:-1]) for x in invocations} <= {
-            ('run', '--parallel-mode', '-m', 'pytest')}
+            ('run', '--parallel-mode', '-m', 'pytest',
+             '-p', 'no:cacheprovider')}
 
 
 def test_require_all_applies_only_to_the_shard(tmp):
@@ -271,9 +272,11 @@ def test_ran():
     suites = {name: suite_source for name in (
         'test_alpha.py', 'test_beta.py', 'test_gamma.py')}
     result, _invocations = _coverage_tree(
-        tmp, suites, real_coverage=True)
+        tmp, suites, real_coverage=True, args=('--require-all',))
     assert result.returncode == 0, (result.stdout, result.stderr)
     tree = Path(tmp) / 'tree'
+    assert not (tree / '.pytest_cache').exists(), sorted(
+        p.name for p in tree.iterdir())
     suite_pids = {
         int((tree / 'tests' / Path(name).with_suffix('.pid')).read_text(
             encoding='ascii'))
