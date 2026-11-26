@@ -141,11 +141,17 @@ coverage==7.17.4 \
 # The pytest toolchain the suite runs under: pytest and its whole
 # dependency closure, which hash mode requires pinned (pytest-xdist for
 # `-n auto`). colorama is Windows-only and carries the marker pytest gives it.
-# Versions were taken from Nitjsefnie-Actions/test-ratchet v1.0.0's pins.
+# Versions were taken from Nitjsefnie-Actions/test-ratchet v1.0.0's pins,
+# except pytest's own artifact.
+#
+# pytest is 9.2.0 rebuilt as 9.2.0+osc1 from the Nitjsefnie-OSC/pytest fork:
+# on win32, stock 9.2.0 crashes collection when a listed directory entry
+# vanishes before the samefile prune, as a concurrent run's renamed-away
+# cache directory does. A URL pin carries no version, so Dependabot never
+# bumps this one; move it with the fork's next release.
 
-pytest==9.2.0 \
-    --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588 \
-    --hash=sha256:97c4f3b1f3c7414aa36465e09b8220f1d03627993bd51b1282e193753c80557b
+pytest @ https://github.com/Nitjsefnie-OSC/pytest/releases/download/9.2.0%2Bosc1/pytest-9.2.0%2Bosc1-py3-none-any.whl \
+    --hash=sha256:8f4f630cf428cce7044968f36b6727ab019a4da1c79a0c0665b9c3b70bc163aa
 
 pluggy==1.7.0 \
     --hash=sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec \
