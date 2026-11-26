@@ -21,7 +21,8 @@ from _completion import run_to_completion
 # promise here, as it is for `_dashnode.DOM`.
 # pylint: disable-next=unused-import
 from _log_safe_cases import log_safe_cases  # noqa: F401
-from _teardown import OwnedTemporaryDirectory, settle
+# pylint: disable-next=unused-import
+from _teardown import OwnedTemporaryDirectory, suite_root  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 # run_tests.py starts the sorted suites in a process wave, so each process's
@@ -591,11 +592,7 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
     """
     _report_safely()
     failed, skipped = [], []
-    # The acquisition stays outside the try: if it raises, `td` is unbound and
-    # the finally would report an UnboundLocalError over the original OSError.
-    td = OwnedTemporaryDirectory(tmp_prefix)
-    try:
-        tmp = os.path.realpath(td.name)
+    with suite_root(tmp_prefix) as tmp:
         for t in tests:
             d = os.path.join(tmp, t.__name__)
             os.makedirs(d, exist_ok=True)
@@ -622,9 +619,6 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
                 print(f'  FAIL  {t.__name__}: '
                       f'SystemExit({_rendered_safely(e.code)}) ended the run '
                       f'from inside a test')
-    finally:
-        if not settle(td.cleanup):
-            print(f'  WARN  temporary tree left behind: {td.name}')
     passed = len(tests) - len(failed) - len(skipped)
     summary = f'\n{passed}/{len(tests)} passed'
     if skipped:
