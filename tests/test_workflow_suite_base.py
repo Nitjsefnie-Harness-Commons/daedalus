@@ -307,6 +307,7 @@ def test_a_job_running_pytest_over_the_tree_is_in_the_policed_set(tmp):
     runners = _suite_runners(_tracked_scripts(ROOT))
     for run, policed in (('python -m pytest -n auto tests/', True),
                          ('pytest -n auto', True),
+                         ('pytest --ignore tests/test_b.py', True),
                          ('python run_tests.py', True),
                          ('python -m pytest tests/test_a.py', False)):
         workflow = ('jobs:\n  suites:\n    runs-on: ubuntu-latest\n'
