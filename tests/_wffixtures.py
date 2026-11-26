@@ -92,13 +92,13 @@ def _audit_step(name):
     return step_scalar(workflow, 'pip-audit', name, 'run')
 
 
-# One fixture per arm of audit.yml's retry block, with a value ON each
-# predicate and one just PAST it, or "retries this" and "gives up on that"
-# look alike. The bare-ServiceError and 401/403/404 rows split a narrow
-# classifier from a broad one; the multi-line report is a real audit's shape.
-# A row matching both arms pins the ORDER of the block's two tests: its retry
-# predicate matches and its refusal one does not, so reading the retry test
-# first runs it three times. The 429 rows pin what the 429 EXCEPTION admits.
+# One fixture per arm of audit.yml's retry block, a value ON each predicate
+# and one just PAST it, or "retries this" and "gives up on that" look alike.
+# The bare-ServiceError and 401/403/404 rows split a narrow classifier from a
+# broad one; the multi-line report is a real audit's shape.
+# A row matching both arms pins the ORDER of the block's two tests: a retry-
+# first block runs it three times, a refusal-first one reports at once. The
+# 429 rows pin what the 429 EXCEPTION admits.
 # (label, what pip-audit wrote, how many times the block ran it, its exit).
 AUDIT_RETRY_FIXTURES = (
     ('clean', 'No known vulnerabilities found\n', 1, 0),
@@ -178,10 +178,10 @@ def audit_step_outcome(body, output, cwd, env, code=1):
     """Run audit.yml's own retry block over one pip-audit output.
 
     `pip-audit` and `sleep` become shell functions, so the block's OWN
-    control flow answers: each run of the tool and its arguments
-    (`runs.log`, not the block's "retrying" line), its exit, what it
-    printed, and every sleep it took (`sleeps.log`), so a retry or backoff
-    announced without being taken cannot pass for one.
+    control flow answers: the tool's runs (`runs.log`, not the block's
+    "retrying" line), its exit, output and sleeps (`sleeps.log`): a retry or
+    backoff announced without being taken cannot pass. `runs` counts attempts,
+    omitting the `--disable-pip` base-release audit that follows each.
 
     The block is handed to bash through `-c`, never `$( )`: macOS ships
     bash 3.2, whose here-doc handling inside a substitution differs.
@@ -194,7 +194,7 @@ def audit_step_outcome(body, output, cwd, env, code=1):
     (root / 'fixture.out').write_text(output, encoding='utf-8')
     (root / 'runs.log').write_text('', encoding='utf-8')
     (root / 'sleeps.log').write_text('', encoding='utf-8')
-    if not (root / 'requirements-test.txt').exists():  # the step derives one
+    if not (root / 'requirements-test.txt').exists():  # step derives from it
         (root / 'requirements-test.txt').write_bytes(
             (ROOT / 'requirements-test.txt').read_bytes())
     script = ('sleep() { echo "$1" >> sleeps.log; }\n'
