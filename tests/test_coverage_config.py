@@ -35,17 +35,14 @@ _SKILL_WATCHERS = ('ci_watch.py', 'pr_comment_watch.py', 'watch_all.py')
 def _omitted(relative):
     """Does this repository's omit list drop `relative`?
 
-    Resolved the way the reporter resolves it: `run:omit` and `report:omit`
-    through `prep_patterns` into the same GlobMatcher, matched against the
-    absolute path coverage hands the matcher.
+    Resolved the way coverage resolves it: `run:omit` through
+    `prep_patterns` into a GlobMatcher, matched against the absolute path
+    coverage hands the matcher.
     """
     config = Coverage(config_file=str(_RCFILE)).config
-    patterns = []
-    for option in ('run:omit', 'report:omit'):
-        configured = config.get_option(option)
-        if isinstance(configured, list):
-            patterns.extend(configured)
-    matcher = GlobMatcher(prep_patterns(patterns))
+    configured = config.get_option('run:omit')
+    assert isinstance(configured, list), configured
+    matcher = GlobMatcher(prep_patterns(configured))
     return matcher.match(str((ROOT / relative).resolve()))
 
 
