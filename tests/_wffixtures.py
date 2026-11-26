@@ -13,8 +13,7 @@ from _wfgraph import _tests_yml
 from _yamlread import step_scalar
 from _yamlscalar import YAMLReadError
 
-# Verbatim blocks from .github/workflows/tests.yml: the suites job's needs,
-# and the changes job's outputs.
+# Verbatim tests.yml blocks: the suites job's needs, the changes job's outputs.
 BLOCK_NEEDS = (
     '    needs:\n'
     '      - changes\n'
@@ -64,9 +63,8 @@ def _refuses(call, *args, contains=None):
 def _value_error(call):
     """The ValueError `call` raised, or None when it raised none.
 
-    The None is the assertion, not an accident: a caller comparing the
-    return against the message it expects goes red on an acceptance,
-    where `_refuses` raises on one.
+    The None is the assertion: a caller comparing it with the message it
+    expects goes red on an acceptance, where `_refuses` raises on one.
     """
     try:
         call()
@@ -250,9 +248,8 @@ def assert_the_audit_covers_every_dependency_surface():
     assert generated, 'the workflow generates no extras file'
     assert f'--requirement {generated.group(1)}' in workflow, (
         generated.group(1))
-    # An empty generated file narrows the gate in silence: pip-audit accepts
-    # it, the other surfaces still report clean, and the only third-party code
-    # that runs in production goes unaudited.
+    # An empty generated file narrows the gate silently: pip-audit accepts it,
+    # the rest reports clean, and production's third-party code goes unaudited.
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
