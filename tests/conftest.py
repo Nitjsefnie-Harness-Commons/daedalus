@@ -171,12 +171,10 @@ def pytest_runtest_logreport(report):
 
 
 def pytest_sessionfinish(session):
-    if hasattr(session.config, 'workerinput'):
-        return  # an xdist worker sees only part of each file
     reporter = session.config.pluginmanager.get_plugin('terminalreporter')
     write = getattr(reporter, 'write_line', print)
     for path, counts in sorted(OUTCOMES.items()):
-        if counts['passed'] or counts['failed']:
+        if counts['passed']:
             continue
         if NEEDS[path]:
             write(f"NOT RUN HERE: {path} ({counts['skipped']} skipped, "
