@@ -146,10 +146,11 @@ jobs:
         # reporting it, and — worse — a gate that goes red for reasons
         # unrelated to its subject is one people learn to ignore.
         #
-        # So there are exactly five outcomes, and the block reaches all five:
+        # So there are exactly six outcomes, and the block reaches all six:
         #
         #   * a clean run exits 0 and prints the output;
-        #   * a real finding matches neither test below and is reported
+        #   * a real finding matches neither test below, carries pip-audit's
+        #     `Found N known vulnerabilities` summary, and is reported
         #     immediately and verbatim;
         #   * a 4xx that is not a 429 is the index answering about THIS
         #     request rather than about the network, so it is reported at
@@ -159,7 +160,12 @@ jobs:
         #     falls through to it;
         #   * a transport failure or a 5xx matches the retry test, and each
         #     attempt backs off further;
-        #   * three retries exhausted exits 1 saying so, with the output.
+        #   * three retries exhausted exits 1 saying so, with the output; a
+        #     failed `pip` upgrade says that instead, since pip-audit drops
+        #     pip's own error and the output cannot tell a transport failure
+        #     from a permanent one;
+        #   * any other failure carries no such summary, so it is reported as
+        #     pip-audit failing, not as findings.
         #
         # Every arm above is pinned by a fixture in tests/_wffixtures.py,
         # which runs this block rather than reading it, and asserts on what it
@@ -195,12 +201,20 @@ jobs:
               continue
             fi
 
-            echo "pip-audit reported findings:" >&2
+            if grep -qE 'Found [0-9]+ known vulnerabilit' audit.out; then
+              echo "pip-audit reported findings:" >&2
+            else
+              echo "pip-audit failed without reporting findings:" >&2
+            fi
             cat audit.out >&2
             exit 1
           done
 
-          echo "pip-audit could not reach PyPI after 3 attempts:" >&2
+          if grep -qi 'failed to upgrade .pip.' audit.out; then
+            echo "pip-audit could not upgrade pip in its virtual environment after 3 attempts; its output does not carry pip's own error:" >&2
+          else
+            echo "pip-audit could not reach PyPI after 3 attempts:" >&2
+          fi
           cat audit.out >&2
           exit 1
 
@@ -210,7 +224,7 @@ jobs:
         # shared invocation above: every unpinned surface there would
         # fail on hashes it does not carry. A dedicated run resolves the
         # hashed pins against their own hashes and audits them
-        # alone, with the same five-outcome retry for the same reasons.
+        # alone, with the same six-outcome retry for the same reasons.
         # It asks OSV, not PyPI: pytest's pin carries a local version (+osc1)
         # that is not on PyPI, whose feed skips it. OSV orders X+osc1 above X,
         # so the pin matches a range that is fixed above X but not one that
@@ -264,12 +278,20 @@ jobs:
               continue
             fi
 
-            echo "pip-audit reported findings:" >&2
+            if grep -qE 'Found [0-9]+ known vulnerabilit' audit-test.out; then
+              echo "pip-audit reported findings:" >&2
+            else
+              echo "pip-audit failed without reporting findings:" >&2
+            fi
             cat audit-test.out >&2
             exit 1
           done
 
-          echo "pip-audit could not reach PyPI or OSV after 3 attempts:" >&2
+          if grep -qi 'failed to upgrade .pip.' audit-test.out; then
+            echo "pip-audit could not upgrade pip in its virtual environment after 3 attempts; its output does not carry pip's own error:" >&2
+          else
+            echo "pip-audit could not reach PyPI or OSV after 3 attempts:" >&2
+          fi
           cat audit-test.out >&2
           exit 1
 

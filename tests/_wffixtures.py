@@ -93,82 +93,85 @@ def _audit_step(name):
 # One fixture per arm of audit.yml's retry block, a value ON each predicate
 # and one just PAST it, or "retries this" and "gives up on that" look alike.
 # The bare-ServiceError and 401/403/404 rows split a narrow classifier from a
-# broad one; the multi-line report is a real audit's shape.
-# A row matching both arms pins the ORDER of the block's two tests: a retry-
-# first block runs it three times, a refusal-first one reports at once. The
-# 429 rows pin what the 429 EXCEPTION admits.
-# (label, what pip-audit wrote, how many times the block ran it, its exit).
+# broad one; the multi-line report is a real audit's shape. A row matching
+# both arms pins the ORDER of the two tests (retry-first runs it three times,
+# refusal-first reports at once); the 429 rows pin the 429 EXCEPTION.
+# (label, what pip-audit wrote, times the block ran it, outcome): a key of
+# AUDIT_OUTCOME_SAYS, or `C` for clean.
+AUDIT_OUTCOME_SAYS = {'F': 'reported findings', 'X': 'without reporting',
+                      'R': '4xx', 'U': 'could not reach', 'P': 'upgrade pip'}
 AUDIT_RETRY_FIXTURES = (
-    ('clean', 'No known vulnerabilities found\n', 1, 0),
+    ('clean', 'No known vulnerabilities found\n', 1, 'C'),
     ('one real finding', 'Found 1 known vulnerability in test/pkg\n'
-     'Upgrade test/pkg to 1.2.3 to fix it.\n', 1, 1),
+     'Upgrade test/pkg to 1.2.3 to fix it.\n', 1, 'F'),
     ('a multi-line findings report',
-     'Found 2 known vulnerabilities in 1 package\n\n'
-     'Name: test/pkg\n'
-     'Version: 1.0.0\n'
-     'Fixed-by: 1.2.3\n'
-     'Vulnerability ID: PYSEC-2026-1\n\n'
-     'To fix all vulnerabilities, run:\n'
-     'pip install test/pkg==1.2.3\n', 1, 1),
-    ('ServiceError carrying a 503',
-     'pip_audit._service.interface.ServiceError: pypi.org returned 503 '
-     'Server Error\n', 3, 1),
-    ('a bare ServiceError', 'ServiceError:\n', 3, 1),
+     'Found 2 known vulnerabilities in 1 package\n\nName: test/pkg\n'
+     'Version: 1.0.0\nFixed-by: 1.2.3\nVulnerability ID: PYSEC-2026-1\n\n'
+     'To fix all vulnerabilities, run:\npip install test/pkg==1.2.3\n',
+     1, 'F'),
+    ('a bare ServiceError', 'ServiceError:\n', 3, 'U'),
     ('requests 500', 'HTTPError: 500 Server Error: Internal Server Error\n',
-     3, 1),
-    ('requests 502', 'HTTPError: 502 Bad Gateway\n', 3, 1),
-    ('requests 503', 'HTTPError: 503 Service Unavailable\n', 3, 1),
-    ('requests 504', 'HTTPError: 504 Gateway Timeout\n', 3, 1),
+     3, 'U'),
+    ('requests 502', 'HTTPError: 502 Bad Gateway\n', 3, 'U'),
+    ('requests 503', 'HTTPError: 503 Service Unavailable\n', 3, 'U'),
+    ('requests 504', 'HTTPError: 504 Gateway Timeout\n', 3, 'U'),
     ('a 429 in the requests spelling',
-     'HTTPError: 429 Client Error: Too Many Requests\n', 3, 1),
+     'HTTPError: 429 Client Error: Too Many Requests\n', 3, 'U'),
     ('a 429 without "Client Error"',
-     'HTTPError: 429 Too Many Requests\n', 3, 1),
+     'HTTPError: 429 Too Many Requests\n', 3, 'U'),
     ('an SSLError', 'urllib3.exceptions.SSLError: certificate verify '
-     'failed\n', 3, 1),
+     'failed\n', 3, 'U'),
     ('a reset connection',
-     'ConnectionResetError: Connection reset by peer\n', 3, 1),
+     'ConnectionResetError: Connection reset by peer\n', 3, 'U'),
     ('an aborted connection', 'ConnectionAbortedError: Software caused '
-     'connection abort\n', 3, 1),
+     'connection abort\n', 3, 'U'),
     ('a read timeout', 'ReadTimeout: HTTPConnectionPool(host=pypi.org): '
-     'Read timed out.\n', 3, 1),
-    ('a DNS failure', 'Temporary failure in name resolution\n', 3, 1),
+     'Read timed out.\n', 3, 'U'),
+    ('a DNS failure', 'Temporary failure in name resolution\n', 3, 'U'),
     ('an unreachable advisory feed', 'Could not connect to PyPI or the '
-     'vulnerability feed\n', 3, 1),
+     'vulnerability feed\n', 3, 'U'),
     ('an unreachable OSV feed', 'ERROR:pip_audit._cli:Could not connect '
-     "to OSV's vulnerability feed\n", 3, 1),
+     "to OSV's vulnerability feed\n", 3, 'U'),
     ('a refused connection', 'NewConnectionError: Failed to establish a new '
-     'connection: [Errno 111] Connection refused\n', 3, 1),
+     'connection: [Errno 111] Connection refused\n', 3, 'U'),
     ('a finding about refused connections', 'Found 1 known vulnerability in '
-     'test/pkg\nConnection refused: Failed to establish a session\n', 1, 1),
+     'test/pkg\nConnection refused: Failed to establish a session\n', 1, 'F'),
     ('a failed name lookup', "NameResolutionError: Failed to resolve 'x.invali"
-     "d' ([Errno -2] Name or service not known)\n", 3, 1),
+     "d' ([Errno -2] Name or service not known)\n", 3, 'U'),
     ('a failed pip upgrade', 'ERROR:pip_audit._cli:Failed to upgrade `pip`: '
-     "['python3', '-m', 'pip', 'install', '--upgrade', 'pip']\n", 3, 1),
+     "['python3', '-m', 'pip', 'install', '--upgrade', 'pip']\n", 3, 'P'),
     ('a connect timeout', "ConnectTimeoutError: 'Connection to 10.255.255.1 "
-     "timed out. (connect timeout=15)'\n", 3, 1),
+     "timed out. (connect timeout=15)'\n", 3, 'U'),
     ('a finding about lookups and timeouts', 'Found 1 known vulnerability in '
-     'test/pkg\nFailed to resolve test/pkg: connect timeout=0\n', 1, 1),
-    ('a 404', 'HTTPError: 404 Client Error: Not Found\n', 1, 1),
-    ('a 403', 'HTTPError: 403 Client Error: Forbidden\n', 1, 1),
-    ('a 401', 'HTTPError: 401 Client Error: Unauthorized\n', 1, 1),
-    ('a 400', 'HTTPError: 400 Client Error: Bad Request\n', 1, 1),
+     'test/pkg\nFailed to resolve test/pkg: connect timeout=0\n', 1, 'F'),
+    ('a requirement set pip cannot resolve', 'ERROR:pip_audit._cli:internal '
+     'pip failure: ERROR: Cannot install a==1 and a==2 because these package '
+     'versions have conflicting dependencies.\nERROR: ResolutionImpossible\n',
+     1, 'X'),
+    # Near miss for the finding marker: "Found" beside no vulnerability.
+    ('a traceback after a count', 'Found 3 dependencies\nTraceback (most '
+     'recent call last):\nKeyError: 1\n', 1, 'X'),
+    ('a 404', 'HTTPError: 404 Client Error: Not Found\n', 1, 'R'),
+    ('a 403', 'HTTPError: 403 Client Error: Forbidden\n', 1, 'R'),
+    ('a 401', 'HTTPError: 401 Client Error: Unauthorized\n', 1, 'R'),
+    ('a 400', 'HTTPError: 400 Client Error: Bad Request\n', 1, 'R'),
     # Longer than the retry arm's excerpt, which it pins: only the last lines
     # print per attempt, where an unbounded `cat` would print the whole report.
     ('a transport failure under a long report',
      'Checking 12 packages\nResolving dependencies\n'
      'Found 1 known vulnerability in test/pkg\n'
      'Upgrade test/pkg to 1.2.3 to fix it.\nVulnerability ID: PYSEC-2026-1\n'
-     'Retrying the advisory feed\n'
-     'HTTPError: 503 Service Unavailable\n', 3, 1),
+     'Retrying the advisory feed\nHTTPError: 503 Service Unavailable\n',
+     3, 'U'),
     # Pins the ORDER: a refusal the index will not repeat beside a retry line.
     ('a 404 reported beside a transport line',
      'HTTPError: 404 Client Error: Not Found\n'
-     'ServiceError: pypi.org returned 502\n', 1, 1),
+     'ServiceError: pypi.org returned 502\n', 1, 'R'),
     # Pins the 429 exception's SCOPE: a 429 that is no status, off a 4xx line.
     ('a 404 reported beside a 429 that is not a status',
      'HTTPError: 404 Client Error: Not Found\n'
      'Fixed-by: 6.0.429\n'
-     'ConnectionError: connection reset by peer\n', 1, 1),
+     'ConnectionError: connection reset by peer\n', 1, 'R'),
 )
 
 
@@ -286,53 +289,50 @@ def assert_the_audit_retry_is_narrow_and_ordered(tmp):
         assert len(set(refusals)) == len(refusals), (
             f'two outcomes refuse in the same words: {refusals}')
         assert len(announcing) == 1, (
-            f'the block announces a retry in {len(announcing)} ways; the '
-            f'retry arm must name the one line: {announcing}')
+            f'the retry arm must name exactly one line: {announcing}')
         marker = announcing[0]
         assert '$attempt' in marker, (
-            f'the retry announcement names no attempt: {marker!r}; a '
-            f'fixed string prints identically every attempt')
+            f'a retry announcement naming no attempt repeats: {marker!r}')
         assert marker not in refusals, (
             f'the retry announcement is also a refusal: {marker!r}')
-        for label, output, runs, code in AUDIT_RETRY_FIXTURES:
+        for label, output, runs, kind in AUDIT_RETRY_FIXTURES:
+            code = int(kind != 'C')
             outcome = audit_step_outcome(
                 body, output, cwd=tmp, env=_util.child_coverage('scrub'),
                 code=code)
             assert (outcome['runs'], outcome['code']) == (runs, code), (
                 f'{label}: {outcome}')
             assert output.strip() in outcome['out'], (
-                f'{label}: the block ended without printing what the '
-                f'tool wrote: {outcome}')
+                f'{label}: the block did not print the tool output: {outcome}')
             printed = [t for t in refusals if t in outcome['out']]
-            assert len(printed) == (0 if not code else 1), (
-                f'{label}: printed {printed}; each outcome names itself '
-                f'once')
+            assert len(printed) == code, (
+                f'{label}: printed {printed}; an outcome names itself once')
+            assert not code or kind == ''.join(
+                k for k, says in AUDIT_OUTCOME_SAYS.items()
+                if says in printed[0]), (
+                f'{label}: the outcome that fired is not {kind}: {printed}')
             expected = list(range(1, runs + 1)) if runs > 1 else []
             announced = [attempt for attempt in range(1, runs + 1)
                          if marker.replace('$attempt', str(attempt))
                          in outcome['out']]
             assert announced == expected, (
-                f'{label}: {runs} attempts; the retry arm announces '
-                f'every one and no other arm announces anything: '
-                f'{announced} of {expected}: {outcome}')
+                f'{label}: the retry arm announces every attempt and no '
+                f'other arm any: {announced} of {expected}: {outcome}')
             if runs > 1:
                 shown = outcome['out'].count
                 tail_lines = output.strip().splitlines()
                 assert all(shown(line) >= runs
                            for line in tail_lines[-5:]), (
-                    f'{label}: each attempt showed the reader the tail '
-                    f'of what the tool wrote: {outcome}')
+                    f'{label}: each attempt shows the output tail: {outcome}')
                 assert all(shown(line) <= 1
                            for line in tail_lines[:-5]), (
                     f'{label}: the excerpt is bounded: {outcome}')
             waits = outcome['sleeps']
             assert len(waits) >= runs - 1, (
-                f'{label}: {runs} attempts, so every retry between them '
-                f'has to wait: {outcome}')
+                f'{label}: every retry has to wait: {outcome}')
             assert all(0 < first < second
                        for first, second in zip(waits, waits[1:])), (
-                f'{label}: each attempt must wait longer than the one '
-                f'before it: {waits}')
+                f'{label}: each attempt waits longer than the last: {waits}')
     # The hash-pinned run asks OSV and refuses a clean exit that skipped.
     outcome = audit_step_outcome(
         blocks[1], 'No known vulnerabilities found\nName Skip Reason\n'
