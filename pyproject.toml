@@ -107,4 +107,18 @@ repo = [".", "*/tree", "*/daedalus/daedalus"]
 [tool.coverage.report]
 # Without this, unexecuted files below non-package directories are absent.
 include_namespace_packages = true
+# The run omit again: a child the suites start in a temporary directory reads
+# that omit relative to its own working directory, so the copies it records
+# come back through the paths above and are left out here.
+omit = [
+    "tests/*",
+    ".venv/*",
+    "build/*",
+    "dist/*",
+    "*/site-packages/*",
+    "node_modules/*",
+    ".claude/skills/*",
+    "scripts/ci/suite_bound.py",
+    "scripts/ci/type_error_baseline.py",
+]
 exclude_also = ["if __name__ == .__main__.:"]
