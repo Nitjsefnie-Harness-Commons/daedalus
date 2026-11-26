@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import _teardown
 import _util
 from _processtree import cleanup_process_tree
 
@@ -42,7 +43,7 @@ class _Scratch:
     """
 
     def __init__(self, prefix, outcomes):
-        self._owned = _util.OwnedTemporaryDirectory(prefix)
+        self._owned = _teardown.OwnedTemporaryDirectory(prefix)
         self._path = self._name = Path(self._owned.name)
         self._outcomes = outcomes
 

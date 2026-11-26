@@ -19,9 +19,10 @@ import _util  # noqa: E402
 
 BOUND = _util.SUITE_BOUND.suite_timeout()
 # A real second process owns a directory until killed, never cleaning up.
-_HOLDER = ('import sys; sys.path.insert(0, sys.argv[1]); import _util\n'
-           'held = _util.OwnedTemporaryDirectory(sys.argv[2], dir=sys.argv[3])'
-           '\nprint(held.name, flush=True)\nsys.stdin.read()\n')
+_HOLDER = ('import sys; sys.path.insert(0, sys.argv[1]); import _teardown\n'
+           'held = _teardown.OwnedTemporaryDirectory('
+           'sys.argv[2], dir=sys.argv[3])\n'
+           'print(held.name, flush=True)\nsys.stdin.read()\n')
 
 
 def _aged(path, seconds):
@@ -37,19 +38,19 @@ def test_a_recorded_leftover_goes_when_its_owner_dies_and_not_before(tmp):
             held = Path(child.stdout.readline().strip())
             assert held.is_absolute(), 'the holder announced no directory'
             _aged(held, 10 * BOUND)
-            _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
+            _teardown.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
             assert child.poll() is None and held.is_dir(), 'owner reclaimed'
         finally:
             child.kill()
     _aged(held, 0)
-    _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
+    _teardown.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
     assert not os.listdir(tmp), os.listdir(tmp)
 
 
 def test_an_owner_without_its_lock_or_cleaning_up_is_not_reclaimed(tmp):
     with mock.patch.object(_teardown, '_lock', return_value=False):
-        unlocked = _util.OwnedTemporaryDirectory('owned_', dir=tmp)
-    cleaning = _util.OwnedTemporaryDirectory('owned_', dir=tmp)
+        unlocked = _teardown.OwnedTemporaryDirectory('owned_', dir=tmp)
+    cleaning = _teardown.OwnedTemporaryDirectory('owned_', dir=tmp)
     cleaning._release()  # the first step of its own cleanup
     _teardown.reclaim_tempdirs('owned_', tmp)
     assert sorted(os.listdir(tmp)) == sorted(
@@ -59,15 +60,15 @@ def test_an_owner_without_its_lock_or_cleaning_up_is_not_reclaimed(tmp):
 
 
 def test_a_refused_own_cleanup_is_reported_and_taken_by_the_next_run(tmp):
-    owner = _util.OwnedTemporaryDirectory('owned_', dir=tmp,
-                                          refusal_warns=True)
+    owner = _teardown.OwnedTemporaryDirectory(
+        'owned_', dir=tmp, refusal_warns=True)
     with mock.patch.object(shutil, 'rmtree', side_effect=PermissionError(
             13, 'held open')), contextlib.redirect_stdout(
                 io.StringIO()) as report:
         owner.cleanup()
     warned = [line for line in report.getvalue().split('\n') if 'WARN' in line]
     assert len(warned) == 1 and owner.name in warned[0], warned
-    _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
+    _teardown.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
     assert not os.listdir(tmp), os.listdir(tmp)
 
 
@@ -110,7 +111,7 @@ def test_the_suite_root_reclaims_exactly_stale_names_and_reports_refusals(
     assert left == sorted(kept + removed[:1]), left
     warned = [line for line in report.getvalue().split('\n') if 'WARN' in line]
     assert len(warned) == 1 and removed[0] in warned[0], warned
-    _util.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
+    _teardown.OwnedTemporaryDirectory('owned_', dir=tmp).cleanup()
     assert sorted(os.listdir(tmp)) == kept, os.listdir(tmp)
 
 

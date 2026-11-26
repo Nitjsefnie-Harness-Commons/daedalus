@@ -39,6 +39,7 @@ import _bridge  # noqa: E402
 import _fanout  # noqa: E402
 import _journey_typed  # noqa: E402
 import _mcp_load  # noqa: E402
+import _teardown  # noqa: E402
 import _util  # noqa: E402
 from daedalus_bridge.env_config import CMD_TTL_DEFAULT  # noqa: E402
 
@@ -433,7 +434,7 @@ def _against_a_fresh_bridge(token, run):
     happened to run alongside. The wait puts the import wholly inside every
     round or wholly outside all of them.
     """
-    with _util.OwnedTemporaryDirectory('journey_') as directory:
+    with _teardown.OwnedTemporaryDirectory('journey_') as directory:
         with _util.bridge(directory, env=bridge_env(token),
                           await_mcp=True) as fixture:
             base, docroot = fixture
