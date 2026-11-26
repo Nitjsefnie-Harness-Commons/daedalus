@@ -4,6 +4,6 @@
   },
   "schema_version": 1,
   "baseline": {
-    ".github/workflows/tests.yml": 1359
+    ".github/workflows/tests.yml": 1330
   }
 }
