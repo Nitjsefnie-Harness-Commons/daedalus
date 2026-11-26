@@ -307,8 +307,8 @@ def test_each_test_starts_at_root_with_process_state_restored(tmp):
             config = sys.modules['daedalus_bridge.config']
             assert str(config.BASE) == __name__[-1], config.BASE
         '''
-    loads = {'test_a.py': load + "load('a')\n", 'test_b.py': load +
-             "def narrowed_suite():\n            load('b')\n"}
+    loads = {'test_a.py': load + "load('a')\n", 'test_b.py': (
+        load + "def narrowed_suite():\n            load('b')\n")}
     code, output, outcomes = run_pytest(tmp, {**loads, 'test_state.py': f'''
         import contextlib
         import os
