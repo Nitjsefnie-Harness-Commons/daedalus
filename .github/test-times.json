@@ -26,7 +26,8 @@
         8.76
       ],
       "tests/test_bridge_results_stripes.py": [
-        6.31
+        6.31,
+        7.9
       ],
       "tests/test_bridge_startup.py": [
         7.42
@@ -39,7 +40,8 @@
         1.04
       ],
       "tests/test_bridge_tabs.py": [
-        3.93
+        3.93,
+        2.64
       ],
       "tests/test_bridge_uploads.py": [
         9.51
@@ -254,7 +256,8 @@
         2.24
       ],
       "tests/test_dashboard_section_net_capture.py": [
-        2.81
+        2.81,
+        1.71
       ],
       "tests/test_dashboard_section_overview.py": [
         1.21
@@ -346,14 +349,16 @@
       ],
       "tests/test_gm_storage.py": [
         29.8,
-        19.54
+        19.54,
+        12.66
       ],
       "tests/test_gm_transfers.py": [
         6.65,
         4.5
       ],
       "tests/test_hotfix_commands.py": [
-        3.21
+        3.21,
+        5.68
       ],
       "tests/test_hotfix_document_binding.py": [
         3.29
@@ -558,7 +563,8 @@
         0.07
       ],
       "tests/test_segment_lock_stripes.py": [
-        2.59
+        2.59,
+        4.04
       ],
       "tests/test_segment_mint.py": [
         3.44,
@@ -572,7 +578,8 @@
       ],
       "tests/test_segment_storage.py": [
         10.66,
-        13.38
+        13.38,
+        7.53
       ],
       "tests/test_segment_store.py": [
         3.19,
@@ -678,7 +685,8 @@
       ],
       "tests/test_worker_module_boundary.py": [
         2.43,
-        4.04
+        4.04,
+        5.89
       ],
       "tests/test_worker_netcapture.py": [
         6.45,
@@ -692,7 +700,8 @@
         0.38
       ],
       "tests/test_worker_result_post.py": [
-        0.65
+        0.65,
+        2.0
       ],
       "tests/test_worker_route_guard.py": [
         0.3
@@ -830,7 +839,8 @@
         18.18
       ],
       "tests/test_ci_tool_declarations.py": [
-        10.7
+        10.7,
+        5.86
       ],
       "tests/test_ci_wait.py": [
         0.27
@@ -1088,7 +1098,8 @@
       ],
       "tests/test_gm_transfers.py": [
         4.22,
-        5.62
+        5.62,
+        7.41
       ],
       "tests/test_hotfix_commands.py": [
         2.36,
@@ -1236,7 +1247,8 @@
         0.01
       ],
       "tests/test_path_safety.py": [
-        10.01
+        10.01,
+        6.48
       ],
       "tests/test_plant_restore.py": [
         0.05
@@ -1293,7 +1305,8 @@
         5.17
       ],
       "tests/test_segment_jobs.py": [
-        10.41
+        10.41,
+        7.37
       ],
       "tests/test_segment_lock_key.py": [
         0.06
@@ -1382,7 +1395,8 @@
         18.16
       ],
       "tests/test_version_contract_empty_rev.py": [
-        2.35
+        2.35,
+        1.32
       ],
       "tests/test_version_contract_quote_duplicates.py": [
         0.89,
@@ -1449,7 +1463,8 @@
       ],
       "tests/test_workflow_cache_boundary.py": [
         4.24,
-        5.37
+        5.37,
+        3.03
       ],
       "tests/test_workflow_job_timeouts.py": [
         1.47,
@@ -1559,7 +1574,8 @@
         1.77
       ],
       "tests/test_ci_thresholds_removed.py": [
-        2.96
+        2.96,
+        1.94
       ],
       "tests/test_ci_tool_declarations.py": [
         9.03,
@@ -1608,7 +1624,8 @@
         0.16
       ],
       "tests/test_cli_content_commands.py": [
-        6.53
+        6.53,
+        4.84
       ],
       "tests/test_cli_content_css.py": [
         0.06
@@ -2052,7 +2069,8 @@
         4.53
       ],
       "tests/test_segment_write_retry.py": [
-        6.92
+        6.92,
+        4.27
       ],
       "tests/test_speed_gate_jobs.py": [
         0.07
@@ -2245,7 +2263,8 @@
       ],
       "tests/test_bridge_startup.py": [
         10.9,
-        7.74
+        7.74,
+        14.64
       ],
       "tests/test_bridge_streams.py": [
         25.26
@@ -2256,10 +2275,12 @@
       ],
       "tests/test_bridge_tabs.py": [
         4.69,
-        2.89
+        2.89,
+        6.33
       ],
       "tests/test_bridge_uploads.py": [
-        9.8
+        9.8,
+        16.65
       ],
       "tests/test_cache_action_releases.py": [
         0.55
@@ -2403,7 +2424,8 @@
         32.89
       ],
       "tests/test_client_credentials.py": [
-        10.37
+        10.37,
+        16.83
       ],
       "tests/test_command_admission.py": [
         0.86
@@ -2556,7 +2578,8 @@
       ],
       "tests/test_gm_storage.py": [
         24.19,
-        39.49
+        39.49,
+        15.93
       ],
       "tests/test_gm_transfers.py": [
         2.59,
@@ -2645,7 +2668,8 @@
         0.15
       ],
       "tests/test_mcp_entry_point.py": [
-        3.51
+        3.51,
+        2.19
       ],
       "tests/test_mcp_guard_floor.py": [
         0.54
@@ -2657,7 +2681,8 @@
         0.55
       ],
       "tests/test_mcp_live_tools.py": [
-        11.42
+        11.42,
+        8.19
       ],
       "tests/test_mcp_path_authority.py": [
         1.08
@@ -2755,7 +2780,8 @@
       ],
       "tests/test_segment_job_names.py": [
         8.14,
-        5.98
+        5.98,
+        3.7
       ],
       "tests/test_segment_jobs.py": [
         7.99,
@@ -2863,7 +2889,8 @@
         3.56
       ],
       "tests/test_version_empty_values.py": [
-        2.74
+        2.74,
+        3.75
       ],
       "tests/test_version_set_atomic.py": [
         1.02
@@ -2955,7 +2982,8 @@
       ],
       "tests/test_bridge_requests.py": [
         12.27,
-        16.67
+        16.67,
+        22.82
       ],
       "tests/test_bridge_results_deliveries.py": [
         12.13
@@ -3122,7 +3150,8 @@
         0.43
       ],
       "tests/test_cli_typed_commands.py": [
-        22.88
+        22.88,
+        35.07
       ],
       "tests/test_cli_waits.py": [
         44.37,
@@ -3160,7 +3189,8 @@
       ],
       "tests/test_dashboard_app_shell.py": [
         2.35,
-        3.71
+        3.71,
+        4.78
       ],
       "tests/test_dashboard_behaviour.py": [
         1.19
@@ -3215,7 +3245,8 @@
         1.36
       ],
       "tests/test_dashboard_tab_events.py": [
-        4.96
+        4.96,
+        3.63
       ],
       "tests/test_debugger_attachment.py": [
         1.04
@@ -3231,14 +3262,16 @@
       ],
       "tests/test_eval_relay.py": [
         5.45,
-        7.52
+        7.52,
+        4.03
       ],
       "tests/test_examples_parse.py": [
         0.64
       ],
       "tests/test_exclusive_bind.py": [
         5.32,
-        3.12
+        3.12,
+        1.5
       ],
       "tests/test_exec_timing_bridge.py": [
         7.57,
@@ -3314,10 +3347,12 @@
         5.01
       ],
       "tests/test_hotfix_scope.py": [
-        8.16
+        8.16,
+        10.52
       ],
       "tests/test_hotfix_scope_clear.py": [
-        2.48
+        2.48,
+        3.8
       ],
       "tests/test_hotfix_store.py": [
         1.23
@@ -3380,11 +3415,13 @@
       ],
       "tests/test_line_lengths.py": [
         9.08,
-        6.36
+        6.36,
+        30.42
       ],
       "tests/test_mcp_auth.py": [
         9.27,
-        14.48
+        14.48,
+        19.19
       ],
       "tests/test_mcp_closure_limits.py": [
         0.24
@@ -3434,17 +3471,20 @@
       ],
       "tests/test_mcp_tools.py": [
         1.5,
-        3.34
+        3.34,
+        5.7
       ],
       "tests/test_mcp_transport.py": [
         2.45,
         0.4
       ],
       "tests/test_mcp_transport_guards.py": [
-        5.07
+        5.07,
+        6.99
       ],
       "tests/test_parent_watch.py": [
-        6.28
+        6.28,
+        12.54
       ],
       "tests/test_path_containment.py": [
         0.03
@@ -3474,7 +3514,8 @@
         0.63
       ],
       "tests/test_release_dispatch.py": [
-        66.19
+        66.19,
+        101.03
       ],
       "tests/test_release_scan.py": [
         2.58,
@@ -3490,7 +3531,8 @@
         2.07
       ],
       "tests/test_result_stripe.py": [
-        0.83
+        0.83,
+        1.84
       ],
       "tests/test_screenshot_quality.py": [
         0.06
@@ -3580,7 +3622,8 @@
         0.01
       ],
       "tests/test_upload_races.py": [
-        0.27
+        0.27,
+        1.47
       ],
       "tests/test_upload_routes.py": [
         1.12
@@ -3619,7 +3662,8 @@
         6.16
       ],
       "tests/test_version_set_atomic.py": [
-        3.51
+        3.51,
+        1.61
       ],
       "tests/test_wf_refusals.py": [
         0.14
@@ -3628,7 +3672,8 @@
         1.58
       ],
       "tests/test_worker_close_tab.py": [
-        2.34
+        2.34,
+        1.16
       ],
       "tests/test_worker_command_types.py": [
         0.51
@@ -3712,7 +3757,8 @@
       ],
       "tests/test_bridge_results_deliveries.py": [
         8.39,
-        6.15
+        6.15,
+        12.27
       ],
       "tests/test_bridge_results_slots.py": [
         6.28,
@@ -3724,7 +3770,8 @@
         32.66
       ],
       "tests/test_bridge_startup.py": [
-        8.82
+        8.82,
+        14.8
       ],
       "tests/test_bridge_streams.py": [
         16.46
@@ -3737,7 +3784,8 @@
         5.37
       ],
       "tests/test_bridge_uploads.py": [
-        10.14
+        10.14,
+        13.95
       ],
       "tests/test_cache_action_releases.py": [
         0.64
@@ -3783,7 +3831,8 @@
         44.81
       ],
       "tests/test_ci_tool_declarations.py": [
-        10.72
+        10.72,
+        5.2
       ],
       "tests/test_ci_wait.py": [
         0.38
@@ -3844,7 +3893,8 @@
         25.88
       ],
       "tests/test_cli_eval_commands.py": [
-        15.88
+        15.88,
+        24.53
       ],
       "tests/test_cli_eval_handlers.py": [
         0.21
@@ -3861,7 +3911,8 @@
         18.27
       ],
       "tests/test_cli_output.py": [
-        2.66
+        2.66,
+        3.72
       ],
       "tests/test_cli_result_handlers.py": [
         0.1
@@ -3934,7 +3985,8 @@
         1.01
       ],
       "tests/test_dashboard_section_block_rules.py": [
-        1.31
+        1.31,
+        3.27
       ],
       "tests/test_dashboard_section_cdp.py": [
         3.22
@@ -3947,14 +3999,16 @@
         4.38
       ],
       "tests/test_dashboard_section_fetch_timings.py": [
-        3.02
+        3.02,
+        4.13
       ],
       "tests/test_dashboard_section_net_capture.py": [
         3.75,
         2.33
       ],
       "tests/test_dashboard_section_overview.py": [
-        2.14
+        2.14,
+        7.79
       ],
       "tests/test_dashboard_sections.py": [
         6.29,
@@ -4034,13 +4088,15 @@
       ],
       "tests/test_gitignore_generator.py": [
         4.07,
-        2.6
+        2.6,
+        5.7
       ],
       "tests/test_gm_relay_authority.py": [
         1.4
       ],
       "tests/test_gm_segment_job.py": [
-        0.8
+        0.8,
+        1.93
       ],
       "tests/test_gm_storage.py": [
         50.43,
@@ -4084,7 +4140,8 @@
         0.49
       ],
       "tests/test_journey_budget.py": [
-        0.75
+        0.75,
+        1.82
       ],
       "tests/test_journey_budget_cli.py": [
         11.14,
@@ -4130,7 +4187,8 @@
       ],
       "tests/test_mcp_auth.py": [
         14.14,
-        9.77
+        9.77,
+        17.95
       ],
       "tests/test_mcp_closure_limits.py": [
         0.15
@@ -4143,7 +4201,8 @@
         1.13
       ],
       "tests/test_mcp_hotfix_scope.py": [
-        1.86
+        1.86,
+        0.13
       ],
       "tests/test_mcp_import_refusals.py": [
         0.46
@@ -4254,11 +4313,13 @@
       ],
       "tests/test_segment_job_names.py": [
         3.62,
-        4.72
+        4.72,
+        7.42
       ],
       "tests/test_segment_jobs.py": [
         9.97,
-        12.52
+        12.52,
+        7.42
       ],
       "tests/test_segment_lock_key.py": [
         0.19
