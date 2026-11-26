@@ -44,20 +44,20 @@
     2820
   ],
   ".github/workflows/codeql.yml": [
-    2362,
-    3326
+    2360,
+    3364
   ],
   ".github/workflows/gate-freshness.yml": [
-    1194,
-    1909
+    1118,
+    1829
   ],
   ".github/workflows/pr-gate.yml": [
     427,
     1095
   ],
   ".github/workflows/release.yml": [
-    4846,
-    8849
+    4828,
+    8834
   ],
   ".github/workflows/scorecard.yml": [
     432,
@@ -408,8 +408,8 @@
     5609
   ],
   "scripts/ci/install_lint_tools.py": [
-    8912,
-    16529
+    8903,
+    16520
   ],
   "scripts/ci/journey_artifact.py": [
     7713,
