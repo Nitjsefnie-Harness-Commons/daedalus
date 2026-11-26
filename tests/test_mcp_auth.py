@@ -15,6 +15,8 @@ import _mcp_load  # noqa: E402
 import _mcp_load as test_mcp_server  # noqa: E402
 import _util  # noqa: E402
 
+suite_scope = _mcp_load.token_env
+
 
 def _auth_module():
     test_mcp_server._need_deps()
@@ -567,5 +569,6 @@ def test_mcp_host_and_origin_repeated_headers_are_rejected(tmp):
 
 
 if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals())),
-                          tmp_prefix='mcpauth_'))
+    with suite_scope():
+        sys.exit(_util.runner(_util.collect(dict(locals())),
+                              tmp_prefix='mcpauth_'))

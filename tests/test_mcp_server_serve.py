@@ -20,11 +20,7 @@ import _util  # noqa: E402
 import _mcp_load  # noqa: E402
 
 DEPS = _mcp_load.DEPS
-if DEPS:
-    import logging
-    logging.getLogger('httpx').setLevel(
-        logging.WARNING)  # quiet per-request logs
-    logging.getLogger('mcp').setLevel(logging.WARNING)  # quiet mcp INFO logs
+suite_scope = _mcp_load.quiet_token_env
 
 
 def test_a_poisoned_shell_cannot_redirect_start_in_thread(tmp):
@@ -571,4 +567,5 @@ def test_bearer_middleware_fails_closed_without_configured_token(tmp):
 
 
 if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(dict(locals()))))
+    with suite_scope():
+        sys.exit(_util.runner(_util.collect(dict(locals()))))

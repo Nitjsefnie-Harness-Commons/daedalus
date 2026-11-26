@@ -15,6 +15,8 @@ import _util  # noqa: E402
 
 from daedalus_cli.output import print_result  # noqa: E402
 
+suite_scope = mcp.token_env
+
 
 def _no_token(value, token):
     assert token not in json.dumps(value), ('bridge token leaked', value)
@@ -272,4 +274,5 @@ def test_mcp_url_preserves_application_paths(tmp):
 
 
 if __name__ == '__main__':
-    sys.exit(_util.runner(_util.collect(globals())))
+    with suite_scope():
+        sys.exit(_util.runner(_util.collect(globals())))

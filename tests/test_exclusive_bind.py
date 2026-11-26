@@ -32,6 +32,7 @@ import _daedalus_env  # noqa: E402
 import _mcp_load  # noqa: E402
 import _util  # noqa: E402
 
+suite_scope = _mcp_load.token_env
 # A fixed instant, so a Date assertion compares bytes instead of carrying a
 # margin. 2001-09-09T01:46:40Z, far enough from any plausible boundary
 # that a header read back in local time cannot land on the same second.
@@ -677,7 +678,9 @@ def test_a_refused_request_still_refreshes_the_date_header(tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()), tmp_prefix='exclusivebind_')
+    with suite_scope():
+        return _util.runner(_util.collect(globals()),
+                            tmp_prefix='exclusivebind_')
 
 
 if __name__ == '__main__':
