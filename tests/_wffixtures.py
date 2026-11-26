@@ -1,11 +1,6 @@
 """The retry fixtures, the harness that runs audit.yml's block, and the
-control that drives them.
-
-The matrix is data and the harness is a fixture, and the control is here
-because it is the one assertion in the repository that exists to drive that
-matrix: it has no fixture of its own to place, and splitting it from the
-fixtures it reads leaves the two halves free to disagree about what an
-outcome is.
+control that drives them, kept together: split, the control and the fixtures
+it reads are free to disagree about what an outcome is.
 """
 import os
 import re
@@ -143,6 +138,10 @@ AUDIT_RETRY_FIXTURES = (
      'vulnerability feed\n', 3, 1),
     ('an unreachable OSV feed', 'ERROR:pip_audit._cli:Could not connect '
      "to OSV's vulnerability feed\n", 3, 1),
+    ('a refused connection', 'NewConnectionError: Failed to establish a new '
+     'connection: [Errno 111] Connection refused\n', 3, 1),
+    ('a finding about refused connections', 'Found 1 known vulnerability in '
+     'test/pkg\nConnection refused: Failed to establish a session\n', 1, 1),
     ('a 404', 'HTTPError: 404 Client Error: Not Found\n', 1, 1),
     ('a 403', 'HTTPError: 403 Client Error: Forbidden\n', 1, 1),
     ('a 401', 'HTTPError: 401 Client Error: Unauthorized\n', 1, 1),
