@@ -14,14 +14,12 @@ name: gate freshness
 # Head SHA, ref and repository come from the event; no PR code runs.
 # -I excludes adjacent modules, PYTHONPATH and user site imports.
 #
-# THE BOUND: L + 2 + H * (G + 8): L path lookups + snapshot and PR list,
-# then H heads x (G compares + eight calls, including both gate files,
-# one runs-list read and one rerun POST).
-# Extra ids and pages are unbounded by this estimate. At 1.5 s/call, 1200 calls
-# take 30 minutes; the 35-minute timeout provides residual slack.
+# THE BOUND: L + 2 + H * (G + 8) calls, as the script derives it. At 1.5 s a
+# call, 1200 calls take 30 minutes; the 35-minute timeout leaves slack.
 #
-# BASE FILTER. A non-main PR could earn an authoritative green without a main
-# comparison; retargeting to main reuses that SHA and its unearned check.
+# BASE FILTER. A non-main PR could earn a green with no main comparison for a
+# retarget to reuse, so it never runs this and needs no `edited` trigger.
+# ready_for_review re-publishes the verdict as a draft becomes mergeable.
 on:
   push:
     branches: [main]
