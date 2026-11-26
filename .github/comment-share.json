@@ -416,8 +416,8 @@
     1109
   ],
   "scripts/ci/coverage_suites.py": [
-    1218,
-    4460
+    1203,
+    4483
   ],
   "scripts/ci/diff_coverage.py": [
     5393,
@@ -488,8 +488,8 @@
     4068
   ],
   "scripts/ci/suite_bound.py": [
-    6451,
-    11341
+    6445,
+    11706
   ],
   "scripts/ci/type_error_baseline.py": [
     1553,
@@ -524,8 +524,8 @@
     15004
   ],
   "tests/_actionlint.py": [
-    10527,
-    19776
+    10524,
+    19773
   ],
   "tests/_block_field_probes.py": [
     503,
@@ -552,12 +552,12 @@
     5890
   ],
   "tests/_ci_imports.py": [
-    1118,
-    2487
+    1115,
+    2484
   ],
   "tests/_ci_wait_fixtures.py": [
-    2318,
-    3448
+    2246,
+    3376
   ],
   "tests/_classifier_calls.py": [
     523,
@@ -576,8 +576,8 @@
     1450
   ],
   "tests/_cli_helpers.py": [
-    1469,
-    2975
+    1466,
+    2972
   ],
   "tests/_cli_parse.py": [
     106,
@@ -592,8 +592,8 @@
     6568
   ],
   "tests/_command_candidates.py": [
-    322,
-    925
+    319,
+    922
   ],
   "tests/_command_type_readers.py": [
     4473,
@@ -616,8 +616,8 @@
     1959
   ],
   "tests/_dashfield.py": [
-    1019,
-    4266
+    1016,
+    4263
   ],
   "tests/_dashnode.py": [
     3884,
@@ -628,8 +628,8 @@
     5355
   ],
   "tests/_dashnode_retry_control.py": [
-    750,
-    4804
+    745,
+    4799
   ],
   "tests/_dashqueue.py": [
     294,
@@ -664,8 +664,8 @@
     11401
   ],
   "tests/_fanout.py": [
-    879,
-    1748
+    876,
+    1745
   ],
   "tests/_frontend.py": [
     832,
@@ -692,16 +692,16 @@
     680
   ],
   "tests/_journey_contract.py": [
-    9984,
-    20673
+    9979,
+    20668
   ],
   "tests/_journey_profile_fixture.py": [
     1719,
     2105
   ],
   "tests/_journey_typed.py": [
-    11077,
-    19254
+    11074,
+    19251
   ],
   "tests/_journeys.py": [
     10841,
@@ -716,8 +716,8 @@
     1901
   ],
   "tests/_lint_tool_mechanisms.py": [
-    8633,
-    12289
+    8628,
+    12284
   ],
   "tests/_lint_tool_refusals.py": [
     6880,
@@ -772,12 +772,12 @@
     20131
   ],
   "tests/_mcp_tools_helpers.py": [
-    695,
-    3938
+    692,
+    3935
   ],
   "tests/_netcapture_harness.py": [
-    2856,
-    12884
+    2853,
+    12881
   ],
   "tests/_node_harness_fixtures.py": [
     177,
@@ -788,12 +788,12 @@
     3087
   ],
   "tests/_noderun.py": [
-    3430,
-    7258
+    3388,
+    7179
   ],
   "tests/_noglibc.py": [
-    578,
-    935
+    575,
+    932
   ],
   "tests/_overlap.py": [
     3125,
@@ -804,8 +804,8 @@
     4343
   ],
   "tests/_pip_cache.py": [
-    412,
-    913
+    409,
+    910
   ],
   "tests/_processtree.py": [
     3241,
@@ -820,8 +820,8 @@
     19832
   ],
   "tests/_realbrowser_broken_worker.py": [
-    1177,
-    2327
+    1174,
+    2324
   ],
   "tests/_realbrowser_errors.py": [
     247,
@@ -832,8 +832,8 @@
     9716
   ],
   "tests/_repo.py": [
-    548,
-    1182
+    545,
+    1179
   ],
   "tests/_segment_job_record.py": [
     286,
@@ -844,8 +844,8 @@
     2100
   ],
   "tests/_service_loader.py": [
-    329,
-    524
+    326,
+    521
   ],
   "tests/_stream_fake.py": [
     2467,
@@ -856,8 +856,8 @@
     5996
   ],
   "tests/_suite_jobs.py": [
-    8330,
-    12785
+    8127,
+    12598
   ],
   "tests/_teardown.py": [
     369,
@@ -868,28 +868,28 @@
     3157
   ],
   "tests/_upload_fixture.py": [
-    368,
-    737
+    363,
+    732
   ],
   "tests/_util.py": [
-    10002,
-    20282
+    7400,
+    15500
   ],
   "tests/_version_contract.py": [
-    1654,
-    3663
+    1651,
+    3660
   ],
   "tests/_version_contract_dashboard_duplicates.py": [
-    418,
-    1731
+    415,
+    1728
   ],
   "tests/_version_contract_scanners.py": [
-    1900,
-    6657
+    1897,
+    6654
   ],
   "tests/_watcher_fixtures.py": [
-    1461,
-    2262
+    1456,
+    2257
   ],
   "tests/_wffixtures.py": [
     4652,
@@ -904,16 +904,16 @@
     4876
   ],
   "tests/_wfpins.py": [
-    7390,
-    19492
+    7387,
+    19493
   ],
   "tests/_wfskip.py": [
     369,
     1662
   ],
   "tests/_worker_chrome_fake.py": [
-    357,
-    789
+    354,
+    786
   ],
   "tests/_worker_routes.py": [
     372,
@@ -1004,8 +1004,8 @@
     20385
   ],
   "tests/test_ci_wait_gate.py": [
-    9766,
-    23717
+    9707,
+    23639
   ],
   "tests/test_ci_wait_published.py": [
     10897,
@@ -1280,8 +1280,8 @@
     11507
   ],
   "tests/test_http_transport.py": [
-    4695,
-    16991
+    4245,
+    16303
   ],
   "tests/test_install_lint_tools.py": [
     7373,
@@ -1372,20 +1372,20 @@
     18741
   ],
   "tests/test_mcp_path_authority.py": [
-    822,
-    4644
+    784,
+    4445
   ],
   "tests/test_mcp_poll_pause.py": [
     426,
     1971
   ],
   "tests/test_mcp_server_load.py": [
-    1605,
-    9990
+    1567,
+    9791
   ],
   "tests/test_mcp_server_serve.py": [
-    2698,
-    17239
+    2660,
+    17040
   ],
   "tests/test_mcp_transport.py": [
     1191,
@@ -1420,8 +1420,8 @@
     5242
   ],
   "tests/test_result_routes.py": [
-    2330,
-    13017
+    2314,
+    12938
   ],
   "tests/test_result_stripe.py": [
     6619,
@@ -1540,7 +1540,7 @@
     14448
   ],
   "tests/test_workflow_suite_base.py": [
-    5616,
-    10802
+    5614,
+    11227
   ]
 }
