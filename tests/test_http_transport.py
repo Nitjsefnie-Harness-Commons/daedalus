@@ -20,28 +20,25 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _daedalus_env  # noqa: E402
 import _noglibc  # noqa: E402
 import _util  # noqa: E402
 
-# run_tests.py gives every suite its own process, so this process strips
-# inherited DAEDALUS_ exports at import; only the runner's summary channel
-# survives it. The module reads only the byte limits out of
-# daedalus_bridge.config, which still refuses to import without these two.
-# Nothing is written under the root, so the system temp directory serves and
-# no fixture tree is left behind.
-for name in [name for name in os.environ
-             if name.startswith('DAEDALUS_')
-             and name != 'DAEDALUS_TEST_SUMMARY']:
-    del os.environ[name]
-os.environ.setdefault('DAEDALUS_DIR', tempfile.gettempdir())
-os.environ.setdefault('DAEDALUS_PORT', '0')
 
-transport = _util.load(
-    _util.ROOT / 'daedalus_bridge' / 'http_transport.py',
-    'fixture_http_transport')
-json_body = _util.load(
-    _util.ROOT / 'daedalus_bridge' / 'json_body.py',
-    'fixture_json_body')
+def suite_scope():
+    # daedalus_bridge.config refuses to import without these two; nothing is
+    # written under the root, so the system temp directory serves.
+    return _daedalus_env.isolated({'DAEDALUS_DIR': tempfile.gettempdir(),
+                                   'DAEDALUS_PORT': '0'})
+
+
+with suite_scope():
+    transport = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'http_transport.py',
+        'fixture_http_transport')
+    json_body = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'json_body.py',
+        'fixture_json_body')
 
 
 class _Headers:
@@ -482,19 +479,14 @@ def test_json_body_imports_without_daedalus_configuration(_tmp):
 
 
 def test_the_suite_process_starts_without_inherited_daedalus_names(_tmp):
-    """The suite process strips ambient `DAEDALUS_` exports at import.
+    """The suite's scope holds only its own two `DAEDALUS_` settings.
 
-    run_tests.py hands each suite its own process and injects only
-    `DAEDALUS_TEST_SUMMARY`; any other `DAEDALUS_` name still in this
-    process's environment came around the suite, and the module-level strip
-    must have removed it before the in-process transport import validated
-    the settings.
+    `DAEDALUS_TEST_SUMMARY` is the old runner's channel, which `main` keeps.
     """
-    leaked = [name for name in os.environ
-              if name.startswith('DAEDALUS_')
-              and name not in ('DAEDALUS_DIR', 'DAEDALUS_PORT',
-                               'DAEDALUS_TEST_SUMMARY')]
-    assert leaked == [], leaked
+    names = sorted(name for name in os.environ
+                   if name.startswith('DAEDALUS_')
+                   and name != 'DAEDALUS_TEST_SUMMARY')
+    assert names == ['DAEDALUS_DIR', 'DAEDALUS_PORT'], names
 
 
 def test_importing_the_transport_prints_nothing(tmp):
@@ -532,8 +524,11 @@ def test_the_transport_re_exports_the_answer_types(_tmp):
 
 
 def main():
-    return _util.runner(_util.collect(globals()),
-                        tmp_prefix='httptransport_')
+    summary = os.environ.get('DAEDALUS_TEST_SUMMARY', '')
+    with suite_scope():
+        os.environ['DAEDALUS_TEST_SUMMARY'] = summary
+        return _util.runner(_util.collect(globals()),
+                            tmp_prefix='httptransport_')
 
 
 if __name__ == '__main__':
